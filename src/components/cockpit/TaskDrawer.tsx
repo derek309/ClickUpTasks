@@ -144,7 +144,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     <div className="relative border-t p-3">
       {mentionMatch && mentionCands.length > 0 && (<div className="absolute bottom-full left-3 mb-1 w-56 overflow-hidden rounded-lg border bg-surface shadow-lg">{mentionCands.map((u) => (<button key={u.id} onClick={() => setComment(comment.replace(/@([\w]*)$/, `@${u.name} `))} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[15px] hover:bg-background"><Avatar id={u.id} size={22} /> {u.name}{u.role === "va" && <span className="text-[15px] text-muted">VA</span>}</button>))}</div>)}
       <div className="flex items-end gap-2 rounded-xl border bg-background px-2.5 py-2 focus-within:border-accent">
-        <textarea value={comment} onChange={(e) => setComment(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !(mentionMatch && mentionCands.length)) { e.preventDefault(); onAddComment(); } }} placeholder="Write a comment…  (type @ to mention)" rows={1} className="max-h-24 flex-1 resize-none bg-transparent text-[15px] outline-none placeholder:text-muted" />
+        <textarea value={comment} onChange={(e) => setComment(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !(mentionMatch && mentionCands.length)) { e.preventDefault(); onAddComment(); } }} placeholder="Write a comment…  (type @ to mention)" rows={1} className="max-h-72 min-h-[38px] flex-1 resize-y bg-transparent text-[15px] outline-none placeholder:text-muted" />
         <button onClick={onAddComment} disabled={!comment.trim()} className="rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">Send</button>
       </div>
     </div>
@@ -176,9 +176,9 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
           // ClickUp-style split: task content (document) on the left,
           // the Activity/comments conversation in its own column on the right
           // with the composer pinned to the bottom.
-          <div className="flex flex-1 overflow-hidden bg-background/60">
-            <div className="min-w-0 flex-1 overflow-y-auto px-6 py-7">
-              <div className="mx-auto w-full max-w-3xl rounded-2xl border bg-surface p-8 shadow-soft">
+          <div className="flex flex-1 overflow-hidden">
+            <div className="min-w-0 flex-1 overflow-y-auto px-8 py-7 lg:px-12">
+              <div className="mx-auto w-full max-w-4xl">
                 {titleBlock}
                 {statusBlock}
                 <div className="my-6 border-t" />
