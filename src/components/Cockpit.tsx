@@ -71,6 +71,37 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [promptDialog, setPromptDialog] = useState<PromptSpec | null>(null);
   const [menuClientId, setMenuClientId] = useState<string | null>(null);
   const [menuProjectId, setMenuProjectId] = useState<string | null>(null);
+
+  // Sidebar client ordering: star to pin, sort mode, manual drag order.
+  // Personal preferences → persisted per-browser (localStorage), not the DB.
+  type ClientSort = "manual" | "az" | "tasks" | "recent";
+  const [clientSort, setClientSort] = useState<ClientSort>("manual");
+  const [starred, setStarred] = useState<Set<string>>(new Set());
+  const [manualOrder, setManualOrder] = useState<string[]>([]);
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  const [dragClientId, setDragClientId] = useState<string | null>(null);
+  useEffect(() => {
+    try {
+      const s = localStorage.getItem("cut_clientSort"); if (s) setClientSort(s as ClientSort);
+      const st = localStorage.getItem("cut_starred"); if (st) setStarred(new Set(JSON.parse(st)));
+      const mo = localStorage.getItem("cut_clientOrder"); if (mo) setManualOrder(JSON.parse(mo));
+    } catch { /* fresh browser */ }
+  }, []);
+  const saveClientSort = (v: ClientSort) => { setClientSort(v); try { localStorage.setItem("cut_clientSort", v); } catch {} };
+  const toggleStar = (id: string) => setStarred((prev) => {
+    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id);
+    try { localStorage.setItem("cut_starred", JSON.stringify([...n])); } catch {}
+    return n;
+  });
+  const saveManualOrder = (ids: string[]) => { setManualOrder(ids); try { localStorage.setItem("cut_clientOrder", JSON.stringify(ids)); } catch {} };
+  const dropOnClient = (targetId: string) => {
+    if (!dragClientId || dragClientId === targetId) { setDragClientId(null); return; }
+    const ids = sortedClients.map((c) => c.id).filter((id) => id !== dragClientId);
+    ids.splice(ids.indexOf(targetId), 0, dragClientId);
+    saveManualOrder(ids);
+    if (clientSort !== "manual") saveClientSort("manual"); // dragging implies manual
+    setDragClientId(null);
+  };
   const [drawerFull, setDrawerFull] = useState(false);
   useEffect(() => { try { setDrawerFull(localStorage.getItem("cut_drawerFull") === "1"); } catch {} }, []);
   // Drop the project filter whenever we leave its client (or enter My Work).
@@ -180,6 +211,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const subAccounts = clients.filter((c) => !c.id.startsWith("cl_"));
   const clientList = clients.filter((c) => c.id.startsWith("cl_"));
   const visibleClients = canAdmin ? clientList : clientList.filter((c) => scopedTasks.some((t) => t.clientId === c.id));
+  // Apply the user's sort preference; starred clients always float to the top.
+  const sortedClients = (() => {
+    const base = [...visibleClients];
+    if (clientSort === "az") base.sort((a, b) => a.name.localeCompare(b.name));
+    else if (clientSort === "tasks") base.sort((a, b) => clientTaskCountRef(b.id) - clientTaskCountRef(a.id));
+    else if (clientSort === "recent") base.reverse(); // fetch order is created_at asc
+    else if (manualOrder.length) base.sort((a, b) => { const ia = manualOrder.indexOf(a.id), ib = manualOrder.indexOf(b.id); return (ia < 0 ? 1e9 : ia) - (ib < 0 ? 1e9 : ib); });
+    return [...base.filter((c) => starred.has(c.id)), ...base.filter((c) => !starred.has(c.id))];
+  })();
+  function clientTaskCountRef(clientId: string) { return scopedTasks.filter((t) => t.clientId === clientId).length; }
   const subAccountOf = (clientId: string) => contactById(clientId.slice(3))?.clientId ?? null;
   const subAccountName = (clientId: string) => { const s = subAccountOf(clientId); return subAccounts.find((x) => x.id === s)?.name ?? ""; };
   const ghlContactUrlFor = (clientId: string) => {
@@ -518,23 +559,43 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
         <div className="flex items-center justify-between px-4 pb-1 pt-4">
           <span className="text-[15px] font-semibold uppercase tracking-wide text-muted">Clients</span>
-          {canAdmin && <button onClick={() => setAddClientOpen(true)} title="Add client from GHL contacts" className="rounded p-0.5 text-muted hover:bg-background hover:text-foreground"><I.plus /></button>}
+          <span className="flex items-center gap-0.5">
+            <span className="relative">
+              <button onClick={() => setSortMenuOpen((o) => !o)} title="Sort clients" className={`rounded p-0.5 hover:bg-background hover:text-foreground ${clientSort !== "manual" ? "text-accent" : "text-muted"}`}><I.list className="h-3.5 w-3.5" /></button>
+              {sortMenuOpen && (<>
+                <div className="fixed inset-0 z-30" onClick={() => setSortMenuOpen(false)} />
+                <div className="absolute right-0 top-full z-40 mt-1 w-44 rounded-lg border border-white/10 bg-background p-1 shadow-xl">
+                  {([["manual", "Manual (drag to order)"], ["az", "A → Z"], ["tasks", "Most active"], ["recent", "Recently added"]] as const).map(([v, label]) => (
+                    <button key={v} onClick={() => { saveClientSort(v); setSortMenuOpen(false); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-white/10">
+                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${clientSort === v ? "bg-accent" : "bg-transparent"}`} />{label}
+                    </button>
+                  ))}
+                </div>
+              </>)}
+            </span>
+            {canAdmin && <button onClick={() => setAddClientOpen(true)} title="Add client from GHL contacts" className="rounded p-0.5 text-muted hover:bg-background hover:text-foreground"><I.plus /></button>}
+          </span>
         </div>
         <nav className="flex-1 space-y-0.5 overflow-y-auto px-2">
-          {visibleClients.map((c) => {
+          {sortedClients.map((c) => {
             const active = !myWork && activeClient === c.id;
             const clientProjects = projectsForClient(c.id);
             return (
-              <div key={c.id} className={menuClientId === c.id ? "relative z-50" : undefined}>
-                <div className="group/row relative">
+              <div key={c.id} className={menuClientId === c.id ? "relative z-50" : undefined}
+                draggable onDragStart={() => setDragClientId(c.id)} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); dropOnClient(c.id); }}>
+                <div className={`group/row relative ${dragClientId === c.id ? "opacity-40" : ""}`}>
                   <button onClick={() => { setMyWork(false); setActiveClient(c.id); setActiveProject(null); setSidebarOpen(false); setOpenTaskId(null); }}
                     className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[15px] transition ${active ? "bg-accent-soft font-medium text-accent" : "text-foreground hover:bg-background"}`}>
                     <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: c.color }} />
                     <span className="min-w-0 flex-1">
-                      <span className="truncate">{c.name}</span>
+                      <span className="flex items-center gap-1 truncate">{c.name}{starred.has(c.id) && <I.star filled className="shrink-0 text-amber-400" />}</span>
                       {clientCompany(c) && <span className="block truncate text-[13px] font-normal text-muted">{clientCompany(c)}</span>}
                     </span>
                     <span className="text-[15px] text-muted group-hover/row:opacity-0">{clientTaskCount(c.id)}</span>
+                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); toggleStar(c.id); }} title={starred.has(c.id) ? "Unstar" : "Star — pin to top"}
+                    className={`absolute right-8 top-1/2 -translate-y-1/2 rounded p-1 hover:bg-background ${starred.has(c.id) ? "text-amber-400" : "text-muted opacity-0 group-hover/row:opacity-100"}`}>
+                    <I.star filled={starred.has(c.id)} />
                   </button>
                   {canAdmin && (
                     <div className="absolute right-1.5 top-1/2 -translate-y-1/2">
