@@ -96,8 +96,15 @@ export const deleteClientDb = (id: string) => supabase.from("clients").delete().
 export const insertNotif = (n: Notification) => supabase.from("notifications").insert(notifToRow(n)).then(logErr);
 export const markNotifsReadDb = (recipientId: string) => supabase.from("notifications").update({ read: true }).eq("recipient_id", recipientId).then(logErr);
 
+// Every upsert/delete above is fire-and-forget from the UI's perspective — this
+// is the single choke point where a failed save gets surfaced. Dispatches a
+// DOM event rather than importing a toast function so db.ts stays UI-agnostic;
+// Cockpit listens once and turns it into a visible toast.
 function logErr({ error }: { error: any }) {
-  if (error) console.error("[db]", error.message);
+  if (error) {
+    console.error("[db]", error.message);
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("cut:save-error", { detail: error.message }));
+  }
 }
 
 // --- file storage (Supabase Storage) ----------------------------------------

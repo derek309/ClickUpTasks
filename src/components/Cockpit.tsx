@@ -140,6 +140,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [addClientOpen, setAddClientOpen] = useState(false);
   const [ghlBusy, setGhlBusy] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
+  const [promptDialog, setPromptDialog] = useState<PromptSpec | null>(null);
   const [menuClientId, setMenuClientId] = useState<string | null>(null);
   const [drawerFull, setDrawerFull] = useState(false);
   useEffect(() => { try { setDrawerFull(localStorage.getItem("cut_drawerFull") === "1"); } catch {} }, []);
@@ -202,6 +204,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setToasts((t) => [...t, { id, text }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2800);
   };
+  // Surfaces every failed background save (see db.ts logErr) so a dropped
+  // connection is never silent — was previously console.error-only.
+  useEffect(() => {
+    const onSaveError = () => pushToast("⚠️ Couldn't save — check your connection and reload.");
+    window.addEventListener("cut:save-error", onSaveError);
+    return () => window.removeEventListener("cut:save-error", onSaveError);
+  }, []);
   const notify = (recipientId: string, text: string, taskId: string | null) => {
     const n: Notification = { id: newId("n_"), recipientId, text, taskId, at: new Date().toISOString(), read: false };
     setNotifications((ns) => [n, ...ns]);
@@ -349,13 +358,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   };
 
   const deleteTask = (id: string) => {
-    if (!confirm("Delete this task? This can't be undone.")) return;
-    const t = tasks.find((x) => x.id === id);
-    if (t?.ghlTaskId) ghlCall("delete", t); // also remove it from GoHighLevel
-    setTasks((ts) => ts.filter((t) => t.id !== id));
-    setOpenTaskId(null);
-    deleteTaskDb(id);
-    pushToast("Task deleted");
+    setConfirmDialog({
+      title: "Delete this task?", message: "This can't be undone.", confirmLabel: "Delete",
+      onConfirm: () => {
+        setConfirmDialog(null);
+        const t = tasks.find((x) => x.id === id);
+        if (t?.ghlTaskId) ghlCall("delete", t); // also remove it from GoHighLevel
+        setTasks((ts) => ts.filter((t) => t.id !== id));
+        setOpenTaskId(null);
+        deleteTaskDb(id);
+        pushToast("Task deleted");
+      },
+    });
   };
 
   const addTask = (projectId: string, clientId: string, title: string) => {
@@ -496,21 +510,76 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       if (j.company) { const up: Client = { ...c, ghlLocationId: j.company }; setClients((cs) => cs.map((x) => (x.id === id ? up : x))); upsertClient(up); }
     } catch { /* business name is optional */ }
   };
-  const renameClient = (id: string) => { const c = clientById(id); const name = prompt("Rename client", c?.name); if (!name?.trim() || !c) return; const nc = { ...c, name: name.trim() }; setClients((cs) => cs.map((x) => (x.id === id ? nc : x))); upsertClient(nc); };
+  const renameClient = (id: string) => {
+    const c = clientById(id);
+    if (!c) return;
+    setPromptDialog({ title: "Rename client", initial: c.name, confirmLabel: "Rename", onSubmit: (name) => {
+      setPromptDialog(null);
+      const nc = { ...c, name };
+      setClients((cs) => cs.map((x) => (x.id === id ? nc : x)));
+      upsertClient(nc);
+    } });
+  };
   const deleteClient = (id: string) => {
     const c = clientById(id);
     const n = tasks.filter((t) => t.clientId === id).length;
-    if (!confirm(`Remove client “${c?.name}”${n ? ` and its ${n} task(s)` : ""}? The GoHighLevel contact itself stays untouched.`)) return;
-    setClients((cs) => cs.filter((x) => x.id !== id));
-    setProjects((ps) => ps.filter((p) => p.clientId !== id));
-    setTasks((ts) => ts.filter((t) => t.clientId !== id));
-    deleteClientDb(id);
-    if (activeClient === id) setActiveClient("all");
+    setConfirmDialog({
+      title: `Remove “${c?.name}”?`,
+      message: `${n ? `This also removes its ${n} task${n === 1 ? "" : "s"}. ` : ""}The GoHighLevel contact itself stays untouched.`,
+      confirmLabel: "Remove",
+      onConfirm: () => {
+        setConfirmDialog(null);
+        setClients((cs) => cs.filter((x) => x.id !== id));
+        setProjects((ps) => ps.filter((p) => p.clientId !== id));
+        setTasks((ts) => ts.filter((t) => t.clientId !== id));
+        deleteClientDb(id);
+        if (activeClient === id) setActiveClient("all");
+      },
+    });
   };
-  const addProject = (clientId: string) => { const name = prompt("New project name?"); if (!name?.trim()) return; const p: Project = { id: newId("p_"), clientId, name: name.trim(), description: "" }; setProjects((ps) => [...ps, p]); upsertProject(p); };
-  const moveTaskToNewProject = (taskId: string, clientId: string) => { const name = prompt("New project name?"); if (!name?.trim()) return; const p: Project = { id: newId("p_"), clientId, name: name.trim(), description: "" }; setProjects((ps) => [...ps, p]); upsertProject(p); patchTask(taskId, { projectId: p.id }); pushToast(`Moved to “${p.name}”`); };
-  const renameProject = (id: string) => { const p = projectById(id); const name = prompt("Rename project", p?.name); if (!name?.trim() || !p) return; const np = { ...p, name: name.trim() }; setProjects((ps) => ps.map((x) => (x.id === id ? np : x))); upsertProject(np); };
-  const deleteProject = (id: string) => { const p = projectById(id); const n = tasks.filter((t) => t.projectId === id).length; if (!confirm(`Delete project “${p?.name}”${n ? ` and its ${n} task(s)` : ""}?`)) return; setProjects((ps) => ps.filter((x) => x.id !== id)); setTasks((ts) => ts.filter((t) => t.projectId !== id)); deleteProjectDb(id); };
+  const addProject = (clientId: string) => {
+    setPromptDialog({ title: "New project", placeholder: "Project name", confirmLabel: "Create", onSubmit: (name) => {
+      setPromptDialog(null);
+      const p: Project = { id: newId("p_"), clientId, name, description: "" };
+      setProjects((ps) => [...ps, p]);
+      upsertProject(p);
+    } });
+  };
+  const moveTaskToNewProject = (taskId: string, clientId: string) => {
+    setPromptDialog({ title: "New project", placeholder: "Project name", confirmLabel: "Create & move", onSubmit: (name) => {
+      setPromptDialog(null);
+      const p: Project = { id: newId("p_"), clientId, name, description: "" };
+      setProjects((ps) => [...ps, p]);
+      upsertProject(p);
+      patchTask(taskId, { projectId: p.id });
+      pushToast(`Moved to “${p.name}”`);
+    } });
+  };
+  const renameProject = (id: string) => {
+    const p = projectById(id);
+    if (!p) return;
+    setPromptDialog({ title: "Rename project", initial: p.name, confirmLabel: "Rename", onSubmit: (name) => {
+      setPromptDialog(null);
+      const np = { ...p, name };
+      setProjects((ps) => ps.map((x) => (x.id === id ? np : x)));
+      upsertProject(np);
+    } });
+  };
+  const deleteProject = (id: string) => {
+    const p = projectById(id);
+    const n = tasks.filter((t) => t.projectId === id).length;
+    setConfirmDialog({
+      title: `Delete “${p?.name}”?`,
+      message: n ? `This also deletes its ${n} task${n === 1 ? "" : "s"}.` : "This can't be undone.",
+      confirmLabel: "Delete",
+      onConfirm: () => {
+        setConfirmDialog(null);
+        setProjects((ps) => ps.filter((x) => x.id !== id));
+        setTasks((ts) => ts.filter((t) => t.projectId !== id));
+        deleteProjectDb(id);
+      },
+    });
+  };
 
 
   if (loading) return (<div className="flex h-screen items-center justify-center text-muted">Loading your workspace…</div>);
@@ -749,6 +818,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         onSaveClient={(c) => { setClients((cs) => cs.map((x) => (x.id === c.id ? c : x))); upsertClient(c); }}
         onSynced={async () => { try { setContacts(await fetchContacts()); pushToast("Contacts updated from GoHighLevel"); } catch { /* ignore */ } }} />}
       {addClientOpen && <AddClientModal subAccounts={subAccounts} contacts={contacts} existingIds={new Set(clients.map((c) => c.id))} onAdd={addClientContact} onClose={() => setAddClientOpen(false)} />}
+      {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
+      {promptDialog && <PromptModal {...promptDialog} onCancel={() => setPromptDialog(null)} />}
       {cmdkOpen && <CommandK tasks={scopedTasks} clients={clientList} clientById={clientById} onOpenTask={(id) => { setOpenTaskId(id); setCmdkOpen(false); }} onOpenClient={(id) => { setMyWork(false); setActiveClient(id); setCmdkOpen(false); }} onClose={() => setCmdkOpen(false)} />}
 
       <div className="pointer-events-none fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 flex-col items-center gap-2">
@@ -1401,6 +1472,52 @@ function TaskDrawer({ task, comment, setComment, clientById, projectById, contac
 function renderMentions(body: string) {
   const parts = body.split(/(@[A-Za-z]+ [A-Za-z]+)/g);
   return parts.map((p, i) => { const isMention = users.some((u) => "@" + u.name === p); return isMention ? (<span key={i} className="rounded bg-accent-soft px-1 font-medium text-accent">{p}</span>) : <span key={i}>{p}</span>; });
+}
+
+type ConfirmSpec = { title: string; message: string; confirmLabel?: string; danger?: boolean; onConfirm: () => void };
+function ConfirmModal({ title, message, confirmLabel = "Confirm", danger = true, onConfirm, onCancel }: ConfirmSpec & { onCancel: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onCancel(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/30" onClick={onCancel} />
+      <div className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border bg-surface p-5 shadow-xl">
+        <h2 className="text-[16px] font-semibold">{title}</h2>
+        <p className="mt-1.5 text-[15px] text-muted">{message}</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onCancel} className="rounded-md border px-3 py-1.5 text-[15px] font-medium hover:bg-background">Cancel</button>
+          <button onClick={onConfirm} autoFocus className={`rounded-md px-3 py-1.5 text-[15px] font-medium text-white ${danger ? "bg-red-500 hover:bg-red-600" : "bg-accent hover:opacity-90"}`}>{confirmLabel}</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+type PromptSpec = { title: string; label?: string; initial?: string; placeholder?: string; confirmLabel?: string; onSubmit: (v: string) => void };
+function PromptModal({ title, label, initial = "", placeholder, confirmLabel = "Save", onSubmit, onCancel }: PromptSpec & { onCancel: () => void }) {
+  const [value, setValue] = useState(initial);
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { ref.current?.focus(); ref.current?.select(); }, []);
+  const submit = () => { if (value.trim()) onSubmit(value.trim()); };
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/30" onClick={onCancel} />
+      <div className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border bg-surface p-5 shadow-xl">
+        <h2 className="text-[16px] font-semibold">{title}</h2>
+        {label && <label className="mt-1.5 block text-[15px] text-muted">{label}</label>}
+        <input ref={ref} value={value} onChange={(e) => setValue(e.target.value)} placeholder={placeholder}
+          onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") onCancel(); }}
+          className="mt-2 w-full rounded-md border bg-background px-3 py-1.5 text-[15px] outline-none focus:border-accent" />
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onCancel} className="rounded-md border px-3 py-1.5 text-[15px] font-medium hover:bg-background">Cancel</button>
+          <button onClick={submit} disabled={!value.trim()} className="rounded-md bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{confirmLabel}</button>
+        </div>
+      </div>
+    </>
+  );
 }
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
