@@ -119,23 +119,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [activeProject, setActiveProject] = useState<string | null>(null);
   const [myWork, setMyWork] = useState(me.role === "va");
   const [myWorkUser, setMyWorkUser] = useState<string>(me.id);
-  const [viewMode, setViewMode] = useState<"board" | "list">("list");
   const [groupBy, setGroupBy] = useState<"project" | "status" | "priority" | "due">("status");
   const [filters, setFilters] = useState<FilterState>({ status: "all", assignee: "all", priority: "all" });
   const [sortBy, setSortBy] = useState<SortBy>("manual");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [visibleCols, setVisibleCols] = useState<string[]>(["due", "priority", "comments"]);
-  const [colsOpen, setColsOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [composing, setComposing] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
   const [comment, setComment] = useState("");
 
-  const [dragId, setDragId] = useState<string | null>(null);
   const [bellOpen, setBellOpen] = useState(false);
   const [teamOpen, setTeamOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -145,6 +139,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
   const [promptDialog, setPromptDialog] = useState<PromptSpec | null>(null);
   const [menuClientId, setMenuClientId] = useState<string | null>(null);
+  const [menuProjectId, setMenuProjectId] = useState<string | null>(null);
   const [drawerFull, setDrawerFull] = useState(false);
   useEffect(() => { try { setDrawerFull(localStorage.getItem("cut_drawerFull") === "1"); } catch {} }, []);
   // Drop the project filter whenever we leave its client (or enter My Work).
@@ -193,7 +188,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const clientById = (id: string) => clients.find((c) => c.id === id) ?? null;
   const projectById = (id: string) => projects.find((p) => p.id === id) ?? null;
   const contactById = (id: string | null) => contacts.find((c) => c.id === id) ?? null;
-  const contactsForClient = (clientId: string) => contacts.filter((c) => c.clientId === clientId);
 
   const toggleTheme = () => {
     const next = theme === "light" ? "dark" : "light";
@@ -329,8 +323,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     upsertTask(t);
   };
 
-  const toggleCollapse = (key: string) => setCollapsed((s) => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n; });
-
   // --- mutations ------------------------------------------------------------
 
   const update = (id: string, patch: Partial<Task>) => {
@@ -372,15 +364,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         pushToast("Task deleted");
       },
     });
-  };
-
-  const addTask = (projectId: string, clientId: string, title: string) => {
-    if (!title.trim()) return;
-    const t: Task = { id: newId("t_"), projectId, clientId, title: title.trim(), description: "", status: "todo", priority: "none", assigneeId: me.role === "admin" ? null : me.id, contactId: clientId.startsWith("cl_") ? clientId.slice(3) : null, due: null, recurrence: "none", labelIds: [], ghlTaskId: null, subtasks: [], attachments: [], comments: [] };
-    setTasks((ts) => [...ts, t]);
-    upsertTask(t);
-    setDraft("");
-    setComposing(null);
   };
 
   const addComment = (id: string, body: string) => {
@@ -479,28 +462,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const addSub = (taskId: string, title: string) => { const t = tasks.find((x) => x.id === taskId); if (t && title.trim()) update(taskId, { subtasks: [...t.subtasks, { id: newId("s_"), title: title.trim(), done: false }] }); };
   const renameSub = (taskId: string, subId: string, title: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, title } : s)) }); };
   const toggleLabel = (taskId: string, labelId: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { labelIds: t.labelIds.includes(labelId) ? t.labelIds.filter((l) => l !== labelId) : [...t.labelIds, labelId] }); };
-
-  const moveTask = (columnKey: string, beforeId: string | null) => {
-    if (!dragId) return;
-    const dragged = tasks.find((t) => t.id === dragId);
-    if (!dragged) { setDragId(null); return; }
-    const moved: Task = { ...dragged };
-    if (groupBy === "project") { moved.projectId = columnKey; moved.clientId = projectById(columnKey)?.clientId ?? moved.clientId; }
-    else moved.status = columnKey as TaskStatus;
-    setTasks((prev) => {
-      const without = prev.filter((t) => t.id !== dragId);
-      let idx: number;
-      if (beforeId && beforeId !== dragId) idx = without.findIndex((t) => t.id === beforeId);
-      else { const inCol = without.filter((t) => (groupBy === "project" ? t.projectId === columnKey : t.status === columnKey)); idx = inCol.length === 0 ? without.length : without.findIndex((t) => t.id === inCol[inCol.length - 1].id) + 1; }
-      if (idx < 0) idx = without.length;
-      const copy = [...without];
-      copy.splice(idx, 0, moved);
-      return copy;
-    });
-    upsertTask(moved);
-    setDragId(null);
-  };
-  const onCardDrop = (target: Task) => moveTask(groupBy === "project" ? target.projectId : target.status, target.id);
 
   // A client's ghlLocationId field is repurposed to store the contact's business/company name.
   const clientCompany = (c: Client | null) => (c && c.id.startsWith("cl_") ? c.ghlLocationId : "");
@@ -645,6 +606,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                         <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setMenuClientId(null); }} />
                         <div className="absolute right-0 top-full z-40 mt-1 w-44 rounded-lg border border-white/10 bg-background p-1 shadow-xl">
                           <button onClick={(e) => { e.stopPropagation(); setMenuClientId(null); addProject(c.id); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[15px] hover:bg-white/10"><I.plus /> Add project</button>
+                          <button onClick={(e) => { e.stopPropagation(); setMenuClientId(null); renameClient(c.id); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[15px] hover:bg-white/10"><I.pencil /> Rename client</button>
                           <button onClick={(e) => { e.stopPropagation(); setMenuClientId(null); deleteClient(c.id); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[15px] text-red-500 hover:bg-white/10"><I.trash /> Remove client</button>
                         </div>
                       </>)}
@@ -657,12 +619,25 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                       const pg = projectProgress(p.id);
                       const on = activeProject === p.id;
                       return (
-                        <button key={p.id} onClick={() => { setActiveProject(on ? null : p.id); setOpenTaskId(null); }}
-                          className={`flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[13px] transition ${on ? "bg-accent-soft font-medium text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>
-                          <I.folder className="shrink-0 opacity-70" />
-                          <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                          <span className="shrink-0 tabular-nums opacity-70">{pg.done}/{pg.total}</span>
-                        </button>
+                        <div key={p.id} className={`group/prow relative ${menuProjectId === p.id ? "z-50" : ""}`}>
+                          <button onClick={() => { setActiveProject(on ? null : p.id); setOpenTaskId(null); }}
+                            className={`flex w-full items-center gap-2 rounded-md py-1 pl-2 pr-1 text-left text-[13px] transition ${on ? "bg-accent-soft font-medium text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>
+                            <I.folder className="shrink-0 opacity-70" />
+                            <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                            <span className="shrink-0 tabular-nums opacity-70">{pg.done}/{pg.total}</span>
+                            {canAdmin && (
+                              <span onClick={(e) => { e.stopPropagation(); setMenuProjectId(menuProjectId === p.id ? null : p.id); }}
+                                className="rounded p-0.5 opacity-0 hover:bg-background hover:text-foreground group-hover/prow:opacity-100"><I.dots /></span>
+                            )}
+                          </button>
+                          {menuProjectId === p.id && (<>
+                            <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setMenuProjectId(null); }} />
+                            <div className="absolute right-0 top-full z-40 mt-1 w-40 rounded-lg border border-white/10 bg-background p-1 shadow-xl">
+                              <button onClick={(e) => { e.stopPropagation(); setMenuProjectId(null); renameProject(p.id); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-white/10"><I.pencil /> Rename</button>
+                              <button onClick={(e) => { e.stopPropagation(); setMenuProjectId(null); deleteProject(p.id); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-red-500 hover:bg-white/10"><I.trash /> Delete</button>
+                            </div>
+                          </>)}
+                        </div>
                       );
                     })}
                   </div>
@@ -785,38 +760,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         {/* content */}
         {myWork ? (
           <GroupedList groups={buildGroups(myWorkTasks, "due").filter((g) => g.tasks.length > 0)} showClient clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={false} quickAddHint="" onQuickAdd={() => {}} onToggleSub={toggleSub} onAddSub={addSub} />
-        ) : viewMode === "list" ? (
-          <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} />
         ) : (
-          <div className="flex flex-1 gap-4 overflow-x-auto bg-background p-4 sm:p-5">
-            {groupBy === "project"
-              ? visibleProjects.map((p) => {
-                  const list = sortTasks(scopedTasks.filter((t) => t.projectId === p.id && passesFilters(t)));
-                  const client = clientById(p.clientId)!;
-                  return (
-                    <BoardColumn key={p.id} title={p.name} dot={client.color} count={list.length} subtitle={activeClient === "all" ? client.name : undefined} columnKey={p.id} collapsed={collapsed.has(p.id)} onToggleCollapse={() => toggleCollapse(p.id)} onDropColumn={moveTask} onRename={canAdmin ? () => renameProject(p.id) : undefined} onDelete={canAdmin ? () => deleteProject(p.id) : undefined}>
-                      {list.map((t) => (<TaskCard key={t.id} task={t} contactById={contactById} clientById={clientById} onOpen={() => setOpenTaskId(t.id)} onDragStart={() => setDragId(t.id)} onCardDrop={() => onCardDrop(t)} dragging={dragId === t.id} />))}
-                      {list.length === 0 && <EmptyCol />}
-                      <AddTask projectId={p.id} clientId={p.clientId} composing={composing === p.id} draft={draft} setDraft={setDraft} onStart={() => { setComposing(p.id); setDraft(""); }} onCancel={() => setComposing(null)} onAdd={addTask} />
-                    </BoardColumn>
-                  );
-                })
-              : STATUS_ORDER.map((s) => {
-                  const list = sortTasks(baseTasks.filter((t) => t.status === s && passesFilters(t)));
-                  return (
-                    <BoardColumn key={s} title={STATUS_META[s].label} dot={STATUS_META[s].dot} count={list.length} columnKey={s} collapsed={collapsed.has(s)} onToggleCollapse={() => toggleCollapse(s)} onDropColumn={moveTask}>
-                      {list.map((t) => (<TaskCard key={t.id} task={t} showProject projectName={projectById(t.projectId)?.name} contactById={contactById} clientById={clientById} onOpen={() => setOpenTaskId(t.id)} onDragStart={() => setDragId(t.id)} onCardDrop={() => onCardDrop(t)} dragging={dragId === t.id} />))}
-                      {list.length === 0 && <EmptyCol />}
-                    </BoardColumn>
-                  );
-                })}
-            {canAdmin && groupBy === "project" && activeClient !== "all" && (<button onClick={() => addProject(activeClient)} className="mt-1 flex h-9 w-[220px] shrink-0 items-center gap-1.5 rounded-lg border border-dashed px-3 text-[15px] text-muted hover:bg-surface"><I.plus /> Add project</button>)}
-          </div>
+          <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} />
         )}
       </main>
 
       {openTask && (
-        <TaskDrawer task={openTask} comment={comment} setComment={setComment} clientById={clientById} projectById={projectById} contactById={contactById} contactsForClient={contactsForClient}
+        <TaskDrawer task={openTask} comment={comment} setComment={setComment} clientById={clientById} projectById={projectById} contactById={contactById}
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={orderedTaskIds.length} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={() => addComment(openTask.id, comment)}
@@ -844,118 +794,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 function SideItem({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (<button onClick={onClick} className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[15px] transition ${active ? "bg-accent-soft font-medium text-accent" : "text-foreground hover:bg-background"}`}>{children}</button>);
 }
-function Seg({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (<button onClick={onClick} className={`flex items-center gap-1.5 px-2.5 py-1 ${on ? "bg-accent-soft font-medium text-accent" : "bg-surface text-muted hover:bg-background"}`}>{children}</button>);
-}
-function FilterSelect({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: [string, string][] }) {
-  const active = value !== "all" && value !== "manual";
-  return (<label className="flex items-center gap-1.5"><span className="text-muted">{label}</span><select value={value} onChange={(e) => onChange(e.target.value)} className={`rounded-md border px-2 py-1 outline-none ${active ? "border-accent text-accent" : "bg-background"}`}>{options.map(([v, l]) => (<option key={v} value={v}>{l}</option>))}</select></label>);
-}
-function EmptyCol() { return <div className="rounded-lg border border-dashed px-3 py-4 text-center text-[15px] text-muted">Nothing here yet</div>; }
-
-function BoardColumn({ title, dot, count, subtitle, columnKey, collapsed, onToggleCollapse, onDropColumn, onRename, onDelete, children }: {
-  title: string; dot: string; count: number; subtitle?: string; columnKey: string; collapsed?: boolean; onToggleCollapse?: () => void;
-  onDropColumn: (columnKey: string, beforeId: string | null) => void; onRename?: () => void; onDelete?: () => void; children: React.ReactNode;
-}) {
-  const [over, setOver] = useState(false);
-  if (collapsed) {
-    return (
-      <section className="flex h-full w-11 shrink-0 flex-col items-center rounded-xl border bg-surface py-3">
-        <button onClick={onToggleCollapse} className="rotate-180 rounded p-0.5 text-muted hover:text-foreground" title="Expand"><I.chevron /></button>
-        <span className="mt-2 h-2 w-2 rounded-full" style={{ background: dot }} />
-        <span className="mt-2 rounded-full bg-background px-1.5 text-[15px] text-muted">{count}</span>
-        <div className="mt-3 flex-1 [writing-mode:vertical-rl] text-[15px] font-semibold">{title}</div>
-      </section>
-    );
-  }
-  return (
-    <section className="group/col flex h-full w-[300px] shrink-0 flex-col">
-      <div className="mb-2 flex items-center gap-2">
-        {onToggleCollapse && <button onClick={onToggleCollapse} className="rounded p-0.5 text-muted hover:text-foreground" title="Collapse"><I.chevron /></button>}
-        <span className="h-2.5 w-2.5 rounded-full" style={{ background: dot }} />
-        <h2 className="truncate font-semibold">{title}</h2>
-        <span className="rounded-full bg-surface px-1.5 text-[15px] text-muted">{count}</span>
-        {(onRename || onDelete) && (<span className="ml-1 flex items-center gap-0.5 opacity-0 group-hover/col:opacity-100">{onRename && <button onClick={onRename} title="Rename project" className="rounded p-0.5 text-muted hover:bg-surface hover:text-foreground"><I.pencil /></button>}{onDelete && <button onClick={onDelete} title="Delete project" className="rounded p-0.5 text-muted hover:bg-surface hover:text-red-500"><I.trash /></button>}</span>)}
-        {subtitle && <span className="ml-auto truncate text-[15px] text-muted">{subtitle}</span>}
-      </div>
-      <div onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={(e) => { e.preventDefault(); setOver(false); onDropColumn(columnKey, null); }}
-        className={`flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto rounded-lg pr-1 transition ${over ? "bg-accent-soft/60 outline-2 outline-dashed outline-accent/40" : ""}`}>
-        {children}
-      </div>
-    </section>
-  );
-}
-
-function PriorityFlag({ p }: { p: Priority }) { return p === "none" ? null : <I.flag />; }
 function LabelChips({ ids }: { ids: string[] }) {
   if (ids.length === 0) return null;
   return (<div className="mt-1.5 flex flex-wrap gap-1">{ids.map((id) => { const l = labelById(id); return l ? (<span key={id} className="rounded px-1.5 py-0.5 text-[15px] font-medium" style={{ background: l.color + "1a", color: l.color }}>{l.name}</span>) : null; })}</div>);
-}
-
-function TaskCard({ task, onOpen, showProject, projectName, contactById, clientById, onDragStart, onCardDrop, dragging }: {
-  task: Task; onOpen: () => void; showProject?: boolean; projectName?: string;
-  contactById: (id: string | null) => { name: string } | null; clientById: (id: string) => Client | null;
-  onDragStart: () => void; onCardDrop: () => void; dragging: boolean;
-}) {
-  const s = STATUS_META[task.status];
-  const contact = contactById(task.contactId);
-  const client = clientById(task.clientId)!;
-  const doneSubs = task.subtasks.filter((x) => x.done).length;
-  const overdue = isOverdue(task.due) && task.status !== "done";
-  return (
-    <div draggable onDragStart={onDragStart} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); onCardDrop(); }} onClick={onOpen} role="button"
-      className={`group relative cursor-pointer overflow-hidden rounded-xl border bg-surface p-3 text-left shadow-sm transition hover:border-accent/40 hover:shadow ${dragging ? "scale-[0.98] opacity-40" : ""}`}>
-      <span className="absolute inset-y-0 left-0 w-1" style={{ background: client.color }} />
-      <span className="absolute right-1.5 top-1.5 text-muted opacity-0 group-hover:opacity-60"><I.grip /></span>
-      <div className="pl-1.5">
-        <div className="mb-1.5 flex items-center gap-1.5">
-          <span className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[15px] font-medium" style={{ background: s.chip, color: s.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: s.dot }} /> {s.label}</span>
-          {task.priority !== "none" && (<span className="inline-flex items-center gap-0.5 text-[15px] font-semibold" style={{ color: PRIORITY_META[task.priority].color }}><PriorityFlag p={task.priority} /> {PRIORITY_META[task.priority].label}</span>)}
-          <span className="ml-auto flex items-center gap-1">{task.recurrence !== "none" && <I.repeat className="text-muted" />}{task.ghlTaskId && (<span className="inline-flex items-center gap-0.5 rounded-full bg-green-50 px-1.5 py-0.5 text-[15px] font-semibold text-green-600"><I.bolt /> GHL</span>)}</span>
-        </div>
-        <div className="text-[15px] font-medium leading-snug">{task.title}</div>
-        {showProject && projectName && <div className="mt-0.5 text-[15px] text-muted">{projectName}</div>}
-        <LabelChips ids={task.labelIds} />
-        {contact && (<div className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-background px-1.5 py-0.5 text-[15px] text-muted"><I.user /> {contact.name}</div>)}
-        <div className="mt-2.5 flex items-center gap-3 text-[15px] text-muted">
-          <Avatar id={task.assigneeId} size={22} />
-          {task.due && (<span className={`inline-flex items-center gap-1 ${overdue ? "font-medium text-red-500" : ""}`}><I.calendar /> {formatDue(task.due)}</span>)}
-          <span className="ml-auto flex items-center gap-2.5">{task.subtasks.length > 0 && (<span className="inline-flex items-center gap-1"><I.check /> {doneSubs}/{task.subtasks.length}</span>)}{task.comments.length > 0 && (<span className="inline-flex items-center gap-1"><I.comment /> {task.comments.length}</span>)}{task.attachments.length > 0 && (<span className="inline-flex items-center gap-1"><I.clip /> {task.attachments.length}</span>)}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ListView({ tasks, onOpen, clientById, projectById, emptyLabel }: {
-  tasks: Task[]; onOpen: (id: string) => void; emptyLabel: string;
-  clientById: (id: string) => Client | null; projectById: (id: string) => Project | null;
-}) {
-  return (
-    <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">
-      <div className="overflow-hidden rounded-xl border bg-surface">
-        <table className="w-full text-[15px]">
-          <thead><tr className="border-b bg-background/60 text-left text-[15px] uppercase tracking-wide text-muted"><th className="px-4 py-2 font-semibold">Task</th><th className="px-3 py-2 font-semibold">Client / Project</th><th className="px-3 py-2 font-semibold">Status</th><th className="px-3 py-2 font-semibold">Priority</th><th className="px-3 py-2 font-semibold">Assignee</th><th className="px-3 py-2 font-semibold">Due</th></tr></thead>
-          <tbody>
-            {tasks.length === 0 && (<tr><td colSpan={6} className="px-4 py-10 text-center text-muted">{emptyLabel}</td></tr>)}
-            {tasks.map((t) => {
-              const s = STATUS_META[t.status]; const client = clientById(t.clientId)!; const overdue = isOverdue(t.due) && t.status !== "done";
-              return (
-                <tr key={t.id} onClick={() => onOpen(t.id)} className="cursor-pointer border-b last:border-0 hover:bg-background/60">
-                  <td className="px-4 py-2.5"><div className="font-medium">{t.title}</div><LabelChips ids={t.labelIds} /></td>
-                  <td className="px-3 py-2.5"><div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: client.color }} />{client.name}</div><div className="text-[15px] text-muted">{projectById(t.projectId)?.name}</div></td>
-                  <td className="px-3 py-2.5"><span className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[15px] font-medium" style={{ background: s.chip, color: s.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: s.dot }} /> {s.label}</span></td>
-                  <td className="px-3 py-2.5">{t.priority === "none" ? <span className="text-muted">—</span> : (<span className="inline-flex items-center gap-0.5 text-[15px] font-medium" style={{ color: PRIORITY_META[t.priority].color }}><I.flag /> {PRIORITY_META[t.priority].label}</span>)}</td>
-                  <td className="px-3 py-2.5"><Avatar id={t.assigneeId} size={24} /></td>
-                  <td className={`px-3 py-2.5 ${overdue ? "font-medium text-red-500" : ""}`}>{t.due ? formatDue(t.due) : "—"}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
 }
 
 // --- ⌘K command palette -----------------------------------------------------
@@ -1190,31 +1031,6 @@ function friendlyDue(iso: string): string {
   return formatDue(iso);
 }
 
-// Small ClickUp-style status circle that opens a status menu.
-function InlineStatus({ value, onChange }: { value: TaskStatus; onChange: (s: TaskStatus) => void }) {
-  const [open, setOpen] = useState(false);
-  const m = STATUS_META[value];
-  return (
-    <div className="relative">
-      <button onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} title={m.label} className="flex h-5 w-5 items-center justify-center">
-        {value === "done"
-          ? <span className="flex h-4 w-4 items-center justify-center rounded-full text-white" style={{ background: m.dot }}><I.check /></span>
-          : <span className="h-3.5 w-3.5 rounded-full border-2" style={{ borderColor: m.dot }} />}
-      </button>
-      {open && (<>
-        <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
-        <div className="absolute left-0 z-40 mt-1 w-36 rounded-lg border bg-surface p-1 shadow-lg">
-          {STATUS_ORDER.map((s) => { const mm = STATUS_META[s]; return (
-            <button key={s} onClick={(e) => { e.stopPropagation(); onChange(s); setOpen(false); }} className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[15px] hover:bg-background">
-              <span className="h-3.5 w-3.5 rounded-full border-2" style={{ borderColor: mm.dot, background: s === "done" ? mm.dot : "transparent" }} /> {mm.label}
-            </button>
-          ); })}
-        </div>
-      </>)}
-    </div>
-  );
-}
-
 function InlineDue({ value, overdue, recurrence, onChange, onRecurrenceChange }: { value: string | null; overdue: boolean; recurrence: Recurrence; onChange: (d: string | null) => void; onRecurrenceChange: (r: Recurrence) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
@@ -1291,21 +1107,9 @@ function DatePopover({ pos, value, recurrence, onSelect, onRecurrenceChange, onC
   );
 }
 
-function AddTask({ projectId, clientId, composing, draft, setDraft, onStart, onCancel, onAdd }: {
-  projectId: string; clientId: string; composing: boolean; draft: string; setDraft: (v: string) => void; onStart: () => void; onCancel: () => void; onAdd: (projectId: string, clientId: string, title: string) => void;
-}) {
-  if (!composing) return (<button onClick={onStart} className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[15px] text-muted hover:bg-surface"><I.plus /> Add task</button>);
-  return (
-    <div className="rounded-xl border bg-surface p-2">
-      <textarea autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onAdd(projectId, clientId, draft); } if (e.key === "Escape") onCancel(); }} placeholder="Task name…" rows={2} className="w-full resize-none bg-transparent text-[15px] outline-none placeholder:text-muted" />
-      <div className="mt-1 flex gap-2"><button onClick={() => onAdd(projectId, clientId, draft)} className="rounded-md bg-accent px-2.5 py-1 text-[15px] font-medium text-white">Add task</button><button onClick={onCancel} className="rounded-md px-2 py-1 text-[15px] text-muted hover:bg-background">Cancel</button></div>
-    </div>
-  );
-}
-
-function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, contactsForClient, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, clientProjects, onSetProject, onNewProject, onToggleSub, onAddSub, onRenameSub, onToggleLabel }: {
+function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, clientProjects, onSetProject, onNewProject, onToggleSub, onAddSub, onRenameSub, onToggleLabel }: {
   task: Task; comment: string; setComment: (v: string) => void;
-  clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null; contactsForClient: (clientId: string) => Contact[];
+  clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; onPrev: () => void; onNext: () => void;
   onClose: () => void; onPatch: (patch: Partial<Task>) => void; onDelete: () => void; onAddComment: () => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; onPushGhl: () => void; ghlBusy: boolean; ghlLinkable: boolean; onUnlinkGhl: () => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onToggleSub: (sid: string) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onToggleLabel: (lid: string) => void;
 }) {
@@ -1540,39 +1344,3 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   return (<div className="flex items-center gap-3"><dt className="w-24 shrink-0 text-[15px] text-muted">{label}</dt><dd className="min-w-0 flex-1">{children}</dd></div>);
 }
 
-// Searchable contact picker — handles thousands of synced GHL contacts.
-function ContactPicker({ contacts, value, onChange }: { contacts: Contact[]; value: string | null; onChange: (id: string | null) => void }) {
-  const [q, setQ] = useState("");
-  const [open, setOpen] = useState(false);
-  const selected = contacts.find((c) => c.id === value) ?? null;
-  const ql = q.trim().toLowerCase();
-  const list = (ql ? contacts.filter((c) => c.name.toLowerCase().includes(ql) || (c.email ?? "").toLowerCase().includes(ql)) : contacts).slice(0, 50);
-  return (
-    <div className="relative w-full">
-      {open && <div className="fixed inset-0 z-20" onClick={() => { setOpen(false); setQ(""); }} />}
-      <div className="relative z-30 flex items-center gap-1">
-        <input
-          value={open ? q : selected?.name ?? ""}
-          onChange={(e) => { setQ(e.target.value); setOpen(true); }}
-          onFocus={() => { setOpen(true); setQ(""); }}
-          placeholder={contacts.length ? "Search contacts…" : "No contacts synced yet"}
-          className="w-full rounded-md border bg-background px-2 py-1 text-[15px] outline-none focus:border-accent"
-        />
-        {value && !open && <button onClick={() => onChange(null)} title="Clear" className="rounded p-1 text-muted hover:text-red-500"><I.close /></button>}
-      </div>
-      {open && (
-        <div className="absolute z-30 mt-1 max-h-56 w-72 overflow-y-auto rounded-lg border bg-surface shadow-lg">
-          <button onClick={() => { onChange(null); setOpen(false); setQ(""); }} className="flex w-full items-center px-3 py-1.5 text-left text-[15px] text-muted hover:bg-background">No contact</button>
-          {list.map((c) => (
-            <button key={c.id} onClick={() => { onChange(c.id); setOpen(false); setQ(""); }} className="flex w-full flex-col items-start px-3 py-1.5 text-left hover:bg-background">
-              <span className="text-[15px]">{c.name}</span>
-              {c.email && <span className="text-[15px] text-muted">{c.email}</span>}
-            </button>
-          ))}
-          {!ql && contacts.length > 50 && <div className="px-3 py-1.5 text-[15px] text-muted">Showing 50 of {contacts.length.toLocaleString()} — type to search</div>}
-          {ql && list.length === 0 && <div className="px-3 py-2 text-[15px] text-muted">No matches</div>}
-        </div>
-      )}
-    </div>
-  );
-}
