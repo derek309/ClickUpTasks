@@ -25,6 +25,26 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const [copied, setCopied] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // Resizable Activity column (full-page mode): drag its left edge; width
+  // persists per browser.
+  const [activityW, setActivityW] = useState(400);
+  useEffect(() => { try { const w = parseInt(localStorage.getItem("cut_activityW") ?? "", 10); if (w >= 280 && w <= 720) setActivityW(w); } catch {} }, []);
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const onMove = (ev: MouseEvent) => {
+      const w = Math.min(720, Math.max(280, window.innerWidth - ev.clientX));
+      setActivityW(w);
+    };
+    const onUp = (ev: MouseEvent) => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      const w = Math.min(720, Math.max(280, window.innerWidth - ev.clientX));
+      try { localStorage.setItem("cut_activityW", String(w)); } catch {}
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
   // Packages the task as a ready-to-paste brief for a Claude Code session.
   // (There's no supported deep link to launch Claude Code with a prompt, so
   // clipboard + paste is the reliable hand-off.)
@@ -189,7 +209,9 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                 {attachmentsBlock}
               </div>
             </div>
-            <div className="flex w-[400px] shrink-0 flex-col border-l bg-surface">
+            <div className="relative flex shrink-0 flex-col border-l bg-surface" style={{ width: activityW }}>
+              <div onMouseDown={startResize} title="Drag to resize"
+                className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize hover:bg-accent/30 active:bg-accent/40" />
               <div className="flex items-center gap-2 border-b px-5 py-3">
                 <span className="text-[15px] font-semibold">Activity</span>
                 <span className="rounded-full bg-background px-2 py-0.5 text-[13px] text-muted">{task.comments.length}</span>
