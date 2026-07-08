@@ -301,7 +301,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!body.trim()) return;
     const t = tasks.find((x) => x.id === id);
     update(id, { comments: [...(t?.comments ?? []), { id: newId("cm_"), authorId: me.id, body: body.trim(), at: new Date().toISOString() }] });
-    users.forEach((u) => { if (u.id !== me.id && body.includes("@" + u.name)) { notify(u.id, `${me.name} mentioned you in “${t?.title}”`, id); pushToast(`Notified ${u.name}`); } });
+    // Comment notifications: @mentions get "mentioned you"; the task's assignee
+    // always hears about new comments on their task (unless they wrote it).
+    const mentioned = new Set<string>();
+    users.forEach((u) => { if (u.id !== me.id && body.includes("@" + u.name)) { mentioned.add(u.id); notify(u.id, `${me.name} mentioned you in “${t?.title}”`, id); pushToast(`Notified ${u.name}`); } });
+    if (t?.assigneeId && t.assigneeId !== me.id && !mentioned.has(t.assigneeId)) {
+      notify(t.assigneeId, `${me.name} commented on “${t.title}”`, id);
+    }
     setComment("");
   };
   const addFiles = async (id: string, fileList: FileList) => {
@@ -616,36 +622,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             </>)}
           </div>
 
-          {!myWork && activeClient.startsWith("cl_") && ghlContactUrlFor(activeClient) && (
-            <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" className="inline-flex shrink-0 items-center gap-1 rounded-md border border-accent px-2.5 py-1.5 text-[13px] font-medium text-accent hover:bg-accent-soft"><I.bolt /> Open in GHL</a>
-          )}
 
-          <div className="ml-auto flex items-center gap-2">
-            <div className="hidden items-center gap-2 rounded-lg border bg-background px-2.5 py-1.5 sm:flex">
-              <I.search className="text-muted" />
-              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search tasks…" className="w-36 bg-transparent text-[15px] outline-none placeholder:text-muted" />
-            </div>
-            <div className="relative">
-              <button onClick={() => { const opening = !bellOpen; setBellOpen(opening); if (opening) { setNotifications((ns) => ns.map((n) => (n.recipientId === me.id ? { ...n, read: true } : n))); markNotifsReadDb(me.id); } }} className="relative rounded-lg border bg-background p-2 text-muted hover:text-foreground">
-                <I.bell />
-                {unread > 0 && <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[15px] font-semibold text-white">{unread}</span>}
-              </button>
-              {bellOpen && (<>
-                <div className="fixed inset-0 z-30" onClick={() => setBellOpen(false)} />
-                <div className="absolute right-0 z-40 mt-1 w-80 overflow-hidden rounded-xl border bg-surface shadow-xl">
-                  <div className="border-b px-4 py-2.5 text-[15px] font-semibold uppercase tracking-wide text-muted">Notifications</div>
-                  <div className="max-h-96 overflow-y-auto">
-                    {myNotifs.length === 0 && <div className="px-4 py-6 text-center text-[15px] text-muted">You&apos;re all caught up.</div>}
-                    {myNotifs.map((n) => (<button key={n.id} onClick={() => { if (n.taskId) setOpenTaskId(n.taskId); setBellOpen(false); }} className="flex w-full gap-2.5 border-b px-4 py-2.5 text-left last:border-0 hover:bg-background"><I.comment className="mt-0.5 shrink-0 text-accent" /><div><div className="text-[15px] leading-snug">{n.text}</div><div className="text-[15px] text-muted">{timeAgo(n.at)}</div></div></button>))}
-                  </div>
-                </div>
-              </>)}
-            </div>
-          </div>
-        </header>
-
-        {/* controls */}
-        <div className="flex flex-wrap items-center gap-2 border-b bg-surface px-4 py-2 text-[15px] sm:px-5">
           {myWork ? (
             canAdmin ? (
               <label className="flex items-center gap-2"><span className="text-muted">Viewing work for</span>
@@ -686,7 +663,34 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </>)}
             </div>
           )}
-        </div>
+
+          {!myWork && activeClient.startsWith("cl_") && ghlContactUrlFor(activeClient) && (
+            <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" className="inline-flex shrink-0 items-center gap-1 rounded-md border border-accent px-2.5 py-1.5 text-[13px] font-medium text-accent hover:bg-accent-soft"><I.bolt /> Open in GHL</a>
+          )}
+
+          <div className="ml-auto flex items-center gap-2">
+            <div className="hidden items-center gap-2 rounded-lg border bg-background px-2.5 py-1.5 sm:flex">
+              <I.search className="text-muted" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search tasks…" className="w-36 bg-transparent text-[15px] outline-none placeholder:text-muted" />
+            </div>
+            <div className="relative">
+              <button onClick={() => { const opening = !bellOpen; setBellOpen(opening); if (opening) { setNotifications((ns) => ns.map((n) => (n.recipientId === me.id ? { ...n, read: true } : n))); markNotifsReadDb(me.id); } }} className="relative rounded-lg border bg-background p-2 text-muted hover:text-foreground">
+                <I.bell />
+                {unread > 0 && <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[15px] font-semibold text-white">{unread}</span>}
+              </button>
+              {bellOpen && (<>
+                <div className="fixed inset-0 z-30" onClick={() => setBellOpen(false)} />
+                <div className="absolute right-0 z-40 mt-1 w-80 overflow-hidden rounded-xl border bg-surface shadow-xl">
+                  <div className="border-b px-4 py-2.5 text-[15px] font-semibold uppercase tracking-wide text-muted">Notifications</div>
+                  <div className="max-h-96 overflow-y-auto">
+                    {myNotifs.length === 0 && <div className="px-4 py-6 text-center text-[15px] text-muted">You&apos;re all caught up.</div>}
+                    {myNotifs.map((n) => (<button key={n.id} onClick={() => { if (n.taskId) setOpenTaskId(n.taskId); setBellOpen(false); }} className="flex w-full gap-2.5 border-b px-4 py-2.5 text-left last:border-0 hover:bg-background"><I.comment className="mt-0.5 shrink-0 text-accent" /><div><div className="text-[15px] leading-snug">{n.text}</div><div className="text-[15px] text-muted">{timeAgo(n.at)}</div></div></button>))}
+                  </div>
+                </div>
+              </>)}
+            </div>
+          </div>
+        </header>
 
         {/* content */}
         {myWork ? (

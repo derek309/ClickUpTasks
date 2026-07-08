@@ -107,7 +107,7 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
         <button onClick={onOpen} className="flex min-w-0 flex-col justify-center py-0.5 text-left">
           {crumb && <span className="truncate text-[13px] leading-tight text-muted">{crumb}</span>}
           <span className="flex min-w-0 items-center gap-1.5">
-            <span className="truncate text-[17px] font-medium leading-snug">{task.title}</span>
+            <span className="min-w-0 whitespace-normal break-words text-[17px] font-medium leading-snug">{task.title}</span>
             {task.recurrence !== "none" && <I.repeat className="shrink-0 text-muted" />}
             {task.attachments.length > 0 && <I.clip className="shrink-0 text-muted" />}
             {task.subtasks.length > 0 && <span className="inline-flex shrink-0 items-center gap-0.5 text-[15px] text-muted"><I.check />{doneSubs}/{task.subtasks.length}</span>}
