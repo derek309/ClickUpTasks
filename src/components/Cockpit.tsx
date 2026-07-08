@@ -239,7 +239,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const clientGroups = ([["", "active"], ["Paused", "paused"], ["Archived", "archived"]] as const)
     .map(([header, st]) => ({ header, items: sortedClients.filter((c) => c.status === st) }))
     .filter((g) => g.items.length > 0);
-  const subAccountOf = (clientId: string) => contactById(clientId.slice(3))?.clientId ?? null;
   const ghlContactUrlFor = (clientId: string) => {
     if (!clientId.startsWith("cl_")) return null;
     const ct = contactById(clientId.slice(3));
@@ -320,10 +319,23 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (cur) { const merged = { ...cur, ...patch }; upsertTask(merged); syncGhlIfLinked(merged, patch); }
   };
 
+  // Field changes on a task that are worth a line in its Activity feed. Stored
+  // as kind:"event" comments (no schema change) so the existing JSONB column
+  // and feed rendering carry them for free — excluded from comment counts.
+  const describeFieldChange = (before: Task, patch: Partial<Task>): string[] => {
+    const lines: string[] = [];
+    if (patch.status && patch.status !== before.status) lines.push(`changed status to ${STATUS_META[patch.status].label}`);
+    if (patch.assigneeId !== undefined && patch.assigneeId !== before.assigneeId) lines.push(patch.assigneeId ? `assigned to ${userById(patch.assigneeId)?.name ?? "someone"}` : "unassigned");
+    if (patch.due !== undefined && patch.due !== before.due) lines.push(patch.due ? `set due date to ${formatDue(patch.due)}` : "cleared the due date");
+    if (patch.priority && patch.priority !== before.priority) lines.push(`set priority to ${PRIORITY_META[patch.priority].label}`);
+    return lines;
+  };
+
   const patchTask = (id: string, patch: Partial<Task>) => {
     const before = tasks.find((x) => x.id === id);
     if (!before) return;
-    const updated: Task = { ...before, ...patch };
+    const events = describeFieldChange(before, patch).map((body) => ({ id: newId("cm_"), authorId: me.id, body, at: new Date().toISOString(), kind: "event" as const }));
+    const updated: Task = { ...before, ...patch, comments: events.length ? [...before.comments, ...events] : before.comments };
     let clone: Task | null = null;
     if (patch.status === "done" && before.status !== "done" && before.recurrence !== "none") {
       const nextDue = advanceDue(before.due, before.recurrence);
@@ -337,6 +349,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (patch.assigneeId && patch.assigneeId !== me.id && patch.assigneeId !== before.assigneeId) {
       notify(patch.assigneeId, `${me.name} assigned you “${before.title}”`, id);
       pushToast(`Notified ${userById(patch.assigneeId)?.name}`);
+    }
+    // Finishing work is worth surfacing to the rest of the team, not just silence.
+    if (patch.status && (patch.status === "review" || patch.status === "done") && patch.status !== before.status) {
+      users.filter((u) => u.id !== me.id && (u.role === "admin" || before.assigneeId === u.id)).forEach((u) => {
+        notify(u.id, `${me.name} moved “${before.title}” to ${STATUS_META[patch.status as TaskStatus].label}`, id);
+      });
+    }
+    // A due-date change is easy for the assignee to miss otherwise.
+    if (patch.due !== undefined && patch.due !== before.due && before.assigneeId && before.assigneeId !== me.id) {
+      notify(before.assigneeId, `${me.name} changed the due date on “${before.title}”`, id);
     }
   };
 

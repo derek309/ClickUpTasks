@@ -87,6 +87,10 @@ export interface Comment {
   authorId: string;
   body: string;
   at: string;
+  /** "event" = system-logged field change (status/assignee/due/priority), rendered
+   * as a compact line in the Activity feed instead of a chat bubble; excluded from
+   * comment counts. Absent/"comment" = a real user comment. */
+  kind?: "comment" | "event";
 }
 
 export interface Subtask {

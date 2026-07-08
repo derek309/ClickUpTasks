@@ -35,7 +35,7 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   return (
     <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">
       <div className="overflow-hidden rounded-xl border bg-surface shadow-soft">
-        <div className="grid items-center gap-2 border-b bg-background/40 px-4 py-2 text-[15px] text-muted" style={{ gridTemplateColumns: template }}>
+        <div className="grid items-center gap-2 border-b bg-background/40 px-4 py-2 text-[12px] font-semibold uppercase tracking-wide text-muted" style={{ gridTemplateColumns: template }}>
           <span />
           <button onClick={() => onSort("task")} className="flex items-center gap-1 text-left hover:text-foreground">Name <Arrow col="task" /></button>
           {showClient && <span>Client</span>}
@@ -49,7 +49,7 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
               <I.chevron className={`text-muted transition ${collapsedG.has(g.key) ? "rotate-180" : "-rotate-90"}`} />
               <span className="h-2.5 w-2.5 rounded-full" style={{ background: g.color }} />
               <span className="text-[15px] font-bold">{g.label}</span>
-              <span className="rounded-full bg-background px-1.5 text-[15px] text-muted">{g.tasks.length}</span>
+              <span className="rounded-full bg-background px-1.5 text-[13px] font-normal normal-case tracking-normal text-muted">{g.tasks.length}</span>
             </button>
             {!collapsedG.has(g.key) && (
               <div>
@@ -92,7 +92,7 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
     if (key === "priority") return <InlinePriority value={task.priority} onChange={(p) => onPatch(task.id, { priority: p })} />;
     if (key === "assignee") return <InlineAssignee value={task.assigneeId} onChange={(a) => onPatch(task.id, { assigneeId: a })} />;
     if (key === "due") return <InlineDue value={task.due} overdue={overdue} recurrence={task.recurrence} onChange={(d) => onPatch(task.id, { due: d })} onRecurrenceChange={(r) => onPatch(task.id, { recurrence: r })} />;
-    if (key === "comments") return task.comments.length ? <span className="inline-flex items-center gap-1 text-[15px] text-muted"><I.comment /> {task.comments.length}</span> : <I.comment className="text-muted opacity-30" />;
+    if (key === "comments") { const n = task.comments.filter((c) => c.kind !== "event").length; return n ? <span className="inline-flex items-center gap-1 text-[13px] text-muted"><I.comment /> {n}</span> : <I.comment className="text-muted opacity-30" />; }
     if (key === "contact") { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return <span className="truncate text-[15px] text-muted">{ct?.name ?? "—"}</span>; }
     if (key === "labels") return <LabelChips ids={task.labelIds} />;
     return null;
@@ -205,7 +205,7 @@ function InlineDue({ value, overdue, recurrence, onChange, onRecurrenceChange }:
   };
   return (
     <>
-      <button ref={ref} onClick={openIt} className={`inline-flex items-center gap-1 rounded px-1 py-0.5 text-[15px] hover:bg-background ${overdue ? "font-medium text-red-500" : "text-muted"}`}>
+      <button ref={ref} onClick={openIt} className={`inline-flex items-center gap-1 rounded px-1 py-0.5 text-[15px] hover:bg-background ${overdue ? "font-medium text-danger" : "text-muted"}`}>
         {value ? friendlyDue(value) : "—"}{recurrence !== "none" && <I.repeat className="text-accent" />}
       </button>
       {open && <DatePopover pos={pos} value={value} recurrence={recurrence} onSelect={(d) => { onChange(d); setOpen(false); }} onRecurrenceChange={onRecurrenceChange} onClose={() => setOpen(false)} />}
@@ -235,7 +235,7 @@ function DatePopover({ pos, value, recurrence, onSelect, onRecurrenceChange, onC
           {quicks.map(([label, iso]) => (
             <button key={label} onClick={() => onSelect(iso)} className="flex w-full items-center justify-between gap-3 whitespace-nowrap rounded px-2 py-1.5 text-left text-[15px] hover:bg-background"><span>{label}</span><span className="text-[15px] text-muted">{formatDue(iso)}</span></button>
           ))}
-          <button onClick={() => onSelect(null)} className="mt-0.5 w-full rounded px-2 py-1.5 text-left text-[15px] text-red-500 hover:bg-background">No date</button>
+          <button onClick={() => onSelect(null)} className="mt-0.5 w-full rounded px-2 py-1.5 text-left text-[15px] text-danger hover:bg-background">No date</button>
           <div className="mt-1 border-t pt-1.5">
             <div className="px-2 pb-1 text-[15px] font-semibold uppercase tracking-wide text-muted">Repeat</div>
             <select value={recurrence} onClick={(e) => e.stopPropagation()} onChange={(e) => onRecurrenceChange(e.target.value as Recurrence)} className="w-full rounded border bg-background px-1.5 py-1 text-[15px] outline-none">

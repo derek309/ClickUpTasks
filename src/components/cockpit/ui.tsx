@@ -45,7 +45,19 @@ export function Avatar({ id, size = 26 }: { id: string | null; size?: number }) 
   return (<span className="inline-flex items-center justify-center rounded-full font-semibold text-white" style={{ width: size, height: size, background: u.color, fontSize: size * 0.4 }} title={u.name}>{u.initials}</span>);
 }
 
-export const attachIcon: Record<string, string> = { pdf: "📄", image: "🖼️", doc: "📝", sheet: "📊", link: "🔗" };
+// Flat file-type badge — replaces platform-inconsistent emoji, respects theme
+// via existing color tokens instead of raw Tailwind palette colors.
+const FILE_BADGE: Record<Attachment["kind"], { label: string; fg: string; bg: string }> = {
+  pdf: { label: "PDF", fg: "text-danger", bg: "bg-danger-soft" },
+  image: { label: "IMG", fg: "text-accent", bg: "bg-accent-soft" },
+  sheet: { label: "XLS", fg: "text-success", bg: "bg-success-soft" },
+  doc: { label: "DOC", fg: "text-muted", bg: "bg-background" },
+  link: { label: "URL", fg: "text-accent", bg: "bg-accent-soft" },
+};
+export function FileBadge({ kind }: { kind: Attachment["kind"] }) {
+  const b = FILE_BADGE[kind];
+  return (<span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[9px] font-bold ${b.fg} ${b.bg}`}>{b.label}</span>);
+}
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25MB — keep in sync with the Supabase bucket's file-size limit
 let idCounter = 0;
 export const newId = (p: string) => p + Date.now().toString(36) + (idCounter++).toString(36);
@@ -70,7 +82,7 @@ export function SideItem({ active, onClick, children }: { active: boolean; onCli
 }
 export function LabelChips({ ids }: { ids: string[] }) {
   if (ids.length === 0) return null;
-  return (<div className="mt-1.5 flex flex-wrap gap-1">{ids.map((id) => { const l = labelById(id); return l ? (<span key={id} className="rounded px-1.5 py-0.5 text-[15px] font-medium" style={{ background: l.color + "1a", color: l.color }}>{l.name}</span>) : null; })}</div>);
+  return (<div className="mt-1.5 flex flex-wrap gap-1">{ids.map((id) => { const l = labelById(id); return l ? (<span key={id} className="rounded px-1.5 py-0 text-[13px] font-medium" style={{ background: l.color + "1a", color: l.color }}>{l.name}</span>) : null; })}</div>);
 }
 
 export function Row({ label, children }: { label: string; children: React.ReactNode }) {
