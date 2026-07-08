@@ -76,6 +76,7 @@ function Avatar({ id, size = 26 }: { id: string | null; size?: number }) {
 }
 
 const attachIcon: Record<string, string> = { pdf: "📄", image: "🖼️", doc: "📝", sheet: "📊", link: "🔗" };
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25MB — keep in sync with the Supabase bucket's file-size limit
 let idCounter = 0;
 const newId = (p: string) => p + Date.now().toString(36) + (idCounter++).toString(36);
 function formatBytes(n: number) {
@@ -140,6 +141,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [addClientOpen, setAddClientOpen] = useState(false);
   const [ghlBusy, setGhlBusy] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
   const [promptDialog, setPromptDialog] = useState<PromptSpec | null>(null);
   const [menuClientId, setMenuClientId] = useState<string | null>(null);
@@ -388,19 +390,27 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     users.forEach((u) => { if (u.id !== me.id && body.includes("@" + u.name)) { notify(u.id, `${me.name} mentioned you in “${t?.title}”`, id); pushToast(`Notified ${u.name}`); } });
     setComment("");
   };
-  const addFiles = async (id: string, files: FileList) => {
+  const addFiles = async (id: string, fileList: FileList) => {
     const t = tasks.find((x) => x.id === id);
-    if (!t || files.length === 0) return;
-    pushToast(`Uploading ${files.length} file${files.length > 1 ? "s" : ""}…`);
+    if (!t || fileList.length === 0) return;
+    const all = Array.from(fileList);
+    const files = all.filter((f) => f.size <= MAX_ATTACHMENT_BYTES);
+    const oversized = all.filter((f) => f.size > MAX_ATTACHMENT_BYTES);
+    if (oversized.length) pushToast(`Skipped ${oversized.length} file${oversized.length > 1 ? "s" : ""} over ${formatBytes(MAX_ATTACHMENT_BYTES)}: ${oversized.map((f) => f.name).join(", ")}`);
+    if (files.length === 0) return;
+
+    setUploadProgress({ done: 0, total: files.length });
     const items: Attachment[] = [];
     let failed = 0;
-    for (const f of Array.from(files)) {
+    for (const f of files) {
       const safe = f.name.replace(/[^\w.\-]+/g, "_");
       const path = `${id}/${newId("f_")}-${safe}`;
       const res = await uploadTaskFile(path, f);
       items.push({ id: newId("a_"), name: f.name, size: formatBytes(f.size), kind: kindFromName(f.name), path: res.ok ? path : undefined });
       if (!res.ok) failed++;
+      setUploadProgress((p) => (p ? { done: p.done + 1, total: p.total } : p));
     }
+    setUploadProgress(null);
     // Re-read current task in case it changed while awaiting.
     const cur = tasks.find((x) => x.id === id) ?? t;
     update(id, { attachments: [...cur.attachments, ...items] });
@@ -810,7 +820,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={orderedTaskIds.length} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={() => addComment(openTask.id, comment)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} />
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} />
       )}
 
       {teamOpen && <TeamPanel me={me} onClose={() => setTeamOpen(false)} />}
@@ -1293,11 +1303,11 @@ function AddTask({ projectId, clientId, composing, draft, setDraft, onStart, onC
   );
 }
 
-function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, contactsForClient, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, clientProjects, onSetProject, onNewProject, onToggleSub, onAddSub, onRenameSub, onToggleLabel }: {
+function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, contactsForClient, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, clientProjects, onSetProject, onNewProject, onToggleSub, onAddSub, onRenameSub, onToggleLabel }: {
   task: Task; comment: string; setComment: (v: string) => void;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null; contactsForClient: (clientId: string) => Contact[];
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; onPrev: () => void; onNext: () => void;
-  onClose: () => void; onPatch: (patch: Partial<Task>) => void; onDelete: () => void; onAddComment: () => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onRemoveFile: (att: Attachment) => void; onPushGhl: () => void; ghlBusy: boolean; ghlLinkable: boolean; onUnlinkGhl: () => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onToggleSub: (sid: string) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onToggleLabel: (lid: string) => void;
+  onClose: () => void; onPatch: (patch: Partial<Task>) => void; onDelete: () => void; onAddComment: () => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; onPushGhl: () => void; ghlBusy: boolean; ghlLinkable: boolean; onUnlinkGhl: () => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onToggleSub: (sid: string) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onToggleLabel: (lid: string) => void;
 }) {
   const client = clientById(task.clientId)!;
   const project = projectById(task.projectId)!;
@@ -1370,8 +1380,14 @@ function TaskDrawer({ task, comment, setComment, clientById, projectById, contac
     <div className="mt-5">
       <div className="mb-2 flex items-center justify-between"><span className="text-[15px] font-semibold uppercase tracking-wide text-muted">Attachments · {task.attachments.length}</span><button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1 text-[15px] font-medium text-accent"><I.plus /> Attach</button></div>
       <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) onAddFiles(e.target.files); e.target.value = ""; }} />
+      {uploadProgress && (
+        <div className="mb-2 flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-[15px] text-muted">
+          <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+          Uploading {uploadProgress.done + 1} of {uploadProgress.total}…
+        </div>
+      )}
       <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files.length) onAddFiles(e.dataTransfer.files); }} className="space-y-1.5">
-        {task.attachments.length === 0 && (<div className="rounded-lg border border-dashed px-3 py-4 text-center text-[15px] text-muted">Drop files here or click Attach</div>)}
+        {task.attachments.length === 0 && !uploadProgress && (<div className="rounded-lg border border-dashed px-3 py-4 text-center text-[15px] text-muted">Drop files here or click Attach · max 25MB each</div>)}
         {task.attachments.map((a) => (
           <div key={a.id} className="group/att flex items-center gap-2 rounded-lg border bg-background px-3 py-2">
             <span className="text-[16px]">{attachIcon[a.kind]}</span>

@@ -11,17 +11,21 @@ export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteName, setInviteName] = useState("");
+  const [inviting, setInviting] = useState(false);
+  const [inviteMsg, setInviteMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
-  async function authedFetch(init?: RequestInit) {
+  async function authedFetch(path: string, init?: RequestInit) {
     const { data } = await supabase.auth.getSession();
-    return fetch("/api/team", { ...init, headers: { ...(init?.headers ?? {}), Authorization: `Bearer ${data.session?.access_token ?? ""}` } });
+    return fetch(path, { ...init, headers: { ...(init?.headers ?? {}), Authorization: `Bearer ${data.session?.access_token ?? ""}` } });
   }
 
   async function load() {
     setLoading(true);
     setError(null);
     try {
-      const res = await authedFetch();
+      const res = await authedFetch("/api/team");
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Failed to load team");
       setProfiles(json.profiles);
@@ -38,13 +42,33 @@ export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void
     setSaving(id);
     setProfiles((ps) => ps.map((p) => (p.id === id ? { ...p, ...(body.role ? { role: body.role as Profile["role"] } : {}) } : p)));
     try {
-      const res = await authedFetch({ method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...body }) });
+      const res = await authedFetch("/api/team", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...body }) });
       if (!res.ok) { const j = await res.json(); throw new Error(j.error); }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
       load();
     } finally {
       setSaving(null);
+    }
+  }
+
+  async function sendInvite(e: React.FormEvent) {
+    e.preventDefault();
+    if (!inviteEmail.trim()) return;
+    setInviting(true);
+    setInviteMsg(null);
+    try {
+      const res = await authedFetch("/api/team/invite", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: inviteEmail.trim(), name: inviteName.trim() }) });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error ?? "Invite failed");
+      setInviteMsg({ kind: "ok", text: `Invite sent to ${j.email}` });
+      setInviteEmail("");
+      setInviteName("");
+      load();
+    } catch (e) {
+      setInviteMsg({ kind: "err", text: e instanceof Error ? e.message : "Invite failed" });
+    } finally {
+      setInviting(false);
     }
   }
 
@@ -55,10 +79,17 @@ export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void
         <div className="flex items-center justify-between border-b px-5 py-3">
           <div>
             <h2 className="text-[16px] font-semibold">Team</h2>
-            <p className="text-[15px] text-muted">Manage who&apos;s an admin vs a VA. VAs sign up themselves, then you set their access here.</p>
+            <p className="text-[15px] text-muted">Invite teammates by email, then set who&apos;s an admin vs a VA.</p>
           </div>
           <button onClick={onClose} className="rounded-md p-1 text-muted hover:bg-background">✕</button>
         </div>
+
+        <form onSubmit={sendInvite} className="flex flex-wrap items-center gap-2 border-b bg-background/40 px-5 py-3">
+          <input value={inviteName} onChange={(e) => setInviteName(e.target.value)} placeholder="Name (optional)" className="w-40 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
+          <input value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} type="email" required placeholder="teammate@email.com" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
+          <button type="submit" disabled={inviting || !inviteEmail.trim()} className="shrink-0 rounded-md bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{inviting ? "Sending…" : "Send invite"}</button>
+          {inviteMsg && <div className={`w-full text-[15px] ${inviteMsg.kind === "err" ? "text-red-500" : "text-green-600"}`}>{inviteMsg.text}</div>}
+        </form>
 
         <div className="max-h-[60vh] overflow-y-auto px-5 py-3">
           {loading && <div className="py-8 text-center text-[15px] text-muted">Loading team…</div>}

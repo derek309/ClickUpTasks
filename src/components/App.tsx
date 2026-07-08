@@ -52,11 +52,12 @@ function Centered({ children }: { children: React.ReactNode }) {
   return <div className="flex h-screen flex-col items-center justify-center px-6 text-center">{children}</div>;
 }
 
+// Sign-in only — accounts are created exclusively via an admin's invite
+// (Team panel), which sends a Supabase magic-link email to set a password.
+// There is intentionally no public self-serve signup here.
 function Login() {
-  const [mode, setMode] = useState<"in" | "up">("in");
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
-  const [name, setName] = useState("");
   const [msg, setMsg] = useState<{ kind: "err" | "ok"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -64,12 +65,8 @@ function Login() {
     e.preventDefault();
     setBusy(true);
     setMsg(null);
-    const res =
-      mode === "in"
-        ? await supabase.auth.signInWithPassword({ email: email.trim(), password: pw })
-        : await supabase.auth.signUp({ email: email.trim(), password: pw, options: { data: { name: name.trim() } } });
+    const res = await supabase.auth.signInWithPassword({ email: email.trim(), password: pw });
     if (res.error) setMsg({ kind: "err", text: res.error.message });
-    else if (mode === "up" && !res.data.session) setMsg({ kind: "ok", text: "Account created — check your email to confirm, then sign in." });
     setBusy(false);
   }
 
@@ -84,24 +81,19 @@ function Login() {
           </div>
         </div>
 
-        <h1 className="text-[17px] font-semibold">{mode === "in" ? "Sign in" : "Create your account"}</h1>
-        <p className="mb-4 text-[15px] text-muted">{mode === "in" ? "Welcome back." : "Set a password to get started."}</p>
+        <h1 className="text-[17px] font-semibold">Sign in</h1>
+        <p className="mb-4 text-[15px] text-muted">Welcome back.</p>
 
         <form onSubmit={submit} className="space-y-2.5">
-          {mode === "up" && (
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" className="w-full rounded-lg border bg-background px-3 py-2 text-[15px] outline-none focus:border-accent" />
-          )}
           <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className="w-full rounded-lg border bg-background px-3 py-2 text-[15px] outline-none focus:border-accent" />
           <input type="password" required value={pw} onChange={(e) => setPw(e.target.value)} placeholder="Password" className="w-full rounded-lg border bg-background px-3 py-2 text-[15px] outline-none focus:border-accent" />
           {msg && <div className={`rounded-lg px-3 py-2 text-[15px] ${msg.kind === "err" ? "bg-red-50 text-red-600" : "bg-green-50 text-green-600"}`}>{msg.text}</div>}
           <button disabled={busy} className="w-full rounded-lg bg-accent px-3 py-2 text-[15px] font-medium text-white disabled:opacity-50">
-            {busy ? "…" : mode === "in" ? "Sign in" : "Create account"}
+            {busy ? "…" : "Sign in"}
           </button>
         </form>
 
-        <button onClick={() => { setMode(mode === "in" ? "up" : "in"); setMsg(null); }} className="mt-4 w-full text-center text-[15px] text-muted hover:text-foreground">
-          {mode === "in" ? "Need an account? Sign up" : "Have an account? Sign in"}
-        </button>
+        <p className="mt-4 text-center text-[15px] text-muted">New teammate? Ask your admin for an invite.</p>
       </div>
     </div>
   );
