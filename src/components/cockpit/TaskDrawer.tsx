@@ -79,7 +79,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   }, [onClose]);
 
   const titleBlock = (
-    <textarea value={task.title} onChange={(e) => onPatch({ title: e.target.value })} rows={1} className={`w-full resize-none bg-transparent font-semibold leading-snug outline-none [field-sizing:content] focus:rounded-md focus:bg-background focus:px-1 ${full ? "text-[24px]" : "text-[18px]"}`} />
+    <textarea value={task.title} onChange={(e) => onPatch({ title: e.target.value })} rows={1} className={`w-full resize-none bg-transparent font-semibold leading-snug outline-none [field-sizing:content] focus:rounded-md focus:bg-background focus:px-1 ${full ? "text-[28px]" : "text-[18px]"}`} />
   );
   const statusBlock = (
     <div className="mt-3 flex flex-wrap gap-1.5">
@@ -117,19 +117,19 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     </dl>
   );
   const descriptionBlock = (
-    <div className="mt-5"><div className="mb-1.5 text-[15px] font-semibold uppercase tracking-wide text-muted">Description</div><textarea value={task.description} onChange={(e) => onPatch({ description: e.target.value })} placeholder="Add a description…" rows={3} className="w-full resize-none rounded-lg border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" /></div>
+    <div className="mt-5"><div className="mb-1.5 text-[13px] font-semibold uppercase tracking-wider text-muted">Description</div><textarea value={task.description} onChange={(e) => onPatch({ description: e.target.value })} placeholder="Add a description…" rows={3} className="w-full resize-none rounded-lg border border-transparent px-3 py-2 text-[15px] outline-none transition placeholder:text-muted hover:bg-background focus:border-accent focus:bg-background -mx-3" /></div>
   );
   const subtasksBlock = (
     <div className="mt-5">
-      <div className="mb-2 flex items-center justify-between"><span className="text-[15px] font-semibold uppercase tracking-wide text-muted">Subtasks {task.subtasks.length > 0 && `· ${doneSubs}/${task.subtasks.length}`}</span></div>
+      <div className="mb-2 flex items-center justify-between"><span className="text-[13px] font-semibold uppercase tracking-wider text-muted">Subtasks {task.subtasks.length > 0 && `· ${doneSubs}/${task.subtasks.length}`}</span></div>
       {task.subtasks.length > 0 && (<div className="mb-2 h-1.5 overflow-hidden rounded-full bg-background"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${(doneSubs / task.subtasks.length) * 100}%` }} /></div>)}
       <div className="space-y-1">{task.subtasks.map((s) => (<div key={s.id} className="flex items-center gap-2 rounded-md px-1 py-1 hover:bg-background"><button onClick={() => onToggleSub(s.id)} className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${s.done ? "border-accent bg-accent text-white" : "border-border"}`}>{s.done && <I.check />}</button><input value={s.title} onChange={(e) => onRenameSub(s.id, e.target.value)} className={`flex-1 bg-transparent text-[15px] outline-none focus:rounded focus:bg-background focus:px-1 ${s.done ? "text-muted line-through" : ""}`} /></div>))}</div>
-      <div className="mt-1.5"><input value={subDraft} onChange={(e) => setSubDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { onAddSub(subDraft); setSubDraft(""); } }} placeholder="Add a subtask…" className="w-full rounded-md border bg-background px-2 py-1 text-[15px] outline-none placeholder:text-muted focus:border-accent" /></div>
+      <div className="mt-1.5"><input value={subDraft} onChange={(e) => setSubDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { onAddSub(subDraft); setSubDraft(""); } }} placeholder="+ Add a subtask…" className="w-full rounded-md border border-transparent px-2 py-1 text-[15px] outline-none transition placeholder:text-muted hover:bg-background focus:border-accent focus:bg-background" /></div>
     </div>
   );
   const attachmentsBlock = (
     <div className="mt-5">
-      <div className="mb-2 flex items-center justify-between"><span className="text-[15px] font-semibold uppercase tracking-wide text-muted">Attachments · {task.attachments.length}</span><button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1 text-[15px] font-medium text-accent"><I.plus /> Attach</button></div>
+      <div className="mb-2 flex items-center justify-between"><span className="text-[13px] font-semibold uppercase tracking-wider text-muted">Attachments · {task.attachments.length}</span><button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1 text-[15px] font-medium text-accent"><I.plus /> Attach</button></div>
       <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) onAddFiles(e.target.files); e.target.value = ""; }} />
       {uploadProgress && (
         <div className="mb-2 flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-[15px] text-muted">
@@ -156,12 +156,12 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   );
   const commentsBlock = (
     <div className="mt-6">
-      <div className="mb-2 text-[15px] font-semibold uppercase tracking-wide text-muted">Comments · {task.comments.length}</div>
+      <div className="mb-2 text-[13px] font-semibold uppercase tracking-wider text-muted">Comments · {task.comments.length}</div>
       <div className="space-y-3">{task.comments.map((c) => { const u = userById(c.authorId); return (<div key={c.id} className="flex gap-2.5"><Avatar id={c.authorId} size={28} /><div className="min-w-0"><div className="text-[15px]"><span className="font-medium">{u?.name}</span> <span className="text-muted">· {timeAgo(c.at)}</span></div><div className="text-[15px]">{renderMentions(c.body)}</div></div></div>); })}{task.comments.length === 0 && (<div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted"><I.comment /><span className="text-[15px]">No comments yet</span><span className="text-[13px]">Start the thread — type @ to mention a teammate.</span></div>)}</div>
     </div>
   );
   const composer = (
-    <div className="relative border-t p-3">
+    <div className="relative border-t bg-surface p-3">
       {mentionMatch && mentionCands.length > 0 && (<div className="absolute bottom-full left-3 mb-1 w-56 overflow-hidden rounded-lg border bg-surface shadow-lg">{mentionCands.map((u) => (<button key={u.id} onClick={() => setComment(comment.replace(/@([\w]*)$/, `@${u.name} `))} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[15px] hover:bg-background"><Avatar id={u.id} size={22} /> {u.name}{u.role === "va" && <span className="text-[15px] text-muted">VA</span>}</button>))}</div>)}
       <div className="flex items-end gap-2 rounded-xl border bg-background px-2.5 py-2 focus-within:border-accent">
         <textarea value={comment} onChange={(e) => setComment(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !(mentionMatch && mentionCands.length)) { e.preventDefault(); onAddComment(); } }} placeholder="Write a comment…  (type @ to mention)" rows={1} className="max-h-72 min-h-[38px] flex-1 resize-y bg-transparent text-[15px] outline-none placeholder:text-muted" />
@@ -209,10 +209,10 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                 {attachmentsBlock}
               </div>
             </div>
-            <div className="relative flex shrink-0 flex-col border-l bg-surface" style={{ width: activityW }}>
+            <div className="relative flex shrink-0 flex-col border-l bg-background/50" style={{ width: activityW }}>
               <div onMouseDown={startResize} title="Drag to resize"
                 className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize hover:bg-accent/30 active:bg-accent/40" />
-              <div className="flex items-center gap-2 border-b px-5 py-3">
+              <div className="flex items-center gap-2 border-b bg-surface px-5 py-3">
                 <span className="text-[15px] font-semibold">Activity</span>
                 <span className="rounded-full bg-background px-2 py-0.5 text-[13px] text-muted">{task.comments.length}</span>
               </div>
@@ -223,15 +223,15 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                       <Avatar id={c.authorId} size={28} />
                       <div className="min-w-0 flex-1">
                         <div className="text-[15px]"><span className="font-medium">{u?.name}</span> <span className="text-muted">· {timeAgo(c.at)}</span></div>
-                        <div className="mt-0.5 rounded-lg rounded-tl-none border bg-background/60 px-3 py-2 text-[15px]">{renderMentions(c.body)}</div>
+                        <div className="mt-1 rounded-xl rounded-tl-sm border bg-surface px-3 py-2 text-[15px] shadow-soft">{renderMentions(c.body)}</div>
                       </div>
                     </div>
                   ); })}
                   {task.comments.length === 0 && (
-                    <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-10 text-center text-muted">
-                      <I.comment />
-                      <span className="text-[15px]">No activity yet</span>
-                      <span className="text-[13px]">Start the conversation — type @ to mention a teammate.</span>
+                    <div className="flex flex-col items-center gap-2 py-16 text-center text-muted">
+                      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent-soft text-accent"><I.comment /></span>
+                      <span className="text-[15px] font-medium">No activity yet</span>
+                      <span className="max-w-[220px] text-[13px] leading-relaxed">Start the conversation below — type @ to loop in a teammate.</span>
                     </div>
                   )}
                 </div>

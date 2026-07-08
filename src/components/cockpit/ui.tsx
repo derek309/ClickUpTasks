@@ -74,7 +74,7 @@ export function LabelChips({ ids }: { ids: string[] }) {
 }
 
 export function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (<div className="flex items-center gap-3"><dt className="w-24 shrink-0 text-[15px] text-muted">{label}</dt><dd className="min-w-0 flex-1">{children}</dd></div>);
+  return (<div className="flex items-center gap-3"><dt className="w-24 shrink-0 text-[13px] font-medium text-muted">{label}</dt><dd className="min-w-0 flex-1">{children}</dd></div>);
 }
 
 
