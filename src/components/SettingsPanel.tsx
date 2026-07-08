@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { type Client } from "@/lib/data";
+import { authedFetch } from "@/lib/supabase";
 
 export default function SettingsPanel({
   clients,
@@ -35,7 +36,7 @@ export default function SettingsPanel({
     if (locationId !== client.ghlLocationId) onSaveClient({ ...client, ghlLocationId: locationId });
     setStatus((s) => ({ ...s, [client.id]: { kind: "busy" } }));
     try {
-      const res = await fetch("/api/ghl/connect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ locationId, token }) });
+      const res = await authedFetch("/api/ghl/connect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ locationId, token }) });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error ?? "Connect failed");
       setTokenLocations((l) => Array.from(new Set([...l, locationId])));
@@ -53,7 +54,7 @@ export default function SettingsPanel({
     if (locationId !== client.ghlLocationId) onSaveClient({ ...client, ghlLocationId: locationId });
     setStatus((s) => ({ ...s, [client.id]: { kind: "busy" } }));
     try {
-      const res = await fetch("/api/ghl/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: client.id, locationId }) });
+      const res = await authedFetch("/api/ghl/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: client.id, locationId }) });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error ?? "Sync failed");
       setStatus((s) => ({ ...s, [client.id]: { kind: "ok", msg: `Synced ${j.synced} contact${j.synced === 1 ? "" : "s"}` } }));

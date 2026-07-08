@@ -3,12 +3,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   users,
+  setUsers,
+  initialsOf,
   labels,
   userById,
   labelById,
   formatDue,
   isOverdue,
   advanceDue,
+  timeAgo,
   TODAY,
   STATUS_META,
   STATUS_ORDER,
@@ -26,7 +29,7 @@ import {
   type Notification,
   type Me,
 } from "@/lib/data";
-import { supabaseReady } from "@/lib/supabase";
+import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
 import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile } from "@/lib/db";
 import TeamPanel from "./TeamPanel";
 import SettingsPanel from "./SettingsPanel";
@@ -114,7 +117,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [activeClient, setActiveClient] = useState<string>("all");
   const [activeProject, setActiveProject] = useState<string | null>(null);
   const [myWork, setMyWork] = useState(me.role === "va");
-  const [myWorkUser, setMyWorkUser] = useState<string>(me.role === "va" ? me.id : "u_maria");
+  const [myWorkUser, setMyWorkUser] = useState<string>(me.id);
   const [viewMode, setViewMode] = useState<"board" | "list">("list");
   const [groupBy, setGroupBy] = useState<"project" | "status" | "priority" | "due">("status");
   const [filters, setFilters] = useState<FilterState>({ status: "all", assignee: "all", priority: "all" });
@@ -158,6 +161,21 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       try {
         if (!supabaseReady) { setDbError("Supabase env vars are missing."); return; }
         await seedIfEmpty();
+        // Load the real team roster (every signed-up profile) before rendering
+        // data, so assignees/avatars resolve to real people — not demo seeds.
+        try {
+          const { data: profs } = await supabase.from("profiles").select("id, name, email, role, member_id, color");
+          if (profs?.length) {
+            const seen = new Set<string>();
+            setUsers(profs.flatMap((p) => {
+              const id = p.member_id || p.id;
+              if (seen.has(id)) return [];
+              seen.add(id);
+              const name = p.name || p.email || "Teammate";
+              return [{ id, name, initials: initialsOf(name), color: p.color || "#a855f7", role: p.role === "admin" ? "admin" as const : "va" as const }];
+            }));
+          }
+        } catch { /* roster fetch is best-effort; founder fallback stays */ }
         const d = await fetchAll();
         setClients(d.clients); setProjects(d.projects); setContacts(d.contacts); setTasks(d.tasks); setNotifications(d.notifications);
       } catch (e) {
@@ -185,7 +203,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2800);
   };
   const notify = (recipientId: string, text: string, taskId: string | null) => {
-    const n: Notification = { id: newId("n_"), recipientId, text, taskId, at: "just now", read: false };
+    const n: Notification = { id: newId("n_"), recipientId, text, taskId, at: new Date().toISOString(), read: false };
     setNotifications((ns) => [n, ...ns]);
     insertNotif(n);
   };
@@ -352,7 +370,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const addComment = (id: string, body: string) => {
     if (!body.trim()) return;
     const t = tasks.find((x) => x.id === id);
-    update(id, { comments: [...(t?.comments ?? []), { id: newId("cm_"), authorId: me.id, body: body.trim(), at: "just now" }] });
+    update(id, { comments: [...(t?.comments ?? []), { id: newId("cm_"), authorId: me.id, body: body.trim(), at: new Date().toISOString() }] });
     users.forEach((u) => { if (u.id !== me.id && body.includes("@" + u.name)) { notify(u.id, `${me.name} mentioned you in “${t?.title}”`, id); pushToast(`Notified ${u.name}`); } });
     setComment("");
   };
@@ -402,7 +420,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const ghlCall = (op: "create" | "update" | "complete" | "delete", t: Task) => {
     const target = ghlTargetFor(t);
     if (!target) return Promise.resolve<{ error?: string; ghlTaskId?: string } | null>(null);
-    return fetch("/api/ghl/task", {
+    return authedFetch("/api/ghl/task", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ op, ...target, ghlTaskId: t.ghlTaskId, title: t.title, body: t.description, due: t.due, completed: t.status === "done" }),
@@ -473,7 +491,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setMyWork(false);
     pushToast(`Added ${contact.name}`);
     try {
-      const res = await fetch("/api/ghl/company", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ locationId: sub?.ghlLocationId ?? "", contactId: contact.ghlContactId }) });
+      const res = await authedFetch("/api/ghl/company", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ locationId: sub?.ghlLocationId ?? "", contactId: contact.ghlContactId }) });
       const j = await res.json();
       if (j.company) { const up: Client = { ...c, ghlLocationId: j.company }; setClients((cs) => cs.map((x) => (x.id === id ? up : x))); upsertClient(up); }
     } catch { /* business name is optional */ }
@@ -633,7 +651,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   <div className="border-b px-4 py-2.5 text-[15px] font-semibold uppercase tracking-wide text-muted">Notifications</div>
                   <div className="max-h-96 overflow-y-auto">
                     {myNotifs.length === 0 && <div className="px-4 py-6 text-center text-[15px] text-muted">You&apos;re all caught up.</div>}
-                    {myNotifs.map((n) => (<button key={n.id} onClick={() => { if (n.taskId) setOpenTaskId(n.taskId); setBellOpen(false); }} className="flex w-full gap-2.5 border-b px-4 py-2.5 text-left last:border-0 hover:bg-background"><I.comment className="mt-0.5 shrink-0 text-accent" /><div><div className="text-[15px] leading-snug">{n.text}</div><div className="text-[15px] text-muted">{n.at}</div></div></button>))}
+                    {myNotifs.map((n) => (<button key={n.id} onClick={() => { if (n.taskId) setOpenTaskId(n.taskId); setBellOpen(false); }} className="flex w-full gap-2.5 border-b px-4 py-2.5 text-left last:border-0 hover:bg-background"><I.comment className="mt-0.5 shrink-0 text-accent" /><div><div className="text-[15px] leading-snug">{n.text}</div><div className="text-[15px] text-muted">{timeAgo(n.at)}</div></div></button>))}
                   </div>
                 </div>
               </>)}
@@ -1301,7 +1319,7 @@ function TaskDrawer({ task, comment, setComment, clientById, projectById, contac
   const commentsBlock = (
     <div className="mt-6">
       <div className="mb-2 text-[15px] font-semibold uppercase tracking-wide text-muted">Comments · {task.comments.length}</div>
-      <div className="space-y-3">{task.comments.map((c) => { const u = userById(c.authorId); return (<div key={c.id} className="flex gap-2.5"><Avatar id={c.authorId} size={28} /><div className="min-w-0"><div className="text-[15px]"><span className="font-medium">{u?.name}</span> <span className="text-muted">· {c.at}</span></div><div className="text-[15px]">{renderMentions(c.body)}</div></div></div>); })}{task.comments.length === 0 && (<div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted"><I.comment /><span className="text-[15px]">No comments yet</span><span className="text-[13px]">Start the thread — type @ to mention a teammate.</span></div>)}</div>
+      <div className="space-y-3">{task.comments.map((c) => { const u = userById(c.authorId); return (<div key={c.id} className="flex gap-2.5"><Avatar id={c.authorId} size={28} /><div className="min-w-0"><div className="text-[15px]"><span className="font-medium">{u?.name}</span> <span className="text-muted">· {timeAgo(c.at)}</span></div><div className="text-[15px]">{renderMentions(c.body)}</div></div></div>); })}{task.comments.length === 0 && (<div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted"><I.comment /><span className="text-[15px]">No comments yet</span><span className="text-[13px]">Start the thread — type @ to mention a teammate.</span></div>)}</div>
     </div>
   );
   const composer = (

@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { writeToken } from "@/lib/ghlTokens";
+import { requireAdmin } from "@/lib/serverAuth";
 
 // Saves a GoHighLevel Private Integration token for a sub-account after
-// verifying it works. The token is written server-side (gitignored file) and is
-// never echoed back to the browser.
+// verifying it works. Admin-only. The token is stored server-side (DB/file)
+// and is never echoed back to the browser.
 export async function POST(req: NextRequest) {
+  if (!(await requireAdmin(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { locationId, token } = await req.json().catch(() => ({}));
   if (!locationId || !token) return NextResponse.json({ error: "Location ID and token are both required." }, { status: 400 });
 
@@ -18,6 +20,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `GoHighLevel rejected it (${res.status}). Check the token and Location ID. ${text.slice(0, 160)}` }, { status: 400 });
   }
 
-  writeToken(String(locationId).trim(), String(token).trim());
+  await writeToken(String(locationId).trim(), String(token).trim());
   return NextResponse.json({ ok: true });
 }

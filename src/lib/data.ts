@@ -4,8 +4,14 @@
 // Supabase; Phase 2-3 sync clients/contacts/tasks with GoHighLevel sub-accounts.
 // ---------------------------------------------------------------------------
 
-/** Fixed "today" so date math is deterministic (avoids SSR hydration drift). */
-export const TODAY = "2026-07-07";
+/** Today's date in the user's local timezone (yyyy-mm-dd). */
+export function todayIso(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+// Evaluated at module load. All date-sensitive UI renders client-side after the
+// Supabase fetch resolves, so server/client drift isn't visible in practice.
+export const TODAY = todayIso();
 
 export type Role = "admin" | "va";
 
@@ -126,12 +132,23 @@ export const RECURRENCE_LABEL: Record<Recurrence, string> = {
 
 // --- Team -------------------------------------------------------------------
 
+// The live roster. Starts with just the founder; replaced at app load with the
+// real signed-up team from the `profiles` table (see setUsers/Cockpit). The
+// array is mutated in place so every module holding a reference sees updates.
 export const users: User[] = [
   { id: "u_derek", name: "Derek Fox", initials: "DF", color: "#a855f7", role: "admin" },
-  { id: "u_maria", name: "Maria Santos", initials: "MS", color: "#0ea5e9", role: "va" },
-  { id: "u_james", name: "James Okoro", initials: "JO", color: "#14b8a6", role: "va" },
-  { id: "u_ana", name: "Ana Reyes", initials: "AR", color: "#f43f5e", role: "va" },
 ];
+
+export function initialsOf(name: string): string {
+  const p = name.trim().split(/\s+/);
+  return ((p[0]?.[0] ?? "") + (p[1]?.[0] ?? "")).toUpperCase() || "?";
+}
+
+/** Replace the roster with the real team (from profiles). */
+export function setUsers(list: User[]) {
+  if (list.length === 0) return; // keep the founder fallback if fetch fails
+  users.splice(0, users.length, ...list);
+}
 
 // --- Labels -----------------------------------------------------------------
 
@@ -334,6 +351,19 @@ export function formatDue(iso: string | null): string {
 }
 export function isOverdue(iso: string | null): boolean {
   return !!iso && iso < TODAY;
+}
+
+/** "2m ago" / "3h ago" / "4d ago" from an ISO timestamp. Non-ISO input (legacy
+ *  seeded strings like "just now") is returned unchanged. */
+export function timeAgo(at: string): string {
+  const t = Date.parse(at);
+  if (Number.isNaN(t)) return at;
+  const s = Math.floor((Date.now() - t) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  if (s < 86400 * 30) return `${Math.floor(s / 86400)}d ago`;
+  return new Date(t).toLocaleDateString();
 }
 
 /** Advance an ISO due date by one recurrence step (deterministic — no now()). */

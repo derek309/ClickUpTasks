@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { tokenForLocation } from "@/lib/ghlTokens";
+import { requireUser } from "@/lib/serverAuth";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -14,12 +15,14 @@ import { tokenForLocation } from "@/lib/ghlTokens";
 const GHL = "https://services.leadconnectorhq.com";
 
 // GHL wants an ISO-8601 datetime for dueDate; our tasks carry a yyyy-mm-dd.
+// 17:00 UTC = 9/10am Pacific, so tasks land on the right day at a sane hour.
 function toGhlDate(due: string | null | undefined): string {
   const day = due && /^\d{4}-\d{2}-\d{2}$/.test(due) ? due : new Date().toISOString().slice(0, 10);
-  return `${day}T09:00:00.000Z`;
+  return `${day}T17:00:00.000Z`;
 }
 
 export async function POST(req: NextRequest) {
+  if (!(await requireUser(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const b = await req.json().catch(() => ({} as any));
   const { op, locationId, ghlContactId, ghlTaskId, title, body, due, completed } = b as {
     op: "create" | "update" | "complete" | "delete";
@@ -35,7 +38,7 @@ export async function POST(req: NextRequest) {
   if (!op || !locationId || !ghlContactId)
     return NextResponse.json({ error: "Missing op, locationId, or ghlContactId." }, { status: 400 });
 
-  const token = tokenForLocation(locationId);
+  const token = await tokenForLocation(locationId);
   if (!token)
     return NextResponse.json({ error: "No GoHighLevel token configured for this sub-account yet." }, { status: 501 });
 

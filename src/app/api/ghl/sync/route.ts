@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { tokenForLocation } from "@/lib/ghlTokens";
+import { requireAdmin } from "@/lib/serverAuth";
 
 // Prefer the service-role client so contact upserts succeed once RLS is on;
 // fall back to the anon client for the pre-RLS setup.
@@ -14,10 +15,11 @@ const writer = () => (adminConfigured ? supabaseAdmin : supabase);
 // server-side (env). NOTE: this route is currently gated only by the admin-only
 // Settings UI; server-side role enforcement lands with RLS hardening.
 export async function POST(req: NextRequest) {
+  if (!(await requireAdmin(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { clientId, locationId } = await req.json().catch(() => ({}));
   if (!clientId || !locationId) return NextResponse.json({ error: "Missing clientId or locationId." }, { status: 400 });
 
-  const token = tokenForLocation(locationId);
+  const token = await tokenForLocation(locationId);
   if (!token) return NextResponse.json({ error: "No GoHighLevel token configured for this sub-account yet." }, { status: 501 });
 
   const headers = { Authorization: `Bearer ${token}`, Version: "2021-07-28", Accept: "application/json" };
