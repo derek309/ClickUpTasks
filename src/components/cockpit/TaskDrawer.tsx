@@ -152,8 +152,8 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
 
   return (
     <>
-      <div className="fixed inset-0 z-10 bg-black/20" onClick={onClose} />
-      <aside className={full ? "fixed inset-0 z-20 flex flex-col bg-surface" : "fixed inset-y-0 right-0 z-20 flex w-full max-w-[460px] flex-col border-l bg-surface shadow-xl"}>
+      <div className={`fixed inset-0 bg-black/20 ${full ? "z-40" : "z-10"}`} onClick={onClose} />
+      <aside className={full ? "fixed inset-0 z-50 flex flex-col bg-surface" : "fixed inset-y-0 right-0 z-20 flex w-full max-w-[460px] flex-col border-l bg-surface shadow-xl"}>
         <div className="flex items-center gap-2 border-b px-5 py-3 text-[15px] text-muted">
           <span className="h-2.5 w-2.5 rounded-full" style={{ background: client.color }} /> {client.name} <span>/</span> <span className="truncate">{project.name}</span>
           <div className="ml-auto flex items-center gap-1">

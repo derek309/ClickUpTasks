@@ -60,7 +60,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [filterOpen, setFilterOpen] = useState(false);
 
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
   const [comment, setComment] = useState("");
 
   const [bellOpen, setBellOpen] = useState(false);
@@ -127,6 +126,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarHidden, setSidebarHidden] = useState(false);
+  useEffect(() => { try { setSidebarHidden(localStorage.getItem("cut_sidebarHidden") === "1"); } catch {} }, []);
+  const toggleSidebar = () => {
+    setSidebarHidden((h) => { const v = !h; try { localStorage.setItem("cut_sidebarHidden", v ? "1" : "0"); } catch {} return v; });
+    setSidebarOpen((o) => !o); // mobile overlay uses the same button
+  };
 
   useEffect(() => {
     (async () => {
@@ -189,12 +194,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const myNotifs = notifications.filter((n) => n.recipientId === me.id);
   const unread = myNotifs.filter((n) => !n.read).length;
 
-  const q = query.trim().toLowerCase();
   const passesFilters = (t: Task) =>
     (filters.status === "all" || t.status === filters.status) &&
     (filters.assignee === "all" || (filters.assignee === "unassigned" ? t.assigneeId === null : t.assigneeId === filters.assignee)) &&
-    (filters.priority === "all" || t.priority === filters.priority) &&
-    (q === "" || t.title.toLowerCase().includes(q) || (contactById(t.contactId)?.name.toLowerCase().includes(q) ?? false));
+    (filters.priority === "all" || t.priority === filters.priority);
 
   const sortTasks = (list: Task[]) => {
     if (sortBy === "manual") return list;
@@ -237,7 +240,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     .map(([header, st]) => ({ header, items: sortedClients.filter((c) => c.status === st) }))
     .filter((g) => g.items.length > 0);
   const subAccountOf = (clientId: string) => contactById(clientId.slice(3))?.clientId ?? null;
-  const subAccountName = (clientId: string) => { const s = subAccountOf(clientId); return subAccounts.find((x) => x.id === s)?.name ?? ""; };
   const ghlContactUrlFor = (clientId: string) => {
     if (!clientId.startsWith("cl_")) return null;
     const ct = contactById(clientId.slice(3));
@@ -561,7 +563,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={() => setSidebarOpen(false)} />}
 
       {/* ---------- Sidebar ---------- */}
-      <aside className={`sidebar-dark fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r bg-surface transition-transform md:static md:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
+      <aside className={`sidebar-dark fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r bg-surface transition-transform ${sidebarHidden ? "md:hidden" : "md:static md:translate-x-0"} ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="flex items-center gap-2.5 px-4 py-4">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-[15px] font-bold text-white">CT</span>
           <div className="leading-tight"><div className="font-semibold">ClickUpTasks</div><div className="text-[15px] text-muted">GHL Task Cockpit</div></div>
@@ -700,7 +702,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       {/* ---------- Main ---------- */}
       <main className="flex min-w-0 flex-1 flex-col">
         <header className="relative z-10 flex items-center gap-3 border-b bg-surface px-4 py-3 shadow-soft sm:px-5">
-          <button onClick={() => setSidebarOpen(true)} className="rounded-lg border p-2 text-muted md:hidden"><I.menu /></button>
+          <button onClick={toggleSidebar} title="Show/hide sidebar" className="rounded-lg border p-2 text-muted hover:text-foreground"><I.menu /></button>
           {!myWork && activeClient !== "all" && clientById(activeClient) && (
             <span className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[16px] font-semibold text-white shadow-soft sm:flex" style={{ background: clientById(activeClient)!.color }}>{clientById(activeClient)!.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}</span>
           )}
@@ -713,8 +715,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 {(() => { const pg = projectProgress(activeProject); return (<span className="inline-flex items-center gap-1.5">{pg.done}/{pg.total} done<span className="inline-block h-1.5 w-24 overflow-hidden rounded-full bg-border align-middle"><span className="block h-full rounded-full bg-green-500 transition-all" style={{ width: `${pg.pct}%` }} /></span>{pg.pct}%</span>); })()}
               </p>
             </>) : (<>
-              <h1 className="truncate text-[17px] font-semibold">{myWork ? "My Work" : activeClient === "all" ? "All clients" : clientById(activeClient)?.name}</h1>
-              <p className="hidden text-[15px] text-muted sm:block">{myWork ? "Everything assigned to one person, across all clients" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : [clientCompany(clientById(activeClient)), subAccountName(activeClient), contactById(activeClient.slice(3))?.email].filter(Boolean).join(" · ")}</p>
+              <h1 className="truncate text-[17px] font-semibold">{myWork ? "My Work" : activeClient === "all" ? "All clients" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}</h1>
+              <p className="hidden text-[15px] text-muted sm:block">{myWork ? "Everything assigned to one person, across all clients" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</p>
             </>)}
           </div>
 
@@ -760,15 +762,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             </div>
           )}
 
-          {!myWork && activeClient.startsWith("cl_") && ghlContactUrlFor(activeClient) && (
-            <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" className="inline-flex shrink-0 items-center gap-1 rounded-md border border-accent px-2.5 py-1.5 text-[13px] font-medium text-accent hover:bg-accent-soft"><I.bolt /> Open in GHL</a>
-          )}
-
           <div className="ml-auto flex items-center gap-2">
-            <div className="hidden items-center gap-2 rounded-lg border bg-background px-2.5 py-1.5 sm:flex">
-              <I.search className="text-muted" />
-              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search tasks…" className="w-36 bg-transparent text-[15px] outline-none placeholder:text-muted" />
-            </div>
             <div className="relative">
               <button onClick={() => { const opening = !bellOpen; setBellOpen(opening); if (opening) { setNotifications((ns) => ns.map((n) => (n.recipientId === me.id ? { ...n, read: true } : n))); markNotifsReadDb(me.id); } }} className="relative rounded-lg border bg-background p-2 text-muted hover:text-foreground">
                 <I.bell />
