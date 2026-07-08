@@ -25,7 +25,6 @@ export async function PATCH(req: NextRequest) {
   const body = await req.json();
   const patch: Record<string, unknown> = {};
   if (body.role) patch.role = body.role;
-  if (body.memberId !== undefined) patch.member_id = body.memberId || null;
   const { error } = await supabaseAdmin.from("profiles").update(patch).eq("id", body.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ ok: true });

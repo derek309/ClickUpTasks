@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { users, type Me } from "@/lib/data";
+import { type Me } from "@/lib/data";
 
-type Profile = { id: string; email: string; name: string; role: "admin" | "va"; member_id: string | null; color: string };
+type Profile = { id: string; email: string; name: string; role: "admin" | "va"; color: string };
 
 export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void }) {
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -36,7 +36,7 @@ export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void
 
   async function patch(id: string, body: Record<string, unknown>) {
     setSaving(id);
-    setProfiles((ps) => ps.map((p) => (p.id === id ? { ...p, ...(body.role ? { role: body.role as Profile["role"] } : {}), ...(body.memberId !== undefined ? { member_id: (body.memberId as string) || null } : {}) } : p)));
+    setProfiles((ps) => ps.map((p) => (p.id === id ? { ...p, ...(body.role ? { role: body.role as Profile["role"] } : {}) } : p)));
     try {
       const res = await authedFetch({ method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...body }) });
       if (!res.ok) { const j = await res.json(); throw new Error(j.error); }
@@ -70,11 +70,6 @@ export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void
                 <div className="truncate text-[15px] font-medium">{p.name || p.email}{p.id === me.id && <span className="ml-1 text-[15px] text-muted">(you)</span>}</div>
                 <div className="truncate text-[15px] text-muted">{p.email}</div>
               </div>
-
-              <select value={p.member_id ?? ""} disabled={saving === p.id} onChange={(e) => patch(p.id, { memberId: e.target.value })} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none" title="Roster identity for task assignment">
-                <option value="">— roster —</option>
-                {users.map((u) => (<option key={u.id} value={u.id}>{u.name}</option>))}
-              </select>
 
               <div className="inline-flex overflow-hidden rounded-md border">
                 {(["admin", "va"] as const).map((r) => (
