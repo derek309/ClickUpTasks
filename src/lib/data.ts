@@ -35,12 +35,20 @@ export interface User {
   role: Role;
 }
 
+export type ClientStatus = "active" | "paused" | "archived";
+export const CLIENT_STATUS_META: Record<ClientStatus, { label: string; dot: string }> = {
+  active: { label: "Active", dot: "#22c55e" },
+  paused: { label: "Paused", dot: "#f59e0b" },
+  archived: { label: "Archived", dot: "#94a3b8" },
+};
+
 /** A GHL sub-account. In our app this is a "Client". */
 export interface Client {
   id: string;
   name: string;
   color: string;
   ghlLocationId: string;
+  status: ClientStatus;
 }
 
 /** A GHL contact inside a sub-account. Tasks link to one of these. */
@@ -163,9 +171,9 @@ export const labels: Label[] = [
 // --- Clients (GHL sub-accounts) --------------------------------------------
 
 export const clientsSeed: Client[] = [
-  { id: "c_bright", name: "Bright Dental", color: "#0ea5e9", ghlLocationId: "loc_8f21ac" },
-  { id: "c_peak", name: "Peak Fitness Co.", color: "#f59e0b", ghlLocationId: "loc_2b77de" },
-  { id: "c_harbor", name: "Harbor Law Group", color: "#8b5cf6", ghlLocationId: "loc_5c09fb" },
+  { id: "c_bright", name: "Bright Dental", color: "#0ea5e9", ghlLocationId: "loc_8f21ac", status: "active" },
+  { id: "c_peak", name: "Peak Fitness Co.", color: "#f59e0b", ghlLocationId: "loc_2b77de", status: "active" },
+  { id: "c_harbor", name: "Harbor Law Group", color: "#8b5cf6", ghlLocationId: "loc_5c09fb", status: "active" },
 ];
 
 // --- Contacts (GHL contacts) -----------------------------------------------

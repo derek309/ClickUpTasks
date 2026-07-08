@@ -12,6 +12,8 @@ import {
   TODAY,
   STATUS_META,
   STATUS_ORDER,
+  CLIENT_STATUS_META,
+  type ClientStatus,
   PRIORITY_META,
   PRIORITY_ORDER,
   type Task,
@@ -80,6 +82,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [manualOrder, setManualOrder] = useState<string[]>([]);
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [dragClientId, setDragClientId] = useState<string | null>(null);
+  const [statusMenuClientId, setStatusMenuClientId] = useState<string | null>(null);
+  const setClientStatus = (id: string, status: ClientStatus) => {
+    const c = clientById(id);
+    if (!c || c.status === status) return;
+    const nc = { ...c, status };
+    setClients((cs) => cs.map((x) => (x.id === id ? nc : x)));
+    upsertClient(nc);
+    pushToast(`${c.name} → ${CLIENT_STATUS_META[status].label}`);
+  };
   useEffect(() => {
     try {
       const s = localStorage.getItem("cut_clientSort"); if (s) setClientSort(s as ClientSort);
@@ -221,6 +232,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return [...base.filter((c) => starred.has(c.id)), ...base.filter((c) => !starred.has(c.id))];
   })();
   function clientTaskCountRef(clientId: string) { return scopedTasks.filter((t) => t.clientId === clientId).length; }
+  // Sidebar sections by client status; Active has no header, others only show when non-empty.
+  const clientGroups = ([["", "active"], ["Paused", "paused"], ["Archived", "archived"]] as const)
+    .map(([header, st]) => ({ header, items: sortedClients.filter((c) => c.status === st) }))
+    .filter((g) => g.items.length > 0);
   const subAccountOf = (clientId: string) => contactById(clientId.slice(3))?.clientId ?? null;
   const subAccountName = (clientId: string) => { const s = subAccountOf(clientId); return subAccounts.find((x) => x.id === s)?.name ?? ""; };
   const ghlContactUrlFor = (clientId: string) => {
@@ -447,7 +462,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const id = "cl_" + contact.id;
     if (clients.some((c) => c.id === id)) { setActiveClient(id); setMyWork(false); setAddClientOpen(false); return; }
     const sub = subAccounts.find((s) => s.id === contact.clientId);
-    const c: Client = { id, name: contact.name, color: sub?.color ?? "#a855f7", ghlLocationId: "" };
+    const c: Client = { id, name: contact.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "active" };
     setClients((cs) => [...cs, c]);
     upsertClient(c);
     setActiveClient(id);
@@ -577,18 +592,36 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </span>
         </div>
         <nav className="flex-1 space-y-0.5 overflow-y-auto px-2">
-          {sortedClients.map((c) => {
+          {clientGroups.map((g) => (
+          <div key={g.header || "active"}>
+          {g.header && <div className="px-2.5 pb-0.5 pt-2.5 text-[12px] font-semibold uppercase tracking-wide text-muted">{g.header}</div>}
+          {g.items.map((c) => {
             const active = !myWork && activeClient === c.id;
             const clientProjects = projectsForClient(c.id);
             return (
               <div key={c.id} className={menuClientId === c.id ? "relative z-50" : undefined}
                 draggable onDragStart={() => setDragClientId(c.id)} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); dropOnClient(c.id); }}>
-                <div className={`group/row relative ${dragClientId === c.id ? "opacity-40" : ""}`}>
+                <div className={`group/row relative ${dragClientId === c.id ? "opacity-40" : ""} ${statusMenuClientId === c.id ? "z-50" : ""}`}>
+                  {statusMenuClientId === c.id && (<>
+                    <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setStatusMenuClientId(null); }} />
+                    <div className="absolute left-1 top-full z-40 mt-1 w-36 rounded-lg border border-white/10 bg-background p-1 shadow-xl">
+                      {(Object.keys(CLIENT_STATUS_META) as ClientStatus[]).map((st) => (
+                        <button key={st} onClick={(e) => { e.stopPropagation(); setStatusMenuClientId(null); setClientStatus(c.id, st); }}
+                          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-white/10">
+                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: CLIENT_STATUS_META[st].dot }} />
+                          {CLIENT_STATUS_META[st].label}
+                          {c.status === st && <I.check className="ml-auto text-accent" />}
+                        </button>
+                      ))}
+                    </div>
+                  </>)}
                   <button onClick={() => { setMyWork(false); setActiveClient(c.id); setActiveProject(null); setSidebarOpen(false); setOpenTaskId(null); }}
-                    className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[15px] transition ${active ? "bg-accent-soft font-medium text-accent" : "text-foreground hover:bg-background"}`}>
-                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: c.color }} />
+                    className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[15px] transition ${active ? "bg-accent-soft font-medium text-accent" : "text-foreground hover:bg-background"} ${c.status === "archived" ? "opacity-50" : ""}`}>
+                    <span role="button" title={`${CLIENT_STATUS_META[c.status].label} — click to change`}
+                      onClick={(e) => { e.stopPropagation(); setStatusMenuClientId(statusMenuClientId === c.id ? null : c.id); }}
+                      className="h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-transparent transition hover:ring-white/30" style={{ background: CLIENT_STATUS_META[c.status].dot }} />
                     <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-1 truncate">{c.name}{starred.has(c.id) && <I.star filled className="shrink-0 text-amber-400" />}</span>
+                      <span className="truncate">{c.name}</span>
                       {clientCompany(c) && <span className="block truncate text-[13px] font-normal text-muted">{clientCompany(c)}</span>}
                     </span>
                     <span className="text-[15px] text-muted group-hover/row:opacity-0">{clientTaskCount(c.id)}</span>
@@ -643,6 +676,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </div>
             );
           })}
+          </div>
+          ))}
           {visibleClients.length === 0 && <div className="px-3 py-3 text-[15px] leading-relaxed text-muted">No clients yet. Click <b>+</b> to add one from your GoHighLevel contacts.</div>}
         </nav>
 
