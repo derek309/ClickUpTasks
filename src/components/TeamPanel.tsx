@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { type Me } from "@/lib/data";
+import { ConfirmModal, type ConfirmSpec } from "./cockpit/modals";
 
-type Profile = { id: string; email: string; name: string; role: "admin" | "va"; color: string };
+type Profile = { id: string; email: string; name: string; role: "admin" | "va"; color: string; pending?: boolean };
 
 export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void }) {
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -15,6 +16,7 @@ export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void
   const [inviteName, setInviteName] = useState("");
   const [inviting, setInviting] = useState(false);
   const [inviteMsg, setInviteMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
 
   async function authedFetch(path: string, init?: RequestInit) {
     const { data } = await supabase.auth.getSession();
@@ -72,6 +74,29 @@ export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void
     }
   }
 
+  function removeUser(p: Profile) {
+    setConfirmDialog({
+      title: p.pending ? `Revoke invite for ${p.email}?` : `Remove ${p.name || p.email}?`,
+      message: p.pending
+        ? "Their invite link will stop working and they'll disappear from the team."
+        : "Their account is deleted and they lose access immediately. Tasks assigned to them keep their history.",
+      confirmLabel: p.pending ? "Revoke invite" : "Remove",
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        setSaving(p.id);
+        try {
+          const res = await authedFetch("/api/team", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: p.id }) });
+          if (!res.ok) { const j = await res.json(); throw new Error(j.error); }
+          setProfiles((ps) => ps.filter((x) => x.id !== p.id));
+        } catch (e) {
+          setError(e instanceof Error ? e.message : "Remove failed");
+        } finally {
+          setSaving(null);
+        }
+      },
+    });
+  }
+
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
@@ -98,7 +123,7 @@ export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void
             <div key={p.id} className="flex items-center gap-3 border-b py-2.5 last:border-0">
               <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[15px] font-semibold text-white" style={{ background: p.color }}>{initials(p.name || p.email)}</span>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-[15px] font-medium">{p.name || p.email}{p.id === me.id && <span className="ml-1 text-[15px] text-muted">(you)</span>}</div>
+                <div className="truncate text-[15px] font-medium">{p.name || p.email}{p.id === me.id && <span className="ml-1 text-[15px] text-muted">(you)</span>}{p.pending && <span className="ml-1.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[13px] font-medium text-amber-700">Invite pending</span>}</div>
                 <div className="truncate text-[15px] text-muted">{p.email}</div>
               </div>
 
@@ -110,11 +135,16 @@ export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void
                   </button>
                 ))}
               </div>
+              {p.id !== me.id && (
+                <button onClick={() => removeUser(p)} disabled={saving === p.id} title={p.pending ? "Revoke invite" : "Remove user"}
+                  className="rounded-md border px-2 py-1 text-[15px] text-muted hover:border-red-300 hover:text-red-500 disabled:opacity-40">✕</button>
+              )}
             </div>
           ))}
           {!loading && !error && profiles.length === 0 && <div className="py-8 text-center text-[15px] text-muted">No team members yet.</div>}
         </div>
       </div>
+      {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
     </>
   );
 }
