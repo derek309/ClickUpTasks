@@ -1,0 +1,192 @@
+"use client";
+
+// The task detail window (sidebar or full-page "document" view).
+import { useEffect, useRef, useState } from "react";
+import {
+  users, labels, userById, labelById, timeAgo,
+  STATUS_META, STATUS_ORDER, PRIORITY_META, PRIORITY_ORDER, RECURRENCE_LABEL,
+  type Task, type Client, type Project, type Contact, type Attachment, type Priority, type Recurrence,
+} from "@/lib/data";
+import { I, Avatar, Row, renderMentions, attachIcon } from "./ui";
+
+export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, clientProjects, onSetProject, onNewProject, onToggleSub, onAddSub, onRenameSub, onToggleLabel }: {
+  task: Task; comment: string; setComment: (v: string) => void;
+  clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
+  full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; onPrev: () => void; onNext: () => void;
+  onClose: () => void; onPatch: (patch: Partial<Task>) => void; onDelete: () => void; onAddComment: () => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; onPushGhl: () => void; ghlBusy: boolean; ghlLinkable: boolean; onUnlinkGhl: () => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onToggleSub: (sid: string) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onToggleLabel: (lid: string) => void;
+}) {
+  const client = clientById(task.clientId)!;
+  const project = projectById(task.projectId)!;
+  const linkedContact = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId);
+  const ghlSub = linkedContact ? clientById(linkedContact.clientId) : null;
+  const ghlContactUrl = linkedContact && ghlSub?.ghlLocationId ? `https://app.gohighlevel.com/v2/location/${ghlSub.ghlLocationId}/contacts/detail/${linkedContact.ghlContactId}` : null;
+  const [subDraft, setSubDraft] = useState("");
+  const [labelOpen, setLabelOpen] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const doneSubs = task.subtasks.filter((s) => s.done).length;
+  const mentionMatch = /@([\w]*)$/.exec(comment);
+  const mentionCands = mentionMatch ? users.filter((u) => u.name.toLowerCase().includes(mentionMatch[1].toLowerCase())) : [];
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const titleBlock = (
+    <textarea value={task.title} onChange={(e) => onPatch({ title: e.target.value })} rows={1} className={`w-full resize-none bg-transparent font-semibold leading-snug outline-none [field-sizing:content] focus:rounded-md focus:bg-background focus:px-1 ${full ? "text-[24px]" : "text-[18px]"}`} />
+  );
+  const statusBlock = (
+    <div className="mt-3 flex flex-wrap gap-1.5">
+      {STATUS_ORDER.map((s) => { const m = STATUS_META[s]; const on = task.status === s; return (<button key={s} onClick={() => onPatch({ status: s })} className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[15px] font-medium transition ${on ? "text-white" : "text-muted hover:bg-background"}`} style={on ? { background: m.dot, borderColor: m.dot } : {}}><span className="h-1.5 w-1.5 rounded-full" style={{ background: on ? "#fff" : m.dot }} /> {m.label}</button>); })}
+    </div>
+  );
+  const propsBlock = (
+    <dl className="space-y-3">
+      <Row label="Priority"><select value={task.priority} onChange={(e) => onPatch({ priority: e.target.value as Priority })} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none" style={{ color: PRIORITY_META[task.priority].color }}>{PRIORITY_ORDER.map((p) => (<option key={p} value={p}>{PRIORITY_META[p].label}</option>))}</select></Row>
+      <Row label="Assignee"><select value={task.assigneeId ?? ""} onChange={(e) => onPatch({ assigneeId: e.target.value || null })} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="">Unassigned</option>{users.map((u) => (<option key={u.id} value={u.id}>{u.name} {u.role === "va" ? "(VA)" : "(Admin)"}</option>))}</select></Row>
+      <Row label="Project"><select value={task.projectId} onChange={(e) => { if (e.target.value === "__new") onNewProject(); else onSetProject(e.target.value); }} className="max-w-[200px] rounded-md border bg-background px-2 py-1 text-[15px] outline-none">{clientProjects.map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}{clientProjects.every((p) => p.id !== task.projectId) && <option value={task.projectId}>{project?.name ?? "—"}</option>}<option value="__new">+ New project…</option></select></Row>
+      <Row label="Contact">{(() => { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return ct ? (<span className="inline-flex items-center gap-1 rounded-md bg-background px-2 py-1 text-[15px]"><I.user /> {ct.name}</span>) : <span className="text-[15px] text-muted">—</span>; })()}</Row>
+      <Row label="Due date"><input type="date" value={task.due ?? ""} onChange={(e) => onPatch({ due: e.target.value || null })} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none" /></Row>
+      <Row label="Repeat"><select value={task.recurrence} onChange={(e) => onPatch({ recurrence: e.target.value as Recurrence })} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none">{(Object.keys(RECURRENCE_LABEL) as Recurrence[]).map((r) => (<option key={r} value={r}>{RECURRENCE_LABEL[r]}</option>))}</select></Row>
+      <Row label="Labels">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {task.labelIds.map((id) => { const l = labelById(id); return l ? (<button key={id} onClick={() => onToggleLabel(id)} className="group inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[15px] font-medium" style={{ background: l.color + "1a", color: l.color }}>{l.name} <span className="opacity-50 group-hover:opacity-100">×</span></button>) : null; })}
+          <div className="relative">
+            <button onClick={() => setLabelOpen((o) => !o)} className="inline-flex items-center gap-0.5 rounded border border-dashed px-1.5 py-0.5 text-[15px] text-muted hover:bg-background"><I.plus /> Label</button>
+            {labelOpen && (<div className="absolute z-30 mt-1 w-40 rounded-lg border bg-surface p-1 shadow-lg">{labels.map((l) => { const on = task.labelIds.includes(l.id); return (<button key={l.id} onClick={() => onToggleLabel(l.id)} className="flex w-full items-center gap-2 rounded px-2 py-1 text-[15px] hover:bg-background"><span className="h-2.5 w-2.5 rounded-full" style={{ background: l.color }} /> {l.name}{on && <I.check className="ml-auto text-accent" />}</button>); })}</div>)}
+          </div>
+        </div>
+      </Row>
+      <Row label="GoHighLevel">{task.ghlTaskId ? (
+        <span className="inline-flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-md bg-green-50 px-2 py-1 text-[15px] font-medium text-green-600"><I.bolt /> Synced — changes push automatically</span>
+          {ghlContactUrl && <a href={ghlContactUrl} target="_blank" rel="noopener noreferrer" className="text-[15px] font-medium text-accent hover:underline">Open contact ↗</a>}
+          <button onClick={onUnlinkGhl} className="text-[15px] text-muted hover:text-red-500">Unlink</button>
+        </span>
+      ) : ghlLinkable ? (
+        <button onClick={onPushGhl} disabled={ghlBusy} className="inline-flex items-center gap-1.5 rounded-md border border-accent px-2.5 py-1 text-[15px] font-medium text-accent hover:bg-accent-soft disabled:opacity-50"><I.bolt /> {ghlBusy ? "Pushing…" : "Push to GHL"}</button>
+      ) : (
+        <span className="text-[15px] text-muted">Not linkable — this client has no GHL contact/location.</span>
+      )}</Row>
+    </dl>
+  );
+  const descriptionBlock = (
+    <div className="mt-5"><div className="mb-1.5 text-[15px] font-semibold uppercase tracking-wide text-muted">Description</div><textarea value={task.description} onChange={(e) => onPatch({ description: e.target.value })} placeholder="Add a description…" rows={3} className="w-full resize-none rounded-lg border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" /></div>
+  );
+  const subtasksBlock = (
+    <div className="mt-5">
+      <div className="mb-2 flex items-center justify-between"><span className="text-[15px] font-semibold uppercase tracking-wide text-muted">Subtasks {task.subtasks.length > 0 && `· ${doneSubs}/${task.subtasks.length}`}</span></div>
+      {task.subtasks.length > 0 && (<div className="mb-2 h-1.5 overflow-hidden rounded-full bg-background"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${(doneSubs / task.subtasks.length) * 100}%` }} /></div>)}
+      <div className="space-y-1">{task.subtasks.map((s) => (<div key={s.id} className="flex items-center gap-2 rounded-md px-1 py-1 hover:bg-background"><button onClick={() => onToggleSub(s.id)} className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${s.done ? "border-accent bg-accent text-white" : "border-border"}`}>{s.done && <I.check />}</button><input value={s.title} onChange={(e) => onRenameSub(s.id, e.target.value)} className={`flex-1 bg-transparent text-[15px] outline-none focus:rounded focus:bg-background focus:px-1 ${s.done ? "text-muted line-through" : ""}`} /></div>))}</div>
+      <div className="mt-1.5"><input value={subDraft} onChange={(e) => setSubDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { onAddSub(subDraft); setSubDraft(""); } }} placeholder="Add a subtask…" className="w-full rounded-md border bg-background px-2 py-1 text-[15px] outline-none placeholder:text-muted focus:border-accent" /></div>
+    </div>
+  );
+  const attachmentsBlock = (
+    <div className="mt-5">
+      <div className="mb-2 flex items-center justify-between"><span className="text-[15px] font-semibold uppercase tracking-wide text-muted">Attachments · {task.attachments.length}</span><button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1 text-[15px] font-medium text-accent"><I.plus /> Attach</button></div>
+      <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) onAddFiles(e.target.files); e.target.value = ""; }} />
+      {uploadProgress && (
+        <div className="mb-2 flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-[15px] text-muted">
+          <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+          Uploading {uploadProgress.done + 1} of {uploadProgress.total}…
+        </div>
+      )}
+      <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files.length) onAddFiles(e.dataTransfer.files); }} className="space-y-1.5">
+        {task.attachments.length === 0 && !uploadProgress && (<div className="rounded-lg border border-dashed px-3 py-4 text-center text-[15px] text-muted">Drop files here or click Attach · max 25MB each</div>)}
+        {task.attachments.map((a) => (
+          <div key={a.id} className="group/att flex items-center gap-2 rounded-lg border bg-background px-3 py-2">
+            <span className="text-[16px]">{attachIcon[a.kind]}</span>
+            {a.path ? (
+              <button onClick={() => onDownloadFile(a.path!)} className="truncate text-left text-[15px] text-accent hover:underline" title="Download">{a.name}</button>
+            ) : (
+              <span className="truncate text-[15px]" title="Not stored — re-upload once the storage bucket exists">{a.name}</span>
+            )}
+            <span className="ml-auto text-[15px] text-muted">{a.size}</span>
+            <button onClick={() => onRemoveFile(a)} title="Remove" className="text-muted opacity-0 hover:text-red-500 group-hover/att:opacity-100"><I.trash /></button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+  const commentsBlock = (
+    <div className="mt-6">
+      <div className="mb-2 text-[15px] font-semibold uppercase tracking-wide text-muted">Comments · {task.comments.length}</div>
+      <div className="space-y-3">{task.comments.map((c) => { const u = userById(c.authorId); return (<div key={c.id} className="flex gap-2.5"><Avatar id={c.authorId} size={28} /><div className="min-w-0"><div className="text-[15px]"><span className="font-medium">{u?.name}</span> <span className="text-muted">· {timeAgo(c.at)}</span></div><div className="text-[15px]">{renderMentions(c.body)}</div></div></div>); })}{task.comments.length === 0 && (<div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted"><I.comment /><span className="text-[15px]">No comments yet</span><span className="text-[13px]">Start the thread — type @ to mention a teammate.</span></div>)}</div>
+    </div>
+  );
+  const composer = (
+    <div className={`relative border-t p-3 ${full ? "mx-auto w-full max-w-3xl" : ""}`}>
+      {mentionMatch && mentionCands.length > 0 && (<div className="absolute bottom-full left-3 mb-1 w-56 overflow-hidden rounded-lg border bg-surface shadow-lg">{mentionCands.map((u) => (<button key={u.id} onClick={() => setComment(comment.replace(/@([\w]*)$/, `@${u.name} `))} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[15px] hover:bg-background"><Avatar id={u.id} size={22} /> {u.name}{u.role === "va" && <span className="text-[15px] text-muted">VA</span>}</button>))}</div>)}
+      <div className="flex items-end gap-2 rounded-xl border bg-background px-2.5 py-2 focus-within:border-accent">
+        <textarea value={comment} onChange={(e) => setComment(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !(mentionMatch && mentionCands.length)) { e.preventDefault(); onAddComment(); } }} placeholder="Write a comment…  (type @ to mention)" rows={1} className="max-h-24 flex-1 resize-none bg-transparent text-[15px] outline-none placeholder:text-muted" />
+        <button onClick={onAddComment} disabled={!comment.trim()} className="rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">Send</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      <div className="fixed inset-0 z-10 bg-black/20" onClick={onClose} />
+      <aside className={full ? "fixed inset-0 z-20 flex flex-col bg-surface" : "fixed inset-y-0 right-0 z-20 flex w-full max-w-[460px] flex-col border-l bg-surface shadow-xl"}>
+        <div className="flex items-center gap-2 border-b px-5 py-3 text-[15px] text-muted">
+          <span className="h-2.5 w-2.5 rounded-full" style={{ background: client.color }} /> {client.name} <span>/</span> <span className="truncate">{project.name}</span>
+          <div className="ml-auto flex items-center gap-1">
+            {navTotal > 1 && (
+              <div className="mr-1 flex items-center gap-0.5">
+                <button onClick={onPrev} disabled={navIndex <= 0} title="Previous task (k)" className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground disabled:opacity-30"><I.chevron className="rotate-90" /></button>
+                <span className="min-w-[54px] text-center text-[13px] tabular-nums text-muted">{navIndex + 1} of {navTotal}</span>
+                <button onClick={onNext} disabled={navIndex < 0 || navIndex >= navTotal - 1} title="Next task (j)" className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground disabled:opacity-30"><I.chevron className="-rotate-90" /></button>
+              </div>
+            )}
+            {ghlContactUrl && <a href={ghlContactUrl} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="inline-flex items-center gap-1 rounded-md border border-accent px-2 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft"><I.bolt /> Open in GHL</a>}
+            <button onClick={onToggleFull} title={full ? "Collapse to sidebar" : "Expand to full page"} className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground">{full ? <I.minimize /> : <I.expand />}</button>
+            <button onClick={onDelete} title="Delete task" className="rounded-md p-1 text-muted hover:bg-background hover:text-red-500"><I.trash /></button>
+            <button onClick={onClose} className="rounded-md p-1 text-muted hover:bg-background"><I.close /></button>
+          </div>
+        </div>
+
+        {full ? (
+          <div className="flex flex-1 overflow-hidden bg-background/60">
+            <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+              <div className="flex-1 overflow-y-auto px-6 py-7">
+                <div className="mx-auto w-full max-w-3xl rounded-2xl border bg-surface p-8 shadow-soft">
+                  {titleBlock}
+                  {statusBlock}
+                  <div className="my-6 border-t" />
+                  {descriptionBlock}
+                  {subtasksBlock}
+                  {attachmentsBlock}
+                  <div className="mt-7 border-t pt-1" />
+                  {commentsBlock}
+                </div>
+              </div>
+              {composer}
+            </div>
+            <div className="w-[340px] shrink-0 overflow-y-auto border-l bg-surface px-6 py-6">
+              <div className="mb-5 flex items-center gap-3 rounded-xl border bg-background/50 p-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-[15px] font-semibold text-white" style={{ background: client.color }}>{client.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}</span>
+                <div className="min-w-0"><div className="truncate text-[15px] font-semibold">{client.name}</div><div className="truncate text-[13px] text-muted">{project.name}</div></div>
+              </div>
+              <div className="mb-3 text-[13px] font-semibold uppercase tracking-wide text-muted">Details</div>
+              {propsBlock}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="flex-1 overflow-y-auto px-5 py-4">
+              {titleBlock}
+              {statusBlock}
+              <div className="mt-5">{propsBlock}</div>
+              {descriptionBlock}
+              {subtasksBlock}
+              {attachmentsBlock}
+              {commentsBlock}
+            </div>
+            {composer}
+          </>
+        )}
+      </aside>
+    </>
+  );
+}
