@@ -1,26 +1,80 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #eef0f6;
+  --surface: #ffffff;
+  --foreground: #1c2030;
+  --muted: #6b7280;
+  --border: #e6e8f0;
+  --accent: #7c3aed;
+  --accent-soft: #f1ecff;
+  --shadow-sm: 0 1px 2px rgba(20, 24, 40, 0.04), 0 1px 3px rgba(20, 24, 40, 0.05);
+  --shadow-md: 0 4px 12px rgba(20, 24, 40, 0.06), 0 2px 4px rgba(20, 24, 40, 0.04);
+}
+
+:root[data-theme="dark"] {
+  --background: #0e1016;
+  --surface: #181b22;
+  --foreground: #e6e8ee;
+  --muted: #99a1af;
+  --border: #262b35;
+  --accent: #a879f5;
+  --accent-soft: #2a2140;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 6px 16px rgba(0, 0, 0, 0.4);
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
   --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+html,
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+* {
+  border-color: var(--border);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #d7d7e2;
+  border-radius: 999px;
+  border: 2px solid var(--background);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #c3c3d4;
+}
+
+/* depth helpers */
+.shadow-soft { box-shadow: var(--shadow-sm); }
+.shadow-soft-md { box-shadow: var(--shadow-md); }
+
+/* dark navy sidebar — scopes a dark palette to its subtree so every element flips automatically */
+.sidebar-dark {
+  --surface: #191c24;
+  --background: #262b37;
+  --foreground: #e8eaf0;
+  --muted: #9aa2af;
+  --border: #2b313d;
+  --accent: #b794f6;
+  --accent-soft: #322a55;
+  background: var(--surface);
+  color: var(--foreground);
 }
