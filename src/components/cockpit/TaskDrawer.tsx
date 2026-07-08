@@ -22,7 +22,32 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const ghlContactUrl = linkedContact && ghlSub?.ghlLocationId ? `https://app.gohighlevel.com/v2/location/${ghlSub.ghlLocationId}/contacts/detail/${linkedContact.ghlContactId}` : null;
   const [subDraft, setSubDraft] = useState("");
   const [labelOpen, setLabelOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Packages the task as a ready-to-paste brief for a Claude Code session.
+  // (There's no supported deep link to launch Claude Code with a prompt, so
+  // clipboard + paste is the reliable hand-off.)
+  const copyForClaude = async () => {
+    const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId);
+    const brief = [
+      `Work on this task from ClickUpTasks (https://clickuptasks.vercel.app):`,
+      ``,
+      `Task: ${task.title}`,
+      `Client: ${client.name}${ct?.email ? ` (${ct.email})` : ""}`,
+      `Project: ${project?.name ?? "—"}`,
+      `Status: ${STATUS_META[task.status].label} · Priority: ${PRIORITY_META[task.priority].label}${task.due ? ` · Due: ${task.due}` : ""}`,
+      task.description ? `\nDescription:\n${task.description}` : "",
+      task.subtasks.length ? `\nSubtasks:\n${task.subtasks.map((s) => `- [${s.done ? "x" : " "}] ${s.title}`).join("\n")}` : "",
+      task.comments.length ? `\nRecent comments:\n${task.comments.slice(-3).map((c) => `- ${userById(c.authorId)?.name ?? "?"}: ${c.body}`).join("\n")}` : "",
+      ghlContactUrl ? `\nGHL contact: ${ghlContactUrl}` : "",
+    ].filter(Boolean).join("\n");
+    try {
+      await navigator.clipboard.writeText(brief);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch { /* clipboard unavailable */ }
+  };
   const doneSubs = task.subtasks.filter((s) => s.done).length;
   const mentionMatch = /@([\w]*)$/.exec(comment);
   const mentionCands = mentionMatch ? users.filter((u) => u.name.toLowerCase().includes(mentionMatch[1].toLowerCase())) : [];
@@ -116,7 +141,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     </div>
   );
   const composer = (
-    <div className={`relative border-t p-3 ${full ? "mx-auto w-full max-w-3xl" : ""}`}>
+    <div className="relative border-t p-3">
       {mentionMatch && mentionCands.length > 0 && (<div className="absolute bottom-full left-3 mb-1 w-56 overflow-hidden rounded-lg border bg-surface shadow-lg">{mentionCands.map((u) => (<button key={u.id} onClick={() => setComment(comment.replace(/@([\w]*)$/, `@${u.name} `))} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[15px] hover:bg-background"><Avatar id={u.id} size={22} /> {u.name}{u.role === "va" && <span className="text-[15px] text-muted">VA</span>}</button>))}</div>)}
       <div className="flex items-end gap-2 rounded-xl border bg-background px-2.5 py-2 focus-within:border-accent">
         <textarea value={comment} onChange={(e) => setComment(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !(mentionMatch && mentionCands.length)) { e.preventDefault(); onAddComment(); } }} placeholder="Write a comment…  (type @ to mention)" rows={1} className="max-h-24 flex-1 resize-none bg-transparent text-[15px] outline-none placeholder:text-muted" />
@@ -139,6 +164,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                 <button onClick={onNext} disabled={navIndex < 0 || navIndex >= navTotal - 1} title="Next task (j)" className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground disabled:opacity-30"><I.chevron className="-rotate-90" /></button>
               </div>
             )}
+            <button onClick={copyForClaude} title="Copy this task as a brief to paste into Claude Code" className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">{copied ? "✓ Copied" : "✳ Copy for Claude"}</button>
             {ghlContactUrl && <a href={ghlContactUrl} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="inline-flex items-center gap-1 rounded-md border border-accent px-2 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft"><I.bolt /> Open in GHL</a>}
             <button onClick={onToggleFull} title={full ? "Collapse to sidebar" : "Expand to full page"} className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground">{full ? <I.minimize /> : <I.expand />}</button>
             <button onClick={onDelete} title="Delete task" className="rounded-md p-1 text-muted hover:bg-background hover:text-red-500"><I.trash /></button>
@@ -147,29 +173,48 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
         </div>
 
         {full ? (
+          // ClickUp-style split: task content (document) on the left,
+          // the Activity/comments conversation in its own column on the right
+          // with the composer pinned to the bottom.
           <div className="flex flex-1 overflow-hidden bg-background/60">
-            <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-              <div className="flex-1 overflow-y-auto px-6 py-7">
-                <div className="mx-auto w-full max-w-3xl rounded-2xl border bg-surface p-8 shadow-soft">
-                  {titleBlock}
-                  {statusBlock}
-                  <div className="my-6 border-t" />
-                  {descriptionBlock}
-                  {subtasksBlock}
-                  {attachmentsBlock}
-                  <div className="mt-7 border-t pt-1" />
-                  {commentsBlock}
+            <div className="min-w-0 flex-1 overflow-y-auto px-6 py-7">
+              <div className="mx-auto w-full max-w-3xl rounded-2xl border bg-surface p-8 shadow-soft">
+                {titleBlock}
+                {statusBlock}
+                <div className="my-6 border-t" />
+                {propsBlock}
+                <div className="my-6 border-t" />
+                {descriptionBlock}
+                {subtasksBlock}
+                {attachmentsBlock}
+              </div>
+            </div>
+            <div className="flex w-[400px] shrink-0 flex-col border-l bg-surface">
+              <div className="flex items-center gap-2 border-b px-5 py-3">
+                <span className="text-[15px] font-semibold">Activity</span>
+                <span className="rounded-full bg-background px-2 py-0.5 text-[13px] text-muted">{task.comments.length}</span>
+              </div>
+              <div className="flex-1 overflow-y-auto px-5 py-4">
+                <div className="space-y-4">
+                  {task.comments.map((c) => { const u = userById(c.authorId); return (
+                    <div key={c.id} className="flex gap-2.5">
+                      <Avatar id={c.authorId} size={28} />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[15px]"><span className="font-medium">{u?.name}</span> <span className="text-muted">· {timeAgo(c.at)}</span></div>
+                        <div className="mt-0.5 rounded-lg rounded-tl-none border bg-background/60 px-3 py-2 text-[15px]">{renderMentions(c.body)}</div>
+                      </div>
+                    </div>
+                  ); })}
+                  {task.comments.length === 0 && (
+                    <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-10 text-center text-muted">
+                      <I.comment />
+                      <span className="text-[15px]">No activity yet</span>
+                      <span className="text-[13px]">Start the conversation — type @ to mention a teammate.</span>
+                    </div>
+                  )}
                 </div>
               </div>
               {composer}
-            </div>
-            <div className="w-[340px] shrink-0 overflow-y-auto border-l bg-surface px-6 py-6">
-              <div className="mb-5 flex items-center gap-3 rounded-xl border bg-background/50 p-3">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-[15px] font-semibold text-white" style={{ background: client.color }}>{client.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}</span>
-                <div className="min-w-0"><div className="truncate text-[15px] font-semibold">{client.name}</div><div className="truncate text-[13px] text-muted">{project.name}</div></div>
-              </div>
-              <div className="mb-3 text-[13px] font-semibold uppercase tracking-wide text-muted">Details</div>
-              {propsBlock}
             </div>
           </div>
         ) : (
