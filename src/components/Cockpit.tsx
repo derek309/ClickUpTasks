@@ -14,6 +14,7 @@ import {
   STATUS_ORDER,
   CLIENT_STATUS_META,
   type ClientStatus,
+  type ClientType,
   HEALTH_META,
   clientHealth,
   PRIORITY_META,
@@ -50,6 +51,7 @@ import { QuickLinksBar } from "./cockpit/ClientLinks";
 import { ClientNotes } from "./cockpit/ClientNotes";
 import { ContactMessages } from "./cockpit/ContactMessages";
 import { ConversationsInbox } from "./cockpit/ConversationsInbox";
+import { ContactsDirectory } from "./cockpit/ContactsDirectory";
 
 export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [clients, setClients] = useState<Client[]>([]);
@@ -70,6 +72,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [activeProject, setActiveProject] = useState<string | null>(null);
   const [myWork, setMyWork] = useState(me.role === "va");
   const [inboxView, setInboxView] = useState(false);
+  const [contactsView, setContactsView] = useState(false);
   const [myWorkUser, setMyWorkUser] = useState<string>(me.id);
   const [groupBy, setGroupBy] = useState<"project" | "status" | "priority" | "due">("status");
   const [filters, setFilters] = useState<FilterState>({ status: "all", assignee: "all", priority: "all" });
@@ -379,7 +382,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const scopedTasks = canAdmin ? tasks : tasks.filter((t) => t.assigneeId === me.id);
   // Sub-accounts (Agency/Directory) are the contact source; clients (cl_*) are contacts you've added.
   const subAccounts = clients.filter((c) => !c.id.startsWith("cl_"));
-  const clientList = clients.filter((c) => c.id.startsWith("cl_"));
+  // Only type 'client' gets sidebar/⌘K/task presence — prospects/past
+  // clients/vendors are classified contacts you can message, reached via the
+  // Contacts tab and Conversations, not full clients with projects/tasks.
+  const clientList = clients.filter((c) => c.id.startsWith("cl_") && c.type === "client");
   const visibleClients = canAdmin ? clientList : clientList.filter((c) => scopedTasks.some((t) => t.clientId === c.id));
   // Apply the user's sort preference; starred clients always float to the top.
   const sortedClients = (() => {
@@ -703,13 +709,26 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     markMessagesReadDb(contactId);
   };
   const openConversation = (contactId: string) => {
-    setInboxView(false);
+    setInboxView(false); setContactsView(false);
     setMyWork(false);
     setActiveClient("cl_" + contactId);
     setActiveProject(null);
     setClientTab("messages");
     setOpenTaskId(null);
     markConversationRead(contactId);
+  };
+  // "All GoHighLevel" tab in the Conversations inbox — resolves a live GHL
+  // conversation's real contactId back to our locally-synced Contact (if any)
+  // and its classification (if any), so the UI can offer "open" vs "classify"
+  // vs "not synced yet" without a second round trip.
+  const resolveLiveContact = (ghlContactId: string): { contact: Contact; client: Client | null } | null => {
+    const contact = contacts.find((c) => c.ghlContactId === ghlContactId);
+    if (!contact) return null;
+    return { contact, client: clients.find((c) => c.id === "cl_" + contact.id) ?? null };
+  };
+  const classifyAndOpen = (contact: Contact, type: ClientType) => {
+    addClientContact(contact, type);
+    setClientTab("messages");
   };
   const toggleSub = (taskId: string, subId: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, done: !s.done } : s)) }); };
   const addSub = (taskId: string, title: string) => { const t = tasks.find((x) => x.id === taskId); if (t && title.trim()) update(taskId, { subtasks: [...t.subtasks, { id: newId("s_"), title: title.trim(), done: false }] }); };
@@ -718,17 +737,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   // A client's ghlLocationId field is repurposed to store the contact's business/company name.
   const clientCompany = (c: Client | null) => (c && c.id.startsWith("cl_") ? c.ghlLocationId : "");
-  const addClientContact = async (contact: Contact) => {
+  const addClientContact = async (contact: Contact, type: ClientType = "client") => {
     const id = "cl_" + contact.id;
-    if (clients.some((c) => c.id === id)) { setActiveClient(id); setMyWork(false); setInboxView(false); setAddClientOpen(false); return; }
+    if (clients.some((c) => c.id === id)) { setActiveClient(id); setMyWork(false); setInboxView(false); setContactsView(false); setAddClientOpen(false); return; }
     const sub = subAccounts.find((s) => s.id === contact.clientId);
-    const c: Client = { id, name: contact.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "active" };
+    const c: Client = { id, name: contact.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "active", type };
     setClients((cs) => [...cs, c]);
     markOwnClientWrite(c.id);
     upsertClient(c);
     setActiveClient(id);
     setMyWork(false);
-    setInboxView(false);
+    setInboxView(false); setContactsView(false);
     pushToast(`Added ${contact.name}`);
     try {
       const res = await authedFetch("/api/ghl/company", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ locationId: sub?.ghlLocationId ?? "", contactId: contact.ghlContactId }) });
@@ -871,12 +890,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         </div>
 
         <nav className="space-y-0.5 px-2">
-          <SideItem active={myWork} onClick={() => { setMyWork(true); setInboxView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.inbox className="text-muted" /> <span>My Work</span></SideItem>
-          <SideItem active={inboxView} onClick={() => { setInboxView(true); setMyWork(false); setSidebarOpen(false); setOpenTaskId(null); }}>
+          <SideItem active={myWork} onClick={() => { setMyWork(true); setInboxView(false); setContactsView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.inbox className="text-muted" /> <span>My Work</span></SideItem>
+          <SideItem active={inboxView} onClick={() => { setInboxView(true); setMyWork(false); setContactsView(false); setSidebarOpen(false); setOpenTaskId(null); }}>
             <I.comment className="text-muted" /> <span>Conversations</span>
             {unreadConvoCount > 0 && <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{unreadConvoCount}</span>}
           </SideItem>
-          <SideItem active={!myWork && !inboxView && activeClient === "all"} onClick={() => { setMyWork(false); setInboxView(false); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>All clients</span><span className="ml-auto text-[15px] text-muted">{scopedTasks.length}</span></SideItem>
+          {canAdmin && (
+            <SideItem active={contactsView} onClick={() => { setContactsView(true); setMyWork(false); setInboxView(false); setSidebarOpen(false); setOpenTaskId(null); }}>
+              <I.user className="text-muted" /> <span>Contacts</span><span className="ml-auto text-[15px] text-muted">{contacts.length.toLocaleString()}</span>
+            </SideItem>
+          )}
+          <SideItem active={!myWork && !inboxView && !contactsView && activeClient === "all"} onClick={() => { setMyWork(false); setInboxView(false); setContactsView(false); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>All clients</span><span className="ml-auto text-[15px] text-muted">{scopedTasks.length}</span></SideItem>
         </nav>
 
         <div className="flex items-center justify-between px-4 pb-1 pt-4">
@@ -922,7 +946,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                       ))}
                     </div>
                   </>)}
-                  <button onClick={() => { setMyWork(false); setInboxView(false); setActiveClient(c.id); setActiveProject(null); setSidebarOpen(false); setOpenTaskId(null); }}
+                  <button onClick={() => { setMyWork(false); setInboxView(false); setContactsView(false); setActiveClient(c.id); setActiveProject(null); setSidebarOpen(false); setOpenTaskId(null); }}
                     className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[15px] transition ${active ? "bg-accent-soft font-medium text-accent" : "text-foreground hover:bg-background"} ${c.status === "archived" ? "opacity-50" : ""}`}>
                     <span role="button" title={`${CLIENT_STATUS_META[c.status].label} — click to change`}
                       onClick={(e) => { e.stopPropagation(); setStatusMenuClientId(statusMenuClientId === c.id ? null : c.id); }}
@@ -1009,11 +1033,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       <main className="flex min-w-0 flex-1 flex-col">
         <header className="relative z-10 flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-surface px-4 py-3 shadow-soft sm:px-5">
           <button onClick={toggleSidebar} title="Show/hide sidebar" className="rounded-lg border p-2 text-muted hover:text-foreground"><I.menu /></button>
-          {!myWork && !inboxView && activeClient !== "all" && clientById(activeClient) && (
+          {!myWork && !inboxView && !contactsView && activeClient !== "all" && clientById(activeClient) && (
             <span className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[16px] font-semibold text-white shadow-soft sm:flex" style={{ background: clientById(activeClient)!.color }}>{clientById(activeClient)!.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}</span>
           )}
           <div className="min-w-0">
-            {!myWork && !inboxView && activeProject && projectById(activeProject) ? (<>
+            {!myWork && !inboxView && !contactsView && activeProject && projectById(activeProject) ? (<>
               <h1 className="flex items-center gap-1.5 truncate text-[17px] font-semibold"><I.folder className="shrink-0 text-muted" /> {projectById(activeProject)!.name}</h1>
               <p className="hidden items-center gap-2 text-[15px] text-muted sm:flex">
                 <button onClick={() => setActiveProject(null)} className="hover:text-foreground hover:underline">{clientById(activeClient)?.name}</button>
@@ -1022,14 +1046,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </p>
             </>) : (<>
               <h1 className="flex items-center gap-2 truncate text-[17px] font-semibold">
-                {inboxView ? "Conversations" : myWork ? "My Work" : activeClient === "all" ? "All clients" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
-                {!myWork && !inboxView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
+                {contactsView ? "Contacts" : inboxView ? "Conversations" : myWork ? "My Work" : activeClient === "all" ? "All clients" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
+                {!myWork && !inboxView && !contactsView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
               </h1>
-              <p className="hidden text-[15px] text-muted sm:block">{inboxView ? "Every message thread across your clients" : myWork ? "Everything assigned to one person, across all clients" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</p>
+              <p className="hidden text-[15px] text-muted sm:block">{contactsView ? "Search and classify every synced GoHighLevel contact" : inboxView ? "Every message thread across your clients" : myWork ? "Everything assigned to one person, across all clients" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</p>
             </>)}
           </div>
 
-          {!myWork && !inboxView && activeClient !== "all" && !activeProject && (
+          {!myWork && !inboxView && !contactsView && activeClient !== "all" && !activeProject && (
             <div className="inline-flex overflow-hidden rounded-md border">
               <button onClick={() => setClientTab("tasks")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "tasks" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Tasks</button>
               <button onClick={() => setClientTab("knowledge")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "knowledge" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Knowledge · {clientNotes.filter((n) => n.clientId === activeClient).length}</button>
@@ -1042,7 +1066,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           )}
 
 
-          {inboxView ? null : myWork ? (
+          {inboxView || contactsView ? null : myWork ? (
             canAdmin ? (
               <label className="flex items-center gap-2"><span className="text-muted">Viewing work for</span>
                 <select value={myWorkUser} onChange={(e) => setMyWorkUser(e.target.value)} className="rounded-md border bg-background px-2 py-1 outline-none">{users.map((u) => (<option key={u.id} value={u.id}>{u.name}{u.role === "va" ? " (VA)" : ""}</option>))}</select>
@@ -1107,7 +1131,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </div>
         </header>
 
-        {!myWork && !inboxView && activeClient !== "all" && (
+        {!myWork && !inboxView && !contactsView && activeClient !== "all" && (
           <QuickLinksBar
             links={clientLinks.filter((l) => l.clientId === activeClient)}
             ghlLink={ghlContactUrlFor(activeClient) ? { label: "Open in GHL", url: ghlContactUrlFor(activeClient)! } : null}
@@ -1120,8 +1144,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         )}
 
         {/* content */}
-        {inboxView ? (
-          <ConversationsInbox conversations={conversations} starred={starredConvos} onToggleStar={toggleConvoStar} onOpen={openConversation} />
+        {contactsView ? (
+          <ContactsDirectory
+            contacts={contacts}
+            clients={clients}
+            subAccounts={subAccounts}
+            onClassify={(contact, type) => addClientContact(contact, type)}
+            onOpenClient={(clientId) => { setContactsView(false); setActiveClient(clientId); setActiveProject(null); setOpenTaskId(null); }}
+          />
+        ) : inboxView ? (
+          <ConversationsInbox conversations={conversations} starred={starredConvos} onToggleStar={toggleConvoStar} onOpen={openConversation} resolveLiveContact={resolveLiveContact} onClassify={classifyAndOpen} />
         ) : myWork ? (
           <GroupedList groups={buildGroups(myWorkTasks, "due").filter((g) => g.tasks.length > 0)} showClient clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={false} quickAddHint="" onQuickAdd={() => {}} onToggleSub={toggleSub} onAddSub={addSub} />
         ) : !activeProject && activeClient !== "all" && clientTab === "knowledge" ? (
@@ -1166,7 +1198,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           onCancel={() => setLinkModal(null)}
         />
       )}
-      {cmdkOpen && <CommandK tasks={scopedTasks} clients={clientList} clientById={clientById} onOpenTask={(id) => { setOpenTaskId(id); setCmdkOpen(false); }} onOpenClient={(id) => { setMyWork(false); setInboxView(false); setActiveClient(id); setCmdkOpen(false); }} onClose={() => setCmdkOpen(false)} />}
+      {cmdkOpen && <CommandK tasks={scopedTasks} clients={clientList} clientById={clientById} onOpenTask={(id) => { setOpenTaskId(id); setCmdkOpen(false); }} onOpenClient={(id) => { setMyWork(false); setInboxView(false); setContactsView(false); setActiveClient(id); setCmdkOpen(false); }} onClose={() => setCmdkOpen(false)} />}
 
       <div className="pointer-events-none fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 flex-col items-center gap-2">
         {toasts.map((t) => (<div key={t.id} className="rounded-lg bg-foreground px-3.5 py-2 text-[15px] font-medium text-[color:var(--surface)] shadow-lg">{t.text}</div>))}

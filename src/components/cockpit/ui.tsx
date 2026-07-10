@@ -2,7 +2,8 @@
 
 // Shared UI primitives for the Cockpit: the icon set, Avatar, misc formatting
 // helpers, and the list-view column definitions. Split out of Cockpit.tsx.
-import { users, userById, labelById, type Attachment, type TaskStatus, type Priority } from "@/lib/data";
+import { useState } from "react";
+import { users, userById, labelById, CLIENT_TYPE_META, CLIENT_TYPE_ORDER, type ClientType, type Attachment, type TaskStatus, type Priority } from "@/lib/data";
 
 // --- tiny inline icons ------------------------------------------------------
 
@@ -80,6 +81,27 @@ export function kindFromName(name: string): Attachment["kind"] {
 
 export function SideItem({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (<button onClick={onClick} className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[15px] transition ${active ? "bg-accent-soft font-medium text-accent" : "text-foreground hover:bg-background"}`}>{children}</button>);
+}
+// A contact isn't automatically a "client" — this picks the relationship
+// type (client/prospect/past client/vendor) the moment you promote one from
+// the Contacts tab or an unclassified GoHighLevel conversation.
+export function ClassifyMenu({ onClassify, label = "Classify…" }: { onClassify: (type: ClientType) => void; label?: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} className="shrink-0 rounded-md border bg-background px-2.5 py-1 text-[13px] font-medium text-muted hover:text-foreground">{label}</button>
+      {open && (<>
+        <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
+        <div className="absolute right-0 z-40 mt-1 w-40 rounded-lg border bg-surface p-1 shadow-xl">
+          {CLIENT_TYPE_ORDER.map((t) => (
+            <button key={t} onClick={(e) => { e.stopPropagation(); onClassify(t); setOpen(false); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-background">
+              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: CLIENT_TYPE_META[t].color }} /> {CLIENT_TYPE_META[t].label}
+            </button>
+          ))}
+        </div>
+      </>)}
+    </div>
+  );
 }
 export function LabelChips({ ids }: { ids: string[] }) {
   if (ids.length === 0) return null;

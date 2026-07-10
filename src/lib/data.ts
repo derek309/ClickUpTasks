@@ -42,6 +42,20 @@ export const CLIENT_STATUS_META: Record<ClientStatus, { label: string; dot: stri
   archived: { label: "Archived", dot: "#94a3b8" },
 };
 
+// Relationship type — separate axis from ClientStatus (which tracks the
+// lifecycle of an *active engagement*). A GHL contact you've classified as a
+// prospect/past client/vendor gets no sidebar/task presence (see the
+// clientList filter in Cockpit.tsx); only 'client' does. The two root
+// sub-account markers (c_agency/c_directory) are always 'client'.
+export type ClientType = "client" | "prospect" | "past_client" | "vendor";
+export const CLIENT_TYPE_META: Record<ClientType, { label: string; color: string }> = {
+  client: { label: "Client", color: "#22c55e" },
+  prospect: { label: "Prospect", color: "#3b82f6" },
+  past_client: { label: "Past client", color: "#94a3b8" },
+  vendor: { label: "Vendor", color: "#a855f7" },
+};
+export const CLIENT_TYPE_ORDER: ClientType[] = ["client", "prospect", "past_client", "vendor"];
+
 /** A GHL sub-account. In our app this is a "Client". */
 export interface Client {
   id: string;
@@ -49,6 +63,7 @@ export interface Client {
   color: string;
   ghlLocationId: string;
   status: ClientStatus;
+  type: ClientType;
 }
 
 /** A quick-access link on a client's page (live site, WP admin, etc.), stored
@@ -235,9 +250,9 @@ export const labels: Label[] = [
 // --- Clients (GHL sub-accounts) --------------------------------------------
 
 export const clientsSeed: Client[] = [
-  { id: "c_bright", name: "Bright Dental", color: "#0ea5e9", ghlLocationId: "loc_8f21ac", status: "active" },
-  { id: "c_peak", name: "Peak Fitness Co.", color: "#f59e0b", ghlLocationId: "loc_2b77de", status: "active" },
-  { id: "c_harbor", name: "Harbor Law Group", color: "#8b5cf6", ghlLocationId: "loc_5c09fb", status: "active" },
+  { id: "c_bright", name: "Bright Dental", color: "#0ea5e9", ghlLocationId: "loc_8f21ac", status: "active", type: "client" },
+  { id: "c_peak", name: "Peak Fitness Co.", color: "#f59e0b", ghlLocationId: "loc_2b77de", status: "active", type: "client" },
+  { id: "c_harbor", name: "Harbor Law Group", color: "#8b5cf6", ghlLocationId: "loc_5c09fb", status: "active", type: "client" },
 ];
 
 // --- Contacts (GHL contacts) -----------------------------------------------
