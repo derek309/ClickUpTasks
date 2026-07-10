@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   users,
   setUsers,
@@ -29,10 +29,12 @@ import {
   type ClientLink,
   type ClientNote,
   type NoteType,
+  type Comment,
   type Me,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, rowToTask, rowToClient, rowToNotif } from "@/lib/db";
+import { subscribeRealtime } from "@/lib/realtime";
 import TeamPanel from "./TeamPanel";
 import SettingsPanel from "./SettingsPanel";
 import AddClientModal from "./AddClientModal";
@@ -93,11 +95,27 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [dragClientId, setDragClientId] = useState<string | null>(null);
   const [statusMenuClientId, setStatusMenuClientId] = useState<string | null>(null);
+
+  // Realtime echo suppression for `clients` writes. Admin-only, low-frequency
+  // writes — a short TTL ledger is proportionate here (unlike tasks, which
+  // get a server-confirmed `updated_by` column instead — see below — because
+  // keystroke-driven task writes make a timing-window ledger risky).
+  const clientWriteLedgerRef = useRef<Map<string, number>>(new Map());
+  const CLIENT_ECHO_TTL_MS = 5000;
+  const markOwnClientWrite = (id: string) => clientWriteLedgerRef.current.set(id, Date.now());
+  const isOwnClientEcho = (id: string) => {
+    const ts = clientWriteLedgerRef.current.get(id);
+    if (ts === undefined) return false;
+    clientWriteLedgerRef.current.delete(id);
+    return Date.now() - ts < CLIENT_ECHO_TTL_MS;
+  };
+
   const setClientStatus = (id: string, status: ClientStatus) => {
     const c = clientById(id);
     if (!c || c.status === status) return;
     const nc = { ...c, status };
     setClients((cs) => cs.map((x) => (x.id === id ? nc : x)));
+    markOwnClientWrite(nc.id);
     upsertClient(nc);
     pushToast(`${c.name} → ${CLIENT_STATUS_META[status].label}`);
   };
@@ -199,6 +217,83 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     window.addEventListener("cut:save-error", onSaveError);
     return () => window.removeEventListener("cut:save-error", onSaveError);
   }, []);
+
+  // Live sync — tasks/clients/notifications only (see supabase/realtime.sql
+  // + the plan doc for why not all 7 tables). Gated on !loading so the
+  // channel isn't stood up before the initial fetchAll() populates state.
+  // Every handler uses raw setXxx — never update()/patchTask()/addComment()/
+  // notify() — so an incoming teammate's change never re-derives a diff
+  // against local state and never double-fires GHL sync or notifications.
+  useEffect(() => {
+    if (loading || !supabaseReady) return;
+    const unsub = subscribeRealtime({
+      onTask: (p) => {
+        if (p.eventType === "DELETE") {
+          const id = (p.old as { id: string }).id;
+          setTasks((ts) => ts.filter((t) => t.id !== id));
+          return;
+        }
+        const row = p.new;
+        if (row.updated_by && row.updated_by === me.id) return; // server-confirmed own write
+        const t = rowToTask(row);
+        setTasks((ts) => (ts.some((x) => x.id === t.id) ? ts.map((x) => (x.id === t.id ? t : x)) : [...ts, t]));
+      },
+      onClient: (p) => {
+        if (p.eventType === "DELETE") {
+          const id = (p.old as { id: string }).id;
+          // Cascade purge for teammates who only got the `clients` DELETE
+          // event — contacts/projects/client_links/client_notes aren't in
+          // the publication, so no CDC event arrives for them independently.
+          setClients((cs) => cs.filter((c) => c.id !== id));
+          setProjects((ps) => ps.filter((p2) => p2.clientId !== id));
+          setTasks((ts) => ts.filter((t) => t.clientId !== id));
+          setClientLinks((ls) => ls.filter((l) => l.clientId !== id));
+          setClientNotes((ns) => ns.filter((n) => n.clientId !== id));
+          setActiveClient((a) => (a === id ? "all" : a));
+          return;
+        }
+        const row = p.new;
+        if (isOwnClientEcho(row.id as string)) return;
+        const c = rowToClient(row);
+        setClients((cs) => (cs.some((x) => x.id === c.id) ? cs.map((x) => (x.id === c.id ? c : x)) : [...cs, c]));
+      },
+      onNotification: (p) => {
+        if (p.eventType === "DELETE") {
+          const id = (p.old as { id: string }).id;
+          setNotifications((ns) => ns.filter((n) => n.id !== id));
+          return;
+        }
+        const n = rowToNotif(p.new);
+        setNotifications((ns) => (ns.some((x) => x.id === n.id) ? ns.map((x) => (x.id === n.id ? n : x)) : [n, ...ns]));
+      },
+      onStatusChange: (s) => { if (s === "CHANNEL_ERROR") pushToast("⚠️ Live updates interrupted — reconnecting…"); },
+    });
+    return unsub;
+  }, [loading, me.id]);
+
+  // Fallback for the 4 tables without a live subscription (contacts/projects/
+  // client_links/client_notes), and a reconnection safety net for the 3 that
+  // do — postgres_changes has no replay/resume, and browsers commonly
+  // suspend backgrounded WebSocket connections, so a dropped socket means
+  // silently missed events, not queued ones. Reuses fetchAll() wholesale.
+  useEffect(() => {
+    let lastRefetch = 0;
+    const refetch = async () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastRefetch < 20000) return;
+      lastRefetch = Date.now();
+      try {
+        const d = await fetchAll();
+        setClients(d.clients); setProjects(d.projects); setContacts(d.contacts);
+        setTasks(d.tasks); setNotifications(d.notifications);
+        setClientLinks(d.clientLinks); setClientNotes(d.clientNotes);
+      } catch (e) { console.warn("[realtime] visibility refetch failed", e); }
+    };
+    document.addEventListener("visibilitychange", refetch);
+    window.addEventListener("focus", refetch);
+    return () => { document.removeEventListener("visibilitychange", refetch); window.removeEventListener("focus", refetch); };
+  }, []);
+
   const notify = (recipientId: string, text: string, taskId: string | null) => {
     const n: Notification = { id: newId("n_"), recipientId, text, taskId, at: new Date().toISOString(), read: false };
     setNotifications((ns) => [n, ...ns]);
@@ -322,7 +417,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       recurrence: "none", labelIds: [], ghlTaskId: null, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
     };
     setTasks((ts) => [...ts, t]);
-    upsertTask(t);
+    upsertTask(t, me.id);
   };
 
   // --- mutations ------------------------------------------------------------
@@ -330,7 +425,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const update = (id: string, patch: Partial<Task>) => {
     setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, ...patch } : t)));
     const cur = tasks.find((t) => t.id === id);
-    if (cur) { const merged = { ...cur, ...patch }; upsertTask(merged); syncGhlIfLinked(merged, patch); }
+    if (cur) { const merged = { ...cur, ...patch }; upsertTask(merged, me.id); syncGhlIfLinked(merged, patch); }
   };
 
   // Field changes on a task that are worth a line in its Activity feed. Stored
@@ -357,9 +452,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       pushToast(`🔁 Recurring — next occurrence created for ${formatDue(nextDue)}`);
     }
     setTasks((prev) => { let next = prev.map((x) => (x.id === id ? updated : x)); if (clone) next = [...next, clone]; return next; });
-    upsertTask(updated);
+    upsertTask(updated, me.id);
     syncGhlIfLinked(updated, patch);
-    if (clone) upsertTask(clone);
+    if (clone) upsertTask(clone, me.id);
     if (patch.assigneeId && patch.assigneeId !== me.id && patch.assigneeId !== before.assigneeId) {
       notify(patch.assigneeId, `${me.name} assigned you “${before.title}”`, id);
       pushToast(`Notified ${userById(patch.assigneeId)?.name}`);
@@ -394,12 +489,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const addComment = (id: string, body: string) => {
     if (!body.trim()) return;
     const t = tasks.find((x) => x.id === id);
-    update(id, { comments: [...(t?.comments ?? []), { id: newId("cm_"), authorId: me.id, body: body.trim(), at: new Date().toISOString() }] });
+    if (!t) return;
+    // Atomic JSONB append (append_comment RPC) instead of a full-row upsert —
+    // two teammates commenting on the same task in the same window would
+    // otherwise silently drop one comment (read-then-replace race).
+    const newComment: Comment = { id: newId("cm_"), authorId: me.id, body: body.trim(), at: new Date().toISOString() };
+    setTasks((ts) => ts.map((x) => (x.id === id ? { ...x, comments: [...x.comments, newComment] } : x)));
+    appendCommentDb(id, newComment);
     // Comment notifications: @mentions get "mentioned you"; the task's assignee
     // always hears about new comments on their task (unless they wrote it).
     const mentioned = new Set<string>();
-    users.forEach((u) => { if (u.id !== me.id && body.includes("@" + u.name)) { mentioned.add(u.id); notify(u.id, `${me.name} mentioned you in “${t?.title}”`, id); pushToast(`Notified ${u.name}`); } });
-    if (t?.assigneeId && t.assigneeId !== me.id && !mentioned.has(t.assigneeId)) {
+    users.forEach((u) => { if (u.id !== me.id && body.includes("@" + u.name)) { mentioned.add(u.id); notify(u.id, `${me.name} mentioned you in “${t.title}”`, id); pushToast(`Notified ${u.name}`); } });
+    if (t.assigneeId && t.assigneeId !== me.id && !mentioned.has(t.assigneeId)) {
       notify(t.assigneeId, `${me.name} commented on “${t.title}”`, id);
     }
     setComment("");
@@ -502,6 +603,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const sub = subAccounts.find((s) => s.id === contact.clientId);
     const c: Client = { id, name: contact.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "active" };
     setClients((cs) => [...cs, c]);
+    markOwnClientWrite(c.id);
     upsertClient(c);
     setActiveClient(id);
     setMyWork(false);
@@ -509,7 +611,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     try {
       const res = await authedFetch("/api/ghl/company", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ locationId: sub?.ghlLocationId ?? "", contactId: contact.ghlContactId }) });
       const j = await res.json();
-      if (j.company) { const up: Client = { ...c, ghlLocationId: j.company }; setClients((cs) => cs.map((x) => (x.id === id ? up : x))); upsertClient(up); }
+      if (j.company) { const up: Client = { ...c, ghlLocationId: j.company }; setClients((cs) => cs.map((x) => (x.id === id ? up : x))); markOwnClientWrite(up.id); upsertClient(up); }
     } catch { /* business name is optional */ }
   };
   const renameClient = (id: string) => {
@@ -519,6 +621,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       setPromptDialog(null);
       const nc = { ...c, name };
       setClients((cs) => cs.map((x) => (x.id === id ? nc : x)));
+      markOwnClientWrite(nc.id);
       upsertClient(nc);
     } });
   };
@@ -907,7 +1010,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
       {teamOpen && <TeamPanel me={me} onClose={() => setTeamOpen(false)} />}
       {settingsOpen && <SettingsPanel clients={subAccounts} onClose={() => setSettingsOpen(false)}
-        onSaveClient={(c) => { setClients((cs) => cs.map((x) => (x.id === c.id ? c : x))); upsertClient(c); }}
+        onSaveClient={(c) => { setClients((cs) => cs.map((x) => (x.id === c.id ? c : x))); markOwnClientWrite(c.id); upsertClient(c); }}
         onSynced={async () => { try { setContacts(await fetchContacts()); pushToast("Contacts updated from GoHighLevel"); } catch { /* ignore */ } }} />}
       {addClientOpen && <AddClientModal subAccounts={subAccounts} contacts={contacts} existingIds={new Set(clients.map((c) => c.id))} onAdd={addClientContact} onClose={() => setAddClientOpen(false)} />}
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}

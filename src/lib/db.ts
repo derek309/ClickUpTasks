@@ -16,6 +16,7 @@ import {
   type ClientLink,
   type ClientNote,
   type NoteType,
+  type Comment,
 } from "./data";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -26,7 +27,7 @@ export const titleCase = (s: string) => (s || "").replace(/\b([a-z])/g, (m) => m
 // --- mappers ----------------------------------------------------------------
 
 const clientToRow = (c: Client) => ({ id: c.id, name: c.name, color: c.color, ghl_location_id: c.ghlLocationId, status: c.status ?? "active" });
-const rowToClient = (r: any): Client => ({ id: r.id, name: titleCase(r.name), color: r.color, ghlLocationId: r.ghl_location_id ?? "", status: (r.status as Client["status"]) ?? "active" });
+export const rowToClient = (r: any): Client => ({ id: r.id, name: titleCase(r.name), color: r.color, ghlLocationId: r.ghl_location_id ?? "", status: (r.status as Client["status"]) ?? "active" });
 
 const contactToRow = (c: Contact) => ({ id: c.id, client_id: c.clientId, name: c.name, email: c.email, ghl_contact_id: c.ghlContactId });
 const rowToContact = (r: any): Contact => ({ id: r.id, clientId: r.client_id, name: titleCase(r.name), email: r.email ?? "", ghlContactId: r.ghl_contact_id ?? "" });
@@ -34,13 +35,16 @@ const rowToContact = (r: any): Contact => ({ id: r.id, clientId: r.client_id, na
 const projectToRow = (p: Project) => ({ id: p.id, client_id: p.clientId, name: p.name, description: p.description });
 const rowToProject = (r: any): Project => ({ id: r.id, clientId: r.client_id, name: r.name, description: r.description ?? "" });
 
-const taskToRow = (t: Task) => ({
+// `updatedBy` is DB-only metadata (Realtime echo-suppression signal) — it is
+// not part of the domain Task type, so it's a separate write-time parameter
+// rather than a Task field. See src/lib/realtime.ts for how it's consumed.
+const taskToRow = (t: Task, updatedBy?: string | null) => ({
   id: t.id, project_id: t.projectId, client_id: t.clientId, title: t.title, description: t.description,
   status: t.status, priority: t.priority, assignee_id: t.assigneeId, contact_id: t.contactId, due: t.due,
   recurrence: t.recurrence, ghl_task_id: t.ghlTaskId, label_ids: t.labelIds, subtasks: t.subtasks,
-  attachments: t.attachments, comments: t.comments,
+  attachments: t.attachments, comments: t.comments, updated_by: updatedBy ?? null,
 });
-const rowToTask = (r: any): Task => ({
+export const rowToTask = (r: any): Task => ({
   id: r.id, projectId: r.project_id, clientId: r.client_id, title: r.title, description: r.description ?? "",
   status: r.status, priority: r.priority, assigneeId: r.assignee_id, contactId: r.contact_id, due: r.due,
   recurrence: r.recurrence, ghlTaskId: r.ghl_task_id, labelIds: r.label_ids ?? [], subtasks: r.subtasks ?? [],
@@ -48,7 +52,7 @@ const rowToTask = (r: any): Task => ({
 });
 
 const notifToRow = (n: Notification) => ({ id: n.id, recipient_id: n.recipientId, text: n.text, task_id: n.taskId, at: n.at, read: n.read });
-const rowToNotif = (r: any): Notification => ({ id: r.id, recipientId: r.recipient_id, text: r.text, taskId: r.task_id, at: r.at ?? "", read: r.read });
+export const rowToNotif = (r: any): Notification => ({ id: r.id, recipientId: r.recipient_id, text: r.text, taskId: r.task_id, at: r.at ?? "", read: r.read });
 
 // Free text (link labels, note bodies) — no titleCase, unlike GHL-sourced names.
 const clientLinkToRow = (l: ClientLink) => ({ id: l.id, client_id: l.clientId, group_label: l.groupLabel, label: l.label, url: l.url, position: l.position });
@@ -66,7 +70,10 @@ export async function seedIfEmpty(): Promise<void> {
   await supabase.from("clients").insert(clientsSeed.map(clientToRow));
   await supabase.from("contacts").insert(contactsSeed.map(contactToRow));
   await supabase.from("projects").insert(projectsSeed.map(projectToRow));
-  await supabase.from("tasks").insert(seedTasks.map(taskToRow));
+  // NOT `.map(taskToRow)` directly — Array.map invokes its callback with
+  // (element, index, array), and taskToRow's 2nd param is now `updatedBy`,
+  // so a bare `.map(taskToRow)` would pass the array index as updatedBy.
+  await supabase.from("tasks").insert(seedTasks.map((t) => taskToRow(t)));
   await supabase.from("notifications").insert(seedNotifications.map(notifToRow));
 }
 
@@ -106,7 +113,11 @@ export async function fetchContacts(): Promise<Contact[]> {
 
 // --- mutations (fire-and-forget from the UI; errors surface via console) -----
 
-export const upsertTask = (t: Task) => supabase.from("tasks").upsert(taskToRow(t)).then(logErr);
+export const upsertTask = (t: Task, updatedBy?: string | null) => supabase.from("tasks").upsert(taskToRow(t, updatedBy)).then(logErr);
+// Atomic JSONB array-append (see supabase/realtime.sql append_comment) —
+// avoids the read-then-full-row-replace race that a plain upsertTask() would
+// have if two teammates comment on the same task within the same window.
+export const appendCommentDb = (taskId: string, comment: Comment) => supabase.rpc("append_comment", { task_id: taskId, comment }).then(logErr);
 export const deleteTaskDb = (id: string) => supabase.from("tasks").delete().eq("id", id).then(logErr);
 export const upsertClient = (c: Client) => supabase.from("clients").upsert(clientToRow(c)).then(logErr);
 export const upsertProject = (p: Project) => supabase.from("projects").upsert(projectToRow(p)).then(logErr);
