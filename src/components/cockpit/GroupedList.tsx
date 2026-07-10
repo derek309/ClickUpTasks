@@ -12,12 +12,12 @@ import { I, Avatar, LabelChips, COL_WIDTHS, LIST_COLUMNS } from "./ui";
 
 // --- grouped list view (ClickUp-style: group, quick-add, expandable subtasks) --
 
-export function GroupedList({ groups, showClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub }: {
+export function GroupedList({ groups, showClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, hideEmpty }: {
   groups: { key: string; label: string; color: string; tasks: Task[] }[];
   showClient: boolean; clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null;
   visibleCols: string[]; sortKey: string; sortDir: "asc" | "desc"; onSort: (key: string) => void;
   onOpen: (id: string) => void; onPatch: (taskId: string, patch: Partial<Task>) => void; canQuickAdd: boolean; quickAddHint: string; onQuickAdd: (groupKey: string, title: string) => void;
-  onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void;
+  onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void; hideEmpty?: boolean;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -26,6 +26,7 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   const [collapsedG, setCollapsedG] = useState<Set<string>>(new Set());
   const toggleG = (k: string) => setCollapsedG((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
 
+  const visibleGroups = hideEmpty ? groups.filter((g) => g.tasks.length > 0) : groups;
   const cols = LIST_COLUMNS.filter((c) => visibleCols.includes(c.key));
   // minmax(160px,1fr) — not minmax(0,1fr) — so the name column can never be
   // crushed to near-zero width on a narrow viewport (that crush is what made
@@ -48,34 +49,36 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
             ? <button key={c.key} onClick={() => onSort(c.key)} className="flex items-center gap-1 text-left hover:text-foreground">{c.label} <Arrow col={c.key} /></button>
             : <span key={c.key}>{c.label}</span>)}
         </div>
-        {groups.map((g) => (
-          <div key={g.key} className="border-b last:border-0">
-            <button onClick={() => toggleG(g.key)} className="flex w-full items-center gap-2 px-4 pb-1.5 pt-4 text-left">
-              <I.chevron className={`text-muted transition ${collapsedG.has(g.key) ? "rotate-180" : "-rotate-90"}`} />
-              <span className="h-2.5 w-2.5 rounded-full" style={{ background: g.color }} />
-              <span className="text-[15px] font-bold">{g.label}</span>
-              <span className="rounded-full bg-background px-1.5 text-[13px] font-normal normal-case tracking-normal text-muted">{g.tasks.length}</span>
-            </button>
-            {!collapsedG.has(g.key) && (
-              <div>
-                {g.tasks.map((t) => (
-                  <TaskRow key={t.id} task={t} template={template} cols={cols} showClient={showClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch}
-                    expanded={expanded.has(t.id)} onToggleExpand={() => toggle(t.id)} onToggleSub={onToggleSub} onAddSub={onAddSub}
-                    subDraft={subDraft[t.id] ?? ""} setSubDraft={(v) => setSubDraft((s) => ({ ...s, [t.id]: v }))} />
-                ))}
-                {canQuickAdd && (
-                  <div className="flex items-center gap-2 border-t px-4 py-1.5">
-                    <I.plus className="text-muted" />
-                    <input value={draft[g.key] ?? ""} onChange={(e) => setDraft((d) => ({ ...d, [g.key]: e.target.value }))}
-                      onKeyDown={(e) => { if (e.key === "Enter") { onQuickAdd(g.key, draft[g.key] ?? ""); setDraft((d) => ({ ...d, [g.key]: "" })); } }}
-                      placeholder="Add task…" className="flex-1 bg-transparent py-1 text-[15px] outline-none placeholder:text-muted" />
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        ))}
-        {groups.length === 0 && <div className="px-4 py-10 text-center text-[15px] text-muted">No tasks yet.</div>}
+        <div className="divide-y-8 divide-background">
+          {visibleGroups.map((g) => (
+            <div key={g.key}>
+              <button onClick={() => toggleG(g.key)} className="flex w-full items-center gap-2 px-4 pb-1.5 pt-3 text-left">
+                <I.chevron className={`text-muted transition ${collapsedG.has(g.key) ? "rotate-180" : "-rotate-90"}`} />
+                <span className="h-2.5 w-2.5 rounded-full" style={{ background: g.color }} />
+                <span className="text-[15px] font-bold">{g.label}</span>
+                <span className="rounded-full bg-background px-1.5 text-[13px] font-normal normal-case tracking-normal text-muted">{g.tasks.length}</span>
+              </button>
+              {!collapsedG.has(g.key) && (
+                <div>
+                  {g.tasks.map((t) => (
+                    <TaskRow key={t.id} task={t} template={template} cols={cols} showClient={showClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch}
+                      expanded={expanded.has(t.id)} onToggleExpand={() => toggle(t.id)} onToggleSub={onToggleSub} onAddSub={onAddSub}
+                      subDraft={subDraft[t.id] ?? ""} setSubDraft={(v) => setSubDraft((s) => ({ ...s, [t.id]: v }))} />
+                  ))}
+                  {canQuickAdd && (
+                    <div className="flex items-center gap-2 border-t px-4 py-1.5">
+                      <I.plus className="text-muted" />
+                      <input value={draft[g.key] ?? ""} onChange={(e) => setDraft((d) => ({ ...d, [g.key]: e.target.value }))}
+                        onKeyDown={(e) => { if (e.key === "Enter") { onQuickAdd(g.key, draft[g.key] ?? ""); setDraft((d) => ({ ...d, [g.key]: "" })); } }}
+                        placeholder="Add task…" className="flex-1 bg-transparent py-1 text-[15px] outline-none placeholder:text-muted" />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+        {visibleGroups.length === 0 && <div className="px-4 py-10 text-center text-[15px] text-muted">No tasks yet.</div>}
       </div>
       {!canQuickAdd && quickAddHint && <div className="mt-3 text-center text-[15px] text-muted">{quickAddHint}</div>}
     </div>
