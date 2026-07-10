@@ -1,7 +1,10 @@
 // Supabase Realtime wiring — pure channel setup/teardown, no app state here.
 // Cockpit.tsx owns all React state and decides how to merge incoming rows.
-// Subscribes only to tasks/clients/notifications (see supabase/realtime.sql
-// and the plan doc for why those three and not all 7 domain tables).
+// Subscribes to tasks/clients/notifications (see supabase/realtime.sql and
+// the plan doc for why those three and not all 7 domain tables) plus
+// messages (see supabase/messages.sql, which adds it to the same publication
+// — this is what makes an inbound GHL reply appear in an open thread without
+// a manual reload).
 import { supabase } from "./supabase";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 
@@ -46,12 +49,14 @@ export function subscribeRealtime(handlers: {
   onTask: (p: Payload) => void;
   onClient: (p: Payload) => void;
   onNotification: (p: Payload) => void;
+  onMessage: (p: Payload) => void;
   onStatusChange?: (status: string) => void;
 }): () => void {
   const unsubs = [
     subscribeOne("tasks", handlers.onTask, handlers.onStatusChange),
     subscribeOne("clients", handlers.onClient),
     subscribeOne("notifications", handlers.onNotification),
+    subscribeOne("messages", handlers.onMessage),
   ];
   return () => unsubs.forEach((u) => u());
 }

@@ -66,12 +66,13 @@ const rowToClientNote = (r: any): ClientNote => ({ id: r.id, clientId: r.client_
 
 const messageToRow = (m: Message) => ({
   id: m.id, contact_id: m.contactId, client_id: m.clientId, channel: m.channel, direction: m.direction,
-  subject: m.subject, body: m.body, ghl_message_id: m.ghlMessageId, created_by: m.createdBy,
+  subject: m.subject, body: m.body, ghl_message_id: m.ghlMessageId, created_by: m.createdBy, read: m.read,
 });
-const rowToMessage = (r: any): Message => ({
+export const rowToMessage = (r: any): Message => ({
   id: r.id, contactId: r.contact_id, clientId: r.client_id, channel: (r.channel as MessageChannel) ?? "email",
   direction: r.direction as MessageDirection, subject: r.subject ?? null, body: r.body ?? "",
   ghlMessageId: r.ghl_message_id ?? null, createdBy: r.created_by ?? null, at: r.created_at,
+  read: r.read ?? true,
 });
 
 // --- load + seed ------------------------------------------------------------
@@ -150,6 +151,10 @@ export const deleteClientNoteDb = (id: string) => supabase.from("client_notes").
 // outbound row after a confirmed success; this call itself is still
 // fire-and-forget from the UI's perspective, same as every other mutation here.
 export const insertMessage = (m: Message) => supabase.from("messages").insert(messageToRow(m)).then(logErr);
+// One write per opened conversation, not per message — flips every unread
+// inbound row for that contact in a single UPDATE.
+export const markMessagesReadDb = (contactId: string) =>
+  supabase.from("messages").update({ read: true }).eq("contact_id", contactId).eq("read", false).then(logErr);
 
 // Every upsert/delete above is fire-and-forget from the UI's perspective — this
 // is the single choke point where a failed save gets surfaced. Dispatches a

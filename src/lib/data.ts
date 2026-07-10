@@ -113,6 +113,10 @@ export interface Message {
   ghlMessageId: string | null;
   createdBy: string | null; // roster id for outbound; null for inbound
   at: string; // ISO
+  /** Shared team-wide, not per-user (one flag per message). Outbound rows are
+   * inserted already read; inbound rows start unread until someone opens that
+   * conversation — see the Conversations inbox in Cockpit.tsx. */
+  read: boolean;
 }
 
 /** Our own grouping layer — GHL has no concept of this. */
