@@ -1,6 +1,6 @@
 # ClickUpTasks — Activation runbook
 
-Four big features were built and are code-complete. Each **works in the app today**
+Five big features were built and are code-complete. Each **works in the app today**
 except for the parts below that need something only you can do (run SQL, add a
 key, flip a GHL scope, create a bucket). Do these in order; each is a few minutes.
 
@@ -79,6 +79,45 @@ The Team panel (admin/VA editing) and server-side GHL contact sync need Supabase
 
 ---
 
+## 5. GoHighLevel email messaging (send + receive)
+
+Open a contact (a "cl_" client in the sidebar) → **Messages** tab: compose and send
+a real email, which goes out from that sub-account's own connected GHL email, not
+a separate provider. When they reply, it shows up in that same thread
+automatically — no polling, GHL pushes it to you.
+
+**What you need to do**, per sub-account (same Private Integration token as step 1):
+
+1. In GHL: Settings → Private Integrations → your existing integration → make
+   sure a **Conversations / Messages** write scope is checked (alongside the
+   Tasks scope from step 1) → save. Paste any new token into Settings the same
+   way as step 1 if GHL forces a new one.
+2. Supabase → SQL Editor → paste all of [`supabase/messages.sql`](../supabase/messages.sql)
+   → **Run**. (Needs `rls.sql` and `realtime.sql` run first — see their own steps.)
+3. In GHL, for **each** sub-account: Automation → create a **second** Workflow,
+   trigger **"Customer Replied"** → action **"Webhook"** → same URL you used for
+   step 1's task-sync Workflow (`https://<your-app>/api/ghl/webhook?secret=<GHL_WEBHOOK_SECRET>`),
+   but with the webhook action's JSON body set to exactly:
+   ```json
+   { "event": "message_reply", "contactId": "{{contact.id}}", "channel": "email",
+     "subject": "{{message.subject}}", "body": "{{message.body}}", "messageId": "{{message.id}}" }
+   ```
+   (The webhook route tells the two Workflows apart by this `event` field, so the
+   one URL + secret serves both without conflict.)
+
+**How to test:** open any contact → **Messages** → send yourself a short email →
+confirm it lands in your inbox from the sub-account's GHL address. Reply to it →
+within a few seconds it should appear in the same thread here.
+
+*If the Messages tab says "not linked to a GoHighLevel contact yet," that
+contact has no `ghlContactId` — re-sync contacts in Settings (same fix as
+"Not linkable" in step 1).*
+
+*SMS is not built yet — the schema and UI already carry a `channel` field for
+it, so it's a second pass on top of this, not a rebuild.*
+
+---
+
 ### Order that avoids friction
-4 (add key) → 2 (run rls.sql) → 3 (bucket + storage.sql) → 1 (GHL Tasks scope).
+4 (add key) → 2 (run rls.sql) → 3 (bucket + storage.sql) → 1 (GHL Tasks scope) → 5 (messages.sql + Conversations scope + Customer Replied workflow).
 Doing the key first means the moment RLS turns on, the server can still work.

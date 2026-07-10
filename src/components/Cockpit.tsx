@@ -30,10 +30,11 @@ import {
   type ClientNote,
   type NoteType,
   type Comment,
+  type Message,
   type Me,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, rowToTask, rowToClient, rowToNotif } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, insertMessage, appendCommentDb, rowToTask, rowToClient, rowToNotif } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import TeamPanel from "./TeamPanel";
 import SettingsPanel from "./SettingsPanel";
@@ -47,6 +48,7 @@ import { GroupedList } from "./cockpit/GroupedList";
 import { TaskDrawer } from "./cockpit/TaskDrawer";
 import { QuickLinksBar } from "./cockpit/ClientLinks";
 import { ClientNotes } from "./cockpit/ClientNotes";
+import { ContactMessages } from "./cockpit/ContactMessages";
 
 export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [clients, setClients] = useState<Client[]>([]);
@@ -56,7 +58,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [clientLinks, setClientLinks] = useState<ClientLink[]>([]);
   const [clientNotes, setClientNotes] = useState<ClientNote[]>([]);
-  const [clientTab, setClientTab] = useState<"tasks" | "knowledge">("tasks");
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [clientTab, setClientTab] = useState<"tasks" | "knowledge" | "messages">("tasks");
   const [linkModal, setLinkModal] = useState<{ initial?: ClientLink } | null>(null);
   const [loading, setLoading] = useState(true);
   const [dbError, setDbError] = useState<string | null>(null);
@@ -189,7 +193,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         } catch { /* roster fetch is best-effort; founder fallback stays */ }
         const d = await fetchAll();
         setClients(d.clients); setProjects(d.projects); setContacts(d.contacts); setTasks(d.tasks); setNotifications(d.notifications);
-        setClientLinks(d.clientLinks); setClientNotes(d.clientNotes);
+        setClientLinks(d.clientLinks); setClientNotes(d.clientNotes); setMessages(d.messages);
       } catch (e) {
         setDbError(e instanceof Error ? e.message : "Failed to load data.");
       } finally {
@@ -302,7 +306,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           incoming.forEach((x) => byId.set(x.id, x));
           return [...byId.values()];
         };
-        setContacts(d.contacts); setClientLinks(d.clientLinks); setClientNotes(d.clientNotes); setProjects(d.projects);
+        setContacts(d.contacts); setClientLinks(d.clientLinks); setClientNotes(d.clientNotes); setMessages(d.messages); setProjects(d.projects);
         setTasks((prev) => mergeById(prev, d.tasks));
         setClients((prev) => mergeById(prev, d.clients));
         setNotifications((prev) => mergeById(prev, d.notifications));
@@ -608,6 +612,46 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     ghlCall("delete", t); // remove the task on GHL too
     update(id, { ghlTaskId: null });
     pushToast("Unlinked from GoHighLevel");
+  };
+
+  // --- GoHighLevel messages (email now, sms later) -------------------------
+  // Same target-resolution shape as ghlTargetFor above, but keyed directly off
+  // a Contact rather than a Task, since a message belongs to the person, not
+  // any one piece of work.
+  const ghlTargetForContact = (contact: Contact): { locationId: string; ghlContactId: string } | null => {
+    if (!contact.ghlContactId) return null;
+    const sub = clientById(contact.clientId);
+    if (!sub?.ghlLocationId) return null;
+    return { locationId: sub.ghlLocationId, ghlContactId: contact.ghlContactId };
+  };
+  const activeContact = (): Contact | null =>
+    activeClient.startsWith("cl_") ? contactById(activeClient.slice(3)) : null;
+  const sendMessage = async (subject: string, body: string): Promise<boolean> => {
+    const contact = activeContact();
+    const target = contact && ghlTargetForContact(contact);
+    if (!contact || !target) return false;
+    setSendingMessage(true);
+    try {
+      const res = await authedFetch("/api/ghl/message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...target, subject, body }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j?.error) { pushToast(j?.error ?? "GoHighLevel send failed."); return false; }
+      const msg: Message = {
+        id: newId("msg_"), contactId: contact.id, clientId: contact.clientId, channel: "email", direction: "outbound",
+        subject: subject || null, body, ghlMessageId: j?.ghlMessageId ?? null, createdBy: me.id, at: new Date().toISOString(),
+      };
+      setMessages((ms) => [...ms, msg]);
+      insertMessage(msg);
+      return true;
+    } catch {
+      pushToast("Network error reaching GoHighLevel.");
+      return false;
+    } finally {
+      setSendingMessage(false);
+    }
   };
   const toggleSub = (taskId: string, subId: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, done: !s.done } : s)) }); };
   const addSub = (taskId: string, title: string) => { const t = tasks.find((x) => x.id === taskId); if (t && title.trim()) update(taskId, { subtasks: [...t.subtasks, { id: newId("s_"), title: title.trim(), done: false }] }); };
@@ -926,6 +970,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <div className="inline-flex overflow-hidden rounded-md border">
               <button onClick={() => setClientTab("tasks")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "tasks" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Tasks</button>
               <button onClick={() => setClientTab("knowledge")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "knowledge" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Knowledge · {clientNotes.filter((n) => n.clientId === activeClient).length}</button>
+              {/* Messages is Contact-specific ("cl_" pseudo-clients only) — a
+                  real sub-account Client has no single GHL contact to message. */}
+              {activeClient.startsWith("cl_") && (
+                <button onClick={() => setClientTab("messages")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "messages" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Messages · {messages.filter((m) => m.contactId === activeClient.slice(3)).length}</button>
+              )}
             </div>
           )}
 
@@ -938,7 +987,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             ) : (
               <span className="text-[15px] text-muted">Your assigned tasks across all clients</span>
             )
-          ) : clientTab === "knowledge" ? null : (
+          ) : clientTab === "knowledge" || clientTab === "messages" ? null : (
             <div className="relative">
               <button onClick={() => setFilterOpen((o) => !o)} className="flex items-center gap-1.5 rounded-md border bg-background px-2.5 py-1.5 text-muted hover:text-foreground">
                 <I.filter /> Filter &amp; view
@@ -1017,6 +1066,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onAdd={(type, body) => addNote(activeClient, type, body)}
             onEdit={editNote}
             onDelete={deleteNote}
+          />
+        ) : !activeProject && activeClient.startsWith("cl_") && clientTab === "messages" ? (
+          <ContactMessages
+            messages={messages.filter((m) => m.contactId === activeClient.slice(3))}
+            canSend={!!activeContact() && !!ghlTargetForContact(activeContact()!)}
+            sending={sendingMessage}
+            onSend={sendMessage}
           />
         ) : (
           <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} hideEmpty={hideEmpty} />

@@ -17,6 +17,9 @@ import {
   type ClientNote,
   type NoteType,
   type Comment,
+  type Message,
+  type MessageChannel,
+  type MessageDirection,
 } from "./data";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -61,6 +64,16 @@ const rowToClientLink = (r: any): ClientLink => ({ id: r.id, clientId: r.client_
 const clientNoteToRow = (n: ClientNote) => ({ id: n.id, client_id: n.clientId, type: n.type, body: n.body, author_id: n.authorId, created_at: n.at });
 const rowToClientNote = (r: any): ClientNote => ({ id: r.id, clientId: r.client_id, type: (r.type as NoteType) ?? "note", body: r.body ?? "", authorId: r.author_id, at: r.created_at });
 
+const messageToRow = (m: Message) => ({
+  id: m.id, contact_id: m.contactId, client_id: m.clientId, channel: m.channel, direction: m.direction,
+  subject: m.subject, body: m.body, ghl_message_id: m.ghlMessageId, created_by: m.createdBy,
+});
+const rowToMessage = (r: any): Message => ({
+  id: r.id, contactId: r.contact_id, clientId: r.client_id, channel: (r.channel as MessageChannel) ?? "email",
+  direction: r.direction as MessageDirection, subject: r.subject ?? null, body: r.body ?? "",
+  ghlMessageId: r.ghl_message_id ?? null, createdBy: r.created_by ?? null, at: r.created_at,
+});
+
 // --- load + seed ------------------------------------------------------------
 
 export async function seedIfEmpty(): Promise<void> {
@@ -78,22 +91,24 @@ export async function seedIfEmpty(): Promise<void> {
 }
 
 export async function fetchAll() {
-  const [c, ct, p, t, n, cl, cn] = await Promise.all([
+  const [c, ct, p, t, n, cl, cn, m] = await Promise.all([
     supabase.from("clients").select("*").order("created_at"),
     supabase.from("contacts").select("*"),
     supabase.from("projects").select("*"),
     supabase.from("tasks").select("*").order("created_at"),
     supabase.from("notifications").select("*").order("created_at", { ascending: false }),
-    // Fetched separately from the hard-fail set below: these two tables ship
-    // via a manually-run migration (client-links-notes.sql), so a not-yet-run
-    // migration must degrade to "no links/notes yet", not break the whole app.
+    // Fetched separately from the hard-fail set below: these tables ship via a
+    // manually-run migration (client-links-notes.sql / messages.sql), so a
+    // not-yet-run migration must degrade to "nothing yet", not break the app.
     supabase.from("client_links").select("*").order("position"),
     supabase.from("client_notes").select("*").order("created_at", { ascending: false }),
+    supabase.from("messages").select("*").order("created_at"),
   ]);
   const err = c.error || ct.error || p.error || t.error || n.error;
   if (err) throw err;
   if (cl.error) console.warn("[db] client_links unavailable — run supabase/client-links-notes.sql", cl.error.message);
   if (cn.error) console.warn("[db] client_notes unavailable — run supabase/client-links-notes.sql", cn.error.message);
+  if (m.error) console.warn("[db] messages unavailable — run supabase/messages.sql", m.error.message);
   return {
     clients: (c.data ?? []).map(rowToClient),
     contacts: (ct.data ?? []).map(rowToContact),
@@ -102,6 +117,7 @@ export async function fetchAll() {
     notifications: (n.data ?? []).map(rowToNotif),
     clientLinks: cl.error ? [] : (cl.data ?? []).map(rowToClientLink),
     clientNotes: cn.error ? [] : (cn.data ?? []).map(rowToClientNote),
+    messages: m.error ? [] : (m.data ?? []).map(rowToMessage),
   };
 }
 
@@ -129,6 +145,11 @@ export const upsertClientLink = (l: ClientLink) => supabase.from("client_links")
 export const deleteClientLinkDb = (id: string) => supabase.from("client_links").delete().eq("id", id).then(logErr);
 export const upsertClientNote = (n: ClientNote) => supabase.from("client_notes").upsert(clientNoteToRow(n)).then(logErr);
 export const deleteClientNoteDb = (id: string) => supabase.from("client_notes").delete().eq("id", id).then(logErr);
+// Messages are append-only (never edited), so insert not upsert. The caller
+// awaits the GHL send first (see Cockpit.tsx sendMessage) and only inserts an
+// outbound row after a confirmed success; this call itself is still
+// fire-and-forget from the UI's perspective, same as every other mutation here.
+export const insertMessage = (m: Message) => supabase.from("messages").insert(messageToRow(m)).then(logErr);
 
 // Every upsert/delete above is fire-and-forget from the UI's perspective — this
 // is the single choke point where a failed save gets surfaced. Dispatches a

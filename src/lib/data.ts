@@ -93,6 +93,28 @@ export interface Contact {
   ghlContactId: string;
 }
 
+export type MessageChannel = "email" | "sms";
+export type MessageDirection = "outbound" | "inbound";
+
+/** A single email/SMS with a Contact, sent or received via GoHighLevel's
+ * Conversations API. Belongs to the Contact, not any one Task — a contact can
+ * have many tasks, and the conversation is with the person. Outbound rows are
+ * inserted by the client right after a successful send; inbound rows are
+ * inserted by the GHL webhook (src/app/api/ghl/webhook/route.ts) using the
+ * service-role client, so they bypass RLS like the existing task-sync path. */
+export interface Message {
+  id: string;
+  contactId: string;
+  clientId: string;
+  channel: MessageChannel;
+  direction: MessageDirection;
+  subject: string | null;
+  body: string;
+  ghlMessageId: string | null;
+  createdBy: string | null; // roster id for outbound; null for inbound
+  at: string; // ISO
+}
+
 /** Our own grouping layer — GHL has no concept of this. */
 export interface Project {
   id: string;
