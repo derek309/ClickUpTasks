@@ -27,14 +27,19 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   const toggleG = (k: string) => setCollapsedG((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
 
   const cols = LIST_COLUMNS.filter((c) => visibleCols.includes(c.key));
-  const template = ["54px", "minmax(0,1fr)", ...(showClient ? ["180px"] : []), ...cols.map((c) => COL_WIDTHS[c.key])].join(" ");
+  // minmax(160px,1fr) — not minmax(0,1fr) — so the name column can never be
+  // crushed to near-zero width on a narrow viewport (that crush is what made
+  // task titles render as one letter per line on mobile). The card scrolls
+  // horizontally instead once the fixed-width columns + this minimum exceed
+  // the viewport.
+  const template = ["54px", "minmax(160px,1fr)", ...(showClient ? ["180px"] : []), ...cols.map((c) => COL_WIDTHS[c.key])].join(" ");
   const sortColKey: Record<string, string> = { title: "task", priority: "priority", due: "due", assignee: "assignee", status: "status", comments: "comments" };
   const activeCol = sortColKey[sortKey];
   const Arrow = ({ col }: { col: string }) => (activeCol === col ? <span className="text-accent">{sortDir === "asc" ? "↑" : "↓"}</span> : null);
 
   return (
     <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">
-      <div className="overflow-hidden rounded-xl border bg-surface shadow-soft">
+      <div className="overflow-x-auto rounded-xl border bg-surface shadow-soft">
         <div className="grid items-center gap-2 border-b bg-background/40 px-4 py-2 text-[12px] font-semibold uppercase tracking-wide text-muted" style={{ gridTemplateColumns: template }}>
           <span />
           <button onClick={() => onSort("task")} className="flex items-center gap-1 text-left hover:text-foreground">Name <Arrow col="task" /></button>

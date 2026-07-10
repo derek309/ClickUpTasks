@@ -275,7 +275,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // client_links/client_notes), and a reconnection safety net for the 3 that
   // do — postgres_changes has no replay/resume, and browsers commonly
   // suspend backgrounded WebSocket connections, so a dropped socket means
-  // silently missed events, not queued ones. Reuses fetchAll() wholesale.
+  // silently missed events, not queued ones. Reuses fetchAll() for the data.
+  //
+  // tasks/clients/notifications are merged (add/update by id), NEVER
+  // wholesale-replaced: their deletions are already fully covered by the
+  // live realtime DELETE handlers above, so this fallback has no need to
+  // remove anything for them — and a wholesale replace here was actively
+  // dangerous: any transient gap between this fetch's snapshot and a very
+  // recent local write could wipe a real, just-saved task out of view even
+  // though it was safely in the database. contacts/projects/client_links/
+  // client_notes have no realtime coverage at all, so they still need a
+  // full replace (including removals) to reflect deletes.
   useEffect(() => {
     let lastRefetch = 0;
     const refetch = async () => {
@@ -284,9 +294,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       lastRefetch = Date.now();
       try {
         const d = await fetchAll();
-        setClients(d.clients); setProjects(d.projects); setContacts(d.contacts);
-        setTasks(d.tasks); setNotifications(d.notifications);
-        setClientLinks(d.clientLinks); setClientNotes(d.clientNotes);
+        const mergeById = <T extends { id: string }>(prev: T[], incoming: T[]) => {
+          const byId = new Map(prev.map((x) => [x.id, x]));
+          incoming.forEach((x) => byId.set(x.id, x));
+          return [...byId.values()];
+        };
+        setContacts(d.contacts); setClientLinks(d.clientLinks); setClientNotes(d.clientNotes); setProjects(d.projects);
+        setTasks((prev) => mergeById(prev, d.tasks));
+        setClients((prev) => mergeById(prev, d.clients));
+        setNotifications((prev) => mergeById(prev, d.notifications));
       } catch (e) { console.warn("[realtime] visibility refetch failed", e); }
     };
     document.addEventListener("visibilitychange", refetch);
@@ -881,7 +897,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
       {/* ---------- Main ---------- */}
       <main className="flex min-w-0 flex-1 flex-col">
-        <header className="relative z-10 flex items-center gap-3 border-b bg-surface px-4 py-3 shadow-soft sm:px-5">
+        <header className="relative z-10 flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-surface px-4 py-3 shadow-soft sm:px-5">
           <button onClick={toggleSidebar} title="Show/hide sidebar" className="rounded-lg border p-2 text-muted hover:text-foreground"><I.menu /></button>
           {!myWork && activeClient !== "all" && clientById(activeClient) && (
             <span className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[16px] font-semibold text-white shadow-soft sm:flex" style={{ background: clientById(activeClient)!.color }}>{clientById(activeClient)!.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}</span>
