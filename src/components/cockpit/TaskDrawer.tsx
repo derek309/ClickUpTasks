@@ -183,9 +183,11 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     <>
       <div className={`fixed inset-0 bg-black/20 ${full ? "z-40" : "z-10"}`} onClick={onClose} />
       <aside className={full ? "fixed inset-0 z-50 flex flex-col bg-surface" : "fixed inset-y-0 right-0 z-20 flex w-full max-w-[460px] flex-col border-l bg-surface shadow-xl"}>
-        <div className="flex items-center gap-2 border-b px-5 py-3 text-[15px] text-muted">
-          <span className="h-2.5 w-2.5 rounded-full" style={{ background: client.color }} /> {client.name} <span>/</span> <span className="truncate">{project.name}</span>
-          <div className="ml-auto flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-2 border-b px-5 py-3 text-[15px] text-muted">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: client.color }} /> <span className="truncate">{client.name}</span> <span className="shrink-0">/</span> <span className="truncate">{project.name}</span>
+          </span>
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-1">
             {navTotal > 1 && (
               <div className="mr-1 flex items-center gap-0.5">
                 <button onClick={onPrev} disabled={navIndex <= 0} title="Previous task (k)" className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground disabled:opacity-30"><I.chevron className="rotate-90" /></button>
@@ -193,8 +195,14 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                 <button onClick={onNext} disabled={navIndex < 0 || navIndex >= navTotal - 1} title="Next task (j)" className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground disabled:opacity-30"><I.chevron className="-rotate-90" /></button>
               </div>
             )}
-            <button onClick={copyForClaude} title="Copy this task as a brief to paste into Claude Code" className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">{copied ? "✓ Copied" : "✳ Copy for Claude"}</button>
-            {ghlContactUrl && <a href={ghlContactUrl} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="inline-flex items-center gap-1 rounded-md border border-accent px-2 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft"><I.bolt /> Open in GHL</a>}
+            <button onClick={copyForClaude} title="Copy this task as a brief to paste into Claude Code" className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
+              <span aria-hidden>{copied ? "✓" : "✳"}</span><span className="hidden sm:inline">{copied ? "Copied" : "Copy for Claude"}</span>
+            </button>
+            {ghlContactUrl && (
+              <a href={ghlContactUrl} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="inline-flex items-center gap-1 rounded-md border border-accent px-2 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft">
+                <I.bolt /> <span className="hidden sm:inline">Open in GHL</span>
+              </a>
+            )}
             <button onClick={onToggleFull} title={full ? "Collapse to sidebar" : "Expand to full page"} className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground">{full ? <I.minimize /> : <I.expand />}</button>
             <button onClick={onDelete} title="Delete task" className="rounded-md p-1 text-muted hover:bg-background hover:text-danger"><I.trash /></button>
             <button onClick={onClose} className="rounded-md p-1 text-muted hover:bg-background"><I.close /></button>
