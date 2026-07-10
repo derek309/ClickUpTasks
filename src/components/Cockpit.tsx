@@ -63,6 +63,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [clientNotes, setClientNotes] = useState<ClientNote[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [importingTasks, setImportingTasks] = useState(false);
   const [clientTab, setClientTab] = useState<"tasks" | "knowledge" | "messages">("tasks");
   const [linkModal, setLinkModal] = useState<{ initial?: ClientLink } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -98,8 +99,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   // Sidebar client ordering: star to pin, sort mode, manual drag order.
   // Personal preferences → persisted per-browser (localStorage), not the DB.
-  type ClientSort = "manual" | "az" | "tasks" | "recent";
-  const [clientSort, setClientSort] = useState<ClientSort>("manual");
+  type ClientSort = "manual" | "az" | "tasks" | "recent" | "urgent";
+  const [clientSort, setClientSort] = useState<ClientSort>("urgent");
   const [starred, setStarred] = useState<Set<string>>(new Set());
   // Starred conversations (Conversations inbox) — a distinct, contactId-keyed
   // set, unrelated to sidebar client-starring above despite the shared pattern.
@@ -393,10 +394,29 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (clientSort === "az") base.sort((a, b) => a.name.localeCompare(b.name));
     else if (clientSort === "tasks") base.sort((a, b) => clientTaskCountRef(b.id) - clientTaskCountRef(a.id));
     else if (clientSort === "recent") base.reverse(); // fetch order is created_at asc
+    else if (clientSort === "urgent") {
+      // Overdue first, then due today, then soonest due date, then anything
+      // with no due date, then clients with no open tasks at all — each tier
+      // broken by priority (highest first), then recency (fetch order is
+      // created_at asc, so a higher original index is more recently added).
+      const withIndex = base.map((c, i) => ({ c, i, k: clientUrgencyKey(c.id) }));
+      withIndex.sort((a, b) => a.k.tier - b.k.tier || a.k.due.localeCompare(b.k.due) || b.k.priorityRank - a.k.priorityRank || b.i - a.i);
+      base.splice(0, base.length, ...withIndex.map((x) => x.c));
+    }
     else if (manualOrder.length) base.sort((a, b) => { const ia = manualOrder.indexOf(a.id), ib = manualOrder.indexOf(b.id); return (ia < 0 ? 1e9 : ia) - (ib < 0 ? 1e9 : ib); });
     return [...base.filter((c) => starred.has(c.id)), ...base.filter((c) => !starred.has(c.id))];
   })();
   function clientTaskCountRef(clientId: string) { return scopedTasks.filter((t) => t.clientId === clientId).length; }
+  function clientUrgencyKey(clientId: string): { tier: number; due: string; priorityRank: number } {
+    const open = scopedTasks.filter((t) => t.clientId === clientId && t.status !== "done");
+    if (open.length === 0) return { tier: 4, due: "", priorityRank: 0 };
+    const withDue = open.filter((t) => t.due);
+    if (withDue.length === 0) return { tier: 3, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
+    const soonest = withDue.reduce((a, b) => (b.due! < a.due! ? b : a)).due!;
+    const atSoonest = withDue.filter((t) => t.due === soonest);
+    const tier = soonest < TODAY ? 0 : soonest === TODAY ? 1 : 2;
+    return { tier, due: soonest, priorityRank: Math.max(...atSoonest.map((t) => PRIORITY_META[t.priority].rank)) };
+  }
   // Sidebar sections by client status; Active has no header, others only show when non-empty.
   const clientGroups = ([["", "active"], ["Paused", "paused"], ["Archived", "archived"]] as const)
     .map(([header, st]) => ({ header, items: sortedClients.filter((c) => c.status === st) }))
@@ -730,6 +750,46 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     addClientContact(contact, type);
     setClientTab("messages");
   };
+  // Pulls a contact's tasks created directly in GoHighLevel (not pushed from
+  // here) into local tracked tasks, linked via ghlTaskId so they join the
+  // existing two-way sync (see GHL_SYNC_FIELDS/syncGhlIfLinked below) going
+  // forward. Dedupes against ghlTaskId already present locally so re-clicking
+  // never creates duplicates.
+  const importGhlTasks = async () => {
+    const contact = activeContact();
+    const target = contact && ghlTargetForContact(contact);
+    if (!contact || !target) return;
+    setImportingTasks(true);
+    try {
+      const res = await authedFetch(`/api/ghl/import-tasks?${new URLSearchParams(target)}`);
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j?.error) { pushToast(j?.error ?? "GoHighLevel import failed."); return; }
+      const existingGhlIds = new Set(tasks.map((t) => t.ghlTaskId).filter(Boolean));
+      const fresh = ((j.tasks ?? []) as { ghlTaskId: string; title: string; description: string; due: string | null; completed: boolean }[])
+        .filter((g) => !existingGhlIds.has(g.ghlTaskId));
+      if (fresh.length === 0) { pushToast("No new tasks to import — everything's already tracked."); return; }
+      let projectId = projects.find((p) => p.clientId === activeClient)?.id;
+      if (!projectId) {
+        const p: Project = { id: newId("p_"), clientId: activeClient, name: "Tasks", description: "" };
+        setProjects((ps) => [...ps, p]);
+        upsertProject(p);
+        projectId = p.id;
+      }
+      const newTasks: Task[] = fresh.map((g) => ({
+        id: newId("t_"), projectId: projectId!, clientId: activeClient, title: g.title, description: g.description,
+        status: g.completed ? "done" : "todo", priority: "none", assigneeId: null, contactId: contact.id,
+        due: g.due, recurrence: "none", labelIds: [], ghlTaskId: g.ghlTaskId, subtasks: [], attachments: [], comments: [],
+        createdAt: new Date().toISOString(),
+      }));
+      setTasks((ts) => [...ts, ...newTasks]);
+      newTasks.forEach((t) => upsertTask(t, me.id));
+      pushToast(`Imported ${newTasks.length} task${newTasks.length === 1 ? "" : "s"} from GoHighLevel`);
+    } catch {
+      pushToast("Network error reaching GoHighLevel.");
+    } finally {
+      setImportingTasks(false);
+    }
+  };
   const toggleSub = (taskId: string, subId: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, done: !s.done } : s)) }); };
   const addSub = (taskId: string, title: string) => { const t = tasks.find((x) => x.id === taskId); if (t && title.trim()) update(taskId, { subtasks: [...t.subtasks, { id: newId("s_"), title: title.trim(), done: false }] }); };
   const renameSub = (taskId: string, subId: string, title: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, title } : s)) }); };
@@ -911,7 +971,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               {sortMenuOpen && (<>
                 <div className="fixed inset-0 z-30" onClick={() => setSortMenuOpen(false)} />
                 <div className="absolute right-0 top-full z-40 mt-1 w-44 rounded-lg border border-white/10 bg-background p-1 shadow-xl">
-                  {([["manual", "Manual (drag to order)"], ["az", "A → Z"], ["tasks", "Most active"], ["recent", "Recently added"]] as const).map(([v, label]) => (
+                  {([["urgent", "Overdue first"], ["manual", "Manual (drag to order)"], ["az", "A → Z"], ["tasks", "Most active"], ["recent", "Recently added"]] as const).map(([v, label]) => (
                     <button key={v} onClick={() => { saveClientSort(v); setSortMenuOpen(false); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-white/10">
                       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${clientSort === v ? "bg-accent" : "bg-transparent"}`} />{label}
                     </button>
@@ -1140,6 +1200,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onEdit={(link) => setLinkModal({ initial: link })}
             onDelete={deleteLink}
             onReorder={(ids) => reorderLinks(activeClient, ids)}
+            onImportTasks={importGhlTasks}
+            importingTasks={importingTasks}
           />
         )}
 

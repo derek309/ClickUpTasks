@@ -18,7 +18,7 @@ function groupLinks(links: ClientLink[]) {
   return order.map((key) => ({ key, links: map.get(key)! }));
 }
 
-export function QuickLinksBar({ links, ghlLink, canEdit, onAdd, onEdit, onDelete, onReorder }: {
+export function QuickLinksBar({ links, ghlLink, canEdit, onAdd, onEdit, onDelete, onReorder, onImportTasks, importingTasks }: {
   links: ClientLink[];
   ghlLink: { label: string; url: string } | null;
   canEdit: boolean;
@@ -26,6 +26,8 @@ export function QuickLinksBar({ links, ghlLink, canEdit, onAdd, onEdit, onDelete
   onEdit: (link: ClientLink) => void;
   onDelete: (link: ClientLink) => void;
   onReorder: (orderedIds: string[]) => void;
+  onImportTasks?: () => void;
+  importingTasks?: boolean;
 }) {
   const [menuId, setMenuId] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -47,6 +49,12 @@ export function QuickLinksBar({ links, ghlLink, canEdit, onAdd, onEdit, onDelete
           className="inline-flex items-center gap-1.5 rounded-md border border-accent px-2.5 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft">
           <I.bolt /> {ghlLink.label}
         </a>
+      )}
+      {ghlLink && onImportTasks && (
+        <button onClick={onImportTasks} disabled={importingTasks} title="Pull in this contact's tasks created directly in GoHighLevel"
+          className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[13px] font-medium text-foreground hover:bg-background disabled:opacity-50">
+          <I.repeat /> {importingTasks ? "Importing…" : "Import tasks from GHL"}
+        </button>
       )}
       {groupLinks(links).map((g) => (
         <span key={g.key || "_"} className="inline-flex items-center gap-1.5">
