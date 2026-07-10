@@ -13,6 +13,9 @@ import {
   type Project,
   type Contact,
   type Notification,
+  type ClientLink,
+  type ClientNote,
+  type NoteType,
 } from "./data";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -41,11 +44,18 @@ const rowToTask = (r: any): Task => ({
   id: r.id, projectId: r.project_id, clientId: r.client_id, title: r.title, description: r.description ?? "",
   status: r.status, priority: r.priority, assigneeId: r.assignee_id, contactId: r.contact_id, due: r.due,
   recurrence: r.recurrence, ghlTaskId: r.ghl_task_id, labelIds: r.label_ids ?? [], subtasks: r.subtasks ?? [],
-  attachments: r.attachments ?? [], comments: r.comments ?? [],
+  attachments: r.attachments ?? [], comments: r.comments ?? [], createdAt: r.created_at ?? new Date().toISOString(),
 });
 
 const notifToRow = (n: Notification) => ({ id: n.id, recipient_id: n.recipientId, text: n.text, task_id: n.taskId, at: n.at, read: n.read });
 const rowToNotif = (r: any): Notification => ({ id: r.id, recipientId: r.recipient_id, text: r.text, taskId: r.task_id, at: r.at ?? "", read: r.read });
+
+// Free text (link labels, note bodies) — no titleCase, unlike GHL-sourced names.
+const clientLinkToRow = (l: ClientLink) => ({ id: l.id, client_id: l.clientId, group_label: l.groupLabel, label: l.label, url: l.url, position: l.position });
+const rowToClientLink = (r: any): ClientLink => ({ id: r.id, clientId: r.client_id, groupLabel: r.group_label ?? "", label: r.label, url: r.url, position: r.position ?? 0 });
+
+const clientNoteToRow = (n: ClientNote) => ({ id: n.id, client_id: n.clientId, type: n.type, body: n.body, author_id: n.authorId, created_at: n.at });
+const rowToClientNote = (r: any): ClientNote => ({ id: r.id, clientId: r.client_id, type: (r.type as NoteType) ?? "note", body: r.body ?? "", authorId: r.author_id, at: r.created_at });
 
 // --- load + seed ------------------------------------------------------------
 
@@ -61,21 +71,30 @@ export async function seedIfEmpty(): Promise<void> {
 }
 
 export async function fetchAll() {
-  const [c, ct, p, t, n] = await Promise.all([
+  const [c, ct, p, t, n, cl, cn] = await Promise.all([
     supabase.from("clients").select("*").order("created_at"),
     supabase.from("contacts").select("*"),
     supabase.from("projects").select("*"),
     supabase.from("tasks").select("*").order("created_at"),
     supabase.from("notifications").select("*").order("created_at", { ascending: false }),
+    // Fetched separately from the hard-fail set below: these two tables ship
+    // via a manually-run migration (client-links-notes.sql), so a not-yet-run
+    // migration must degrade to "no links/notes yet", not break the whole app.
+    supabase.from("client_links").select("*").order("position"),
+    supabase.from("client_notes").select("*").order("created_at", { ascending: false }),
   ]);
   const err = c.error || ct.error || p.error || t.error || n.error;
   if (err) throw err;
+  if (cl.error) console.warn("[db] client_links unavailable — run supabase/client-links-notes.sql", cl.error.message);
+  if (cn.error) console.warn("[db] client_notes unavailable — run supabase/client-links-notes.sql", cn.error.message);
   return {
     clients: (c.data ?? []).map(rowToClient),
     contacts: (ct.data ?? []).map(rowToContact),
     projects: (p.data ?? []).map(rowToProject),
     tasks: (t.data ?? []).map(rowToTask),
     notifications: (n.data ?? []).map(rowToNotif),
+    clientLinks: cl.error ? [] : (cl.data ?? []).map(rowToClientLink),
+    clientNotes: cn.error ? [] : (cn.data ?? []).map(rowToClientNote),
   };
 }
 
@@ -95,6 +114,10 @@ export const deleteProjectDb = (id: string) => supabase.from("projects").delete(
 export const deleteClientDb = (id: string) => supabase.from("clients").delete().eq("id", id).then(logErr);
 export const insertNotif = (n: Notification) => supabase.from("notifications").insert(notifToRow(n)).then(logErr);
 export const markNotifsReadDb = (recipientId: string) => supabase.from("notifications").update({ read: true }).eq("recipient_id", recipientId).then(logErr);
+export const upsertClientLink = (l: ClientLink) => supabase.from("client_links").upsert(clientLinkToRow(l)).then(logErr);
+export const deleteClientLinkDb = (id: string) => supabase.from("client_links").delete().eq("id", id).then(logErr);
+export const upsertClientNote = (n: ClientNote) => supabase.from("client_notes").upsert(clientNoteToRow(n)).then(logErr);
+export const deleteClientNoteDb = (id: string) => supabase.from("client_notes").delete().eq("id", id).then(logErr);
 
 // Every upsert/delete above is fire-and-forget from the UI's perspective — this
 // is the single choke point where a failed save gets surfaced. Dispatches a

@@ -14,6 +14,8 @@ import {
   STATUS_ORDER,
   CLIENT_STATUS_META,
   type ClientStatus,
+  HEALTH_META,
+  clientHealth,
   PRIORITY_META,
   PRIORITY_ORDER,
   type Task,
@@ -24,20 +26,25 @@ import {
   type Contact,
   type Attachment,
   type Notification,
+  type ClientLink,
+  type ClientNote,
+  type NoteType,
   type Me,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb } from "@/lib/db";
 import TeamPanel from "./TeamPanel";
 import SettingsPanel from "./SettingsPanel";
 import AddClientModal from "./AddClientModal";
 
 
 import { I, SideItem, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFromName, LIST_COLUMNS, type FilterState, type SortBy, type Toast } from "./cockpit/ui";
-import { ConfirmModal, PromptModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
+import { ConfirmModal, PromptModal, LinkFormModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
 import { CommandK } from "./cockpit/CommandK";
 import { GroupedList } from "./cockpit/GroupedList";
 import { TaskDrawer } from "./cockpit/TaskDrawer";
+import { QuickLinksBar } from "./cockpit/ClientLinks";
+import { ClientNotes } from "./cockpit/ClientNotes";
 
 export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [clients, setClients] = useState<Client[]>([]);
@@ -45,6 +52,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [clientLinks, setClientLinks] = useState<ClientLink[]>([]);
+  const [clientNotes, setClientNotes] = useState<ClientNote[]>([]);
+  const [clientTab, setClientTab] = useState<"tasks" | "knowledge">("tasks");
+  const [linkModal, setLinkModal] = useState<{ initial?: ClientLink } | null>(null);
   const [loading, setLoading] = useState(true);
   const [dbError, setDbError] = useState<string | null>(null);
 
@@ -116,6 +127,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   useEffect(() => { try { setDrawerFull(localStorage.getItem("cut_drawerFull") === "1"); } catch {} }, []);
   // Drop the project filter whenever we leave its client (or enter My Work).
   useEffect(() => { setActiveProject((p) => (p && projects.find((x) => x.id === p)?.clientId === activeClient && !myWork ? p : null)); }, [activeClient, myWork, projects]);
+  // Links/Notes/health are single-client concepts — always land back on Tasks when the active client changes.
+  useEffect(() => { setClientTab("tasks"); }, [activeClient, myWork]);
   const toggleDrawerFull = () => setDrawerFull((f) => { const v = !f; try { localStorage.setItem("cut_drawerFull", v ? "1" : "0"); } catch {} return v; });
   const [cmdkOpen, setCmdkOpen] = useState(false);
   useEffect(() => {
@@ -155,6 +168,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         } catch { /* roster fetch is best-effort; founder fallback stays */ }
         const d = await fetchAll();
         setClients(d.clients); setProjects(d.projects); setContacts(d.contacts); setTasks(d.tasks); setNotifications(d.notifications);
+        setClientLinks(d.clientLinks); setClientNotes(d.clientNotes);
       } catch (e) {
         setDbError(e instanceof Error ? e.message : "Failed to load data.");
       } finally {
@@ -305,7 +319,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       assigneeId: me.role === "admin" ? null : me.id,
       contactId: activeClient.slice(3),
       due: groupBy === "due" && groupKey === "today" ? TODAY : null,
-      recurrence: "none", labelIds: [], ghlTaskId: null, subtasks: [], attachments: [], comments: [],
+      recurrence: "none", labelIds: [], ghlTaskId: null, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
     };
     setTasks((ts) => [...ts, t]);
     upsertTask(t);
@@ -520,6 +534,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setClients((cs) => cs.filter((x) => x.id !== id));
         setProjects((ps) => ps.filter((p) => p.clientId !== id));
         setTasks((ts) => ts.filter((t) => t.clientId !== id));
+        setClientLinks((ls) => ls.filter((l) => l.clientId !== id));
+        setClientNotes((ns) => ns.filter((n) => n.clientId !== id));
         deleteClientDb(id);
         if (activeClient === id) setActiveClient("all");
       },
@@ -569,6 +585,44 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     });
   };
 
+  // --- client links -----------------------------------------------------
+  const saveLink = (clientId: string, initial: ClientLink | undefined, v: { label: string; url: string; groupLabel: string }) => {
+    if (initial) {
+      const updated: ClientLink = { ...initial, ...v };
+      setClientLinks((ls) => ls.map((l) => (l.id === initial.id ? updated : l)));
+      upsertClientLink(updated);
+    } else {
+      const link: ClientLink = { id: newId("cl_"), clientId, position: clientLinks.filter((l) => l.clientId === clientId).length, ...v };
+      setClientLinks((ls) => [...ls, link]);
+      upsertClientLink(link);
+    }
+    setLinkModal(null);
+  };
+  const deleteLink = (link: ClientLink) => setConfirmDialog({
+    title: `Delete "${link.label}"?`, message: "This can't be undone.", confirmLabel: "Delete",
+    onConfirm: () => { setConfirmDialog(null); setClientLinks((ls) => ls.filter((l) => l.id !== link.id)); deleteClientLinkDb(link.id); },
+  });
+  const reorderLinks = (clientId: string, orderedIds: string[]) => {
+    const reordered = orderedIds.map((id, i) => { const l = clientLinks.find((x) => x.id === id)!; return { ...l, position: i }; });
+    setClientLinks((ls) => [...ls.filter((l) => l.clientId !== clientId), ...reordered]);
+    reordered.forEach((l) => upsertClientLink(l));
+  };
+
+  // --- client notes ------------------------------------------------------
+  const addNote = (clientId: string, type: NoteType, body: string) => {
+    const note: ClientNote = { id: newId("cn_"), clientId, type, body, authorId: me.id, at: new Date().toISOString() };
+    setClientNotes((ns) => [note, ...ns]); // newest-first feed
+    upsertClientNote(note);
+  };
+  const editNote = (note: ClientNote, body: string) => {
+    const updated: ClientNote = { ...note, body };
+    setClientNotes((ns) => ns.map((n) => (n.id === note.id ? updated : n)));
+    upsertClientNote(updated);
+  };
+  const deleteNote = (note: ClientNote) => {
+    setClientNotes((ns) => ns.filter((n) => n.id !== note.id));
+    deleteClientNoteDb(note.id);
+  };
 
   if (loading) return (<div className="flex h-screen items-center justify-center text-muted">Loading your workspace…</div>);
   if (dbError) return (
@@ -644,6 +698,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     <span role="button" title={`${CLIENT_STATUS_META[c.status].label} — click to change`}
                       onClick={(e) => { e.stopPropagation(); setStatusMenuClientId(statusMenuClientId === c.id ? null : c.id); }}
                       className="h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-transparent transition hover:ring-white/30" style={{ background: CLIENT_STATUS_META[c.status].dot }} />
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full" title={HEALTH_META[clientHealth(c.id, scopedTasks)].label} style={{ background: HEALTH_META[clientHealth(c.id, scopedTasks)].dot }} />
                     <span className="min-w-0 flex-1">
                       <span className="truncate">{c.name}</span>
                       {clientCompany(c) && <span className="block truncate text-[13px] font-normal text-muted">{clientCompany(c)}</span>}
@@ -675,7 +730,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                       const on = activeProject === p.id;
                       return (
                         <div key={p.id} className={`group/prow relative ${menuProjectId === p.id ? "z-50" : ""}`}>
-                          <button onClick={() => { setActiveProject(on ? null : p.id); setOpenTaskId(null); }}
+                          <button onClick={() => { setActiveProject(on ? null : p.id); setOpenTaskId(null); setClientTab("tasks"); }}
                             className={`flex w-full items-center gap-2 rounded-md py-1 pl-2 pr-1 text-left text-[13px] transition ${on ? "bg-accent-soft font-medium text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>
                             <I.folder className="shrink-0 opacity-70" />
                             <span className="min-w-0 flex-1 truncate">{p.name}</span>
@@ -737,10 +792,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 {(() => { const pg = projectProgress(activeProject); return (<span className="inline-flex items-center gap-1.5">{pg.done}/{pg.total} done<span className="inline-block h-1.5 w-24 overflow-hidden rounded-full bg-border align-middle"><span className="block h-full rounded-full bg-green-500 transition-all" style={{ width: `${pg.pct}%` }} /></span>{pg.pct}%</span>); })()}
               </p>
             </>) : (<>
-              <h1 className="truncate text-[17px] font-semibold">{myWork ? "My Work" : activeClient === "all" ? "All clients" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}</h1>
+              <h1 className="flex items-center gap-2 truncate text-[17px] font-semibold">
+                {myWork ? "My Work" : activeClient === "all" ? "All clients" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
+                {!myWork && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
+              </h1>
               <p className="hidden text-[15px] text-muted sm:block">{myWork ? "Everything assigned to one person, across all clients" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</p>
             </>)}
           </div>
+
+          {!myWork && activeClient !== "all" && !activeProject && (
+            <div className="inline-flex overflow-hidden rounded-md border">
+              <button onClick={() => setClientTab("tasks")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "tasks" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Tasks</button>
+              <button onClick={() => setClientTab("knowledge")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "knowledge" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Knowledge · {clientNotes.filter((n) => n.clientId === activeClient).length}</button>
+            </div>
+          )}
 
 
           {myWork ? (
@@ -751,7 +816,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             ) : (
               <span className="text-[15px] text-muted">Your assigned tasks across all clients</span>
             )
-          ) : (
+          ) : clientTab === "knowledge" ? null : (
             <div className="relative">
               <button onClick={() => setFilterOpen((o) => !o)} className="flex items-center gap-1.5 rounded-md border bg-background px-2.5 py-1.5 text-muted hover:text-foreground">
                 <I.filter /> Filter &amp; view
@@ -804,9 +869,29 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </div>
         </header>
 
+        {!myWork && activeClient !== "all" && (
+          <QuickLinksBar
+            links={clientLinks.filter((l) => l.clientId === activeClient)}
+            ghlLink={ghlContactUrlFor(activeClient) ? { label: "Open in GHL", url: ghlContactUrlFor(activeClient)! } : null}
+            canEdit={canAdmin}
+            onAdd={() => setLinkModal({})}
+            onEdit={(link) => setLinkModal({ initial: link })}
+            onDelete={deleteLink}
+            onReorder={(ids) => reorderLinks(activeClient, ids)}
+          />
+        )}
+
         {/* content */}
         {myWork ? (
           <GroupedList groups={buildGroups(myWorkTasks, "due").filter((g) => g.tasks.length > 0)} showClient clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={false} quickAddHint="" onQuickAdd={() => {}} onToggleSub={toggleSub} onAddSub={addSub} />
+        ) : !activeProject && activeClient !== "all" && clientTab === "knowledge" ? (
+          <ClientNotes
+            notes={clientNotes.filter((n) => n.clientId === activeClient)}
+            me={me}
+            onAdd={(type, body) => addNote(activeClient, type, body)}
+            onEdit={editNote}
+            onDelete={deleteNote}
+          />
         ) : (
           <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} />
         )}
@@ -827,6 +912,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       {addClientOpen && <AddClientModal subAccounts={subAccounts} contacts={contacts} existingIds={new Set(clients.map((c) => c.id))} onAdd={addClientContact} onClose={() => setAddClientOpen(false)} />}
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
       {promptDialog && <PromptModal {...promptDialog} onCancel={() => setPromptDialog(null)} />}
+      {linkModal && activeClient !== "all" && (
+        <LinkFormModal
+          initial={linkModal.initial ? { label: linkModal.initial.label, url: linkModal.initial.url, groupLabel: linkModal.initial.groupLabel } : undefined}
+          onSubmit={(v) => saveLink(activeClient, linkModal.initial, v)}
+          onCancel={() => setLinkModal(null)}
+        />
+      )}
       {cmdkOpen && <CommandK tasks={scopedTasks} clients={clientList} clientById={clientById} onOpenTask={(id) => { setOpenTaskId(id); setCmdkOpen(false); }} onOpenClient={(id) => { setMyWork(false); setActiveClient(id); setCmdkOpen(false); }} onClose={() => setCmdkOpen(false)} />}
 
       <div className="pointer-events-none fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 flex-col items-center gap-2">

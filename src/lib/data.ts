@@ -51,6 +51,39 @@ export interface Client {
   status: ClientStatus;
 }
 
+/** A quick-access link on a client's page (live site, WP admin, etc.), stored
+ * in its own `client_links` table so ordering/grouping can be edited freely. */
+export interface ClientLink {
+  id: string;
+  clientId: string;
+  groupLabel: string; // "" = ungrouped
+  label: string;
+  url: string;
+  position: number;
+}
+
+export type NoteType = "meeting" | "content" | "contact" | "deliverable" | "note";
+export const NOTE_TYPE_META: Record<NoteType, { label: string; color: string }> = {
+  meeting: { label: "Meeting", color: "#3b82f6" },
+  content: { label: "Content", color: "#ec4899" },
+  contact: { label: "Contact", color: "#0ea5e9" },
+  deliverable: { label: "Deliverable", color: "#22c55e" },
+  note: { label: "Note", color: "#94a3b8" },
+};
+export const NOTE_TYPE_ORDER: NoteType[] = ["meeting", "content", "contact", "deliverable", "note"];
+
+/** A freeform, typed log entry on a client — a shared wiki/log, not a task
+ * comment thread. Lives in its own `client_notes` table so a VA can be
+ * granted write access to their own notes without touching client metadata. */
+export interface ClientNote {
+  id: string;
+  clientId: string;
+  type: NoteType;
+  body: string;
+  authorId: string | null;
+  at: string; // ISO
+}
+
 /** A GHL contact inside a sub-account. Tasks link to one of these. */
 export interface Contact {
   id: string;
@@ -116,6 +149,7 @@ export interface Task {
   subtasks: Subtask[];
   attachments: Attachment[];
   comments: Comment[];
+  createdAt: string; // ISO — set by the DB; never overwritten on upsert
 }
 
 export const STATUS_META: Record<TaskStatus, { label: string; dot: string; chip: string }> = {
@@ -205,6 +239,7 @@ export const projectsSeed: Project[] = [
 export const seedTasks: Task[] = [
   {
     id: "t_1",
+    createdAt: TODAY,
     projectId: "p_bright_onboard",
     clientId: "c_bright",
     title: "Build new-patient landing page",
@@ -234,6 +269,7 @@ export const seedTasks: Task[] = [
   },
   {
     id: "t_2",
+    createdAt: TODAY,
     projectId: "p_bright_onboard",
     clientId: "c_bright",
     title: "Wire intake form → GHL automation",
@@ -252,6 +288,7 @@ export const seedTasks: Task[] = [
   },
   {
     id: "t_3",
+    createdAt: TODAY,
     projectId: "p_bright_reviews",
     clientId: "c_bright",
     title: "Set up review request SMS",
@@ -273,6 +310,7 @@ export const seedTasks: Task[] = [
   },
   {
     id: "t_4",
+    createdAt: TODAY,
     projectId: "p_peak_launch",
     clientId: "c_peak",
     title: "Design challenge signup page",
@@ -295,6 +333,7 @@ export const seedTasks: Task[] = [
   },
   {
     id: "t_5",
+    createdAt: TODAY,
     projectId: "p_peak_launch",
     clientId: "c_peak",
     title: "Build email nurture (5 emails)",
@@ -313,6 +352,7 @@ export const seedTasks: Task[] = [
   },
   {
     id: "t_6",
+    createdAt: TODAY,
     projectId: "p_harbor_intake",
     clientId: "c_harbor",
     title: "Map intake questions to custom fields",
@@ -334,6 +374,7 @@ export const seedTasks: Task[] = [
   },
   {
     id: "t_7",
+    createdAt: TODAY,
     projectId: "p_harbor_intake",
     clientId: "c_harbor",
     title: "Build 48-hour follow-up sequence",
@@ -376,6 +417,26 @@ export function timeAgo(at: string): string {
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   if (s < 86400 * 30) return `${Math.floor(s / 86400)}d ago`;
   return new Date(t).toLocaleDateString();
+}
+
+export type ClientHealth = "danger" | "stale" | "calm";
+export const HEALTH_META: Record<ClientHealth, { label: string; dot: string }> = {
+  danger: { label: "Overdue work", dot: "#ef4444" },
+  stale: { label: "No recent activity", dot: "#f59e0b" },
+  calm: { label: "On track", dot: "#22c55e" },
+};
+
+/** Auto-derived, never stored: danger if anything overdue, stale if the
+ * client's tasks have had no activity (creation or a comment/event) in 30+
+ * days, calm otherwise. "Activity" already includes the kind:"event" entries
+ * patchTask logs on every status/assignee/due/priority change. */
+export function clientHealth(clientId: string, tasks: Task[]): ClientHealth {
+  const ts = tasks.filter((t) => t.clientId === clientId);
+  if (ts.some((t) => t.status !== "done" && isOverdue(t.due))) return "danger";
+  if (ts.length === 0) return "calm";
+  const signals = ts.flatMap((t) => [Date.parse(t.createdAt), ...t.comments.map((c) => Date.parse(c.at))]).filter((n) => !Number.isNaN(n));
+  const last = signals.length ? Math.max(...signals) : -Infinity;
+  return (Date.now() - last) / 86_400_000 > 30 ? "stale" : "calm";
 }
 
 /** Advance an ISO due date by one recurrence step (deterministic — no now()). */

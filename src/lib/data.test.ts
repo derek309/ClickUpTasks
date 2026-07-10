@@ -8,11 +8,23 @@ import {
   initialsOf,
   setUsers,
   users,
+  clientHealth,
   TODAY,
   type User,
+  type Task,
 } from "./data";
 
 afterEach(() => vi.useRealTimers());
+
+function mkTask(overrides: Partial<Task> = {}): Task {
+  return {
+    id: "t_x", projectId: "p_x", clientId: "cl_x", title: "Task", description: "",
+    status: "todo", priority: "none", assigneeId: null, contactId: null, due: null,
+    recurrence: "none", labelIds: [], ghlTaskId: null, subtasks: [], attachments: [],
+    comments: [], createdAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
 
 describe("todayIso", () => {
   it("returns the local date as yyyy-mm-dd", () => {
@@ -127,5 +139,57 @@ describe("setUsers (live roster)", () => {
     setUsers([]);
     expect(users).toEqual(before);
     expect(users.length).toBeGreaterThan(0);
+  });
+});
+
+describe("clientHealth", () => {
+  it("is danger when any non-done task is overdue", () => {
+    const tasks = [mkTask({ clientId: "cl_a", due: "2000-01-01", status: "todo" })];
+    expect(clientHealth("cl_a", tasks)).toBe("danger");
+  });
+
+  it("ignores overdue tasks that are already done", () => {
+    const tasks = [mkTask({ clientId: "cl_a", due: "2000-01-01", status: "done", createdAt: new Date().toISOString() })];
+    expect(clientHealth("cl_a", tasks)).toBe("calm");
+  });
+
+  it("is calm when the client has no tasks", () => {
+    expect(clientHealth("cl_a", [])).toBe("calm");
+  });
+
+  it("is stale when the only activity is 30+ days old", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-07T12:00:00Z"));
+    const tasks = [mkTask({ clientId: "cl_a", due: null, createdAt: "2026-05-01T00:00:00Z" })];
+    expect(clientHealth("cl_a", tasks)).toBe("stale");
+  });
+
+  it("is calm when activity is recent", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-07T12:00:00Z"));
+    const tasks = [mkTask({ clientId: "cl_a", due: null, createdAt: "2026-07-06T00:00:00Z" })];
+    expect(clientHealth("cl_a", tasks)).toBe("calm");
+  });
+
+  it("counts a comment/event timestamp as activity, not just createdAt", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-07T12:00:00Z"));
+    const tasks = [mkTask({
+      clientId: "cl_a", due: null, createdAt: "2026-01-01T00:00:00Z",
+      comments: [{ id: "cm_1", authorId: "u_derek", body: "moved status", at: "2026-07-06T00:00:00Z", kind: "event" }],
+    })];
+    expect(clientHealth("cl_a", tasks)).toBe("calm");
+  });
+
+  it("danger beats stale when both conditions apply", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-07T12:00:00Z"));
+    const tasks = [mkTask({ clientId: "cl_a", due: "2000-01-01", status: "todo", createdAt: "2026-01-01T00:00:00Z" })];
+    expect(clientHealth("cl_a", tasks)).toBe("danger");
+  });
+
+  it("only considers tasks belonging to the given client", () => {
+    const tasks = [mkTask({ clientId: "cl_other", due: "2000-01-01", status: "todo" })];
+    expect(clientHealth("cl_a", tasks)).toBe("calm");
   });
 });
