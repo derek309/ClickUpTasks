@@ -28,10 +28,10 @@ export function ClientsBoard({ groups, scopedTasks, clientTaskCount, hasUnreadMe
         <div className="divide-y-8 divide-background">
           {groups.map((g) => (
             <div key={g.key}>
-              <div className="flex items-center gap-2 px-4 pb-1.5 pt-3">
+              <div className="flex items-center gap-2 border-y px-4 py-2" style={{ background: g.color + "22", borderColor: g.color + "40" }}>
                 <span className="h-2.5 w-2.5 rounded-full" style={{ background: g.color }} />
                 <span className="text-[15px] font-bold">{g.label}</span>
-                <span className="rounded-full bg-background px-1.5 text-[13px] font-normal normal-case tracking-normal text-muted">{g.clients.length}</span>
+                <span className="rounded-full px-1.5 text-[13px] font-semibold normal-case tracking-normal text-white" style={{ background: g.color }}>{g.clients.length}</span>
               </div>
               <div>
                 {g.clients.map((c) => (
