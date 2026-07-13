@@ -1202,6 +1202,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             </>)}
           </div>
 
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           {!myWork && !myClientsView && !personalView && activeClient !== "all" && !activeProject && (
             <div className="inline-flex overflow-hidden rounded-md border">
               <button onClick={() => setClientTab("tasks")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "tasks" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Tasks</button>
@@ -1329,7 +1330,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             </div>
           )}
 
-          <div className="ml-auto flex items-center gap-2">
+          <div className="flex items-center gap-2">
             <div className="relative">
               <button onClick={() => { const opening = !bellOpen; setBellOpen(opening); if (opening) { setNotifications((ns) => ns.map((n) => (n.recipientId === me.id ? { ...n, read: true } : n))); markNotifsReadDb(me.id); } }} className="relative rounded-lg border bg-background p-2 text-muted hover:text-foreground">
                 <I.bell />
@@ -1346,6 +1347,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 </div>
               </>)}
             </div>
+          </div>
           </div>
         </header>
 
