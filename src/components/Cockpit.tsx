@@ -66,6 +66,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [importingTasks, setImportingTasks] = useState(false);
   const [clientTab, setClientTab] = useState<"tasks" | "knowledge">("tasks");
   const [linkModal, setLinkModal] = useState<{ initial?: ClientLink } | null>(null);
+  const [ghlLinkOpen, setGhlLinkOpen] = useState(false); // "Link to GHL" contact-picker
+  const [ghlLinkSearch, setGhlLinkSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [dbError, setDbError] = useState<string | null>(null);
 
@@ -143,6 +145,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setClients((cs) => cs.map((x) => (x.id === clientId ? nc : x)));
     markOwnClientWrite(nc.id);
     upsertClient(nc);
+  };
+  // Point a client at a synced GHL contact (or null to unlink). Used for
+  // clients whose id isn't itself a contact id, so GHL features can't derive
+  // one from the id — see contactForClient.
+  const linkClientToContact = (clientId: string, contactId: string | null) => {
+    const c = clientById(clientId);
+    if (!c) return;
+    const nc = { ...c, linkedContactId: contactId };
+    setClients((cs) => cs.map((x) => (x.id === clientId ? nc : x)));
+    markOwnClientWrite(nc.id);
+    upsertClient(nc);
+    pushToast(contactId ? `Linked to GoHighLevel — ${contactById(contactId)?.name ?? "contact"}` : "Unlinked from GoHighLevel");
   };
   useEffect(() => {
     try {
@@ -510,9 +524,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       items: sortedClients.filter((c) => c.status === st || (st === "active_client" && !knownClientStatuses.has(c.status))),
     }))
     .filter((g) => g.items.length > 0);
+  // Resolves the GHL contact backing a client: an explicit link (set via
+  // "Link to GHL" for clients whose id isn't itself a contact id) wins;
+  // otherwise fall back to the id-derived contact ("cl_" + contact id).
+  const contactForClient = (clientId: string): Contact | null => {
+    const c = clientById(clientId);
+    if (c?.linkedContactId) return contactById(c.linkedContactId);
+    return clientId.startsWith("cl_") ? contactById(clientId.slice(3)) : null;
+  };
   const ghlContactUrlFor = (clientId: string) => {
-    if (!clientId.startsWith("cl_")) return null;
-    const ct = contactById(clientId.slice(3));
+    const ct = contactForClient(clientId);
     if (!ct) return null;
     const sub = clientById(ct.clientId);
     return sub?.ghlLocationId ? `https://app.gohighlevel.com/v2/location/${sub.ghlLocationId}/contacts/detail/${ct.ghlContactId}` : null;
@@ -787,7 +808,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return { locationId: sub.ghlLocationId, ghlContactId: contact.ghlContactId };
   };
   const activeContact = (): Contact | null =>
-    activeClient.startsWith("cl_") ? contactById(activeClient.slice(3)) : null;
+    activeClient !== "all" ? contactForClient(activeClient) : null;
   // Pulls a contact's tasks created directly in GoHighLevel (not pushed from
   // here) into local tracked tasks, linked via ghlTaskId so they join the
   // existing two-way sync (see GHL_SYNC_FIELDS/syncGhlIfLinked below) going
@@ -1212,6 +1233,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   <I.repeat />
                 </button>
               )}
+              {canAdmin && !ghlContactUrlFor(activeClient) && (
+                <button onClick={() => { setGhlLinkSearch(""); setGhlLinkOpen(true); }} title="Connect this client to a GoHighLevel contact"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-dashed px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
+                  <I.bolt /> Link to GHL
+                </button>
+              )}
+              {canAdmin && clientById(activeClient)?.linkedContactId && (
+                <button onClick={() => linkClientToContact(activeClient, null)} title="Unlink from GoHighLevel"
+                  className="rounded-md border bg-background p-1.5 text-muted hover:text-danger">
+                  <I.close />
+                </button>
+              )}
               {canAdmin && (
                 <button onClick={() => setLinkModal({})} title="Add a quick link" className="rounded-md border bg-background p-1.5 text-muted hover:text-foreground">
                   <I.plus />
@@ -1370,6 +1403,32 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           onCancel={() => setLinkModal(null)}
         />
       )}
+      {ghlLinkOpen && activeClient !== "all" && (<>
+        <div className="fixed inset-0 z-40 bg-black/30" onClick={() => setGhlLinkOpen(false)} />
+        <div className="fixed left-1/2 top-1/2 z-50 flex max-h-[70vh] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border bg-surface shadow-xl">
+          <div className="border-b px-5 py-3">
+            <h2 className="text-[16px] font-semibold">Link to GoHighLevel</h2>
+            <p className="text-[15px] text-muted">Connect <b>{clientById(activeClient)?.name}</b> to a synced GoHighLevel contact so Open-in-GHL and task import work.</p>
+          </div>
+          <div className="border-b p-3">
+            <input autoFocus value={ghlLinkSearch} onChange={(e) => setGhlLinkSearch(e.target.value)} placeholder="Search contacts by name or email…" className="w-full rounded-md border bg-background px-3 py-2 text-[15px] outline-none focus:border-accent" />
+          </div>
+          <div className="flex-1 overflow-y-auto p-1">
+            {(() => {
+              const q = ghlLinkSearch.trim().toLowerCase();
+              const linkable = contacts.filter((ct) => ct.ghlContactId && clientById(ct.clientId)?.ghlLocationId);
+              const matches = (q ? linkable.filter((ct) => ct.name.toLowerCase().includes(q) || ct.email.toLowerCase().includes(q)) : linkable).slice(0, 50);
+              if (matches.length === 0) return <div className="px-4 py-8 text-center text-[15px] text-muted">{q ? "No matching GoHighLevel contacts." : "Type to search your synced contacts."}</div>;
+              return matches.map((ct) => (
+                <button key={ct.id} onClick={() => { linkClientToContact(activeClient, ct.id); setGhlLinkOpen(false); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-background">
+                  <span className="min-w-0 flex-1"><span className="block truncate text-[15px] font-medium">{ct.name}</span>{ct.email && <span className="block truncate text-[13px] text-muted">{ct.email}</span>}</span>
+                  <span className="shrink-0 text-[13px] text-muted">{clientById(ct.clientId)?.name}</span>
+                </button>
+              ));
+            })()}
+          </div>
+        </div>
+      </>)}
       {cmdkOpen && <CommandK tasks={scopedTasks} clients={clientList} contacts={contacts} addedContactIds={addedContactIds} clientById={clientById}
         onOpenTask={(id) => { setOpenTaskId(id); setCmdkOpen(false); }}
         onOpenClient={(id) => { setMyWork(false); setMyClientsView(false); setPersonalView(false); setActiveClient(id); setCmdkOpen(false); }}

@@ -29,8 +29,8 @@ export const titleCase = (s: string) => (s || "").replace(/\b([a-z])/g, (m) => m
 
 // --- mappers ----------------------------------------------------------------
 
-const clientToRow = (c: Client) => ({ id: c.id, name: c.name, color: c.color, ghl_location_id: c.ghlLocationId, status: c.status ?? "lead", type: c.type ?? "client", assigned_to: c.assignedTo ?? [] });
-export const rowToClient = (r: any): Client => ({ id: r.id, name: titleCase(r.name), color: r.color, ghlLocationId: r.ghl_location_id ?? "", status: (r.status as Client["status"]) ?? "lead", type: (r.type as Client["type"]) ?? "client", assignedTo: r.assigned_to ?? [] });
+const clientToRow = (c: Client) => ({ id: c.id, name: c.name, color: c.color, ghl_location_id: c.ghlLocationId, status: c.status ?? "lead", type: c.type ?? "client", assigned_to: c.assignedTo ?? [], linked_contact_id: c.linkedContactId ?? null });
+export const rowToClient = (r: any): Client => ({ id: r.id, name: titleCase(r.name), color: r.color, ghlLocationId: r.ghl_location_id ?? "", status: (r.status as Client["status"]) ?? "lead", type: (r.type as Client["type"]) ?? "client", assignedTo: r.assigned_to ?? [], linkedContactId: r.linked_contact_id ?? null });
 
 const contactToRow = (c: Contact) => ({ id: c.id, client_id: c.clientId, name: c.name, email: c.email, ghl_contact_id: c.ghlContactId });
 const rowToContact = (r: any): Contact => ({ id: r.id, clientId: r.client_id, name: titleCase(r.name), email: r.email ?? "", ghlContactId: r.ghl_contact_id ?? "" });

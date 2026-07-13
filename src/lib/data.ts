@@ -84,6 +84,10 @@ export interface Client {
    * projects/tasks/links/notes/messages) before they have any task assigned
    * on it, not just an ownership label. */
   assignedTo: string[];
+  /** Explicit link to a synced GHL Contact, for clients whose id isn't
+   * itself "cl_" + a contact id (e.g. ClickUp-origin imports). When set, it
+   * overrides the id-derived contact for Open-in-GHL and task import. */
+  linkedContactId?: string | null;
 }
 
 /** A quick-access link on a client's page (live site, WP admin, etc.), stored
