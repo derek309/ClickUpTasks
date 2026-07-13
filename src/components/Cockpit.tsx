@@ -481,7 +481,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const baseTasks = scopedTasks.filter((t) => t.clientId.startsWith("cl_") && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject));
   const projectsForClient = (clientId: string) => projects.filter((p) => p.clientId === clientId);
   const projectProgress = (projectId: string) => { const ts = scopedTasks.filter((t) => t.projectId === projectId); const done = ts.filter((t) => t.status === "done").length; return { done, total: ts.length, pct: ts.length ? Math.round((done / ts.length) * 100) : 0 }; };
-  const clientTaskCount = (clientId: string) => scopedTasks.filter((t) => t.clientId === clientId).length;
+  // Open (non-done) count — matches what the client's task list actually shows
+  // with "Hide done" on by default, so the sidebar/board badge and the list
+  // never disagree about how many tasks "need attention".
+  const clientTaskCount = (clientId: string) => scopedTasks.filter((t) => t.clientId === clientId && t.status !== "done").length;
   const myWorkTasks = sortTasks(tasks.filter((t) => t.assigneeId === myWorkUser && passesFilters(t)));
 
   const openTask = tasks.find((t) => t.id === openTaskId) ?? null;
