@@ -198,7 +198,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         // Load the real team roster (every signed-up profile) before rendering
         // data, so assignees/avatars resolve to real people — not demo seeds.
         try {
-          const { data: profs } = await supabase.from("profiles").select("id, name, email, role, member_id, color, avatar_url");
+          const { data: profs } = await supabase.from("profiles").select("id, name, email, role, member_id, color");
           if (profs?.length) {
             const seen = new Set<string>();
             setUsers(profs.flatMap((p) => {
@@ -206,9 +206,23 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               if (seen.has(id)) return [];
               seen.add(id);
               const name = p.name || p.email || "Teammate";
-              return [{ id, name, initials: initialsOf(name), color: p.color || "#a855f7", role: p.role === "admin" ? "admin" as const : "va" as const, avatarUrl: p.avatar_url ?? null }];
+              return [{ id, name, initials: initialsOf(name), color: p.color || "#a855f7", role: p.role === "admin" ? "admin" as const : "va" as const }];
             }));
           }
+          // Avatar photos are a newer, optional column — fetched in a second,
+          // independently-failing pass so a deploy that lands before
+          // supabase/avatars.sql has run (no avatar_url column yet) can't
+          // take the whole roster fetch above down with it; PostgREST 400s
+          // the entire query for an unknown column, not just that field.
+          try {
+            const { data: withAvatars } = await supabase.from("profiles").select("id, member_id, avatar_url");
+            if (withAvatars?.length) {
+              setUsers(users.map((u) => {
+                const row = withAvatars.find((p) => (p.member_id || p.id) === u.id);
+                return row?.avatar_url ? { ...u, avatarUrl: row.avatar_url } : u;
+              }));
+            }
+          } catch { /* avatar enrichment is best-effort */ }
         } catch { /* roster fetch is best-effort; founder fallback stays */ }
         const d = await fetchAll();
         setClients(d.clients); setProjects(d.projects); setContacts(d.contacts); setTasks(d.tasks); setNotifications(d.notifications);
