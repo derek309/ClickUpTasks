@@ -212,7 +212,7 @@ function InlinePriority({ value, onChange }: { value: Priority; onChange: (p: Pr
   );
 }
 
-function InlineAssignee({ value, onChange, size = 22 }: { value: string | null; onChange: (a: string | null) => void; size?: number }) {
+export function InlineAssignee({ value, onChange, size = 22 }: { value: string | null; onChange: (a: string | null) => void; size?: number }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });

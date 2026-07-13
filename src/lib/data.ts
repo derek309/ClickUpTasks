@@ -195,6 +195,8 @@ export interface Subtask {
   id: string;
   title: string;
   done: boolean;
+  assigneeId?: string | null;
+  due?: string | null; // ISO yyyy-mm-dd
 }
 
 export interface Task {
