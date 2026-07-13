@@ -830,6 +830,31 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       pushToast(`Moved to “${p.name}”`);
     } });
   };
+  // Moving a task to a different client also has to move its project (a
+  // project belongs to exactly one client) and its contact link — reuses the
+  // same find-or-create-a-"Tasks"-project pattern as quickAdd. A GHL-linked
+  // task is quietly unlinked rather than deleted remotely: the old link
+  // points at the wrong contact once moved, but the task on GHL's side is
+  // still real work someone may be tracking there — not ours to delete.
+  const moveTaskToClient = (taskId: string, newClientId: string) => {
+    const t = tasks.find((x) => x.id === taskId);
+    if (!t || t.clientId === newClientId) return;
+    let projectId = projects.find((p) => p.clientId === newClientId)?.id;
+    if (!projectId) {
+      const p: Project = { id: newId("p_"), clientId: newClientId, name: "Tasks", description: "" };
+      setProjects((ps) => [...ps, p]);
+      upsertProject(p);
+      projectId = p.id;
+    }
+    const wasLinked = !!t.ghlTaskId;
+    patchTask(taskId, {
+      clientId: newClientId,
+      projectId,
+      contactId: newClientId.startsWith("cl_") ? newClientId.slice(3) : null,
+      ghlTaskId: null,
+    });
+    pushToast(`Moved to ${clientById(newClientId)?.name ?? "client"}${wasLinked ? " — unlinked from GoHighLevel" : ""}`);
+  };
   const renameProject = (id: string) => {
     const p = projectById(id);
     if (!p) return;
@@ -1196,7 +1221,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={orderedTaskIds.length} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={() => addComment(openTask.id, comment)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} />
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...clientList].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} />
       )}
 
       {teamOpen && <TeamPanel me={me} onClose={() => setTeamOpen(false)} />}
