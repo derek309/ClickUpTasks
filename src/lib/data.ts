@@ -64,6 +64,10 @@ export interface Client {
   ghlLocationId: string;
   status: ClientStatus;
   type: ClientType;
+  /** Roster ids "following" this client — lets a VA see it (and its
+   * projects/tasks/links/notes/messages) before they have any task assigned
+   * on it, not just an ownership label. */
+  assignedTo: string[];
 }
 
 /** A quick-access link on a client's page (live site, WP admin, etc.), stored
@@ -250,9 +254,9 @@ export const labels: Label[] = [
 // --- Clients (GHL sub-accounts) --------------------------------------------
 
 export const clientsSeed: Client[] = [
-  { id: "c_bright", name: "Bright Dental", color: "#0ea5e9", ghlLocationId: "loc_8f21ac", status: "active", type: "client" },
-  { id: "c_peak", name: "Peak Fitness Co.", color: "#f59e0b", ghlLocationId: "loc_2b77de", status: "active", type: "client" },
-  { id: "c_harbor", name: "Harbor Law Group", color: "#8b5cf6", ghlLocationId: "loc_5c09fb", status: "active", type: "client" },
+  { id: "c_bright", name: "Bright Dental", color: "#0ea5e9", ghlLocationId: "loc_8f21ac", status: "active", type: "client", assignedTo: [] },
+  { id: "c_peak", name: "Peak Fitness Co.", color: "#f59e0b", ghlLocationId: "loc_2b77de", status: "active", type: "client", assignedTo: [] },
+  { id: "c_harbor", name: "Harbor Law Group", color: "#8b5cf6", ghlLocationId: "loc_5c09fb", status: "active", type: "client", assignedTo: [] },
 ];
 
 // --- Contacts (GHL contacts) -----------------------------------------------

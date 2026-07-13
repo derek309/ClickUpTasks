@@ -42,7 +42,7 @@ import SettingsPanel from "./SettingsPanel";
 import AddClientModal from "./AddClientModal";
 
 
-import { I, SideItem, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFromName, LIST_COLUMNS, type FilterState, type SortBy, type Toast } from "./cockpit/ui";
+import { I, Avatar, SideItem, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFromName, LIST_COLUMNS, type FilterState, type SortBy, type Toast } from "./cockpit/ui";
 import { ConfirmModal, PromptModal, LinkFormModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
 import { CommandK } from "./cockpit/CommandK";
 import { GroupedList } from "./cockpit/GroupedList";
@@ -105,6 +105,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [dragClientId, setDragClientId] = useState<string | null>(null);
   const [statusMenuClientId, setStatusMenuClientId] = useState<string | null>(null);
+  const [followersMenuOpen, setFollowersMenuOpen] = useState(false);
 
   // Realtime echo suppression for `clients` writes. Admin-only, low-frequency
   // writes — a short TTL ledger is proportionate here (unlike tasks, which
@@ -128,6 +129,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     markOwnClientWrite(nc.id);
     upsertClient(nc);
     pushToast(`${c.name} → ${CLIENT_STATUS_META[status].label}`);
+  };
+  // "Follow" a client: adds/removes a team member from assigned_to, which
+  // supabase/client-assignment.sql's RLS lets that person see the client
+  // (and its projects/tasks/links/notes/messages) even with zero tasks
+  // assigned to them there yet.
+  const toggleClientAssignment = (clientId: string, memberId: string) => {
+    const c = clientById(clientId);
+    if (!c) return;
+    const current = c.assignedTo ?? [];
+    const nc = { ...c, assignedTo: current.includes(memberId) ? current.filter((id) => id !== memberId) : [...current, memberId] };
+    setClients((cs) => cs.map((x) => (x.id === clientId ? nc : x)));
+    markOwnClientWrite(nc.id);
+    upsertClient(nc);
   };
   useEffect(() => {
     try {
@@ -382,7 +396,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // clients/vendors are classified contacts you can message, reached via the
   // Contacts tab and Conversations, not full clients with projects/tasks.
   const clientList = clients.filter((c) => c.id.startsWith("cl_") && c.type === "client");
-  const visibleClients = canAdmin ? clientList : clientList.filter((c) => scopedTasks.some((t) => t.clientId === c.id));
+  // Mirrors the RLS rule in supabase/client-assignment.sql: a VA sees a
+  // client if they have a task on it OR they're explicitly following it —
+  // this is a display-layer echo of that DB rule, not the enforcement of it.
+  const visibleClients = canAdmin ? clientList : clientList.filter((c) => scopedTasks.some((t) => t.clientId === c.id) || (c.assignedTo ?? []).includes(me.id));
   // ⌘K's "Not imported" search — any type counts as "already added" here,
   // not just type 'client', so a contact never shows as addable twice.
   const addedContactIds = new Set(clients.filter((c) => c.id.startsWith("cl_")).map((c) => c.id.slice(3)));
@@ -796,7 +813,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const id = "cl_" + contact.id;
     if (clients.some((c) => c.id === id)) { setActiveClient(id); setMyWork(false); setMyClientsView(false); setAddClientOpen(false); return; }
     const sub = subAccounts.find((s) => s.id === contact.clientId);
-    const c: Client = { id, name: contact.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "active", type };
+    const c: Client = { id, name: contact.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "active", type, assignedTo: [] };
     setClients((cs) => [...cs, c]);
     markOwnClientWrite(c.id);
     upsertClient(c);
@@ -1220,6 +1237,37 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onImportTasks={importGhlTasks}
             importingTasks={importingTasks}
           />
+        )}
+
+        {!myWork && !myClientsView && activeClient !== "all" && clientById(activeClient) && (
+          <div className="flex flex-wrap items-center gap-2 border-b bg-background/40 px-4 py-2 sm:px-5">
+            <span className="text-[13px] font-medium text-muted">Following</span>
+            <div className="flex items-center -space-x-1.5">
+              {(clientById(activeClient)!.assignedTo ?? []).length === 0 && <span className="text-[13px] text-muted">Nobody yet</span>}
+              {(clientById(activeClient)!.assignedTo ?? []).map((uid) => (<Avatar key={uid} id={uid} size={22} />))}
+            </div>
+            {canAdmin && (
+              <div className="relative">
+                <button onClick={() => setFollowersMenuOpen((o) => !o)} className="rounded-md border px-2 py-0.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
+                  <I.plus /> Edit
+                </button>
+                {followersMenuOpen && (<>
+                  <div className="fixed inset-0 z-30" onClick={() => setFollowersMenuOpen(false)} />
+                  <div className="absolute left-0 z-40 mt-1 w-56 rounded-lg border bg-surface p-1 shadow-xl">
+                    {users.map((u) => {
+                      const on = (clientById(activeClient)!.assignedTo ?? []).includes(u.id);
+                      return (
+                        <button key={u.id} onClick={() => toggleClientAssignment(activeClient, u.id)} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-background">
+                          <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "border-accent bg-accent text-white" : "border-border"}`}>{on && <I.check />}</span>
+                          <Avatar id={u.id} size={18} /> {u.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>)}
+              </div>
+            )}
+          </div>
         )}
 
         {/* content */}
