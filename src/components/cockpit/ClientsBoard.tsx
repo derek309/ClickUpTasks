@@ -4,7 +4,7 @@
 // rows are clients, not tasks, grouped by the same urgency tiers that drive
 // the sidebar's "Overdue first" sort: a client who's messaged and is waiting
 // on a reply comes first, then overdue work, then due today, and so on.
-import { CLIENT_STATUS_META, HEALTH_META, clientHealth, type Client, type ClientStatus, type Task } from "@/lib/data";
+import { HEALTH_META, clientHealth, clientStatusMeta, type Client, type Task } from "@/lib/data";
 import { I } from "./ui";
 
 export interface ClientBoardGroup {
@@ -52,7 +52,7 @@ function ClientRow({ client, scopedTasks, taskCount, unread, onOpen }: {
   const health = HEALTH_META[clientHealth(client.id, scopedTasks)];
   return (
     <button onClick={onOpen} className="flex w-full items-center gap-3 border-b px-4 py-2.5 text-left transition-colors last:border-0 hover:bg-accent-soft/50">
-      <span className="h-2.5 w-2.5 shrink-0 rounded-full" title={CLIENT_STATUS_META[client.status as ClientStatus].label} style={{ background: CLIENT_STATUS_META[client.status as ClientStatus].dot }} />
+      <span className="h-2.5 w-2.5 shrink-0 rounded-full" title={clientStatusMeta(client.status).label} style={{ background: clientStatusMeta(client.status).dot }} />
       <span className="h-8 w-8 shrink-0 rounded-full text-center text-[13px] font-semibold leading-8 text-white" style={{ background: client.color }}>
         {client.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}
       </span>

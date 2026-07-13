@@ -35,12 +35,27 @@ export interface User {
   role: Role;
 }
 
-export type ClientStatus = "active" | "paused" | "archived";
+// Full client lifecycle funnel, replacing the earlier active/paused/archived
+// set — that couldn't represent anything before "actively engaged" (lead,
+// prospect, onboarding) or the difference between cancelling mid-engagement
+// vs. simply wrapping up (cancelled vs. past client).
+export type ClientStatus = "lead" | "prospect" | "onboarding" | "active_client" | "cancelled" | "past_client";
 export const CLIENT_STATUS_META: Record<ClientStatus, { label: string; dot: string }> = {
-  active: { label: "Active", dot: "#22c55e" },
-  paused: { label: "Paused", dot: "#f59e0b" },
-  archived: { label: "Archived", dot: "#94a3b8" },
+  lead: { label: "Lead", dot: "#94a3b8" },
+  prospect: { label: "Prospect", dot: "#3b82f6" },
+  onboarding: { label: "Onboarding", dot: "#a855f7" },
+  active_client: { label: "Active Client", dot: "#22c55e" },
+  cancelled: { label: "Cancelled", dot: "#ef4444" },
+  past_client: { label: "Past Client", dot: "#64748b" },
 };
+export const CLIENT_STATUS_ORDER: ClientStatus[] = ["lead", "prospect", "onboarding", "active_client", "cancelled", "past_client"];
+/** `clients.status` is plain text with no DB-level CHECK constraint, so a
+ * stored value can in principle predate a funnel change (as happened when
+ * this went from active/paused/archived to the 6-stage funnel below) — fall
+ * back instead of letting an unrecognized value throw on `.label`/`.dot`. */
+export function clientStatusMeta(status: string): { label: string; dot: string } {
+  return CLIENT_STATUS_META[status as ClientStatus] ?? { label: status || "Unknown", dot: "#94a3b8" };
+}
 
 // Relationship type — separate axis from ClientStatus (which tracks the
 // lifecycle of an *active engagement*). A GHL contact you've classified as a
@@ -254,9 +269,9 @@ export const labels: Label[] = [
 // --- Clients (GHL sub-accounts) --------------------------------------------
 
 export const clientsSeed: Client[] = [
-  { id: "c_bright", name: "Bright Dental", color: "#0ea5e9", ghlLocationId: "loc_8f21ac", status: "active", type: "client", assignedTo: [] },
-  { id: "c_peak", name: "Peak Fitness Co.", color: "#f59e0b", ghlLocationId: "loc_2b77de", status: "active", type: "client", assignedTo: [] },
-  { id: "c_harbor", name: "Harbor Law Group", color: "#8b5cf6", ghlLocationId: "loc_5c09fb", status: "active", type: "client", assignedTo: [] },
+  { id: "c_bright", name: "Bright Dental", color: "#0ea5e9", ghlLocationId: "loc_8f21ac", status: "active_client", type: "client", assignedTo: [] },
+  { id: "c_peak", name: "Peak Fitness Co.", color: "#f59e0b", ghlLocationId: "loc_2b77de", status: "active_client", type: "client", assignedTo: [] },
+  { id: "c_harbor", name: "Harbor Law Group", color: "#8b5cf6", ghlLocationId: "loc_5c09fb", status: "active_client", type: "client", assignedTo: [] },
 ];
 
 // --- Contacts (GHL contacts) -----------------------------------------------

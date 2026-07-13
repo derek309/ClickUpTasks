@@ -13,6 +13,8 @@ import {
   STATUS_META,
   STATUS_ORDER,
   CLIENT_STATUS_META,
+  CLIENT_STATUS_ORDER,
+  clientStatusMeta,
   type ClientStatus,
   type ClientType,
   HEALTH_META,
@@ -462,8 +464,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       }))
       .filter((g) => g.clients.length > 0);
   })();
-  // Sidebar sections by client status; Active has no header, others only show when non-empty.
-  const clientGroups = ([["", "active"], ["Paused", "paused"], ["Archived", "archived"]] as const)
+  // Sidebar sections by client status, funnel order; Active Client has no
+  // header (it's the main working set), the rest only show when non-empty.
+  const clientGroups = ([
+    ["", "active_client"],
+    ["Onboarding", "onboarding"],
+    ["Prospects", "prospect"],
+    ["Leads", "lead"],
+    ["Cancelled", "cancelled"],
+    ["Past Clients", "past_client"],
+  ] as const)
     .map(([header, st]) => ({ header, items: sortedClients.filter((c) => c.status === st) }))
     .filter((g) => g.items.length > 0);
   const ghlContactUrlFor = (clientId: string) => {
@@ -532,7 +542,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       id: newId("t_"), projectId, clientId: activeClient, title: title.trim(), description: "",
       status: groupBy === "status" ? (groupKey as TaskStatus) : "todo",
       priority: groupBy === "priority" ? (groupKey as Priority) : "none",
-      assigneeId: me.role === "admin" ? null : me.id,
+      assigneeId: me.id,
       contactId: activeClient.slice(3),
       due: groupBy === "due" && groupKey === "today" ? TODAY : null,
       recurrence: "none", labelIds: [], ghlTaskId: null, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
@@ -777,6 +787,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const toggleSub = (taskId: string, subId: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, done: !s.done } : s)) }); };
   const addSub = (taskId: string, title: string) => { const t = tasks.find((x) => x.id === taskId); if (t && title.trim()) update(taskId, { subtasks: [...t.subtasks, { id: newId("s_"), title: title.trim(), done: false }] }); };
   const renameSub = (taskId: string, subId: string, title: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, title } : s)) }); };
+  const deleteSub = (taskId: string, subId: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { subtasks: t.subtasks.filter((s) => s.id !== subId) }); };
   const toggleLabel = (taskId: string, labelId: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { labelIds: t.labelIds.includes(labelId) ? t.labelIds.filter((l) => l !== labelId) : [...t.labelIds, labelId] }); };
 
   // A client's ghlLocationId field is repurposed to store the contact's business/company name.
@@ -785,7 +796,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const id = "cl_" + contact.id;
     if (clients.some((c) => c.id === id)) { setActiveClient(id); setMyWork(false); setMyClientsView(false); setAddClientOpen(false); return; }
     const sub = subAccounts.find((s) => s.id === contact.clientId);
-    const c: Client = { id, name: contact.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "active", type, assignedTo: [] };
+    const c: Client = { id, name: contact.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "lead", type, assignedTo: [] };
     setClients((cs) => [...cs, c]);
     markOwnClientWrite(c.id);
     upsertClient(c);
@@ -996,8 +1007,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 <div className={`group/row relative ${dragClientId === c.id ? "opacity-40" : ""} ${statusMenuClientId === c.id ? "z-50" : ""}`}>
                   {statusMenuClientId === c.id && (<>
                     <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setStatusMenuClientId(null); }} />
-                    <div className="absolute left-1 top-full z-40 mt-1 w-36 rounded-lg border border-white/10 bg-background p-1 shadow-xl">
-                      {(Object.keys(CLIENT_STATUS_META) as ClientStatus[]).map((st) => (
+                    <div className="absolute left-1 top-full z-40 mt-1 w-44 rounded-lg border border-white/10 bg-background p-1 shadow-xl">
+                      {CLIENT_STATUS_ORDER.map((st) => (
                         <button key={st} onClick={(e) => { e.stopPropagation(); setStatusMenuClientId(null); setClientStatus(c.id, st); }}
                           className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-white/10">
                           <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: CLIENT_STATUS_META[st].dot }} />
@@ -1008,10 +1019,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     </div>
                   </>)}
                   <button onClick={() => { setMyWork(false); setMyClientsView(false); setActiveClient(c.id); setActiveProject(null); setSidebarOpen(false); setOpenTaskId(null); }}
-                    className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[15px] transition ${active ? "bg-accent-soft font-medium text-accent" : "text-foreground hover:bg-background"} ${c.status === "archived" ? "opacity-50" : ""}`}>
-                    <span role="button" title={`${CLIENT_STATUS_META[c.status].label} — click to change`}
+                    className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[15px] transition ${active ? "bg-accent-soft font-medium text-accent" : "text-foreground hover:bg-background"} ${c.status === "cancelled" || c.status === "past_client" ? "opacity-50" : ""}`}>
+                    <span role="button" title={`${clientStatusMeta(c.status).label} — click to change`}
                       onClick={(e) => { e.stopPropagation(); setStatusMenuClientId(statusMenuClientId === c.id ? null : c.id); }}
-                      className="h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-transparent transition hover:ring-white/30" style={{ background: CLIENT_STATUS_META[c.status].dot }} />
+                      className="h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-transparent transition hover:ring-white/30" style={{ background: clientStatusMeta(c.status).dot }} />
                     <span className="h-1.5 w-1.5 shrink-0 rounded-full" title={HEALTH_META[clientHealth(c.id, scopedTasks)].label} style={{ background: HEALTH_META[clientHealth(c.id, scopedTasks)].dot }} />
                     {hasUnreadMessage(c.id) && <span className="shrink-0 text-accent" title="New message — waiting on a reply"><I.comment /></span>}
                     <span className="min-w-0 flex-1">
@@ -1238,7 +1249,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <ClientsBoard groups={myClientsGroups} scopedTasks={scopedTasks} clientTaskCount={clientTaskCount} hasUnreadMessage={hasUnreadMessage}
             onOpen={(id) => { setMyWork(false); setMyClientsView(false); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }} />
         ) : myWork ? (
-          <GroupedList groups={buildGroups(myWorkTasks, "due").filter((g) => g.tasks.length > 0)} showClient clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={false} quickAddHint="" onQuickAdd={() => {}} onToggleSub={toggleSub} onAddSub={addSub} onAddComment={addComment} />
+          <GroupedList groups={buildGroups(myWorkTasks, "due").filter((g) => g.tasks.length > 0)} showClient clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={false} quickAddHint="" onQuickAdd={() => {}} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} />
         ) : !activeProject && activeClient !== "all" && clientTab === "knowledge" ? (
           <ClientNotes
             notes={clientNotes.filter((n) => n.clientId === activeClient)}
@@ -1248,7 +1259,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onDelete={deleteNote}
           />
         ) : (
-          <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onAddComment={addComment} hideEmpty={hideEmpty} />
+          <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} />
         )}
       </main>
 
@@ -1257,7 +1268,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={orderedTaskIds.length} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={() => addComment(openTask.id, comment)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...clientList].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} />
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...clientList].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} />
       )}
 
       {teamOpen && <TeamPanel me={me} onClose={() => setTeamOpen(false)} />}

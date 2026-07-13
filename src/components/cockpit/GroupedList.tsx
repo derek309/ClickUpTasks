@@ -13,12 +13,12 @@ import { I, Avatar, LabelChips, COL_WIDTHS, LIST_COLUMNS } from "./ui";
 
 // --- grouped list view (ClickUp-style: group, quick-add, expandable subtasks) --
 
-export function GroupedList({ groups, showClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onAddComment, hideEmpty }: {
+export function GroupedList({ groups, showClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onDeleteSub, onAddComment, hideEmpty }: {
   groups: { key: string; label: string; color: string; tasks: Task[] }[];
   showClient: boolean; clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null;
   visibleCols: string[]; sortKey: string; sortDir: "asc" | "desc"; onSort: (key: string) => void;
   onOpen: (id: string) => void; onPatch: (taskId: string, patch: Partial<Task>) => void; canQuickAdd: boolean; quickAddHint: string; onQuickAdd: (groupKey: string, title: string) => void;
-  onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void; onAddComment: (taskId: string, body: string) => void; hideEmpty?: boolean;
+  onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void; onDeleteSub: (taskId: string, subId: string) => void; onAddComment: (taskId: string, body: string) => void; hideEmpty?: boolean;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -68,7 +68,7 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
                 <div>
                   {g.tasks.map((t) => (
                     <TaskRow key={t.id} task={t} template={template} cols={cols} showClient={showClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} onAddComment={onAddComment}
-                      expanded={expanded.has(t.id)} onToggleExpand={() => toggle(t.id)} onToggleSub={onToggleSub} onAddSub={onAddSub}
+                      expanded={expanded.has(t.id)} onToggleExpand={() => toggle(t.id)} onToggleSub={onToggleSub} onAddSub={onAddSub} onDeleteSub={onDeleteSub}
                       subDraft={subDraft[t.id] ?? ""} setSubDraft={(v) => setSubDraft((s) => ({ ...s, [t.id]: v }))} />
                   ))}
                   {canQuickAdd && (
@@ -91,10 +91,10 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   );
 }
 
-function TaskRow({ task, template, cols, showClient, clientById, projectById, contactById, onOpen, onPatch, onAddComment, expanded, onToggleExpand, onToggleSub, onAddSub, subDraft, setSubDraft }: {
+function TaskRow({ task, template, cols, showClient, clientById, projectById, contactById, onOpen, onPatch, onAddComment, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
   task: Task; template: string; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void; onAddComment: (taskId: string, body: string) => void;
-  expanded: boolean; onToggleExpand: () => void; onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void;
+  expanded: boolean; onToggleExpand: () => void; onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void; onDeleteSub: (taskId: string, subId: string) => void;
   subDraft: string; setSubDraft: (v: string) => void;
 }) {
   const client = clientById(task.clientId);
@@ -134,10 +134,11 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
       {expanded && (
         <div className="border-b bg-background/40 py-1.5 pl-10 pr-3">
           {task.subtasks.map((st) => (
-            <label key={st.id} className="flex cursor-pointer items-center gap-2 py-0.5">
-              <button onClick={() => onToggleSub(task.id, st.id)} className={`flex h-4 w-4 items-center justify-center rounded border ${st.done ? "border-accent bg-accent text-white" : "border-border"}`}>{st.done && <I.check />}</button>
-              <span className={`text-[15px] ${st.done ? "text-muted line-through" : ""}`}>{st.title}</span>
-            </label>
+            <div key={st.id} className="group/sub flex items-center gap-2 py-0.5">
+              <button onClick={() => onToggleSub(task.id, st.id)} className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${st.done ? "border-accent bg-accent text-white" : "border-border"}`}>{st.done && <I.check />}</button>
+              <span className={`flex-1 text-[15px] ${st.done ? "text-muted line-through" : ""}`}>{st.title}</span>
+              <button onClick={() => onDeleteSub(task.id, st.id)} title="Delete subtask" className="shrink-0 text-muted opacity-0 hover:text-red-500 group-hover/sub:opacity-100"><I.trash /></button>
+            </div>
           ))}
           <div className="flex items-center gap-2 py-0.5">
             <span className="h-4 w-4 shrink-0" />
