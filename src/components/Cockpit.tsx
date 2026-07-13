@@ -35,7 +35,7 @@ import {
   type Me,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, insertMessage, appendCommentDb, rowToTask, rowToClient, rowToNotif, rowToMessage } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, rowToTask, rowToClient, rowToNotif, rowToMessage } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import TeamPanel from "./TeamPanel";
 import SettingsPanel from "./SettingsPanel";
@@ -49,7 +49,6 @@ import { GroupedList } from "./cockpit/GroupedList";
 import { TaskDrawer } from "./cockpit/TaskDrawer";
 import { QuickLinksBar } from "./cockpit/ClientLinks";
 import { ClientNotes } from "./cockpit/ClientNotes";
-import { ContactMessages } from "./cockpit/ContactMessages";
 import { ClientsBoard, type ClientBoardGroup } from "./cockpit/ClientsBoard";
 
 export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
@@ -61,9 +60,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [clientLinks, setClientLinks] = useState<ClientLink[]>([]);
   const [clientNotes, setClientNotes] = useState<ClientNote[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [sendingMessage, setSendingMessage] = useState(false);
   const [importingTasks, setImportingTasks] = useState(false);
-  const [clientTab, setClientTab] = useState<"tasks" | "knowledge" | "messages">("tasks");
+  const [clientTab, setClientTab] = useState<"tasks" | "knowledge">("tasks");
   const [linkModal, setLinkModal] = useState<{ initial?: ClientLink } | null>(null);
   const [loading, setLoading] = useState(true);
   const [dbError, setDbError] = useState<string | null>(null);
@@ -105,7 +103,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [dragClientId, setDragClientId] = useState<string | null>(null);
   const [statusMenuClientId, setStatusMenuClientId] = useState<string | null>(null);
-  const [followersMenuOpen, setFollowersMenuOpen] = useState(false);
 
   // Realtime echo suppression for `clients` writes. Admin-only, low-frequency
   // writes — a short TTL ledger is proportionate here (unlike tasks, which
@@ -727,34 +724,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   };
   const activeContact = (): Contact | null =>
     activeClient.startsWith("cl_") ? contactById(activeClient.slice(3)) : null;
-  const sendMessage = async (subject: string, body: string): Promise<boolean> => {
-    const contact = activeContact();
-    const target = contact && ghlTargetForContact(contact);
-    if (!contact || !target) return false;
-    setSendingMessage(true);
-    try {
-      const res = await authedFetch("/api/ghl/message", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...target, subject, body }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || j?.error) { pushToast(j?.error ?? "GoHighLevel send failed."); return false; }
-      const msg: Message = {
-        id: newId("msg_"), contactId: contact.id, clientId: contact.clientId, channel: "email", direction: "outbound",
-        subject: subject || null, body, ghlMessageId: j?.ghlMessageId ?? null, createdBy: me.id, at: new Date().toISOString(),
-        read: true,
-      };
-      setMessages((ms) => [...ms, msg]);
-      insertMessage(msg);
-      return true;
-    } catch {
-      pushToast("Network error reaching GoHighLevel.");
-      return false;
-    } finally {
-      setSendingMessage(false);
-    }
-  };
   // Pulls a contact's tasks created directly in GoHighLevel (not pushed from
   // here) into local tracked tasks, linked via ghlTaskId so they join the
   // existing two-way sync (see GHL_SYNC_FIELDS/syncGhlIfLinked below) going
@@ -1150,11 +1119,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <div className="inline-flex overflow-hidden rounded-md border">
               <button onClick={() => setClientTab("tasks")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "tasks" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Tasks</button>
               <button onClick={() => setClientTab("knowledge")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "knowledge" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Knowledge · {clientNotes.filter((n) => n.clientId === activeClient).length}</button>
-              {/* Messages is Contact-specific ("cl_" pseudo-clients only) — a
-                  real sub-account Client has no single GHL contact to message. */}
-              {activeClient.startsWith("cl_") && (
-                <button onClick={() => setClientTab("messages")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "messages" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Messages · {messages.filter((m) => m.contactId === activeClient.slice(3)).length}</button>
-              )}
             </div>
           )}
 
@@ -1167,7 +1131,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             ) : (
               <span className="text-[15px] text-muted">Your assigned tasks across all clients</span>
             )
-          ) : clientTab === "knowledge" || clientTab === "messages" ? null : (
+          ) : clientTab === "knowledge" ? null : (
             <div className="relative">
               <button onClick={() => setFilterOpen((o) => !o)} className="flex items-center gap-1.5 rounded-md border bg-background px-2.5 py-1.5 text-muted hover:text-foreground">
                 <I.filter /> Filter &amp; view
@@ -1176,6 +1140,32 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               {filterOpen && (<>
                 <div className="fixed inset-0 z-30" onClick={() => setFilterOpen(false)} />
                 <div className="absolute left-0 z-40 mt-1 w-72 space-y-2.5 rounded-xl border bg-surface p-3 shadow-xl">
+                  {activeClient !== "all" && clientById(activeClient) && (
+                    <div className="space-y-1.5 border-b pb-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[13px] font-semibold uppercase tracking-wide text-muted">Following</span>
+                        {!canAdmin && (
+                          <div className="flex items-center -space-x-1.5">
+                            {(clientById(activeClient)!.assignedTo ?? []).length === 0 && <span className="text-[13px] text-muted">Nobody yet</span>}
+                            {(clientById(activeClient)!.assignedTo ?? []).map((uid) => (<Avatar key={uid} id={uid} size={20} />))}
+                          </div>
+                        )}
+                      </div>
+                      {canAdmin && (
+                        <div className="grid grid-cols-2 gap-0.5">
+                          {users.map((u) => {
+                            const on = (clientById(activeClient)!.assignedTo ?? []).includes(u.id);
+                            return (
+                              <button key={u.id} onClick={() => toggleClientAssignment(activeClient, u.id)} className="flex items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-background">
+                                <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "border-accent bg-accent text-white" : "border-border"}`}>{on && <I.check />}</span>
+                                <Avatar id={u.id} size={18} /> <span className="truncate text-[13px]">{u.name}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <div className="flex items-center justify-between">
                     <span className="text-[13px] font-semibold uppercase tracking-wide text-muted">Group &amp; sort</span>
                     {(filtersActive || sortBy !== "manual") && <button onClick={() => { setFilters({ status: "all", assignee: "all", priority: "all" }); setSortBy("manual"); }} className="text-[13px] font-medium text-accent">Reset</button>}
@@ -1242,43 +1232,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           />
         )}
 
-        {!myWork && !myClientsView && activeClient !== "all" && clientById(activeClient) && (
-          <div className="flex flex-wrap items-center gap-2 border-b bg-background/40 px-4 py-2 sm:px-5">
-            <span className="text-[13px] font-medium text-muted">Following</span>
-            <div className="flex items-center -space-x-1.5">
-              {(clientById(activeClient)!.assignedTo ?? []).length === 0 && <span className="text-[13px] text-muted">Nobody yet</span>}
-              {(clientById(activeClient)!.assignedTo ?? []).map((uid) => (<Avatar key={uid} id={uid} size={22} />))}
-            </div>
-            {canAdmin && (
-              <div className="relative">
-                <button onClick={() => setFollowersMenuOpen((o) => !o)} className="rounded-md border px-2 py-0.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
-                  <I.plus /> Edit
-                </button>
-                {followersMenuOpen && (<>
-                  <div className="fixed inset-0 z-30" onClick={() => setFollowersMenuOpen(false)} />
-                  <div className="absolute left-0 z-40 mt-1 w-56 rounded-lg border bg-surface p-1 shadow-xl">
-                    {users.map((u) => {
-                      const on = (clientById(activeClient)!.assignedTo ?? []).includes(u.id);
-                      return (
-                        <button key={u.id} onClick={() => toggleClientAssignment(activeClient, u.id)} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-background">
-                          <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "border-accent bg-accent text-white" : "border-border"}`}>{on && <I.check />}</span>
-                          <Avatar id={u.id} size={18} /> {u.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </>)}
-              </div>
-            )}
-          </div>
-        )}
 
         {/* content */}
         {myClientsView ? (
           <ClientsBoard groups={myClientsGroups} scopedTasks={scopedTasks} clientTaskCount={clientTaskCount} hasUnreadMessage={hasUnreadMessage}
             onOpen={(id) => { setMyWork(false); setMyClientsView(false); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }} />
         ) : myWork ? (
-          <GroupedList groups={buildGroups(myWorkTasks, "due").filter((g) => g.tasks.length > 0)} showClient clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={false} quickAddHint="" onQuickAdd={() => {}} onToggleSub={toggleSub} onAddSub={addSub} />
+          <GroupedList groups={buildGroups(myWorkTasks, "due").filter((g) => g.tasks.length > 0)} showClient clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={false} quickAddHint="" onQuickAdd={() => {}} onToggleSub={toggleSub} onAddSub={addSub} onAddComment={addComment} />
         ) : !activeProject && activeClient !== "all" && clientTab === "knowledge" ? (
           <ClientNotes
             notes={clientNotes.filter((n) => n.clientId === activeClient)}
@@ -1287,15 +1247,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onEdit={editNote}
             onDelete={deleteNote}
           />
-        ) : !activeProject && activeClient.startsWith("cl_") && clientTab === "messages" ? (
-          <ContactMessages
-            messages={messages.filter((m) => m.contactId === activeClient.slice(3))}
-            canSend={!!activeContact() && !!ghlTargetForContact(activeContact()!)}
-            sending={sendingMessage}
-            onSend={sendMessage}
-          />
         ) : (
-          <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} hideEmpty={hideEmpty} />
+          <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onAddComment={addComment} hideEmpty={hideEmpty} />
         )}
       </main>
 

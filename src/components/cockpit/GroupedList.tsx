@@ -4,7 +4,7 @@
 // expandable subtasks, and the inline cell editors (priority/assignee/due).
 import { useRef, useState } from "react";
 import {
-  users, formatDue, isOverdue, TODAY,
+  users, formatDue, isOverdue, TODAY, timeAgo, userById,
   PRIORITY_META, PRIORITY_ORDER,
   STATUS_META, STATUS_ORDER,
   type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus,
@@ -13,12 +13,12 @@ import { I, Avatar, LabelChips, COL_WIDTHS, LIST_COLUMNS } from "./ui";
 
 // --- grouped list view (ClickUp-style: group, quick-add, expandable subtasks) --
 
-export function GroupedList({ groups, showClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, hideEmpty }: {
+export function GroupedList({ groups, showClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onAddComment, hideEmpty }: {
   groups: { key: string; label: string; color: string; tasks: Task[] }[];
   showClient: boolean; clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null;
   visibleCols: string[]; sortKey: string; sortDir: "asc" | "desc"; onSort: (key: string) => void;
   onOpen: (id: string) => void; onPatch: (taskId: string, patch: Partial<Task>) => void; canQuickAdd: boolean; quickAddHint: string; onQuickAdd: (groupKey: string, title: string) => void;
-  onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void; hideEmpty?: boolean;
+  onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void; onAddComment: (taskId: string, body: string) => void; hideEmpty?: boolean;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -67,7 +67,7 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
               {!collapsedG.has(g.key) && (
                 <div>
                   {g.tasks.map((t) => (
-                    <TaskRow key={t.id} task={t} template={template} cols={cols} showClient={showClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch}
+                    <TaskRow key={t.id} task={t} template={template} cols={cols} showClient={showClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} onAddComment={onAddComment}
                       expanded={expanded.has(t.id)} onToggleExpand={() => toggle(t.id)} onToggleSub={onToggleSub} onAddSub={onAddSub}
                       subDraft={subDraft[t.id] ?? ""} setSubDraft={(v) => setSubDraft((s) => ({ ...s, [t.id]: v }))} />
                   ))}
@@ -91,9 +91,9 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   );
 }
 
-function TaskRow({ task, template, cols, showClient, clientById, projectById, contactById, onOpen, onPatch, expanded, onToggleExpand, onToggleSub, onAddSub, subDraft, setSubDraft }: {
+function TaskRow({ task, template, cols, showClient, clientById, projectById, contactById, onOpen, onPatch, onAddComment, expanded, onToggleExpand, onToggleSub, onAddSub, subDraft, setSubDraft }: {
   task: Task; template: string; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean;
-  clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void;
+  clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void; onAddComment: (taskId: string, body: string) => void;
   expanded: boolean; onToggleExpand: () => void; onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void;
   subDraft: string; setSubDraft: (v: string) => void;
 }) {
@@ -107,7 +107,7 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
     if (key === "priority") return <InlinePriority value={task.priority} onChange={(p) => onPatch(task.id, { priority: p })} />;
     if (key === "assignee") return <InlineAssignee value={task.assigneeId} onChange={(a) => onPatch(task.id, { assigneeId: a })} />;
     if (key === "due") return <InlineDue value={task.due} overdue={overdue} recurrence={task.recurrence} onChange={(d) => onPatch(task.id, { due: d })} onRecurrenceChange={(r) => onPatch(task.id, { recurrence: r })} />;
-    if (key === "comments") { const n = task.comments.filter((c) => c.kind !== "event").length; return n ? <span className="inline-flex items-center gap-1 text-[13px] text-muted"><I.comment /> {n}</span> : <I.comment className="text-muted opacity-30" />; }
+    if (key === "comments") return <InlineComments task={task} onAddComment={onAddComment} />;
     if (key === "contact") { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return <span className="truncate text-[15px] text-muted">{ct?.name ?? "—"}</span>; }
     if (key === "labels") return <LabelChips ids={task.labelIds} />;
     return null;
@@ -122,7 +122,7 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
         <button onClick={onOpen} className="flex min-w-0 flex-col justify-center py-0.5 text-left">
           {crumb && <span className="truncate text-[13px] leading-tight text-muted">{crumb}</span>}
           <span className="flex min-w-0 items-center gap-1.5">
-            <span className="min-w-0 whitespace-normal break-words text-[17px] font-medium leading-snug">{task.title}</span>
+            <span className="min-w-0 flex-1 truncate text-[17px] font-medium leading-snug">{task.title}</span>
             {task.recurrence !== "none" && <I.repeat className="shrink-0 text-muted" />}
             {task.attachments.length > 0 && <I.clip className="shrink-0 text-muted" />}
             {task.subtasks.length > 0 && <span className="inline-flex shrink-0 items-center gap-0.5 text-[15px] text-muted"><I.check />{doneSubs}/{task.subtasks.length}</span>}
@@ -151,16 +151,31 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
 
 // --- inline cell editors ----------------------------------------------------
 
+// Shared by every inline dropdown below: they're nested inside overflow-auto
+// scroll containers (the list card, the page), so plain `absolute` popups get
+// silently clipped whenever a row is near the bottom or right edge. Fixed
+// positioning off the trigger's own screen rect (clamped to the viewport)
+// sidesteps that — the same approach InlineDue/DatePopover already used.
+function menuPos(ref: React.RefObject<HTMLElement | null>, width: number, height = 240) {
+  const r = ref.current?.getBoundingClientRect();
+  if (!r) return { top: 0, left: 0 };
+  const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+  const top = r.bottom + height > window.innerHeight ? Math.max(8, r.top - height) : r.bottom + 4;
+  return { top, left };
+}
+
 function InlineStatus({ value, onChange }: { value: TaskStatus; onChange: (s: TaskStatus) => void }) {
   const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
   return (
     <div className="relative">
-      <button onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} className="inline-flex items-center gap-1.5 rounded px-1 py-0.5 text-[15px] font-medium hover:bg-background">
+      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 144, STATUS_ORDER.length * 32 + 8)); setOpen((o) => !o); }} className="inline-flex items-center gap-1.5 rounded px-1 py-0.5 text-[15px] font-medium hover:bg-background">
         <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[value].dot }} /> {STATUS_META[value].label}
       </button>
       {open && (<>
         <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
-        <div className="absolute left-0 z-40 mt-1 w-36 rounded-lg border bg-surface p-1 shadow-lg">
+        <div style={{ position: "fixed", top: pos.top, left: pos.left, width: 144 }} className="z-40 rounded-lg border bg-surface p-1 shadow-lg">
           {STATUS_ORDER.map((s) => (
             <button key={s} onClick={(e) => { e.stopPropagation(); onChange(s); setOpen(false); }} className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[15px] hover:bg-background">
               <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[s].dot }} /> {STATUS_META[s].label}
@@ -174,14 +189,16 @@ function InlineStatus({ value, onChange }: { value: TaskStatus; onChange: (s: Ta
 
 function InlinePriority({ value, onChange }: { value: Priority; onChange: (p: Priority) => void }) {
   const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
   return (
     <div className="relative">
-      <button onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[15px] font-medium hover:bg-background" style={{ color: value === "none" ? "var(--muted)" : PRIORITY_META[value].color }}>
+      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 128, PRIORITY_ORDER.length * 32 + 8)); setOpen((o) => !o); }} className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[15px] font-medium hover:bg-background" style={{ color: value === "none" ? "var(--muted)" : PRIORITY_META[value].color }}>
         {value === "none" ? "—" : (<><I.flag />{PRIORITY_META[value].label}</>)}
       </button>
       {open && (<>
         <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
-        <div className="absolute left-0 z-40 mt-1 w-32 rounded-lg border bg-surface p-1 shadow-lg">
+        <div style={{ position: "fixed", top: pos.top, left: pos.left, width: 128 }} className="z-40 rounded-lg border bg-surface p-1 shadow-lg">
           {PRIORITY_ORDER.map((p) => (
             <button key={p} onClick={(e) => { e.stopPropagation(); onChange(p); setOpen(false); }} className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[15px] hover:bg-background" style={{ color: p === "none" ? "var(--muted)" : PRIORITY_META[p].color }}>
               {p !== "none" && <I.flag />} {PRIORITY_META[p].label}
@@ -195,16 +212,59 @@ function InlinePriority({ value, onChange }: { value: Priority; onChange: (p: Pr
 
 function InlineAssignee({ value, onChange }: { value: string | null; onChange: (a: string | null) => void }) {
   const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
   return (
     <div className="relative">
-      <button onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} className="rounded-full hover:opacity-80"><Avatar id={value} size={22} /></button>
+      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 176, (users.length + 1) * 32 + 8)); setOpen((o) => !o); }} className="rounded-full hover:opacity-80"><Avatar id={value} size={22} /></button>
       {open && (<>
         <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
-        <div className="absolute left-0 z-40 mt-1 w-44 rounded-lg border bg-surface p-1 shadow-xl">
+        <div style={{ position: "fixed", top: pos.top, left: pos.left, width: 176 }} className="z-40 rounded-lg border bg-surface p-1 shadow-xl">
           <button onClick={(e) => { e.stopPropagation(); onChange(null); setOpen(false); }} className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[15px] text-muted hover:bg-background">Unassigned</button>
           {users.map((u) => (
             <button key={u.id} onClick={(e) => { e.stopPropagation(); onChange(u.id); setOpen(false); }} className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[15px] hover:bg-background"><Avatar id={u.id} size={20} /> {u.name}</button>
           ))}
+        </div>
+      </>)}
+    </div>
+  );
+}
+
+function InlineComments({ task, onAddComment }: { task: Task; onAddComment: (taskId: string, body: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [body, setBody] = useState("");
+  const ref = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const visible = task.comments.filter((c) => c.kind !== "event");
+  const send = () => { if (!body.trim()) return; onAddComment(task.id, body); setBody(""); };
+  return (
+    <div className="relative">
+      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 320, 360)); setOpen((o) => !o); }} className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-[13px] text-muted hover:bg-background">
+        <I.comment className={visible.length ? "" : "opacity-30"} /> {visible.length > 0 && visible.length}
+      </button>
+      {open && (<>
+        <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
+        <div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", top: pos.top, left: pos.left, width: 320 }} className="z-40 flex max-h-96 flex-col overflow-hidden rounded-xl border bg-surface shadow-xl">
+          <div className="border-b px-3 py-2 text-[13px] font-semibold uppercase tracking-wide text-muted">Comments · {visible.length}</div>
+          <div className="flex-1 space-y-2.5 overflow-y-auto p-3">
+            {visible.map((c) => {
+              const u = userById(c.authorId);
+              return (
+                <div key={c.id} className="flex gap-2">
+                  <Avatar id={c.authorId} size={22} />
+                  <div className="min-w-0">
+                    <div className="text-[13px]"><span className="font-medium">{u?.name}</span> <span className="text-muted">· {timeAgo(c.at)}</span></div>
+                    <div className="text-[14px]">{c.body}</div>
+                  </div>
+                </div>
+              );
+            })}
+            {visible.length === 0 && <div className="py-4 text-center text-[13px] text-muted">No comments yet.</div>}
+          </div>
+          <div className="flex items-end gap-1.5 border-t p-2">
+            <textarea value={body} onChange={(e) => setBody(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder="Write a comment…" rows={1} className="max-h-32 min-h-[32px] flex-1 resize-y rounded-lg border bg-background px-2 py-1.5 text-[14px] outline-none placeholder:text-muted" />
+            <button onClick={send} disabled={!body.trim()} className="rounded-lg bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white disabled:opacity-40">Send</button>
+          </div>
         </div>
       </>)}
     </div>
