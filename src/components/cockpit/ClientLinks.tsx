@@ -18,16 +18,12 @@ function groupLinks(links: ClientLink[]) {
   return order.map((key) => ({ key, links: map.get(key)! }));
 }
 
-export function QuickLinksBar({ links, ghlLink, canEdit, onAdd, onEdit, onDelete, onReorder, onImportTasks, importingTasks }: {
+export function QuickLinksBar({ links, canEdit, onEdit, onDelete, onReorder }: {
   links: ClientLink[];
-  ghlLink: { label: string; url: string } | null;
   canEdit: boolean;
-  onAdd: () => void;
   onEdit: (link: ClientLink) => void;
   onDelete: (link: ClientLink) => void;
   onReorder: (orderedIds: string[]) => void;
-  onImportTasks?: () => void;
-  importingTasks?: boolean;
 }) {
   const [menuId, setMenuId] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -40,22 +36,13 @@ export function QuickLinksBar({ links, ghlLink, canEdit, onAdd, onEdit, onDelete
     setDragId(null);
   };
 
-  if (!ghlLink && links.length === 0 && !canEdit) return null;
+  // Adding a link now lives in the header (an always-available icon button),
+  // so this bar is purely optional — no reason to reserve a permanent row of
+  // chrome for a client that hasn't added any quick links yet.
+  if (links.length === 0) return null;
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 border-b bg-background/40 px-4 py-2 sm:px-5">
-      {ghlLink && (
-        <a href={ghlLink.url} target="_blank" rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 rounded-md border border-accent px-2.5 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft">
-          <I.bolt /> {ghlLink.label}
-        </a>
-      )}
-      {ghlLink && onImportTasks && (
-        <button onClick={onImportTasks} disabled={importingTasks} title="Pull in this contact's tasks created directly in GoHighLevel"
-          className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[13px] font-medium text-foreground hover:bg-background disabled:opacity-50">
-          <I.repeat /> {importingTasks ? "Importing…" : "Import tasks from GHL"}
-        </button>
-      )}
       {groupLinks(links).map((g) => (
         <span key={g.key || "_"} className="inline-flex items-center gap-1.5">
           {g.key && <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">{g.key}</span>}
@@ -85,11 +72,6 @@ export function QuickLinksBar({ links, ghlLink, canEdit, onAdd, onEdit, onDelete
           ))}
         </span>
       ))}
-      {canEdit && (
-        <button onClick={onAdd} className="inline-flex items-center gap-1 rounded-md border border-dashed px-2.5 py-1 text-[13px] text-muted hover:bg-background hover:text-foreground">
-          <I.plus /> Add link
-        </button>
-      )}
     </div>
   );
 }

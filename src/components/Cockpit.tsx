@@ -1133,6 +1133,28 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             </div>
           )}
 
+          {!myWork && !myClientsView && activeClient !== "all" && clientById(activeClient) && (
+            <div className="flex items-center gap-1.5">
+              {ghlContactUrlFor(activeClient) && (
+                <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel"
+                  className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[13px] font-medium text-accent hover:bg-accent-soft">
+                  <I.bolt /> Open in GHL
+                </a>
+              )}
+              {ghlContactUrlFor(activeClient) && (
+                <button onClick={importGhlTasks} disabled={importingTasks} title="Import tasks created directly in GoHighLevel"
+                  className="rounded-md border bg-background p-1.5 text-muted hover:text-foreground disabled:opacity-50">
+                  <I.repeat />
+                </button>
+              )}
+              {canAdmin && (
+                <button onClick={() => setLinkModal({})} title="Add a quick link" className="rounded-md border bg-background p-1.5 text-muted hover:text-foreground">
+                  <I.plus />
+                </button>
+              )}
+            </div>
+          )}
+
 
           {myClientsView ? null : myWork ? (
             canAdmin ? (
@@ -1232,14 +1254,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         {!myWork && !myClientsView && activeClient !== "all" && (
           <QuickLinksBar
             links={clientLinks.filter((l) => l.clientId === activeClient)}
-            ghlLink={ghlContactUrlFor(activeClient) ? { label: "Open in GHL", url: ghlContactUrlFor(activeClient)! } : null}
             canEdit={canAdmin}
-            onAdd={() => setLinkModal({})}
             onEdit={(link) => setLinkModal({ initial: link })}
             onDelete={deleteLink}
             onReorder={(ids) => reorderLinks(activeClient, ids)}
-            onImportTasks={importGhlTasks}
-            importingTasks={importingTasks}
           />
         )}
 
