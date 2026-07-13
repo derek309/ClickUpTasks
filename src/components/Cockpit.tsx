@@ -445,9 +445,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const contactId = clientId.slice(3);
     return messages.some((m) => m.contactId === contactId && m.direction === "inbound" && !m.read);
   }
-  function clientUrgencyKey(clientId: string): { tier: number; due: string; priorityRank: number } {
+  // forAssignee narrows "open tasks" to just that person's — used by the
+  // personal My Clients board, where a client's tier should reflect *my*
+  // tasks there, not a teammate's (a client can't land in "Overdue" here
+  // because of someone else's overdue task while my own task on it has no
+  // due date). Omitted entirely for the sidebar's "Overdue first" sort,
+  // which is intentionally client-wide across every assignee.
+  function clientUrgencyKey(clientId: string, forAssignee?: string): { tier: number; due: string; priorityRank: number } {
     if (hasUnreadMessage(clientId)) return { tier: 0, due: "", priorityRank: 0 };
-    const open = scopedTasks.filter((t) => t.clientId === clientId && t.status !== "done");
+    const open = scopedTasks.filter((t) => t.clientId === clientId && t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
     if (open.length === 0) return { tier: 5, due: "", priorityRank: 0 };
     const withDue = open.filter((t) => t.due);
     if (withDue.length === 0) return { tier: 4, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
@@ -468,7 +474,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       [4, "No due date", "#94a3b8"],
       [5, "No open tasks", "#cbd5e1"],
     ];
-    const withKey = myAssignedClients.map((c) => ({ c, k: clientUrgencyKey(c.id) }));
+    const withKey = myAssignedClients.map((c) => ({ c, k: clientUrgencyKey(c.id, me.id) }));
     return defs
       .map(([tier, label, color]) => ({
         key: String(tier),
