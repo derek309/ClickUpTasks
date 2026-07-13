@@ -9,10 +9,10 @@ import {
 } from "@/lib/data";
 import { I, Avatar, Row, renderMentions, FileBadge } from "./ui";
 
-export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onToggleLabel }: {
+export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onToggleLabel }: {
   task: Task; comment: string; setComment: (v: string) => void;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
-  full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; onPrev: () => void; onNext: () => void;
+  full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; navTasks: Task[]; onOpenTask: (id: string) => void; onPrev: () => void; onNext: () => void;
   onClose: () => void; onPatch: (patch: Partial<Task>) => void; onDelete: () => void; onAddComment: () => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; onPushGhl: () => void; ghlBusy: boolean; ghlLinkable: boolean; onUnlinkGhl: () => void; allClients: Client[]; onMoveClient: (clientId: string) => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onRenameProject: () => void; onToggleSub: (sid: string) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onDeleteSub: (sid: string) => void; onToggleLabel: (lid: string) => void;
 }) {
   const client = clientById(task.clientId)!;
@@ -157,6 +157,26 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       </div>
     </div>
   );
+  // Quick-jump list of the other tasks in the current view, so you don't have
+  // to close the drawer and reopen another. Shown below attachments.
+  const siblingsBlock = navTasks.length > 1 && (
+    <div className="mt-6 border-t pt-5">
+      <div className="mb-2 text-[13px] font-semibold uppercase tracking-wider text-muted">All tasks · {navTasks.length}</div>
+      <div className="overflow-hidden rounded-lg border">
+        {navTasks.map((t) => {
+          const active = t.id === task.id;
+          return (
+            <button key={t.id} onClick={() => { if (!active) onOpenTask(t.id); }} disabled={active}
+              className={`flex w-full items-center gap-2.5 border-b px-3 py-2 text-left text-[15px] last:border-0 ${active ? "bg-accent-soft font-medium text-accent" : "hover:bg-background"}`}>
+              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[t.status].dot }} title={STATUS_META[t.status].label} />
+              <span className={`min-w-0 flex-1 truncate ${t.status === "done" ? "text-muted line-through" : ""}`}>{t.title}</span>
+              {t.due && <span className="shrink-0 text-[13px] text-muted">{t.due}</span>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
   const commentsBlock = (
     <div className="mt-6">
       <div className="mb-2 text-[13px] font-semibold uppercase tracking-wider text-muted">Activity · {commentCount}</div>
@@ -226,6 +246,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                 {descriptionBlock}
                 {subtasksBlock}
                 {attachmentsBlock}
+                {siblingsBlock}
               </div>
             </div>
             <div className="relative flex shrink-0 flex-col border-l bg-background/50" style={{ width: activityW }}>
@@ -276,6 +297,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               {descriptionBlock}
               {subtasksBlock}
               {attachmentsBlock}
+              {siblingsBlock}
               {commentsBlock}
             </div>
             {composer}
