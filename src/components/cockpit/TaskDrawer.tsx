@@ -157,13 +157,15 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       </div>
     </div>
   );
-  // Quick-jump list of the other tasks in the current view, so you don't have
-  // to close the drawer and reopen another. Shown below attachments.
-  const siblingsBlock = navTasks.length > 1 && (
+  // Quick-jump list of the other tasks in this same list (project), so you
+  // don't have to close the drawer and reopen another. Shown below
+  // attachments. Scoped to the current task's list, not the whole view.
+  const listSiblings = navTasks.filter((t) => t.projectId === task.projectId);
+  const siblingsBlock = listSiblings.length > 1 && (
     <div className="mt-6 border-t pt-5">
-      <div className="mb-2 text-[13px] font-semibold uppercase tracking-wider text-muted">All tasks · {navTasks.length}</div>
+      <div className="mb-2 text-[13px] font-semibold uppercase tracking-wider text-muted">{project?.name ?? "This list"} · {listSiblings.length}</div>
       <div className="overflow-hidden rounded-lg border">
-        {navTasks.map((t) => {
+        {listSiblings.map((t) => {
           const active = t.id === task.id;
           return (
             <button key={t.id} onClick={() => { if (!active) onOpenTask(t.id); }} disabled={active}
