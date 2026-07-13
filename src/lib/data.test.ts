@@ -20,7 +20,7 @@ function mkTask(overrides: Partial<Task> = {}): Task {
   return {
     id: "t_x", projectId: "p_x", clientId: "cl_x", title: "Task", description: "",
     status: "todo", priority: "none", assigneeId: null, contactId: null, due: null,
-    recurrence: "none", labelIds: [], ghlTaskId: null, subtasks: [], attachments: [],
+    recurrence: "none", labelIds: [], ghlTaskId: null, private: false, subtasks: [], attachments: [],
     comments: [], createdAt: new Date().toISOString(),
     ...overrides,
   };

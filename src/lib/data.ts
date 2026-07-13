@@ -207,11 +207,24 @@ export interface Task {
   recurrence: Recurrence;
   labelIds: string[];
   ghlTaskId: string | null;
+  /** A private task is visible only to its own assignee, enforced by RLS —
+   * not even admins can see one. Always lives under the shared "Personal"
+   * pseudo-client/project (see PERSONAL_CLIENT_ID) rather than a real GHL
+   * contact, so it never has anything to sync or show up in client views. */
+  private: boolean;
   subtasks: Subtask[];
   attachments: Attachment[];
   comments: Comment[];
   createdAt: string; // ISO — set by the DB; never overwritten on upsert
 }
+
+// A single shared client/project pair every private task lives under —
+// deliberately not "cl_"-prefixed, so it's automatically excluded from the
+// client sidebar, "My Clients", and "All tasks" (all of which filter on that
+// prefix). RLS is what actually keeps a private task hidden from everyone
+// but its assignee, regardless of the fact this id is shared across users.
+export const PERSONAL_CLIENT_ID = "personal";
+export const PERSONAL_PROJECT_ID = "personal_project";
 
 export const STATUS_META: Record<TaskStatus, { label: string; dot: string; chip: string }> = {
   todo: { label: "To do", dot: "#94a3b8", chip: "#f1f5f9" },
@@ -300,6 +313,7 @@ export const projectsSeed: Project[] = [
 export const seedTasks: Task[] = [
   {
     id: "t_1",
+    private: false,
     createdAt: TODAY,
     projectId: "p_bright_onboard",
     clientId: "c_bright",
@@ -330,6 +344,7 @@ export const seedTasks: Task[] = [
   },
   {
     id: "t_2",
+    private: false,
     createdAt: TODAY,
     projectId: "p_bright_onboard",
     clientId: "c_bright",
@@ -349,6 +364,7 @@ export const seedTasks: Task[] = [
   },
   {
     id: "t_3",
+    private: false,
     createdAt: TODAY,
     projectId: "p_bright_reviews",
     clientId: "c_bright",
@@ -371,6 +387,7 @@ export const seedTasks: Task[] = [
   },
   {
     id: "t_4",
+    private: false,
     createdAt: TODAY,
     projectId: "p_peak_launch",
     clientId: "c_peak",
@@ -394,6 +411,7 @@ export const seedTasks: Task[] = [
   },
   {
     id: "t_5",
+    private: false,
     createdAt: TODAY,
     projectId: "p_peak_launch",
     clientId: "c_peak",
@@ -413,6 +431,7 @@ export const seedTasks: Task[] = [
   },
   {
     id: "t_6",
+    private: false,
     createdAt: TODAY,
     projectId: "p_harbor_intake",
     clientId: "c_harbor",
@@ -435,6 +454,7 @@ export const seedTasks: Task[] = [
   },
   {
     id: "t_7",
+    private: false,
     createdAt: TODAY,
     projectId: "p_harbor_intake",
     clientId: "c_harbor",

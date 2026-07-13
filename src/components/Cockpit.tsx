@@ -34,6 +34,8 @@ import {
   type Comment,
   type Message,
   type Me,
+  PERSONAL_CLIENT_ID,
+  PERSONAL_PROJECT_ID,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
 import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, rowToTask, rowToClient, rowToNotif, rowToMessage } from "@/lib/db";
@@ -51,6 +53,7 @@ import { TaskDrawer } from "./cockpit/TaskDrawer";
 import { QuickLinksBar } from "./cockpit/ClientLinks";
 import { ClientNotes } from "./cockpit/ClientNotes";
 import { ClientsBoard, type ClientBoardGroup } from "./cockpit/ClientsBoard";
+import { PersonalTasks } from "./PersonalTasks";
 
 export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [clients, setClients] = useState<Client[]>([]);
@@ -523,7 +526,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // with "Hide done" on by default, so the sidebar/board badge and the list
   // never disagree about how many tasks "need attention".
   const clientTaskCount = (clientId: string) => scopedTasks.filter((t) => t.clientId === clientId && t.status !== "done").length;
-  const myWorkTasks = sortTasks(tasks.filter((t) => t.assigneeId === myWorkUser && passesFilters(t)));
+  const myWorkTasks = sortTasks(tasks.filter((t) => t.assigneeId === myWorkUser && !t.private && passesFilters(t)));
+  // Not gated by myWorkUser (the admin-only "viewing work for" selector) —
+  // RLS never even returns another person's private tasks in `tasks`, so
+  // filtering by `me.id` here is correct regardless of who's being viewed.
+  const myPersonalTasks = sortTasks(tasks.filter((t) => t.assigneeId === me.id && t.private));
 
   const openTask = tasks.find((t) => t.id === openTaskId) ?? null;
   const filtersActive = filters.status !== "all" || filters.assignee !== "all" || filters.priority !== "all";
@@ -576,7 +583,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       assigneeId: me.id,
       contactId: activeClient.slice(3),
       due: groupBy === "due" && groupKey === "today" ? TODAY : null,
-      recurrence: "none", labelIds: [], ghlTaskId: null, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
+      recurrence: "none", labelIds: [], ghlTaskId: null, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
+    };
+    setTasks((ts) => [...ts, t]);
+    upsertTask(t, me.id);
+  };
+
+  const quickAddPersonal = (title: string) => {
+    if (!title.trim()) return;
+    const t: Task = {
+      id: newId("t_"), projectId: PERSONAL_PROJECT_ID, clientId: PERSONAL_CLIENT_ID, title: title.trim(), description: "",
+      status: "todo", priority: "none", assigneeId: me.id, contactId: null, due: null, recurrence: "none",
+      labelIds: [], ghlTaskId: null, private: true, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
     };
     setTasks((ts) => [...ts, t]);
     upsertTask(t, me.id);
@@ -803,7 +821,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       const newTasks: Task[] = fresh.map((g) => ({
         id: newId("t_"), projectId: projectId!, clientId: activeClient, title: g.title, description: g.description,
         status: "todo", priority: "none", assigneeId: null, contactId: contact.id,
-        due: g.due, recurrence: "none", labelIds: [], ghlTaskId: g.ghlTaskId, subtasks: [], attachments: [], comments: [],
+        due: g.due, recurrence: "none", labelIds: [], ghlTaskId: g.ghlTaskId, private: false, subtasks: [], attachments: [], comments: [],
         createdAt: new Date().toISOString(),
       }));
       setTasks((ts) => [...ts, ...newTasks]);
@@ -1003,7 +1021,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         <nav className="space-y-0.5 px-2">
           <SideItem active={myWork} onClick={() => { setMyWork(true); setMyClientsView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.inbox className="text-muted" /> <span>My Work</span></SideItem>
           <SideItem active={myClientsView} onClick={() => { setMyClientsView(true); setMyWork(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.user className="text-muted" /> <span>My Clients</span><span className="ml-auto text-[15px] text-muted">{myAssignedClients.length}</span></SideItem>
-          <SideItem active={!myWork && !myClientsView && activeClient === "all"} onClick={() => { setMyWork(false); setMyClientsView(false); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>All tasks</span><span className="ml-auto text-[15px] text-muted">{scopedTasks.length}</span></SideItem>
+          <SideItem active={!myWork && !myClientsView && activeClient === "all"} onClick={() => { setMyWork(false); setMyClientsView(false); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>All tasks</span><span className="ml-auto text-[15px] text-muted">{scopedTasks.filter((t) => t.clientId.startsWith("cl_")).length}</span></SideItem>
         </nav>
 
         <div className="flex items-center justify-between px-4 pb-1 pt-4">
@@ -1307,7 +1325,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <ClientsBoard groups={myClientsGroups} scopedTasks={scopedTasks} clientTaskCount={clientTaskCount} hasUnreadMessage={hasUnreadMessage}
             onOpen={(id) => { setMyWork(false); setMyClientsView(false); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }} />
         ) : myWork ? (
-          <GroupedList groups={buildGroups(myWorkTasks, "due").filter((g) => g.tasks.length > 0)} showClient clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={false} quickAddHint="" onQuickAdd={() => {}} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} />
+          <>
+            <GroupedList groups={buildGroups(myWorkTasks, "due").filter((g) => g.tasks.length > 0)} showClient clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={false} quickAddHint="" onQuickAdd={() => {}} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} />
+            {myWorkUser === me.id && (
+              <PersonalTasks tasks={myPersonalTasks} onOpen={setOpenTaskId} onToggleDone={(id, doneNow) => patchTask(id, { status: doneNow ? "done" : "todo" })} onQuickAdd={quickAddPersonal} />
+            )}
+          </>
         ) : !activeProject && activeClient !== "all" && clientTab === "knowledge" ? (
           <ClientNotes
             notes={clientNotes.filter((n) => n.clientId === activeClient)}
