@@ -1059,7 +1059,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <button onClick={() => setSortMenuOpen((o) => !o)} title="Sort clients" className={`rounded p-0.5 hover:bg-background hover:text-foreground ${clientSort !== "manual" ? "text-accent" : "text-muted"}`}><I.list className="h-3.5 w-3.5" /></button>
               {sortMenuOpen && (<>
                 <div className="fixed inset-0 z-30" onClick={() => setSortMenuOpen(false)} />
-                <div className="absolute right-0 top-full z-40 mt-1 w-44 rounded-lg border border-white/10 bg-background p-1 shadow-xl">
+                <div className="absolute right-0 top-full z-40 mt-1 w-44 rounded-lg border border-white/15 bg-[#2c3140] p-1 shadow-2xl">
                   {([["urgent", "Overdue first"], ["manual", "Manual (drag to order)"], ["az", "A → Z"], ["tasks", "Most active"], ["recent", "Recently added"]] as const).map(([v, label]) => (
                     <button key={v} onClick={() => { saveClientSort(v); setSortMenuOpen(false); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-white/10">
                       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${clientSort === v ? "bg-accent" : "bg-transparent"}`} />{label}
@@ -1084,7 +1084,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 <div className={`group/row relative ${dragClientId === c.id ? "opacity-40" : ""} ${statusMenuClientId === c.id ? "z-50" : ""}`}>
                   {statusMenuClientId === c.id && (<>
                     <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setStatusMenuClientId(null); }} />
-                    <div className="absolute left-1 top-full z-40 mt-1 w-44 rounded-lg border border-white/10 bg-background p-1 shadow-xl">
+                    <div className="absolute left-1 top-full z-40 mt-1 w-44 rounded-lg border border-white/15 bg-[#2c3140] p-1 shadow-2xl">
                       {CLIENT_STATUS_ORDER.map((st) => (
                         <button key={st} onClick={(e) => { e.stopPropagation(); setStatusMenuClientId(null); setClientStatus(c.id, st); }}
                           className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-white/10">
@@ -1116,7 +1116,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                       <button onClick={(e) => { e.stopPropagation(); setMenuClientId(menuClientId === c.id ? null : c.id); }} title="More" className="rounded p-1 text-muted opacity-0 hover:bg-background hover:text-foreground group-hover/row:opacity-100"><I.dots /></button>
                       {menuClientId === c.id && (<>
                         <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setMenuClientId(null); }} />
-                        <div className="absolute right-0 top-full z-40 mt-1 w-44 rounded-lg border border-white/10 bg-background p-1 shadow-xl">
+                        <div className="absolute right-0 top-full z-40 mt-1 w-44 rounded-lg border border-white/15 bg-[#2c3140] p-1 shadow-2xl">
                           <button onClick={(e) => { e.stopPropagation(); setMenuClientId(null); addProject(c.id); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[15px] hover:bg-white/10"><I.plus /> Add project</button>
                           <button onClick={(e) => { e.stopPropagation(); setMenuClientId(null); renameClient(c.id); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[15px] hover:bg-white/10"><I.pencil /> Rename client</button>
                           <button onClick={(e) => { e.stopPropagation(); setMenuClientId(null); deleteClient(c.id); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[15px] text-red-500 hover:bg-white/10"><I.trash /> Remove client</button>
@@ -1144,7 +1144,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                           </button>
                           {menuProjectId === p.id && (<>
                             <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setMenuProjectId(null); }} />
-                            <div className="absolute right-0 top-full z-40 mt-1 w-40 rounded-lg border border-white/10 bg-background p-1 shadow-xl">
+                            <div className="absolute right-0 top-full z-40 mt-1 w-40 rounded-lg border border-white/15 bg-[#2c3140] p-1 shadow-2xl">
                               <button onClick={(e) => { e.stopPropagation(); setMenuProjectId(null); renameProject(p.id); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-white/10"><I.pencil /> Rename</button>
                               <button onClick={(e) => { e.stopPropagation(); setMenuProjectId(null); deleteProject(p.id); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-red-500 hover:bg-white/10"><I.trash /> Delete</button>
                             </div>
