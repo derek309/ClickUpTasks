@@ -20,6 +20,10 @@ export default function SettingsPanel({
   const [locs, setLocs] = useState<Record<string, string>>(() => Object.fromEntries(clients.map((c) => [c.id, c.ghlLocationId || ""])));
   const [status, setStatus] = useState<Record<string, { kind: "idle" | "busy" | "ok" | "err"; msg?: string }>>({});
   const [tokens, setTokens] = useState<Record<string, string>>({});
+  // Once a sub-account is connected, collapse the token form to a single
+  // Sync button — showing both a live token field and Connect+Sync side by
+  // side for an already-connected account was the confusing part.
+  const [editing, setEditing] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     fetch("/api/ghl/status").then((r) => r.json()).then((j) => { setConfigured(!!j.configured); setTokenLocations(j.locations ?? []); }).catch(() => setConfigured(false));
@@ -41,7 +45,8 @@ export default function SettingsPanel({
       if (!res.ok) throw new Error(j.error ?? "Connect failed");
       setTokenLocations((l) => Array.from(new Set([...l, locationId])));
       setTokens((t) => ({ ...t, [client.id]: "" }));
-      setStatus((s) => ({ ...s, [client.id]: { kind: "ok", msg: "Connected ✓ — now hit Sync" } }));
+      setEditing((e) => ({ ...e, [client.id]: false }));
+      setStatus((s) => ({ ...s, [client.id]: { kind: "ok", msg: "Connected — hit Sync to pull contacts." } }));
     } catch (e) {
       setStatus((s) => ({ ...s, [client.id]: { kind: "err", msg: e instanceof Error ? e.message : "Connect failed" } }));
     }
@@ -100,28 +105,44 @@ export default function SettingsPanel({
           <div className="space-y-2">
             {clients.map((c) => {
               const st = status[c.id];
+              const loc = (locs[c.id] || "").trim();
+              const connected = !!loc && tokenLocations.includes(loc);
+              // Not-yet-connected accounts always show the form (nothing to
+              // collapse to); connected ones start collapsed and only show
+              // it again if you explicitly ask to change the token.
+              const showForm = !connected || editing[c.id];
               return (
                 <div key={c.id} className="rounded-lg border bg-background px-3 py-2.5">
-                  <div className="mb-2 flex items-center gap-2">
+                  <div className="flex items-center gap-2">
                     <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: c.color }} />
                     <span className="truncate text-[15px] font-medium">{c.name}</span>
-                    {(locs[c.id] || "").trim() && (
-                      tokenLocations.includes((locs[c.id] || "").trim())
-                        ? <span className="ml-auto rounded-full bg-green-50 px-2 py-0.5 text-[15px] font-medium text-green-600">token ✓</span>
-                        : <span className="ml-auto rounded-full bg-amber-50 px-2 py-0.5 text-[15px] font-medium text-amber-700">no token</span>
-                    )}
+                    <span className={`ml-auto rounded-full px-2 py-0.5 text-[13px] font-medium ${connected ? "bg-green-50 text-green-600" : "bg-amber-50 text-amber-700"}`}>
+                      {connected ? "Connected" : "Not connected"}
+                    </span>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <input value={locs[c.id] ?? ""} onChange={(e) => setLoc(c.id, e.target.value)} placeholder="Location ID"
-                      className="w-40 rounded-md border bg-surface px-2 py-1 text-[15px] outline-none focus:border-accent" />
-                    <input type="password" value={tokens[c.id] ?? ""} onChange={(e) => setTokens((t) => ({ ...t, [c.id]: e.target.value }))} placeholder="pit-… token"
-                      className="min-w-0 flex-1 rounded-md border bg-surface px-2 py-1 text-[15px] outline-none focus:border-accent" />
-                    <button onClick={() => connect(c)} disabled={st?.kind === "busy"}
-                      className="shrink-0 rounded-md border border-accent px-2.5 py-1 text-[15px] font-medium text-accent hover:bg-accent-soft disabled:opacity-50">Connect</button>
-                    <button onClick={() => sync(c)} disabled={st?.kind === "busy" || !tokenLocations.includes((locs[c.id] || "").trim())}
-                      className="shrink-0 rounded-md bg-accent px-2.5 py-1 text-[15px] font-medium text-white disabled:opacity-40">
-                      {st?.kind === "busy" ? "…" : "Sync"}</button>
-                  </div>
+
+                  {showForm ? (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <input value={locs[c.id] ?? ""} onChange={(e) => setLoc(c.id, e.target.value)} placeholder="Location ID"
+                        className="w-40 rounded-md border bg-surface px-2 py-1 text-[15px] outline-none focus:border-accent" />
+                      <input type="password" value={tokens[c.id] ?? ""} onChange={(e) => setTokens((t) => ({ ...t, [c.id]: e.target.value }))} placeholder="pit-… token"
+                        className="min-w-0 flex-1 rounded-md border bg-surface px-2 py-1 text-[15px] outline-none focus:border-accent" />
+                      <button onClick={() => connect(c)} disabled={st?.kind === "busy"}
+                        className="shrink-0 rounded-md bg-accent px-2.5 py-1 text-[15px] font-medium text-white disabled:opacity-50">
+                        {st?.kind === "busy" ? "Connecting…" : "Connect"}</button>
+                      {connected && (
+                        <button onClick={() => setEditing((e) => ({ ...e, [c.id]: false }))} className="shrink-0 text-[13px] text-muted hover:text-foreground">Cancel</button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="mt-2 flex items-center gap-2">
+                      <button onClick={() => sync(c)} disabled={st?.kind === "busy"}
+                        className="shrink-0 rounded-md bg-accent px-3 py-1 text-[15px] font-medium text-white disabled:opacity-50">
+                        {st?.kind === "busy" ? "Syncing…" : "Sync"}</button>
+                      <button onClick={() => setEditing((e) => ({ ...e, [c.id]: true }))} className="text-[13px] text-muted hover:text-foreground hover:underline">Change token</button>
+                    </div>
+                  )}
+
                   {st && st.kind !== "busy" && (
                     <div className={`mt-1.5 text-[15px] ${st.kind === "ok" ? "text-green-600" : "text-red-500"}`}>{st.msg}</div>
                   )}

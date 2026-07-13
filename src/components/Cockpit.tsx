@@ -381,6 +381,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Contacts tab and Conversations, not full clients with projects/tasks.
   const clientList = clients.filter((c) => c.id.startsWith("cl_") && c.type === "client");
   const visibleClients = canAdmin ? clientList : clientList.filter((c) => scopedTasks.some((t) => t.clientId === c.id));
+  // ⌘K's "Not imported" search — any type counts as "already added" here,
+  // not just type 'client', so a contact never shows as addable twice.
+  const addedContactIds = new Set(clients.filter((c) => c.id.startsWith("cl_")).map((c) => c.id.slice(3)));
   // Apply the user's sort preference; starred clients always float to the top.
   const sortedClients = (() => {
     const base = [...visibleClients];
@@ -1201,7 +1204,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           onCancel={() => setLinkModal(null)}
         />
       )}
-      {cmdkOpen && <CommandK tasks={scopedTasks} clients={clientList} clientById={clientById} onOpenTask={(id) => { setOpenTaskId(id); setCmdkOpen(false); }} onOpenClient={(id) => { setMyWork(false); setActiveClient(id); setCmdkOpen(false); }} onClose={() => setCmdkOpen(false)} />}
+      {cmdkOpen && <CommandK tasks={scopedTasks} clients={clientList} contacts={contacts} addedContactIds={addedContactIds} clientById={clientById}
+        onOpenTask={(id) => { setOpenTaskId(id); setCmdkOpen(false); }}
+        onOpenClient={(id) => { setMyWork(false); setActiveClient(id); setCmdkOpen(false); }}
+        onAddContact={(contact) => { addClientContact(contact); setCmdkOpen(false); }}
+        onClose={() => setCmdkOpen(false)} />}
 
       <div className="pointer-events-none fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 flex-col items-center gap-2">
         {toasts.map((t) => (<div key={t.id} className="rounded-lg bg-foreground px-3.5 py-2 text-[15px] font-medium text-[color:var(--surface)] shadow-lg">{t.text}</div>))}
