@@ -27,7 +27,12 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   const [collapsedG, setCollapsedG] = useState<Set<string>>(new Set());
   const toggleG = (k: string) => setCollapsedG((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
 
-  const visibleGroups = hideEmpty ? groups.filter((g) => g.tasks.length > 0) : groups;
+  const filteredGroups = hideEmpty ? groups.filter((g) => g.tasks.length > 0) : groups;
+  // hideEmpty must never hide the only way to add a first task — if filtering
+  // would leave nothing on screen at all, fall back to the first defined
+  // group (empty, but its quick-add row is still reachable) instead of a
+  // dead-end "No tasks yet." with no input anywhere.
+  const visibleGroups = filteredGroups.length === 0 && canQuickAdd && groups.length > 0 ? [groups[0]] : filteredGroups;
   const cols = LIST_COLUMNS.filter((c) => visibleCols.includes(c.key));
   // minmax(160px,1fr) — not minmax(0,1fr) — so the name column can never be
   // crushed to near-zero width on a narrow viewport (that crush is what made

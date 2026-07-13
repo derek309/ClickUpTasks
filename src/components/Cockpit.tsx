@@ -391,10 +391,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     else if (clientSort === "tasks") base.sort((a, b) => clientTaskCountRef(b.id) - clientTaskCountRef(a.id));
     else if (clientSort === "recent") base.reverse(); // fetch order is created_at asc
     else if (clientSort === "urgent") {
-      // Overdue first, then due today, then soonest due date, then anything
-      // with no due date, then clients with no open tasks at all — each tier
-      // broken by priority (highest first), then recency (fetch order is
-      // created_at asc, so a higher original index is more recently added).
+      // A client who's actually messaged us goes first — they're waiting on
+      // a reply, which trumps everything else. Then: overdue, then due
+      // today, then soonest due date, then anything with no due date, then
+      // clients with no open tasks at all — each tier broken by priority
+      // (highest first), then recency (fetch order is created_at asc, so a
+      // higher original index is more recently added).
       const withIndex = base.map((c, i) => ({ c, i, k: clientUrgencyKey(c.id) }));
       withIndex.sort((a, b) => a.k.tier - b.k.tier || a.k.due.localeCompare(b.k.due) || b.k.priorityRank - a.k.priorityRank || b.i - a.i);
       base.splice(0, base.length, ...withIndex.map((x) => x.c));
@@ -403,14 +405,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return [...base.filter((c) => starred.has(c.id)), ...base.filter((c) => !starred.has(c.id))];
   })();
   function clientTaskCountRef(clientId: string) { return scopedTasks.filter((t) => t.clientId === clientId).length; }
+  function hasUnreadMessage(clientId: string): boolean {
+    if (!clientId.startsWith("cl_")) return false;
+    const contactId = clientId.slice(3);
+    return messages.some((m) => m.contactId === contactId && m.direction === "inbound" && !m.read);
+  }
   function clientUrgencyKey(clientId: string): { tier: number; due: string; priorityRank: number } {
+    if (hasUnreadMessage(clientId)) return { tier: 0, due: "", priorityRank: 0 };
     const open = scopedTasks.filter((t) => t.clientId === clientId && t.status !== "done");
-    if (open.length === 0) return { tier: 4, due: "", priorityRank: 0 };
+    if (open.length === 0) return { tier: 5, due: "", priorityRank: 0 };
     const withDue = open.filter((t) => t.due);
-    if (withDue.length === 0) return { tier: 3, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
+    if (withDue.length === 0) return { tier: 4, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
     const soonest = withDue.reduce((a, b) => (b.due! < a.due! ? b : a)).due!;
     const atSoonest = withDue.filter((t) => t.due === soonest);
-    const tier = soonest < TODAY ? 0 : soonest === TODAY ? 1 : 2;
+    const tier = soonest < TODAY ? 1 : soonest === TODAY ? 2 : 3;
     return { tier, due: soonest, priorityRank: Math.max(...atSoonest.map((t) => PRIORITY_META[t.priority].rank)) };
   }
   // Sidebar sections by client status; Active has no header, others only show when non-empty.
@@ -962,6 +970,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                       onClick={(e) => { e.stopPropagation(); setStatusMenuClientId(statusMenuClientId === c.id ? null : c.id); }}
                       className="h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-transparent transition hover:ring-white/30" style={{ background: CLIENT_STATUS_META[c.status].dot }} />
                     <span className="h-1.5 w-1.5 shrink-0 rounded-full" title={HEALTH_META[clientHealth(c.id, scopedTasks)].label} style={{ background: HEALTH_META[clientHealth(c.id, scopedTasks)].dot }} />
+                    {hasUnreadMessage(c.id) && <span className="shrink-0 text-accent" title="New message — waiting on a reply"><I.comment /></span>}
                     <span className="min-w-0 flex-1">
                       <span className="truncate">{c.name}</span>
                       {clientCompany(c) && <span className="block truncate text-[13px] font-normal text-muted">{clientCompany(c)}</span>}
