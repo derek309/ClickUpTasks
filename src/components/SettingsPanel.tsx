@@ -57,7 +57,9 @@ export default function SettingsPanel({
       const res = await authedFetch("/api/ghl/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: client.id, locationId }) });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error ?? "Sync failed");
-      setStatus((s) => ({ ...s, [client.id]: { kind: "ok", msg: `Synced ${j.synced} contact${j.synced === 1 ? "" : "s"}` } }));
+      // A 200 can still carry a partial-failure message (sync.route.ts saves
+      // whatever it collected before a page failed, rather than losing it).
+      setStatus((s) => ({ ...s, [client.id]: { kind: j.error ? "err" : "ok", msg: j.error ?? `Synced ${j.synced} contact${j.synced === 1 ? "" : "s"}` } }));
       await onSynced();
     } catch (e) {
       setStatus((s) => ({ ...s, [client.id]: { kind: "err", msg: e instanceof Error ? e.message : "Sync failed" } }));
