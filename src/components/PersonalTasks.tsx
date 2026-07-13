@@ -27,7 +27,7 @@ export function PersonalTasks({ tasks, onOpen, onToggleDone, onQuickAdd }: {
   };
 
   return (
-    <div className="border-t bg-background p-4 sm:p-5">
+    <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">
       <div className="overflow-hidden rounded-xl border bg-surface shadow-soft">
         <div className="flex items-center gap-2 border-b bg-background/40 px-4 py-2">
           <I.user className="text-muted" />
