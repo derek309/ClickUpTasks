@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { type Me } from "@/lib/data";
 import { ConfirmModal, type ConfirmSpec } from "./cockpit/modals";
+import { I } from "./cockpit/ui";
 
-type Profile = { id: string; email: string; name: string; role: "admin" | "va"; color: string; pending?: boolean };
+type Profile = { id: string; email: string; name: string; role: "admin" | "va"; color: string; pending?: boolean; avatar_url?: string | null };
 
 export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void }) {
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -17,6 +18,7 @@ export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void
   const [inviting, setInviting] = useState(false);
   const [inviteMsg, setInviteMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
+  const [uploadingId, setUploadingId] = useState<string | null>(null);
 
   async function authedFetch(path: string, init?: RequestInit) {
     const { data } = await supabase.auth.getSession();
@@ -51,6 +53,24 @@ export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void
       load();
     } finally {
       setSaving(null);
+    }
+  }
+
+  async function uploadAvatar(id: string, file: File) {
+    setUploadingId(id);
+    setError(null);
+    try {
+      const form = new FormData();
+      form.set("id", id);
+      form.set("file", file);
+      const res = await authedFetch("/api/team/avatar", { method: "POST", body: form });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error ?? "Upload failed");
+      setProfiles((ps) => ps.map((p) => (p.id === id ? { ...p, avatar_url: j.avatar_url } : p)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setUploadingId(null);
     }
   }
 
@@ -121,7 +141,17 @@ export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void
           {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-[15px] text-red-600">{error}</div>}
           {!loading && profiles.map((p) => (
             <div key={p.id} className="flex items-center gap-3 border-b py-2.5 last:border-0">
-              <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[15px] font-semibold text-white" style={{ background: p.color }}>{initials(p.name || p.email)}</span>
+              <label className="group/avatar relative block h-8 w-8 shrink-0 cursor-pointer overflow-hidden rounded-full" title="Upload a headshot">
+                <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="sr-only"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadAvatar(p.id, f); e.target.value = ""; }} />
+                {p.avatar_url
+                  // eslint-disable-next-line @next/next/no-img-element -- small fixed-size thumbnail, not worth next/image's setup here.
+                  ? <img src={p.avatar_url} alt={p.name || p.email} className="h-8 w-8 rounded-full object-cover" />
+                  : <span className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[15px] font-semibold text-white" style={{ background: p.color }}>{initials(p.name || p.email)}</span>}
+                <span className={`absolute inset-0 flex items-center justify-center rounded-full bg-black/50 text-white transition-opacity ${uploadingId === p.id ? "opacity-100" : "opacity-0 group-hover/avatar:opacity-100"}`}>
+                  {uploadingId === p.id ? <span className="text-[11px]">…</span> : <I.pencil className="h-3.5 w-3.5" />}
+                </span>
+              </label>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[15px] font-medium">{p.name || p.email}{p.id === me.id && <span className="ml-1 text-[15px] text-muted">(you)</span>}{p.pending && <span className="ml-1.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[13px] font-medium text-amber-700">Invite pending</span>}</div>
                 <div className="truncate text-[15px] text-muted">{p.email}</div>

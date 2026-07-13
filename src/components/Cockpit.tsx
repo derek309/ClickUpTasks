@@ -23,7 +23,6 @@ import {
   PRIORITY_ORDER,
   type Task,
   type TaskStatus,
-  type Priority,
   type Client,
   type Project,
   type Contact,
@@ -199,7 +198,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         // Load the real team roster (every signed-up profile) before rendering
         // data, so assignees/avatars resolve to real people — not demo seeds.
         try {
-          const { data: profs } = await supabase.from("profiles").select("id, name, email, role, member_id, color");
+          const { data: profs } = await supabase.from("profiles").select("id, name, email, role, member_id, color, avatar_url");
           if (profs?.length) {
             const seen = new Set<string>();
             setUsers(profs.flatMap((p) => {
@@ -207,7 +206,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               if (seen.has(id)) return [];
               seen.add(id);
               const name = p.name || p.email || "Teammate";
-              return [{ id, name, initials: initialsOf(name), color: p.color || "#a855f7", role: p.role === "admin" ? "admin" as const : "va" as const }];
+              return [{ id, name, initials: initialsOf(name), color: p.color || "#a855f7", role: p.role === "admin" ? "admin" as const : "va" as const, avatarUrl: p.avatar_url ?? null }];
             }));
           }
         } catch { /* roster fetch is best-effort; founder fallback stays */ }
@@ -553,7 +552,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const t: Task = {
       id: newId("t_"), projectId, clientId: activeClient, title: title.trim(), description: "",
       status: groupBy === "status" ? (groupKey as TaskStatus) : "todo",
-      priority: groupBy === "priority" ? (groupKey as Priority) : "none",
+      priority: "none",
       assigneeId: me.id,
       contactId: activeClient.slice(3),
       due: groupBy === "due" && groupKey === "today" ? TODAY : null,

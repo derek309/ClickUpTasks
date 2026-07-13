@@ -43,6 +43,10 @@ export const I = {
 export function Avatar({ id, size = 26 }: { id: string | null; size?: number }) {
   const u = userById(id);
   if (!u) return (<span className="inline-flex items-center justify-center rounded-full border border-dashed text-muted" style={{ width: size, height: size, fontSize: size * 0.42 }}><I.user /></span>);
+  if (u.avatarUrl) return (
+    // eslint-disable-next-line @next/next/no-img-element -- sizes are dynamic per call site; next/image's fixed-dimension model doesn't fit this many tiny inline avatars.
+    <img src={u.avatarUrl} alt={u.name} title={u.name} className="rounded-full object-cover" style={{ width: size, height: size }} />
+  );
   return (<span className="inline-flex items-center justify-center rounded-full font-semibold text-white" style={{ width: size, height: size, background: u.color, fontSize: size * 0.4 }} title={u.name}>{u.initials}</span>);
 }
 

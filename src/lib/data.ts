@@ -33,6 +33,7 @@ export interface User {
   initials: string;
   color: string;
   role: Role;
+  avatarUrl?: string | null;
 }
 
 // Full client lifecycle funnel, replacing the earlier active/paused/archived
