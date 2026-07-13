@@ -53,7 +53,6 @@ import { TaskDrawer } from "./cockpit/TaskDrawer";
 import { QuickLinksBar } from "./cockpit/ClientLinks";
 import { ClientNotes } from "./cockpit/ClientNotes";
 import { ClientsBoard, type ClientBoardGroup } from "./cockpit/ClientsBoard";
-import { PersonalTasks } from "./PersonalTasks";
 
 export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [clients, setClients] = useState<Client[]>([]);
@@ -527,7 +526,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // with "Hide done" on by default, so the sidebar/board badge and the list
   // never disagree about how many tasks "need attention".
   const clientTaskCount = (clientId: string) => scopedTasks.filter((t) => t.clientId === clientId && t.status !== "done").length;
-  const myWorkTasks = sortTasks(tasks.filter((t) => t.assigneeId === myWorkUser && !t.private && passesFilters(t)));
+  // Personal (private) tasks are included here too — they're real tasks
+  // assigned to you, just private, so they belong in your work feed.
+  const myWorkTasks = sortTasks(tasks.filter((t) => t.assigneeId === myWorkUser && passesFilters(t)));
   // Not gated by myWorkUser (the admin-only "viewing work for" selector) —
   // RLS never even returns another person's private tasks in `tasks`, so
   // filtering by `me.id` here is correct regardless of who's being viewed.
@@ -551,7 +552,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   // Flat, in-display-order list of the tasks currently shown — drives prev/next
   // navigation inside the open task (j/k + header arrows).
-  const displayedGroups = myWork ? buildGroups(myWorkTasks, "due").filter((g) => g.tasks.length > 0) : buildGroups(sortTasks(baseTasks.filter(passesFilters)));
+  const displayedGroups = personalView ? buildGroups(myPersonalTasks, "due").filter((g) => g.tasks.length > 0) : myWork ? buildGroups(myWorkTasks, "due").filter((g) => g.tasks.length > 0) : buildGroups(sortTasks(baseTasks.filter(passesFilters)));
   const orderedTaskIds = displayedGroups.flatMap((g) => g.tasks.map((t) => t.id));
   const openTaskIdx = openTaskId ? orderedTaskIds.indexOf(openTaskId) : -1;
   const goToTask = (delta: number) => { if (openTaskIdx < 0) return; const next = orderedTaskIds[openTaskIdx + delta]; if (next) setOpenTaskId(next); };
@@ -590,12 +591,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     upsertTask(t, me.id);
   };
 
-  const quickAddPersonal = (title: string) => {
+  const quickAddPersonal = (groupKey: string, title: string) => {
     if (!title.trim()) return;
     const t: Task = {
       id: newId("t_"), projectId: PERSONAL_PROJECT_ID, clientId: PERSONAL_CLIENT_ID, title: title.trim(), description: "",
-      status: "todo", priority: "none", assigneeId: me.id, contactId: null, due: null, recurrence: "none",
-      labelIds: [], ghlTaskId: null, private: true, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
+      status: groupBy === "status" ? (groupKey as TaskStatus) : "todo",
+      priority: "none",
+      assigneeId: me.id, contactId: null,
+      due: groupBy === "due" && groupKey === "today" ? TODAY : null,
+      recurrence: "none", labelIds: [], ghlTaskId: null, private: true, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
     };
     setTasks((ts) => [...ts, t]);
     upsertTask(t, me.id);
@@ -1325,7 +1329,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
         {/* content */}
         {personalView ? (
-          <PersonalTasks tasks={myPersonalTasks} onOpen={setOpenTaskId} onToggleDone={(id, doneNow) => patchTask(id, { status: doneNow ? "done" : "todo" })} onQuickAdd={quickAddPersonal} />
+          <GroupedList groups={buildGroups(myPersonalTasks, "due")} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty />
         ) : myClientsView ? (
           <ClientsBoard groups={myClientsGroups} scopedTasks={scopedTasks} clientTaskCount={clientTaskCount} hasUnreadMessage={hasUnreadMessage}
             onOpen={(id) => { setMyWork(false); setMyClientsView(false); setPersonalView(false); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }} />
