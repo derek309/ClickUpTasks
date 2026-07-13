@@ -143,7 +143,7 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
           ))}
           <div className="flex items-center gap-2 py-0.5">
             <span className="h-4 w-4 shrink-0" />
-            <input value={subDraft} onChange={(e) => setSubDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { onAddSub(task.id, subDraft); setSubDraft(""); } }} placeholder="Add subtask…" className="flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted" />
+            <input value={subDraft} onChange={(e) => setSubDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { onAddSub(task.id, subDraft); setSubDraft(""); } }} placeholder="Add checklist item…" className="flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted" />
           </div>
         </div>
       )}
