@@ -50,6 +50,7 @@ import { TaskDrawer } from "./cockpit/TaskDrawer";
 import { QuickLinksBar } from "./cockpit/ClientLinks";
 import { ClientNotes } from "./cockpit/ClientNotes";
 import { ContactMessages } from "./cockpit/ContactMessages";
+import { ClientsBoard, type ClientBoardGroup } from "./cockpit/ClientsBoard";
 
 export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [clients, setClients] = useState<Client[]>([]);
@@ -71,6 +72,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [activeProject, setActiveProject] = useState<string | null>(null);
   const [myWork, setMyWork] = useState(me.role === "va");
   const [myWorkUser, setMyWorkUser] = useState<string>(me.id);
+  const [myClientsView, setMyClientsView] = useState(false);
   const [groupBy, setGroupBy] = useState<"project" | "status" | "priority" | "due">("status");
   const [filters, setFilters] = useState<FilterState>({ status: "all", assignee: "all", priority: "all" });
   const [sortBy, setSortBy] = useState<SortBy>("manual");
@@ -156,7 +158,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [drawerFull, setDrawerFull] = useState(false);
   useEffect(() => { try { setDrawerFull(localStorage.getItem("cut_drawerFull") === "1"); } catch {} }, []);
   // Drop the project filter whenever we leave its client (or enter My Work).
-  useEffect(() => { setActiveProject((p) => (p && projects.find((x) => x.id === p)?.clientId === activeClient && !myWork ? p : null)); }, [activeClient, myWork, projects]);
+  useEffect(() => { setActiveProject((p) => (p && projects.find((x) => x.id === p)?.clientId === activeClient && !myWork && !myClientsView ? p : null)); }, [activeClient, myWork, myClientsView, projects]);
   // Links/Notes/health are single-client concepts — always land back on Tasks when the active client changes.
   useEffect(() => { setClientTab("tasks"); }, [activeClient, myWork]);
   const toggleDrawerFull = () => setDrawerFull((f) => { const v = !f; try { localStorage.setItem("cut_drawerFull", v ? "1" : "0"); } catch {} return v; });
@@ -421,6 +423,31 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const tier = soonest < TODAY ? 1 : soonest === TODAY ? 2 : 3;
     return { tier, due: soonest, priorityRank: Math.max(...atSoonest.map((t) => PRIORITY_META[t.priority].rank)) };
   }
+  // "My Clients" — the same urgency tiers as the sidebar's "Overdue first"
+  // sort, but as grouped sections of clients (My Work's layout, client rows
+  // instead of task rows) rather than a single flat re-ordered list.
+  const myClientsGroups: ClientBoardGroup[] = (() => {
+    const defs: [number, string, string][] = [
+      [0, "New message", "#8b5cf6"],
+      [1, "Overdue", "#ef4444"],
+      [2, "Due today", "#f59e0b"],
+      [3, "Upcoming", "#3b82f6"],
+      [4, "No due date", "#94a3b8"],
+      [5, "No open tasks", "#cbd5e1"],
+    ];
+    const withKey = visibleClients.map((c) => ({ c, k: clientUrgencyKey(c.id) }));
+    return defs
+      .map(([tier, label, color]) => ({
+        key: String(tier),
+        label,
+        color,
+        clients: withKey
+          .filter((x) => x.k.tier === tier)
+          .sort((a, b) => a.k.due.localeCompare(b.k.due) || b.k.priorityRank - a.k.priorityRank || a.c.name.localeCompare(b.c.name))
+          .map((x) => x.c),
+      }))
+      .filter((g) => g.clients.length > 0);
+  })();
   // Sidebar sections by client status; Active has no header, others only show when non-empty.
   const clientGroups = ([["", "active"], ["Paused", "paused"], ["Archived", "archived"]] as const)
     .map(([header, st]) => ({ header, items: sortedClients.filter((c) => c.status === st) }))
@@ -767,7 +794,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const clientCompany = (c: Client | null) => (c && c.id.startsWith("cl_") ? c.ghlLocationId : "");
   const addClientContact = async (contact: Contact, type: ClientType = "client") => {
     const id = "cl_" + contact.id;
-    if (clients.some((c) => c.id === id)) { setActiveClient(id); setMyWork(false); setAddClientOpen(false); return; }
+    if (clients.some((c) => c.id === id)) { setActiveClient(id); setMyWork(false); setMyClientsView(false); setAddClientOpen(false); return; }
     const sub = subAccounts.find((s) => s.id === contact.clientId);
     const c: Client = { id, name: contact.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "active", type };
     setClients((cs) => [...cs, c]);
@@ -775,6 +802,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     upsertClient(c);
     setActiveClient(id);
     setMyWork(false);
+    setMyClientsView(false);
     pushToast(`Added ${contact.name}`);
     try {
       const res = await authedFetch("/api/ghl/company", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ locationId: sub?.ghlLocationId ?? "", contactId: contact.ghlContactId }) });
@@ -942,8 +970,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         </div>
 
         <nav className="space-y-0.5 px-2">
-          <SideItem active={myWork} onClick={() => { setMyWork(true); setSidebarOpen(false); setOpenTaskId(null); }}><I.inbox className="text-muted" /> <span>My Work</span></SideItem>
-          <SideItem active={!myWork && activeClient === "all"} onClick={() => { setMyWork(false); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>All clients</span><span className="ml-auto text-[15px] text-muted">{scopedTasks.length}</span></SideItem>
+          <SideItem active={myWork} onClick={() => { setMyWork(true); setMyClientsView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.inbox className="text-muted" /> <span>My Work</span></SideItem>
+          <SideItem active={myClientsView} onClick={() => { setMyClientsView(true); setMyWork(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.user className="text-muted" /> <span>My Clients</span><span className="ml-auto text-[15px] text-muted">{visibleClients.length}</span></SideItem>
+          <SideItem active={!myWork && !myClientsView && activeClient === "all"} onClick={() => { setMyWork(false); setMyClientsView(false); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>All clients</span><span className="ml-auto text-[15px] text-muted">{scopedTasks.length}</span></SideItem>
         </nav>
 
         <div className="flex items-center justify-between px-4 pb-1 pt-4">
@@ -970,7 +999,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <div key={g.header || "active"}>
           {g.header && <div className="px-2.5 pb-0.5 pt-2.5 text-[12px] font-semibold uppercase tracking-wide text-muted">{g.header}</div>}
           {g.items.map((c) => {
-            const active = !myWork && activeClient === c.id;
+            const active = !myWork && !myClientsView && activeClient === c.id;
             const clientProjects = projectsForClient(c.id);
             return (
               <div key={c.id} className={menuClientId === c.id ? "relative z-50" : undefined}
@@ -989,7 +1018,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                       ))}
                     </div>
                   </>)}
-                  <button onClick={() => { setMyWork(false); setActiveClient(c.id); setActiveProject(null); setSidebarOpen(false); setOpenTaskId(null); }}
+                  <button onClick={() => { setMyWork(false); setMyClientsView(false); setActiveClient(c.id); setActiveProject(null); setSidebarOpen(false); setOpenTaskId(null); }}
                     className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[15px] transition ${active ? "bg-accent-soft font-medium text-accent" : "text-foreground hover:bg-background"} ${c.status === "archived" ? "opacity-50" : ""}`}>
                     <span role="button" title={`${CLIENT_STATUS_META[c.status].label} — click to change`}
                       onClick={(e) => { e.stopPropagation(); setStatusMenuClientId(statusMenuClientId === c.id ? null : c.id); }}
@@ -1077,11 +1106,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       <main className="flex min-w-0 flex-1 flex-col">
         <header className="relative z-10 flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-surface px-4 py-3 shadow-soft sm:px-5">
           <button onClick={toggleSidebar} title="Show/hide sidebar" className="rounded-lg border p-2 text-muted hover:text-foreground"><I.menu /></button>
-          {!myWork && activeClient !== "all" && clientById(activeClient) && (
+          {!myWork && !myClientsView && activeClient !== "all" && clientById(activeClient) && (
             <span className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[16px] font-semibold text-white shadow-soft sm:flex" style={{ background: clientById(activeClient)!.color }}>{clientById(activeClient)!.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}</span>
           )}
           <div className="min-w-0">
-            {!myWork && activeProject && projectById(activeProject) ? (<>
+            {!myWork && !myClientsView && activeProject && projectById(activeProject) ? (<>
               <h1 className="flex items-center gap-1.5 truncate text-[17px] font-semibold"><I.folder className="shrink-0 text-muted" /> {projectById(activeProject)!.name}</h1>
               <p className="hidden items-center gap-2 text-[15px] text-muted sm:flex">
                 <button onClick={() => setActiveProject(null)} className="hover:text-foreground hover:underline">{clientById(activeClient)?.name}</button>
@@ -1090,14 +1119,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </p>
             </>) : (<>
               <h1 className="flex items-center gap-2 truncate text-[17px] font-semibold">
-                {myWork ? "My Work" : activeClient === "all" ? "All clients" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
-                {!myWork && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
+                {myClientsView ? "My Clients" : myWork ? "My Work" : activeClient === "all" ? "All clients" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
+                {!myWork && !myClientsView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
               </h1>
-              <p className="hidden text-[15px] text-muted sm:block">{myWork ? "Everything assigned to one person, across all clients" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</p>
+              <p className="hidden text-[15px] text-muted sm:block">{myClientsView ? "Every client, grouped by what needs attention first" : myWork ? "Everything assigned to one person, across all clients" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</p>
             </>)}
           </div>
 
-          {!myWork && activeClient !== "all" && !activeProject && (
+          {!myWork && !myClientsView && activeClient !== "all" && !activeProject && (
             <div className="inline-flex overflow-hidden rounded-md border">
               <button onClick={() => setClientTab("tasks")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "tasks" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Tasks</button>
               <button onClick={() => setClientTab("knowledge")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "knowledge" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Knowledge · {clientNotes.filter((n) => n.clientId === activeClient).length}</button>
@@ -1110,7 +1139,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           )}
 
 
-          {myWork ? (
+          {myClientsView ? null : myWork ? (
             canAdmin ? (
               <label className="flex items-center gap-2"><span className="text-muted">Viewing work for</span>
                 <select value={myWorkUser} onChange={(e) => setMyWorkUser(e.target.value)} className="rounded-md border bg-background px-2 py-1 outline-none">{users.map((u) => (<option key={u.id} value={u.id}>{u.name}{u.role === "va" ? " (VA)" : ""}</option>))}</select>
@@ -1179,7 +1208,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </div>
         </header>
 
-        {!myWork && activeClient !== "all" && (
+        {!myWork && !myClientsView && activeClient !== "all" && (
           <QuickLinksBar
             links={clientLinks.filter((l) => l.clientId === activeClient)}
             ghlLink={ghlContactUrlFor(activeClient) ? { label: "Open in GHL", url: ghlContactUrlFor(activeClient)! } : null}
@@ -1194,7 +1223,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         )}
 
         {/* content */}
-        {myWork ? (
+        {myClientsView ? (
+          <ClientsBoard groups={myClientsGroups} scopedTasks={scopedTasks} clientTaskCount={clientTaskCount} hasUnreadMessage={hasUnreadMessage}
+            onOpen={(id) => { setMyWork(false); setMyClientsView(false); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }} />
+        ) : myWork ? (
           <GroupedList groups={buildGroups(myWorkTasks, "due").filter((g) => g.tasks.length > 0)} showClient clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={false} quickAddHint="" onQuickAdd={() => {}} onToggleSub={toggleSub} onAddSub={addSub} />
         ) : !activeProject && activeClient !== "all" && clientTab === "knowledge" ? (
           <ClientNotes
@@ -1240,7 +1272,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       )}
       {cmdkOpen && <CommandK tasks={scopedTasks} clients={clientList} contacts={contacts} addedContactIds={addedContactIds} clientById={clientById}
         onOpenTask={(id) => { setOpenTaskId(id); setCmdkOpen(false); }}
-        onOpenClient={(id) => { setMyWork(false); setActiveClient(id); setCmdkOpen(false); }}
+        onOpenClient={(id) => { setMyWork(false); setMyClientsView(false); setActiveClient(id); setCmdkOpen(false); }}
         onAddContact={(contact) => { addClientContact(contact); setCmdkOpen(false); }}
         onClose={() => setCmdkOpen(false)} />}
 
