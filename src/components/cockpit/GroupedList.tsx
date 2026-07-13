@@ -118,7 +118,7 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
       <div className="group/tr grid min-h-[46px] items-center gap-2 border-b px-4 py-2 transition-colors last:border-0 hover:bg-accent-soft/50" style={{ gridTemplateColumns: template }}>
         <div className="flex min-w-0 items-center gap-0.5">
           <button onClick={onToggleExpand} className={`shrink-0 rounded p-0.5 text-muted hover:text-foreground ${task.subtasks.length ? "" : "opacity-0 group-hover/tr:opacity-40"}`} title="Subtasks"><I.chevron className={`transition ${expanded ? "-rotate-90" : "rotate-180"}`} /></button>
-          <InlineAssignee value={task.assigneeId} onChange={(a) => onPatch(task.id, { assigneeId: a })} />
+          <InlineAssignee value={task.assigneeId} onChange={(a) => onPatch(task.id, { assigneeId: a })} size={40} />
           <button onClick={onOpen} className="flex min-w-0 flex-1 flex-col justify-center py-0.5 pl-1 text-left">
             {crumb && <span className="truncate text-[13px] leading-tight text-muted">{crumb}</span>}
             <span className="flex min-w-0 items-center gap-1.5">
@@ -212,13 +212,13 @@ function InlinePriority({ value, onChange }: { value: Priority; onChange: (p: Pr
   );
 }
 
-function InlineAssignee({ value, onChange }: { value: string | null; onChange: (a: string | null) => void }) {
+function InlineAssignee({ value, onChange, size = 22 }: { value: string | null; onChange: (a: string | null) => void; size?: number }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   return (
     <div className="relative">
-      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 176, (users.length + 1) * 32 + 8)); setOpen((o) => !o); }} className="rounded-full hover:opacity-80"><Avatar id={value} size={22} /></button>
+      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 176, (users.length + 1) * 32 + 8)); setOpen((o) => !o); }} className="rounded-full hover:opacity-80"><Avatar id={value} size={size} /></button>
       {open && (<>
         <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
         <div style={{ position: "fixed", top: pos.top, left: pos.left, width: 176 }} className="z-40 rounded-lg border bg-surface p-1 shadow-xl">
