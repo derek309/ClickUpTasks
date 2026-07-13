@@ -612,6 +612,21 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     upsertTask(t, me.id);
   };
 
+  // Add a task straight into a specific list (client + project), used by the
+  // task drawer's sibling-list quick-add. Inherits the list's private flag so
+  // adding under a Personal task stays private.
+  const addTaskToList = (clientId: string, projectId: string, isPrivate: boolean, title: string) => {
+    if (!title.trim()) return;
+    const t: Task = {
+      id: newId("t_"), projectId, clientId, title: title.trim(), description: "",
+      status: "todo", priority: "none", assigneeId: me.id,
+      contactId: clientId.startsWith("cl_") ? clientId.slice(3) : null,
+      due: null, recurrence: "none", labelIds: [], ghlTaskId: null, private: isPrivate, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
+    };
+    setTasks((ts) => [...ts, t]);
+    upsertTask(t, me.id);
+  };
+
   const quickAddPersonal = (groupKey: string, title: string) => {
     if (!title.trim()) return;
     const t: Task = {
@@ -1386,7 +1401,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       {openTask && (
         <TaskDrawer task={openTask} comment={comment} setComment={setComment} clientById={clientById} projectById={projectById} contactById={contactById}
           full={drawerFull} onToggleFull={toggleDrawerFull}
-          navIndex={openTaskIdx} navTotal={orderedTaskIds.length} navTasks={orderedTaskIds.map((id) => tasks.find((t) => t.id === id)).filter((t): t is Task => !!t)} onOpenTask={setOpenTaskId} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
+          navIndex={openTaskIdx} navTotal={orderedTaskIds.length} navTasks={orderedTaskIds.map((id) => tasks.find((t) => t.id === id)).filter((t): t is Task => !!t)} onOpenTask={setOpenTaskId} onAddSibling={(title) => addTaskToList(openTask.clientId, openTask.projectId, openTask.private, title)} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={() => addComment(openTask.id, comment)}
           onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...clientList].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} />
       )}
