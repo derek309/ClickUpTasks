@@ -470,6 +470,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   })();
   // Sidebar sections by client status, funnel order; Active Client has no
   // header (it's the main working set), the rest only show when non-empty.
+  // A client whose stored status predates the funnel (e.g. the old
+  // active/paused/archived values, before client-status-funnel.sql has run)
+  // falls into this same no-header bucket instead of vanishing from every
+  // group — exact-match filtering below would otherwise drop it entirely.
+  const knownClientStatuses = new Set<string>(CLIENT_STATUS_ORDER);
   const clientGroups = ([
     ["", "active_client"],
     ["Onboarding", "onboarding"],
@@ -478,7 +483,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     ["Cancelled", "cancelled"],
     ["Past Clients", "past_client"],
   ] as const)
-    .map(([header, st]) => ({ header, items: sortedClients.filter((c) => c.status === st) }))
+    .map(([header, st]) => ({
+      header,
+      items: sortedClients.filter((c) => c.status === st || (st === "active_client" && !knownClientStatuses.has(c.status))),
+    }))
     .filter((g) => g.items.length > 0);
   const ghlContactUrlFor = (clientId: string) => {
     if (!clientId.startsWith("cl_")) return null;
@@ -976,7 +984,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         <nav className="space-y-0.5 px-2">
           <SideItem active={myWork} onClick={() => { setMyWork(true); setMyClientsView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.inbox className="text-muted" /> <span>My Work</span></SideItem>
           <SideItem active={myClientsView} onClick={() => { setMyClientsView(true); setMyWork(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.user className="text-muted" /> <span>My Clients</span><span className="ml-auto text-[15px] text-muted">{myAssignedClients.length}</span></SideItem>
-          <SideItem active={!myWork && !myClientsView && activeClient === "all"} onClick={() => { setMyWork(false); setMyClientsView(false); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>All clients</span><span className="ml-auto text-[15px] text-muted">{scopedTasks.length}</span></SideItem>
+          <SideItem active={!myWork && !myClientsView && activeClient === "all"} onClick={() => { setMyWork(false); setMyClientsView(false); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>All tasks</span><span className="ml-auto text-[15px] text-muted">{scopedTasks.length}</span></SideItem>
         </nav>
 
         <div className="flex items-center justify-between px-4 pb-1 pt-4">
@@ -1123,7 +1131,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </p>
             </>) : (<>
               <h1 className="flex items-center gap-2 truncate text-[17px] font-semibold">
-                {myClientsView ? "My Clients" : myWork ? "My Work" : activeClient === "all" ? "All clients" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
+                {myClientsView ? "My Clients" : myWork ? "My Work" : activeClient === "all" ? "All tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
                 {!myWork && !myClientsView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
               </h1>
               <p className="hidden text-[15px] text-muted sm:block">{myClientsView ? "Every client, grouped by what needs attention first" : myWork ? "Everything assigned to one person, across all clients" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</p>
