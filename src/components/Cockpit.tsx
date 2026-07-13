@@ -1271,7 +1271,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </button>
               {filterOpen && (<>
                 <div className="fixed inset-0 z-30" onClick={() => setFilterOpen(false)} />
-                <div className="absolute left-0 z-40 mt-1 w-72 space-y-2.5 rounded-xl border bg-surface p-3 shadow-xl">
+                <div className="absolute right-0 z-40 mt-1 w-72 space-y-2.5 rounded-xl border bg-surface p-3 shadow-xl">
                   {activeClient !== "all" && clientById(activeClient) && (
                     <div className="space-y-1.5 border-b pb-2.5">
                       <div className="flex items-center justify-between">
