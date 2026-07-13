@@ -100,11 +100,12 @@ export function renderMentions(body: string) {
 export type FilterState = { status: TaskStatus | "all"; assignee: string; priority: Priority | "all" };
 export type SortBy = "manual" | "due" | "priority" | "title" | "status" | "assignee" | "comments";
 export const LIST_COLUMNS: { key: string; label: string; sortable: boolean }[] = [
+  { key: "status", label: "Stage", sortable: true },
   { key: "due", label: "Due date", sortable: true },
   { key: "priority", label: "Priority", sortable: true },
   { key: "comments", label: "Comments", sortable: true },
   { key: "contact", label: "Contact", sortable: false },
   { key: "labels", label: "Labels", sortable: false },
 ];
-export const COL_WIDTHS: Record<string, string> = { due: "96px", priority: "104px", comments: "84px", assignee: "72px", contact: "160px", labels: "150px" };
+export const COL_WIDTHS: Record<string, string> = { status: "128px", due: "96px", priority: "104px", comments: "84px", assignee: "72px", contact: "160px", labels: "150px" };
 export type Toast = { id: string; text: string };

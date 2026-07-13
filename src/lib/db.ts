@@ -91,19 +91,41 @@ export async function seedIfEmpty(): Promise<void> {
   await supabase.from("notifications").insert(seedNotifications.map(notifToRow));
 }
 
+// PostgREST caps a single response at 1000 rows (Supabase's default
+// db-max-rows) regardless of how many actually match — a plain .select("*")
+// silently truncates past that, no error. With 3,500+ contacts (and tasks
+// headed the same way once every ClickUpLocal client is migrated in), that
+// silently hid ~2,500 contacts from search/add entirely. Pages through with
+// .range() until a page comes back short.
+async function fetchAllRows(table: string, orderCol?: string, ascending = true) {
+  const PAGE_SIZE = 1000;
+  let all: any[] = [];
+  let from = 0;
+  for (;;) {
+    let q = supabase.from(table).select("*").range(from, from + PAGE_SIZE - 1);
+    if (orderCol) q = q.order(orderCol, { ascending });
+    const { data, error } = await q;
+    if (error) return { data: null as any[] | null, error };
+    all = all.concat(data ?? []);
+    if (!data || data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return { data: all, error: null as null | { message: string } };
+}
+
 export async function fetchAll() {
   const [c, ct, p, t, n, cl, cn, m] = await Promise.all([
-    supabase.from("clients").select("*").order("created_at"),
-    supabase.from("contacts").select("*"),
-    supabase.from("projects").select("*"),
-    supabase.from("tasks").select("*").order("created_at"),
-    supabase.from("notifications").select("*").order("created_at", { ascending: false }),
+    fetchAllRows("clients", "created_at"),
+    fetchAllRows("contacts"),
+    fetchAllRows("projects"),
+    fetchAllRows("tasks", "created_at"),
+    fetchAllRows("notifications", "created_at", false),
     // Fetched separately from the hard-fail set below: these tables ship via a
     // manually-run migration (client-links-notes.sql / messages.sql), so a
     // not-yet-run migration must degrade to "nothing yet", not break the app.
-    supabase.from("client_links").select("*").order("position"),
-    supabase.from("client_notes").select("*").order("created_at", { ascending: false }),
-    supabase.from("messages").select("*").order("created_at"),
+    fetchAllRows("client_links", "position"),
+    fetchAllRows("client_notes", "created_at", false),
+    fetchAllRows("messages", "created_at"),
   ]);
   const err = c.error || ct.error || p.error || t.error || n.error;
   if (err) throw err;
@@ -123,7 +145,7 @@ export async function fetchAll() {
 }
 
 export async function fetchContacts(): Promise<Contact[]> {
-  const { data, error } = await supabase.from("contacts").select("*");
+  const { data, error } = await fetchAllRows("contacts");
   if (error) throw error;
   return (data ?? []).map(rowToContact);
 }

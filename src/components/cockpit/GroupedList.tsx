@@ -6,7 +6,8 @@ import { useRef, useState } from "react";
 import {
   users, formatDue, isOverdue, TODAY,
   PRIORITY_META, PRIORITY_ORDER,
-  type Task, type Priority, type Recurrence, type Client, type Project,
+  STATUS_META, STATUS_ORDER,
+  type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, LabelChips, COL_WIDTHS, LIST_COLUMNS } from "./ui";
 
@@ -97,6 +98,7 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
   const doneSubs = task.subtasks.filter((x) => x.done).length;
   const crumb = project && project.name !== "Tasks" ? project.name : "";
   const cell = (key: string) => {
+    if (key === "status") return <InlineStatus value={task.status} onChange={(s) => onPatch(task.id, { status: s })} />;
     if (key === "priority") return <InlinePriority value={task.priority} onChange={(p) => onPatch(task.id, { priority: p })} />;
     if (key === "assignee") return <InlineAssignee value={task.assigneeId} onChange={(a) => onPatch(task.id, { assigneeId: a })} />;
     if (key === "due") return <InlineDue value={task.due} overdue={overdue} recurrence={task.recurrence} onChange={(d) => onPatch(task.id, { due: d })} onRecurrenceChange={(r) => onPatch(task.id, { recurrence: r })} />;
@@ -143,6 +145,27 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
 }
 
 // --- inline cell editors ----------------------------------------------------
+
+function InlineStatus({ value, onChange }: { value: TaskStatus; onChange: (s: TaskStatus) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} className="inline-flex items-center gap-1.5 rounded px-1 py-0.5 text-[15px] font-medium hover:bg-background">
+        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[value].dot }} /> {STATUS_META[value].label}
+      </button>
+      {open && (<>
+        <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
+        <div className="absolute left-0 z-40 mt-1 w-36 rounded-lg border bg-surface p-1 shadow-lg">
+          {STATUS_ORDER.map((s) => (
+            <button key={s} onClick={(e) => { e.stopPropagation(); onChange(s); setOpen(false); }} className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[15px] hover:bg-background">
+              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[s].dot }} /> {STATUS_META[s].label}
+            </button>
+          ))}
+        </div>
+      </>)}
+    </div>
+  );
+}
 
 function InlinePriority({ value, onChange }: { value: Priority; onChange: (p: Priority) => void }) {
   const [open, setOpen] = useState(false);

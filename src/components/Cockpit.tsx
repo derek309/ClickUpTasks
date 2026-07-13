@@ -75,9 +75,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [filters, setFilters] = useState<FilterState>({ status: "all", assignee: "all", priority: "all" });
   const [sortBy, setSortBy] = useState<SortBy>("manual");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
-  const [visibleCols, setVisibleCols] = useState<string[]>(["due", "priority", "comments"]);
+  const [visibleCols, setVisibleCols] = useState<string[]>(["status", "due", "priority", "comments"]);
   const [filterOpen, setFilterOpen] = useState(false);
   const [hideEmpty, setHideEmpty] = useState(true);
+  const [hideDone, setHideDone] = useState(true);
 
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [comment, setComment] = useState("");
@@ -132,9 +133,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       const st = localStorage.getItem("cut_starred"); if (st) setStarred(new Set(JSON.parse(st)));
       const mo = localStorage.getItem("cut_clientOrder"); if (mo) setManualOrder(JSON.parse(mo));
       const he = localStorage.getItem("cut_hideEmpty"); if (he !== null) setHideEmpty(he === "1");
+      const hd = localStorage.getItem("cut_hideDone"); if (hd !== null) setHideDone(hd === "1");
     } catch { /* fresh browser */ }
   }, []);
   const toggleHideEmpty = () => setHideEmpty((v) => { const n = !v; try { localStorage.setItem("cut_hideEmpty", n ? "1" : "0"); } catch {} return n; });
+  const toggleHideDone = () => setHideDone((v) => { const n = !v; try { localStorage.setItem("cut_hideDone", n ? "1" : "0"); } catch {} return n; });
   const saveClientSort = (v: ClientSort) => { setClientSort(v); try { localStorage.setItem("cut_clientSort", v); } catch {} };
   const toggleStar = (id: string) => setStarred((prev) => {
     const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id);
@@ -344,7 +347,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const passesFilters = (t: Task) =>
     (filters.status === "all" || t.status === filters.status) &&
     (filters.assignee === "all" || (filters.assignee === "unassigned" ? t.assigneeId === null : t.assigneeId === filters.assignee)) &&
-    (filters.priority === "all" || t.priority === filters.priority);
+    (filters.priority === "all" || t.priority === filters.priority) &&
+    // Explicitly filtering to Done overrides the hide-done toggle — asking
+    // to see done tasks and then hiding them would show nothing.
+    (!hideDone || filters.status === "done" || t.status !== "done");
 
   const sortTasks = (list: Task[]) => {
     if (sortBy === "manual") return list;
@@ -706,9 +712,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j?.error) { pushToast(j?.error ?? "GoHighLevel import failed."); return; }
       const existingGhlIds = new Set(tasks.map((t) => t.ghlTaskId).filter(Boolean));
-      const fresh = ((j.tasks ?? []) as { ghlTaskId: string; title: string; description: string; due: string | null; completed: boolean }[])
+      const notYetImported = ((j.tasks ?? []) as { ghlTaskId: string; title: string; description: string; due: string | null; completed: boolean }[])
         .filter((g) => !existingGhlIds.has(g.ghlTaskId));
-      if (fresh.length === 0) { pushToast("No new tasks to import — everything's already tracked."); return; }
+      // GHL tasks are commonly years of completed history (recurring blog/
+      // review tasks, etc.) — importing those would just be dead clutter in
+      // an active task manager, so open tasks only.
+      const skippedDone = notYetImported.filter((g) => g.completed).length;
+      const fresh = notYetImported.filter((g) => !g.completed);
+      if (fresh.length === 0) {
+        pushToast(skippedDone > 0
+          ? `No open tasks to import — skipped ${skippedDone} already-completed task${skippedDone === 1 ? "" : "s"}.`
+          : "No new tasks to import — everything's already tracked.");
+        return;
+      }
       let projectId = projects.find((p) => p.clientId === activeClient)?.id;
       if (!projectId) {
         const p: Project = { id: newId("p_"), clientId: activeClient, name: "Tasks", description: "" };
@@ -718,13 +734,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       }
       const newTasks: Task[] = fresh.map((g) => ({
         id: newId("t_"), projectId: projectId!, clientId: activeClient, title: g.title, description: g.description,
-        status: g.completed ? "done" : "todo", priority: "none", assigneeId: null, contactId: contact.id,
+        status: "todo", priority: "none", assigneeId: null, contactId: contact.id,
         due: g.due, recurrence: "none", labelIds: [], ghlTaskId: g.ghlTaskId, subtasks: [], attachments: [], comments: [],
         createdAt: new Date().toISOString(),
       }));
       setTasks((ts) => [...ts, ...newTasks]);
       newTasks.forEach((t) => upsertTask(t, me.id));
-      pushToast(`Imported ${newTasks.length} task${newTasks.length === 1 ? "" : "s"} from GoHighLevel`);
+      pushToast(`Imported ${newTasks.length} task${newTasks.length === 1 ? "" : "s"} from GoHighLevel${skippedDone > 0 ? ` (skipped ${skippedDone} already completed)` : ""}`);
     } catch {
       pushToast("Network error reaching GoHighLevel.");
     } finally {
@@ -1083,6 +1099,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   <button onClick={toggleHideEmpty} className="flex w-full items-center gap-2 rounded px-0 py-1 text-left hover:bg-background">
                     <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${hideEmpty ? "border-accent bg-accent text-white" : "border-border"}`}>{hideEmpty && <I.check />}</span>
                     <span className="text-muted">Hide empty groups</span>
+                  </button>
+                  <button onClick={toggleHideDone} className="flex w-full items-center gap-2 rounded px-0 py-1 text-left hover:bg-background">
+                    <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${hideDone ? "border-accent bg-accent text-white" : "border-border"}`}>{hideDone && <I.check />}</span>
+                    <span className="text-muted">Hide done tasks</span>
                   </button>
                   <div className="border-t pt-2 text-[13px] font-semibold uppercase tracking-wide text-muted">Filter</div>
                   <label className="flex items-center justify-between gap-3"><span className="text-muted">Status</span><select value={filters.status} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value as FilterState["status"] }))} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="all">All</option>{STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}</select></label>
