@@ -73,9 +73,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [myWork, setMyWork] = useState(me.role === "va");
   const [myWorkUser, setMyWorkUser] = useState<string>(me.id);
   const [myClientsView, setMyClientsView] = useState(false);
-  const [groupBy, setGroupBy] = useState<"project" | "status" | "priority" | "due">("status");
+  const [groupBy, setGroupBy] = useState<"project" | "status" | "priority" | "due">("priority");
   const [filters, setFilters] = useState<FilterState>({ status: "all", assignee: "all", priority: "all" });
-  const [sortBy, setSortBy] = useState<SortBy>("manual");
+  const [sortBy, setSortBy] = useState<SortBy>("due");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [visibleCols, setVisibleCols] = useState<string[]>(["status", "due", "priority", "comments"]);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -399,6 +399,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // client if they have a task on it OR they're explicitly following it —
   // this is a display-layer echo of that DB rule, not the enforcement of it.
   const visibleClients = canAdmin ? clientList : clientList.filter((c) => scopedTasks.some((t) => t.clientId === c.id) || (c.assignedTo ?? []).includes(me.id));
+  // "My Clients" is a strictly personal view — only clients with a task
+  // assigned to *me specifically* (or that I'm explicitly following), even
+  // for admins, who otherwise see every client via visibleClients above.
+  const myAssignedClients = clientList.filter((c) => scopedTasks.some((t) => t.clientId === c.id && t.assigneeId === me.id) || (c.assignedTo ?? []).includes(me.id));
   // ⌘K's "Not imported" search — any type counts as "already added" here,
   // not just type 'client', so a contact never shows as addable twice.
   const addedContactIds = new Set(clients.filter((c) => c.id.startsWith("cl_")).map((c) => c.id.slice(3)));
@@ -451,7 +455,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       [4, "No due date", "#94a3b8"],
       [5, "No open tasks", "#cbd5e1"],
     ];
-    const withKey = visibleClients.map((c) => ({ c, k: clientUrgencyKey(c.id) }));
+    const withKey = myAssignedClients.map((c) => ({ c, k: clientUrgencyKey(c.id) }));
     return defs
       .map(([tier, label, color]) => ({
         key: String(tier),
@@ -496,7 +500,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   const openTask = tasks.find((t) => t.id === openTaskId) ?? null;
   const filtersActive = filters.status !== "all" || filters.assignee !== "all" || filters.priority !== "all";
-  const activeFilterCount = [filters.status !== "all", filters.assignee !== "all", filters.priority !== "all", sortBy !== "manual"].filter(Boolean).length;
+  const activeFilterCount = [filters.status !== "all", filters.assignee !== "all", filters.priority !== "all", sortBy !== "due"].filter(Boolean).length;
 
   // due-date buckets relative to the fixed "today"
   const weekEnd = (() => { const [y, m, d] = TODAY.split("-").map(Number); const dt = new Date(Date.UTC(y, m - 1, d)); dt.setUTCDate(dt.getUTCDate() + 7); return dt.toISOString().slice(0, 10); })();
@@ -971,7 +975,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
         <nav className="space-y-0.5 px-2">
           <SideItem active={myWork} onClick={() => { setMyWork(true); setMyClientsView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.inbox className="text-muted" /> <span>My Work</span></SideItem>
-          <SideItem active={myClientsView} onClick={() => { setMyClientsView(true); setMyWork(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.user className="text-muted" /> <span>My Clients</span><span className="ml-auto text-[15px] text-muted">{visibleClients.length}</span></SideItem>
+          <SideItem active={myClientsView} onClick={() => { setMyClientsView(true); setMyWork(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.user className="text-muted" /> <span>My Clients</span><span className="ml-auto text-[15px] text-muted">{myAssignedClients.length}</span></SideItem>
           <SideItem active={!myWork && !myClientsView && activeClient === "all"} onClick={() => { setMyWork(false); setMyClientsView(false); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>All clients</span><span className="ml-auto text-[15px] text-muted">{scopedTasks.length}</span></SideItem>
         </nav>
 
@@ -1135,6 +1139,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
           {!myWork && !myClientsView && activeClient !== "all" && clientById(activeClient) && (
             <div className="flex items-center gap-1.5">
+              {(() => {
+                const following = (clientById(activeClient)!.assignedTo ?? []).includes(me.id);
+                return (
+                  <button onClick={() => toggleClientAssignment(activeClient, me.id)}
+                    title={following ? "Following — click to stop following this client" : "Follow this client to keep it in My Clients"}
+                    className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-[13px] font-medium ${following ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>
+                    {following ? <><I.check /> Following</> : <><I.plus /> Follow</>}
+                  </button>
+                );
+              })()}
               {ghlContactUrlFor(activeClient) && (
                 <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel"
                   className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[13px] font-medium text-accent hover:bg-accent-soft">
@@ -1201,7 +1215,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   )}
                   <div className="flex items-center justify-between">
                     <span className="text-[13px] font-semibold uppercase tracking-wide text-muted">Group &amp; sort</span>
-                    {(filtersActive || sortBy !== "manual") && <button onClick={() => { setFilters({ status: "all", assignee: "all", priority: "all" }); setSortBy("manual"); }} className="text-[13px] font-medium text-accent">Reset</button>}
+                    {(filtersActive || sortBy !== "due" || groupBy !== "priority") && <button onClick={() => { setFilters({ status: "all", assignee: "all", priority: "all" }); setGroupBy("priority"); setSortBy("due"); }} className="text-[13px] font-medium text-accent">Reset</button>}
                   </div>
                   <label className="flex items-center justify-between gap-3"><span className="text-muted">Group by</span><select value={groupBy} onChange={(e) => setGroupBy(e.target.value as typeof groupBy)} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="status">Status</option><option value="priority">Priority</option><option value="due">Due date</option><option value="project">Project</option></select></label>
                   <label className="flex items-center justify-between gap-3"><span className="text-muted">Sort</span><select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="manual">Manual</option><option value="due">Due date</option><option value="priority">Priority</option><option value="title">Task name</option><option value="status">Status</option><option value="assignee">Assignee</option></select></label>
