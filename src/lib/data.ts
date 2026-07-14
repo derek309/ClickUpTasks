@@ -197,6 +197,10 @@ export interface Subtask {
   done: boolean;
   assigneeId?: string | null;
   due?: string | null; // ISO yyyy-mm-dd
+  /** Delegation instructions — what the assignee is being asked to do. Only
+   * meaningful when assigneeId is set (an assigned checklist item = a
+   * delegation of one step of the parent task). */
+  note?: string;
 }
 
 export interface Task {

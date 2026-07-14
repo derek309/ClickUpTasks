@@ -46,6 +46,9 @@ const taskToRow = (t: Task, updatedBy?: string | null) => ({
   status: t.status, priority: t.priority, assignee_id: t.assigneeId, contact_id: t.contactId, due: t.due,
   recurrence: t.recurrence, ghl_task_id: t.ghlTaskId, label_ids: t.labelIds, subtasks: t.subtasks,
   attachments: t.attachments, comments: t.comments, updated_by: updatedBy ?? null, is_private: t.private,
+  // Derived from checklist-item assignees so RLS can let a delegatee see a
+  // task delegated to them even when they don't own it or follow the client.
+  delegated_to: [...new Set(t.subtasks.map((s) => s.assigneeId).filter((id): id is string => !!id && id !== t.assigneeId))],
 });
 export const rowToTask = (r: any): Task => ({
   id: r.id, projectId: r.project_id, clientId: r.client_id, title: r.title, description: r.description ?? "",

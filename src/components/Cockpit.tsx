@@ -433,7 +433,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // "My Clients" is a strictly personal view — only clients with a task
   // assigned to *me specifically* (or that I'm explicitly following), even
   // for admins, who otherwise see every client via visibleClients above.
-  const myAssignedClients = clientList.filter((c) => scopedTasks.some((t) => t.clientId === c.id && t.assigneeId === me.id) || (c.assignedTo ?? []).includes(me.id));
+  const myAssignedClients = clientList.filter((c) => scopedTasks.some((t) => t.clientId === c.id && (t.assigneeId === me.id || t.subtasks.some((s) => s.assigneeId === me.id))) || (c.assignedTo ?? []).includes(me.id));
   // ⌘K's "Not imported" search — any type counts as "already added" here,
   // not just type 'client', so a contact never shows as addable twice.
   const addedContactIds = new Set(clients.filter((c) => c.id.startsWith("cl_")).map((c) => c.id.slice(3)));
@@ -550,7 +550,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const clientTaskCount = (clientId: string) => scopedTasks.filter((t) => t.clientId === clientId && t.status !== "done").length;
   // Personal (private) tasks are included here too — they're real tasks
   // assigned to you, just private, so they belong in your work feed.
-  const myWorkTasks = sortTasks(tasks.filter((t) => t.assigneeId === myWorkUser && passesFilters(t)));
+  // Delegated tasks too: if a checklist item on a task is assigned to you,
+  // the whole parent task surfaces here even though someone else owns it.
+  const isDelegatedTo = (t: Task, memberId: string) => t.assigneeId !== memberId && t.subtasks.some((s) => s.assigneeId === memberId);
+  const myWorkTasks = sortTasks(tasks.filter((t) => (t.assigneeId === myWorkUser || isDelegatedTo(t, myWorkUser)) && passesFilters(t)));
   // Not gated by myWorkUser (the admin-only "viewing work for" selector) —
   // RLS never even returns another person's private tasks in `tasks`, so
   // filtering by `me.id` here is correct regardless of who's being viewed.
@@ -875,11 +878,26 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       setImportingTasks(false);
     }
   };
-  const toggleSub = (taskId: string, subId: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, done: !s.done } : s)) }); };
+  const toggleSub = (taskId: string, subId: string) => {
+    const t = tasks.find((x) => x.id === taskId);
+    if (!t) return;
+    const s = t.subtasks.find((x) => x.id === subId);
+    const nowDone = s ? !s.done : false;
+    update(taskId, { subtasks: t.subtasks.map((x) => (x.id === subId ? { ...x, done: !x.done } : x)) });
+    // Completing a delegated item pings the task owner so they know it's handled.
+    if (nowDone && s?.assigneeId && t.assigneeId && t.assigneeId !== me.id) notify(t.assigneeId, `${me.name} completed "${s.title}" on ${t.title}`, taskId);
+  };
   const addSub = (taskId: string, title: string) => { const t = tasks.find((x) => x.id === taskId); if (t && title.trim()) update(taskId, { subtasks: [...t.subtasks, { id: newId("s_"), title: title.trim(), done: false }] }); };
   const renameSub = (taskId: string, subId: string, title: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, title } : s)) }); };
   const deleteSub = (taskId: string, subId: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { subtasks: t.subtasks.filter((s) => s.id !== subId) }); };
-  const patchSub = (taskId: string, subId: string, patch: Partial<Subtask>) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, ...patch } : s)) }); };
+  const patchSub = (taskId: string, subId: string, patch: Partial<Subtask>) => {
+    const t = tasks.find((x) => x.id === taskId);
+    if (!t) return;
+    const before = t.subtasks.find((s) => s.id === subId);
+    update(taskId, { subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, ...patch } : s)) });
+    // Assigning a checklist item to someone else = delegating that step; ping them.
+    if (patch.assigneeId && patch.assigneeId !== before?.assigneeId && patch.assigneeId !== me.id) notify(patch.assigneeId, `${me.name} delegated "${before?.title || "a checklist item"}" on ${t.title} to you`, taskId);
+  };
   const toggleLabel = (taskId: string, labelId: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { labelIds: t.labelIds.includes(labelId) ? t.labelIds.filter((l) => l !== labelId) : [...t.labelIds, labelId] }); };
 
   // A client's ghlLocationId field is repurposed to store the contact's business/company name.
@@ -1386,7 +1404,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <ClientsBoard groups={myClientsGroups} scopedTasks={scopedTasks} clientTaskCount={clientTaskCount} hasUnreadMessage={hasUnreadMessage}
             onOpen={(id) => { setMyWork(false); setMyClientsView(false); setPersonalView(false); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }} />
         ) : myWork ? (
-          <GroupedList groups={buildGroups(myWorkTasks, "due").filter((g) => g.tasks.length > 0)} showClient clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={false} quickAddHint="" onQuickAdd={() => {}} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} />
+          <GroupedList groups={buildGroups(myWorkTasks, "due").filter((g) => g.tasks.length > 0)} showClient clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={false} quickAddHint="" onQuickAdd={() => {}} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} highlightDelegateFor={myWorkUser} />
         ) : !activeProject && activeClient !== "all" && clientTab === "knowledge" ? (
           <ClientNotes
             notes={clientNotes.filter((n) => n.clientId === activeClient)}
