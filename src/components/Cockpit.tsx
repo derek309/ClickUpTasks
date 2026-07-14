@@ -858,7 +858,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const updated: Task = { ...before, ...patch, comments: events.length ? [...before.comments, ...events] : before.comments };
     let clone: Task | null = null;
     if (patch.status === "done" && before.status !== "done" && before.recurrence !== "none") {
-      const nextDue = advanceDue(before.due, before.recurrence);
+      const nextDue = advanceDue(before.due, before.recurrence, before.recurrenceInterval, before.recurrenceUnit);
       clone = { ...before, id: newId("t_"), status: "todo", due: nextDue, subtasks: before.subtasks.map((s) => ({ ...s, id: newId("s_"), done: false })), comments: [], attachments: [...before.attachments], ghlTaskId: null };
       pushToast(`🔁 Recurring — next occurrence created for ${formatDue(nextDue)}`);
     }

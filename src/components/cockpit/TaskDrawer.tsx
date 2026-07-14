@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo,
   STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, RECURRENCE_LABEL,
-  type Task, type Client, type Project, type Contact, type Attachment, type Priority, type Recurrence, type Subtask, type TaskTemplate,
+  type Task, type Client, type Project, type Contact, type Attachment, type Priority, type Recurrence, type RecurrenceUnit, type Subtask, type TaskTemplate,
 } from "@/lib/data";
 import { I, Avatar, Row, renderMentions, FileBadge, newId } from "./ui";
 import { InlineAssignee } from "./GroupedList";
@@ -132,7 +132,22 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       <Row label="Project"><select value={task.projectId} onChange={(e) => { if (e.target.value === "__new") onNewProject(); else onSetProject(e.target.value); }} className="max-w-[200px] rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background">{clientProjects.map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}{clientProjects.every((p) => p.id !== task.projectId) && <option value={task.projectId}>{project?.name ?? "—"}</option>}<option value="__new">+ New project…</option></select></Row>
       <Row label="Contact">{(() => { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return ct ? (<span className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[14px] text-muted"><I.user /> {ct.name}</span>) : <span className="text-[14px] text-muted">—</span>; })()}</Row>
       <Row label="Due date"><input type="date" value={task.due ?? ""} onChange={(e) => onPatch({ due: e.target.value || null })} className="rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background" /></Row>
-      <Row label="Repeat"><select value={task.recurrence} onChange={(e) => onPatch({ recurrence: e.target.value as Recurrence })} className="rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background">{(Object.keys(RECURRENCE_LABEL) as Recurrence[]).map((r) => (<option key={r} value={r}>{RECURRENCE_LABEL[r]}</option>))}</select></Row>
+      <Row label="Repeat">
+        <span className="inline-flex flex-wrap items-center gap-1.5">
+          <select value={task.recurrence} onChange={(e) => onPatch({ recurrence: e.target.value as Recurrence })} className="rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background">{(Object.keys(RECURRENCE_LABEL) as Recurrence[]).map((r) => (<option key={r} value={r}>{RECURRENCE_LABEL[r]}</option>))}</select>
+          {task.recurrence === "custom" && (
+            <span className="inline-flex items-center gap-1.5 text-[14px] text-muted">
+              Every
+              <input type="number" min={1} value={task.recurrenceInterval ?? 1} onChange={(e) => onPatch({ recurrenceInterval: Math.max(1, parseInt(e.target.value, 10) || 1) })} className="w-14 rounded-md border bg-background px-1.5 py-1 text-center text-[14px] outline-none focus:border-accent" />
+              <select value={task.recurrenceUnit ?? "week"} onChange={(e) => onPatch({ recurrenceUnit: e.target.value as RecurrenceUnit })} className="rounded-md border bg-background px-1.5 py-1 text-[14px] outline-none focus:border-accent">
+                <option value="day">day(s)</option>
+                <option value="week">week(s)</option>
+                <option value="month">month(s)</option>
+              </select>
+            </span>
+          )}
+        </span>
+      </Row>
       <Row label="Labels">
         <div className="flex flex-wrap items-center gap-1.5">
           {task.labelIds.map((id) => { const l = labelById(id); return l ? (<button key={id} onClick={() => onToggleLabel(id)} className="group inline-flex items-center gap-1 rounded px-1.5 py-0 text-[13px] font-medium" style={{ background: l.color + "1a", color: l.color }}>{l.name} <span className="opacity-50 group-hover:opacity-100">×</span></button>) : null; })}

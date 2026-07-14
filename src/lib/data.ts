@@ -31,8 +31,9 @@ export interface Me {
 }
 export type TaskStatus = "todo" | "in_progress" | "review" | "done";
 export type Priority = "conversation" | "urgent" | "normal" | "none";
-export type Recurrence = "none" | "daily" | "weekday" | "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly";
-export const RECURRENCE_ORDER: Recurrence[] = ["none", "daily", "weekday", "weekly", "biweekly", "monthly", "quarterly", "yearly"];
+export type Recurrence = "none" | "daily" | "weekday" | "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly" | "custom";
+export const RECURRENCE_ORDER: Recurrence[] = ["none", "daily", "weekday", "weekly", "biweekly", "monthly", "quarterly", "yearly", "custom"];
+export type RecurrenceUnit = "day" | "week" | "month";
 
 export interface User {
   id: string;
@@ -281,6 +282,9 @@ export interface Task {
   contactId: string | null;
   due: string | null; // ISO yyyy-mm-dd
   recurrence: Recurrence;
+  /** Only meaningful when recurrence === "custom" — "every N days/weeks/months". */
+  recurrenceInterval?: number;
+  recurrenceUnit?: RecurrenceUnit;
   labelIds: string[];
   ghlTaskId: string | null;
   /** A private task is visible only to its own assignee, enforced by RLS —
@@ -345,7 +349,19 @@ export const RECURRENCE_LABEL: Record<Recurrence, string> = {
   monthly: "Every month",
   quarterly: "Every 3 months",
   yearly: "Every year",
+  custom: "Custom…",
 };
+const UNIT_LABEL: Record<RecurrenceUnit, [string, string]> = { day: ["day", "days"], week: ["week", "weeks"], month: ["month", "months"] };
+// RECURRENCE_LABEL's "custom" entry is just the picker option text — this
+// resolves the actual "every N units" wording once a task's interval/unit
+// are set, for display in the drawer and list row.
+export function describeRecurrence(rec: Recurrence, interval?: number, unit?: RecurrenceUnit): string {
+  if (rec !== "custom") return RECURRENCE_LABEL[rec];
+  const n = interval && interval > 0 ? interval : 1;
+  const u = unit ?? "week";
+  const [sing, plur] = UNIT_LABEL[u];
+  return n === 1 ? `Every ${sing}` : `Every ${n} ${plur}`;
+}
 
 // --- Team -------------------------------------------------------------------
 
@@ -618,7 +634,7 @@ export function clientHealth(clientId: string, tasks: Task[]): ClientHealth {
 }
 
 /** Advance an ISO due date by one recurrence step (deterministic — no now()). */
-export function advanceDue(iso: string | null, rec: Recurrence): string | null {
+export function advanceDue(iso: string | null, rec: Recurrence, interval?: number, unit?: RecurrenceUnit): string | null {
   if (!iso || rec === "none") return iso;
   const [y, m, d] = iso.split("-").map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d));
@@ -629,6 +645,13 @@ export function advanceDue(iso: string | null, rec: Recurrence): string | null {
   else if (rec === "monthly") dt.setUTCMonth(dt.getUTCMonth() + 1);
   else if (rec === "quarterly") dt.setUTCMonth(dt.getUTCMonth() + 3);
   else if (rec === "yearly") dt.setUTCFullYear(dt.getUTCFullYear() + 1);
+  else if (rec === "custom") {
+    const n = interval && interval > 0 ? interval : 1;
+    const u = unit ?? "week";
+    if (u === "day") dt.setUTCDate(dt.getUTCDate() + n);
+    else if (u === "week") dt.setUTCDate(dt.getUTCDate() + n * 7);
+    else dt.setUTCMonth(dt.getUTCMonth() + n);
+  }
   return dt.toISOString().slice(0, 10);
 }
 
