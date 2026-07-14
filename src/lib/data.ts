@@ -118,6 +118,7 @@ export const NOTE_TYPE_ORDER: NoteType[] = ["meeting", "content", "contact", "de
 export interface ClientNote {
   id: string;
   clientId: string;
+  projectId?: string | null; // set = scoped to one project's Knowledge tab; unset = client-wide
   type: NoteType;
   body: string;
   authorId: string | null;

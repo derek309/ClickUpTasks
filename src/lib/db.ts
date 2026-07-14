@@ -66,8 +66,8 @@ export const rowToNotif = (r: any): Notification => ({ id: r.id, recipientId: r.
 const clientLinkToRow = (l: ClientLink) => ({ id: l.id, client_id: l.clientId, group_label: l.groupLabel, label: l.label, url: l.url, position: l.position });
 const rowToClientLink = (r: any): ClientLink => ({ id: r.id, clientId: r.client_id, groupLabel: r.group_label ?? "", label: r.label, url: r.url, position: r.position ?? 0 });
 
-const clientNoteToRow = (n: ClientNote) => ({ id: n.id, client_id: n.clientId, type: n.type, body: n.body, author_id: n.authorId, created_at: n.at });
-const rowToClientNote = (r: any): ClientNote => ({ id: r.id, clientId: r.client_id, type: (r.type as NoteType) ?? "note", body: r.body ?? "", authorId: r.author_id, at: r.created_at });
+const clientNoteToRow = (n: ClientNote) => ({ id: n.id, client_id: n.clientId, project_id: n.projectId ?? null, type: n.type, body: n.body, author_id: n.authorId, created_at: n.at });
+const rowToClientNote = (r: any): ClientNote => ({ id: r.id, clientId: r.client_id, projectId: r.project_id ?? null, type: (r.type as NoteType) ?? "note", body: r.body ?? "", authorId: r.author_id, at: r.created_at });
 
 const territoryToRow = (t: Territory) => ({ id: t.id, name: t.name, city: t.city, state: t.state, member_id: t.memberId });
 const rowToTerritory = (r: any): Territory => ({ id: r.id, name: r.name, city: r.city, state: r.state, memberId: r.member_id ?? null });

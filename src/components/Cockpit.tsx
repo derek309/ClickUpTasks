@@ -1122,6 +1122,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setConfirmDialog(null);
         setProjects((ps) => ps.filter((x) => x.id !== id));
         setTasks((ts) => ts.filter((t) => t.projectId !== id));
+        setClientNotes((ns) => ns.filter((n) => n.projectId !== id));
         deleteProjectDb(id);
       },
     });
@@ -1151,8 +1152,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   };
 
   // --- client notes ------------------------------------------------------
-  const addNote = (clientId: string, type: NoteType, body: string) => {
-    const note: ClientNote = { id: newId("cn_"), clientId, type, body, authorId: me.id, at: new Date().toISOString() };
+  const addNote = (clientId: string, type: NoteType, body: string, projectId?: string | null) => {
+    const note: ClientNote = { id: newId("cn_"), clientId, projectId: projectId ?? null, type, body, authorId: me.id, at: new Date().toISOString() };
     setClientNotes((ns) => [note, ...ns]); // newest-first feed
     upsertClientNote(note);
   };
@@ -1383,10 +1384,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </div>
 
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-          {!myWork && !myClientsView && !personalView && activeClient !== "all" && !activeProject && (
+          {!myWork && !myClientsView && !personalView && activeClient !== "all" && (
             <div className="inline-flex overflow-hidden rounded-md border">
               <button onClick={() => setClientTab("tasks")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "tasks" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Tasks</button>
-              <button onClick={() => setClientTab("knowledge")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "knowledge" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Knowledge · {clientNotes.filter((n) => n.clientId === activeClient).length}</button>
+              <button onClick={() => setClientTab("knowledge")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "knowledge" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Knowledge · {clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId)).length}</button>
             </div>
           )}
 
@@ -1554,11 +1555,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onOpen={(id) => { setMyWork(false); setMyClientsView(false); setPersonalView(false); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }} />
         ) : myWork ? (
           <GroupedList groups={buildGroups(myWorkTasks, "due").filter((g) => g.tasks.length > 0)} showClient clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={false} quickAddHint="" onQuickAdd={() => {}} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} highlightDelegateFor={myWorkUser} />
-        ) : !activeProject && activeClient !== "all" && clientTab === "knowledge" ? (
+        ) : activeClient !== "all" && clientTab === "knowledge" ? (
           <ClientNotes
-            notes={clientNotes.filter((n) => n.clientId === activeClient)}
+            notes={clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId))}
             me={me}
-            onAdd={(type, body) => addNote(activeClient, type, body)}
+            onAdd={(type, body) => addNote(activeClient, type, body, activeProject)}
             onEdit={editNote}
             onDelete={deleteNote}
           />
