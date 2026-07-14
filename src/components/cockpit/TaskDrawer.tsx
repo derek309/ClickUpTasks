@@ -5,16 +5,17 @@ import { useEffect, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo,
   STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, RECURRENCE_LABEL,
-  type Task, type Client, type Project, type Contact, type Attachment, type Priority, type Recurrence, type Subtask,
+  type Task, type Client, type Project, type Contact, type Attachment, type Priority, type Recurrence, type Subtask, type TaskTemplate,
 } from "@/lib/data";
 import { I, Avatar, Row, renderMentions, FileBadge, newId } from "./ui";
 import { InlineAssignee } from "./GroupedList";
 
-export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, isQueued, onToggleQueue, onCopyLink }: {
+export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, isQueued, onToggleQueue, onCopyLink, templates, onApplyTemplate }: {
   task: Task; comment: string; setComment: (v: string) => void;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; navTasks: Task[]; onOpenTask: (id: string) => void; onAddSibling: (title: string) => void; onPrev: () => void; onNext: () => void;
   onClose: () => void; onPatch: (patch: Partial<Task>) => void; onDelete: () => void; onAddComment: () => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; onPushGhl: () => void; ghlBusy: boolean; ghlLinkable: boolean; onUnlinkGhl: () => void; allClients: Client[]; onMoveClient: (clientId: string) => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onRenameProject: () => void; onToggleSub: (sid: string) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onDeleteSub: (sid: string) => void; onPatchSub: (sid: string, patch: Partial<Subtask>) => void; onToggleLabel: (lid: string) => void; isQueued: boolean; onToggleQueue: () => void; onCopyLink: () => void;
+  templates: TaskTemplate[]; onApplyTemplate: (templateId: string) => void;
 }) {
   const client = clientById(task.clientId)!;
   const project = projectById(task.projectId)!;
@@ -34,6 +35,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     setLinkUrl(""); setLinkLabel(""); setLinkOpen(false);
   };
   const [labelOpen, setLabelOpen] = useState(false);
+  const [templateOpen, setTemplateOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -158,7 +160,25 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   );
   const subtasksBlock = (
     <div className="mt-5">
-      <div className="mb-2 flex items-center justify-between"><span className="text-[13px] font-semibold uppercase tracking-wider text-muted">Checklist {task.subtasks.length > 0 && `· ${doneSubs}/${task.subtasks.length}`}</span></div>
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-[13px] font-semibold uppercase tracking-wider text-muted">Checklist {task.subtasks.length > 0 && `· ${doneSubs}/${task.subtasks.length}`}</span>
+        {templates.length > 0 && (
+          <div className="relative">
+            <button onClick={() => setTemplateOpen((o) => !o)} className="inline-flex items-center gap-1 text-[13px] font-medium text-accent"><I.clipboard /> From template</button>
+            {templateOpen && (<>
+              <div className="fixed inset-0 z-30" onClick={() => setTemplateOpen(false)} />
+              <div className="absolute right-0 z-40 mt-1 w-56 rounded-lg border bg-surface p-1 shadow-lg">
+                {templates.map((t) => (
+                  <button key={t.id} onClick={() => { onApplyTemplate(t.id); setTemplateOpen(false); }} className="flex w-full flex-col items-start rounded px-2 py-1.5 text-left hover:bg-background">
+                    <span className="truncate text-[14px] font-medium">{t.name}</span>
+                    <span className="text-[12px] text-muted">{t.checklistItems.length} item{t.checklistItems.length === 1 ? "" : "s"}</span>
+                  </button>
+                ))}
+              </div>
+            </>)}
+          </div>
+        )}
+      </div>
       {task.subtasks.length > 0 && (<div className="mb-2 h-1.5 overflow-hidden rounded-full bg-background"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${(doneSubs / task.subtasks.length) * 100}%` }} /></div>)}
       <div className="space-y-1">{task.subtasks.map((s) => (
         <div key={s.id}>

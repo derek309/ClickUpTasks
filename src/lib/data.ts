@@ -167,6 +167,15 @@ export interface Territory {
   memberId: string | null; // roster id of the assigned ambassador; null = unassigned
 }
 
+// A reusable checklist, applied either to quick-populate a new task (title
+// defaults to the template name) or to append the checklist onto an
+// existing task's subtasks.
+export interface TaskTemplate {
+  id: string;
+  name: string;
+  checklistItems: string[];
+}
+
 // GHL contacts store state inconsistently — full name ("California"), abbreviation
 // ("CA"), or mixed case ("Ca") all show up for the same state in practice. Territory
 // matching needs both sides normalized to the 2-letter form or a typed "CA" silently

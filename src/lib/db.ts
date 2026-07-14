@@ -21,6 +21,7 @@ import {
   type MessageChannel,
   type MessageDirection,
   type Territory,
+  type TaskTemplate,
   type Priority,
   titleCase,
   PRIORITY_META,
@@ -80,6 +81,9 @@ export const rowToClientNote = (r: any): ClientNote => ({ id: r.id, clientId: r.
 const territoryToRow = (t: Territory) => ({ id: t.id, name: t.name, city: t.city, state: t.state, member_id: t.memberId });
 const rowToTerritory = (r: any): Territory => ({ id: r.id, name: r.name, city: r.city, state: r.state, memberId: r.member_id ?? null });
 
+const taskTemplateToRow = (t: TaskTemplate) => ({ id: t.id, name: t.name, checklist_items: t.checklistItems });
+const rowToTaskTemplate = (r: any): TaskTemplate => ({ id: r.id, name: r.name, checklistItems: r.checklist_items ?? [] });
+
 const messageToRow = (m: Message) => ({
   id: m.id, contact_id: m.contactId, client_id: m.clientId, channel: m.channel, direction: m.direction,
   subject: m.subject, body: m.body, ghl_message_id: m.ghlMessageId, created_by: m.createdBy, read: m.read,
@@ -130,7 +134,7 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true) 
 }
 
 export async function fetchAll() {
-  const [c, ct, p, t, n, cl, cn, m, tr] = await Promise.all([
+  const [c, ct, p, t, n, cl, cn, m, tr, tt] = await Promise.all([
     fetchAllRows("clients", "created_at"),
     fetchAllRows("contacts"),
     fetchAllRows("projects"),
@@ -143,6 +147,7 @@ export async function fetchAll() {
     fetchAllRows("client_notes", "created_at", false),
     fetchAllRows("messages", "created_at"),
     fetchAllRows("territories", "created_at"),
+    fetchAllRows("task_templates", "created_at"),
   ]);
   const err = c.error || ct.error || p.error || t.error || n.error;
   if (err) throw err;
@@ -150,6 +155,7 @@ export async function fetchAll() {
   if (cn.error) console.warn("[db] client_notes unavailable — run supabase/client-links-notes.sql", cn.error.message);
   if (m.error) console.warn("[db] messages unavailable — run supabase/messages.sql", m.error.message);
   if (tr.error) console.warn("[db] territories unavailable — run supabase/territories.sql", tr.error.message);
+  if (tt.error) console.warn("[db] task_templates unavailable — run supabase/task-templates.sql", tt.error.message);
   return {
     clients: (c.data ?? []).map(rowToClient),
     contacts: (ct.data ?? []).map(rowToContact),
@@ -160,6 +166,7 @@ export async function fetchAll() {
     clientNotes: cn.error ? [] : (cn.data ?? []).map(rowToClientNote),
     messages: m.error ? [] : (m.data ?? []).map(rowToMessage),
     territories: tr.error ? [] : (tr.data ?? []).map(rowToTerritory),
+    taskTemplates: tt.error ? [] : (tt.data ?? []).map(rowToTaskTemplate),
   };
 }
 
@@ -198,6 +205,9 @@ export const deleteClientLinkDb = (id: string) => supabase.from("client_links").
 export const upsertClientNote = (n: ClientNote) => supabase.from("client_notes").upsert(clientNoteToRow(n)).then(logErr);
 export const upsertTerritory = (t: Territory) => supabase.from("territories").upsert(territoryToRow(t)).then(logErr);
 export const deleteTerritoryDb = (id: string) => supabase.from("territories").delete().eq("id", id).then(logErr);
+
+export const upsertTaskTemplate = (t: TaskTemplate) => supabase.from("task_templates").upsert(taskTemplateToRow(t)).then(logErr);
+export const deleteTaskTemplateDb = (id: string) => supabase.from("task_templates").delete().eq("id", id).then(logErr);
 export const deleteClientNoteDb = (id: string) => supabase.from("client_notes").delete().eq("id", id).then(logErr);
 // Messages are append-only (never edited), so insert not upsert. The caller
 // awaits the GHL send first (see Cockpit.tsx sendMessage) and only inserts an

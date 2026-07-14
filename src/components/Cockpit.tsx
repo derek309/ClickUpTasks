@@ -39,15 +39,17 @@ import {
   type MessageChannel,
   type Me,
   type Territory,
+  type TaskTemplate,
   PERSONAL_CLIENT_ID,
   WORKSPACE_CLIENT_ID,
   PERSONAL_PROJECT_ID,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, markMessagesReadDb, insertMessage } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, markMessagesReadDb, insertMessage } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import TeamPanel from "./TeamPanel";
 import TerritoryPanel from "./TerritoryPanel";
+import TemplatesPanel from "./TemplatesPanel";
 import { Inbox } from "./cockpit/Inbox";
 import SettingsPanel from "./SettingsPanel";
 import AddClientModal from "./AddClientModal";
@@ -99,6 +101,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [messages, setMessages] = useState<Message[]>([]);
   const [territories, setTerritories] = useState<Territory[]>([]);
   const [territoriesOpen, setTerritoriesOpen] = useState(false);
+  const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   const [importingTasks, setImportingTasks] = useState(false);
   const [clientTab, setClientTab] = useState<"tasks" | "knowledge">("tasks");
   const [linkModal, setLinkModal] = useState<{ initial?: ClientLink } | null>(null);
@@ -355,6 +359,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setClients(d.clients); setProjects(d.projects); setContacts(d.contacts); setTasks(d.tasks); setNotifications(d.notifications);
         setClientLinks(d.clientLinks); setClientNotes(d.clientNotes); setMessages(d.messages);
         setTerritories(d.territories);
+        setTaskTemplates(d.taskTemplates);
         fetchClaudeQueue().then((ids) => setClaudeQueue(new Set(ids)));
       } catch (e) {
         setDbError(e instanceof Error ? e.message : "Failed to load data.");
@@ -1144,6 +1149,43 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setTerritories((ts) => ts.filter((t) => t.id !== id));
     deleteTerritoryDb(id);
   };
+  const saveTemplate = (id: string | undefined, spec: { name: string; checklistItems: string[] }) => {
+    const t: TaskTemplate = { id: id ?? newId("tmpl_"), ...spec };
+    setTaskTemplates((ts) => (id ? ts.map((x) => (x.id === id ? t : x)) : [...ts, t]));
+    upsertTaskTemplate(t);
+  };
+  const deleteTemplate = (id: string) => {
+    setTaskTemplates((ts) => ts.filter((t) => t.id !== id));
+    deleteTaskTemplateDb(id);
+  };
+  // Appends a template's checklist items onto an existing task as new,
+  // unchecked subtasks — one patch, not a loop of addSub calls, so it's a
+  // single upsert instead of one per item.
+  const applyTemplate = (taskId: string, templateId: string) => {
+    const tpl = taskTemplates.find((t) => t.id === templateId);
+    const t = tasks.find((x) => x.id === taskId);
+    if (!tpl || !t) return;
+    const added: Subtask[] = tpl.checklistItems.map((title) => ({ id: newId("s_"), title, done: false }));
+    update(taskId, { subtasks: [...t.subtasks, ...added] });
+    pushToast(`Added ${added.length} checklist item${added.length === 1 ? "" : "s"} from "${tpl.name}"`);
+  };
+  // Creates a brand-new task from a template — title defaults to the
+  // template name, checklist pre-filled — to quickly populate a project.
+  const useTemplateAsTask = (templateId: string, clientId: string, projectId: string) => {
+    const tpl = taskTemplates.find((t) => t.id === templateId);
+    if (!tpl) return;
+    const t: Task = {
+      id: newId("t_"), projectId, clientId, title: tpl.name, description: "",
+      status: "todo", priority: "none", assigneeId: me.id,
+      contactId: clientId.startsWith("cl_") ? clientId.slice(3) : null,
+      due: null, recurrence: "none", labelIds: [], ghlTaskId: null, private: false,
+      subtasks: tpl.checklistItems.map((title) => ({ id: newId("s_"), title, done: false })),
+      attachments: [], comments: [], createdAt: new Date().toISOString(),
+    };
+    setTasks((ts) => [...ts, t]);
+    upsertTask(t, me.id);
+    pushToast(`Created "${t.title}" from template`);
+  };
   const renameClient = (id: string) => {
     const c = clientById(id);
     if (!c) return;
@@ -1489,6 +1531,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             {canAdmin && <button onClick={() => { setSettingsOpen(true); setSidebarOpen(false); }} title="Settings" className="rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>}
             {canAdmin && <button onClick={() => { setTeamOpen(true); setSidebarOpen(false); }} title="Team" className="rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.user /></button>}
             <button onClick={() => { setTerritoriesOpen(true); setSidebarOpen(false); }} title="Territories" className="rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.flag /></button>
+            {canAdmin && <button onClick={() => { setTemplatesOpen(true); setSidebarOpen(false); }} title="Task templates" className="rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.clipboard /></button>}
           </nav>
         )}
 
@@ -1722,7 +1765,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={orderedTaskIds.length} navTasks={orderedTaskIds.map((id) => tasks.find((t) => t.id === id)).filter((t): t is Task => !!t)} onOpenTask={setOpenTaskId} onAddSibling={(title) => addTaskToList(openTask.clientId, openTask.projectId, openTask.private, title)} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={() => addComment(openTask.id, comment)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...clientList].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} isQueued={claudeQueue.has(openTask.id)} onToggleQueue={() => toggleClaudeQueue(openTask.id)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id })} />
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...clientList].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} isQueued={claudeQueue.has(openTask.id)} onToggleQueue={() => toggleClaudeQueue(openTask.id)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id })} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} />
       )}
 
       {teamOpen && <TeamPanel me={me} onClose={() => setTeamOpen(false)} />}
@@ -1731,6 +1774,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         onAddContact={(contact) => addClientContact(contact)}
         onOpenClient={(id) => { setTerritoriesOpen(false); setMyWork(false); setMyClientsView(false); setPersonalView(false); setInboxView(false); setActiveClient(id); setActiveProject(null); }}
         onClose={() => setTerritoriesOpen(false)} />}
+      {templatesOpen && <TemplatesPanel templates={taskTemplates} clients={clients} projects={projects}
+        onSave={saveTemplate} onDelete={deleteTemplate} onUseAsTask={useTemplateAsTask} onClose={() => setTemplatesOpen(false)} />}
       {settingsOpen && <SettingsPanel clients={subAccounts} onClose={() => setSettingsOpen(false)}
         onSaveClient={(c) => { setClients((cs) => cs.map((x) => (x.id === c.id ? c : x))); markOwnClientWrite(c.id); upsertClient(c); }}
         onSynced={async () => { try { setContacts(await fetchContacts()); pushToast("Contacts updated from GoHighLevel"); } catch { /* ignore */ } }} />}
