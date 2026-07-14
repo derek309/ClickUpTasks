@@ -125,14 +125,16 @@ describe("initialsOf", () => {
 describe("setUsers (live roster)", () => {
   const roster = (): User[] => [...users];
 
-  it("replaces the roster in place so existing references see the change", () => {
+  it("replaces the roster in place so existing references see the change, keeping the synthetic Claude entry", () => {
     const ref = users; // simulate another module holding the array
     setUsers([
       { id: "u_derek", name: "Derek Fox", initials: "DF", color: "#a855f7", role: "admin" },
       { id: "abc-123", name: "Justin Chevallier", initials: "JC", color: "#a855f7", role: "admin" },
     ]);
-    expect(ref).toHaveLength(2);
+    // 2 real accounts + the preserved "u_claude" synthetic entry (see PROTECTED_USER_IDS).
+    expect(ref).toHaveLength(3);
     expect(ref.find((u) => u.id === "abc-123")?.name).toBe("Justin Chevallier");
+    expect(ref.find((u) => u.id === "u_claude")?.name).toBe("Claude");
   });
 
   it("keeps the existing roster when handed an empty list (failed fetch)", () => {

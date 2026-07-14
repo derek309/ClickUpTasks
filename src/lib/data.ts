@@ -372,7 +372,13 @@ export function describeRecurrence(rec: Recurrence, interval?: number, unit?: Re
 // array is mutated in place so every module holding a reference sees updates.
 export const users: User[] = [
   { id: "u_derek", name: "Derek Fox", initials: "DF", color: "#a855f7", role: "admin" },
+  { id: "u_claude", name: "Claude", initials: "AI", color: "#f97316", role: "va" },
 ];
+// Synthetic, non-account roster entries (currently just Claude, the MCP
+// server's identity for notes/comments it posts) — never a real Supabase
+// auth user, so setUsers() below must keep it across every real-roster
+// refresh instead of letting the fetched profiles list wipe it out.
+const PROTECTED_USER_IDS = new Set(["u_claude"]);
 
 export function initialsOf(name: string): string {
   const p = name.trim().split(/\s+/);
@@ -382,7 +388,8 @@ export function initialsOf(name: string): string {
 /** Replace the roster with the real team (from profiles). */
 export function setUsers(list: User[]) {
   if (list.length === 0) return; // keep the founder fallback if fetch fails
-  users.splice(0, users.length, ...list);
+  const preserved = users.filter((u) => PROTECTED_USER_IDS.has(u.id) && !list.some((l) => l.id === u.id));
+  users.splice(0, users.length, ...list, ...preserved);
 }
 
 // --- Labels -----------------------------------------------------------------
