@@ -10,6 +10,7 @@ import {
   advanceDue,
   timeAgo,
   TODAY,
+  TOMORROW,
   STATUS_META,
   STATUS_ORDER,
   CLIENT_STATUS_META,
@@ -793,12 +794,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       id: newId("t_"), projectId, clientId: activeClient, title: title.trim(), description: "",
       status: groupBy === "status" ? (groupKey as TaskStatus) : "todo",
       // isManuallyAssignable guards Conversation (auto-created-only, see
-      // data.ts) — a quick-add inside that group still lands as "none"
+      // data.ts) — a quick-add inside that group still lands as "normal"
       // rather than manually assigning the reserved tier.
-      priority: groupBy === "priority" && isManuallyAssignable(groupKey as Priority) ? (groupKey as Priority) : "none",
+      priority: groupBy === "priority" && isManuallyAssignable(groupKey as Priority) ? (groupKey as Priority) : "normal",
       assigneeId: me.id,
       contactId: activeClient.slice(3),
-      due: groupBy === "due" && groupKey === "today" ? TODAY : null,
+      due: groupBy === "due" && groupKey === "today" ? TODAY : TOMORROW,
       recurrence: "none", labelIds: [], ghlTaskId: null, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
     };
     setTasks((ts) => [...ts, t]);
@@ -824,9 +825,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!title.trim()) return;
     const t: Task = {
       id: newId("t_"), projectId, clientId, title: title.trim(), description: "",
-      status: "todo", priority: "none", assigneeId: me.id,
+      status: "todo", priority: "normal", assigneeId: me.id,
       contactId: clientId.startsWith("cl_") ? clientId.slice(3) : null,
-      due: null, recurrence: "none", labelIds: [], ghlTaskId: null, private: isPrivate, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
+      due: TOMORROW, recurrence: "none", labelIds: [], ghlTaskId: null, private: isPrivate, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
     };
     setTasks((ts) => [...ts, t]);
     upsertTask(t, me.id);
@@ -837,9 +838,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const t: Task = {
       id: newId("t_"), projectId: PERSONAL_PROJECT_ID, clientId: PERSONAL_CLIENT_ID, title: title.trim(), description: "",
       status: groupBy === "status" ? (groupKey as TaskStatus) : "todo",
-      priority: "none",
+      priority: "normal",
       assigneeId: me.id, contactId: null,
-      due: groupBy === "due" && groupKey === "today" ? TODAY : null,
+      due: groupBy === "due" && groupKey === "today" ? TODAY : TOMORROW,
       recurrence: "none", labelIds: [], ghlTaskId: null, private: true, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
     };
     setTasks((ts) => [...ts, t]);
@@ -1228,9 +1229,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!tpl) return;
     const t: Task = {
       id: newId("t_"), projectId, clientId, title: tpl.name, description: "",
-      status: "todo", priority: "none", assigneeId: me.id,
+      status: "todo", priority: "normal", assigneeId: me.id,
       contactId: clientId.startsWith("cl_") ? clientId.slice(3) : null,
-      due: null, recurrence: "none", labelIds: [], ghlTaskId: null, private: false,
+      due: TOMORROW, recurrence: "none", labelIds: [], ghlTaskId: null, private: false,
       subtasks: tpl.checklistItems.map((title) => ({ id: newId("s_"), title, done: false })),
       attachments: [], comments: [], createdAt: new Date().toISOString(),
     };

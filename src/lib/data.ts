@@ -13,6 +13,15 @@ export function todayIso(): string {
 // Supabase fetch resolves, so server/client drift isn't visible in practice.
 export const TODAY = todayIso();
 
+/** yyyy-mm-dd for `iso` plus `days` days, via UTC date math to dodge DST. */
+export function addDaysIso(iso: string, days: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+export const TOMORROW = addDaysIso(TODAY, 1);
+
 // Capitalize the first letter of each word (leaves existing caps + numbers
 // alone) — GHL-sourced contact/client names commonly arrive all-lowercase.
 // Lives here (not db.ts) so server routes can use it without pulling in
