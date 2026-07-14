@@ -7,7 +7,7 @@ import {
   STATUS_META, STATUS_ORDER, PRIORITY_META, PRIORITY_ORDER, RECURRENCE_LABEL,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type Recurrence, type Subtask,
 } from "@/lib/data";
-import { I, Avatar, Row, renderMentions, FileBadge } from "./ui";
+import { I, Avatar, Row, renderMentions, FileBadge, newId } from "./ui";
 import { InlineAssignee } from "./GroupedList";
 
 export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel }: {
@@ -23,6 +23,16 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const ghlContactUrl = linkedContact && ghlSub?.ghlLocationId ? `https://app.gohighlevel.com/v2/location/${ghlSub.ghlLocationId}/contacts/detail/${linkedContact.ghlContactId}` : null;
   const [subDraft, setSubDraft] = useState("");
   const [siblingDraft, setSiblingDraft] = useState("");
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkLabel, setLinkLabel] = useState("");
+  const addLink = () => {
+    const url = linkUrl.trim();
+    if (!url) return;
+    const href = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+    onPatch({ attachments: [...task.attachments, { id: newId("at_"), name: linkLabel.trim() || href.replace(/^https?:\/\//, ""), kind: "link", size: "", url: href }] });
+    setLinkUrl(""); setLinkLabel(""); setLinkOpen(false);
+  };
   const [labelOpen, setLabelOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -122,7 +132,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     </dl>
   );
   const descriptionBlock = (
-    <div className="mt-5"><div className="mb-1.5 text-[13px] font-semibold uppercase tracking-wider text-muted">Description</div><textarea value={task.description} onChange={(e) => onPatch({ description: e.target.value })} placeholder="Add a description…" rows={3} className="w-full resize-none rounded-lg border border-transparent px-3 py-2 text-[15px] outline-none transition placeholder:text-muted hover:bg-background focus:border-accent focus:bg-background -mx-3" /></div>
+    <div className="mt-5"><div className="mb-1.5 text-[13px] font-semibold uppercase tracking-wider text-muted">Description</div><textarea value={task.description} onChange={(e) => onPatch({ description: e.target.value })} placeholder="Add a description…" rows={3} className="-mx-3 min-h-[80px] w-full resize-y rounded-lg border border-transparent px-3 py-2 text-[15px] outline-none transition placeholder:text-muted hover:bg-background focus:border-accent focus:bg-background" /></div>
   );
   const subtasksBlock = (
     <div className="mt-5">
@@ -144,8 +154,15 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   );
   const attachmentsBlock = (
     <div className="mt-5">
-      <div className="mb-2 flex items-center justify-between"><span className="text-[13px] font-semibold uppercase tracking-wider text-muted">Attachments · {task.attachments.length}</span><button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1 text-[15px] font-medium text-accent"><I.plus /> Attach</button></div>
+      <div className="mb-2 flex items-center justify-between"><span className="text-[13px] font-semibold uppercase tracking-wider text-muted">Attachments · {task.attachments.length}</span><span className="flex items-center gap-3"><button onClick={() => { setLinkOpen((o) => !o); }} className="inline-flex items-center gap-1 text-[15px] font-medium text-accent"><I.link /> Link</button><button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1 text-[15px] font-medium text-accent"><I.plus /> Attach</button></span></div>
       <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) onAddFiles(e.target.files); e.target.value = ""; }} />
+      {linkOpen && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border bg-background p-2">
+          <input autoFocus value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLink(); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
+          <input value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLink(); }} placeholder="Label (optional)" className="w-40 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
+          <button onClick={addLink} disabled={!linkUrl.trim()} className="rounded-md bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">Add</button>
+        </div>
+      )}
       {uploadProgress && (
         <div className="mb-2 flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-[15px] text-muted">
           <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-accent border-t-transparent" />
@@ -157,7 +174,9 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
         {task.attachments.map((a) => (
           <div key={a.id} className="group/att flex items-center gap-2 rounded-lg border bg-background px-3 py-2">
             <FileBadge kind={a.kind} />
-            {a.path ? (
+            {a.url ? (
+              <a href={a.url} target="_blank" rel="noopener noreferrer" className="truncate text-left text-[15px] text-accent hover:underline" title={a.url}>{a.name}</a>
+            ) : a.path ? (
               <button onClick={() => onDownloadFile(a.path!)} className="truncate text-left text-[15px] text-accent hover:underline" title="Download">{a.name}</button>
             ) : (
               <span className="truncate text-[15px]" title="Not stored — re-upload once the storage bucket exists">{a.name}</span>

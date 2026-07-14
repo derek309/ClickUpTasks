@@ -180,6 +180,7 @@ export interface Attachment {
   kind: "pdf" | "image" | "doc" | "sheet" | "link";
   size: string;
   path?: string; // Supabase Storage object path; absent = metadata-only (not stored)
+  url?: string; // for kind "link" — a drive/website URL rather than a stored file
 }
 
 export interface Comment {
