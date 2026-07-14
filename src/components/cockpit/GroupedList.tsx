@@ -120,7 +120,10 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
           <button onClick={onToggleExpand} className={`shrink-0 rounded p-0.5 text-muted hover:text-foreground ${task.subtasks.length ? "" : "opacity-0 group-hover/tr:opacity-40"}`} title="Subtasks"><I.chevron className={`transition ${expanded ? "-rotate-90" : "rotate-180"}`} /></button>
           <InlineAssignee value={task.assigneeId} onChange={(a) => onPatch(task.id, { assigneeId: a })} size={36} />
           <button onClick={onOpen} className="flex min-w-0 flex-1 flex-col justify-center py-0.5 pl-1 text-left">
-            {crumb && <span className="truncate text-[13px] leading-tight text-muted">{crumb}</span>}
+            {/* Project crumb is redundant once the Client column is already
+                shown (My Work, All tasks) — keep it only in single-client
+                views where there's no other column carrying that context. */}
+            {!showClient && crumb && <span className="truncate text-[13px] leading-tight text-muted">{crumb}</span>}
             <span className="flex min-w-0 items-center gap-1.5">
               {delegated && <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">Delegated</span>}
               <span className="min-w-0 flex-1 whitespace-normal break-words text-[17px] font-medium leading-snug">{task.title}</span>
