@@ -79,19 +79,19 @@ server.tool("list_my_tasks",
   });
 
 server.tool("get_task",
-  "Get one task's full detail: description, checklist, links, client/list context.",
+  "Get one task's full detail: description, checklist (title + done state), links, client/list context.",
   { id: z.string() },
   async ({ id }) => {
     await names();
     const [t] = await sb(`tasks?select=*&id=eq.${enc(id)}`);
     if (!t) return { content: [{ type: "text", text: `No task ${id}.` }] };
-    const subs = (t.subtasks || []).map((s) => `  [${s.done ? "x" : " "}] ${s.title}${s.due ? ` (due ${s.due})` : ""}`).join("\n");
+    const checklist = (t.subtasks || []).map((s) => ({ title: s.title, done: !!s.done }));
     const links = (t.attachments || []).filter((a) => a.url).map((a) => `  - ${a.name}: ${a.url}`).join("\n");
     const comments = (t.comments || []).filter((c) => c.kind !== "event").slice(-5).map((c) => `  - ${c.body}`).join("\n");
     const text = [
       brief(t),
       t.description ? `\nDescription:\n${t.description}` : "",
-      subs ? `\nChecklist:\n${subs}` : "",
+      checklist.length ? `\nChecklist: ${JSON.stringify(checklist)}` : "",
       links ? `\nLinks:\n${links}` : "",
       comments ? `\nRecent comments:\n${comments}` : "",
     ].filter(Boolean).join("\n");
@@ -133,6 +133,21 @@ server.tool("check_item",
     if (!hit) return { content: [{ type: "text", text: `No checklist item matching "${item}".` }] };
     await sb(`tasks?id=eq.${enc(id)}`, "PATCH", { subtasks });
     return { content: [{ type: "text", text: `Checklist "${hit.title}" → ${done ?? true ? "done" : "open"}.` }] };
+  });
+
+server.tool("add_checklist_items",
+  "Add one or more unchecked checklist items to a task, in the order given. Creates the checklist if the task has none yet. Check get_task first to see what's already there and avoid duplicates.",
+  { id: z.string(), items: z.array(z.string()).min(1).describe("item titles to add, unchecked") },
+  async ({ id, items }) => {
+    const [t] = await sb(`tasks?select=subtasks&id=eq.${enc(id)}`);
+    if (!t) return { content: [{ type: "text", text: `No task ${id}.` }] };
+    const titles = items.map((s) => s.trim()).filter(Boolean);
+    if (!titles.length) return { content: [{ type: "text", text: "No items to add." }] };
+    const added = titles.map((title) => ({ id: rid("s_"), title, done: false }));
+    const subtasks = [...(t.subtasks || []), ...added];
+    await sb(`tasks?id=eq.${enc(id)}`, "PATCH", { subtasks });
+    const summary = added.map((s) => ({ id: s.id, title: s.title }));
+    return { content: [{ type: "text", text: `Added ${added.length} checklist item(s) to ${id}: ${JSON.stringify(summary)}` }] };
   });
 
 server.tool("list_queue",
