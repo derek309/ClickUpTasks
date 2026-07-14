@@ -64,7 +64,7 @@ export default function AddClientModal({
                   {ghlUrl(c)
                     ? <a href={ghlUrl(c)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="block truncate text-[15px] font-medium text-accent hover:underline">{c.name}</a>
                     : <div className="truncate text-[15px] font-medium">{c.name}</div>}
-                  <div className="truncate text-[15px] text-muted">{c.email || "no email"} · {subName(c.clientId)}</div>
+                  <div className="truncate text-[15px] text-muted">{c.company ? `${c.company} · ` : ""}{c.email || "no email"} · {subName(c.clientId)}</div>
                 </div>
                 <button disabled={added} onClick={() => onAdd(c)} className="shrink-0 rounded-md bg-accent px-2.5 py-1 text-[15px] font-medium text-white disabled:opacity-40">{added ? "Added" : "Add"}</button>
               </div>

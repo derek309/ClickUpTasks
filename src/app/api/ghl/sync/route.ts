@@ -66,6 +66,7 @@ export async function POST(req: NextRequest) {
     name: [c.firstName, c.lastName].filter(Boolean).join(" ") || c.contactName || c.name || c.email || "Unnamed contact",
     email: c.email ?? "",
     ghl_contact_id: c.id,
+    company_name: c.companyName ?? null,
   }));
 
   if (rows.length) {

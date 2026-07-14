@@ -130,6 +130,7 @@ export interface Contact {
   name: string;
   email: string;
   ghlContactId: string;
+  company?: string; // GHL companyName — shown alongside the name in search
 }
 
 export type MessageChannel = "email" | "sms";

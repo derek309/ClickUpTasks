@@ -65,7 +65,7 @@ export function CommandK({ tasks, clients, contacts, addedContactIds, clientById
           {notImportedItems.map((c, i) => { const gi = taskItems.length + clientItems.length + i; return (
             <button key={c.id} onMouseEnter={() => setIdx(gi)} onClick={() => activate(gi)} className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left ${idx === gi ? "bg-background" : ""}`}>
               <I.plus className="shrink-0 text-muted" />
-              <span className="min-w-0 flex-1 truncate text-[15px] text-muted">{c.name}</span>
+              <span className="min-w-0 flex-1 truncate text-[15px] text-muted">{c.name}{c.company && <span className="text-muted/70"> · {c.company}</span>}</span>
               <span className="shrink-0 text-[13px] text-accent">Add as client</span>
             </button>
           ); })}
