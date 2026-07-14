@@ -1156,6 +1156,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const note: ClientNote = { id: newId("cn_"), clientId, projectId: projectId ?? null, type, body, authorId: me.id, at: new Date().toISOString() };
     setClientNotes((ns) => [note, ...ns]); // newest-first feed
     upsertClientNote(note);
+    // @mentions notify, same as task comments — the one signal that pulls
+    // people back into this feed instead of it going stale and unread.
+    const where = projectId ? projectById(projectId)?.name : clientById(clientId)?.name;
+    users.forEach((u) => {
+      if (u.id !== me.id && body.includes("@" + u.name)) notify(u.id, `${me.name} mentioned you in the ${where ?? "team"} chat`, null);
+    });
   };
   const editNote = (note: ClientNote, body: string) => {
     const updated: ClientNote = { ...note, body };

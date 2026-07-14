@@ -6,7 +6,7 @@
 // on everything without hunting through individual tasks. Claude (via the MCP
 // server's list_notes/add_note tools) reads and posts here too.
 import { useEffect, useRef, useState } from "react";
-import { userById, timeAgo, NOTE_TYPE_META, NOTE_TYPE_ORDER, type ClientNote, type NoteType, type Task, type Me } from "@/lib/data";
+import { users, userById, timeAgo, NOTE_TYPE_META, NOTE_TYPE_ORDER, type ClientNote, type NoteType, type Task, type Me } from "@/lib/data";
 import { I, Avatar, renderMentions } from "./ui";
 import { ConfirmModal, type ConfirmSpec } from "./modals";
 
@@ -33,6 +33,11 @@ export function ClientNotes({ notes, tasks, me, onAdd, onEdit, onDelete, onOpenT
   const filtered = filter === "all" ? notes : notes.filter((n) => n.type === filter);
   const chatOrder = [...filtered].reverse();
   const canModify = (n: ClientNote) => me.role === "admin" || n.authorId === me.id;
+
+  // Same @mention pattern as task comments: type @ to search teammates, pick
+  // one to insert "@Name ", and onAdd's caller notifies them on send.
+  const mentionMatch = /@([\w]*)$/.exec(draft);
+  const mentionCands = mentionMatch ? users.filter((u) => u.name.toLowerCase().includes(mentionMatch[1].toLowerCase())) : [];
 
   useEffect(() => { if (view === "chat") feedEndRef.current?.scrollIntoView({ block: "end" }); }, [notes.length, view]);
 
@@ -125,16 +130,25 @@ export function ClientNotes({ notes, tasks, me, onAdd, onEdit, onDelete, onOpenT
           </div>
         </div>
 
-        <div className="shrink-0 border-t bg-surface p-3">
+        <div className="relative shrink-0 border-t bg-surface p-3">
           <div className="mx-auto max-w-3xl">
+            {mentionMatch && mentionCands.length > 0 && (
+              <div className="absolute bottom-full left-3 mb-1 w-56 overflow-hidden rounded-lg border bg-surface shadow-lg">
+                {mentionCands.map((u) => (
+                  <button key={u.id} onClick={() => setDraft(draft.replace(/@([\w]*)$/, `@${u.name} `))} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[15px] hover:bg-background">
+                    <Avatar id={u.id} size={22} /> {u.name}{u.role === "va" && <span className="text-[13px] text-muted">VA</span>}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="flex items-end gap-2 rounded-xl border bg-background px-2.5 py-2 focus-within:border-accent">
               <select value={draftType} onChange={(e) => setDraftType(e.target.value as NoteType)}
                 className="shrink-0 rounded-md border bg-surface px-1.5 py-1 text-[13px] outline-none">
                 {NOTE_TYPE_ORDER.map((t) => (<option key={t} value={t}>{NOTE_TYPE_META[t].label}</option>))}
               </select>
               <textarea value={draft} onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
-                placeholder="Message the team… (Enter to send, Shift+Enter for a new line)" rows={1}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !(mentionMatch && mentionCands.length)) { e.preventDefault(); submit(); } }}
+                placeholder="Message the team… (Enter to send, type @ to mention)" rows={1}
                 className="max-h-72 min-h-[38px] flex-1 resize-y bg-transparent text-[15px] outline-none placeholder:text-muted" />
               <button onClick={submit} disabled={!draft.trim()} className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">Send</button>
             </div>
