@@ -93,7 +93,9 @@ def mstatus(st):
     return "todo"
 def mprio(p):
     nm=(p or {}).get("priority") if isinstance(p,dict) else None
-    return {"urgent":"urgent","high":"high","normal":"medium","low":"low"}.get((nm or "").lower(),"none")
+    # ClickUpTasks' 4-tier scheme (conversation/urgent/normal/none) — conversation
+    # is auto-created only, never assigned from an import.
+    return {"urgent":"urgent","high":"urgent","normal":"normal","low":"normal"}.get((nm or "").lower(),"none")
 
 # preload state
 clients={c["id"]:c for c in sb("clients?select=id,name")}

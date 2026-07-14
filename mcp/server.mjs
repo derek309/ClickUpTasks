@@ -62,7 +62,7 @@ server.tool("list_my_tasks",
   "List tasks assigned to you (or delegated to you via a checklist item). Filter by client name, status, priority. Excludes Done unless include_done.",
   { client: z.string().optional().describe("filter by client name (substring, case-insensitive)"),
     status: z.enum(STATUSES).optional(),
-    priority: z.enum(["none","low","medium","high","urgent"]).optional(),
+    priority: z.enum(["none","normal","urgent","conversation"]).optional(),
     include_done: z.boolean().optional(),
     limit: z.number().optional() },
   async ({ client, status, priority, include_done, limit }) => {

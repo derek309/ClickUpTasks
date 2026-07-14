@@ -24,7 +24,7 @@ export interface Me {
   role: Role;
 }
 export type TaskStatus = "todo" | "in_progress" | "review" | "done";
-export type Priority = "none" | "low" | "medium" | "high" | "urgent";
+export type Priority = "conversation" | "urgent" | "normal" | "none";
 export type Recurrence = "none" | "daily" | "weekday" | "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly";
 export const RECURRENCE_ORDER: Recurrence[] = ["none", "daily", "weekday", "weekly", "biweekly", "monthly", "quarterly", "yearly"];
 
@@ -288,14 +288,17 @@ export const STATUS_META: Record<TaskStatus, { label: string; dot: string; chip:
 };
 export const STATUS_ORDER: TaskStatus[] = ["todo", "in_progress", "review", "done"];
 
+// Conversation is auto-created only (an open, unanswered GHL inbound
+// message) — it's excluded from the manual priority pickers unless it's
+// already the task's current value, see GroupedList/TaskDrawer. It always
+// ranks above Urgent so a live thread surfaces before anything else.
 export const PRIORITY_META: Record<Priority, { label: string; color: string; rank: number }> = {
-  urgent: { label: "Urgent", color: "#ef4444", rank: 4 },
-  high: { label: "High", color: "#f97316", rank: 3 },
-  medium: { label: "Medium", color: "#3b82f6", rank: 2 },
-  low: { label: "Low", color: "#94a3b8", rank: 1 },
+  conversation: { label: "Conversation", color: "#8b5cf6", rank: 3 },
+  urgent: { label: "Urgent", color: "#ef4444", rank: 2 },
+  normal: { label: "Normal", color: "#3b82f6", rank: 1 },
   none: { label: "No priority", color: "#cbd5e1", rank: 0 },
 };
-export const PRIORITY_ORDER: Priority[] = ["urgent", "high", "medium", "low", "none"];
+export const PRIORITY_ORDER: Priority[] = ["conversation", "urgent", "normal", "none"];
 
 export const RECURRENCE_LABEL: Record<Recurrence, string> = {
   none: "Does not repeat",
@@ -378,7 +381,7 @@ export const seedTasks: Task[] = [
     title: "Build new-patient landing page",
     description: "Draft copy, hero image, and the GHL form embed for the new patient offer. Match brand colors from the style guide.",
     status: "in_progress",
-    priority: "high",
+    priority: "urgent",
     assigneeId: "u_maria",
     contactId: "ct_1",
     due: "2026-07-10",
@@ -409,7 +412,7 @@ export const seedTasks: Task[] = [
     title: "Wire intake form → GHL automation",
     description: "Connect the form submission to the new-patient workflow so contacts get tagged and enter the nurture sequence.",
     status: "todo",
-    priority: "medium",
+    priority: "normal",
     assigneeId: "u_james",
     contactId: "ct_2",
     due: "2026-07-12",
@@ -429,7 +432,7 @@ export const seedTasks: Task[] = [
     title: "Set up review request SMS",
     description: "Draft the review-request text and schedule it to fire 3 days post-appointment.",
     status: "review",
-    priority: "low",
+    priority: "normal",
     assigneeId: "u_maria",
     contactId: "ct_1",
     due: "2026-07-09",
@@ -476,7 +479,7 @@ export const seedTasks: Task[] = [
     title: "Build email nurture (5 emails)",
     description: "Pre-launch nurture sequence for the challenge waitlist.",
     status: "todo",
-    priority: "medium",
+    priority: "normal",
     assigneeId: "u_maria",
     contactId: "ct_4",
     due: "2026-07-15",
@@ -496,7 +499,7 @@ export const seedTasks: Task[] = [
     title: "Map intake questions to custom fields",
     description: "Turn the paper intake form into GHL custom fields and a clean intake workflow.",
     status: "done",
-    priority: "medium",
+    priority: "normal",
     assigneeId: "u_james",
     contactId: "ct_6",
     due: "2026-07-03",
@@ -519,7 +522,7 @@ export const seedTasks: Task[] = [
     title: "Build 48-hour follow-up sequence",
     description: "If a lead doesn't book a consult within 48h, trigger a follow-up call task + SMS.",
     status: "in_progress",
-    priority: "high",
+    priority: "urgent",
     assigneeId: "u_james",
     contactId: "ct_5",
     due: "2026-07-13",

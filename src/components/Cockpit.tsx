@@ -604,6 +604,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const contactId = clientId.slice(3);
     return messages.some((m) => m.contactId === contactId && m.direction === "inbound" && !m.read);
   }
+  // The tier-0 "New message" boost in clientUrgencyKey is driven by an open
+  // Conversation-priority task (the priority-system source of truth for "a
+  // thread needs a reply"), not raw unread-message state — a thread stays
+  // boosted for as long as its task is open, even after the message itself
+  // is marked read, and clears only when the task is completed.
+  function hasOpenConversationTask(clientId: string): boolean {
+    return scopedTasks.some((t) => t.clientId === clientId && t.status !== "done" && t.priority === "conversation");
+  }
   // forAssignee narrows "open tasks" to just that person's — used by the
   // personal My Clients board, where a client's tier should reflect *my*
   // tasks there, not a teammate's (a client can't land in "Overdue" here
@@ -611,7 +619,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // due date). Omitted entirely for the sidebar's "Overdue first" sort,
   // which is intentionally client-wide across every assignee.
   function clientUrgencyKey(clientId: string, forAssignee?: string): { tier: number; due: string; priorityRank: number } {
-    if (hasUnreadMessage(clientId)) return { tier: 0, due: "", priorityRank: 0 };
+    if (hasOpenConversationTask(clientId)) return { tier: 0, due: "", priorityRank: 0 };
     const open = scopedTasks.filter((t) => t.clientId === clientId && t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
     if (open.length === 0) return { tier: 5, due: "", priorityRank: 0 };
     const withDue = open.filter((t) => t.due);

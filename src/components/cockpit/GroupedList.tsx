@@ -190,19 +190,24 @@ function InlineStatus({ value, onChange }: { value: TaskStatus; onChange: (s: Ta
   );
 }
 
+// Conversation is auto-created-only (see PRIORITY_META doc comment in
+// data.ts) — it's hidden from this manual picker unless it's already the
+// task's current value, so an existing conversation task can still be
+// displayed/reselected but a person can't manually assign it to a new task.
 function InlinePriority({ value, onChange }: { value: Priority; onChange: (p: Priority) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
+  const options = PRIORITY_ORDER.filter((p) => p !== "conversation" || p === value);
   return (
     <div className="relative">
-      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 128, PRIORITY_ORDER.length * 32 + 8)); setOpen((o) => !o); }} className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[15px] font-medium hover:bg-background" style={{ color: value === "none" ? "var(--muted)" : PRIORITY_META[value].color }}>
+      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 128, options.length * 32 + 8)); setOpen((o) => !o); }} className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[15px] font-medium hover:bg-background" style={{ color: value === "none" ? "var(--muted)" : PRIORITY_META[value].color }}>
         {value === "none" ? "—" : (<><I.flag />{PRIORITY_META[value].label}</>)}
       </button>
       {open && (<>
         <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
         <div style={{ position: "fixed", top: pos.top, left: pos.left, width: 128 }} className="z-40 rounded-lg border bg-surface p-1 shadow-lg">
-          {PRIORITY_ORDER.map((p) => (
+          {options.map((p) => (
             <button key={p} onClick={(e) => { e.stopPropagation(); onChange(p); setOpen(false); }} className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[15px] hover:bg-background" style={{ color: p === "none" ? "var(--muted)" : PRIORITY_META[p].color }}>
               {p !== "none" && <I.flag />} {PRIORITY_META[p].label}
             </button>

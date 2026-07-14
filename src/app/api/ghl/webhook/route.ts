@@ -90,7 +90,7 @@ async function handleMessageReply(body: any, custom: any) {
 
   const { data: contact } = await supabaseAdmin
     .from("contacts")
-    .select("id, client_id")
+    .select("id, name, client_id")
     .eq("ghl_contact_id", ghlContactId)
     .maybeSingle();
   if (!contact) return NextResponse.json({ ok: true, skipped: "no contact for that ghlContactId" });
@@ -110,7 +110,60 @@ async function handleMessageReply(body: any, custom: any) {
   // A duplicate delivery of the same reply (GHL retries on a non-2xx, or the
   // workflow fires twice) hits the partial unique index on ghl_message_id —
   // treat that as already-processed, not a failure, same conservative spirit
-  // as the task-sync path above.
-  if (error && !error.message.includes("duplicate key")) return NextResponse.json({ error: error.message }, { status: 500 });
+  // as the task-sync path above. Only run the Conversation-task automation
+  // on a genuinely new reply, so a retried delivery doesn't bump due twice.
+  if (error) {
+    if (!error.message.includes("duplicate key")) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  }
+  await upsertConversationTask(contact, ghlContactId);
   return NextResponse.json({ ok: true });
+}
+
+// Priority-system spec (see PRIORITY_META in src/lib/data.ts): every inbound
+// reply keeps exactly one open Conversation-priority task per contact
+// thread — a second reply on a thread that already has one open just bumps
+// its due date rather than creating a duplicate, per the spec's own
+// "Due date updates" section. due doubles as "last touched" here, not a
+// deadline, since Conversation always sorts to the top on priority alone.
+// Conversation tasks are never auto-completed (spec) — only this creation/
+// due-bump path writes to them; completion is left entirely to a person.
+async function upsertConversationTask(contact: { id: string; name: string; client_id: string }, ghlContactId: string) {
+  const today = new Date().toISOString().slice(0, 10);
+  const { data: openTasks } = await supabaseAdmin
+    .from("tasks")
+    .select("id")
+    .eq("client_id", contact.client_id)
+    .eq("priority", "conversation")
+    .neq("status", "done")
+    .limit(1);
+  if (openTasks && openTasks.length > 0) {
+    await supabaseAdmin.from("tasks").update({ due: today }).eq("id", openTasks[0].id);
+    return;
+  }
+
+  // Reuse whatever project the client's other tasks live under, same "Tasks"
+  // fallback quickAdd/GHL-import use client-side when a client has none yet.
+  let projectId: string | undefined = (
+    await supabaseAdmin.from("projects").select("id").eq("client_id", contact.client_id).limit(1).maybeSingle()
+  ).data?.id;
+  if (!projectId) {
+    projectId = "p_" + crypto.randomUUID();
+    const { error: projErr } = await supabaseAdmin.from("projects").insert({ id: projectId, client_id: contact.client_id, name: "Tasks", description: "" });
+    if (projErr) return;
+  }
+
+  const { data: client } = await supabaseAdmin.from("clients").select("ghl_location_id").eq("id", contact.client_id).maybeSingle();
+  const ghlUrl = client?.ghl_location_id ? `https://app.gohighlevel.com/v2/location/${client.ghl_location_id}/contacts/detail/${ghlContactId}` : null;
+
+  await supabaseAdmin.from("tasks").insert({
+    id: "t_" + crypto.randomUUID(),
+    project_id: projectId,
+    client_id: contact.client_id,
+    title: `Reply to ${contact.name}`,
+    priority: "conversation",
+    contact_id: contact.id,
+    due: today,
+    attachments: ghlUrl ? [{ id: "at_" + crypto.randomUUID(), name: "GHL conversation", kind: "link", size: "", url: ghlUrl }] : [],
+  });
 }
