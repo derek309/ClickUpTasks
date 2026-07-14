@@ -104,14 +104,15 @@ export function renderMentions(body: string) {
 }
 
 // Meeting transcripts, long emails, and long comments would otherwise push
-// everything else off-screen — collapse past this length behind a "Show
+// everything else off-screen — collapse past this many words behind a "Show
 // more" toggle. A plain clickable span, not a <button>, so this still works
 // nested inside a parent <button> (e.g. the Task Activity rollup row).
-const LONG_TEXT_THRESHOLD = 600;
+const LONG_TEXT_WORD_THRESHOLD = 200;
 export function CollapsibleText({ text, className }: { text: string; className?: string }) {
   const [expanded, setExpanded] = useState(false);
-  const isLong = text.length > LONG_TEXT_THRESHOLD;
-  const shown = isLong && !expanded ? text.slice(0, LONG_TEXT_THRESHOLD).trimEnd() + "…" : text;
+  const words = text.trim().split(/\s+/);
+  const isLong = words.length > LONG_TEXT_WORD_THRESHOLD;
+  const shown = isLong && !expanded ? words.slice(0, LONG_TEXT_WORD_THRESHOLD).join(" ") + "…" : text;
   const toggle = (e: React.SyntheticEvent) => { e.stopPropagation(); setExpanded((x) => !x); };
   return (
     <div className={className}>
