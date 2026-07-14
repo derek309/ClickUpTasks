@@ -136,11 +136,12 @@ export const NOTE_TYPE_ORDER: NoteType[] = ["meeting", "content", "contact", "de
 export interface ClientNote {
   id: string;
   clientId: string;
-  projectId?: string | null; // set = scoped to one project's Knowledge tab; unset = client-wide
+  projectId?: string | null; // set = scoped to one project's Chat tab; unset = client-wide
   type: NoteType;
   body: string;
   authorId: string | null;
   at: string; // ISO
+  attachments?: Attachment[]; // images pasted/attached into the chat message
 }
 
 /** A GHL contact inside a sub-account. Tasks link to one of these. */
@@ -256,6 +257,7 @@ export interface Comment {
    * as a compact line in the Activity feed instead of a chat bubble; excluded from
    * comment counts. Absent/"comment" = a real user comment. */
   kind?: "comment" | "event";
+  attachments?: Attachment[]; // images pasted/attached into the comment
 }
 
 export interface Subtask {

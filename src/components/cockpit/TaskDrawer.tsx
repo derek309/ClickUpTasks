@@ -8,14 +8,16 @@ import {
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type Recurrence, type RecurrenceUnit, type Subtask, type TaskTemplate,
 } from "@/lib/data";
 import { I, Avatar, Row, renderMentions, FileBadge, newId } from "./ui";
+import { AttachmentThumbs } from "./AttachmentThumbs";
 import { InlineAssignee } from "./GroupedList";
 
-export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, isQueued, onToggleQueue, onCopyLink, templates, onApplyTemplate }: {
+export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, isQueued, onToggleQueue, onCopyLink, templates, onApplyTemplate, onUploadCommentImage }: {
   task: Task; comment: string; setComment: (v: string) => void;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; navTasks: Task[]; onOpenTask: (id: string) => void; onAddSibling: (title: string) => void; onPrev: () => void; onNext: () => void;
-  onClose: () => void; onPatch: (patch: Partial<Task>) => void; onDelete: () => void; onAddComment: () => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; onPushGhl: () => void; ghlBusy: boolean; ghlLinkable: boolean; onUnlinkGhl: () => void; allClients: Client[]; onMoveClient: (clientId: string) => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onRenameProject: () => void; onToggleSub: (sid: string) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onDeleteSub: (sid: string) => void; onPatchSub: (sid: string, patch: Partial<Subtask>) => void; onToggleLabel: (lid: string) => void; isQueued: boolean; onToggleQueue: () => void; onCopyLink: () => void;
+  onClose: () => void; onPatch: (patch: Partial<Task>) => void; onDelete: () => void; onAddComment: (attachments?: Attachment[]) => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; onPushGhl: () => void; ghlBusy: boolean; ghlLinkable: boolean; onUnlinkGhl: () => void; allClients: Client[]; onMoveClient: (clientId: string) => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onRenameProject: () => void; onToggleSub: (sid: string) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onDeleteSub: (sid: string) => void; onPatchSub: (sid: string, patch: Partial<Subtask>) => void; onToggleLabel: (lid: string) => void; isQueued: boolean; onToggleQueue: () => void; onCopyLink: () => void;
   templates: TaskTemplate[]; onApplyTemplate: (templateId: string) => void;
+  onUploadCommentImage: (file: File) => Promise<Attachment | null>;
 }) {
   const client = clientById(task.clientId)!;
   const project = projectById(task.projectId)!;
@@ -109,6 +111,32 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const doneSubs = task.subtasks.filter((s) => s.done).length;
   const mentionMatch = /@([\w]*)$/.exec(comment);
   const mentionCands = mentionMatch ? users.filter((u) => u.name.toLowerCase().includes(mentionMatch[1].toLowerCase())) : [];
+
+  // Pasting into the comment box specifically stages the image on the
+  // comment being composed (not the task's own Attachments) — stopPropagation
+  // so the drawer-wide handlePaste above doesn't also fire and double-attach.
+  const [pendingCommentAtts, setPendingCommentAtts] = useState<Attachment[]>([]);
+  const [uploadingCommentAtt, setUploadingCommentAtt] = useState(false);
+  const handleCommentPaste = async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const images: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind === "file" && item.type.startsWith("image/")) { const f = item.getAsFile(); if (f) images.push(f); }
+    }
+    if (images.length === 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setUploadingCommentAtt(true);
+    for (const f of images) { const att = await onUploadCommentImage(f); if (att) setPendingCommentAtts((a) => [...a, att]); }
+    setUploadingCommentAtt(false);
+  };
+  const submitComment = () => {
+    if (!comment.trim() && pendingCommentAtts.length === 0) return;
+    onAddComment(pendingCommentAtts.length ? pendingCommentAtts : undefined);
+    setPendingCommentAtts([]);
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -281,7 +309,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
         {task.comments.map((c) => {
           if (c.kind === "event") { const u = userById(c.authorId); return (<div key={c.id} className="flex items-center gap-2 py-0.5 text-[13px] text-muted"><Avatar id={c.authorId} size={16} /><span><span className="font-medium text-foreground">{u?.name}</span> {c.body} · {timeAgo(c.at)}</span></div>); }
           const u = userById(c.authorId);
-          return (<div key={c.id} className="flex gap-2.5"><Avatar id={c.authorId} size={28} /><div className="min-w-0"><div className="text-[14px]"><span className="font-medium">{u?.name}</span> <span className="text-[12px] text-muted">· {timeAgo(c.at)}</span></div><div className="text-[15px]">{renderMentions(c.body)}</div></div></div>);
+          return (<div key={c.id} className="flex gap-2.5"><Avatar id={c.authorId} size={28} /><div className="min-w-0"><div className="text-[14px]"><span className="font-medium">{u?.name}</span> <span className="text-[12px] text-muted">· {timeAgo(c.at)}</span></div>{c.body && <div className="text-[15px]">{renderMentions(c.body)}</div>}{c.attachments && c.attachments.length > 0 && <div className="mt-1"><AttachmentThumbs items={c.attachments} onOpen={onDownloadFile} /></div>}</div></div>);
         })}
         {task.comments.length === 0 && (<div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted"><I.comment /><span className="text-[15px]">No activity yet</span><span className="text-[13px]">Start the thread — type @ to mention a teammate.</span></div>)}
       </div>
@@ -290,9 +318,15 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const composer = (
     <div className="relative border-t bg-surface p-3">
       {mentionMatch && mentionCands.length > 0 && (<div className="absolute bottom-full left-3 mb-1 w-56 overflow-hidden rounded-lg border bg-surface shadow-lg">{mentionCands.map((u) => (<button key={u.id} onClick={() => setComment(comment.replace(/@([\w]*)$/, `@${u.name} `))} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[15px] hover:bg-background"><Avatar id={u.id} size={22} /> {u.name}{u.role === "va" && <span className="text-[13px] text-muted">VA</span>}</button>))}</div>)}
+      {(pendingCommentAtts.length > 0 || uploadingCommentAtt) && (
+        <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+          <AttachmentThumbs items={pendingCommentAtts} onRemove={(id) => setPendingCommentAtts((a) => a.filter((x) => x.id !== id))} />
+          {uploadingCommentAtt && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" />}
+        </div>
+      )}
       <div className="flex items-end gap-2 rounded-xl border bg-background px-2.5 py-2 focus-within:border-accent">
-        <textarea value={comment} onChange={(e) => setComment(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !(mentionMatch && mentionCands.length)) { e.preventDefault(); onAddComment(); } }} placeholder="Write a comment…  (type @ to mention)" rows={1} className="max-h-72 min-h-[38px] flex-1 resize-y bg-transparent text-[15px] outline-none placeholder:text-muted" />
-        <button onClick={onAddComment} disabled={!comment.trim()} className="rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">Send</button>
+        <textarea value={comment} onChange={(e) => setComment(e.target.value)} onPaste={handleCommentPaste} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !(mentionMatch && mentionCands.length)) { e.preventDefault(); submitComment(); } }} placeholder="Write a comment…  (type @ to mention, paste to attach an image)" rows={1} className="max-h-72 min-h-[38px] flex-1 resize-y bg-transparent text-[15px] outline-none placeholder:text-muted" />
+        <button onClick={submitComment} disabled={!comment.trim() && pendingCommentAtts.length === 0} className="rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">Send</button>
       </div>
     </div>
   );
@@ -372,7 +406,8 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                         <Avatar id={c.authorId} size={28} />
                         <div className="min-w-0 flex-1">
                           <div className="text-[14px]"><span className="font-medium">{u?.name}</span> <span className="text-[12px] text-muted">· {timeAgo(c.at)}</span></div>
-                          <div className="mt-1 rounded-xl rounded-tl-sm border bg-surface px-3 py-2 text-[15px] shadow-soft">{renderMentions(c.body)}</div>
+                          {c.body && <div className="mt-1 rounded-xl rounded-tl-sm border bg-surface px-3 py-2 text-[15px] shadow-soft">{renderMentions(c.body)}</div>}
+                          {c.attachments && c.attachments.length > 0 && <div className="mt-1"><AttachmentThumbs items={c.attachments} onOpen={onDownloadFile} /></div>}
                         </div>
                       </div>
                     );

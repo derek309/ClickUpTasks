@@ -1,29 +1,33 @@
 "use client";
 
-// The "Knowledge" tab on a client or project — a live team chat feed (meeting
-// notes, decisions, FYIs — anything worth keeping), a read-only rollup of
-// every comment left on that scope's tasks, and (client-level only, when a
-// GHL contact is linked) that contact's full email/SMS conversation — sent
-// via GHL from right here, received via the inbound webhook — so there's no
-// gap and no need to poll GHL for updates. Claude (via the MCP server's
-// list_notes/add_note tools) reads and posts to the chat too.
+// The "Chat" tab on a client or project — a live team chat feed (meeting
+// notes, decisions, FYIs — anything worth keeping, images pasted right in),
+// a read-only rollup of every comment left on that scope's tasks, and
+// (client-level only, when a GHL contact is linked) that contact's full
+// email/SMS conversation — sent via GHL from right here, received via the
+// inbound webhook — so there's no gap and no need to poll GHL for updates.
+// Claude (via the MCP server's list_notes/add_note tools) reads and posts to
+// the chat too. Every image attached here also shows up in the Vault tab.
 import { useEffect, useRef, useState } from "react";
-import { users, userById, timeAgo, NOTE_TYPE_META, NOTE_TYPE_ORDER, type ClientNote, type NoteType, type Task, type Message, type MessageChannel, type Me } from "@/lib/data";
+import { users, userById, timeAgo, NOTE_TYPE_META, NOTE_TYPE_ORDER, type ClientNote, type NoteType, type Task, type Message, type MessageChannel, type Me, type Attachment } from "@/lib/data";
 import { I, Avatar, renderMentions } from "./ui";
 import { ConfirmModal, type ConfirmSpec } from "./modals";
+import { AttachmentThumbs } from "./AttachmentThumbs";
 
-export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, sendingMessage }: {
+export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, sendingMessage, onUploadImage, onOpenFile }: {
   notes: ClientNote[];
   tasks: Task[]; // already scoped by the caller to the current client/project
   messages?: Message[] | null; // null/undefined = no linked GHL contact at this scope, so no Messages tab
   me: Me;
-  onAdd: (type: NoteType, body: string) => void;
+  onAdd: (type: NoteType, body: string, attachments?: Attachment[]) => void;
   onEdit: (note: ClientNote, body: string) => void;
   onDelete: (note: ClientNote) => void;
   onOpenTask: (taskId: string) => void;
   onOpenMessages?: () => void; // fires once when the Messages tab is opened, to mark them read
   onSendMessage?: (channel: MessageChannel, subject: string, body: string) => void;
   sendingMessage?: boolean;
+  onUploadImage: (file: File) => Promise<Attachment | null>;
+  onOpenFile: (path: string) => void;
 }) {
   const [view, setView] = useState<"chat" | "activity" | "messages">("chat");
   const [filter, setFilter] = useState<NoteType | "all">("all");
@@ -36,6 +40,8 @@ export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelet
   const [msgChannel, setMsgChannel] = useState<MessageChannel>("email");
   const [msgSubject, setMsgSubject] = useState("");
   const [msgBody, setMsgBody] = useState("");
+  const [pendingAtts, setPendingAtts] = useState<Attachment[]>([]);
+  const [uploadingAtt, setUploadingAtt] = useState(false);
 
   // notes arrives newest-first (matches every other feed in the app); a chat
   // reads oldest-to-newest, so flip it just for display.
@@ -51,9 +57,23 @@ export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelet
   useEffect(() => { if (view === "chat") feedEndRef.current?.scrollIntoView({ block: "end" }); }, [notes.length, view]);
 
   const submit = () => {
-    if (!draft.trim()) return;
-    onAdd(draftType, draft.trim());
-    setDraft("");
+    if (!draft.trim() && pendingAtts.length === 0) return;
+    onAdd(draftType, draft.trim(), pendingAtts.length ? pendingAtts : undefined);
+    setDraft(""); setPendingAtts([]);
+  };
+  const handlePaste = async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const images: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind === "file" && item.type.startsWith("image/")) { const f = item.getAsFile(); if (f) images.push(f); }
+    }
+    if (images.length === 0) return;
+    e.preventDefault();
+    setUploadingAtt(true);
+    for (const f of images) { const att = await onUploadImage(f); if (att) setPendingAtts((a) => [...a, att]); }
+    setUploadingAtt(false);
   };
   const submitMessage = () => {
     if (!msgBody.trim() || !onSendMessage) return;
@@ -136,9 +156,12 @@ export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelet
                           <button onClick={() => setEditingId(null)} className="rounded-md px-2.5 py-1 text-[13px] text-muted hover:bg-background">Cancel</button>
                         </div>
                       </div>
-                    ) : (
-                      <div className="mt-1 whitespace-pre-wrap rounded-xl rounded-tl-sm border bg-surface px-3 py-2 text-[15px] shadow-soft">{renderMentions(n.body)}</div>
-                    )}
+                    ) : (<>
+                      {n.body && <div className="mt-1 whitespace-pre-wrap rounded-xl rounded-tl-sm border bg-surface px-3 py-2 text-[15px] shadow-soft">{renderMentions(n.body)}</div>}
+                      {n.attachments && n.attachments.length > 0 && (
+                        <div className="mt-1.5"><AttachmentThumbs items={n.attachments} onOpen={onOpenFile} /></div>
+                      )}
+                    </>)}
                   </div>
                 </div>
               );
@@ -158,16 +181,22 @@ export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelet
                 ))}
               </div>
             )}
+            {(pendingAtts.length > 0 || uploadingAtt) && (
+              <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                <AttachmentThumbs items={pendingAtts} onRemove={(id) => setPendingAtts((a) => a.filter((x) => x.id !== id))} />
+                {uploadingAtt && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" />}
+              </div>
+            )}
             <div className="flex items-end gap-2">
               <select value={draftType} onChange={(e) => setDraftType(e.target.value as NoteType)}
                 className="mb-0.5 shrink-0 rounded-md border bg-surface px-1.5 py-1.5 text-[13px] outline-none">
                 {NOTE_TYPE_ORDER.map((t) => (<option key={t} value={t}>{NOTE_TYPE_META[t].label}</option>))}
               </select>
-              <textarea value={draft} onChange={(e) => setDraft(e.target.value)}
+              <textarea value={draft} onChange={(e) => setDraft(e.target.value)} onPaste={handlePaste}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !(mentionMatch && mentionCands.length)) { e.preventDefault(); submit(); } }}
-                placeholder="Message the team… (Enter to send, type @ to mention)" rows={1}
+                placeholder="Message the team… (Enter to send, type @ to mention, paste to attach an image)" rows={1}
                 className="max-h-72 min-h-[38px] flex-1 resize-y rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
-              <button onClick={submit} disabled={!draft.trim()} className="mb-0.5 shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">Send</button>
+              <button onClick={submit} disabled={!draft.trim() && pendingAtts.length === 0} className="mb-0.5 shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">Send</button>
             </div>
           </div>
         </div>
@@ -192,7 +221,10 @@ export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelet
                       <span className="text-[12px] text-muted">· {timeAgo(c.at)}</span>
                       <span className="ml-auto min-w-0 truncate text-[13px] text-muted">{c.taskTitle}</span>
                     </div>
-                    <div className="mt-1 whitespace-pre-wrap text-[15px]">{renderMentions(c.body)}</div>
+                    {c.body && <div className="mt-1 whitespace-pre-wrap text-[15px]">{renderMentions(c.body)}</div>}
+                    {c.attachments && c.attachments.length > 0 && (
+                      <div className="mt-1 flex items-center gap-1 text-[13px] text-muted"><I.clip /> {c.attachments.length} attachment{c.attachments.length === 1 ? "" : "s"}</div>
+                    )}
                   </div>
                 </button>
               );

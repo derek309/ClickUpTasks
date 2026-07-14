@@ -4,7 +4,7 @@
 // the plan doc for why those three and not all 7 domain tables), messages
 // (supabase/messages.sql — an inbound GHL reply appears in an open thread
 // without a manual reload), and client_notes (supabase/realtime-client-
-// notes.sql — the Knowledge chat, so a teammate's message shows up live).
+// notes.sql — the Chat tab, so a teammate's message shows up live).
 import { supabase } from "./supabase";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 

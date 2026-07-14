@@ -62,6 +62,7 @@ import { GroupedList } from "./cockpit/GroupedList";
 import { TaskDrawer } from "./cockpit/TaskDrawer";
 import { QuickLinksBar } from "./cockpit/ClientLinks";
 import { ClientNotes } from "./cockpit/ClientNotes";
+import { VaultView, type VaultItem } from "./cockpit/VaultView";
 import { ClientsBoard, type ClientBoardGroup } from "./cockpit/ClientsBoard";
 
 // --- Deep-link URL state ----------------------------------------------------
@@ -104,7 +105,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [importingTasks, setImportingTasks] = useState(false);
-  const [clientTab, setClientTab] = useState<"tasks" | "knowledge">("tasks");
+  const [clientTab, setClientTab] = useState<"tasks" | "chat" | "vault">("tasks");
   const [linkModal, setLinkModal] = useState<{ initial?: ClientLink } | null>(null);
   const [ghlLinkOpen, setGhlLinkOpen] = useState(false); // "Link to GHL" contact-picker
   const [ghlLinkSearch, setGhlLinkSearch] = useState("");
@@ -541,7 +542,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (n.taskId) { setOpenTaskId(n.taskId); return; }
     if (n.clientId) {
       setMyWork(false); setMyClientsView(false); setPersonalView(false); setInboxView(false);
-      setActiveClient(n.clientId); setActiveProject(n.projectId ?? null); setClientTab("knowledge");
+      setActiveClient(n.clientId); setActiveProject(n.projectId ?? null); setClientTab("chat");
     }
   };
 
@@ -710,6 +711,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   const visibleProjects = useMemo(() => projects.filter((p) => p.clientId.startsWith("cl_") && (activeClient === "all" || p.clientId === activeClient)), [projects, activeClient]);
   const baseTasks = scopedTasks.filter((t) => t.clientId.startsWith("cl_") && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject));
+  // Every attachment anywhere in the current client/project scope — task
+  // attachments, task comment images, and Chat message images — collected
+  // into one flat list for the Vault tab. Only computed when the Vault tab
+  // is reachable at all (a real client, not "All tasks"/My Work/etc.).
+  const vaultItems: VaultItem[] = activeClient === "all" ? [] : [
+    ...baseTasks.flatMap((t) => t.attachments.map((a) => ({ ...a, sourceLabel: t.title, onOpenSource: () => { setClientTab("tasks"); setOpenTaskId(t.id); } }))),
+    ...baseTasks.flatMap((t) => t.comments.flatMap((c) => (c.attachments ?? []).map((a) => ({ ...a, sourceLabel: t.title, onOpenSource: () => { setClientTab("tasks"); setOpenTaskId(t.id); } })))),
+    ...clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId))
+      .flatMap((n) => (n.attachments ?? []).map((a) => ({ ...a, sourceLabel: "Chat", onOpenSource: () => setClientTab("chat") }))),
+  ];
   const projectsForClient = (clientId: string) => projects.filter((p) => p.clientId === clientId);
   const projectProgress = (projectId: string) => { const ts = scopedTasks.filter((t) => t.projectId === projectId); const done = ts.filter((t) => t.status === "done").length; return { done, total: ts.length, pct: ts.length ? Math.round((done / ts.length) * 100) : 0 }; };
   // Open (non-done) count — matches what the client's task list actually shows
@@ -907,14 +918,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     });
   };
 
-  const addComment = (id: string, body: string) => {
-    if (!body.trim()) return;
+  const addComment = (id: string, body: string, attachments?: Attachment[]) => {
+    if (!body.trim() && !attachments?.length) return;
     const t = tasks.find((x) => x.id === id);
     if (!t) return;
     // Atomic JSONB append (append_comment RPC) instead of a full-row upsert —
     // two teammates commenting on the same task in the same window would
     // otherwise silently drop one comment (read-then-replace race).
-    const newComment: Comment = { id: newId("cm_"), authorId: me.id, body: body.trim(), at: new Date().toISOString() };
+    const newComment: Comment = { id: newId("cm_"), authorId: me.id, body: body.trim(), at: new Date().toISOString(), ...(attachments?.length ? { attachments } : {}) };
     setTasks((ts) => ts.map((x) => (x.id === id ? { ...x, comments: [...x.comments, newComment] } : x)));
     appendCommentDb(id, newComment);
     // Comment notifications: @mentions get "mentioned you"; the task's assignee
@@ -957,6 +968,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const url = await signedUrlForFile(path);
     if (url) window.open(url, "_blank", "noopener");
     else pushToast("Couldn't open the file — is the storage bucket set up?");
+  };
+  // Shared single-image upload for paste-to-attach in Chat messages and task
+  // comments — same storage bucket/pattern as addFiles above, but returns the
+  // Attachment directly instead of patching a task, since a chat message or
+  // comment doesn't exist as a row yet when the paste happens.
+  const uploadOneImage = async (pathPrefix: string, file: File): Promise<Attachment | null> => {
+    if (file.size > MAX_ATTACHMENT_BYTES) { pushToast(`Skipped ${file.name} — over ${formatBytes(MAX_ATTACHMENT_BYTES)}`); return null; }
+    const safe = file.name.replace(/[^\w.\-]+/g, "_");
+    const path = `${pathPrefix}/${newId("f_")}-${safe}`;
+    const res = await uploadTaskFile(path, file);
+    if (!res.ok) { pushToast(`Couldn't upload ${file.name} — is the "task-files" storage bucket set up?`); return null; }
+    return { id: newId("a_"), name: file.name, size: formatBytes(file.size), kind: kindFromName(file.name), path };
   };
   const removeFile = (id: string, att: Attachment) => {
     const t = tasks.find((x) => x.id === id);
@@ -1028,7 +1051,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Sends via GHL's Conversations API (so it goes out from the sub-account's
   // own connected email/number) and only writes the local `messages` row
   // after a confirmed success — same pattern as pushToGhl. This is the
-  // "outbound" half of the Knowledge Messages tab; the webhook (see
+  // "outbound" half of the Chat tab's Messages view; the webhook (see
   // src/app/api/ghl/webhook/route.ts) covers inbound replies, so together
   // the two capture a full two-way conversation with no gap and no polling.
   const sendMessage = async (clientId: string, channel: MessageChannel, subject: string, body: string) => {
@@ -1326,8 +1349,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   };
 
   // --- client notes ------------------------------------------------------
-  const addNote = (clientId: string, type: NoteType, body: string, projectId?: string | null) => {
-    const note: ClientNote = { id: newId("cn_"), clientId, projectId: projectId ?? null, type, body, authorId: me.id, at: new Date().toISOString() };
+  const addNote = (clientId: string, type: NoteType, body: string, projectId?: string | null, attachments?: Attachment[]) => {
+    const note: ClientNote = { id: newId("cn_"), clientId, projectId: projectId ?? null, type, body, authorId: me.id, at: new Date().toISOString(), ...(attachments?.length ? { attachments } : {}) };
     setClientNotes((ns) => [note, ...ns]); // newest-first feed
     upsertClientNote(note);
     // @mentions notify, same as task comments — the one signal that pulls
@@ -1587,7 +1610,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           {!myWork && !myClientsView && !personalView && !inboxView && activeClient !== "all" && (
             <div className="inline-flex overflow-hidden rounded-md border">
               <button onClick={() => setClientTab("tasks")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "tasks" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Tasks</button>
-              <button onClick={() => setClientTab("knowledge")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "knowledge" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Knowledge · {clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId)).length}</button>
+              <button onClick={() => setClientTab("chat")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "chat" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Chat · {clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId)).length}</button>
+              <button onClick={() => setClientTab("vault")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "vault" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Vault · {vaultItems.length}</button>
             </div>
           )}
 
@@ -1648,7 +1672,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             ) : (
               <span className="text-[15px] text-muted">Your assigned tasks across all clients</span>
             )
-          ) : clientTab === "knowledge" ? null : (
+          ) : clientTab === "chat" || clientTab === "vault" ? null : (
             <div className="relative">
               <button onClick={() => setFilterOpen((o) => !o)} title="Filter & view" className="relative rounded-md border bg-background p-2 text-muted hover:text-foreground">
                 <I.filter />
@@ -1757,20 +1781,24 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onOpen={(id) => { setMyWork(false); setMyClientsView(false); setPersonalView(false); setInboxView(false); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }} />
         ) : myWork ? (
           <GroupedList groups={buildGroups(myWorkTasks, "due").filter((g) => g.tasks.length > 0)} showClient clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={false} quickAddHint="" onQuickAdd={() => {}} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} highlightDelegateFor={myWorkUser} queuedIds={claudeQueue} colOrder={colOrder} onReorderCols={reorderCols} />
-        ) : activeClient !== "all" && clientTab === "knowledge" ? (
+        ) : activeClient !== "all" && clientTab === "chat" ? (
           <ClientNotes
             notes={clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId))}
             tasks={baseTasks}
             messages={activeProject ? null : (() => { const ct = contactForClient(activeClient); return ct ? messages.filter((m) => m.contactId === ct.id) : null; })()}
             me={me}
-            onAdd={(type, body) => addNote(activeClient, type, body, activeProject)}
+            onAdd={(type, body, attachments) => addNote(activeClient, type, body, activeProject, attachments)}
             onEdit={editNote}
             onDelete={deleteNote}
             onOpenTask={(id) => { setClientTab("tasks"); setOpenTaskId(id); }}
             onOpenMessages={() => { const ct = contactForClient(activeClient); if (ct) { setMessages((ms) => ms.map((m) => (m.contactId === ct.id ? { ...m, read: true } : m))); markMessagesReadDb(ct.id); } }}
             onSendMessage={activeProject ? undefined : (channel, subject, body) => sendMessage(activeClient, channel, subject, body)}
             sendingMessage={sendingMessage}
+            onUploadImage={(file) => uploadOneImage("notes", file)}
+            onOpenFile={downloadFile}
           />
+        ) : activeClient !== "all" && clientTab === "vault" ? (
+          <VaultView items={vaultItems} onDownloadFile={downloadFile} />
         ) : (
           <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} queuedIds={claudeQueue} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
         )}
@@ -1791,8 +1819,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         <TaskDrawer task={openTask} comment={comment} setComment={setComment} clientById={clientById} projectById={projectById} contactById={contactById}
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={orderedTaskIds.length} navTasks={orderedTaskIds.map((id) => tasks.find((t) => t.id === id)).filter((t): t is Task => !!t)} onOpenTask={setOpenTaskId} onAddSibling={(title) => addTaskToList(openTask.clientId, openTask.projectId, openTask.private, title)} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
-          onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={() => addComment(openTask.id, comment)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...clientList].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} isQueued={claudeQueue.has(openTask.id)} onToggleQueue={() => toggleClaudeQueue(openTask.id)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id })} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} />
+          onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(attachments) => addComment(openTask.id, comment, attachments)}
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...clientList].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} isQueued={claudeQueue.has(openTask.id)} onToggleQueue={() => toggleClaudeQueue(openTask.id)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id })} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} />
       )}
 
       {teamOpen && <TeamPanel me={me} onClose={() => setTeamOpen(false)} />}
