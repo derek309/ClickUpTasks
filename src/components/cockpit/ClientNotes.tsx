@@ -141,16 +141,16 @@ export function ClientNotes({ notes, tasks, me, onAdd, onEdit, onDelete, onOpenT
                 ))}
               </div>
             )}
-            <div className="flex items-end gap-2 rounded-xl border bg-background px-2.5 py-2 focus-within:border-accent">
+            <div className="flex items-end gap-2">
               <select value={draftType} onChange={(e) => setDraftType(e.target.value as NoteType)}
-                className="shrink-0 rounded-md border bg-surface px-1.5 py-1 text-[13px] outline-none">
+                className="mb-0.5 shrink-0 rounded-md border bg-surface px-1.5 py-1.5 text-[13px] outline-none">
                 {NOTE_TYPE_ORDER.map((t) => (<option key={t} value={t}>{NOTE_TYPE_META[t].label}</option>))}
               </select>
               <textarea value={draft} onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !(mentionMatch && mentionCands.length)) { e.preventDefault(); submit(); } }}
                 placeholder="Message the team… (Enter to send, type @ to mention)" rows={1}
-                className="max-h-72 min-h-[38px] flex-1 resize-y bg-transparent text-[15px] outline-none placeholder:text-muted" />
-              <button onClick={submit} disabled={!draft.trim()} className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">Send</button>
+                className="max-h-72 min-h-[38px] flex-1 resize-y rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
+              <button onClick={submit} disabled={!draft.trim()} className="mb-0.5 shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">Send</button>
             </div>
           </div>
         </div>
