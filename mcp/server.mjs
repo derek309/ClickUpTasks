@@ -46,6 +46,13 @@ async function pushGhlStatus(t) {
 }
 const nowIso = () => new Date().toISOString();
 const rid = (p) => p + Math.random().toString(36).slice(2, 10);
+const todayIso = () => new Date().toISOString().slice(0, 10);
+function addDaysIso(iso, days) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
 
 // small caches so we can show client/project names
 let clientNames = {}, projectNames = {};
@@ -96,6 +103,41 @@ server.tool("get_task",
       comments ? `\nRecent comments:\n${comments}` : "",
     ].filter(Boolean).join("\n");
     return { content: [{ type: "text", text }] };
+  });
+
+server.tool("create_task",
+  "Create a new task under a client (and optionally a specific list/project). Defaults match the app's quick-add: due tomorrow, priority normal — except assignee, which defaults to unassigned since you're creating on the user's behalf, not as yourself. Get ids from list_clients/list_projects.",
+  {
+    client_id: z.string(),
+    project_id: z.string().optional().describe("omit to use (or create) the client's default \"Tasks\" list"),
+    title: z.string().min(1),
+    description: z.string().optional(),
+    due: z.string().optional().describe("yyyy-mm-dd; defaults to tomorrow"),
+    priority: z.enum(["none", "normal", "urgent"]).optional().describe("defaults to \"normal\"; \"conversation\" is reserved/auto-created only"),
+    assignee_id: z.string().optional().describe("roster member id; defaults to unassigned"),
+  },
+  async ({ client_id, project_id, title, description, due, priority, assignee_id }) => {
+    await names();
+    if (!clientNames[client_id]) return { content: [{ type: "text", text: `No client ${client_id}.` }] };
+    let pid = project_id;
+    if (pid && !projectNames[pid]) return { content: [{ type: "text", text: `No project ${pid}.` }] };
+    if (!pid) {
+      const existing = await sb(`projects?select=id&client_id=eq.${enc(client_id)}&limit=1`);
+      if (existing?.length) pid = existing[0].id;
+      else {
+        pid = rid("p_");
+        await sb("projects", "POST", { id: pid, client_id, name: "Tasks", description: "" });
+        projectNames[pid] = "Tasks";
+      }
+    }
+    const t = {
+      id: rid("t_"), project_id: pid, client_id, title: title.trim(), description: description || "",
+      status: "todo", priority: priority || "normal", assignee_id: assignee_id || null,
+      contact_id: client_id.startsWith("cl_") ? client_id.slice(3) : null,
+      due: due || addDaysIso(todayIso(), 1),
+    };
+    await sb("tasks", "POST", t);
+    return { content: [{ type: "text", text: `Created ${t.id}: "${t.title}" in ${clientNames[client_id]} · due ${t.due} · priority ${t.priority}${t.assignee_id ? "" : " · unassigned"}.` }] };
   });
 
 server.tool("set_task_status",
