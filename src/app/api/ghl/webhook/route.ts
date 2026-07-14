@@ -37,6 +37,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => ({} as any));
+  // Temporary — pinpointing the actual GHL webhook payload shape while
+  // wiring up the "Customer Replied" workflow. Remove once confirmed.
+  console.log("[ghl webhook] raw body:", JSON.stringify(body));
 
   if (body?.event === "message_reply") return handleMessageReply(body);
 
