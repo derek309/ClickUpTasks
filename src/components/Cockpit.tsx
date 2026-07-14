@@ -99,6 +99,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
   const [promptDialog, setPromptDialog] = useState<PromptSpec | null>(null);
   const [menuClientId, setMenuClientId] = useState<string | null>(null);
+  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
   const [menuProjectId, setMenuProjectId] = useState<string | null>(null);
 
   // Sidebar client ordering: star to pin, sort mode, manual drag order.
@@ -1148,10 +1149,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   </button>
                   {canAdmin && (
                     <div className="absolute right-1.5 top-1/2 -translate-y-1/2">
-                      <button onClick={(e) => { e.stopPropagation(); setMenuClientId(menuClientId === c.id ? null : c.id); }} title="More" className="rounded p-1 text-muted opacity-0 hover:bg-background hover:text-foreground group-hover/row:opacity-100"><I.dots /></button>
+                      <button onClick={(e) => { e.stopPropagation(); const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setMenuPos({ top: r.bottom + 4, left: Math.min(r.right - 176, window.innerWidth - 184) }); setMenuClientId(menuClientId === c.id ? null : c.id); }} title="More" className="rounded p-1 text-muted opacity-0 hover:bg-background hover:text-foreground group-hover/row:opacity-100"><I.dots /></button>
                       {menuClientId === c.id && (<>
-                        <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setMenuClientId(null); }} />
-                        <div className="absolute right-0 top-full z-40 mt-1 w-44 rounded-lg border border-white/15 bg-[#2c3140] p-1 shadow-2xl">
+                        <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setMenuClientId(null); }} />
+                        <div style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: 176 }} className="z-50 rounded-lg border border-white/15 bg-[#2c3140] p-1 shadow-2xl">
                           <button onClick={(e) => { e.stopPropagation(); setMenuClientId(null); addProject(c.id); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[15px] hover:bg-white/10"><I.plus /> Add project</button>
                           <button onClick={(e) => { e.stopPropagation(); setMenuClientId(null); renameClient(c.id); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[15px] hover:bg-white/10"><I.pencil /> Rename client</button>
                           <button onClick={(e) => { e.stopPropagation(); setMenuClientId(null); deleteClient(c.id); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[15px] text-red-500 hover:bg-white/10"><I.trash /> Remove client</button>
@@ -1160,7 +1161,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     </div>
                   )}
                 </div>
-                {active && clientProjects.length > 0 && (
+                {active && (
                   <div className="mb-1 ml-4 mt-0.5 space-y-0.5 border-l pl-2">
                     {clientProjects.map((p) => {
                       const pg = projectProgress(p.id);
@@ -1187,6 +1188,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                         </div>
                       );
                     })}
+                    {canAdmin && (
+                      <button onClick={() => addProject(c.id)} title="Add a project (list) to this client"
+                        className="flex w-full items-center gap-2 rounded-md py-1 pl-2 pr-1 text-left text-[13px] text-muted hover:bg-background hover:text-foreground">
+                        <I.plus className="shrink-0 opacity-70" /> Add project
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
