@@ -1,0 +1,11 @@
+{
+  "name": "clickuptasks-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "bin": { "clickuptasks-mcp": "server.mjs" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.8"
+  }
+}

@@ -1,0 +1,123 @@
+#!/usr/bin/env node
+// ClickUpTasks MCP server — lets Claude Code read and complete your real
+// tasks (the same Supabase DB the web app uses). stdio transport.
+//
+// Env required:
+//   CLICKUPTASKS_URL       = your Supabase project URL (NEXT_PUBLIC_SUPABASE_URL)
+//   CLICKUPTASKS_KEY       = Supabase service-role key (SUPABASE_SERVICE_ROLE_KEY)
+//   CLICKUPTASKS_MEMBER_ID = your roster member id for "my tasks" (default u_derek)
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
+
+const URL = process.env.CLICKUPTASKS_URL;
+const KEY = process.env.CLICKUPTASKS_KEY;
+const ME  = process.env.CLICKUPTASKS_MEMBER_ID || "u_derek";
+if (!URL || !KEY) { console.error("Set CLICKUPTASKS_URL and CLICKUPTASKS_KEY"); process.exit(1); }
+const H = { apikey: KEY, Authorization: `Bearer ${KEY}`, "Content-Type": "application/json" };
+
+async function sb(path, method = "GET", body) {
+  const res = await fetch(`${URL}/rest/v1/${path}`, { method, headers: { ...H, Prefer: "return=representation" }, body: body ? JSON.stringify(body) : undefined });
+  if (!res.ok) throw new Error(`Supabase ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const t = await res.text();
+  return t ? JSON.parse(t) : null;
+}
+const enc = encodeURIComponent;
+const STATUSES = ["todo", "in_progress", "review", "done"];
+const nowIso = () => new Date().toISOString();
+const rid = (p) => p + Math.random().toString(36).slice(2, 10);
+
+// small caches so we can show client/project names
+let clientNames = {}, projectNames = {};
+async function names() {
+  if (Object.keys(clientNames).length) return;
+  for (const c of await sb("clients?select=id,name")) clientNames[c.id] = c.name;
+  for (const p of await sb("projects?select=id,name")) projectNames[p.id] = p.name;
+}
+const brief = (t) => `[${t.id}] ${t.title}\n  status: ${t.status} · priority: ${t.priority} · due: ${t.due || "—"}\n  client: ${clientNames[t.client_id] || t.client_id} · list: ${projectNames[t.project_id] || "—"}`;
+
+const server = new McpServer({ name: "clickuptasks", version: "1.0.0" });
+
+server.tool("list_my_tasks",
+  "List tasks assigned to you (or delegated to you via a checklist item). Filter by client name, status, priority. Excludes Done unless include_done.",
+  { client: z.string().optional().describe("filter by client name (substring, case-insensitive)"),
+    status: z.enum(STATUSES).optional(),
+    priority: z.enum(["none","low","medium","high","urgent"]).optional(),
+    include_done: z.boolean().optional(),
+    limit: z.number().optional() },
+  async ({ client, status, priority, include_done, limit }) => {
+    await names();
+    let q = `tasks?select=*&or=(assignee_id.eq.${ME},delegated_to.cs.[\"${ME}\"])&order=due.asc.nullslast`;
+    if (status) q += `&status=eq.${status}`;
+    else if (!include_done) q += `&status=neq.done`;
+    if (priority) q += `&priority=eq.${priority}`;
+    q += `&limit=${limit || 100}`;
+    let rows = await sb(q);
+    if (client) { const cl = client.toLowerCase(); rows = rows.filter((t) => (clientNames[t.client_id] || "").toLowerCase().includes(cl)); }
+    if (!rows.length) return { content: [{ type: "text", text: "No matching tasks." }] };
+    return { content: [{ type: "text", text: `${rows.length} task(s):\n\n${rows.map(brief).join("\n\n")}` }] };
+  });
+
+server.tool("get_task",
+  "Get one task's full detail: description, checklist, links, client/list context.",
+  { id: z.string() },
+  async ({ id }) => {
+    await names();
+    const [t] = await sb(`tasks?select=*&id=eq.${enc(id)}`);
+    if (!t) return { content: [{ type: "text", text: `No task ${id}.` }] };
+    const subs = (t.subtasks || []).map((s) => `  [${s.done ? "x" : " "}] ${s.title}${s.due ? ` (due ${s.due})` : ""}`).join("\n");
+    const links = (t.attachments || []).filter((a) => a.url).map((a) => `  - ${a.name}: ${a.url}`).join("\n");
+    const comments = (t.comments || []).filter((c) => c.kind !== "event").slice(-5).map((c) => `  - ${c.body}`).join("\n");
+    const text = [
+      brief(t),
+      t.description ? `\nDescription:\n${t.description}` : "",
+      subs ? `\nChecklist:\n${subs}` : "",
+      links ? `\nLinks:\n${links}` : "",
+      comments ? `\nRecent comments:\n${comments}` : "",
+    ].filter(Boolean).join("\n");
+    return { content: [{ type: "text", text }] };
+  });
+
+server.tool("set_task_status",
+  "Set a task's status (todo | in_progress | review | done). Use to start or complete work.",
+  { id: z.string(), status: z.enum(STATUSES) },
+  async ({ id, status }) => {
+    await sb(`tasks?id=eq.${enc(id)}`, "PATCH", { status });
+    return { content: [{ type: "text", text: `Set ${id} → ${status}.` }] };
+  });
+
+server.tool("add_comment",
+  "Add a progress comment to a task (logged as you).",
+  { id: z.string(), text: z.string() },
+  async ({ id, text }) => {
+    const [t] = await sb(`tasks?select=comments&id=eq.${enc(id)}`);
+    if (!t) return { content: [{ type: "text", text: `No task ${id}.` }] };
+    const comments = [...(t.comments || []), { id: rid("cm_"), authorId: ME, body: text, at: nowIso() }];
+    await sb(`tasks?id=eq.${enc(id)}`, "PATCH", { comments });
+    return { content: [{ type: "text", text: `Comment added to ${id}.` }] };
+  });
+
+server.tool("check_item",
+  "Tick (or untick) a checklist item on a task by matching its title text.",
+  { id: z.string(), item: z.string().describe("checklist item title (substring)"), done: z.boolean().optional() },
+  async ({ id, item, done }) => {
+    const [t] = await sb(`tasks?select=subtasks&id=eq.${enc(id)}`);
+    if (!t) return { content: [{ type: "text", text: `No task ${id}.` }] };
+    const it = item.toLowerCase();
+    let hit = null;
+    const subtasks = (t.subtasks || []).map((s) => (!hit && s.title.toLowerCase().includes(it) ? (hit = s, { ...s, done: done ?? true }) : s));
+    if (!hit) return { content: [{ type: "text", text: `No checklist item matching "${item}".` }] };
+    await sb(`tasks?id=eq.${enc(id)}`, "PATCH", { subtasks });
+    return { content: [{ type: "text", text: `Checklist "${hit.title}" → ${done ?? true ? "done" : "open"}.` }] };
+  });
+
+server.tool("list_clients",
+  "List all clients (name and id) so you can filter tasks by client.",
+  {},
+  async () => {
+    await names();
+    const rows = await sb("clients?select=id,name&order=name");
+    return { content: [{ type: "text", text: rows.map((c) => `${c.name}  [${c.id}]`).join("\n") }] };
+  });
+
+await server.connect(new StdioServerTransport());
