@@ -2,6 +2,7 @@
 
 // Shared UI primitives for the Cockpit: the icon set, Avatar, misc formatting
 // helpers, and the list-view column definitions. Split out of Cockpit.tsx.
+import { useState } from "react";
 import { users, userById, labelById, type Attachment, type TaskStatus, type Priority } from "@/lib/data";
 
 // --- tiny inline icons ------------------------------------------------------
@@ -100,6 +101,29 @@ export function Row({ label, children }: { label: string; children: React.ReactN
 export function renderMentions(body: string) {
   const parts = body.split(/(@[A-Za-z]+ [A-Za-z]+)/g);
   return parts.map((p, i) => { const isMention = users.some((u) => "@" + u.name === p); return isMention ? (<span key={i} className="rounded bg-accent-soft px-1 font-medium text-accent">{p}</span>) : <span key={i}>{p}</span>; });
+}
+
+// Meeting transcripts, long emails, and long comments would otherwise push
+// everything else off-screen — collapse past this length behind a "Show
+// more" toggle. A plain clickable span, not a <button>, so this still works
+// nested inside a parent <button> (e.g. the Task Activity rollup row).
+const LONG_TEXT_THRESHOLD = 600;
+export function CollapsibleText({ text, className }: { text: string; className?: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = text.length > LONG_TEXT_THRESHOLD;
+  const shown = isLong && !expanded ? text.slice(0, LONG_TEXT_THRESHOLD).trimEnd() + "…" : text;
+  const toggle = (e: React.SyntheticEvent) => { e.stopPropagation(); setExpanded((x) => !x); };
+  return (
+    <div className={className}>
+      {renderMentions(shown)}
+      {isLong && (
+        <span role="button" tabIndex={0} onClick={toggle} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(e); } }}
+          className="mt-1 block cursor-pointer text-[13px] font-medium text-accent hover:underline">
+          {expanded ? "Show less" : "Show more"}
+        </span>
+      )}
+    </div>
+  );
 }
 
 export type FilterState = { status: TaskStatus | "all"; assignee: string; priority: Priority | "all" };

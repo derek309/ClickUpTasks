@@ -10,32 +10,9 @@
 // the chat too. Every image attached here also shows up in the Vault tab.
 import { useEffect, useRef, useState } from "react";
 import { users, userById, timeAgo, NOTE_TYPE_META, NOTE_TYPE_ORDER, type ClientNote, type NoteType, type Task, type Message, type MessageChannel, type Me, type Attachment } from "@/lib/data";
-import { I, Avatar, renderMentions } from "./ui";
+import { I, Avatar, CollapsibleText } from "./ui";
 import { ConfirmModal, type ConfirmSpec } from "./modals";
 import { AttachmentThumbs } from "./AttachmentThumbs";
-
-// Meeting transcripts and long emails pasted into the feed would otherwise
-// push everything else off-screen — collapse past this length behind a
-// "Show more" toggle. A plain clickable span, not a <button>, so this still
-// works when nested inside the Task Activity row's own <button>.
-const LONG_TEXT_THRESHOLD = 600;
-function CollapsibleText({ text, className }: { text: string; className?: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const isLong = text.length > LONG_TEXT_THRESHOLD;
-  const shown = isLong && !expanded ? text.slice(0, LONG_TEXT_THRESHOLD).trimEnd() + "…" : text;
-  const toggle = (e: React.SyntheticEvent) => { e.stopPropagation(); setExpanded((x) => !x); };
-  return (
-    <div className={className}>
-      {renderMentions(shown)}
-      {isLong && (
-        <span role="button" tabIndex={0} onClick={toggle} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(e); } }}
-          className="mt-1 block cursor-pointer text-[13px] font-medium text-accent hover:underline">
-          {expanded ? "Show less" : "Show more"}
-        </span>
-      )}
-    </div>
-  );
-}
 
 export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, sendingMessage, onUploadImage, onOpenFile }: {
   notes: ClientNote[];
