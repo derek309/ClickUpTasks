@@ -600,6 +600,9 @@ export interface Notification {
   recipientId: string;
   text: string;
   taskId: string | null;
+  actorId?: string | null; // who triggered it — powers the Inbox sender avatar
+  clientId?: string | null; // set on notifications with no taskId (e.g. chat mentions), so Inbox can still deep-link somewhere
+  projectId?: string | null;
   at: string;
   read: boolean;
 }

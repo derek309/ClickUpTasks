@@ -59,8 +59,8 @@ export const rowToTask = (r: any): Task => ({
   private: r.is_private ?? false,
 });
 
-const notifToRow = (n: Notification) => ({ id: n.id, recipient_id: n.recipientId, text: n.text, task_id: n.taskId, at: n.at, read: n.read });
-export const rowToNotif = (r: any): Notification => ({ id: r.id, recipientId: r.recipient_id, text: r.text, taskId: r.task_id, at: r.at ?? "", read: r.read });
+const notifToRow = (n: Notification) => ({ id: n.id, recipient_id: n.recipientId, text: n.text, task_id: n.taskId, actor_id: n.actorId ?? null, client_id: n.clientId ?? null, project_id: n.projectId ?? null, at: n.at, read: n.read });
+export const rowToNotif = (r: any): Notification => ({ id: r.id, recipientId: r.recipient_id, text: r.text, taskId: r.task_id, actorId: r.actor_id ?? null, clientId: r.client_id ?? null, projectId: r.project_id ?? null, at: r.at ?? "", read: r.read });
 
 // Free text (link labels, note bodies) — no titleCase, unlike GHL-sourced names.
 const clientLinkToRow = (l: ClientLink) => ({ id: l.id, client_id: l.clientId, group_label: l.groupLabel, label: l.label, url: l.url, position: l.position });
@@ -184,6 +184,7 @@ export const deleteProjectDb = (id: string) => supabase.from("projects").delete(
 export const deleteClientDb = (id: string) => supabase.from("clients").delete().eq("id", id).then(logErr);
 export const insertNotif = (n: Notification) => supabase.from("notifications").insert(notifToRow(n)).then(logErr);
 export const markNotifsReadDb = (recipientId: string) => supabase.from("notifications").update({ read: true }).eq("recipient_id", recipientId).then(logErr);
+export const markNotifReadDb = (id: string) => supabase.from("notifications").update({ read: true }).eq("id", id).then(logErr);
 export const upsertClientLink = (l: ClientLink) => supabase.from("client_links").upsert(clientLinkToRow(l)).then(logErr);
 export const deleteClientLinkDb = (id: string) => supabase.from("client_links").delete().eq("id", id).then(logErr);
 export const upsertClientNote = (n: ClientNote) => supabase.from("client_notes").upsert(clientNoteToRow(n)).then(logErr);
