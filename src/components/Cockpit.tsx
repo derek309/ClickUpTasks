@@ -969,6 +969,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (url) window.open(url, "_blank", "noopener");
     else pushToast("Couldn't open the file — is the storage bucket set up?");
   };
+  // A "direct link" people can paste elsewhere (Slack, a doc) needs to
+  // outlive the 10-minute expiry used for click-to-open — 30 days is long
+  // enough to be practically permanent without making the bucket public.
+  const copyAttachmentLink = async (path: string) => {
+    const url = await signedUrlForFile(path, 60 * 60 * 24 * 30);
+    if (!url) { pushToast("Couldn't get a link — is the storage bucket set up?"); return; }
+    try { await navigator.clipboard.writeText(url); pushToast("Link copied (valid for 30 days)"); }
+    catch { pushToast("Couldn't copy to clipboard"); }
+  };
   // Shared single-image upload for paste-to-attach in Chat messages and task
   // comments — same storage bucket/pattern as addFiles above, but returns the
   // Attachment directly instead of patching a task, since a chat message or
@@ -1828,7 +1837,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={orderedTaskIds.length} navTasks={orderedTaskIds.map((id) => tasks.find((t) => t.id === id)).filter((t): t is Task => !!t)} onOpenTask={setOpenTaskId} onAddSibling={(title) => addTaskToList(openTask.clientId, openTask.projectId, openTask.private, title)} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(attachments) => addComment(openTask.id, comment, attachments)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...clientList].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} isQueued={claudeQueue.has(openTask.id)} onToggleQueue={() => toggleClaudeQueue(openTask.id)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id })} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} />
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...clientList].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} isQueued={claudeQueue.has(openTask.id)} onToggleQueue={() => toggleClaudeQueue(openTask.id)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id })} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} />
       )}
 
       {teamOpen && <TeamPanel me={me} onClose={() => setTeamOpen(false)} />}

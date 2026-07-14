@@ -242,8 +242,8 @@ export async function uploadTaskFile(path: string, file: File): Promise<{ ok: tr
   return error ? { ok: false, error: error.message } : { ok: true };
 }
 
-export async function signedUrlForFile(path: string): Promise<string | null> {
-  const { data } = await supabase.storage.from(TASK_FILES_BUCKET).createSignedUrl(path, 60 * 10);
+export async function signedUrlForFile(path: string, expirySeconds = 60 * 10): Promise<string | null> {
+  const { data } = await supabase.storage.from(TASK_FILES_BUCKET).createSignedUrl(path, expirySeconds);
   return data?.signedUrl ?? null;
 }
 

@@ -11,13 +11,15 @@ import { I, Avatar, Row, renderMentions, FileBadge, newId } from "./ui";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 import { InlineAssignee } from "./GroupedList";
 
-export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, isQueued, onToggleQueue, onCopyLink, templates, onApplyTemplate, onUploadCommentImage }: {
+export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, isQueued, onToggleQueue, onCopyLink, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl }: {
   task: Task; comment: string; setComment: (v: string) => void;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; navTasks: Task[]; onOpenTask: (id: string) => void; onAddSibling: (title: string) => void; onPrev: () => void; onNext: () => void;
   onClose: () => void; onPatch: (patch: Partial<Task>) => void; onDelete: () => void; onAddComment: (attachments?: Attachment[]) => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; onPushGhl: () => void; ghlBusy: boolean; ghlLinkable: boolean; onUnlinkGhl: () => void; allClients: Client[]; onMoveClient: (clientId: string) => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onRenameProject: () => void; onToggleSub: (sid: string) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onDeleteSub: (sid: string) => void; onPatchSub: (sid: string, patch: Partial<Subtask>) => void; onToggleLabel: (lid: string) => void; isQueued: boolean; onToggleQueue: () => void; onCopyLink: () => void;
   templates: TaskTemplate[]; onApplyTemplate: (templateId: string) => void;
   onUploadCommentImage: (file: File) => Promise<Attachment | null>;
+  onCopyAttachmentLink: (path: string) => void;
+  onGetSignedUrl: (path: string) => Promise<string | null>;
 }) {
   const client = clientById(task.clientId)!;
   const project = projectById(task.projectId)!;
@@ -39,12 +41,23 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const [labelOpen, setLabelOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [attSort, setAttSort] = useState<"added" | "name" | "type">("added");
+  const [previewAtt, setPreviewAtt] = useState<Attachment | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const openPreview = async (att: Attachment) => {
+    setPreviewAtt(att);
+    setPreviewUrl(null);
+    if (att.path) setPreviewUrl(await onGetSignedUrl(att.path));
+  };
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Resizable Activity column (full-page mode): drag its left edge; width
   // persists per browser.
   const [activityW, setActivityW] = useState(400);
   useEffect(() => { try { const w = parseInt(localStorage.getItem("cut_activityW") ?? "", 10); if (w >= 280 && w <= 720) setActivityW(w); } catch {} }, []);
+  const [siblingsCollapsed, setSiblingsCollapsed] = useState(false);
+  useEffect(() => { try { setSiblingsCollapsed(localStorage.getItem("cut_siblingsCollapsed") === "1"); } catch {} }, []);
+  useEffect(() => { try { localStorage.setItem("cut_siblingsCollapsed", siblingsCollapsed ? "1" : "0"); } catch {} }, [siblingsCollapsed]);
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault();
     const onMove = (ev: MouseEvent) => {
@@ -237,9 +250,28 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       <div className="mt-1.5"><input value={subDraft} onChange={(e) => setSubDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { onAddSub(subDraft); setSubDraft(""); } }} placeholder="+ Add a checklist item…" className="w-full rounded-md border border-transparent px-2 py-1 text-[15px] outline-none transition placeholder:text-muted hover:bg-background focus:border-accent focus:bg-background" /></div>
     </div>
   );
+  const ATT_KIND_ORDER: Record<Attachment["kind"], number> = { image: 0, pdf: 1, doc: 2, sheet: 3, link: 4 };
+  const sortedAttachments = [...task.attachments].sort((a, b) => {
+    if (attSort === "name") return a.name.localeCompare(b.name);
+    if (attSort === "type") return ATT_KIND_ORDER[a.kind] - ATT_KIND_ORDER[b.kind];
+    return 0; // "added" — keep stored order (oldest first, matches how they were attached)
+  });
   const attachmentsBlock = (
     <div className="mt-5">
-      <div className="mb-2 flex items-center justify-between"><span className="text-[13px] font-semibold uppercase tracking-wider text-muted">Attachments · {task.attachments.length}</span><span className="flex items-center gap-3"><button onClick={() => { setLinkOpen((o) => !o); }} className="inline-flex items-center gap-1 text-[15px] font-medium text-accent"><I.link /> Link</button><button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1 text-[15px] font-medium text-accent"><I.plus /> Attach</button></span></div>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[13px] font-semibold uppercase tracking-wider text-muted">Attachments · {task.attachments.length}</span>
+        <span className="flex items-center gap-3">
+          {task.attachments.length > 1 && (
+            <select value={attSort} onChange={(e) => setAttSort(e.target.value as typeof attSort)} className="rounded-md border bg-background px-1.5 py-1 text-[13px] outline-none" title="Sort attachments">
+              <option value="added">Sort: Added</option>
+              <option value="name">Sort: Name</option>
+              <option value="type">Sort: Type</option>
+            </select>
+          )}
+          <button onClick={() => { setLinkOpen((o) => !o); }} className="inline-flex items-center gap-1 text-[15px] font-medium text-accent"><I.link /> Link</button>
+          <button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1 text-[15px] font-medium text-accent"><I.plus /> Attach</button>
+        </span>
+      </div>
       <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) onAddFiles(e.target.files); e.target.value = ""; }} />
       {linkOpen && (
         <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border bg-background p-2">
@@ -256,7 +288,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       )}
       <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files.length) onAddFiles(e.dataTransfer.files); }} className="space-y-1.5">
         {task.attachments.length === 0 && !uploadProgress && (<div className="rounded-lg border border-dashed px-3 py-4 text-center text-[15px] text-muted">Drop, paste, or click Attach · max 25MB each</div>)}
-        {task.attachments.map((a) => (
+        {sortedAttachments.map((a) => (
           <div key={a.id} className="group/att flex items-center gap-2 rounded-lg border bg-background px-3 py-2">
             <FileBadge kind={a.kind} />
             {a.url ? (
@@ -267,39 +299,65 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               <span className="truncate text-[15px]" title="Not stored — re-upload once the storage bucket exists">{a.name}</span>
             )}
             <span className="ml-auto text-[13px] text-muted">{a.size}</span>
+            {a.kind === "image" && a.path && (
+              <button onClick={() => openPreview(a)} title="Preview" className="text-muted opacity-0 hover:text-foreground group-hover/att:opacity-100"><I.search /></button>
+            )}
+            {a.path && (
+              <button onClick={() => onCopyAttachmentLink(a.path!)} title="Copy direct link" className="text-muted opacity-0 hover:text-foreground group-hover/att:opacity-100"><I.link /></button>
+            )}
             <button onClick={() => onRemoveFile(a)} title="Remove" className="text-muted opacity-0 hover:text-red-500 group-hover/att:opacity-100"><I.trash /></button>
           </div>
         ))}
       </div>
+      {previewAtt && (
+        <>
+          <div className="fixed inset-0 z-50 bg-black/70" onClick={() => setPreviewAtt(null)} />
+          <div className="fixed inset-8 z-50 flex flex-col items-center justify-center gap-3" onClick={() => setPreviewAtt(null)}>
+            {previewUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={previewUrl} alt={previewAtt.name} className="max-h-full max-w-full rounded-lg object-contain shadow-2xl" onClick={(e) => e.stopPropagation()} />
+            ) : (
+              <span className="h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent" />
+            )}
+            <button onClick={() => setPreviewAtt(null)} className="rounded-md bg-white/10 px-3 py-1.5 text-[14px] font-medium text-white hover:bg-white/20">Close</button>
+          </div>
+        </>
+      )}
     </div>
   );
   // Quick-jump list of the other tasks in this same list (project), so you
   // don't have to close the drawer and reopen another. Shown below
   // attachments. Scoped to the current task's list, not the whole view.
+  // Collapsed state persists per-browser, same pattern as activityW.
   const listSiblings = navTasks.filter((t) => t.projectId === task.projectId);
   const siblingsBlock = (
     <div className="mt-6 border-t pt-5">
-      <div className="mb-2 text-[13px] font-semibold uppercase tracking-wider text-muted">{project?.name ?? "This list"} · {listSiblings.length}</div>
-      <div className="overflow-hidden rounded-lg border">
-        {listSiblings.map((t) => {
-          const active = t.id === task.id;
-          return (
-            <button key={t.id} onClick={() => { if (!active) onOpenTask(t.id); }} disabled={active}
-              className={`flex w-full items-center gap-2.5 border-b px-3 py-2 text-left text-[15px] last:border-0 ${active ? "bg-accent-soft font-medium text-accent" : "hover:bg-background"}`}>
-              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[t.status].dot }} title={STATUS_META[t.status].label} />
-              <Avatar id={t.assigneeId} size={20} />
-              <span className={`min-w-0 flex-1 truncate ${t.status === "done" ? "text-muted line-through" : ""}`}>{t.title}</span>
-              {t.due && <span className="shrink-0 text-[13px] text-muted">{t.due}</span>}
-            </button>
-          );
-        })}
-        <div className="flex items-center gap-2 border-t px-3 py-2">
-          <I.plus className="shrink-0 text-muted" />
-          <input value={siblingDraft} onChange={(e) => setSiblingDraft(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && siblingDraft.trim()) { onAddSibling(siblingDraft); setSiblingDraft(""); } }}
-            placeholder="Add task…" className="flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted" />
+      <button onClick={() => setSiblingsCollapsed((c) => !c)} className="mb-2 flex w-full items-center gap-1.5 text-left text-[13px] font-semibold uppercase tracking-wider text-muted hover:text-foreground">
+        <I.chevron className={`transition ${siblingsCollapsed ? "-rotate-90" : "rotate-180"}`} />
+        {project?.name ?? "This list"} · {listSiblings.length}
+      </button>
+      {!siblingsCollapsed && (
+        <div className="overflow-hidden rounded-lg border">
+          {listSiblings.map((t) => {
+            const active = t.id === task.id;
+            return (
+              <button key={t.id} onClick={() => { if (!active) onOpenTask(t.id); }} disabled={active}
+                className={`flex w-full items-center gap-2.5 border-b px-3 py-2 text-left text-[15px] last:border-0 ${active ? "bg-accent-soft font-medium text-accent" : "hover:bg-background"}`}>
+                <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[t.status].dot }} title={STATUS_META[t.status].label} />
+                <Avatar id={t.assigneeId} size={20} />
+                <span className={`min-w-0 flex-1 truncate ${t.status === "done" ? "text-muted line-through" : ""}`}>{t.title}</span>
+                {t.due && <span className="shrink-0 text-[13px] text-muted">{t.due}</span>}
+              </button>
+            );
+          })}
+          <div className="flex items-center gap-2 border-t px-3 py-2">
+            <I.plus className="shrink-0 text-muted" />
+            <input value={siblingDraft} onChange={(e) => setSiblingDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && siblingDraft.trim()) { onAddSibling(siblingDraft); setSiblingDraft(""); } }}
+              placeholder="Add task…" className="flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted" />
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
   const commentsBlock = (
