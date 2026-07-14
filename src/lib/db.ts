@@ -20,6 +20,7 @@ import {
   type Message,
   type MessageChannel,
   type MessageDirection,
+  type Territory,
 } from "./data";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -32,8 +33,8 @@ export const titleCase = (s: string) => (s || "").replace(/\b([a-z])/g, (m) => m
 const clientToRow = (c: Client) => ({ id: c.id, name: c.name, color: c.color, ghl_location_id: c.ghlLocationId, status: c.status ?? "lead", type: c.type ?? "client", assigned_to: c.assignedTo ?? [], linked_contact_id: c.linkedContactId ?? null });
 export const rowToClient = (r: any): Client => ({ id: r.id, name: titleCase(r.name), color: r.color, ghlLocationId: r.ghl_location_id ?? "", status: (r.status as Client["status"]) ?? "lead", type: (r.type as Client["type"]) ?? "client", assignedTo: r.assigned_to ?? [], linkedContactId: r.linked_contact_id ?? null });
 
-const contactToRow = (c: Contact) => ({ id: c.id, client_id: c.clientId, name: c.name, email: c.email, ghl_contact_id: c.ghlContactId, company_name: c.company ?? null });
-const rowToContact = (r: any): Contact => ({ id: r.id, clientId: r.client_id, name: titleCase(r.name), email: r.email ?? "", ghlContactId: r.ghl_contact_id ?? "", company: r.company_name ?? "" });
+const contactToRow = (c: Contact) => ({ id: c.id, client_id: c.clientId, name: c.name, email: c.email, ghl_contact_id: c.ghlContactId, company_name: c.company ?? null, city: c.city ?? null, state: c.state ?? null });
+const rowToContact = (r: any): Contact => ({ id: r.id, clientId: r.client_id, name: titleCase(r.name), email: r.email ?? "", ghlContactId: r.ghl_contact_id ?? "", company: r.company_name ?? "", city: r.city ?? "", state: r.state ?? "" });
 
 const projectToRow = (p: Project) => ({ id: p.id, client_id: p.clientId, name: p.name, description: p.description });
 const rowToProject = (r: any): Project => ({ id: r.id, clientId: r.client_id, name: r.name, description: r.description ?? "" });
@@ -67,6 +68,9 @@ const rowToClientLink = (r: any): ClientLink => ({ id: r.id, clientId: r.client_
 
 const clientNoteToRow = (n: ClientNote) => ({ id: n.id, client_id: n.clientId, type: n.type, body: n.body, author_id: n.authorId, created_at: n.at });
 const rowToClientNote = (r: any): ClientNote => ({ id: r.id, clientId: r.client_id, type: (r.type as NoteType) ?? "note", body: r.body ?? "", authorId: r.author_id, at: r.created_at });
+
+const territoryToRow = (t: Territory) => ({ id: t.id, name: t.name, city: t.city, state: t.state, member_id: t.memberId });
+const rowToTerritory = (r: any): Territory => ({ id: r.id, name: r.name, city: r.city, state: r.state, memberId: r.member_id ?? null });
 
 const messageToRow = (m: Message) => ({
   id: m.id, contact_id: m.contactId, client_id: m.clientId, channel: m.channel, direction: m.direction,
@@ -118,24 +122,26 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true) 
 }
 
 export async function fetchAll() {
-  const [c, ct, p, t, n, cl, cn, m] = await Promise.all([
+  const [c, ct, p, t, n, cl, cn, m, tr] = await Promise.all([
     fetchAllRows("clients", "created_at"),
     fetchAllRows("contacts"),
     fetchAllRows("projects"),
     fetchAllRows("tasks", "created_at"),
     fetchAllRows("notifications", "created_at", false),
     // Fetched separately from the hard-fail set below: these tables ship via a
-    // manually-run migration (client-links-notes.sql / messages.sql), so a
-    // not-yet-run migration must degrade to "nothing yet", not break the app.
+    // manually-run migration (client-links-notes.sql / messages.sql / territories.sql),
+    // so a not-yet-run migration must degrade to "nothing yet", not break the app.
     fetchAllRows("client_links", "position"),
     fetchAllRows("client_notes", "created_at", false),
     fetchAllRows("messages", "created_at"),
+    fetchAllRows("territories", "created_at"),
   ]);
   const err = c.error || ct.error || p.error || t.error || n.error;
   if (err) throw err;
   if (cl.error) console.warn("[db] client_links unavailable — run supabase/client-links-notes.sql", cl.error.message);
   if (cn.error) console.warn("[db] client_notes unavailable — run supabase/client-links-notes.sql", cn.error.message);
   if (m.error) console.warn("[db] messages unavailable — run supabase/messages.sql", m.error.message);
+  if (tr.error) console.warn("[db] territories unavailable — run supabase/territories.sql", tr.error.message);
   return {
     clients: (c.data ?? []).map(rowToClient),
     contacts: (ct.data ?? []).map(rowToContact),
@@ -145,6 +151,7 @@ export async function fetchAll() {
     clientLinks: cl.error ? [] : (cl.data ?? []).map(rowToClientLink),
     clientNotes: cn.error ? [] : (cn.data ?? []).map(rowToClientNote),
     messages: m.error ? [] : (m.data ?? []).map(rowToMessage),
+    territories: tr.error ? [] : (tr.data ?? []).map(rowToTerritory),
   };
 }
 
@@ -180,6 +187,8 @@ export const markNotifsReadDb = (recipientId: string) => supabase.from("notifica
 export const upsertClientLink = (l: ClientLink) => supabase.from("client_links").upsert(clientLinkToRow(l)).then(logErr);
 export const deleteClientLinkDb = (id: string) => supabase.from("client_links").delete().eq("id", id).then(logErr);
 export const upsertClientNote = (n: ClientNote) => supabase.from("client_notes").upsert(clientNoteToRow(n)).then(logErr);
+export const upsertTerritory = (t: Territory) => supabase.from("territories").upsert(territoryToRow(t)).then(logErr);
+export const deleteTerritoryDb = (id: string) => supabase.from("territories").delete().eq("id", id).then(logErr);
 export const deleteClientNoteDb = (id: string) => supabase.from("client_notes").delete().eq("id", id).then(logErr);
 // Messages are append-only (never edited), so insert not upsert. The caller
 // awaits the GHL send first (see Cockpit.tsx sendMessage) and only inserts an

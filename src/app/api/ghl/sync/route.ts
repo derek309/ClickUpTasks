@@ -67,6 +67,8 @@ export async function POST(req: NextRequest) {
     email: c.email ?? "",
     ghl_contact_id: c.id,
     company_name: c.companyName ?? null,
+    city: c.city ?? null,
+    state: c.state ?? null,
   }));
 
   if (rows.length) {

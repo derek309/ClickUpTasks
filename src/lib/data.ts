@@ -132,6 +132,21 @@ export interface Contact {
   email: string;
   ghlContactId: string;
   company?: string; // GHL companyName — shown alongside the name in search
+  city?: string; // GHL address fields — power the territory dashboard's city/state match
+  state?: string;
+}
+
+/** A city+state assigned to one ambassador (existing team member) for the
+ * territory dashboard. "Claimed" vs "unclaimed" contacts within a territory
+ * are derived at query time (does a `clients` row already exist for this
+ * contact?) rather than stored here — reuses the existing client status
+ * funnel instead of a second, parallel pipeline state. */
+export interface Territory {
+  id: string;
+  name: string;
+  city: string;
+  state: string;
+  memberId: string | null; // roster id of the assigned ambassador; null = unassigned
 }
 
 export type MessageChannel = "email" | "sms";

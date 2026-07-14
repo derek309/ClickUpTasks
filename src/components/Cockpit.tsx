@@ -35,14 +35,16 @@ import {
   type Comment,
   type Message,
   type Me,
+  type Territory,
   PERSONAL_CLIENT_ID,
   WORKSPACE_CLIENT_ID,
   PERSONAL_PROJECT_ID,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, rowToTask, rowToClient, rowToNotif, rowToMessage } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, rowToTask, rowToClient, rowToNotif, rowToMessage } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import TeamPanel from "./TeamPanel";
+import TerritoryPanel from "./TerritoryPanel";
 import SettingsPanel from "./SettingsPanel";
 import AddClientModal from "./AddClientModal";
 
@@ -91,6 +93,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [clientLinks, setClientLinks] = useState<ClientLink[]>([]);
   const [clientNotes, setClientNotes] = useState<ClientNote[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [territories, setTerritories] = useState<Territory[]>([]);
+  const [territoriesOpen, setTerritoriesOpen] = useState(false);
   const [importingTasks, setImportingTasks] = useState(false);
   const [clientTab, setClientTab] = useState<"tasks" | "knowledge">("tasks");
   const [linkModal, setLinkModal] = useState<{ initial?: ClientLink } | null>(null);
@@ -319,6 +323,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         const d = await fetchAll();
         setClients(d.clients); setProjects(d.projects); setContacts(d.contacts); setTasks(d.tasks); setNotifications(d.notifications);
         setClientLinks(d.clientLinks); setClientNotes(d.clientNotes); setMessages(d.messages);
+        setTerritories(d.territories);
         fetchClaudeQueue().then((ids) => setClaudeQueue(new Set(ids)));
       } catch (e) {
         setDbError(e instanceof Error ? e.message : "Failed to load data.");
@@ -518,6 +523,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // assigned to *me specifically* (or that I'm explicitly following), even
   // for admins, who otherwise see every client via visibleClients above.
   const myAssignedClients = clientList.filter((c) => scopedTasks.some((t) => t.clientId === c.id && (t.assigneeId === me.id || t.subtasks.some((s) => s.assigneeId === me.id))) || (c.assignedTo ?? []).includes(me.id));
+  const myTerritories = territories.filter((t) => t.memberId === me.id);
   // ⌘K's "Not imported" search — any type counts as "already added" here,
   // not just type 'client', so a contact never shows as addable twice.
   const addedContactIds = new Set(clients.filter((c) => c.id.startsWith("cl_")).map((c) => c.id.slice(3)));
@@ -1008,6 +1014,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       if (j.company) { const up: Client = { ...c, ghlLocationId: j.company }; setClients((cs) => cs.map((x) => (x.id === id ? up : x))); markOwnClientWrite(up.id); upsertClient(up); }
     } catch { /* business name is optional */ }
   };
+  const addTerritory = (spec: { name: string; city: string; state: string; memberId: string | null }) => {
+    const t: Territory = { id: newId("terr_"), ...spec };
+    setTerritories((ts) => [...ts, t]);
+    upsertTerritory(t);
+  };
+  const assignTerritory = (id: string, memberId: string | null) => {
+    setTerritories((ts) => ts.map((t) => (t.id === id ? { ...t, memberId } : t)));
+    const t = territories.find((x) => x.id === id);
+    if (t) upsertTerritory({ ...t, memberId });
+  };
+  const deleteTerritory = (id: string) => {
+    setTerritories((ts) => ts.filter((t) => t.id !== id));
+    deleteTerritoryDb(id);
+  };
   const renameClient = (id: string) => {
     const c = clientById(id);
     if (!c) return;
@@ -1322,10 +1342,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         </nav>
         )}
 
-        {canAdmin && (
+        {(canAdmin || myTerritories.length > 0) && (
           <nav className="mt-auto flex shrink-0 items-center gap-1 border-t px-3 py-2">
-            <button onClick={() => { setSettingsOpen(true); setSidebarOpen(false); }} title="Settings" className="rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>
-            <button onClick={() => { setTeamOpen(true); setSidebarOpen(false); }} title="Team" className="rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.user /></button>
+            {canAdmin && <button onClick={() => { setSettingsOpen(true); setSidebarOpen(false); }} title="Settings" className="rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>}
+            {canAdmin && <button onClick={() => { setTeamOpen(true); setSidebarOpen(false); }} title="Team" className="rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.user /></button>}
+            <button onClick={() => { setTerritoriesOpen(true); setSidebarOpen(false); }} title="Territories" className="rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.flag /></button>
           </nav>
         )}
 
@@ -1555,6 +1576,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       )}
 
       {teamOpen && <TeamPanel me={me} onClose={() => setTeamOpen(false)} />}
+      {territoriesOpen && <TerritoryPanel me={me} canAdmin={canAdmin} territories={territories} contacts={contacts} clients={clients}
+        onAddTerritory={addTerritory} onAssignTerritory={assignTerritory} onDeleteTerritory={deleteTerritory}
+        onAddContact={(contact) => addClientContact(contact)}
+        onOpenClient={(id) => { setTerritoriesOpen(false); setMyWork(false); setMyClientsView(false); setPersonalView(false); setActiveClient(id); setActiveProject(null); }}
+        onClose={() => setTerritoriesOpen(false)} />}
       {settingsOpen && <SettingsPanel clients={subAccounts} onClose={() => setSettingsOpen(false)}
         onSaveClient={(c) => { setClients((cs) => cs.map((x) => (x.id === c.id ? c : x))); markOwnClientWrite(c.id); upsertClient(c); }}
         onSynced={async () => { try { setContacts(await fetchContacts()); pushToast("Contacts updated from GoHighLevel"); } catch { /* ignore */ } }} />}
