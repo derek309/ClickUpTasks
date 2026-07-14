@@ -82,6 +82,28 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       setTimeout(() => setCopied(false), 2000);
     } catch { /* clipboard unavailable */ }
   };
+  // Pasting an image anywhere in the drawer (title, description, a comment
+  // draft — doesn't matter which field has focus) attaches it to the task,
+  // same upload pipeline as drag-drop onto the Attachments block. Only
+  // intercepts when the clipboard actually carries image data, so a normal
+  // text paste into any field is left untouched.
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const images: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind === "file" && item.type.startsWith("image/")) {
+        const file = item.getAsFile();
+        if (file) images.push(file);
+      }
+    }
+    if (images.length === 0) return;
+    e.preventDefault();
+    const dt = new DataTransfer();
+    images.forEach((f) => dt.items.add(f));
+    onAddFiles(dt.files);
+  };
   const doneSubs = task.subtasks.filter((s) => s.done).length;
   const mentionMatch = /@([\w]*)$/.exec(comment);
   const mentionCands = mentionMatch ? users.filter((u) => u.name.toLowerCase().includes(mentionMatch[1].toLowerCase())) : [];
@@ -170,7 +192,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
         </div>
       )}
       <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files.length) onAddFiles(e.dataTransfer.files); }} className="space-y-1.5">
-        {task.attachments.length === 0 && !uploadProgress && (<div className="rounded-lg border border-dashed px-3 py-4 text-center text-[15px] text-muted">Drop files here or click Attach · max 25MB each</div>)}
+        {task.attachments.length === 0 && !uploadProgress && (<div className="rounded-lg border border-dashed px-3 py-4 text-center text-[15px] text-muted">Drop, paste, or click Attach · max 25MB each</div>)}
         {task.attachments.map((a) => (
           <div key={a.id} className="group/att flex items-center gap-2 rounded-lg border bg-background px-3 py-2">
             <FileBadge kind={a.kind} />
@@ -243,7 +265,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   return (
     <>
       <div className={`fixed inset-0 bg-black/20 ${full ? "z-40" : "z-10"}`} onClick={onClose} />
-      <aside className={full ? "fixed inset-0 z-50 flex flex-col bg-surface" : "fixed inset-y-0 right-0 z-20 flex w-full max-w-[460px] flex-col border-l bg-surface shadow-xl"}>
+      <aside onPaste={handlePaste} className={full ? "fixed inset-0 z-50 flex flex-col bg-surface" : "fixed inset-y-0 right-0 z-20 flex w-full max-w-[460px] flex-col border-l bg-surface shadow-xl"}>
         <div className="flex flex-wrap items-center gap-2 border-b px-5 py-3 text-[15px] text-muted">
           <span className="flex min-w-0 items-center gap-2">
             <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: client.color }} /> <span className="truncate">{client.name}</span> <span className="shrink-0">/</span>
