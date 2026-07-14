@@ -1074,20 +1074,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={() => setSidebarOpen(false)} />}
 
       {/* ---------- Sidebar ---------- */}
-      <aside className={`sidebar-dark fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r bg-surface transition-transform ${sidebarHidden ? "md:hidden" : "md:static md:translate-x-0"} ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
-        <div className="flex items-center gap-2.5 px-4 py-4">
+      <aside className={`sidebar-dark fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col overflow-y-auto border-r bg-surface transition-transform ${sidebarHidden ? "md:hidden" : "md:static md:translate-x-0"} ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
+        <div className="flex shrink-0 items-center gap-2.5 px-4 py-4">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-[15px] font-bold text-white">CT</span>
           <div className="leading-tight"><div className="font-semibold">ClickUpTasks</div><div className="text-[15px] text-muted">GHL Task Cockpit</div></div>
         </div>
 
-        <nav className="space-y-0.5 px-2">
+        <nav className="shrink-0 space-y-0.5 px-2">
           <SideItem active={!myWork && !myClientsView && !personalView && activeClient === "all"} onClick={() => { setMyWork(false); setMyClientsView(false); setPersonalView(false); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>All tasks</span><span className="ml-auto text-[15px] text-muted">{scopedTasks.filter((t) => t.clientId.startsWith("cl_")).length}</span></SideItem>
           <SideItem active={myWork} onClick={() => { setMyWork(true); setMyClientsView(false); setPersonalView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.inbox className="text-muted" /> <span>My Work</span></SideItem>
           <SideItem active={myClientsView} onClick={() => { setMyClientsView(true); setMyWork(false); setPersonalView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.user className="text-muted" /> <span>My Clients</span><span className="ml-auto text-[15px] text-muted">{myAssignedClients.length}</span></SideItem>
           <SideItem active={personalView} onClick={() => { setPersonalView(true); setMyWork(false); setMyClientsView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[15px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>
         </nav>
 
-        <div className="flex items-center justify-between px-4 pb-1 pt-4">
+        <div className="flex shrink-0 items-center justify-between px-4 pb-1 pt-4">
           <span className="text-[15px] font-semibold uppercase tracking-wide text-muted">Clients</span>
           <span className="flex items-center gap-0.5">
             <span className="relative">
@@ -1106,7 +1106,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             {canAdmin && <button onClick={() => setAddClientOpen(true)} title="Add client from GHL contacts" className="rounded p-0.5 text-muted hover:bg-background hover:text-foreground"><I.plus /></button>}
           </span>
         </div>
-        <nav className="flex-1 space-y-0.5 overflow-y-auto px-2">
+        <nav className="shrink-0 space-y-0.5 px-2">
           {clientGroups.map((g) => (
           <div key={g.header || "active"}>
           {g.header && <div className="px-2.5 pb-0.5 pt-2.5 text-[12px] font-semibold uppercase tracking-wide text-muted">{g.header}</div>}
@@ -1198,13 +1198,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         </nav>
 
         {canAdmin && (
-          <nav className="flex items-center gap-1 border-t px-3 py-2">
+          <nav className="mt-auto flex shrink-0 items-center gap-1 border-t px-3 py-2">
             <button onClick={() => { setSettingsOpen(true); setSidebarOpen(false); }} title="Settings" className="rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>
             <button onClick={() => { setTeamOpen(true); setSidebarOpen(false); }} title="Team" className="rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.user /></button>
           </nav>
         )}
 
-        <div className="flex items-center gap-2 border-t px-4 py-3">
+        <div className="flex shrink-0 items-center gap-2 border-t px-4 py-3">
           <span className="inline-flex shrink-0 items-center justify-center rounded-full text-[15px] font-semibold text-white" style={{ width: 30, height: 30, background: me.color }}>{me.initials}</span>
           <div className="min-w-0 leading-tight"><div className="truncate text-[15px] font-medium">{me.name}</div><div className="text-[15px] capitalize text-muted">{me.role}</div></div>
           <button onClick={toggleTheme} title="Toggle theme" className="ml-auto rounded-lg border p-1.5 text-muted hover:text-foreground">{theme === "light" ? <I.moon /> : <I.sun />}</button>
