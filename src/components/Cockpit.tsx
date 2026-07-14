@@ -56,6 +56,32 @@ import { QuickLinksBar } from "./cockpit/ClientLinks";
 import { ClientNotes } from "./cockpit/ClientNotes";
 import { ClientsBoard, type ClientBoardGroup } from "./cockpit/ClientsBoard";
 
+// --- Deep-link URL state ----------------------------------------------------
+// The whole app lives on "/", so we encode what you're looking at into the
+// query string: shareable links, refresh-safe, and back/forward navigation.
+//   ?view=work|clients|personal   the special boards
+//   ?client=<id>[&project=<id>]   a client (optionally scoped to one project)
+//   ?task=<id>                    the task drawer (layers over any of the above)
+type NavState = { view: "work" | "clients" | "personal" | null; client: string; project: string | null; task: string | null };
+function buildSearch(s: NavState): string {
+  const p = new URLSearchParams();
+  if (s.view) p.set("view", s.view);
+  else if (s.client !== "all") { p.set("client", s.client); if (s.project) p.set("project", s.project); }
+  if (s.task) p.set("task", s.task);
+  const q = p.toString();
+  return q ? `?${q}` : "";
+}
+function parseSearch(search: string): NavState {
+  const p = new URLSearchParams(search);
+  const v = p.get("view");
+  return {
+    view: v === "work" || v === "clients" || v === "personal" ? v : null,
+    client: p.get("client") ?? "all",
+    project: p.get("project"),
+    task: p.get("task"),
+  };
+}
+
 export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [clients, setClients] = useState<Client[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -204,6 +230,41 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   useEffect(() => { setActiveProject((p) => (p && projects.find((x) => x.id === p)?.clientId === activeClient && !myWork && !myClientsView && !personalView ? p : null)); }, [activeClient, myWork, myClientsView, personalView, projects]);
   // Links/Notes/health are single-client concepts — always land back on Tasks when the active client changes.
   useEffect(() => { setClientTab("tasks"); }, [activeClient, myWork]);
+
+  // --- Deep-link URL sync ---------------------------------------------------
+  const currentNav = (): NavState => ({
+    view: myWork ? "work" : myClientsView ? "clients" : personalView ? "personal" : null,
+    client: activeClient, project: activeProject, task: openTaskId,
+  });
+  const applyNav = (s: NavState) => {
+    setMyWork(s.view === "work"); setMyClientsView(s.view === "clients"); setPersonalView(s.view === "personal");
+    setActiveClient(s.view ? "all" : s.client); setActiveProject(s.view ? null : s.project); setOpenTaskId(s.task);
+  };
+  // The URL-writing effect below is inert until this flips, so nothing can
+  // clobber the deep link before we read it here.
+  const hydratedRef = useRef(false);
+  // Restore from the URL once data is loaded (so project ids resolve, not get
+  // reconciled away). An empty URL keeps the role-based defaults untouched.
+  useEffect(() => {
+    if (hydratedRef.current || loading) return;
+    hydratedRef.current = true;
+    const search = window.location.search;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (search) applyNav(parseSearch(search));
+  }, [loading]);
+  // Mirror state → URL on every navigation. Skip until hydrated, and no-op when
+  // the URL already matches (covers hydration and back/forward round-trips).
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    const next = buildSearch(currentNav());
+    if (next !== window.location.search) window.history.pushState(null, "", next || window.location.pathname);
+  });
+  // Back/forward → state.
+  useEffect(() => {
+    const onPop = () => applyNav(parseSearch(window.location.search));
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
   const toggleDrawerFull = () => setDrawerFull((f) => { const v = !f; try { localStorage.setItem("cut_drawerFull", v ? "1" : "0"); } catch {} return v; });
   const [cmdkOpen, setCmdkOpen] = useState(false);
   useEffect(() => {
