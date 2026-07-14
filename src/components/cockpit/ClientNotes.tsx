@@ -1,25 +1,29 @@
 "use client";
 
 // The "Knowledge" tab on a client or project — a live team chat feed (meeting
-// notes, decisions, FYIs — anything worth keeping) plus a read-only rollup of
-// every comment left on that scope's tasks, so there's one place to catch up
-// on everything without hunting through individual tasks. Claude (via the MCP
-// server's list_notes/add_note tools) reads and posts here too.
+// notes, decisions, FYIs — anything worth keeping), a read-only rollup of
+// every comment left on that scope's tasks, and (client-level only, when a
+// GHL contact is linked) that contact's email/SMS history for reference —
+// one place to catch up on everything without hunting through individual
+// tasks or the GHL app. Claude (via the MCP server's list_notes/add_note
+// tools) reads and posts to the chat too.
 import { useEffect, useRef, useState } from "react";
-import { users, userById, timeAgo, NOTE_TYPE_META, NOTE_TYPE_ORDER, type ClientNote, type NoteType, type Task, type Me } from "@/lib/data";
+import { users, userById, timeAgo, NOTE_TYPE_META, NOTE_TYPE_ORDER, type ClientNote, type NoteType, type Task, type Message, type Me } from "@/lib/data";
 import { I, Avatar, renderMentions } from "./ui";
 import { ConfirmModal, type ConfirmSpec } from "./modals";
 
-export function ClientNotes({ notes, tasks, me, onAdd, onEdit, onDelete, onOpenTask }: {
+export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages }: {
   notes: ClientNote[];
   tasks: Task[]; // already scoped by the caller to the current client/project
+  messages?: Message[] | null; // null/undefined = no linked GHL contact at this scope, so no Messages tab
   me: Me;
   onAdd: (type: NoteType, body: string) => void;
   onEdit: (note: ClientNote, body: string) => void;
   onDelete: (note: ClientNote) => void;
   onOpenTask: (taskId: string) => void;
+  onOpenMessages?: () => void; // fires once when the Messages tab is opened, to mark them read
 }) {
-  const [view, setView] = useState<"chat" | "activity">("chat");
+  const [view, setView] = useState<"chat" | "activity" | "messages">("chat");
   const [filter, setFilter] = useState<NoteType | "all">("all");
   const [draftType, setDraftType] = useState<NoteType>("note");
   const [draft, setDraft] = useState("");
@@ -65,6 +69,9 @@ export function ClientNotes({ notes, tasks, me, onAdd, onEdit, onDelete, onOpenT
         <div className="inline-flex overflow-hidden rounded-md border">
           <button onClick={() => setView("chat")} className={`px-2.5 py-1.5 text-[13px] font-medium ${view === "chat" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Chat</button>
           <button onClick={() => setView("activity")} className={`px-2.5 py-1.5 text-[13px] font-medium ${view === "activity" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Task Activity · {activity.length}</button>
+          {messages != null && (
+            <button onClick={() => { setView("messages"); onOpenMessages?.(); }} className={`px-2.5 py-1.5 text-[13px] font-medium ${view === "messages" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Messages · {messages.length}</button>
+          )}
         </div>
         {view === "chat" && (
           <div className="flex flex-wrap justify-end gap-1.5">
@@ -154,7 +161,7 @@ export function ClientNotes({ notes, tasks, me, onAdd, onEdit, onDelete, onOpenT
             </div>
           </div>
         </div>
-      </>) : (
+      </>) : view === "activity" ? (
         <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-5">
           <div className="mx-auto max-w-3xl space-y-2.5">
             {activity.length === 0 && (
@@ -180,6 +187,31 @@ export function ClientNotes({ notes, tasks, me, onAdd, onEdit, onDelete, onOpenT
                 </button>
               );
             })}
+          </div>
+        </div>
+      ) : (
+        <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-5">
+          <div className="mx-auto max-w-3xl space-y-2.5">
+            {(!messages || messages.length === 0) && (
+              <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-10 text-center text-muted">
+                <I.bolt />
+                <span className="text-[15px]">No messages yet</span>
+                <span className="text-[13px]">Emails and texts with this contact, synced from GoHighLevel, show up here for reference.</span>
+              </div>
+            )}
+            {[...(messages ?? [])].sort((a, b) => a.at.localeCompare(b.at)).map((m) => (
+              <div key={m.id} className={`rounded-xl border p-3 ${m.direction === "inbound" ? "bg-surface" : "bg-accent-soft/40"}`}>
+                <div className="flex items-center gap-2 text-[13px] text-muted">
+                  <span className="inline-flex items-center gap-1 rounded px-1.5 py-0 font-medium" style={{ background: (m.channel === "email" ? "#3b82f6" : "#22c55e") + "1a", color: m.channel === "email" ? "#3b82f6" : "#22c55e" }}>
+                    {m.channel === "email" ? "Email" : "SMS"}
+                  </span>
+                  <span>{m.direction === "inbound" ? "Received" : "Sent"}</span>
+                  <span>· {timeAgo(m.at)}</span>
+                </div>
+                {m.subject && <div className="mt-1 text-[15px] font-medium">{m.subject}</div>}
+                <div className="mt-1 whitespace-pre-wrap text-[15px]">{m.body}</div>
+              </div>
+            ))}
           </div>
         </div>
       )}

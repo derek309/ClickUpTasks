@@ -41,7 +41,7 @@ import {
   PERSONAL_PROJECT_ID,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, rowToTask, rowToClient, rowToNotif, rowToMessage } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, markMessagesReadDb } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import TeamPanel from "./TeamPanel";
 import TerritoryPanel from "./TerritoryPanel";
@@ -387,8 +387,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         if (p.eventType === "DELETE") {
           const id = (p.old as { id: string }).id;
           // Cascade purge for teammates who only got the `clients` DELETE
-          // event — contacts/projects/client_links/client_notes aren't in
-          // the publication, so no CDC event arrives for them independently.
+          // event — contacts/projects/client_links aren't in the publication,
+          // so no CDC event arrives for them independently. client_notes IS
+          // published now, so its own cascade-delete rows emit their own CDC
+          // events too (Postgres FK cascades are per-row under the hood) —
+          // this purge is a harmless, redundant backstop for it, not load-bearing.
           setClients((cs) => cs.filter((c) => c.id !== id));
           setProjects((ps) => ps.filter((p2) => p2.clientId !== id));
           setTasks((ts) => ts.filter((t) => t.clientId !== id));
@@ -423,26 +426,38 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         const m = rowToMessage(p.new);
         setMessages((ms) => (ms.some((x) => x.id === m.id) ? ms.map((x) => (x.id === m.id ? m : x)) : [...ms, m]));
       },
+      // Same reasoning as messages: a note is only ever fully rewritten on an
+      // explicit Save click (not keystroke-driven like a task title), so
+      // id-based dedup is enough — no updated_by/echo-suppression column needed.
+      onClientNote: (p) => {
+        if (p.eventType === "DELETE") {
+          const id = (p.old as { id: string }).id;
+          setClientNotes((ns) => ns.filter((n) => n.id !== id));
+          return;
+        }
+        const n = rowToClientNote(p.new);
+        setClientNotes((ns) => (ns.some((x) => x.id === n.id) ? ns.map((x) => (x.id === n.id ? n : x)) : [n, ...ns]));
+      },
       onStatusChange: (s) => { if (s === "CHANNEL_ERROR") pushToast("⚠️ Live updates interrupted — reconnecting…"); },
     });
     return unsub;
   }, [loading, me.id]);
 
-  // Fallback for the 3 tables without a live subscription (contacts/projects/
-  // client_links/client_notes), and a reconnection safety net for the 4 that
-  // do — postgres_changes has no replay/resume, and browsers commonly
-  // suspend backgrounded WebSocket connections, so a dropped socket means
-  // silently missed events, not queued ones. Reuses fetchAll() for the data.
+  // Fallback for the 2 tables without a live subscription (contacts/projects/
+  // client_links), and a reconnection safety net for the 5 that do —
+  // postgres_changes has no replay/resume, and browsers commonly suspend
+  // backgrounded WebSocket connections, so a dropped socket means silently
+  // missed events, not queued ones. Reuses fetchAll() for the data.
   //
-  // tasks/clients/notifications/messages are merged (add/update by id), NEVER
-  // wholesale-replaced: their deletions are already fully covered by the
-  // live realtime DELETE handlers above, so this fallback has no need to
-  // remove anything for them — and a wholesale replace here was actively
-  // dangerous: any transient gap between this fetch's snapshot and a very
-  // recent local write could wipe a real, just-saved task out of view even
-  // though it was safely in the database. contacts/projects/client_links/
-  // client_notes have no realtime coverage at all, so they still need a
-  // full replace (including removals) to reflect deletes.
+  // tasks/clients/notifications/messages/client_notes are merged (add/update
+  // by id), NEVER wholesale-replaced: their deletions are already fully
+  // covered by the live realtime DELETE handlers above, so this fallback has
+  // no need to remove anything for them — and a wholesale replace here was
+  // actively dangerous: any transient gap between this fetch's snapshot and a
+  // very recent local write could wipe a real, just-saved task (or chat
+  // message) out of view even though it was safely in the database.
+  // contacts/projects/client_links have no realtime coverage at all, so they
+  // still need a full replace (including removals) to reflect deletes.
   useEffect(() => {
     let lastRefetch = 0;
     const refetch = async () => {
@@ -456,11 +471,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           incoming.forEach((x) => byId.set(x.id, x));
           return [...byId.values()];
         };
-        setContacts(d.contacts); setClientLinks(d.clientLinks); setClientNotes(d.clientNotes); setProjects(d.projects);
+        setContacts(d.contacts); setClientLinks(d.clientLinks); setProjects(d.projects);
         setTasks((prev) => mergeById(prev, d.tasks));
         setClients((prev) => mergeById(prev, d.clients));
         setNotifications((prev) => mergeById(prev, d.notifications));
         setMessages((prev) => mergeById(prev, d.messages));
+        setClientNotes((prev) => mergeById(prev, d.clientNotes));
       } catch (e) { console.warn("[realtime] visibility refetch failed", e); }
     };
     document.addEventListener("visibilitychange", refetch);
@@ -1582,11 +1598,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <ClientNotes
             notes={clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId))}
             tasks={baseTasks}
+            messages={activeProject ? null : (() => { const ct = contactForClient(activeClient); return ct ? messages.filter((m) => m.contactId === ct.id) : null; })()}
             me={me}
             onAdd={(type, body) => addNote(activeClient, type, body, activeProject)}
             onEdit={editNote}
             onDelete={deleteNote}
             onOpenTask={(id) => { setClientTab("tasks"); setOpenTaskId(id); }}
+            onOpenMessages={() => { const ct = contactForClient(activeClient); if (ct) { setMessages((ms) => ms.map((m) => (m.contactId === ct.id ? { ...m, read: true } : m))); markMessagesReadDb(ct.id); } }}
           />
         ) : (
           <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} />
