@@ -1521,9 +1521,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </div>
         </div>
       </>)}
-      {cmdkOpen && <CommandK tasks={scopedTasks} clients={clientList} contacts={contacts} addedContactIds={addedContactIds} clientById={clientById}
+      {cmdkOpen && <CommandK tasks={scopedTasks} clients={clientList} projects={projects} contacts={contacts} addedContactIds={addedContactIds} clientById={clientById}
         onOpenTask={(id) => { setOpenTaskId(id); setCmdkOpen(false); }}
-        onOpenClient={(id) => { setMyWork(false); setMyClientsView(false); setPersonalView(false); setActiveClient(id); setCmdkOpen(false); }}
+        onOpenClient={(id) => { setMyWork(false); setMyClientsView(false); setPersonalView(false); setActiveClient(id); setActiveProject(null); setCmdkOpen(false); }}
+        onOpenProject={(id) => { const p = projects.find((x) => x.id === id); if (p) { setMyWork(false); setMyClientsView(false); setPersonalView(false); setActiveClient(p.clientId); setActiveProject(id); } setCmdkOpen(false); }}
         onAddContact={(contact) => { addClientContact(contact); setCmdkOpen(false); }}
         onClose={() => setCmdkOpen(false)} />}
 
