@@ -24,6 +24,26 @@ async function sb(path, method = "GET", body) {
 }
 const enc = encodeURIComponent;
 const STATUSES = ["todo", "in_progress", "review", "done"];
+const GHL = "https://services.leadconnectorhq.com";
+const SUB2LOC = { c_agency: "7B0Y8xCOblcTHzYnM1Kc", c_directory: "GN4HK1ybbTBWcolEjLHl" };
+const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36";
+const toGhlDate = (due) => `${/^\d{4}-\d{2}-\d{2}$/.test(due || "") ? due : new Date().toISOString().slice(0, 10)}T17:00:00.000Z`;
+
+// Push a status change to GoHighLevel for a GHL-linked task (best-effort).
+async function pushGhlStatus(t) {
+  if (!t.ghl_task_id || !t.contact_id) return null;
+  const [ct] = await sb(`contacts?select=ghl_contact_id,client_id&id=eq.${enc(t.contact_id)}`);
+  if (!ct?.ghl_contact_id) return null;
+  const loc = SUB2LOC[ct.client_id];
+  const [tok] = await sb(`ghl_tokens?select=token&location_id=eq.${enc(loc || "")}`);
+  if (!tok?.token) return null;
+  const res = await fetch(`${GHL}/contacts/${ct.ghl_contact_id}/tasks/${t.ghl_task_id}`, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${tok.token}`, Version: "2021-07-28", Accept: "application/json", "Content-Type": "application/json", "User-Agent": UA },
+    body: JSON.stringify({ title: (t.title || "Untitled task").slice(0, 200), body: t.description || "Created from ClickUpTasks", dueDate: toGhlDate(t.due), completed: t.status === "done" }),
+  });
+  return res.ok;
+}
 const nowIso = () => new Date().toISOString();
 const rid = (p) => p + Math.random().toString(36).slice(2, 10);
 
@@ -82,8 +102,10 @@ server.tool("set_task_status",
   "Set a task's status (todo | in_progress | review | done). Use to start or complete work.",
   { id: z.string(), status: z.enum(STATUSES) },
   async ({ id, status }) => {
-    await sb(`tasks?id=eq.${enc(id)}`, "PATCH", { status });
-    return { content: [{ type: "text", text: `Set ${id} → ${status}.` }] };
+    const [t] = await sb(`tasks?id=eq.${enc(id)}`, "PATCH", { status });
+    let ghl = "";
+    if (t?.ghl_task_id) { try { const ok = await pushGhlStatus(t); ghl = ok ? " (synced to GoHighLevel)" : " (GoHighLevel push failed)"; } catch { ghl = " (GoHighLevel push errored)"; } }
+    return { content: [{ type: "text", text: `Set ${id} → ${status}.${ghl}` }] };
   });
 
 server.tool("add_comment",
