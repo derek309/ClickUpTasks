@@ -24,7 +24,10 @@ NEW={
  "cl_ct_ghl_XaIfK69d7LdVZ5QGdvSM":("Rocklin/Lincoln Pet Spa",None),
  "cl_ct_ghl_MXXU1sDN1PHgSGdfutbr":("Trinity Partners",None),
  "cl_ct_ghl_9VAWKaTs6TeRkp2AmoE3":("",None),
+ "cl_workspace":("",None),  # internal/agency work — no GHL contact, never syncs
 }
+# name overrides for containers with no backing contact
+NAMES={"cl_workspace":"Workspace"}
 # clickup list id -> (client id, project name)
 MAP={
  "901112840803":("cl_ct_ghl_n4vaKoznBTPc5ux4EWij","Task Manager"),
@@ -57,6 +60,12 @@ MAP={
  "901113675117":("cl_ct_ghl_CFcbk6WkgjpLRLae6ega","Parenting Time"),
  "901112836945":("cl_ct_ghl_MXXU1sDN1PHgSGdfutbr","Tasks"),
  "901113845374":("cl_ct_ghl_XaIfK69d7LdVZ5QGdvSM","Tasks"),
+ # ClickUpLocal internal ops -> Workspace container (no contact). Lincoln/Tracy
+ # deliberately excluded — those are territory regions for a later feature.
+ "901100555657":("cl_workspace","Administration"),
+ "901113565054":("cl_workspace","For Businesses"),
+ "901113346714":("cl_workspace","Idea board"),
+ "901114074489":("cl_workspace","Social Media"),
 }
 
 def sb(path, method="GET", body=None):
@@ -100,7 +109,7 @@ def ensure_client(cid):
     if cid in clients: return
     label,assign=NEW.get(cid,("",None))
     contact_app_id=cid[3:]
-    nm=(contacts.get(contact_app_id) or {}).get("name") or label or "Client"
+    nm=NAMES.get(cid) or (contacts.get(contact_app_id) or {}).get("name") or label or "Client"
     nm=" ".join(w.capitalize() for w in nm.split())
     row={"id":cid,"name":nm,"color":"#a855f7","ghl_location_id":label,"status":"active_client","type":"client","assigned_to":([assign] if assign else []),"linked_contact_id":None}
     created_clients.append((cid,nm,label,assign))
