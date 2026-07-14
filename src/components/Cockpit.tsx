@@ -1095,7 +1095,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
         {clients.some((c) => c.id === WORKSPACE_CLIENT_ID) && (<>
           <div className="flex shrink-0 items-center justify-between px-4 pb-1 pt-4">
-            <span className="text-[15px] font-semibold uppercase tracking-wide text-muted">Workspace</span>
+            <span className="text-[15px] font-semibold uppercase tracking-wide text-muted">Projects</span>
             {canAdmin && <button onClick={() => addProject(WORKSPACE_CLIENT_ID)} title="Add project (internal list)" className="rounded p-0.5 text-muted hover:bg-background hover:text-foreground"><I.plus /></button>}
           </div>
           <nav className="shrink-0 space-y-0.5 px-2">

@@ -118,7 +118,7 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
       <div className={`group/tr grid min-h-[46px] items-center gap-2 border-b px-4 py-2 transition-colors last:border-0 hover:bg-accent-soft/50 ${delegated ? "border-l-[3px] border-l-accent bg-accent-soft/30" : ""}`} style={{ gridTemplateColumns: template }}>
         <div className="flex min-w-0 items-center gap-0.5">
           <button onClick={onToggleExpand} className={`shrink-0 rounded p-0.5 text-muted hover:text-foreground ${task.subtasks.length ? "" : "opacity-0 group-hover/tr:opacity-40"}`} title="Subtasks"><I.chevron className={`transition ${expanded ? "-rotate-90" : "rotate-180"}`} /></button>
-          <InlineAssignee value={task.assigneeId} onChange={(a) => onPatch(task.id, { assigneeId: a })} size={40} />
+          <InlineAssignee value={task.assigneeId} onChange={(a) => onPatch(task.id, { assigneeId: a })} size={36} />
           <button onClick={onOpen} className="flex min-w-0 flex-1 flex-col justify-center py-0.5 pl-1 text-left">
             {crumb && <span className="truncate text-[13px] leading-tight text-muted">{crumb}</span>}
             <span className="flex min-w-0 items-center gap-1.5">
