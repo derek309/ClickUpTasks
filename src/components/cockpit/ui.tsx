@@ -105,8 +105,8 @@ export type FilterState = { status: TaskStatus | "all"; assignee: string; priori
 export type SortBy = "manual" | "due" | "priority" | "title" | "status" | "assignee" | "comments";
 export const LIST_COLUMNS: { key: string; label: string; sortable: boolean }[] = [
   { key: "status", label: "Stage", sortable: true },
-  { key: "due", label: "Due date", sortable: true },
   { key: "priority", label: "Priority", sortable: true },
+  { key: "due", label: "Due date", sortable: true },
   { key: "comments", label: "Comments", sortable: true },
   { key: "contact", label: "Contact", sortable: false },
   { key: "labels", label: "Labels", sortable: false },

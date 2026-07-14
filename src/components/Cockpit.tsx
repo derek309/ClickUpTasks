@@ -118,6 +118,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [sortBy, setSortBy] = useState<SortBy>("due");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [visibleCols, setVisibleCols] = useState<string[]>(["status", "due", "priority", "comments"]);
+  // Manual drag order for list columns — persisted like the other view
+  // toggles below. Any key not yet in a saved order (e.g. after adding a new
+  // column) falls back to LIST_COLUMNS' own order in reorderCols/colOrder use.
+  const [colOrder, setColOrder] = useState<string[]>(LIST_COLUMNS.map((c) => c.key));
+  const reorderCols = (keys: string[]) => { setColOrder(keys); try { localStorage.setItem("cut_colOrder", JSON.stringify(keys)); } catch {} };
   const [filterOpen, setFilterOpen] = useState(false);
   const [hideEmpty, setHideEmpty] = useState(true);
   const [hideDone, setHideDone] = useState(true);
@@ -213,6 +218,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       const mo = localStorage.getItem("cut_clientOrder"); if (mo) setManualOrder(JSON.parse(mo));
       const he = localStorage.getItem("cut_hideEmpty"); if (he !== null) setHideEmpty(he === "1");
       const hd = localStorage.getItem("cut_hideDone"); if (hd !== null) setHideDone(hd === "1");
+      const colo = localStorage.getItem("cut_colOrder"); if (colo) setColOrder(JSON.parse(colo));
     } catch { /* fresh browser */ }
   }, []);
   const toggleHideEmpty = () => setHideEmpty((v) => { const n = !v; try { localStorage.setItem("cut_hideEmpty", n ? "1" : "0"); } catch {} return n; });
@@ -1584,9 +1590,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             )
           ) : clientTab === "knowledge" ? null : (
             <div className="relative">
-              <button onClick={() => setFilterOpen((o) => !o)} className="flex items-center gap-1.5 rounded-md border bg-background px-2.5 py-1.5 text-muted hover:text-foreground">
-                <I.filter /> Filter &amp; view
-                {activeFilterCount > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{activeFilterCount}</span>}
+              <button onClick={() => setFilterOpen((o) => !o)} title="Filter & view" className="relative rounded-md border bg-background p-2 text-muted hover:text-foreground">
+                <I.filter />
+                {activeFilterCount > 0 && <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{activeFilterCount}</span>}
               </button>
               {filterOpen && (<>
                 <div className="fixed inset-0 z-30" onClick={() => setFilterOpen(false)} />
@@ -1706,7 +1712,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             sendingMessage={sendingMessage}
           />
         ) : (
-          <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} queuedIds={claudeQueue} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} />
+          <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} queuedIds={claudeQueue} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} colOrder={colOrder} onReorderCols={reorderCols} />
         )}
       </main>
 

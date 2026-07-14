@@ -13,7 +13,7 @@ import { I, Avatar, LabelChips, COL_WIDTHS, LIST_COLUMNS } from "./ui";
 
 // --- grouped list view (ClickUp-style: group, quick-add, expandable subtasks) --
 
-export function GroupedList({ groups, showClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onDeleteSub, onAddComment, hideEmpty, highlightDelegateFor, queuedIds, onDropInGroup }: {
+export function GroupedList({ groups, showClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onDeleteSub, onAddComment, hideEmpty, highlightDelegateFor, queuedIds, onDropInGroup, colOrder, onReorderCols }: {
   groups: { key: string; label: string; color: string; tasks: Task[] }[];
   showClient: boolean; clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null;
   visibleCols: string[]; sortKey: string; sortDir: "asc" | "desc"; onSort: (key: string) => void;
@@ -25,6 +25,9 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   // meaningful for groupBy dimensions the caller knows how to translate back
   // into a task patch (priority/status), so this is opt-in per render.
   onDropInGroup?: (taskId: string, groupKey: string) => void;
+  // Manual column order (all LIST_COLUMNS keys, any order) + its setter —
+  // when both are given, column headers become draggable to reorder.
+  colOrder?: string[]; onReorderCols?: (keys: string[]) => void;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -34,6 +37,7 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   const toggleG = (k: string) => setCollapsedG((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const [dragTaskId, setDragTaskId] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+  const [dragColKey, setDragColKey] = useState<string | null>(null);
 
   const filteredGroups = hideEmpty ? groups.filter((g) => g.tasks.length > 0) : groups;
   // hideEmpty must never hide the only way to add a first task — if filtering
@@ -41,7 +45,21 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   // group (empty, but its quick-add row is still reachable) instead of a
   // dead-end "No tasks yet." with no input anywhere.
   const visibleGroups = filteredGroups.length === 0 && canQuickAdd && groups.length > 0 ? [groups[0]] : filteredGroups;
-  const cols = LIST_COLUMNS.filter((c) => visibleCols.includes(c.key));
+  // Any column missing from a saved colOrder (e.g. added after the order was
+  // last persisted) falls back to LIST_COLUMNS' own position for it.
+  const orderedColumns = colOrder
+    ? LIST_COLUMNS.slice().sort((a, b) => {
+        const ia = colOrder.indexOf(a.key), ib = colOrder.indexOf(b.key);
+        return (ia < 0 ? LIST_COLUMNS.length : ia) - (ib < 0 ? LIST_COLUMNS.length : ib);
+      })
+    : LIST_COLUMNS;
+  const cols = orderedColumns.filter((c) => visibleCols.includes(c.key));
+  const dropColHere = (targetKey: string) => {
+    if (!onReorderCols || !dragColKey || dragColKey === targetKey) return;
+    const keys = orderedColumns.map((c) => c.key).filter((k) => k !== dragColKey);
+    keys.splice(keys.indexOf(targetKey), 0, dragColKey);
+    onReorderCols(keys);
+  };
   // minmax(200px,1fr) — not minmax(0,1fr) — so the name column can never be
   // crushed to near-zero width on a narrow viewport (that crush is what made
   // task titles render as one letter per line on mobile). The card scrolls
@@ -60,9 +78,15 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
         <div className="grid items-center gap-2 border-b bg-background/40 px-4 py-2 text-[12px] font-semibold uppercase tracking-wide text-muted" style={{ gridTemplateColumns: template }}>
           <button onClick={() => onSort("task")} className="flex items-center gap-1 text-left hover:text-foreground">Name <Arrow col="task" /></button>
           {showClient && <span>Client</span>}
-          {cols.map((c) => c.sortable
-            ? <button key={c.key} onClick={() => onSort(c.key)} className={`flex items-center gap-1 hover:text-foreground ${c.key === "comments" ? "justify-center" : "text-left"}`}>{c.label} <Arrow col={c.key} /></button>
-            : <span key={c.key} className={c.key === "comments" ? "text-center" : ""}>{c.label}</span>)}
+          {cols.map((c) => (
+            <div key={c.key} draggable={!!onReorderCols} onDragStart={() => setDragColKey(c.key)} onDragEnd={() => setDragColKey(null)}
+              onDragOver={(e) => onReorderCols && e.preventDefault()} onDrop={(e) => { if (onReorderCols) { e.preventDefault(); dropColHere(c.key); } }}
+              className={onReorderCols ? "cursor-grab active:cursor-grabbing" : undefined}>
+              {c.sortable
+                ? <button onClick={() => onSort(c.key)} className={`flex items-center gap-1 hover:text-foreground ${c.key === "comments" ? "justify-center" : "text-left"}`}>{c.label} <Arrow col={c.key} /></button>
+                : <span className={c.key === "comments" ? "block text-center" : ""}>{c.label}</span>}
+            </div>
+          ))}
         </div>
         <div className="divide-y-8 divide-background">
           {visibleGroups.map((g) => (
