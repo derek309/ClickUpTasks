@@ -53,8 +53,8 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
           <button onClick={() => onSort("task")} className="flex items-center gap-1 text-left hover:text-foreground">Name <Arrow col="task" /></button>
           {showClient && <span>Client</span>}
           {cols.map((c) => c.sortable
-            ? <button key={c.key} onClick={() => onSort(c.key)} className="flex items-center gap-1 text-left hover:text-foreground">{c.label} <Arrow col={c.key} /></button>
-            : <span key={c.key}>{c.label}</span>)}
+            ? <button key={c.key} onClick={() => onSort(c.key)} className={`flex items-center gap-1 hover:text-foreground ${c.key === "comments" ? "justify-center" : "text-left"}`}>{c.label} <Arrow col={c.key} /></button>
+            : <span key={c.key} className={c.key === "comments" ? "text-center" : ""}>{c.label}</span>)}
         </div>
         <div className="divide-y-8 divide-background">
           {visibleGroups.map((g) => (
@@ -241,9 +241,9 @@ function InlineComments({ task, onAddComment }: { task: Task; onAddComment: (tas
   const visible = task.comments.filter((c) => c.kind !== "event");
   const send = () => { if (!body.trim()) return; onAddComment(task.id, body); setBody(""); };
   return (
-    <div className="relative">
-      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 320, 360)); setOpen((o) => !o); }} className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-[13px] text-muted hover:bg-background">
-        <I.comment className={visible.length ? "" : "opacity-30"} /> {visible.length > 0 && visible.length}
+    <div className="relative flex justify-center">
+      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 320, 360)); setOpen((o) => !o); }} className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[13px] text-muted hover:bg-background">
+        <I.comment className={`h-[18px] w-[18px] ${visible.length ? "" : "opacity-30"}`} /> {visible.length > 0 && visible.length}
       </button>
       {open && (<>
         <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
