@@ -16,7 +16,7 @@ export function ConfirmModal({ title, message, confirmLabel = "Confirm", danger 
       <div className="fixed inset-0 z-40 bg-black/30" onClick={onCancel} />
       <div className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border bg-surface p-5 shadow-xl">
         <h2 className="text-[16px] font-semibold">{title}</h2>
-        <p className="mt-1.5 text-[15px] text-muted">{message}</p>
+        <p className="mt-1.5 text-[13px] text-muted">{message}</p>
         <div className="mt-4 flex justify-end gap-2">
           <button onClick={onCancel} className="rounded-md border px-3 py-1.5 text-[15px] font-medium hover:bg-background">Cancel</button>
           <button onClick={onConfirm} autoFocus className={`rounded-md px-3 py-1.5 text-[15px] font-medium text-white ${danger ? "bg-red-500 hover:bg-red-600" : "bg-accent hover:opacity-90"}`}>{confirmLabel}</button>
@@ -37,7 +37,7 @@ export function PromptModal({ title, label, initial = "", placeholder, confirmLa
       <div className="fixed inset-0 z-40 bg-black/30" onClick={onCancel} />
       <div className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border bg-surface p-5 shadow-xl">
         <h2 className="text-[16px] font-semibold">{title}</h2>
-        {label && <label className="mt-1.5 block text-[15px] text-muted">{label}</label>}
+        {label && <label className="mt-1.5 block text-[13px] text-muted">{label}</label>}
         <input ref={ref} value={value} onChange={(e) => setValue(e.target.value)} placeholder={placeholder}
           onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") onCancel(); }}
           className="mt-2 w-full rounded-md border bg-background px-3 py-1.5 text-[15px] outline-none focus:border-accent" />

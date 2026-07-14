@@ -24,7 +24,7 @@ export function ClientsBoard({ groups, scopedTasks, clientTaskCount, hasUnreadMe
   return (
     <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">
       <div className="overflow-hidden rounded-xl border bg-surface shadow-soft">
-        {groups.length === 0 && <div className="px-4 py-10 text-center text-[15px] text-muted">No clients yet.</div>}
+        {groups.length === 0 && <div className="px-4 py-10 text-center text-[13px] text-muted">No clients yet.</div>}
         <div className="divide-y-8 divide-background">
           {groups.map((g) => (
             <div key={g.key}>
@@ -66,7 +66,7 @@ function ClientRow({ client, scopedTasks, taskCount, unread, onOpen }: {
           {health.label}
         </span>
       </span>
-      <span className="shrink-0 text-[15px] text-muted">{taskCount} task{taskCount === 1 ? "" : "s"}</span>
+      <span className="shrink-0 text-[13px] text-muted">{taskCount} task{taskCount === 1 ? "" : "s"}</span>
     </button>
   );
 }

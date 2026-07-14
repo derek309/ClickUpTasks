@@ -77,12 +77,12 @@ function Login() {
           <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-[15px] font-bold text-white">CT</span>
           <div className="leading-tight">
             <div className="font-semibold">ClickUpTasks</div>
-            <div className="text-[15px] text-muted">GHL Task Cockpit</div>
+            <div className="text-[13px] text-muted">GHL Task Cockpit</div>
           </div>
         </div>
 
-        <h1 className="text-[17px] font-semibold">Sign in</h1>
-        <p className="mb-4 text-[15px] text-muted">Welcome back.</p>
+        <h1 className="text-[20px] font-semibold">Sign in</h1>
+        <p className="mb-4 text-[13px] text-muted">Welcome back.</p>
 
         <form onSubmit={submit} className="space-y-2.5">
           <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className="w-full rounded-lg border bg-background px-3 py-2 text-[15px] outline-none focus:border-accent" />
@@ -93,7 +93,7 @@ function Login() {
           </button>
         </form>
 
-        <p className="mt-4 text-center text-[15px] text-muted">New teammate? Ask your admin for an invite.</p>
+        <p className="mt-4 text-center text-[13px] text-muted">New teammate? Ask your admin for an invite.</p>
       </div>
     </div>
   );

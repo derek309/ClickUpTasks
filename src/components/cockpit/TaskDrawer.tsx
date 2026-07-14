@@ -268,7 +268,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     </dl>
   );
   const descriptionBlock = (
-    <div className="mt-5"><div className="mb-1.5 text-[13px] font-semibold uppercase tracking-wider text-muted">Description</div><textarea value={task.description} onChange={(e) => onPatch({ description: e.target.value })} placeholder="Add a description…" rows={3} className="-mx-3 min-h-[80px] w-full resize-y rounded-lg border border-transparent px-3 py-2 text-[15px] outline-none transition placeholder:text-muted hover:bg-background focus:border-accent focus:bg-background" /></div>
+    <div className="mt-5"><div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted">Description</div><textarea value={task.description} onChange={(e) => onPatch({ description: e.target.value })} placeholder="Add a description…" rows={3} className="-mx-3 min-h-[80px] w-full resize-y rounded-lg border border-transparent px-3 py-2 text-[15px] outline-none transition placeholder:text-muted hover:bg-background focus:border-accent focus:bg-background" /></div>
   );
   // Message this task's linked GHL contact directly, without leaving the
   // drawer — sends via the same GHL Conversations API path as the Chat
@@ -340,7 +340,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const subtasksBlock = (
     <div className="mt-5">
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-[13px] font-semibold uppercase tracking-wider text-muted">Checklist {task.subtasks.length > 0 && `· ${doneSubs}/${task.subtasks.length}`}</span>
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">Checklist {task.subtasks.length > 0 && `· ${doneSubs}/${task.subtasks.length}`}</span>
         {templates.length > 0 && (
           <div className="relative">
             <button onClick={() => setTemplateOpen((o) => !o)} className="inline-flex items-center gap-1 text-[13px] font-medium text-accent"><I.clipboard /> From template</button>
@@ -382,7 +382,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const attachmentsBlock = (
     <div className="mt-5">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <span className="text-[13px] font-semibold uppercase tracking-wider text-muted">Attachments · {task.attachments.length}</span>
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">Attachments · {task.attachments.length}</span>
         <span className="flex items-center gap-3">
           {task.attachments.length > 1 && (
             <select value={attSort} onChange={(e) => setAttSort(e.target.value as typeof attSort)} className="rounded-md border bg-background px-1.5 py-1 text-[13px] outline-none" title="Sort attachments">
@@ -404,13 +404,13 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
         </div>
       )}
       {uploadProgress && (
-        <div className="mb-2 flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-[15px] text-muted">
+        <div className="mb-2 flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-[13px] text-muted">
           <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-accent border-t-transparent" />
           Uploading {uploadProgress.done + 1} of {uploadProgress.total}…
         </div>
       )}
       <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files.length) onAddFiles(e.dataTransfer.files); }} className="space-y-1.5">
-        {task.attachments.length === 0 && !uploadProgress && (<div className="rounded-lg border border-dashed px-3 py-4 text-center text-[15px] text-muted">Drop, paste, or click Attach · max 25MB each</div>)}
+        {task.attachments.length === 0 && !uploadProgress && (<div className="rounded-lg border border-dashed px-3 py-4 text-center text-[13px] text-muted">Drop, paste, or click Attach · max 25MB each</div>)}
         {sortedAttachments.map((a) => (
           <div key={a.id} className="group/att flex items-center gap-2 rounded-lg border bg-background px-3 py-2">
             <FileBadge kind={a.kind} />
@@ -455,7 +455,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const listSiblings = navTasks.filter((t) => t.projectId === task.projectId);
   const siblingsBlock = (
     <div className="mt-6 border-t pt-5">
-      <button onClick={() => setSiblingsCollapsed((c) => !c)} className="mb-2 flex w-full items-center gap-1.5 text-left text-[13px] font-semibold uppercase tracking-wider text-muted hover:text-foreground">
+      <button onClick={() => setSiblingsCollapsed((c) => !c)} className="mb-2 flex w-full items-center gap-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-muted hover:text-foreground">
         <I.chevron className={`transition ${siblingsCollapsed ? "-rotate-90" : "rotate-180"}`} />
         {project?.name ?? "This list"} · {listSiblings.length}
       </button>
@@ -537,7 +537,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     <>
       <div className={`fixed inset-0 bg-black/20 ${full ? "z-40" : "z-10"}`} onClick={onClose} />
       <aside onPaste={handlePaste} className={full ? "fixed inset-0 z-50 flex flex-col bg-surface" : "fixed inset-y-0 right-0 z-20 flex w-full max-w-[460px] flex-col border-l bg-surface shadow-xl"}>
-        <div className="flex flex-wrap items-center gap-2 border-b px-5 py-3 text-[15px] text-muted">
+        <div className="flex flex-wrap items-center gap-2 border-b px-5 py-3 text-[13px] text-muted">
           <span className="flex min-w-0 items-center gap-2">
             <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: client.color }} /> <span className="truncate">{client.name}</span> <span className="shrink-0">/</span>
             <button onClick={onRenameProject} title="Rename list" className="truncate rounded px-1 -mx-1 hover:bg-background hover:text-foreground hover:underline">{project.name}</button>

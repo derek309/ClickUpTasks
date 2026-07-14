@@ -43,7 +43,7 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
         <div className="flex items-center justify-between border-b px-5 py-3">
           <div>
             <h2 className="text-[16px] font-semibold">Territories</h2>
-            <p className="text-[15px] text-muted">{canAdmin ? "Assign cities to ambassadors and track their pipeline." : "Contacts in your assigned territory."}</p>
+            <p className="text-[13px] text-muted">{canAdmin ? "Assign cities to ambassadors and track their pipeline." : "Contacts in your assigned territory."}</p>
           </div>
           <button onClick={onClose} className="rounded-md p-1 text-muted hover:bg-background"><I.close /></button>
         </div>
@@ -82,7 +82,7 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                 </div>
               </div>
             ) : (
-              <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 rounded-md border border-dashed px-3 py-1.5 text-[15px] font-medium text-muted hover:bg-background hover:text-foreground">
+              <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 rounded-md border border-dashed px-3 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
                 <I.plus /> Add territory
               </button>
             )}
@@ -91,7 +91,7 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
 
         <div className="max-h-[60vh] overflow-y-auto px-5 py-3">
           {visible.length === 0 && (
-            <div className="py-8 text-center text-[15px] text-muted">
+            <div className="py-8 text-center text-[13px] text-muted">
               {canAdmin ? "No territories yet — click \"Add territory\" to assign a city to a teammate." : "No territory assigned to you yet."}
             </div>
           )}

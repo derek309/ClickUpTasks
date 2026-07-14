@@ -30,7 +30,7 @@ export function VaultView({ items, onDownloadFile }: {
         )}
         {groups.map((g) => (
           <div key={g.kind}>
-            <div className="mb-2 text-[13px] font-semibold uppercase tracking-wider text-muted">{g.label} · {g.items.length}</div>
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">{g.label} · {g.items.length}</div>
             <div className="space-y-1.5">
               {g.items.map((a) => (
                 <div key={a.id} className="flex items-center gap-2.5 rounded-lg border bg-surface px-3 py-2">

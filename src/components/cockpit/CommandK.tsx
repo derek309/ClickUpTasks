@@ -52,15 +52,15 @@ export function CommandK({ tasks, clients, projects, contacts, addedContactIds, 
           <span className="rounded border px-1.5 py-0.5 text-[13px] text-muted">Esc</span>
         </div>
         <div className="max-h-80 overflow-y-auto p-1.5">
-          {total === 0 && <div className="px-3 py-6 text-center text-[15px] text-muted">No matches</div>}
-          {clientItems.length > 0 && <div className="px-2 pb-1 pt-1.5 text-[13px] font-semibold uppercase tracking-wide text-muted">Clients</div>}
+          {total === 0 && <div className="px-3 py-6 text-center text-[13px] text-muted">No matches</div>}
+          {clientItems.length > 0 && <div className="px-2 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Clients</div>}
           {clientItems.map((c, i) => (
             <button key={c.id} onMouseEnter={() => setIdx(i)} onClick={() => activate(i)} className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left ${idx === i ? "bg-background" : ""}`}>
               <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: c.color }} />
               <span className="truncate text-[15px]">{c.name}</span>
             </button>
           ))}
-          {projectItems.length > 0 && <div className="px-2 pb-1 pt-1.5 text-[13px] font-semibold uppercase tracking-wide text-muted">Projects</div>}
+          {projectItems.length > 0 && <div className="px-2 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Projects</div>}
           {projectItems.map((p, i) => { const gi = clientItems.length + i; const client = clientById(p.clientId); return (
             <button key={p.id} onMouseEnter={() => setIdx(gi)} onClick={() => activate(gi)} className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left ${idx === gi ? "bg-background" : ""}`}>
               <I.folder className="shrink-0 text-muted" />
@@ -68,18 +68,18 @@ export function CommandK({ tasks, clients, projects, contacts, addedContactIds, 
               <span className="shrink-0 text-[13px] text-muted">{client?.name}</span>
             </button>
           ); })}
-          {taskItems.length > 0 && <div className="px-2 pb-1 pt-1.5 text-[13px] font-semibold uppercase tracking-wide text-muted">Tasks</div>}
+          {taskItems.length > 0 && <div className="px-2 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Tasks</div>}
           {taskItems.map((t, i) => { const gi = clientItems.length + projectItems.length + i; const client = clientById(t.clientId); return (
             <button key={t.id} onMouseEnter={() => setIdx(gi)} onClick={() => activate(gi)} className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left ${idx === gi ? "bg-background" : ""}`}>
               <span className="min-w-0 flex-1 truncate text-[15px]">{t.title}</span>
               <span className="shrink-0 text-[13px] text-muted">{client?.name}</span>
             </button>
           ); })}
-          {notImportedItems.length > 0 && <div className="px-2 pb-1 pt-1.5 text-[13px] font-semibold uppercase tracking-wide text-muted">Not imported</div>}
+          {notImportedItems.length > 0 && <div className="px-2 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Not imported</div>}
           {notImportedItems.map((c, i) => { const gi = clientItems.length + projectItems.length + taskItems.length + i; return (
             <button key={c.id} onMouseEnter={() => setIdx(gi)} onClick={() => activate(gi)} className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left ${idx === gi ? "bg-background" : ""}`}>
               <I.plus className="shrink-0 text-muted" />
-              <span className="min-w-0 flex-1 truncate text-[15px] text-muted">{c.name}{c.company && <span className="text-muted/70"> · {c.company}</span>}</span>
+              <span className="min-w-0 flex-1 truncate text-[13px] text-muted">{c.name}{c.company && <span className="text-muted/70"> · {c.company}</span>}</span>
               <span className="shrink-0 text-[13px] text-accent">Add as client</span>
             </button>
           ); })}

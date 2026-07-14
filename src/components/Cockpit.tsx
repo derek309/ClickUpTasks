@@ -1417,7 +1417,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   if (dbError) return (
     <div className="flex h-screen flex-col items-center justify-center gap-3 px-6 text-center">
       <div className="text-lg font-semibold">Database not set up yet</div>
-      <div className="max-w-md text-[15px] text-muted">Run <code className="rounded bg-background px-1 py-0.5">supabase/schema.sql</code> in your Supabase project&apos;s SQL editor, then reload this page.</div>
+      <div className="max-w-md text-[13px] text-muted">Run <code className="rounded bg-background px-1 py-0.5">supabase/schema.sql</code> in your Supabase project&apos;s SQL editor, then reload this page.</div>
       <div className="max-w-md rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[15px] text-red-600">{dbError}</div>
     </div>
   );
@@ -1431,7 +1431,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       <aside className={`sidebar-dark fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col overflow-y-auto border-r bg-surface transition-transform ${sidebarHidden ? "md:hidden" : "md:static md:translate-x-0"} ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="flex shrink-0 items-center gap-2.5 px-4 py-4">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-[15px] font-bold text-white">CT</span>
-          <div className="leading-tight"><div className="font-semibold">ClickUpTasks</div><div className="text-[15px] text-muted">GHL Task Cockpit</div></div>
+          <div className="leading-tight"><div className="font-semibold">ClickUpTasks</div><div className="text-[13px] text-muted">GHL Task Cockpit</div></div>
           <span className="relative ml-auto">
             <button onClick={() => setNavMenuOpen((o) => !o)} title="Show/hide sidebar items" className="rounded p-1 text-muted hover:bg-background hover:text-foreground"><I.list className="h-3.5 w-3.5" /></button>
             {navMenuOpen && (<>
@@ -1450,15 +1450,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
         <nav className="shrink-0 space-y-0.5 px-2">
           {navVisible.inbox && <SideItem active={inboxView} onClick={() => { setInboxView(true); setMyWork(false); setMyClientsView(false); setPersonalView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.bell className="text-muted" /> <span>Inbox</span>{unread > 0 && <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{unread}</span>}</SideItem>}
-          {navVisible.all && <SideItem active={!myWork && !myClientsView && !personalView && !inboxView && activeClient === "all"} onClick={() => { setMyWork(false); setMyClientsView(false); setPersonalView(false); setInboxView(false); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>All tasks</span><span className="ml-auto text-[15px] text-muted">{scopedTasks.filter((t) => t.clientId.startsWith("cl_")).length}</span></SideItem>}
+          {navVisible.all && <SideItem active={!myWork && !myClientsView && !personalView && !inboxView && activeClient === "all"} onClick={() => { setMyWork(false); setMyClientsView(false); setPersonalView(false); setInboxView(false); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>All tasks</span><span className="ml-auto text-[13px] text-muted">{scopedTasks.filter((t) => t.clientId.startsWith("cl_")).length}</span></SideItem>}
           {navVisible.work && <SideItem active={myWork} onClick={() => { setMyWork(true); setMyClientsView(false); setPersonalView(false); setInboxView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.inbox className="text-muted" /> <span>My Work</span></SideItem>}
-          {navVisible.clients && <SideItem active={myClientsView} onClick={() => { setMyClientsView(true); setMyWork(false); setPersonalView(false); setInboxView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.user className="text-muted" /> <span>My Clients</span><span className="ml-auto text-[15px] text-muted">{myAssignedClients.length}</span></SideItem>}
-          {navVisible.personal && <SideItem active={personalView} onClick={() => { setPersonalView(true); setMyWork(false); setMyClientsView(false); setInboxView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[15px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>}
+          {navVisible.clients && <SideItem active={myClientsView} onClick={() => { setMyClientsView(true); setMyWork(false); setPersonalView(false); setInboxView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.user className="text-muted" /> <span>My Clients</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length}</span></SideItem>}
+          {navVisible.personal && <SideItem active={personalView} onClick={() => { setPersonalView(true); setMyWork(false); setMyClientsView(false); setInboxView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>}
         </nav>
 
         {clients.some((c) => c.id === WORKSPACE_CLIENT_ID) && (<>
           <div className="flex shrink-0 items-center justify-between px-4 pb-1 pt-4">
-            <button onClick={() => toggleCollapse("projects")} className="flex items-center gap-1 text-[15px] font-semibold uppercase tracking-wide text-muted hover:text-foreground">
+            <button onClick={() => toggleCollapse("projects")} className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-muted hover:text-foreground">
               <I.chevron className={`transition ${collapsed.has("projects") ? "-rotate-90" : "rotate-180"}`} /> Projects
             </button>
             {canAdmin && <button onClick={() => addProject(WORKSPACE_CLIENT_ID)} title="Add project (internal list)" className="rounded p-0.5 text-muted hover:bg-background hover:text-foreground"><I.plus /></button>}
@@ -1486,7 +1486,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         </>)}
 
         <div className="flex shrink-0 items-center justify-between px-4 pb-1 pt-4">
-          <button onClick={() => toggleCollapse("clients")} className="flex items-center gap-1 text-[15px] font-semibold uppercase tracking-wide text-muted hover:text-foreground">
+          <button onClick={() => toggleCollapse("clients")} className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-muted hover:text-foreground">
             <I.chevron className={`transition ${collapsed.has("clients") ? "-rotate-90" : "rotate-180"}`} /> Clients
           </button>
           <span className="flex items-center gap-0.5">
@@ -1542,7 +1542,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                       <span className="truncate">{c.name}</span>
                       {clientCompany(c) && <span className="block truncate text-[13px] font-normal text-muted">{clientCompany(c)}</span>}
                     </span>
-                    <span className="text-[15px] text-muted group-hover/row:opacity-0">{clientTaskCount(c.id)}</span>
+                    <span className="text-[13px] text-muted group-hover/row:opacity-0">{clientTaskCount(c.id)}</span>
                   </button>
                   <button onClick={(e) => { e.stopPropagation(); toggleStar(c.id); }} title={starred.has(c.id) ? "Unstar" : "Star — pin to top"}
                     className={`absolute right-8 top-1/2 -translate-y-1/2 rounded p-1 hover:bg-background ${starred.has(c.id) ? "text-amber-400" : "text-muted opacity-0 group-hover/row:opacity-100"}`}>
@@ -1604,7 +1604,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </>)}
           </div>
           ))}
-          {visibleClients.length === 0 && <div className="px-3 py-3 text-[15px] leading-relaxed text-muted">No clients yet. Click <b>+</b> to add one from your GoHighLevel contacts.</div>}
+          {visibleClients.length === 0 && <div className="px-3 py-3 text-[13px] leading-relaxed text-muted">No clients yet. Click <b>+</b> to add one from your GoHighLevel contacts.</div>}
         </nav>
         )}
 
@@ -1619,7 +1619,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
         <div className="flex shrink-0 items-center gap-2 border-t px-4 py-3">
           <span className="inline-flex shrink-0 items-center justify-center rounded-full text-[15px] font-semibold text-white" style={{ width: 30, height: 30, background: me.color }}>{me.initials}</span>
-          <div className="min-w-0 leading-tight"><div className="truncate text-[15px] font-medium">{me.name}</div><div className="text-[15px] capitalize text-muted">{me.role}</div></div>
+          <div className="min-w-0 leading-tight"><div className="truncate text-[15px] font-medium">{me.name}</div><div className="text-[13px] capitalize text-muted">{me.role}</div></div>
           <button onClick={toggleTheme} title="Toggle theme" className="ml-auto rounded-lg border p-1.5 text-muted hover:text-foreground">{theme === "light" ? <I.moon /> : <I.sun />}</button>
           <button onClick={onSignOut} title="Sign out" className="rounded-lg border p-1.5 text-muted hover:text-red-500"><I.logout /></button>
         </div>
@@ -1634,18 +1634,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           )}
           <div className="min-w-0">
             {!myWork && !myClientsView && !personalView && !inboxView && activeProject && projectById(activeProject) ? (<>
-              <h1 className="flex items-center gap-1.5 truncate text-[17px] font-semibold"><I.folder className="shrink-0 text-muted" /> {projectById(activeProject)!.name}</h1>
-              <p className="hidden items-center gap-2 text-[15px] text-muted sm:flex">
+              <h1 className="flex items-center gap-1.5 truncate text-[20px] font-semibold"><I.folder className="shrink-0 text-muted" /> {projectById(activeProject)!.name}</h1>
+              <p className="hidden items-center gap-2 text-[13px] text-muted sm:flex">
                 <button onClick={() => setActiveProject(null)} className="hover:text-foreground hover:underline">{clientById(activeClient)?.name}</button>
                 <span>·</span>
                 {(() => { const pg = projectProgress(activeProject); return (<span className="inline-flex items-center gap-1.5">{pg.done}/{pg.total} done<span className="inline-block h-1.5 w-24 overflow-hidden rounded-full bg-border align-middle"><span className="block h-full rounded-full bg-green-500 transition-all" style={{ width: `${pg.pct}%` }} /></span>{pg.pct}%</span>); })()}
               </p>
             </>) : (<>
-              <h1 className="flex items-center gap-2 truncate text-[17px] font-semibold">
+              <h1 className="flex items-center gap-2 truncate text-[20px] font-semibold">
                 {inboxView ? "Inbox" : personalView ? "Personal" : myClientsView ? "My Clients" : myWork ? "My Work" : activeClient === "all" ? "All tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
                 {!myWork && !myClientsView && !personalView && !inboxView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
               </h1>
-              <p className="hidden text-[15px] text-muted sm:block">{inboxView ? "Everything that mentions or notifies you, in one place" : personalView ? "Your private to-dos — only visible to you" : myClientsView ? "Every client, grouped by what needs attention first" : myWork ? "Everything assigned to one person, across all clients" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</p>
+              <p className="hidden text-[13px] text-muted sm:block">{inboxView ? "Everything that mentions or notifies you, in one place" : personalView ? "Your private to-dos — only visible to you" : myClientsView ? "Every client, grouped by what needs attention first" : myWork ? "Everything assigned to one person, across all clients" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</p>
             </>)}
           </div>
 
@@ -1713,7 +1713,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 <select value={myWorkUser} onChange={(e) => setMyWorkUser(e.target.value)} className="rounded-md border bg-background px-2 py-1 outline-none">{users.map((u) => (<option key={u.id} value={u.id}>{u.name}{u.role === "va" ? " (VA)" : ""}</option>))}</select>
               </label>
             ) : (
-              <span className="text-[15px] text-muted">Your assigned tasks across all clients</span>
+              <span className="text-[13px] text-muted">Your assigned tasks across all clients</span>
             )
           ) : clientTab === "chat" || clientTab === "vault" ? null : (
             <div className="relative">
@@ -1727,7 +1727,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   {activeClient !== "all" && clientById(activeClient) && (
                     <div className="space-y-1.5 border-b pb-2.5">
                       <div className="flex items-center justify-between">
-                        <span className="text-[13px] font-semibold uppercase tracking-wide text-muted">Following</span>
+                        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Following</span>
                         {!canAdmin && (
                           <div className="flex items-center -space-x-1.5">
                             {(clientById(activeClient)!.assignedTo ?? []).length === 0 && <span className="text-[13px] text-muted">Nobody yet</span>}
@@ -1751,7 +1751,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     </div>
                   )}
                   <div className="flex items-center justify-between">
-                    <span className="text-[13px] font-semibold uppercase tracking-wide text-muted">Group &amp; sort</span>
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Group &amp; sort</span>
                     {(filtersActive || sortBy !== "due" || groupBy !== "priority") && <button onClick={() => { setFilters({ status: "all", assignee: "all", priority: "all" }); setGroupBy("priority"); setSortBy("due"); }} className="text-[13px] font-medium text-accent">Reset</button>}
                   </div>
                   <label className="flex items-center justify-between gap-3"><span className="text-muted">Group by</span><select value={groupBy} onChange={(e) => setGroupBy(e.target.value as typeof groupBy)} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="status">Status</option><option value="priority">Priority</option><option value="due">Due date</option><option value="project">Project</option></select></label>
@@ -1764,11 +1764,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${hideDone ? "border-accent bg-accent text-white" : "border-border"}`}>{hideDone && <I.check />}</span>
                     <span className="text-muted">Hide done tasks</span>
                   </button>
-                  <div className="border-t pt-2 text-[13px] font-semibold uppercase tracking-wide text-muted">Filter</div>
+                  <div className="border-t pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Filter</div>
                   <label className="flex items-center justify-between gap-3"><span className="text-muted">Status</span><select value={filters.status} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value as FilterState["status"] }))} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="all">All</option>{STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}</select></label>
                   <label className="flex items-center justify-between gap-3"><span className="text-muted">Assignee</span><select value={filters.assignee} onChange={(e) => setFilters((f) => ({ ...f, assignee: e.target.value }))} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="all">All</option><option value="unassigned">Unassigned</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
                   <label className="flex items-center justify-between gap-3"><span className="text-muted">Priority</span><select value={filters.priority} onChange={(e) => setFilters((f) => ({ ...f, priority: e.target.value as FilterState["priority"] }))} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="all">All</option>{PRIORITY_ORDER.filter((p) => p !== "none").map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}</select></label>
-                  <div className="border-t pt-2 text-[13px] font-semibold uppercase tracking-wide text-muted">Columns</div>
+                  <div className="border-t pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Columns</div>
                   <div className="grid grid-cols-2 gap-0.5">
                     {LIST_COLUMNS.map((c) => (
                       <button key={c.key} onClick={() => toggleCol(c.key)} className="flex items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-background">
@@ -1791,10 +1791,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               {bellOpen && (<>
                 <div className="fixed inset-0 z-30" onClick={() => setBellOpen(false)} />
                 <div className="absolute right-0 z-40 mt-1 w-80 overflow-hidden rounded-xl border bg-surface shadow-xl">
-                  <div className="border-b px-4 py-2.5 text-[15px] font-semibold uppercase tracking-wide text-muted">Notifications</div>
+                  <div className="border-b px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Notifications</div>
                   <div className="max-h-96 overflow-y-auto">
-                    {myNotifs.length === 0 && <div className="px-4 py-6 text-center text-[15px] text-muted">You&apos;re all caught up.</div>}
-                    {myNotifs.map((n) => (<button key={n.id} onClick={() => { if (n.taskId) setOpenTaskId(n.taskId); setBellOpen(false); }} className="flex w-full gap-2.5 border-b px-4 py-2.5 text-left last:border-0 hover:bg-background"><I.comment className="mt-0.5 shrink-0 text-accent" /><div><div className="text-[15px] leading-snug">{n.text}</div><div className="text-[15px] text-muted">{timeAgo(n.at)}</div></div></button>))}
+                    {myNotifs.length === 0 && <div className="px-4 py-6 text-center text-[13px] text-muted">You&apos;re all caught up.</div>}
+                    {myNotifs.map((n) => (<button key={n.id} onClick={() => { if (n.taskId) setOpenTaskId(n.taskId); setBellOpen(false); }} className="flex w-full gap-2.5 border-b px-4 py-2.5 text-left last:border-0 hover:bg-background"><I.comment className="mt-0.5 shrink-0 text-accent" /><div><div className="text-[15px] leading-snug">{n.text}</div><div className="text-[13px] text-muted">{timeAgo(n.at)}</div></div></button>))}
                   </div>
                 </div>
               </>)}
@@ -1894,7 +1894,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         <div className="fixed left-1/2 top-1/2 z-50 flex max-h-[70vh] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border bg-surface shadow-xl">
           <div className="border-b px-5 py-3">
             <h2 className="text-[16px] font-semibold">Link to GoHighLevel</h2>
-            <p className="text-[15px] text-muted">Connect <b>{clientById(activeClient)?.name}</b> to a synced GoHighLevel contact so Open-in-GHL and task import work.</p>
+            <p className="text-[13px] text-muted">Connect <b>{clientById(activeClient)?.name}</b> to a synced GoHighLevel contact so Open-in-GHL and task import work.</p>
           </div>
           <div className="border-b p-3">
             <input autoFocus value={ghlLinkSearch} onChange={(e) => setGhlLinkSearch(e.target.value)} placeholder="Search contacts by name or email…" className="w-full rounded-md border bg-background px-3 py-2 text-[15px] outline-none focus:border-accent" />
@@ -1904,7 +1904,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               const q = ghlLinkSearch.trim().toLowerCase();
               const linkable = contacts.filter((ct) => ct.ghlContactId && clientById(ct.clientId)?.ghlLocationId);
               const matches = (q ? linkable.filter((ct) => ct.name.toLowerCase().includes(q) || ct.email.toLowerCase().includes(q)) : linkable).slice(0, 50);
-              if (matches.length === 0) return <div className="px-4 py-8 text-center text-[15px] text-muted">{q ? "No matching GoHighLevel contacts." : "Type to search your synced contacts."}</div>;
+              if (matches.length === 0) return <div className="px-4 py-8 text-center text-[13px] text-muted">{q ? "No matching GoHighLevel contacts." : "Type to search your synced contacts."}</div>;
               return matches.map((ct) => (
                 <button key={ct.id} onClick={() => { linkClientToContact(activeClient, ct.id); setGhlLinkOpen(false); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-background">
                   <span className="min-w-0 flex-1"><span className="block truncate text-[15px] font-medium">{ct.name}</span>{ct.email && <span className="block truncate text-[13px] text-muted">{ct.email}</span>}</span>

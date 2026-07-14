@@ -124,7 +124,7 @@ export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void
         <div className="flex items-center justify-between border-b px-5 py-3">
           <div>
             <h2 className="text-[16px] font-semibold">Team</h2>
-            <p className="text-[15px] text-muted">Invite teammates by email, then set who&apos;s an admin vs a VA.</p>
+            <p className="text-[13px] text-muted">Invite teammates by email, then set who&apos;s an admin vs a VA.</p>
           </div>
           <button onClick={onClose} className="rounded-md p-1 text-muted hover:bg-background">✕</button>
         </div>
@@ -137,7 +137,7 @@ export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void
         </form>
 
         <div className="max-h-[60vh] overflow-y-auto px-5 py-3">
-          {loading && <div className="py-8 text-center text-[15px] text-muted">Loading team…</div>}
+          {loading && <div className="py-8 text-center text-[13px] text-muted">Loading team…</div>}
           {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-[15px] text-red-600">{error}</div>}
           {!loading && profiles.map((p) => (
             <div key={p.id} className="flex items-center gap-3 border-b py-2.5 last:border-0">
@@ -153,8 +153,8 @@ export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void
                 </span>
               </label>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-[15px] font-medium">{p.name || p.email}{p.id === me.id && <span className="ml-1 text-[15px] text-muted">(you)</span>}{p.pending && <span className="ml-1.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[13px] font-medium text-amber-700">Invite pending</span>}</div>
-                <div className="truncate text-[15px] text-muted">{p.email}</div>
+                <div className="truncate text-[15px] font-medium">{p.name || p.email}{p.id === me.id && <span className="ml-1 text-[13px] text-muted">(you)</span>}{p.pending && <span className="ml-1.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[13px] font-medium text-amber-700">Invite pending</span>}</div>
+                <div className="truncate text-[13px] text-muted">{p.email}</div>
               </div>
 
               <div className="inline-flex overflow-hidden rounded-md border">
@@ -167,11 +167,11 @@ export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void
               </div>
               {p.id !== me.id && (
                 <button onClick={() => removeUser(p)} disabled={saving === p.id} title={p.pending ? "Revoke invite" : "Remove user"}
-                  className="rounded-md border px-2 py-1 text-[15px] text-muted hover:border-red-300 hover:text-red-500 disabled:opacity-40">✕</button>
+                  className="rounded-md border px-2 py-1 text-[13px] text-muted hover:border-red-300 hover:text-red-500 disabled:opacity-40">✕</button>
               )}
             </div>
           ))}
-          {!loading && !error && profiles.length === 0 && <div className="py-8 text-center text-[15px] text-muted">No team members yet.</div>}
+          {!loading && !error && profiles.length === 0 && <div className="py-8 text-center text-[13px] text-muted">No team members yet.</div>}
         </div>
       </div>
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}

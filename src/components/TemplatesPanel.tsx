@@ -51,7 +51,7 @@ export default function TemplatesPanel({ templates, clients, projects, onSave, o
         <div className="flex items-center justify-between border-b px-5 py-3">
           <div>
             <h2 className="text-[16px] font-semibold">Task templates</h2>
-            <p className="text-[15px] text-muted">Reusable checklists — apply to a new or existing task.</p>
+            <p className="text-[13px] text-muted">Reusable checklists — apply to a new or existing task.</p>
           </div>
           <button onClick={onClose} className="rounded-md p-1 text-muted hover:bg-background"><I.close /></button>
         </div>
@@ -75,7 +75,7 @@ export default function TemplatesPanel({ templates, clients, projects, onSave, o
               </div>
             </div>
           ) : (
-            <button onClick={startAdd} className="inline-flex items-center gap-1.5 rounded-md border border-dashed px-3 py-1.5 text-[15px] font-medium text-muted hover:bg-background hover:text-foreground">
+            <button onClick={startAdd} className="inline-flex items-center gap-1.5 rounded-md border border-dashed px-3 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
               <I.plus /> Add template
             </button>
           )}
@@ -83,7 +83,7 @@ export default function TemplatesPanel({ templates, clients, projects, onSave, o
 
         <div className="max-h-[55vh] overflow-y-auto px-5 py-3">
           {templates.length === 0 && (
-            <div className="py-8 text-center text-[15px] text-muted">No templates yet — click &quot;Add template&quot; to create one.</div>
+            <div className="py-8 text-center text-[13px] text-muted">No templates yet — click &quot;Add template&quot; to create one.</div>
           )}
           {templates.map((t) => (
             <div key={t.id} className="mb-2 rounded-xl border">

@@ -40,7 +40,7 @@ export default function AddClientModal({
         <div className="flex items-center justify-between border-b px-5 py-3">
           <div>
             <h2 className="text-[16px] font-semibold">Add a client</h2>
-            <p className="text-[15px] text-muted">Search your GoHighLevel contacts and add one as a client.</p>
+            <p className="text-[13px] text-muted">Search your GoHighLevel contacts and add one as a client.</p>
           </div>
           <button onClick={onClose} className="rounded-md p-1 text-muted hover:bg-background">✕</button>
         </div>
@@ -54,7 +54,7 @@ export default function AddClientModal({
         </div>
 
         <div className="max-h-[55vh] overflow-y-auto px-3 py-2">
-          {list.length === 0 && <div className="py-8 text-center text-[15px] text-muted">No matching contacts</div>}
+          {list.length === 0 && <div className="py-8 text-center text-[13px] text-muted">No matching contacts</div>}
           {list.map((c) => {
             const added = existingIds.has("cl_" + c.id);
             return (
@@ -64,13 +64,13 @@ export default function AddClientModal({
                   {ghlUrl(c)
                     ? <a href={ghlUrl(c)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="block truncate text-[15px] font-medium text-accent hover:underline">{c.name}</a>
                     : <div className="truncate text-[15px] font-medium">{c.name}</div>}
-                  <div className="truncate text-[15px] text-muted">{c.company ? `${c.company} · ` : ""}{c.email || "no email"} · {subName(c.clientId)}</div>
+                  <div className="truncate text-[13px] text-muted">{c.company ? `${c.company} · ` : ""}{c.email || "no email"} · {subName(c.clientId)}</div>
                 </div>
                 <button disabled={added} onClick={() => onAdd(c)} className="shrink-0 rounded-md bg-accent px-2.5 py-1 text-[15px] font-medium text-white disabled:opacity-40">{added ? "Added" : "Add"}</button>
               </div>
             );
           })}
-          {!ql && contacts.length > 60 && <div className="px-2 py-1.5 text-[15px] text-muted">Showing 60 — type to search all {contacts.length.toLocaleString()} contacts.</div>}
+          {!ql && contacts.length > 60 && <div className="px-2 py-1.5 text-[13px] text-muted">Showing 60 — type to search all {contacts.length.toLocaleString()} contacts.</div>}
         </div>
       </div>
     </>

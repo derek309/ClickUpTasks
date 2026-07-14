@@ -78,7 +78,7 @@ export default function SettingsPanel({
         <div className="flex items-center justify-between border-b px-5 py-3">
           <div>
             <h2 className="text-[16px] font-semibold">Settings · Integrations</h2>
-            <p className="text-[15px] text-muted">Connect your GoHighLevel sub-accounts and pull their contacts.</p>
+            <p className="text-[13px] text-muted">Connect your GoHighLevel sub-accounts and pull their contacts.</p>
           </div>
           <button onClick={onClose} className="rounded-md p-1 text-muted hover:bg-background">✕</button>
         </div>
@@ -87,7 +87,7 @@ export default function SettingsPanel({
           <div className="mb-3 flex items-center gap-2">
             <span className="text-[15px] font-semibold">GoHighLevel</span>
             {configured === null ? (
-              <span className="text-[15px] text-muted">checking…</span>
+              <span className="text-[13px] text-muted">checking…</span>
             ) : configured ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[15px] font-medium text-green-600"><span className="h-1.5 w-1.5 rounded-full bg-green-500" /> Token connected</span>
             ) : (

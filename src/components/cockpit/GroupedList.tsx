@@ -126,9 +126,9 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
             </div>
           ))}
         </div>
-        {visibleGroups.length === 0 && <div className="px-4 py-10 text-center text-[15px] text-muted">No tasks yet.</div>}
+        {visibleGroups.length === 0 && <div className="px-4 py-10 text-center text-[13px] text-muted">No tasks yet.</div>}
       </div>
-      {!canQuickAdd && quickAddHint && <div className="mt-3 text-center text-[15px] text-muted">{quickAddHint}</div>}
+      {!canQuickAdd && quickAddHint && <div className="mt-3 text-center text-[13px] text-muted">{quickAddHint}</div>}
     </div>
   );
 }
@@ -152,7 +152,7 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
     if (key === "assignee") return <InlineAssignee value={task.assigneeId} onChange={(a) => onPatch(task.id, { assigneeId: a })} />;
     if (key === "due") return <InlineDue value={task.due} overdue={overdue} recurrence={task.recurrence} onChange={(d) => onPatch(task.id, { due: d })} onRecurrenceChange={(r) => onPatch(task.id, { recurrence: r })} />;
     if (key === "comments") return <InlineComments task={task} onAddComment={onAddComment} />;
-    if (key === "contact") { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return <span className="truncate text-[15px] text-muted">{ct?.name ?? "—"}</span>; }
+    if (key === "contact") { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return <span className="truncate text-[13px] text-muted">{ct?.name ?? "—"}</span>; }
     if (key === "labels") return <LabelChips ids={task.labelIds} />;
     return null;
   };
@@ -177,10 +177,10 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
             <span className="flex min-w-0 items-center gap-1.5">
               {delegated && <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">Delegated</span>}
               {queued && <span title="Queued for Claude Code" className="shrink-0 text-amber-500">★</span>}
-              <span className="min-w-0 flex-1 whitespace-normal break-words text-[17px] font-medium leading-snug">{task.title}</span>
+              <span className="min-w-0 flex-1 whitespace-normal break-words text-[20px] font-medium leading-snug">{task.title}</span>
               {task.recurrence !== "none" && <span title={describeRecurrence(task.recurrence, task.recurrenceInterval, task.recurrenceUnit)}><I.repeat className="shrink-0 text-muted" /></span>}
               {task.attachments.length > 0 && <I.clip className="shrink-0 text-muted" />}
-              {task.subtasks.length > 0 && <span className="inline-flex shrink-0 items-center gap-0.5 text-[15px] text-muted"><I.check />{doneSubs}/{task.subtasks.length}</span>}
+              {task.subtasks.length > 0 && <span className="inline-flex shrink-0 items-center gap-0.5 text-[13px] text-muted"><I.check />{doneSubs}/{task.subtasks.length}</span>}
             </span>
           </button>
         </div>
@@ -282,7 +282,7 @@ export function InlineAssignee({ value, onChange, size = 22 }: { value: string |
       {open && (<>
         <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
         <div style={{ position: "fixed", top: pos.top, left: pos.left, width: 176 }} className="z-40 rounded-lg border bg-surface p-1 shadow-xl">
-          <button onClick={(e) => { e.stopPropagation(); onChange(null); setOpen(false); }} className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[15px] text-muted hover:bg-background">Unassigned</button>
+          <button onClick={(e) => { e.stopPropagation(); onChange(null); setOpen(false); }} className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[13px] text-muted hover:bg-background">Unassigned</button>
           {users.map((u) => (
             <button key={u.id} onClick={(e) => { e.stopPropagation(); onChange(u.id); setOpen(false); }} className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[15px] hover:bg-background"><Avatar id={u.id} size={20} /> <span className="min-w-0 flex-1 truncate">{u.name}</span></button>
           ))}
@@ -307,7 +307,7 @@ function InlineComments({ task, onAddComment }: { task: Task; onAddComment: (tas
       {open && (<>
         <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
         <div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", top: pos.top, left: pos.left, width: 320 }} className="z-40 flex max-h-96 flex-col overflow-hidden rounded-xl border bg-surface shadow-xl">
-          <div className="border-b px-3 py-2 text-[13px] font-semibold uppercase tracking-wide text-muted">Comments · {visible.length}</div>
+          <div className="border-b px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Comments · {visible.length}</div>
           <div className="flex-1 space-y-2.5 overflow-y-auto p-3">
             {visible.map((c) => {
               const u = userById(c.authorId);
@@ -363,7 +363,7 @@ export function InlineDue({ value, overdue, recurrence, onChange, onRecurrenceCh
   };
   return (
     <>
-      <button ref={ref} onClick={openIt} className={`inline-flex items-center gap-1 rounded px-1 py-0.5 text-[15px] hover:bg-background ${overdue ? "font-medium text-danger" : "text-muted"}`}>
+      <button ref={ref} onClick={openIt} className={`inline-flex items-center gap-1 rounded px-1 py-0.5 text-[13px] hover:bg-background ${overdue ? "font-medium text-danger" : "text-muted"}`}>
         {value ? friendlyDue(value) : "—"}{recurrence !== "none" && <I.repeat className="text-accent" />}
       </button>
       {open && <DatePopover pos={pos} value={value} recurrence={recurrence} onSelect={(d) => { onChange(d); setOpen(false); }} onRecurrenceChange={onRecurrenceChange} onClose={() => setOpen(false)} />}
@@ -391,11 +391,11 @@ function DatePopover({ pos, value, recurrence, onSelect, onRecurrenceChange, onC
       <div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", top: pos.top, left: pos.left, width: 440 }} className="z-50 flex rounded-xl border bg-surface shadow-xl">
         <div className="w-52 shrink-0 border-r p-1.5">
           {quicks.map(([label, iso]) => (
-            <button key={label} onClick={() => onSelect(iso)} className="flex w-full items-center justify-between gap-3 whitespace-nowrap rounded px-2 py-1.5 text-left text-[15px] hover:bg-background"><span>{label}</span><span className="text-[15px] text-muted">{formatDue(iso)}</span></button>
+            <button key={label} onClick={() => onSelect(iso)} className="flex w-full items-center justify-between gap-3 whitespace-nowrap rounded px-2 py-1.5 text-left text-[15px] hover:bg-background"><span>{label}</span><span className="text-[13px] text-muted">{formatDue(iso)}</span></button>
           ))}
           <button onClick={() => onSelect(null)} className="mt-0.5 w-full rounded px-2 py-1.5 text-left text-[15px] text-danger hover:bg-background">No date</button>
           <div className="mt-1 border-t pt-1.5">
-            <div className="px-2 pb-1 text-[15px] font-semibold uppercase tracking-wide text-muted">Repeat</div>
+            <div className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Repeat</div>
             <select value={recurrence} onClick={(e) => e.stopPropagation()} onChange={(e) => onRecurrenceChange(e.target.value as Recurrence)} className="w-full rounded border bg-background px-1.5 py-1 text-[15px] outline-none">
               {RECURRENCE_ORDER.map((r) => <option key={r} value={r}>{RECURRENCE_LABEL[r]}</option>)}
             </select>
@@ -406,7 +406,7 @@ function DatePopover({ pos, value, recurrence, onSelect, onRecurrenceChange, onC
             <span className="text-[15px] font-semibold">{MO[ym.m]} {ym.y}</span>
             <span className="flex gap-0.5"><button onClick={() => shift(-1)} className="rounded px-1 text-muted hover:bg-background">‹</button><button onClick={() => shift(1)} className="rounded px-1 text-muted hover:bg-background">›</button></span>
           </div>
-          <div className="grid grid-cols-7 gap-0.5 text-center text-[15px] text-muted">{WD.map((w) => <span key={w} className="py-0.5">{w}</span>)}</div>
+          <div className="grid grid-cols-7 gap-0.5 text-center text-[13px] text-muted">{WD.map((w) => <span key={w} className="py-0.5">{w}</span>)}</div>
           <div className="grid grid-cols-7 gap-0.5">
             {cells.map((d, i) => {
               if (d === null) return <span key={i} />;
