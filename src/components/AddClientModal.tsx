@@ -23,6 +23,10 @@ export default function AddClientModal({
   const [sub, setSub] = useState("all");
   const subName = (id: string) => subAccounts.find((s) => s.id === id)?.name ?? "—";
   const subColor = (id: string) => subAccounts.find((s) => s.id === id)?.color ?? "#94a3b8";
+  const ghlUrl = (c: Contact) => {
+    const loc = subAccounts.find((s) => s.id === c.clientId)?.ghlLocationId;
+    return loc && c.ghlContactId ? `https://app.gohighlevel.com/v2/location/${loc}/contacts/detail/${c.ghlContactId}` : null;
+  };
   const ql = q.trim().toLowerCase();
   const list = contacts
     .filter((c) => sub === "all" || c.clientId === sub)
@@ -57,7 +61,9 @@ export default function AddClientModal({
               <div key={c.id} className="flex items-center gap-2.5 rounded-lg px-2 py-2 hover:bg-background">
                 <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: subColor(c.clientId) }} />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[15px] font-medium">{c.name}</div>
+                  {ghlUrl(c)
+                    ? <a href={ghlUrl(c)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="block truncate text-[15px] font-medium text-accent hover:underline">{c.name}</a>
+                    : <div className="truncate text-[15px] font-medium">{c.name}</div>}
                   <div className="truncate text-[15px] text-muted">{c.email || "no email"} · {subName(c.clientId)}</div>
                 </div>
                 <button disabled={added} onClick={() => onAdd(c)} className="shrink-0 rounded-md bg-accent px-2.5 py-1 text-[15px] font-medium text-white disabled:opacity-40">{added ? "Added" : "Add"}</button>

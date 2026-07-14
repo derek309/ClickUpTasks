@@ -1198,10 +1198,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         </nav>
 
         {canAdmin && (
-          <nav className="space-y-0.5 border-t px-2 py-2">
-            <div className="px-2.5 pb-1 pt-0.5 text-[15px] font-semibold uppercase tracking-wide text-muted">Manage</div>
-            <SideItem active={false} onClick={() => { setSettingsOpen(true); setSidebarOpen(false); }}><I.gear className="text-muted" /> <span>Settings</span></SideItem>
-            <SideItem active={false} onClick={() => { setTeamOpen(true); setSidebarOpen(false); }}><I.user className="text-muted" /> <span>Team</span></SideItem>
+          <nav className="flex items-center gap-1 border-t px-3 py-2">
+            <button onClick={() => { setSettingsOpen(true); setSidebarOpen(false); }} title="Settings" className="rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>
+            <button onClick={() => { setTeamOpen(true); setSidebarOpen(false); }} title="Team" className="rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.user /></button>
           </nav>
         )}
 
