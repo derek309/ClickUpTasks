@@ -11,6 +11,7 @@ import {
   timeAgo,
   TODAY,
   TOMORROW,
+  addDaysIso,
   STATUS_META,
   STATUS_ORDER,
   CLIENT_STATUS_META,
@@ -746,15 +747,28 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const filtersActive = filters.status !== "all" || filters.assignee !== "all" || filters.priority !== "all";
   const activeFilterCount = [filters.status !== "all", filters.assignee !== "all", filters.priority !== "all", sortBy !== "due"].filter(Boolean).length;
 
-  // due-date buckets relative to the fixed "today"
-  const weekEnd = (() => { const [y, m, d] = TODAY.split("-").map(Number); const dt = new Date(Date.UTC(y, m - 1, d)); dt.setUTCDate(dt.getUTCDate() + 7); return dt.toISOString().slice(0, 10); })();
-  const dueBucket = (t: Task) => { if (!t.due) return "none"; if (t.due < TODAY && t.status !== "done") return "overdue"; if (t.due === TODAY) return "today"; if (t.due <= weekEnd) return "week"; return "later"; };
+  // due-date buckets relative to the fixed "today" — "This week"/"Next week"
+  // are calendar weeks starting Sunday, not rolling 7-day windows, so the
+  // boundary always falls on a Saturday regardless of what day "today" is.
+  const todayDow = (() => { const [y, m, d] = TODAY.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d)).getUTCDay(); })();
+  const weekStart = addDaysIso(TODAY, -todayDow);
+  const thisWeekEnd = addDaysIso(weekStart, 6);
+  const nextWeekEnd = addDaysIso(weekStart, 13);
+  const dueBucket = (t: Task) => {
+    if (!t.due) return "none";
+    if (t.due < TODAY && t.status !== "done") return "overdue";
+    if (t.due === TODAY) return "today";
+    if (t.due === TOMORROW) return "tomorrow";
+    if (t.due <= thisWeekEnd) return "week";
+    if (t.due <= nextWeekEnd) return "nextWeek";
+    return "later";
+  };
 
   type Grp = { key: string; label: string; color: string; tasks: Task[] };
   const buildGroups = (list: Task[], dim: typeof groupBy = groupBy): Grp[] => {
     if (dim === "status") return STATUS_ORDER.map((s) => ({ key: s, label: STATUS_META[s].label, color: STATUS_META[s].dot, tasks: list.filter((t) => t.status === s) }));
     if (dim === "priority") return PRIORITY_ORDER.map((p) => ({ key: p, label: PRIORITY_META[p].label, color: PRIORITY_META[p].color, tasks: list.filter((t) => t.priority === p) }));
-    if (dim === "due") { const defs: [string, string, string][] = [["overdue", "Overdue", "#ef4444"], ["today", "Today", "#f59e0b"], ["week", "This week", "#3b82f6"], ["later", "Later", "#94a3b8"], ["none", "No due date", "#cbd5e1"]]; return defs.map(([k, l, c]) => ({ key: k, label: l, color: c, tasks: list.filter((t) => dueBucket(t) === k) })); }
+    if (dim === "due") { const defs: [string, string, string][] = [["overdue", "Overdue", "#ef4444"], ["today", "Due today", "#f59e0b"], ["tomorrow", "Due tomorrow", "#eab308"], ["week", "This week", "#3b82f6"], ["nextWeek", "Next week", "#6366f1"], ["later", "Later", "#94a3b8"], ["none", "No due date", "#cbd5e1"]]; return defs.map(([k, l, c]) => ({ key: k, label: l, color: c, tasks: list.filter((t) => dueBucket(t) === k) })); }
     return visibleProjects.map((p) => ({ key: p.id, label: p.name, color: clientById(p.clientId)?.color ?? "#94a3b8", tasks: list.filter((t) => t.projectId === p.id) }));
   };
 
