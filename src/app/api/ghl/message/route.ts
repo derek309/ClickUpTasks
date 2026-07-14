@@ -25,12 +25,13 @@ const GHL = "https://services.leadconnectorhq.com";
 export async function POST(req: NextRequest) {
   if (!(await requireUser(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const b = await req.json().catch(() => ({} as any));
-  const { locationId, ghlContactId, channel, subject, body } = b as {
+  const { locationId, ghlContactId, channel, subject, body, attachments } = b as {
     locationId?: string;
     ghlContactId?: string;
     channel?: string;
     subject?: string;
     body?: string;
+    attachments?: string[]; // publicly-fetchable URLs — GHL fetches these itself, not a file upload
   };
 
   if (!locationId || !ghlContactId || !body?.trim())
@@ -40,9 +41,10 @@ export async function POST(req: NextRequest) {
   if (!token)
     return NextResponse.json({ error: "No GoHighLevel token configured for this sub-account yet." }, { status: 501 });
 
+  const attachmentUrls = attachments?.length ? attachments : undefined;
   const payload = channel === "sms"
-    ? { type: "SMS", contactId: ghlContactId, message: body }
-    : { type: "Email", contactId: ghlContactId, subject: (subject || "").slice(0, 200), html: body };
+    ? { type: "SMS", contactId: ghlContactId, message: body, ...(attachmentUrls ? { attachments: attachmentUrls } : {}) }
+    : { type: "Email", contactId: ghlContactId, subject: (subject || "").slice(0, 200), html: body, ...(attachmentUrls ? { attachments: attachmentUrls } : {}) };
 
   try {
     const res = await fetch(`${GHL}/conversations/messages`, {

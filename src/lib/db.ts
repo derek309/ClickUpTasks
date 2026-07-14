@@ -36,8 +36,8 @@ export { titleCase };
 const clientToRow = (c: Client) => ({ id: c.id, name: c.name, color: c.color, ghl_location_id: c.ghlLocationId, status: c.status ?? "lead", type: c.type ?? "client", assigned_to: c.assignedTo ?? [], linked_contact_id: c.linkedContactId ?? null });
 export const rowToClient = (r: any): Client => ({ id: r.id, name: titleCase(r.name), color: r.color, ghlLocationId: r.ghl_location_id ?? "", status: (r.status as Client["status"]) ?? "lead", type: (r.type as Client["type"]) ?? "client", assignedTo: r.assigned_to ?? [], linkedContactId: r.linked_contact_id ?? null });
 
-const contactToRow = (c: Contact) => ({ id: c.id, client_id: c.clientId, name: c.name, email: c.email, ghl_contact_id: c.ghlContactId, company_name: c.company ?? null, city: c.city ?? null, state: c.state ?? null });
-const rowToContact = (r: any): Contact => ({ id: r.id, clientId: r.client_id, name: titleCase(r.name), email: r.email ?? "", ghlContactId: r.ghl_contact_id ?? "", company: r.company_name ?? "", city: r.city ?? "", state: r.state ?? "" });
+const contactToRow = (c: Contact) => ({ id: c.id, client_id: c.clientId, name: c.name, email: c.email, phone: c.phone ?? null, ghl_contact_id: c.ghlContactId, company_name: c.company ?? null, city: c.city ?? null, state: c.state ?? null });
+const rowToContact = (r: any): Contact => ({ id: r.id, clientId: r.client_id, name: titleCase(r.name), email: r.email ?? "", phone: r.phone ?? "", ghlContactId: r.ghl_contact_id ?? "", company: r.company_name ?? "", city: r.city ?? "", state: r.state ?? "" });
 
 const projectToRow = (p: Project) => ({ id: p.id, client_id: p.clientId, name: p.name, description: p.description });
 const rowToProject = (r: any): Project => ({ id: r.id, clientId: r.client_id, name: r.name, description: r.description ?? "" });
@@ -89,12 +89,13 @@ const rowToTaskTemplate = (r: any): TaskTemplate => ({ id: r.id, name: r.name, c
 const messageToRow = (m: Message) => ({
   id: m.id, contact_id: m.contactId, client_id: m.clientId, channel: m.channel, direction: m.direction,
   subject: m.subject, body: m.body, ghl_message_id: m.ghlMessageId, created_by: m.createdBy, read: m.read,
+  attachments: m.attachments,
 });
 export const rowToMessage = (r: any): Message => ({
   id: r.id, contactId: r.contact_id, clientId: r.client_id, channel: (r.channel as MessageChannel) ?? "email",
   direction: r.direction as MessageDirection, subject: r.subject ?? null, body: r.body ?? "",
   ghlMessageId: r.ghl_message_id ?? null, createdBy: r.created_by ?? null, at: r.created_at,
-  read: r.read ?? true,
+  read: r.read ?? true, attachments: r.attachments ?? [],
 });
 
 // --- load + seed ------------------------------------------------------------

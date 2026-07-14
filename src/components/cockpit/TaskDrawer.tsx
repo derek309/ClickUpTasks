@@ -11,7 +11,7 @@ import { I, Avatar, Row, CollapsibleText, FileBadge, newId } from "./ui";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 import { InlineAssignee, InlineDue } from "./GroupedList";
 
-export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, isQueued, onToggleQueue, onCopyLink, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onSendTaskMessage, sendingMessage }: {
+export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, isQueued, onToggleQueue, onCopyLink, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, linkedContactInfo, onUploadMessageImage, onSendTaskMessage, sendingMessage }: {
   task: Task; comment: string; setComment: (v: string) => void;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; navTasks: Task[]; onOpenTask: (id: string) => void; onAddSibling: (title: string) => void; onPrev: () => void; onNext: () => void;
@@ -21,12 +21,15 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   onCopyAttachmentLink: (path: string) => void;
   onGetSignedUrl: (path: string) => Promise<string | null>;
   messages?: Message[] | null; // this task's linked contact's email/SMS history, merged into the Activity feed
-  onSendTaskMessage?: (channel: MessageChannel, subject: string, body: string) => void;
+  linkedContactInfo?: Contact | null; // authoritative send target (matches what onSendTaskMessage actually resolves) — shown as "Sending to" in the SMS/Email composer
+  onUploadMessageImage?: (file: File) => Promise<Attachment | null>;
+  onSendTaskMessage?: (channel: MessageChannel, subject: string, body: string, attachments?: Attachment[]) => void;
   sendingMessage?: boolean;
 }) {
   const client = clientById(task.clientId)!;
   const project = projectById(task.projectId)!;
   const linkedContact = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId);
+  const messageDest = linkedContactInfo ?? linkedContact;
   const ghlSub = linkedContact ? clientById(linkedContact.clientId) : null;
   const ghlContactUrl = linkedContact && ghlSub?.ghlLocationId ? `https://app.gohighlevel.com/v2/location/${ghlSub.ghlLocationId}/contacts/detail/${linkedContact.ghlContactId}` : null;
   const [subDraft, setSubDraft] = useState("");
@@ -46,6 +49,23 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const [copied, setCopied] = useState(false);
   const [msgSubject, setMsgSubject] = useState("");
   const [msgBody, setMsgBody] = useState("");
+  const [pendingMsgAtts, setPendingMsgAtts] = useState<Attachment[]>([]);
+  const [uploadingMsgAtt, setUploadingMsgAtt] = useState(false);
+  const handleMsgPaste = async (e: React.ClipboardEvent) => {
+    if (!onUploadMessageImage) return;
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const images: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind === "file" && item.type.startsWith("image/")) { const f = item.getAsFile(); if (f) images.push(f); }
+    }
+    if (images.length === 0) return;
+    e.preventDefault();
+    setUploadingMsgAtt(true);
+    for (const f of images) { const att = await onUploadMessageImage(f); if (att) setPendingMsgAtts((a) => [...a, att]); }
+    setUploadingMsgAtt(false);
+  };
   // Merged into the Activity panel as a 3-way switcher rather than its own
   // block in the document body — messaging the contact and the internal
   // comment thread are both "activity on this task", just different
@@ -53,11 +73,24 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   // state, so there's one source of truth for what Send will do.
   const [rightTab, setRightTab] = useState<"activity" | "sms" | "email">("activity");
   const submitTaskMessage = () => {
-    if (!msgBody.trim() || !onSendTaskMessage || rightTab === "activity") return;
-    onSendTaskMessage(rightTab, msgSubject, msgBody.trim());
-    setMsgSubject(""); setMsgBody("");
+    if ((!msgBody.trim() && pendingMsgAtts.length === 0) || !onSendTaskMessage || rightTab === "activity") return;
+    onSendTaskMessage(rightTab, msgSubject, msgBody.trim(), pendingMsgAtts.length ? pendingMsgAtts : undefined);
+    setMsgSubject(""); setMsgBody(""); setPendingMsgAtts([]);
     setRightTab("activity"); // so the send is immediately visible in the feed
   };
+  // Rough SMS segment estimate, matching how carriers actually bill: GSM-7
+  // encoding (plain ASCII + a handful of accented/Greek chars) fits 160
+  // chars in one segment or 153 per segment once concatenated across
+  // multiple; anything outside that set (emoji, curly quotes, etc.) forces
+  // UCS-2 encoding at 70/67 chars instead.
+  const GSM7_RE = /^[A-Za-z0-9 \r\n@£$¥èéùìòÇØøÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ!"#¤%&'()*+,\-./:;<=>?¡ÄÖÑÜ§¿äöñüà^{}\\[~\]|€]*$/;
+  const smsSegments = (text: string): { count: number; encoding: string } => {
+    if (!text) return { count: 0, encoding: "GSM-7" };
+    const isGsm = GSM7_RE.test(text);
+    const [single, multi] = isGsm ? [160, 153] : [70, 67];
+    return { count: text.length <= single ? 1 : Math.ceil(text.length / multi), encoding: isGsm ? "GSM-7" : "Unicode" };
+  };
+  const wordCount = (text: string) => (text.trim() ? text.trim().split(/\s+/).length : 0);
   const [attSort, setAttSort] = useState<"added" | "name" | "type">("added");
   const [previewAtt, setPreviewAtt] = useState<Attachment | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -67,6 +100,13 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     if (att.path) setPreviewUrl(await onGetSignedUrl(att.path));
   };
   const fileRef = useRef<HTMLInputElement>(null);
+  const msgFileRef = useRef<HTMLInputElement>(null);
+  const handleMsgFileSelect = async (files: FileList | null) => {
+    if (!files || !onUploadMessageImage) return;
+    setUploadingMsgAtt(true);
+    for (const f of Array.from(files)) { const att = await onUploadMessageImage(f); if (att) setPendingMsgAtts((a) => [...a, att]); }
+    setUploadingMsgAtt(false);
+  };
 
   // Resizable Activity column (full-page mode): drag its left edge; width
   // persists per browser.
@@ -239,26 +279,49 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   // a proper subject-then-body layout. Sending flips back to the Activity
   // tab (see submitTaskMessage) so the send is visible immediately.
   const hasMessaging = !!(linkedContact && onSendTaskMessage);
+  const msgAttBar = (pendingMsgAtts.length > 0 || uploadingMsgAtt) && (
+    <div className="mb-2 flex shrink-0 flex-wrap items-center gap-1.5">
+      <AttachmentThumbs items={pendingMsgAtts} onRemove={(id) => setPendingMsgAtts((a) => a.filter((x) => x.id !== id))} />
+      {uploadingMsgAtt && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" />}
+    </div>
+  );
+  const msgAttachButton = onUploadMessageImage && (<>
+    <button onClick={() => msgFileRef.current?.click()} title="Attach an image" className="rounded-md p-1.5 text-muted hover:bg-background hover:text-foreground"><I.clip /></button>
+    <input ref={msgFileRef} type="file" multiple accept="image/*" className="hidden" onChange={(e) => { handleMsgFileSelect(e.target.files); e.target.value = ""; }} />
+  </>);
+  const smsSeg = smsSegments(msgBody);
   const smsComposerBlock = hasMessaging ? (
     <div className="flex flex-1 flex-col border-t bg-surface p-3">
-      <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)}
+      <div className="mb-2 shrink-0 text-[13px] text-muted">Sending to: <span className="font-medium text-foreground">{messageDest?.phone || "no phone on file"}</span></div>
+      {msgAttBar}
+      <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)} onPaste={handleMsgPaste}
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitTaskMessage(); } }}
-        placeholder="Write a text… (Enter to send)"
+        placeholder="Write a text… (Enter to send, paste to attach an image)"
         className="min-h-[140px] w-full flex-1 resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
-      <div className="mt-2 flex shrink-0 justify-end">
-        <button onClick={submitTaskMessage} disabled={!msgBody.trim() || sendingMessage} className="rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send text"}</button>
+      <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
+        <span className="text-[13px] text-muted">{wordCount(msgBody)} word{wordCount(msgBody) === 1 ? "" : "s"} · {smsSeg.count} segment{smsSeg.count === 1 ? "" : "s"}{smsSeg.count > 0 ? ` (${smsSeg.encoding})` : ""}</span>
+        <span className="flex items-center gap-1.5">
+          {msgAttachButton}
+          <button onClick={submitTaskMessage} disabled={(!msgBody.trim() && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send text"}</button>
+        </span>
       </div>
     </div>
   ) : null;
   const emailComposerBlock = hasMessaging ? (
     <div className="flex flex-1 flex-col border-t bg-surface p-3">
+      <div className="mb-2 shrink-0 text-[13px] text-muted">Sending to: <span className="font-medium text-foreground">{messageDest?.email || "no email on file"}</span></div>
       <input value={msgSubject} onChange={(e) => setMsgSubject(e.target.value)} placeholder="Subject"
         className="mb-2 w-full shrink-0 rounded-lg border bg-background px-3 py-2 text-[15px] font-medium outline-none placeholder:text-muted focus:border-accent" />
-      <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)}
-        placeholder="Write an email…"
+      {msgAttBar}
+      <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)} onPaste={handleMsgPaste}
+        placeholder="Write an email… (paste to attach an image)"
         className="min-h-[220px] w-full flex-1 resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
-      <div className="mt-2 flex shrink-0 justify-end">
-        <button onClick={submitTaskMessage} disabled={!msgBody.trim() || sendingMessage} className="rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send email"}</button>
+      <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
+        <span className="text-[13px] text-muted">{wordCount(msgBody)} word{wordCount(msgBody) === 1 ? "" : "s"}</span>
+        <span className="flex items-center gap-1.5">
+          {msgAttachButton}
+          <button onClick={submitTaskMessage} disabled={(!msgBody.trim() && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send email"}</button>
+        </span>
       </div>
     </div>
   ) : null;
@@ -443,6 +506,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               </div>
               {m.subject && <div className="mt-1 text-[15px] font-medium">{m.subject}</div>}
               <CollapsibleText text={m.body} className="mt-1 text-[15px]" />
+              {m.attachments && m.attachments.length > 0 && <div className="mt-1.5"><AttachmentThumbs items={m.attachments} onOpen={onDownloadFile} /></div>}
             </div>
           );
         }

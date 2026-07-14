@@ -159,6 +159,7 @@ export interface Contact {
   clientId: string;
   name: string;
   email: string;
+  phone?: string; // GHL phone — shown as the SMS send target in the task drawer
   ghlContactId: string;
   company?: string; // GHL companyName — shown alongside the name in search
   city?: string; // GHL address fields — power the territory dashboard's city/state match
@@ -232,6 +233,7 @@ export interface Message {
    * inserted already read; inbound rows start unread until someone opens that
    * conversation — see the Conversations inbox in Cockpit.tsx. */
   read: boolean;
+  attachments: Attachment[];
 }
 
 /** Our own grouping layer — GHL has no concept of this. */

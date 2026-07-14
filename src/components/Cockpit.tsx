@@ -1085,7 +1085,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // "outbound" half of the Chat tab's Messages view; the webhook (see
   // src/app/api/ghl/webhook/route.ts) covers inbound replies, so together
   // the two capture a full two-way conversation with no gap and no polling.
-  const sendMessage = async (clientId: string, channel: MessageChannel, subject: string, body: string) => {
+  const sendMessage = async (clientId: string, channel: MessageChannel, subject: string, body: string, attachments: Attachment[] = []) => {
     if (!body.trim()) return;
     const contact = contactForClient(clientId);
     if (!contact) { pushToast("This client isn't linked to a GHL contact yet."); return; }
@@ -1093,9 +1093,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!target) { pushToast("No GoHighLevel connection for this client's sub-account."); return; }
     setSendingMessage(true);
     try {
+      // GHL fetches attachments itself from a URL rather than accepting an
+      // upload — an hour is ample time for that fetch, without leaving the
+      // private bucket's contents reachable indefinitely.
+      const attachmentUrls = (await Promise.all(attachments.filter((a) => a.path).map((a) => signedUrlForFile(a.path!, 60 * 60)))).filter((u): u is string => !!u);
       const res = await authedFetch("/api/ghl/message", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ locationId: target.locationId, ghlContactId: target.ghlContactId, channel, subject: channel === "email" ? subject : undefined, body }),
+        body: JSON.stringify({ locationId: target.locationId, ghlContactId: target.ghlContactId, channel, subject: channel === "email" ? subject : undefined, body, attachments: attachmentUrls }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) { pushToast(j.error || "Failed to send message."); return; }
@@ -1103,6 +1107,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         id: newId("msg_"), contactId: contact.id, clientId, channel, direction: "outbound",
         subject: channel === "email" && subject.trim() ? subject.trim() : null, body,
         ghlMessageId: j.ghlMessageId ?? null, createdBy: me.id, at: new Date().toISOString(), read: true,
+        attachments,
       };
       setMessages((ms) => [...ms, m]);
       insertMessage(m);
@@ -1860,7 +1865,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={orderedTaskIds.length} navTasks={orderedTaskIds.map((id) => tasks.find((t) => t.id === id)).filter((t): t is Task => !!t)} onOpenTask={setOpenTaskId} onAddSibling={(title) => addTaskToList(openTask.clientId, openTask.projectId, openTask.private, title)} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(attachments) => addComment(openTask.id, comment, attachments)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...clientList].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} isQueued={claudeQueue.has(openTask.id)} onToggleQueue={() => toggleClaudeQueue(openTask.id)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id })} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={(() => { const ct = contactForClient(openTask.clientId); return ct ? messages.filter((m) => m.contactId === ct.id) : null; })()} onSendTaskMessage={(channel, subject, body) => sendMessage(openTask.clientId, channel, subject, body)} sendingMessage={sendingMessage} />
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...clientList].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} isQueued={claudeQueue.has(openTask.id)} onToggleQueue={() => toggleClaudeQueue(openTask.id)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id })} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={(() => { const ct = contactForClient(openTask.clientId); return ct ? messages.filter((m) => m.contactId === ct.id) : null; })()} linkedContactInfo={contactForClient(openTask.clientId)} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={(channel, subject, body, attachments) => sendMessage(openTask.clientId, channel, subject, body, attachments)} sendingMessage={sendingMessage} />
       )}
 
       {teamOpen && <TeamPanel me={me} onClose={() => setTeamOpen(false)} />}
