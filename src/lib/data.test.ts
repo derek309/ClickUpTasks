@@ -9,6 +9,7 @@ import {
   setUsers,
   users,
   clientHealth,
+  normalizeState,
   TODAY,
   type User,
   type Task,
@@ -191,5 +192,22 @@ describe("clientHealth", () => {
   it("only considers tasks belonging to the given client", () => {
     const tasks = [mkTask({ clientId: "cl_other", due: "2000-01-01", status: "todo" })];
     expect(clientHealth("cl_a", tasks)).toBe("calm");
+  });
+});
+
+describe("normalizeState", () => {
+  it("maps a full state name to its 2-letter abbreviation", () => {
+    expect(normalizeState("California")).toBe("CA");
+  });
+  it("is case-insensitive on the full name", () => {
+    expect(normalizeState("california")).toBe("CA");
+    expect(normalizeState("CALIFORNIA")).toBe("CA");
+  });
+  it("uppercases an already-abbreviated state", () => {
+    expect(normalizeState("ca")).toBe("CA");
+    expect(normalizeState("CA")).toBe("CA");
+  });
+  it("passes through unrecognized values uppercased, rather than throwing", () => {
+    expect(normalizeState("Dallas")).toBe("DALLAS");
   });
 });

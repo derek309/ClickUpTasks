@@ -6,7 +6,7 @@
 // vs "unclaimed" (still just a raw synced contact). Reuses the existing client
 // status funnel for pipeline stage instead of a second, parallel state.
 import { useState } from "react";
-import { users, clientStatusMeta, type Me, type Territory, type Contact, type Client } from "@/lib/data";
+import { users, clientStatusMeta, normalizeState, type Me, type Territory, type Contact, type Client } from "@/lib/data";
 import { I, Avatar } from "./cockpit/ui";
 
 export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onAssignTerritory, onDeleteTerritory, onAddContact, onOpenClient, onClose }: {
@@ -77,7 +77,8 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
             </div>
           )}
           {visible.map((t) => {
-            const matched = contacts.filter((c) => (c.city ?? "").trim().toLowerCase() === t.city.toLowerCase() && (c.state ?? "").trim().toLowerCase() === t.state.toLowerCase());
+            const territoryState = normalizeState(t.state);
+            const matched = contacts.filter((c) => (c.city ?? "").trim().toLowerCase() === t.city.toLowerCase() && c.state && normalizeState(c.state) === territoryState);
             const unclaimed = matched.filter((c) => !clientIds.has("cl_" + c.id));
             const claimed = matched.filter((c) => clientIds.has("cl_" + c.id));
             const open = expanded.has(t.id);
