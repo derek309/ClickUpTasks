@@ -100,7 +100,18 @@ export interface ClientLink {
   label: string;
   url: string;
   position: number;
+  color: string;
 }
+
+// A fixed, visually-distinct palette for quick links — assigned at random on
+// creation so a client's link bar reads at a glance instead of every chip
+// looking identical, and re-pickable from the same set via a color selector.
+export const LINK_COLORS = [
+  "#ef4444", "#f97316", "#f59e0b", "#84cc16", "#22c55e",
+  "#14b8a6", "#06b6d4", "#3b82f6", "#6366f1", "#8b5cf6",
+  "#d946ef", "#ec4899",
+];
+export const randomLinkColor = () => LINK_COLORS[Math.floor(Math.random() * LINK_COLORS.length)];
 
 export type NoteType = "meeting" | "content" | "contact" | "deliverable" | "note";
 export const NOTE_TYPE_META: Record<NoteType, { label: string; color: string }> = {

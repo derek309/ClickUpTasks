@@ -23,6 +23,7 @@ import {
   PRIORITY_ORDER,
   type Task,
   type TaskStatus,
+  type Priority,
   type Subtask,
   type Client,
   type Project,
@@ -758,7 +759,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const t: Task = {
       id: newId("t_"), projectId, clientId: activeClient, title: title.trim(), description: "",
       status: groupBy === "status" ? (groupKey as TaskStatus) : "todo",
-      priority: "none",
+      // Conversation is auto-created-only (see PRIORITY_META doc comment in
+      // data.ts) — a quick-add inside that group still lands as "none"
+      // rather than manually assigning the reserved tier.
+      priority: groupBy === "priority" && groupKey !== "conversation" ? (groupKey as Priority) : "none",
       assigneeId: me.id,
       contactId: activeClient.slice(3),
       due: groupBy === "due" && groupKey === "today" ? TODAY : null,
@@ -1222,7 +1226,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   };
 
   // --- client links -----------------------------------------------------
-  const saveLink = (clientId: string, initial: ClientLink | undefined, v: { label: string; url: string; groupLabel: string }) => {
+  const saveLink = (clientId: string, initial: ClientLink | undefined, v: { label: string; url: string; groupLabel: string; color: string }) => {
     if (initial) {
       const updated: ClientLink = { ...initial, ...v };
       setClientLinks((ls) => ls.map((l) => (l.id === initial.id ? updated : l)));
@@ -1326,7 +1330,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[15px] transition ${on ? "bg-accent-soft font-medium text-accent" : "text-foreground hover:bg-background"}`}>
                   <I.folder className="shrink-0 opacity-70" />
                   <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                  <span className="shrink-0 text-[13px] tabular-nums text-muted">{pg.done}/{pg.total}</span>
+                  {/* Open count, not done/total — matches the client rows'
+                      convention and what the list actually shows by default
+                      (hideDone is on unless toggled off in Filter & view). */}
+                  <span className="shrink-0 text-[13px] tabular-nums text-muted">{pg.total - pg.done}</span>
                 </button>
               );
             })}
@@ -1423,7 +1430,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                             className={`flex w-full items-center gap-2 rounded-md py-1 pl-2 pr-1 text-left text-[13px] transition ${on ? "bg-accent-soft font-medium text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>
                             <I.folder className="shrink-0 opacity-70" />
                             <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                            <span className="shrink-0 tabular-nums opacity-70">{pg.done}/{pg.total}</span>
+                            {/* Open count, not done/total — see workspaceProjects badge above. */}
+                            <span className="shrink-0 tabular-nums opacity-70">{pg.total - pg.done}</span>
                             {canAdmin && (
                               <span onClick={(e) => { e.stopPropagation(); setMenuProjectId(menuProjectId === p.id ? null : p.id); }}
                                 className="rounded p-0.5 opacity-0 hover:bg-background hover:text-foreground group-hover/prow:opacity-100"><I.dots /></span>
@@ -1712,7 +1720,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       {promptDialog && <PromptModal {...promptDialog} onCancel={() => setPromptDialog(null)} />}
       {linkModal && activeClient !== "all" && (
         <LinkFormModal
-          initial={linkModal.initial ? { label: linkModal.initial.label, url: linkModal.initial.url, groupLabel: linkModal.initial.groupLabel } : undefined}
+          initial={linkModal.initial ? { label: linkModal.initial.label, url: linkModal.initial.url, groupLabel: linkModal.initial.groupLabel, color: linkModal.initial.color } : undefined}
           onSubmit={(v) => saveLink(activeClient, linkModal.initial, v)}
           onCancel={() => setLinkModal(null)}
         />

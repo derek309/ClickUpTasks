@@ -2,6 +2,7 @@
 
 // Styled in-app replacements for window.confirm()/prompt().
 import { useEffect, useRef, useState } from "react";
+import { LINK_COLORS, randomLinkColor } from "@/lib/data";
 
 export type ConfirmSpec = { title: string; message: string; confirmLabel?: string; danger?: boolean; onConfirm: () => void };
 export function ConfirmModal({ title, message, confirmLabel = "Confirm", danger = true, onConfirm, onCancel }: ConfirmSpec & { onCancel: () => void }) {
@@ -49,14 +50,17 @@ export function PromptModal({ title, label, initial = "", placeholder, confirmLa
   );
 }
 
-export type LinkFormSpec = { initial?: { label: string; url: string; groupLabel: string }; onSubmit: (v: { label: string; url: string; groupLabel: string }) => void };
+export type LinkFormSpec = { initial?: { label: string; url: string; groupLabel: string; color: string }; onSubmit: (v: { label: string; url: string; groupLabel: string; color: string }) => void };
 export function LinkFormModal({ initial, onSubmit, onCancel }: LinkFormSpec & { onCancel: () => void }) {
   const [label, setLabel] = useState(initial?.label ?? "");
   const [url, setUrl] = useState(initial?.url ?? "");
   const [groupLabel, setGroupLabel] = useState(initial?.groupLabel ?? "");
+  // New links get a random color so a link bar doesn't render as a wall of
+  // identical chips; editing an existing link keeps its color unless changed.
+  const [color, setColor] = useState(initial?.color ?? randomLinkColor());
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => { ref.current?.focus(); ref.current?.select(); }, []);
-  const submit = () => { if (label.trim() && url.trim()) onSubmit({ label: label.trim(), url: url.trim(), groupLabel: groupLabel.trim() }); };
+  const submit = () => { if (label.trim() && url.trim()) onSubmit({ label: label.trim(), url: url.trim(), groupLabel: groupLabel.trim(), color }); };
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/30" onClick={onCancel} />
@@ -71,6 +75,14 @@ export function LinkFormModal({ initial, onSubmit, onCancel }: LinkFormSpec & { 
         <label className="mt-3 block text-[13px] font-medium text-muted">Group (optional)</label>
         <input value={groupLabel} onChange={(e) => setGroupLabel(e.target.value)} placeholder="Launch" onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") onCancel(); }}
           className="mt-1 w-full rounded-md border bg-background px-3 py-1.5 text-[15px] outline-none focus:border-accent" />
+        <label className="mt-3 block text-[13px] font-medium text-muted">Color</label>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {LINK_COLORS.map((c) => (
+            <button key={c} type="button" onClick={() => setColor(c)} title={c}
+              className={`h-6 w-6 shrink-0 rounded-full transition ${color === c ? "ring-2 ring-offset-2 ring-offset-surface" : "hover:scale-110"}`}
+              style={{ background: c, ...(color === c ? { ["--tw-ring-color" as string]: c } : {}) }} />
+          ))}
+        </div>
         <div className="mt-4 flex justify-end gap-2">
           <button onClick={onCancel} className="rounded-md border px-3 py-1.5 text-[15px] font-medium hover:bg-background">Cancel</button>
           <button onClick={submit} disabled={!label.trim() || !url.trim()} className="rounded-md bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{initial ? "Save" : "Add link"}</button>

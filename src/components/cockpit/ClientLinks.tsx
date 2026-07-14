@@ -50,8 +50,9 @@ export function QuickLinksBar({ links, canEdit, onEdit, onDelete, onReorder }: {
             <span key={l.id} className={`group/link relative inline-flex items-center ${dragId === l.id ? "opacity-40" : ""}`}
               draggable={canEdit} onDragStart={() => setDragId(l.id)} onDragOver={(e) => canEdit && e.preventDefault()} onDrop={(e) => { e.preventDefault(); drop(l.id); }}>
               <a href={l.url} target="_blank" rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[13px] font-medium text-foreground hover:bg-background">
-                <I.link className="text-muted" /> {l.label}
+                className="inline-flex items-center gap-1.5 rounded-md border-l-[3px] border-y border-r px-2.5 py-1 text-[13px] font-medium text-foreground hover:bg-background"
+                style={{ borderLeftColor: l.color }}>
+                <span style={{ color: l.color }}><I.link /></span> {l.label}
               </a>
               {canEdit && (
                 <div className="relative">
