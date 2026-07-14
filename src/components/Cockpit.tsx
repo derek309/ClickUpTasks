@@ -289,6 +289,26 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setSidebarOpen((o) => !o); // mobile overlay uses the same button
   };
 
+  // Which of the 5 top nav items (Inbox/All tasks/My Work/My Clients/
+  // Personal) each person wants visible — personal display preference, not
+  // an admin setting, so every role can customize their own sidebar.
+  const NAV_ITEM_LABELS: Record<string, string> = { inbox: "Inbox", all: "All tasks", work: "My Work", clients: "My Clients", personal: "Personal" };
+  const [navVisible, setNavVisible] = useState<Record<string, boolean>>({ inbox: true, all: true, work: true, clients: true, personal: true });
+  const [navMenuOpen, setNavMenuOpen] = useState(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("cut_navVisible");
+      if (raw) setNavVisible((v) => ({ ...v, ...JSON.parse(raw) }));
+    } catch {}
+  }, []);
+  const toggleNavItem = (key: string) => {
+    setNavVisible((v) => {
+      const next = { ...v, [key]: !v[key] };
+      try { localStorage.setItem("cut_navVisible", JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+
   useEffect(() => {
     (async () => {
       try {
@@ -1257,14 +1277,28 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         <div className="flex shrink-0 items-center gap-2.5 px-4 py-4">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-[15px] font-bold text-white">CT</span>
           <div className="leading-tight"><div className="font-semibold">ClickUpTasks</div><div className="text-[15px] text-muted">GHL Task Cockpit</div></div>
+          <span className="relative ml-auto">
+            <button onClick={() => setNavMenuOpen((o) => !o)} title="Show/hide sidebar items" className="rounded p-1 text-muted hover:bg-background hover:text-foreground"><I.list className="h-3.5 w-3.5" /></button>
+            {navMenuOpen && (<>
+              <div className="fixed inset-0 z-30" onClick={() => setNavMenuOpen(false)} />
+              <div className="absolute right-0 top-full z-40 mt-1 w-48 rounded-lg border border-white/15 bg-[#2c3140] p-1 shadow-2xl">
+                {Object.entries(NAV_ITEM_LABELS).map(([key, label]) => (
+                  <button key={key} onClick={() => toggleNavItem(key)} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-white/10">
+                    <span className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm border ${navVisible[key] ? "border-accent bg-accent" : "border-white/30"}`}>{navVisible[key] && <I.check className="h-2.5 w-2.5 text-white" />}</span>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </>)}
+          </span>
         </div>
 
         <nav className="shrink-0 space-y-0.5 px-2">
-          <SideItem active={inboxView} onClick={() => { setInboxView(true); setMyWork(false); setMyClientsView(false); setPersonalView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.bell className="text-muted" /> <span>Inbox</span>{unread > 0 && <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{unread}</span>}</SideItem>
-          <SideItem active={!myWork && !myClientsView && !personalView && !inboxView && activeClient === "all"} onClick={() => { setMyWork(false); setMyClientsView(false); setPersonalView(false); setInboxView(false); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>All tasks</span><span className="ml-auto text-[15px] text-muted">{scopedTasks.filter((t) => t.clientId.startsWith("cl_")).length}</span></SideItem>
-          <SideItem active={myWork} onClick={() => { setMyWork(true); setMyClientsView(false); setPersonalView(false); setInboxView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.inbox className="text-muted" /> <span>My Work</span></SideItem>
-          <SideItem active={myClientsView} onClick={() => { setMyClientsView(true); setMyWork(false); setPersonalView(false); setInboxView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.user className="text-muted" /> <span>My Clients</span><span className="ml-auto text-[15px] text-muted">{myAssignedClients.length}</span></SideItem>
-          <SideItem active={personalView} onClick={() => { setPersonalView(true); setMyWork(false); setMyClientsView(false); setInboxView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[15px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>
+          {navVisible.inbox && <SideItem active={inboxView} onClick={() => { setInboxView(true); setMyWork(false); setMyClientsView(false); setPersonalView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.bell className="text-muted" /> <span>Inbox</span>{unread > 0 && <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{unread}</span>}</SideItem>}
+          {navVisible.all && <SideItem active={!myWork && !myClientsView && !personalView && !inboxView && activeClient === "all"} onClick={() => { setMyWork(false); setMyClientsView(false); setPersonalView(false); setInboxView(false); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>All tasks</span><span className="ml-auto text-[15px] text-muted">{scopedTasks.filter((t) => t.clientId.startsWith("cl_")).length}</span></SideItem>}
+          {navVisible.work && <SideItem active={myWork} onClick={() => { setMyWork(true); setMyClientsView(false); setPersonalView(false); setInboxView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.inbox className="text-muted" /> <span>My Work</span></SideItem>}
+          {navVisible.clients && <SideItem active={myClientsView} onClick={() => { setMyClientsView(true); setMyWork(false); setPersonalView(false); setInboxView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.user className="text-muted" /> <span>My Clients</span><span className="ml-auto text-[15px] text-muted">{myAssignedClients.length}</span></SideItem>}
+          {navVisible.personal && <SideItem active={personalView} onClick={() => { setPersonalView(true); setMyWork(false); setMyClientsView(false); setInboxView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[15px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>}
         </nav>
 
         {clients.some((c) => c.id === WORKSPACE_CLIENT_ID) && (<>
