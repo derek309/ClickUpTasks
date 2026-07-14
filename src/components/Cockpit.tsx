@@ -677,6 +677,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!title.trim() || !activeClient.startsWith("cl_")) return;
     let projectId: string;
     if (groupBy === "project") projectId = groupKey;
+    // Scoped to one project? Add straight into it — otherwise the task lands in
+    // some other project of this client and vanishes from the filtered view.
+    else if (activeProject) projectId = activeProject;
     else {
       const existing = projects.find((p) => p.clientId === activeClient);
       if (existing) projectId = existing.id;
