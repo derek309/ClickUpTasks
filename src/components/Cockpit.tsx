@@ -1279,7 +1279,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // task is quietly unlinked rather than deleted remotely: the old link
   // points at the wrong contact once moved, but the task on GHL's side is
   // still real work someone may be tracking there — not ours to delete.
-  const moveTaskToClient = (taskId: string, newClientId: string) => {
+  const moveTaskToClient = (taskId: string, newClientId: string, silent?: boolean) => {
     const t = tasks.find((x) => x.id === taskId);
     if (!t || t.clientId === newClientId) return;
     let projectId = projects.find((p) => p.clientId === newClientId)?.id;
@@ -1296,7 +1296,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       contactId: newClientId.startsWith("cl_") ? newClientId.slice(3) : null,
       ghlTaskId: null,
     });
-    pushToast(`Moved to ${clientById(newClientId)?.name ?? "client"}${wasLinked ? " — unlinked from GoHighLevel" : ""}`);
+    if (!silent) pushToast(`Moved to ${clientById(newClientId)?.name ?? "client"}${wasLinked ? " — unlinked from GoHighLevel" : ""}`);
+  };
+  // Bulk version of the above — moves every selected task in one pass with a
+  // single summary toast instead of one per task.
+  const bulkMoveToClient = (clientId: string) => {
+    const ids = [...selectedTaskIds];
+    ids.forEach((id) => moveTaskToClient(id, clientId, true));
+    pushToast(`Moved ${ids.length} task${ids.length === 1 ? "" : "s"} to ${clientById(clientId)?.name ?? "client"}`);
   };
   const renameProject = (id: string) => {
     const p = projectById(id);
@@ -1811,6 +1818,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ status: e.target.value as TaskStatus }); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Status…</option>{STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}</select>
           <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ priority: e.target.value as Priority }); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Priority…</option>{PRIORITY_ORDER.filter(isManuallyAssignable).map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}</select>
           <input type="date" onChange={(e) => { if (e.target.value) { bulkPatch({ due: e.target.value }); e.target.value = ""; } }} title="Due date" className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none" />
+          <select defaultValue="" onChange={(e) => { if (e.target.value) bulkMoveToClient(e.target.value); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Move to…</option>{[...clientList].sort((a, b) => a.name.localeCompare(b.name)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
           <button onClick={clearSelection} className="rounded-md border px-2.5 py-1 text-[15px] font-medium hover:bg-background">Clear</button>
         </div>
       )}
