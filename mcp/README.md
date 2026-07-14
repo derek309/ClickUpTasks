@@ -12,6 +12,9 @@ Supabase DB the web app uses), so you can work them from your terminal.
 - `add_comment(id, text)` — log progress back onto the task
 - `check_item(id, item)` — tick a checklist item by title
 - `list_clients` — all clients + ids
+- `list_projects(client?)` — projects (lists) + their client, for scoping list_notes/add_note
+- `list_notes(client_id, project_id?)` — read the Knowledge chat feed (meeting notes, decisions, FYIs — not task comments)
+- `add_note(client_id, project_id?, type?, body)` — post into that chat feed, logged as you
 
 ## Install
 

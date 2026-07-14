@@ -158,4 +158,36 @@ server.tool("list_clients",
     return { content: [{ type: "text", text: rows.map((c) => `${c.name}  [${c.id}]`).join("\n") }] };
   });
 
+server.tool("list_projects",
+  "List projects (lists) and the id of the client each belongs to, so you can filter list_notes/add_note by project.",
+  { client: z.string().optional().describe("filter by client name (substring, case-insensitive)") },
+  async ({ client }) => {
+    await names();
+    let rows = await sb("projects?select=id,name,client_id&order=name");
+    if (client) { const cl = client.toLowerCase(); rows = rows.filter((p) => (clientNames[p.client_id] || "").toLowerCase().includes(cl)); }
+    if (!rows.length) return { content: [{ type: "text", text: "No matching projects." }] };
+    return { content: [{ type: "text", text: rows.map((p) => `${p.name}  [${p.id}]  · ${clientNames[p.client_id] || p.client_id}`).join("\n") }] };
+  });
+
+const NOTE_TYPES = ["meeting", "content", "contact", "deliverable", "note"];
+
+server.tool("list_notes",
+  "Read the Knowledge chat feed for a client or a specific project within it (get ids from list_clients/list_projects). This is the team's running chat — meeting notes, decisions, FYIs — not task comments (see get_task for those).",
+  { client_id: z.string(), project_id: z.string().optional().describe("omit for the client-wide feed; set for one project's feed") },
+  async ({ client_id, project_id }) => {
+    let q = `client_notes?select=*&client_id=eq.${enc(client_id)}&order=created_at.asc`;
+    q += project_id ? `&project_id=eq.${enc(project_id)}` : `&project_id=is.null`;
+    const rows = await sb(q);
+    if (!rows.length) return { content: [{ type: "text", text: "No messages yet in this feed." }] };
+    return { content: [{ type: "text", text: rows.map((n) => `[${n.type}] ${n.body}  (by ${n.author_id || "unknown"}, ${n.created_at})`).join("\n\n") }] };
+  });
+
+server.tool("add_note",
+  "Post a message into the Knowledge chat feed for a client or project (get ids from list_clients/list_projects) — meeting notes, decisions, anything the team should see. Logged as you.",
+  { client_id: z.string(), project_id: z.string().optional(), type: z.enum(NOTE_TYPES).optional().describe("defaults to \"note\""), body: z.string() },
+  async ({ client_id, project_id, type, body }) => {
+    await sb("client_notes", "POST", { id: rid("cn_"), client_id, project_id: project_id || null, type: type || "note", body, author_id: ME, created_at: nowIso() });
+    return { content: [{ type: "text", text: `Posted to ${project_id ? "project" : "client"} feed.` }] };
+  });
+
 await server.connect(new StdioServerTransport());

@@ -1558,10 +1558,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         ) : activeClient !== "all" && clientTab === "knowledge" ? (
           <ClientNotes
             notes={clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId))}
+            tasks={baseTasks}
             me={me}
             onAdd={(type, body) => addNote(activeClient, type, body, activeProject)}
             onEdit={editNote}
             onDelete={deleteNote}
+            onOpenTask={(id) => { setClientTab("tasks"); setOpenTaskId(id); }}
           />
         ) : (
           <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} />
