@@ -34,6 +34,7 @@ import {
   type NoteType,
   type Comment,
   type Message,
+  type MessageChannel,
   type Me,
   type Territory,
   PERSONAL_CLIENT_ID,
@@ -41,7 +42,7 @@ import {
   PERSONAL_PROJECT_ID,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, markMessagesReadDb } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, markMessagesReadDb, insertMessage } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import TeamPanel from "./TeamPanel";
 import TerritoryPanel from "./TerritoryPanel";
@@ -951,6 +952,40 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   };
   const activeContact = (): Contact | null =>
     activeClient !== "all" ? contactForClient(activeClient) : null;
+  const [sendingMessage, setSendingMessage] = useState(false);
+  // Sends via GHL's Conversations API (so it goes out from the sub-account's
+  // own connected email/number) and only writes the local `messages` row
+  // after a confirmed success — same pattern as pushToGhl. This is the
+  // "outbound" half of the Knowledge Messages tab; the webhook (see
+  // src/app/api/ghl/webhook/route.ts) covers inbound replies, so together
+  // the two capture a full two-way conversation with no gap and no polling.
+  const sendMessage = async (clientId: string, channel: MessageChannel, subject: string, body: string) => {
+    if (!body.trim()) return;
+    const contact = contactForClient(clientId);
+    if (!contact) { pushToast("This client isn't linked to a GHL contact yet."); return; }
+    const target = ghlTargetForContact(contact);
+    if (!target) { pushToast("No GoHighLevel connection for this client's sub-account."); return; }
+    setSendingMessage(true);
+    try {
+      const res = await authedFetch("/api/ghl/message", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locationId: target.locationId, ghlContactId: target.ghlContactId, channel, subject: channel === "email" ? subject : undefined, body }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { pushToast(j.error || "Failed to send message."); return; }
+      const m: Message = {
+        id: newId("msg_"), contactId: contact.id, clientId, channel, direction: "outbound",
+        subject: channel === "email" && subject.trim() ? subject.trim() : null, body,
+        ghlMessageId: j.ghlMessageId ?? null, createdBy: me.id, at: new Date().toISOString(), read: true,
+      };
+      setMessages((ms) => [...ms, m]);
+      insertMessage(m);
+    } catch {
+      pushToast("Failed to send message.");
+    } finally {
+      setSendingMessage(false);
+    }
+  };
   // Pulls a contact's tasks created directly in GoHighLevel (not pushed from
   // here) into local tracked tasks, linked via ghlTaskId so they join the
   // existing two-way sync (see GHL_SYNC_FIELDS/syncGhlIfLinked below) going
@@ -1605,6 +1640,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onDelete={deleteNote}
             onOpenTask={(id) => { setClientTab("tasks"); setOpenTaskId(id); }}
             onOpenMessages={() => { const ct = contactForClient(activeClient); if (ct) { setMessages((ms) => ms.map((m) => (m.contactId === ct.id ? { ...m, read: true } : m))); markMessagesReadDb(ct.id); } }}
+            onSendMessage={activeProject ? undefined : (channel, subject, body) => sendMessage(activeClient, channel, subject, body)}
+            sendingMessage={sendingMessage}
           />
         ) : (
           <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} />

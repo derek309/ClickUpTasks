@@ -4,12 +4,13 @@ import { requireUser } from "@/lib/serverAuth";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-// Send an email to a GHL contact via GoHighLevel's Conversations API, so it
-// goes out from the sub-account's own connected email, not a separate
-// provider. This route is a pure GHL bridge (same shape as ../task/route.ts):
-// it does the external call and returns the result; the caller (Cockpit.tsx
-// sendMessage) inserts the local `messages` row itself after a confirmed
-// success, matching how pushToGhl awaits ghlCall before writing locally.
+// Send an email or SMS to a GHL contact via GoHighLevel's Conversations API,
+// so it goes out from the sub-account's own connected email/number, not a
+// separate provider. This route is a pure GHL bridge (same shape as
+// ../task/route.ts): it does the external call and returns the result; the
+// caller (Cockpit.tsx sendMessage) inserts the local `messages` row itself
+// after a confirmed success, matching how pushToGhl awaits ghlCall before
+// writing locally.
 //
 // GHL's exact response field naming for this endpoint wasn't confirmed against
 // a live send while building this (docs render client-side JS that couldn't be
@@ -24,9 +25,10 @@ const GHL = "https://services.leadconnectorhq.com";
 export async function POST(req: NextRequest) {
   if (!(await requireUser(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const b = await req.json().catch(() => ({} as any));
-  const { locationId, ghlContactId, subject, body } = b as {
+  const { locationId, ghlContactId, channel, subject, body } = b as {
     locationId?: string;
     ghlContactId?: string;
+    channel?: string;
     subject?: string;
     body?: string;
   };
@@ -38,12 +40,9 @@ export async function POST(req: NextRequest) {
   if (!token)
     return NextResponse.json({ error: "No GoHighLevel token configured for this sub-account yet." }, { status: 501 });
 
-  const payload = {
-    type: "Email",
-    contactId: ghlContactId,
-    subject: (subject || "").slice(0, 200),
-    html: body,
-  };
+  const payload = channel === "sms"
+    ? { type: "SMS", contactId: ghlContactId, message: body }
+    : { type: "Email", contactId: ghlContactId, subject: (subject || "").slice(0, 200), html: body };
 
   try {
     const res = await fetch(`${GHL}/conversations/messages`, {

@@ -3,16 +3,16 @@
 // The "Knowledge" tab on a client or project — a live team chat feed (meeting
 // notes, decisions, FYIs — anything worth keeping), a read-only rollup of
 // every comment left on that scope's tasks, and (client-level only, when a
-// GHL contact is linked) that contact's email/SMS history for reference —
-// one place to catch up on everything without hunting through individual
-// tasks or the GHL app. Claude (via the MCP server's list_notes/add_note
-// tools) reads and posts to the chat too.
+// GHL contact is linked) that contact's full email/SMS conversation — sent
+// via GHL from right here, received via the inbound webhook — so there's no
+// gap and no need to poll GHL for updates. Claude (via the MCP server's
+// list_notes/add_note tools) reads and posts to the chat too.
 import { useEffect, useRef, useState } from "react";
-import { users, userById, timeAgo, NOTE_TYPE_META, NOTE_TYPE_ORDER, type ClientNote, type NoteType, type Task, type Message, type Me } from "@/lib/data";
+import { users, userById, timeAgo, NOTE_TYPE_META, NOTE_TYPE_ORDER, type ClientNote, type NoteType, type Task, type Message, type MessageChannel, type Me } from "@/lib/data";
 import { I, Avatar, renderMentions } from "./ui";
 import { ConfirmModal, type ConfirmSpec } from "./modals";
 
-export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages }: {
+export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, sendingMessage }: {
   notes: ClientNote[];
   tasks: Task[]; // already scoped by the caller to the current client/project
   messages?: Message[] | null; // null/undefined = no linked GHL contact at this scope, so no Messages tab
@@ -22,6 +22,8 @@ export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelet
   onDelete: (note: ClientNote) => void;
   onOpenTask: (taskId: string) => void;
   onOpenMessages?: () => void; // fires once when the Messages tab is opened, to mark them read
+  onSendMessage?: (channel: MessageChannel, subject: string, body: string) => void;
+  sendingMessage?: boolean;
 }) {
   const [view, setView] = useState<"chat" | "activity" | "messages">("chat");
   const [filter, setFilter] = useState<NoteType | "all">("all");
@@ -31,6 +33,9 @@ export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelet
   const [editBody, setEditBody] = useState("");
   const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
   const feedEndRef = useRef<HTMLDivElement>(null);
+  const [msgChannel, setMsgChannel] = useState<MessageChannel>("email");
+  const [msgSubject, setMsgSubject] = useState("");
+  const [msgBody, setMsgBody] = useState("");
 
   // notes arrives newest-first (matches every other feed in the app); a chat
   // reads oldest-to-newest, so flip it just for display.
@@ -49,6 +54,11 @@ export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelet
     if (!draft.trim()) return;
     onAdd(draftType, draft.trim());
     setDraft("");
+  };
+  const submitMessage = () => {
+    if (!msgBody.trim() || !onSendMessage) return;
+    onSendMessage(msgChannel, msgSubject, msgBody.trim());
+    setMsgSubject(""); setMsgBody("");
   };
   const startEdit = (n: ClientNote) => { setEditingId(n.id); setEditBody(n.body); };
   const saveEdit = (n: ClientNote) => { if (editBody.trim()) onEdit(n, editBody.trim()); setEditingId(null); };
@@ -189,14 +199,14 @@ export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelet
             })}
           </div>
         </div>
-      ) : (
+      ) : (<>
         <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-5">
           <div className="mx-auto max-w-3xl space-y-2.5">
             {(!messages || messages.length === 0) && (
               <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-10 text-center text-muted">
                 <I.bolt />
                 <span className="text-[15px]">No messages yet</span>
-                <span className="text-[13px]">Emails and texts with this contact, synced from GoHighLevel, show up here for reference.</span>
+                <span className="text-[13px]">Emails and texts with this contact — sent from here, received via GoHighLevel — show up in one conversation.</span>
               </div>
             )}
             {[...(messages ?? [])].sort((a, b) => a.at.localeCompare(b.at)).map((m) => (
@@ -214,7 +224,29 @@ export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelet
             ))}
           </div>
         </div>
-      )}
+
+        {onSendMessage && (
+          <div className="shrink-0 border-t bg-surface p-3">
+            <div className="mx-auto max-w-3xl">
+              <div className="mb-2 inline-flex overflow-hidden rounded-md border">
+                <button onClick={() => setMsgChannel("email")} className={`px-2.5 py-1 text-[13px] font-medium ${msgChannel === "email" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Email</button>
+                <button onClick={() => setMsgChannel("sms")} className={`px-2.5 py-1 text-[13px] font-medium ${msgChannel === "sms" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>SMS</button>
+              </div>
+              {msgChannel === "email" && (
+                <input value={msgSubject} onChange={(e) => setMsgSubject(e.target.value)} placeholder="Subject"
+                  className="mb-2 w-full rounded-lg border bg-background px-3 py-1.5 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
+              )}
+              <div className="flex items-end gap-2">
+                <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitMessage(); } }}
+                  placeholder={msgChannel === "email" ? "Write an email… (Enter to send)" : "Write a text… (Enter to send)"} rows={1}
+                  className="max-h-72 min-h-[38px] flex-1 resize-y rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
+                <button onClick={submitMessage} disabled={!msgBody.trim() || sendingMessage} className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send"}</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </>)}
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
     </div>
   );
