@@ -46,6 +46,10 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const [msgChannel, setMsgChannel] = useState<MessageChannel>("email");
   const [msgSubject, setMsgSubject] = useState("");
   const [msgBody, setMsgBody] = useState("");
+  // Merged into the Activity panel as a second tab rather than its own
+  // block in the document body — messaging the contact and the internal
+  // comment thread are both "activity on this task", just two channels.
+  const [rightTab, setRightTab] = useState<"activity" | "message">("activity");
   const submitTaskMessage = () => {
     if (!msgBody.trim() || !onSendTaskMessage) return;
     onSendTaskMessage(msgChannel, msgSubject, msgBody.trim());
@@ -226,10 +230,12 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   // Message this task's linked GHL contact directly, without leaving the
   // drawer — sends via the same GHL Conversations API path as the Chat
   // tab's Messages composer, so it shows up there too (a message isn't
-  // tied to one task in the data model, just the contact/client).
-  const messageBlock = linkedContact && onSendTaskMessage ? (
-    <div className="mt-5">
-      <div className="mb-2 text-[13px] font-semibold uppercase tracking-wider text-muted">Message {linkedContact.name}</div>
+  // tied to one task in the data model, just the contact/client). Rendered
+  // as the bottom composer when the "Message" tab is active, mirroring how
+  // {composer} is the bottom composer for the "Activity" tab — no heading
+  // of its own since the tab button above already labels it.
+  const messageComposerBlock = linkedContact && onSendTaskMessage ? (
+    <div className="border-t bg-surface p-3">
       <div className="mb-2 inline-flex overflow-hidden rounded-md border">
         <button onClick={() => setMsgChannel("email")} className={`px-2.5 py-1 text-[13px] font-medium ${msgChannel === "email" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Email</button>
         <button onClick={() => setMsgChannel("sms")} className={`px-2.5 py-1 text-[13px] font-medium ${msgChannel === "sms" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>SMS</button>
@@ -247,6 +253,17 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       </div>
     </div>
   ) : null;
+  // Falls back to "activity" if the message tab was active but the contact
+  // got unlinked out from under it.
+  const activeRightTab = messageComposerBlock ? rightTab : "activity";
+  const rightTabBar = (
+    <div className="flex items-center gap-1">
+      <button onClick={() => setRightTab("activity")} className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium ${activeRightTab === "activity" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Activity · {commentCount}</button>
+      {messageComposerBlock && (
+        <button onClick={() => setRightTab("message")} className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium ${activeRightTab === "message" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Message {linkedContact!.name}</button>
+      )}
+    </div>
+  );
   const subtasksBlock = (
     <div className="mt-5">
       <div className="mb-2 flex items-center justify-between">
@@ -393,17 +410,14 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       )}
     </div>
   );
-  const commentsBlock = (
-    <div className="mt-6">
-      <div className="mb-2 text-[13px] font-semibold uppercase tracking-wider text-muted">Activity · {commentCount}</div>
-      <div className="space-y-2.5">
-        {task.comments.map((c) => {
-          if (c.kind === "event") { const u = userById(c.authorId); return (<div key={c.id} className="flex items-center gap-2 py-0.5 text-[13px] text-muted"><Avatar id={c.authorId} size={16} /><span><span className="font-medium text-foreground">{u?.name}</span> {c.body} · {timeAgo(c.at)}</span></div>); }
-          const u = userById(c.authorId);
-          return (<div key={c.id} className="flex gap-2.5"><Avatar id={c.authorId} size={28} /><div className="min-w-0"><div className="text-[14px]"><span className="font-medium">{u?.name}</span> <span className="text-[12px] text-muted">· {timeAgo(c.at)}</span></div>{c.body && <div className="text-[15px]">{renderMentions(c.body)}</div>}{c.attachments && c.attachments.length > 0 && <div className="mt-1"><AttachmentThumbs items={c.attachments} onOpen={onDownloadFile} /></div>}</div></div>);
-        })}
-        {task.comments.length === 0 && (<div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted"><I.comment /><span className="text-[15px]">No activity yet</span><span className="text-[13px]">Start the thread — type @ to mention a teammate.</span></div>)}
-      </div>
+  const commentsFeed = (
+    <div className="space-y-2.5">
+      {task.comments.map((c) => {
+        if (c.kind === "event") { const u = userById(c.authorId); return (<div key={c.id} className="flex items-center gap-2 py-0.5 text-[13px] text-muted"><Avatar id={c.authorId} size={16} /><span><span className="font-medium text-foreground">{u?.name}</span> {c.body} · {timeAgo(c.at)}</span></div>); }
+        const u = userById(c.authorId);
+        return (<div key={c.id} className="flex gap-2.5"><Avatar id={c.authorId} size={28} /><div className="min-w-0"><div className="text-[14px]"><span className="font-medium">{u?.name}</span> <span className="text-[12px] text-muted">· {timeAgo(c.at)}</span></div>{c.body && <div className="text-[15px]">{renderMentions(c.body)}</div>}{c.attachments && c.attachments.length > 0 && <div className="mt-1"><AttachmentThumbs items={c.attachments} onOpen={onDownloadFile} /></div>}</div></div>);
+      })}
+      {task.comments.length === 0 && (<div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted"><I.comment /><span className="text-[15px]">No activity yet</span><span className="text-[13px]">Start the thread — type @ to mention a teammate.</span></div>)}
     </div>
   );
   const composer = (
@@ -470,7 +484,6 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                 {propsBlock}
                 <div className="my-6 border-t" />
                 {descriptionBlock}
-                {messageBlock}
                 {subtasksBlock}
                 {attachmentsBlock}
                 {siblingsBlock}
@@ -479,41 +492,16 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
             <div className="relative flex shrink-0 flex-col border-l bg-background/50" style={{ width: activityW }}>
               <div onMouseDown={startResize} title="Drag to resize"
                 className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize hover:bg-accent/30 active:bg-accent/40" />
-              <div className="flex items-center gap-2 border-b bg-surface px-5 py-3">
-                <span className="text-[15px] font-semibold">Activity</span>
-                <span className="rounded-full bg-background px-2 py-0.5 text-[13px] text-muted">{commentCount}</span>
+              <div className="flex items-center gap-1 border-b bg-surface px-3 py-2">
+                {rightTabBar}
               </div>
-              <div className="flex-1 overflow-y-auto px-5 py-4">
-                <div className="space-y-3">
-                  {task.comments.map((c) => {
-                    const u = userById(c.authorId);
-                    if (c.kind === "event") return (
-                      <div key={c.id} className="flex items-center gap-2 pl-1 text-[13px] text-muted">
-                        <Avatar id={c.authorId} size={18} />
-                        <span><span className="font-medium text-foreground">{u?.name}</span> {c.body} <span className="text-muted">· {timeAgo(c.at)}</span></span>
-                      </div>
-                    );
-                    return (
-                      <div key={c.id} className="flex gap-2.5">
-                        <Avatar id={c.authorId} size={28} />
-                        <div className="min-w-0 flex-1">
-                          <div className="text-[14px]"><span className="font-medium">{u?.name}</span> <span className="text-[12px] text-muted">· {timeAgo(c.at)}</span></div>
-                          {c.body && <div className="mt-1 rounded-xl rounded-tl-sm border bg-surface px-3 py-2 text-[15px] shadow-soft">{renderMentions(c.body)}</div>}
-                          {c.attachments && c.attachments.length > 0 && <div className="mt-1"><AttachmentThumbs items={c.attachments} onOpen={onDownloadFile} /></div>}
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {task.comments.length === 0 && (
-                    <div className="flex flex-col items-center gap-2 py-16 text-center text-muted">
-                      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent-soft text-accent"><I.comment /></span>
-                      <span className="text-[15px] font-medium">No activity yet</span>
-                      <span className="max-w-[220px] text-[13px] leading-relaxed">Start the conversation below — type @ to loop in a teammate.</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-              {composer}
+              {activeRightTab === "activity" ? (<>
+                <div className="flex-1 overflow-y-auto px-5 py-4">{commentsFeed}</div>
+                {composer}
+              </>) : (<>
+                <div className="flex-1 overflow-y-auto px-5 py-4 text-[13px] text-muted">Sent from here via GoHighLevel — also visible in {linkedContact!.name}&apos;s Chat tab.</div>
+                {messageComposerBlock}
+              </>)}
             </div>
           </div>
         ) : (
@@ -523,13 +511,19 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               {statusBlock}
               <div className="mt-5">{propsBlock}</div>
               {descriptionBlock}
-              {messageBlock}
               {subtasksBlock}
               {attachmentsBlock}
               {siblingsBlock}
-              {commentsBlock}
+              <div className="mt-6">
+                {rightTabBar}
+                <div className="mt-2">
+                  {activeRightTab === "activity" ? commentsFeed : (
+                    <div className="rounded-lg border border-dashed px-3 py-6 text-center text-[13px] text-muted">Sent from here via GoHighLevel — also visible in {linkedContact!.name}&apos;s Chat tab.</div>
+                  )}
+                </div>
+              </div>
             </div>
-            {composer}
+            {activeRightTab === "activity" ? composer : messageComposerBlock}
           </>
         )}
       </aside>
