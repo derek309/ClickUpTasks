@@ -13,12 +13,18 @@ import { I, Avatar, LabelChips, COL_WIDTHS, LIST_COLUMNS } from "./ui";
 
 // --- grouped list view (ClickUp-style: group, quick-add, expandable subtasks) --
 
-export function GroupedList({ groups, showClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onDeleteSub, onAddComment, hideEmpty, highlightDelegateFor }: {
+export function GroupedList({ groups, showClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onDeleteSub, onAddComment, hideEmpty, highlightDelegateFor, queuedIds, onDropInGroup }: {
   groups: { key: string; label: string; color: string; tasks: Task[] }[];
   showClient: boolean; clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null;
   visibleCols: string[]; sortKey: string; sortDir: "asc" | "desc"; onSort: (key: string) => void;
   onOpen: (id: string) => void; onPatch: (taskId: string, patch: Partial<Task>) => void; canQuickAdd: boolean; quickAddHint: string; onQuickAdd: (groupKey: string, title: string) => void;
   onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void; onDeleteSub: (taskId: string, subId: string) => void; onAddComment: (taskId: string, body: string) => void; hideEmpty?: boolean; highlightDelegateFor?: string;
+  queuedIds?: Set<string>;
+  // When set, task rows can be dragged onto a group header to move them into
+  // that group (e.g. drag a row onto "Urgent" to reprioritize it) — only
+  // meaningful for groupBy dimensions the caller knows how to translate back
+  // into a task patch (priority/status), so this is opt-in per render.
+  onDropInGroup?: (taskId: string, groupKey: string) => void;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -26,6 +32,8 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   const toggle = (id: string) => setExpanded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [collapsedG, setCollapsedG] = useState<Set<string>>(new Set());
   const toggleG = (k: string) => setCollapsedG((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const [dragTaskId, setDragTaskId] = useState<string | null>(null);
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
 
   const filteredGroups = hideEmpty ? groups.filter((g) => g.tasks.length > 0) : groups;
   // hideEmpty must never hide the only way to add a first task — if filtering
@@ -59,7 +67,11 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
         <div className="divide-y-8 divide-background">
           {visibleGroups.map((g) => (
             <div key={g.key}>
-              <button onClick={() => toggleG(g.key)} className="flex w-full items-center gap-2 border-y px-4 py-2 text-left" style={{ background: g.color + "22", borderColor: g.color + "40" }}>
+              <button onClick={() => toggleG(g.key)}
+                onDragOver={(e) => { if (onDropInGroup) { e.preventDefault(); setDragOverKey(g.key); } }}
+                onDragLeave={() => setDragOverKey((k) => (k === g.key ? null : k))}
+                onDrop={(e) => { if (!onDropInGroup) return; e.preventDefault(); if (dragTaskId) onDropInGroup(dragTaskId, g.key); setDragTaskId(null); setDragOverKey(null); }}
+                className={`flex w-full items-center gap-2 border-y px-4 py-2 text-left transition ${dragOverKey === g.key ? "ring-2 ring-inset ring-accent" : ""}`} style={{ background: g.color + "22", borderColor: g.color + "40" }}>
                 <I.chevron className={`text-muted transition ${collapsedG.has(g.key) ? "rotate-180" : "-rotate-90"}`} />
                 <span className="h-2.5 w-2.5 rounded-full" style={{ background: g.color }} />
                 <span className="text-[15px] font-bold">{g.label}</span>
@@ -68,7 +80,8 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
               {!collapsedG.has(g.key) && (
                 <div>
                   {g.tasks.map((t) => (
-                    <TaskRow key={t.id} task={t} template={template} cols={cols} showClient={showClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} onAddComment={onAddComment} delegated={!!highlightDelegateFor && t.assigneeId !== highlightDelegateFor && t.subtasks.some((s) => s.assigneeId === highlightDelegateFor)}
+                    <TaskRow key={t.id} task={t} template={template} cols={cols} showClient={showClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} onAddComment={onAddComment} delegated={!!highlightDelegateFor && t.assigneeId !== highlightDelegateFor && t.subtasks.some((s) => s.assigneeId === highlightDelegateFor)} queued={!!queuedIds?.has(t.id)}
+                      draggable={!!onDropInGroup} onDragStart={() => setDragTaskId(t.id)} onDragEnd={() => { setDragTaskId(null); setDragOverKey(null); }}
                       expanded={expanded.has(t.id)} onToggleExpand={() => toggle(t.id)} onToggleSub={onToggleSub} onAddSub={onAddSub} onDeleteSub={onDeleteSub}
                       subDraft={subDraft[t.id] ?? ""} setSubDraft={(v) => setSubDraft((s) => ({ ...s, [t.id]: v }))} />
                   ))}
@@ -92,9 +105,10 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   );
 }
 
-function TaskRow({ task, template, cols, showClient, clientById, projectById, contactById, onOpen, onPatch, onAddComment, delegated, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
+function TaskRow({ task, template, cols, showClient, clientById, projectById, contactById, onOpen, onPatch, onAddComment, delegated, queued, draggable, onDragStart, onDragEnd, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
   task: Task; template: string; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean;
-  clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void; onAddComment: (taskId: string, body: string) => void; delegated?: boolean;
+  clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void; onAddComment: (taskId: string, body: string) => void; delegated?: boolean; queued?: boolean;
+  draggable?: boolean; onDragStart?: () => void; onDragEnd?: () => void;
   expanded: boolean; onToggleExpand: () => void; onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void; onDeleteSub: (taskId: string, subId: string) => void;
   subDraft: string; setSubDraft: (v: string) => void;
 }) {
@@ -115,7 +129,8 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
   };
   return (
     <>
-      <div className={`group/tr grid min-h-[46px] items-center gap-2 border-b px-4 py-2 transition-colors last:border-0 hover:bg-accent-soft/50 ${delegated ? "border-l-[3px] border-l-accent bg-accent-soft/30" : ""}`} style={{ gridTemplateColumns: template }}>
+      <div draggable={draggable} onDragStart={onDragStart} onDragEnd={onDragEnd}
+        className={`group/tr grid min-h-[46px] items-center gap-2 border-b px-4 py-2 transition-colors last:border-0 hover:bg-accent-soft/50 ${delegated ? "border-l-[3px] border-l-accent bg-accent-soft/30" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`} style={{ gridTemplateColumns: template }}>
         <div className="flex min-w-0 items-center gap-0.5">
           <button onClick={onToggleExpand} className={`shrink-0 rounded p-0.5 text-muted hover:text-foreground ${task.subtasks.length ? "" : "opacity-0 group-hover/tr:opacity-40"}`} title="Subtasks"><I.chevron className={`transition ${expanded ? "-rotate-90" : "rotate-180"}`} /></button>
           <InlineAssignee value={task.assigneeId} onChange={(a) => onPatch(task.id, { assigneeId: a })} size={36} />
@@ -126,6 +141,7 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
             {!showClient && crumb && <span className="truncate text-[13px] leading-tight text-muted">{crumb}</span>}
             <span className="flex min-w-0 items-center gap-1.5">
               {delegated && <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">Delegated</span>}
+              {queued && <span title="Queued for Claude Code" className="shrink-0 text-amber-500">★</span>}
               <span className="min-w-0 flex-1 whitespace-normal break-words text-[17px] font-medium leading-snug">{task.title}</span>
               {task.recurrence !== "none" && <I.repeat className="shrink-0 text-muted" />}
               {task.attachments.length > 0 && <I.clip className="shrink-0 text-muted" />}
