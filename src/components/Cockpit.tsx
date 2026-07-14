@@ -108,6 +108,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   type ClientSort = "manual" | "az" | "tasks" | "recent" | "urgent";
   const [clientSort, setClientSort] = useState<ClientSort>("urgent");
   const [starred, setStarred] = useState<Set<string>>(new Set());
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggleCollapse = (key: string) => setCollapsed((s) => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); try { localStorage.setItem("cut_collapsed", JSON.stringify([...n])); } catch {} return n; });
   const [manualOrder, setManualOrder] = useState<string[]>([]);
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [dragClientId, setDragClientId] = useState<string | null>(null);
@@ -165,6 +167,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     try {
       const s = localStorage.getItem("cut_clientSort"); if (s) setClientSort(s as ClientSort);
       const st = localStorage.getItem("cut_starred"); if (st) setStarred(new Set(JSON.parse(st)));
+      const co = localStorage.getItem("cut_collapsed"); if (co) setCollapsed(new Set(JSON.parse(co)));
       const mo = localStorage.getItem("cut_clientOrder"); if (mo) setManualOrder(JSON.parse(mo));
       const he = localStorage.getItem("cut_hideEmpty"); if (he !== null) setHideEmpty(he === "1");
       const hd = localStorage.getItem("cut_hideDone"); if (hd !== null) setHideDone(hd === "1");
@@ -1095,9 +1098,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
         {clients.some((c) => c.id === WORKSPACE_CLIENT_ID) && (<>
           <div className="flex shrink-0 items-center justify-between px-4 pb-1 pt-4">
-            <span className="text-[15px] font-semibold uppercase tracking-wide text-muted">Projects</span>
+            <button onClick={() => toggleCollapse("projects")} className="flex items-center gap-1 text-[15px] font-semibold uppercase tracking-wide text-muted hover:text-foreground">
+              <I.chevron className={`transition ${collapsed.has("projects") ? "-rotate-90" : "rotate-180"}`} /> Projects
+            </button>
             {canAdmin && <button onClick={() => addProject(WORKSPACE_CLIENT_ID)} title="Add project (internal list)" className="rounded p-0.5 text-muted hover:bg-background hover:text-foreground"><I.plus /></button>}
           </div>
+          {!collapsed.has("projects") && (
           <nav className="shrink-0 space-y-0.5 px-2">
             {workspaceProjects.map((p) => {
               const pg = projectProgress(p.id);
@@ -1113,10 +1119,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             })}
             {workspaceProjects.length === 0 && <div className="px-2.5 py-1 text-[13px] text-muted">No projects yet — click + to add one.</div>}
           </nav>
+          )}
         </>)}
 
         <div className="flex shrink-0 items-center justify-between px-4 pb-1 pt-4">
-          <span className="text-[15px] font-semibold uppercase tracking-wide text-muted">Clients</span>
+          <button onClick={() => toggleCollapse("clients")} className="flex items-center gap-1 text-[15px] font-semibold uppercase tracking-wide text-muted hover:text-foreground">
+            <I.chevron className={`transition ${collapsed.has("clients") ? "-rotate-90" : "rotate-180"}`} /> Clients
+          </button>
           <span className="flex items-center gap-0.5">
             <span className="relative">
               <button onClick={() => setSortMenuOpen((o) => !o)} title="Sort clients" className={`rounded p-0.5 hover:bg-background hover:text-foreground ${clientSort !== "manual" ? "text-accent" : "text-muted"}`}><I.list className="h-3.5 w-3.5" /></button>
@@ -1134,10 +1143,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             {canAdmin && <button onClick={() => setAddClientOpen(true)} title="Add client from GHL contacts" className="rounded p-0.5 text-muted hover:bg-background hover:text-foreground"><I.plus /></button>}
           </span>
         </div>
+        {!collapsed.has("clients") && (
         <nav className="shrink-0 space-y-0.5 px-2">
           {clientGroups.map((g) => (
           <div key={g.header || "active"}>
-          {g.header && <div className="px-2.5 pb-0.5 pt-2.5 text-[12px] font-semibold uppercase tracking-wide text-muted">{g.header}</div>}
+          {g.header && <button onClick={() => toggleCollapse("cli:" + g.header)} className="flex w-full items-center gap-1 px-2.5 pb-0.5 pt-2.5 text-left text-[12px] font-semibold uppercase tracking-wide text-muted hover:text-foreground"><I.chevron className={`transition ${collapsed.has("cli:" + g.header) ? "-rotate-90" : "rotate-180"}`} /> {g.header}</button>}
+          {!(g.header && collapsed.has("cli:" + g.header)) && (<>
           {g.items.map((c) => {
             const active = !myWork && !myClientsView && !personalView && activeClient === c.id;
             const clientProjects = projectsForClient(c.id);
@@ -1226,10 +1237,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </div>
             );
           })}
+          </>)}
           </div>
           ))}
           {visibleClients.length === 0 && <div className="px-3 py-3 text-[15px] leading-relaxed text-muted">No clients yet. Click <b>+</b> to add one from your GoHighLevel contacts.</div>}
         </nav>
+        )}
 
         {canAdmin && (
           <nav className="mt-auto flex shrink-0 items-center gap-1 border-t px-3 py-2">
