@@ -5,7 +5,7 @@
 import { useRef, useState } from "react";
 import {
   users, formatDue, isOverdue, TODAY, timeAgo, userById,
-  PRIORITY_META, PRIORITY_ORDER,
+  PRIORITY_META, manualPriorityOptions,
   STATUS_META, STATUS_ORDER, RECURRENCE_LABEL, RECURRENCE_ORDER,
   type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus,
 } from "@/lib/data";
@@ -241,7 +241,7 @@ function InlinePriority({ value, onChange }: { value: Priority; onChange: (p: Pr
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
-  const options = PRIORITY_ORDER.filter((p) => p !== "conversation" || p === value);
+  const options = manualPriorityOptions(value);
   return (
     <div className="relative">
       <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 128, options.length * 32 + 8)); setOpen((o) => !o); }} className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[15px] font-medium hover:bg-background" style={{ color: value === "none" ? "var(--muted)" : PRIORITY_META[value].color }}>

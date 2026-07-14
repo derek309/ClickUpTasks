@@ -21,6 +21,7 @@ import {
   clientHealth,
   PRIORITY_META,
   PRIORITY_ORDER,
+  isManuallyAssignable,
   type Task,
   type TaskStatus,
   type Priority,
@@ -765,10 +766,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const t: Task = {
       id: newId("t_"), projectId, clientId: activeClient, title: title.trim(), description: "",
       status: groupBy === "status" ? (groupKey as TaskStatus) : "todo",
-      // Conversation is auto-created-only (see PRIORITY_META doc comment in
+      // isManuallyAssignable guards Conversation (auto-created-only, see
       // data.ts) — a quick-add inside that group still lands as "none"
       // rather than manually assigning the reserved tier.
-      priority: groupBy === "priority" && groupKey !== "conversation" ? (groupKey as Priority) : "none",
+      priority: groupBy === "priority" && isManuallyAssignable(groupKey as Priority) ? (groupKey as Priority) : "none",
       assigneeId: me.id,
       contactId: activeClient.slice(3),
       due: groupBy === "due" && groupKey === "today" ? TODAY : null,
@@ -785,7 +786,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const dropTaskInGroup = (taskId: string, groupKey: string) => {
     if (groupBy === "status") patchTask(taskId, { status: groupKey as TaskStatus });
     else if (groupBy === "priority") {
-      if (groupKey === "conversation") { pushToast("Conversation is assigned automatically, not manually."); return; }
+      if (!isManuallyAssignable(groupKey as Priority)) { pushToast("Conversation is assigned automatically, not manually."); return; }
       patchTask(taskId, { priority: groupKey as Priority });
     }
   };
@@ -1691,12 +1692,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         {inboxView ? (
           <Inbox notifications={myNotifs} clientById={clientById} projectById={projectById} onOpen={openNotification} onMarkAllRead={markAllNotifsRead} />
         ) : personalView ? (
-          <GroupedList groups={buildGroups(myPersonalTasks, "due")} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty queuedIds={claudeQueue} />
+          <GroupedList groups={buildGroups(myPersonalTasks, "due")} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty queuedIds={claudeQueue} colOrder={colOrder} onReorderCols={reorderCols} />
         ) : myClientsView ? (
           <ClientsBoard groups={myClientsGroups} scopedTasks={scopedTasks} clientTaskCount={clientTaskCount} hasUnreadMessage={hasUnreadMessage}
             onOpen={(id) => { setMyWork(false); setMyClientsView(false); setPersonalView(false); setInboxView(false); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }} />
         ) : myWork ? (
-          <GroupedList groups={buildGroups(myWorkTasks, "due").filter((g) => g.tasks.length > 0)} showClient clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={false} quickAddHint="" onQuickAdd={() => {}} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} highlightDelegateFor={myWorkUser} queuedIds={claudeQueue} />
+          <GroupedList groups={buildGroups(myWorkTasks, "due").filter((g) => g.tasks.length > 0)} showClient clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={false} quickAddHint="" onQuickAdd={() => {}} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} highlightDelegateFor={myWorkUser} queuedIds={claudeQueue} colOrder={colOrder} onReorderCols={reorderCols} />
         ) : activeClient !== "all" && clientTab === "knowledge" ? (
           <ClientNotes
             notes={clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId))}

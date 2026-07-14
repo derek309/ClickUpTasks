@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
+import { titleCase } from "@/lib/data";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -120,20 +121,39 @@ async function handleMessageReply(body: any, custom: any) {
   return NextResponse.json({ ok: true });
 }
 
+// "Today" for a Conversation task's due date, in the team's operating
+// timezone (Pacific) rather than the server's UTC clock — due doubles as
+// "last touched" here (see below), and a UTC-computed date can already be
+// tomorrow for a US-based reply that just arrived this evening, which would
+// misrender as "Tomorrow" in the UI's local-time due-date formatting.
+function todayPacific(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date());
+}
+
 // Priority-system spec (see PRIORITY_META in src/lib/data.ts): every inbound
 // reply keeps exactly one open Conversation-priority task per contact
-// thread — a second reply on a thread that already has one open just bumps
-// its due date rather than creating a duplicate, per the spec's own
-// "Due date updates" section. due doubles as "last touched" here, not a
-// deadline, since Conversation always sorts to the top on priority alone.
-// Conversation tasks are never auto-completed (spec) — only this creation/
-// due-bump path writes to them; completion is left entirely to a person.
+// thread — a second reply on the same contact's thread that already has one
+// open just bumps its due date rather than creating a duplicate, per the
+// spec's own "Due date updates" section. Scoped by contact_id, not
+// client_id — a client can have multiple GHL contacts, each with their own
+// thread, and conflating them would silently merge one contact's reply into
+// another's task. due doubles as "last touched" here, not a deadline, since
+// Conversation always sorts to the top on priority alone. Conversation tasks
+// are never auto-completed (spec) — only this creation/due-bump path writes
+// to them; completion is left entirely to a person.
+//
+// The open-task lookup is check-then-act, not backed by a DB constraint that
+// would make it atomic (see supabase/conversation-task-unique.sql) — instead
+// the unique partial index there catches the concurrent-insert race: if two
+// deliveries for the same contact both reach the insert, the loser's insert
+// fails on that constraint and is treated as "someone else already created
+// it," same conservative spirit as the ghl_message_id dedup above.
 async function upsertConversationTask(contact: { id: string; name: string; client_id: string }, ghlContactId: string) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayPacific();
   const { data: openTasks } = await supabaseAdmin
     .from("tasks")
     .select("id")
-    .eq("client_id", contact.client_id)
+    .eq("contact_id", contact.id)
     .eq("priority", "conversation")
     .neq("status", "done")
     .limit(1);
@@ -150,20 +170,24 @@ async function upsertConversationTask(contact: { id: string; name: string; clien
   if (!projectId) {
     projectId = "p_" + crypto.randomUUID();
     const { error: projErr } = await supabaseAdmin.from("projects").insert({ id: projectId, client_id: contact.client_id, name: "Tasks", description: "" });
-    if (projErr) return;
+    if (projErr) { console.error("[webhook] upsertConversationTask: fallback project insert failed", projErr); return; }
   }
 
   const { data: client } = await supabaseAdmin.from("clients").select("ghl_location_id").eq("id", contact.client_id).maybeSingle();
   const ghlUrl = client?.ghl_location_id ? `https://app.gohighlevel.com/v2/location/${client.ghl_location_id}/contacts/detail/${ghlContactId}` : null;
 
-  await supabaseAdmin.from("tasks").insert({
+  const { error: taskErr } = await supabaseAdmin.from("tasks").insert({
     id: "t_" + crypto.randomUUID(),
     project_id: projectId,
     client_id: contact.client_id,
-    title: `Reply to ${contact.name}`,
+    title: `Reply to ${titleCase(contact.name)}`,
     priority: "conversation",
     contact_id: contact.id,
     due: today,
     attachments: ghlUrl ? [{ id: "at_" + crypto.randomUUID(), name: "GHL conversation", kind: "link", size: "", url: ghlUrl }] : [],
   });
+  // A concurrent delivery for the same contact can lose the race to the
+  // partial unique index in conversation-task-unique.sql — that's the other
+  // request's insert having already won, not a real failure.
+  if (taskErr && !taskErr.message.includes("duplicate key")) console.error("[webhook] upsertConversationTask: task insert failed", taskErr);
 }

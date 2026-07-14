@@ -13,6 +13,12 @@ export function todayIso(): string {
 // Supabase fetch resolves, so server/client drift isn't visible in practice.
 export const TODAY = todayIso();
 
+// Capitalize the first letter of each word (leaves existing caps + numbers
+// alone) — GHL-sourced contact/client names commonly arrive all-lowercase.
+// Lives here (not db.ts) so server routes can use it without pulling in
+// db.ts's browser Supabase client; db.ts re-exports it for existing callers.
+export const titleCase = (s: string) => (s || "").replace(/\b([a-z])/g, (m) => m.toUpperCase());
+
 export type Role = "admin" | "va";
 
 /** The logged-in identity, derived from a Supabase auth profile. */
@@ -310,6 +316,16 @@ export const PRIORITY_META: Record<Priority, { label: string; color: string; ran
   none: { label: "No priority", color: "#cbd5e1", rank: 0 },
 };
 export const PRIORITY_ORDER: Priority[] = ["conversation", "urgent", "normal", "none"];
+
+// Single source of truth for "conversation is auto-assigned only" — used by
+// every manual priority-setting surface (pickers, quick-add, drag-and-drop)
+// so a future one can't forget the guard.
+export const isManuallyAssignable = (p: Priority): boolean => p !== "conversation";
+// A priority picker's option list: every manually-assignable tier, plus the
+// current value even if it's Conversation (so an existing auto-created task
+// can still show/reselect its own tier, just not switch *into* it).
+export const manualPriorityOptions = (current: Priority): Priority[] =>
+  PRIORITY_ORDER.filter((p) => isManuallyAssignable(p) || p === current);
 
 export const RECURRENCE_LABEL: Record<Recurrence, string> = {
   none: "Does not repeat",

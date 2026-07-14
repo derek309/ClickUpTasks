@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo,
-  STATUS_META, STATUS_ORDER, PRIORITY_META, PRIORITY_ORDER, RECURRENCE_LABEL,
+  STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, RECURRENCE_LABEL,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type Recurrence, type Subtask,
 } from "@/lib/data";
 import { I, Avatar, Row, renderMentions, FileBadge, newId } from "./ui";
@@ -102,7 +102,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   );
   const propsBlock = (
     <dl className={full ? "grid grid-cols-1 gap-x-12 gap-y-2 lg:grid-cols-2" : "space-y-3"}>
-      <Row label="Priority"><select value={task.priority} onChange={(e) => onPatch({ priority: e.target.value as Priority })} className="rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background" style={{ color: PRIORITY_META[task.priority].color }}>{PRIORITY_ORDER.filter((p) => p !== "conversation" || p === task.priority).map((p) => (<option key={p} value={p}>{PRIORITY_META[p].label}</option>))}</select></Row>
+      <Row label="Priority"><select value={task.priority} onChange={(e) => onPatch({ priority: e.target.value as Priority })} className="rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background" style={{ color: PRIORITY_META[task.priority].color }}>{manualPriorityOptions(task.priority).map((p) => (<option key={p} value={p}>{PRIORITY_META[p].label}</option>))}</select></Row>
       <Row label="Assignee"><select value={task.assigneeId ?? ""} onChange={(e) => onPatch({ assigneeId: e.target.value || null })} className="rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background"><option value="">Unassigned</option>{users.map((u) => (<option key={u.id} value={u.id}>{u.name} {u.role === "va" ? "(VA)" : "(Admin)"}</option>))}</select></Row>
       <Row label="Client"><select value={task.clientId} onChange={(e) => onMoveClient(e.target.value)} className="max-w-[200px] rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background">{allClients.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}{allClients.every((c) => c.id !== task.clientId) && <option value={task.clientId}>{client?.name ?? "—"}</option>}</select></Row>
       <Row label="Project"><select value={task.projectId} onChange={(e) => { if (e.target.value === "__new") onNewProject(); else onSetProject(e.target.value); }} className="max-w-[200px] rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background">{clientProjects.map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}{clientProjects.every((p) => p.id !== task.projectId) && <option value={task.projectId}>{project?.name ?? "—"}</option>}<option value="__new">+ New project…</option></select></Row>

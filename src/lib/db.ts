@@ -21,12 +21,14 @@ import {
   type MessageChannel,
   type MessageDirection,
   type Territory,
+  type Priority,
+  titleCase,
+  PRIORITY_META,
 } from "./data";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-// Capitalize the first letter of each word (leaves existing caps + numbers alone).
-export const titleCase = (s: string) => (s || "").replace(/\b([a-z])/g, (m) => m.toUpperCase());
+export { titleCase };
 
 // --- mappers ----------------------------------------------------------------
 
@@ -51,9 +53,15 @@ const taskToRow = (t: Task, updatedBy?: string | null) => ({
   // task delegated to them even when they don't own it or follow the client.
   delegated_to: [...new Set(t.subtasks.map((s) => s.assigneeId).filter((id): id is string => !!id && id !== t.assigneeId))],
 });
+// tasks.priority has no DB CHECK constraint (see supabase/schema.sql), so a
+// row can in principle carry a stale/legacy value (e.g. a missed migration,
+// or a future bug) outside the current Priority union — coerce it to "none"
+// here rather than let PRIORITY_META[priority] throw wherever it's indexed.
+const asPriority = (p: unknown): Priority => (typeof p === "string" && p in PRIORITY_META ? (p as Priority) : "none");
+
 export const rowToTask = (r: any): Task => ({
   id: r.id, projectId: r.project_id, clientId: r.client_id, title: r.title, description: r.description ?? "",
-  status: r.status, priority: r.priority, assigneeId: r.assignee_id, contactId: r.contact_id, due: r.due,
+  status: r.status, priority: asPriority(r.priority), assigneeId: r.assignee_id, contactId: r.contact_id, due: r.due,
   recurrence: r.recurrence, ghlTaskId: r.ghl_task_id, labelIds: r.label_ids ?? [], subtasks: r.subtasks ?? [],
   attachments: r.attachments ?? [], comments: r.comments ?? [], createdAt: r.created_at ?? new Date().toISOString(),
   private: r.is_private ?? false,
