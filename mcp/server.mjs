@@ -99,13 +99,15 @@ server.tool("get_task",
   });
 
 server.tool("set_task_status",
-  "Set a task's status (todo | in_progress | review | done). Use to start or complete work.",
+  "Set a task's status (todo | in_progress | review | done). Use to start or complete work. Completing (done) removes the task from your Claude queue.",
   { id: z.string(), status: z.enum(STATUSES) },
   async ({ id, status }) => {
     const [t] = await sb(`tasks?id=eq.${enc(id)}`, "PATCH", { status });
     let ghl = "";
     if (t?.ghl_task_id) { try { const ok = await pushGhlStatus(t); ghl = ok ? " (synced to GoHighLevel)" : " (GoHighLevel push failed)"; } catch { ghl = " (GoHighLevel push errored)"; } }
-    return { content: [{ type: "text", text: `Set ${id} → ${status}.${ghl}` }] };
+    let dq = "";
+    if (status === "done") { try { await sb(`claude_queue?task_id=eq.${enc(id)}`, "DELETE"); dq = " (removed from queue)"; } catch { /* queue cleanup best-effort */ } }
+    return { content: [{ type: "text", text: `Set ${id} → ${status}.${ghl}${dq}` }] };
   });
 
 server.tool("add_comment",
@@ -131,6 +133,20 @@ server.tool("check_item",
     if (!hit) return { content: [{ type: "text", text: `No checklist item matching "${item}".` }] };
     await sb(`tasks?id=eq.${enc(id)}`, "PATCH", { subtasks });
     return { content: [{ type: "text", text: `Checklist "${hit.title}" → ${done ?? true ? "done" : "open"}.` }] };
+  });
+
+server.tool("list_queue",
+  "List the tasks hand-picked into your Claude Code queue from the app (the “Queue for Claude” star). Start here when asked to “work my queue.”",
+  {},
+  async () => {
+    await names();
+    const q = await sb(`claude_queue?select=task_id&order=at.asc`);
+    const ids = (q || []).map((r) => r.task_id);
+    if (!ids.length) return { content: [{ type: "text", text: "Your Claude queue is empty. (Star a task “Queue for Claude” in the app to add one.)" }] };
+    const rows = await sb(`tasks?select=*&id=in.(${ids.map(enc).join(",")})`);
+    const order = new Map(ids.map((id, i) => [id, i]));
+    rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+    return { content: [{ type: "text", text: `${rows.length} queued task(s):\n\n${rows.map(brief).join("\n\n")}` }] };
   });
 
 server.tool("list_clients",

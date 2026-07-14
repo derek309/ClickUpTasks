@@ -157,6 +157,15 @@ export async function fetchContacts(): Promise<Contact[]> {
 // --- mutations (fire-and-forget from the UI; errors surface via console) -----
 
 export const upsertTask = (t: Task, updatedBy?: string | null) => supabase.from("tasks").upsert(taskToRow(t, updatedBy)).then(logErr);
+
+// "Queue for Claude Code" — a hand-picked set the MCP server reads. Own table
+// so it never touches task writes; degrades to empty if the table isn't there.
+export async function fetchClaudeQueue(): Promise<string[]> {
+  try { const { data } = await supabase.from("claude_queue").select("task_id"); return (data ?? []).map((r) => r.task_id); }
+  catch { return []; }
+}
+export const queueTaskDb = (taskId: string, memberId: string) => supabase.from("claude_queue").upsert({ task_id: taskId, member_id: memberId }).then(logErr);
+export const unqueueTaskDb = (taskId: string) => supabase.from("claude_queue").delete().eq("task_id", taskId).then(logErr);
 // Atomic JSONB array-append (see supabase/realtime.sql append_comment) —
 // avoids the read-then-full-row-replace race that a plain upsertTask() would
 // have if two teammates comment on the same task within the same window.
