@@ -765,6 +765,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      // Cmd/Ctrl-K opens the command palette (see the [] -deps effect above) —
+      // e.key stays "k" regardless of modifiers, so without this guard that
+      // shortcut also triggered "previous task" here at the same time.
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); goToTask(1); }
       else if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); goToTask(-1); }
     };
