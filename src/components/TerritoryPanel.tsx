@@ -51,16 +51,35 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
         {canAdmin && (
           <div className="border-b bg-background/40 px-5 py-3">
             {addOpen ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Territory name (e.g. Rocklin)" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
-                <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="City" className="w-32 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
-                <input value={state} onChange={(e) => setState(e.target.value)} placeholder="State" className="w-20 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
-                <select value={assignTo} onChange={(e) => setAssignTo(e.target.value)} className="rounded-md border bg-surface px-2 py-1.5 text-[15px] outline-none focus:border-accent">
-                  <option value="">Unassigned</option>
-                  {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-                </select>
-                <button onClick={submit} disabled={!name.trim() || !city.trim() || !state.trim()} className="rounded-md bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">Add</button>
-                <button onClick={() => setAddOpen(false)} className="rounded-md border px-3 py-1.5 text-[15px] font-medium hover:bg-background">Cancel</button>
+              <div className="space-y-2.5">
+                <div>
+                  <label className="block text-[13px] font-medium text-muted">Territory name</label>
+                  <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Rocklin" onKeyDown={(e) => { if (e.key === "Escape") setAddOpen(false); }}
+                    className="mt-1 w-full rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
+                </div>
+                <div className="flex gap-2.5">
+                  <div className="flex-1">
+                    <label className="block text-[13px] font-medium text-muted">City</label>
+                    <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Rocklin" onKeyDown={(e) => { if (e.key === "Escape") setAddOpen(false); }}
+                      className="mt-1 w-full rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
+                  </div>
+                  <div className="w-28">
+                    <label className="block text-[13px] font-medium text-muted">State</label>
+                    <input value={state} onChange={(e) => setState(e.target.value)} placeholder="CA" onKeyDown={(e) => { if (e.key === "Escape") setAddOpen(false); }}
+                      className="mt-1 w-full rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[13px] font-medium text-muted">Assign to</label>
+                  <select value={assignTo} onChange={(e) => setAssignTo(e.target.value)} className="mt-1 w-full rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent">
+                    <option value="">Unassigned</option>
+                    {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  </select>
+                </div>
+                <div className="flex justify-end gap-2 pt-1">
+                  <button onClick={() => setAddOpen(false)} className="rounded-md border px-3 py-1.5 text-[15px] font-medium hover:bg-background">Cancel</button>
+                  <button onClick={submit} disabled={!name.trim() || !city.trim() || !state.trim()} className="rounded-md bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">Add territory</button>
+                </div>
               </div>
             ) : (
               <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 rounded-md border border-dashed px-3 py-1.5 text-[15px] font-medium text-muted hover:bg-background hover:text-foreground">
