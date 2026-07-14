@@ -5,13 +5,13 @@ import { useEffect, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo,
   STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, RECURRENCE_LABEL,
-  type Task, type Client, type Project, type Contact, type Attachment, type Priority, type Recurrence, type RecurrenceUnit, type Subtask, type TaskTemplate,
+  type Task, type Client, type Project, type Contact, type Attachment, type Priority, type Recurrence, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel,
 } from "@/lib/data";
 import { I, Avatar, Row, renderMentions, FileBadge, newId } from "./ui";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 import { InlineAssignee } from "./GroupedList";
 
-export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, isQueued, onToggleQueue, onCopyLink, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl }: {
+export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, isQueued, onToggleQueue, onCopyLink, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, onSendTaskMessage, sendingMessage }: {
   task: Task; comment: string; setComment: (v: string) => void;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; navTasks: Task[]; onOpenTask: (id: string) => void; onAddSibling: (title: string) => void; onPrev: () => void; onNext: () => void;
@@ -20,6 +20,8 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   onUploadCommentImage: (file: File) => Promise<Attachment | null>;
   onCopyAttachmentLink: (path: string) => void;
   onGetSignedUrl: (path: string) => Promise<string | null>;
+  onSendTaskMessage?: (channel: MessageChannel, subject: string, body: string) => void;
+  sendingMessage?: boolean;
 }) {
   const client = clientById(task.clientId)!;
   const project = projectById(task.projectId)!;
@@ -41,6 +43,14 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const [labelOpen, setLabelOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [msgChannel, setMsgChannel] = useState<MessageChannel>("email");
+  const [msgSubject, setMsgSubject] = useState("");
+  const [msgBody, setMsgBody] = useState("");
+  const submitTaskMessage = () => {
+    if (!msgBody.trim() || !onSendTaskMessage) return;
+    onSendTaskMessage(msgChannel, msgSubject, msgBody.trim());
+    setMsgSubject(""); setMsgBody("");
+  };
   const [attSort, setAttSort] = useState<"added" | "name" | "type">("added");
   const [previewAtt, setPreviewAtt] = useState<Attachment | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -214,6 +224,30 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const descriptionBlock = (
     <div className="mt-5"><div className="mb-1.5 text-[13px] font-semibold uppercase tracking-wider text-muted">Description</div><textarea value={task.description} onChange={(e) => onPatch({ description: e.target.value })} placeholder="Add a description…" rows={3} className="-mx-3 min-h-[80px] w-full resize-y rounded-lg border border-transparent px-3 py-2 text-[15px] outline-none transition placeholder:text-muted hover:bg-background focus:border-accent focus:bg-background" /></div>
   );
+  // Message this task's linked GHL contact directly, without leaving the
+  // drawer — sends via the same GHL Conversations API path as the Chat
+  // tab's Messages composer, so it shows up there too (a message isn't
+  // tied to one task in the data model, just the contact/client).
+  const messageBlock = linkedContact && onSendTaskMessage ? (
+    <div className="mt-5">
+      <div className="mb-2 text-[13px] font-semibold uppercase tracking-wider text-muted">Message {linkedContact.name}</div>
+      <div className="mb-2 inline-flex overflow-hidden rounded-md border">
+        <button onClick={() => setMsgChannel("email")} className={`px-2.5 py-1 text-[13px] font-medium ${msgChannel === "email" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Email</button>
+        <button onClick={() => setMsgChannel("sms")} className={`px-2.5 py-1 text-[13px] font-medium ${msgChannel === "sms" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>SMS</button>
+      </div>
+      {msgChannel === "email" && (
+        <input value={msgSubject} onChange={(e) => setMsgSubject(e.target.value)} placeholder="Subject"
+          className="mb-2 w-full rounded-lg border bg-background px-3 py-1.5 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
+      )}
+      <div className="flex items-end gap-2">
+        <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitTaskMessage(); } }}
+          placeholder={msgChannel === "email" ? "Write an email… (Enter to send)" : "Write a text… (Enter to send)"} rows={1}
+          className="max-h-72 min-h-[38px] flex-1 resize-y rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
+        <button onClick={submitTaskMessage} disabled={!msgBody.trim() || sendingMessage} className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send"}</button>
+      </div>
+    </div>
+  ) : null;
   const subtasksBlock = (
     <div className="mt-5">
       <div className="mb-2 flex items-center justify-between">
@@ -437,6 +471,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                 {propsBlock}
                 <div className="my-6 border-t" />
                 {descriptionBlock}
+                {messageBlock}
                 {subtasksBlock}
                 {attachmentsBlock}
                 {siblingsBlock}
@@ -489,6 +524,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               {statusBlock}
               <div className="mt-5">{propsBlock}</div>
               {descriptionBlock}
+              {messageBlock}
               {subtasksBlock}
               {attachmentsBlock}
               {siblingsBlock}
