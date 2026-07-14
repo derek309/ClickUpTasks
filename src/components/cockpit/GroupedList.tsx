@@ -13,7 +13,7 @@ import { I, Avatar, LabelChips, COL_WIDTHS, LIST_COLUMNS } from "./ui";
 
 // --- grouped list view (ClickUp-style: group, quick-add, expandable subtasks) --
 
-export function GroupedList({ groups, showClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onDeleteSub, onAddComment, hideEmpty, highlightDelegateFor, queuedIds, onDropInGroup, colOrder, onReorderCols }: {
+export function GroupedList({ groups, showClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onDeleteSub, onAddComment, hideEmpty, highlightDelegateFor, queuedIds, onDropInGroup, colOrder, onReorderCols, selectedIds, onToggleSelect }: {
   groups: { key: string; label: string; color: string; tasks: Task[] }[];
   showClient: boolean; clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null;
   visibleCols: string[]; sortKey: string; sortDir: "asc" | "desc"; onSort: (key: string) => void;
@@ -28,6 +28,9 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   // Manual column order (all LIST_COLUMNS keys, any order) + its setter —
   // when both are given, column headers become draggable to reorder.
   colOrder?: string[]; onReorderCols?: (keys: string[]) => void;
+  // When set, each row gets a selection checkbox for bulk edit; the caller
+  // owns the selected-id set and renders its own bulk-action bar.
+  selectedIds?: Set<string>; onToggleSelect?: (taskId: string) => void;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -105,6 +108,7 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
                 <div>
                   {g.tasks.map((t) => (
                     <TaskRow key={t.id} task={t} template={template} cols={cols} showClient={showClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} onAddComment={onAddComment} delegated={!!highlightDelegateFor && t.assigneeId !== highlightDelegateFor && t.subtasks.some((s) => s.assigneeId === highlightDelegateFor)} queued={!!queuedIds?.has(t.id)}
+                      selected={!!selectedIds?.has(t.id)} onToggleSelect={onToggleSelect ? () => onToggleSelect(t.id) : undefined}
                       draggable={!!onDropInGroup} onDragStart={() => setDragTaskId(t.id)} onDragEnd={() => { setDragTaskId(null); setDragOverKey(null); }}
                       expanded={expanded.has(t.id)} onToggleExpand={() => toggle(t.id)} onToggleSub={onToggleSub} onAddSub={onAddSub} onDeleteSub={onDeleteSub}
                       subDraft={subDraft[t.id] ?? ""} setSubDraft={(v) => setSubDraft((s) => ({ ...s, [t.id]: v }))} />
@@ -129,9 +133,10 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   );
 }
 
-function TaskRow({ task, template, cols, showClient, clientById, projectById, contactById, onOpen, onPatch, onAddComment, delegated, queued, draggable, onDragStart, onDragEnd, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
+function TaskRow({ task, template, cols, showClient, clientById, projectById, contactById, onOpen, onPatch, onAddComment, delegated, queued, selected, onToggleSelect, draggable, onDragStart, onDragEnd, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
   task: Task; template: string; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void; onAddComment: (taskId: string, body: string) => void; delegated?: boolean; queued?: boolean;
+  selected?: boolean; onToggleSelect?: () => void;
   draggable?: boolean; onDragStart?: () => void; onDragEnd?: () => void;
   expanded: boolean; onToggleExpand: () => void; onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void; onDeleteSub: (taskId: string, subId: string) => void;
   subDraft: string; setSubDraft: (v: string) => void;
@@ -156,6 +161,12 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
       <div draggable={draggable} onDragStart={onDragStart} onDragEnd={onDragEnd}
         className={`group/tr grid min-h-[46px] items-center gap-2 border-b px-4 py-2 transition-colors last:border-0 hover:bg-accent-soft/50 ${delegated ? "border-l-[3px] border-l-accent bg-accent-soft/30" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`} style={{ gridTemplateColumns: template }}>
         <div className="flex min-w-0 items-center gap-0.5">
+          {onToggleSelect && (
+            <button onClick={(e) => { e.stopPropagation(); onToggleSelect(); }} title="Select"
+              className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition ${selected ? "border-accent bg-accent text-white opacity-100" : "border-border opacity-0 group-hover/tr:opacity-100"}`}>
+              {selected && <I.check />}
+            </button>
+          )}
           <button onClick={onToggleExpand} className={`shrink-0 rounded p-0.5 text-muted hover:text-foreground ${task.subtasks.length ? "" : "opacity-0 group-hover/tr:opacity-40"}`} title="Subtasks"><I.chevron className={`transition ${expanded ? "-rotate-90" : "rotate-180"}`} /></button>
           <InlineAssignee value={task.assigneeId} onChange={(a) => onPatch(task.id, { assigneeId: a })} size={36} />
           <button onClick={onOpen} className="flex min-w-0 flex-1 flex-col justify-center py-0.5 pl-1 text-left">

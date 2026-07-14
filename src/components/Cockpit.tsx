@@ -154,6 +154,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [starred, setStarred] = useState<Set<string>>(new Set());
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [claudeQueue, setClaudeQueue] = useState<Set<string>>(new Set());
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const toggleClaudeQueue = (taskId: string) => {
     setClaudeQueue((s) => {
       const n = new Set(s);
@@ -247,6 +248,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   useEffect(() => { try { setDrawerFull(localStorage.getItem("cut_drawerFull") === "1"); } catch {} }, []);
   // Drop the project filter whenever we leave its client (or enter My Work).
   useEffect(() => { setActiveProject((p) => (p && projects.find((x) => x.id === p)?.clientId === activeClient && !myWork && !myClientsView && !personalView && !inboxView ? p : null)); }, [activeClient, myWork, myClientsView, personalView, inboxView, projects]);
+  // A bulk selection is scoped to whatever list is on screen — switching
+  // clients/views leaves the selected ids referring to now-invisible tasks,
+  // which would make the floating bulk-action bar silently apply to rows
+  // the user can no longer see. Clear it on any navigation.
+  useEffect(() => { setSelectedTaskIds(new Set()); }, [activeClient, activeProject, myWork, myClientsView, personalView, inboxView]);
   // Links/Notes/health are single-client concepts — always land back on Tasks when the active client changes.
   useEffect(() => { setClientTab("tasks"); }, [activeClient, myWork]);
 
@@ -876,6 +882,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     }
   };
 
+  const toggleTaskSelection = (id: string) => setSelectedTaskIds((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const clearSelection = () => setSelectedTaskIds(new Set());
+  // Reuses patchTask per task (not a raw update()) so a bulk change still
+  // gets the same event-log comments, notifications, and GHL sync a single
+  // edit would — just applied to every selected task at once.
+  const bulkPatch = (patch: Partial<Task>) => {
+    const ids = [...selectedTaskIds];
+    ids.forEach((id) => patchTask(id, patch));
+    pushToast(`Updated ${ids.length} task${ids.length === 1 ? "" : "s"}`);
+  };
   const deleteTask = (id: string) => {
     setConfirmDialog({
       title: "Delete this task?", message: "This can't be undone.", confirmLabel: "Delete",
@@ -1756,9 +1772,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             sendingMessage={sendingMessage}
           />
         ) : (
-          <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} queuedIds={claudeQueue} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} colOrder={colOrder} onReorderCols={reorderCols} />
+          <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} queuedIds={claudeQueue} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
         )}
       </main>
+
+      {selectedTaskIds.size > 0 && (
+        <div className="fixed bottom-4 left-1/2 z-30 flex -translate-x-1/2 flex-wrap items-center gap-2 rounded-xl border bg-surface px-3 py-2 shadow-xl">
+          <span className="text-[15px] font-medium">{selectedTaskIds.size} selected</span>
+          <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ assigneeId: e.target.value === "unassigned" ? null : e.target.value }); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Assignee…</option><option value="unassigned">Unassigned</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
+          <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ status: e.target.value as TaskStatus }); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Status…</option>{STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}</select>
+          <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ priority: e.target.value as Priority }); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Priority…</option>{PRIORITY_ORDER.filter(isManuallyAssignable).map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}</select>
+          <input type="date" onChange={(e) => { if (e.target.value) { bulkPatch({ due: e.target.value }); e.target.value = ""; } }} title="Due date" className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none" />
+          <button onClick={clearSelection} className="rounded-md border px-2.5 py-1 text-[15px] font-medium hover:bg-background">Clear</button>
+        </div>
+      )}
 
       {openTask && (
         <TaskDrawer task={openTask} comment={comment} setComment={setComment} clientById={clientById} projectById={projectById} contactById={contactById}
