@@ -114,8 +114,10 @@ export function CollapsibleText({ text, className }: { text: string; className?:
   const isLong = words.length > LONG_TEXT_WORD_THRESHOLD;
   const shown = isLong && !expanded ? words.slice(0, LONG_TEXT_WORD_THRESHOLD).join(" ") + "…" : text;
   const toggle = (e: React.SyntheticEvent) => { e.stopPropagation(); setExpanded((x) => !x); };
+  // break-words so a long unbroken string (a long URL, most commonly) wraps
+  // instead of forcing the whole feed to scroll horizontally.
   return (
-    <div className={className}>
+    <div className={`break-words ${className ?? ""}`}>
       {renderMentions(shown)}
       {isLong && (
         <span role="button" tabIndex={0} onClick={toggle} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(e); } }}
