@@ -25,7 +25,8 @@ export interface Me {
 }
 export type TaskStatus = "todo" | "in_progress" | "review" | "done";
 export type Priority = "none" | "low" | "medium" | "high" | "urgent";
-export type Recurrence = "none" | "daily" | "weekly" | "monthly";
+export type Recurrence = "none" | "daily" | "weekday" | "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly";
+export const RECURRENCE_ORDER: Recurrence[] = ["none", "daily", "weekday", "weekly", "biweekly", "monthly", "quarterly", "yearly"];
 
 export interface User {
   id: string;
@@ -236,6 +237,10 @@ export interface Task {
 // but its assignee, regardless of the fact this id is shared across users.
 export const PERSONAL_CLIENT_ID = "personal";
 export const PERSONAL_PROJECT_ID = "personal_project";
+// Contact-less container for internal/agency work — its projects are
+// standalone "lists" with no GHL contact, so they never sync. Shown as its
+// own sidebar section above Clients, not in the client list.
+export const WORKSPACE_CLIENT_ID = "cl_workspace";
 
 export const STATUS_META: Record<TaskStatus, { label: string; dot: string; chip: string }> = {
   todo: { label: "To do", dot: "#94a3b8", chip: "#f1f5f9" },
@@ -256,9 +261,13 @@ export const PRIORITY_ORDER: Priority[] = ["urgent", "high", "medium", "low", "n
 
 export const RECURRENCE_LABEL: Record<Recurrence, string> = {
   none: "Does not repeat",
-  daily: "Repeats daily",
-  weekly: "Repeats weekly",
-  monthly: "Repeats monthly",
+  daily: "Every day",
+  weekday: "Every weekday",
+  weekly: "Every week",
+  biweekly: "Every 2 weeks",
+  monthly: "Every month",
+  quarterly: "Every 3 months",
+  yearly: "Every year",
 };
 
 // --- Team -------------------------------------------------------------------
@@ -537,8 +546,12 @@ export function advanceDue(iso: string | null, rec: Recurrence): string | null {
   const [y, m, d] = iso.split("-").map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d));
   if (rec === "daily") dt.setUTCDate(dt.getUTCDate() + 1);
-  if (rec === "weekly") dt.setUTCDate(dt.getUTCDate() + 7);
-  if (rec === "monthly") dt.setUTCMonth(dt.getUTCMonth() + 1);
+  else if (rec === "weekday") { do { dt.setUTCDate(dt.getUTCDate() + 1); } while (dt.getUTCDay() === 0 || dt.getUTCDay() === 6); }
+  else if (rec === "weekly") dt.setUTCDate(dt.getUTCDate() + 7);
+  else if (rec === "biweekly") dt.setUTCDate(dt.getUTCDate() + 14);
+  else if (rec === "monthly") dt.setUTCMonth(dt.getUTCMonth() + 1);
+  else if (rec === "quarterly") dt.setUTCMonth(dt.getUTCMonth() + 3);
+  else if (rec === "yearly") dt.setUTCFullYear(dt.getUTCFullYear() + 1);
   return dt.toISOString().slice(0, 10);
 }
 

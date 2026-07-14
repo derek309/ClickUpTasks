@@ -36,6 +36,7 @@ import {
   type Message,
   type Me,
   PERSONAL_CLIENT_ID,
+  WORKSPACE_CLIENT_ID,
   PERSONAL_PROJECT_ID,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
@@ -426,7 +427,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Only type 'client' gets sidebar/⌘K/task presence — prospects/past
   // clients/vendors are classified contacts you can message, reached via the
   // Contacts tab and Conversations, not full clients with projects/tasks.
-  const clientList = clients.filter((c) => c.id.startsWith("cl_") && c.type === "client");
+  // WORKSPACE_CLIENT_ID is a contact-less container for internal/agency work
+  // (its projects behave like standalone lists that never sync). Kept out of
+  // the real client list and shown as its own top-of-sidebar section.
+  const clientList = clients.filter((c) => c.id.startsWith("cl_") && c.type === "client" && c.id !== WORKSPACE_CLIENT_ID);
+  const workspaceProjects = clients.some((c) => c.id === WORKSPACE_CLIENT_ID) ? projects.filter((p) => p.clientId === WORKSPACE_CLIENT_ID) : [];
   // Mirrors the RLS rule in supabase/client-assignment.sql: a VA sees a
   // client if they have a task on it OR they're explicitly following it —
   // this is a display-layer echo of that DB rule, not the enforcement of it.
@@ -1087,6 +1092,28 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <SideItem active={myClientsView} onClick={() => { setMyClientsView(true); setMyWork(false); setPersonalView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.user className="text-muted" /> <span>My Clients</span><span className="ml-auto text-[15px] text-muted">{myAssignedClients.length}</span></SideItem>
           <SideItem active={personalView} onClick={() => { setPersonalView(true); setMyWork(false); setMyClientsView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[15px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>
         </nav>
+
+        {clients.some((c) => c.id === WORKSPACE_CLIENT_ID) && (<>
+          <div className="flex shrink-0 items-center justify-between px-4 pb-1 pt-4">
+            <span className="text-[15px] font-semibold uppercase tracking-wide text-muted">Workspace</span>
+            {canAdmin && <button onClick={() => addProject(WORKSPACE_CLIENT_ID)} title="Add project (internal list)" className="rounded p-0.5 text-muted hover:bg-background hover:text-foreground"><I.plus /></button>}
+          </div>
+          <nav className="shrink-0 space-y-0.5 px-2">
+            {workspaceProjects.map((p) => {
+              const pg = projectProgress(p.id);
+              const on = !myWork && !myClientsView && !personalView && activeClient === WORKSPACE_CLIENT_ID && activeProject === p.id;
+              return (
+                <button key={p.id} onClick={() => { setMyWork(false); setMyClientsView(false); setPersonalView(false); setActiveClient(WORKSPACE_CLIENT_ID); setActiveProject(p.id); setSidebarOpen(false); setOpenTaskId(null); setClientTab("tasks"); }}
+                  className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[15px] transition ${on ? "bg-accent-soft font-medium text-accent" : "text-foreground hover:bg-background"}`}>
+                  <I.folder className="shrink-0 opacity-70" />
+                  <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                  <span className="shrink-0 text-[13px] tabular-nums text-muted">{pg.done}/{pg.total}</span>
+                </button>
+              );
+            })}
+            {workspaceProjects.length === 0 && <div className="px-2.5 py-1 text-[13px] text-muted">No projects yet — click + to add one.</div>}
+          </nav>
+        </>)}
 
         <div className="flex shrink-0 items-center justify-between px-4 pb-1 pt-4">
           <span className="text-[15px] font-semibold uppercase tracking-wide text-muted">Clients</span>

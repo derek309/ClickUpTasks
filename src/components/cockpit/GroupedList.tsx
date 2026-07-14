@@ -6,7 +6,7 @@ import { useRef, useState } from "react";
 import {
   users, formatDue, isOverdue, TODAY, timeAgo, userById,
   PRIORITY_META, PRIORITY_ORDER,
-  STATUS_META, STATUS_ORDER,
+  STATUS_META, STATUS_ORDER, RECURRENCE_LABEL, RECURRENCE_ORDER,
   type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, LabelChips, COL_WIDTHS, LIST_COLUMNS } from "./ui";
@@ -338,10 +338,7 @@ function DatePopover({ pos, value, recurrence, onSelect, onRecurrenceChange, onC
           <div className="mt-1 border-t pt-1.5">
             <div className="px-2 pb-1 text-[15px] font-semibold uppercase tracking-wide text-muted">Repeat</div>
             <select value={recurrence} onClick={(e) => e.stopPropagation()} onChange={(e) => onRecurrenceChange(e.target.value as Recurrence)} className="w-full rounded border bg-background px-1.5 py-1 text-[15px] outline-none">
-              <option value="none">Doesn&apos;t repeat</option>
-              <option value="daily">Daily</option>
-              <option value="weekly">Weekly</option>
-              <option value="monthly">Monthly</option>
+              {RECURRENCE_ORDER.map((r) => <option key={r} value={r}>{RECURRENCE_LABEL[r]}</option>)}
             </select>
           </div>
         </div>
