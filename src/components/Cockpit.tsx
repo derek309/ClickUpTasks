@@ -1807,6 +1807,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <GroupedList groups={buildGroups(myWorkTasks, "due").filter((g) => g.tasks.length > 0)} showClient clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={false} quickAddHint="" onQuickAdd={() => {}} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} highlightDelegateFor={myWorkUser} queuedIds={claudeQueue} colOrder={colOrder} onReorderCols={reorderCols} />
         ) : activeClient !== "all" && clientTab === "chat" ? (
           <ClientNotes
+            key={activeProject ?? activeClient}
             notes={clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId))}
             tasks={baseTasks}
             messages={activeProject ? null : (() => { const ct = contactForClient(activeClient); return ct ? messages.filter((m) => m.contactId === ct.id) : null; })()}

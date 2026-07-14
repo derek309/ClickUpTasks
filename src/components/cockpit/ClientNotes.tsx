@@ -14,6 +14,29 @@ import { I, Avatar, renderMentions } from "./ui";
 import { ConfirmModal, type ConfirmSpec } from "./modals";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 
+// Meeting transcripts and long emails pasted into the feed would otherwise
+// push everything else off-screen — collapse past this length behind a
+// "Show more" toggle. A plain clickable span, not a <button>, so this still
+// works when nested inside the Task Activity row's own <button>.
+const LONG_TEXT_THRESHOLD = 600;
+function CollapsibleText({ text, className }: { text: string; className?: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = text.length > LONG_TEXT_THRESHOLD;
+  const shown = isLong && !expanded ? text.slice(0, LONG_TEXT_THRESHOLD).trimEnd() + "…" : text;
+  const toggle = (e: React.SyntheticEvent) => { e.stopPropagation(); setExpanded((x) => !x); };
+  return (
+    <div className={className}>
+      {renderMentions(shown)}
+      {isLong && (
+        <span role="button" tabIndex={0} onClick={toggle} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(e); } }}
+          className="mt-1 block cursor-pointer text-[13px] font-medium text-accent hover:underline">
+          {expanded ? "Show less" : "Show more"}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, sendingMessage, onUploadImage, onOpenFile }: {
   notes: ClientNote[];
   tasks: Task[]; // already scoped by the caller to the current client/project
@@ -157,7 +180,7 @@ export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelet
                         </div>
                       </div>
                     ) : (<>
-                      {n.body && <div className="mt-1 whitespace-pre-wrap rounded-xl rounded-tl-sm border bg-surface px-3 py-2 text-[15px] shadow-soft">{renderMentions(n.body)}</div>}
+                      {n.body && <CollapsibleText text={n.body} className="mt-1 whitespace-pre-wrap rounded-xl rounded-tl-sm border bg-surface px-3 py-2 text-[15px] shadow-soft" />}
                       {n.attachments && n.attachments.length > 0 && (
                         <div className="mt-1.5"><AttachmentThumbs items={n.attachments} onOpen={onOpenFile} /></div>
                       )}
@@ -221,7 +244,7 @@ export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelet
                       <span className="text-[12px] text-muted">· {timeAgo(c.at)}</span>
                       <span className="ml-auto min-w-0 truncate text-[13px] text-muted">{c.taskTitle}</span>
                     </div>
-                    {c.body && <div className="mt-1 whitespace-pre-wrap text-[15px]">{renderMentions(c.body)}</div>}
+                    {c.body && <CollapsibleText text={c.body} className="mt-1 whitespace-pre-wrap text-[15px]" />}
                     {c.attachments && c.attachments.length > 0 && (
                       <div className="mt-1 flex items-center gap-1 text-[13px] text-muted"><I.clip /> {c.attachments.length} attachment{c.attachments.length === 1 ? "" : "s"}</div>
                     )}
@@ -251,7 +274,7 @@ export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelet
                   <span>· {timeAgo(m.at)}</span>
                 </div>
                 {m.subject && <div className="mt-1 text-[15px] font-medium">{m.subject}</div>}
-                <div className="mt-1 whitespace-pre-wrap text-[15px]">{m.body}</div>
+                <CollapsibleText text={m.body} className="mt-1 whitespace-pre-wrap text-[15px]" />
               </div>
             ))}
           </div>
