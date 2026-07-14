@@ -13,13 +13,19 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 //   https://<your-app>/api/ghl/webhook?secret=<GHL_WEBHOOK_SECRET>
 //
 //   Message replies — a second Workflow, trigger "Customer Replied" → action
-//   "Webhook" → same URL. Unlike the task triggers, GHL doesn't expose a fixed
-//   payload shape here, you type the JSON body yourself with merge fields, so
-//   this route defines the exact contract: POST a body shaped like
-//     { "event": "message_reply", "contactId": "{{contact.id}}",
-//       "channel": "email", "subject": "{{message.subject}}",
-//       "body": "{{message.body}}", "messageId": "{{message.id}}" }
-//   (channel/subject/messageId are optional; contactId + body are required.)
+//   "Webhook" → same URL. This Webhook action's UI doesn't take a raw JSON
+//   body; instead you add Custom Data key/value rows, which GHL nests under
+//   `customData` alongside its own standard trigger data (confirmed against
+//   a real payload — do not assume flattened top-level fields here again).
+//   Add these 4 Custom Data rows (Value via the merge-field picker except
+//   event, which is typed literally):
+//     event      -> message_reply
+//     contactId  -> {{contact.id}}
+//     subject    -> {{message.subject}}
+//     body       -> {{message.body}}
+//   Channel (email vs sms) isn't set via Custom Data — there's no reliable
+//   merge field for it — it's read instead from GHL's own standard
+//   `message.type` (3 = email, 2 = sms).
 //
 // Security: shared-secret query param (set GHL_WEBHOOK_SECRET in env). GHL
 // workflow webhooks can't sign requests, so a long random secret in the URL is
@@ -37,11 +43,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => ({} as any));
-  // Temporary — pinpointing the actual GHL webhook payload shape while
-  // wiring up the "Customer Replied" workflow. Remove once confirmed.
-  console.log("[ghl webhook] raw body:", JSON.stringify(body));
 
-  if (body?.event === "message_reply") return handleMessageReply(body);
+  // A GHL "Webhook" action's Custom Data fields land nested under
+  // `customData`, not flattened onto the top-level body — confirmed by
+  // logging a real "Customer Replied" payload. Every message_reply field
+  // (event/contactId/subject/body) lives there.
+  const custom = body?.customData ?? {};
+  if (custom?.event === "message_reply" || body?.event === "message_reply") return handleMessageReply(body, custom);
 
   // GHL workflow webhook payloads vary; accept the common shapes.
   const ghlTaskId: string | null = body?.task?.id ?? body?.taskId ?? body?.id ?? null;
@@ -67,12 +75,17 @@ export async function POST(req: NextRequest) {
 }
 
 // The "push" half of two-way messaging: a customer's reply, relayed by a GHL
-// Workflow into the exact payload shape documented above the POST handler.
-// Matching key: contacts.ghl_contact_id (a message isn't tied to any one
-// task, see the Message type's doc comment in src/lib/data.ts).
-async function handleMessageReply(body: any) {
-  const ghlContactId: string | null = body?.contactId ?? null;
-  const text: string | null = typeof body?.body === "string" ? body.body : null;
+// "Customer Replied" Workflow's Webhook action. `custom` is that action's
+// Custom Data (contactId/subject/body/event — see wire-up notes above);
+// `body` is GHL's own standard trigger data alongside it, which is where the
+// message's real channel lives (no merge field for that, but GHL's own
+// `message.type` numeric code — 3 = email, 2 = sms, confirmed against a real
+// payload — tells us directly). Matching key: contacts.ghl_contact_id (a
+// message isn't tied to any one task, see the Message type's doc comment in
+// src/lib/data.ts).
+async function handleMessageReply(body: any, custom: any) {
+  const ghlContactId: string | null = custom?.contactId ?? body?.contact_id ?? null;
+  const text: string | null = typeof custom?.body === "string" && custom.body.trim() ? custom.body : (typeof body?.message?.body === "string" ? body.message.body : null);
   if (!ghlContactId || !text) return NextResponse.json({ ok: true, skipped: "missing contactId or body" });
 
   const { data: contact } = await supabaseAdmin
@@ -82,14 +95,14 @@ async function handleMessageReply(body: any) {
     .maybeSingle();
   if (!contact) return NextResponse.json({ ok: true, skipped: "no contact for that ghlContactId" });
 
-  const ghlMessageId: string | null = typeof body?.messageId === "string" ? body.messageId : null;
+  const ghlMessageId: string | null = typeof custom?.messageId === "string" ? custom.messageId : null;
   const { error } = await supabaseAdmin.from("messages").insert({
     id: "msg_" + crypto.randomUUID(),
     contact_id: contact.id,
     client_id: contact.client_id,
-    channel: body?.channel === "sms" ? "sms" : "email",
+    channel: body?.message?.type === 2 ? "sms" : "email",
     direction: "inbound",
-    subject: typeof body?.subject === "string" ? body.subject : null,
+    subject: typeof custom?.subject === "string" && custom.subject.trim() ? custom.subject : null,
     body: text,
     ghl_message_id: ghlMessageId,
     created_by: null,
