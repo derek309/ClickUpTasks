@@ -591,10 +591,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // client if they have a task on it OR they're explicitly following it —
   // this is a display-layer echo of that DB rule, not the enforcement of it.
   const visibleClients = canAdmin ? clientList : clientList.filter((c) => scopedTasks.some((t) => t.clientId === c.id) || (c.assignedTo ?? []).includes(me.id));
-  // "My Clients" is a strictly personal view — only clients with a task
-  // assigned to *me specifically* (or that I'm explicitly following), even
-  // for admins, who otherwise see every client via visibleClients above.
-  const myAssignedClients = clientList.filter((c) => scopedTasks.some((t) => t.clientId === c.id && (t.assigneeId === me.id || t.subtasks.some((s) => s.assigneeId === me.id))) || (c.assignedTo ?? []).includes(me.id));
+  // "My Clients" is a strictly personal view — only clients with a
+  // currently *open* task assigned to me specifically (or that I'm
+  // explicitly following), even for admins, who otherwise see every client
+  // via visibleClients above. A client whose only connection to me is a
+  // task I already finished, and that I'm not following, drops off the
+  // board entirely rather than lingering in "No open tasks" forever.
+  const myAssignedClients = clientList.filter((c) => scopedTasks.some((t) => t.clientId === c.id && t.status !== "done" && (t.assigneeId === me.id || t.subtasks.some((s) => s.assigneeId === me.id))) || (c.assignedTo ?? []).includes(me.id));
   const myTerritories = territories.filter((t) => t.memberId === me.id);
   // ⌘K's "Not imported" search — any type counts as "already added" here,
   // not just type 'client', so a contact never shows as addable twice.
