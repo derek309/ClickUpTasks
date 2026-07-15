@@ -269,6 +269,22 @@ export interface Attachment {
   size: string;
   path?: string; // Supabase Storage object path; absent = metadata-only (not stored)
   url?: string; // for kind "link" — a drive/website URL rather than a stored file
+  /** Which Vault folder this attachment has been filed into, if any — see
+   * VaultFolder. Unset = "Unfiled". Purely organizational, doesn't move the
+   * underlying file; the attachment still lives on whichever task/comment/
+   * note it was originally attached to. */
+  folderId?: string;
+}
+
+/** A named group in the Vault tab for organizing a client's photos/files.
+ * Client-scoped (visible across all of that client's projects) — projectId
+ * is reserved for future narrowing, unused in v1. */
+export interface VaultFolder {
+  id: string;
+  clientId: string;
+  projectId: string | null;
+  name: string;
+  createdAt: string;
 }
 
 export interface Comment {

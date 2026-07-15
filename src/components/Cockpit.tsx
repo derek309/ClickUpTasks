@@ -43,12 +43,13 @@ import {
   type Me,
   type Territory,
   type TaskTemplate,
+  type VaultFolder,
   PERSONAL_CLIENT_ID,
   WORKSPACE_CLIENT_ID,
   PERSONAL_PROJECT_ID,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, markMessagesReadDb, insertMessage } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertVaultFolder, deleteVaultFolderDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, markMessagesReadDb, insertMessage } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import TeamPanel from "./TeamPanel";
 import TerritoryPanel from "./TerritoryPanel";
@@ -74,11 +75,18 @@ import { ClientsBoard, type WorkBoardGroup, type WorkItem } from "./cockpit/Clie
 //   ?view=work|clients|personal   the special boards
 //   ?client=<id>[&project=<id>]   a client (optionally scoped to one project)
 //   ?task=<id>                    the task drawer (layers over any of the above)
-type NavState = { view: "work" | "personal" | "inbox" | null; client: string; project: string | null; task: string | null };
+type NavState = { view: "work" | "personal" | "inbox" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | "vault" | null; vaultFolder: string | null };
 function buildSearch(s: NavState): string {
   const p = new URLSearchParams();
   if (s.view) p.set("view", s.view);
-  else if (s.client !== "all") { p.set("client", s.client); if (s.project) p.set("project", s.project); }
+  else if (s.client !== "all") {
+    p.set("client", s.client);
+    if (s.project) p.set("project", s.project);
+    // "tasks" is the default sub-tab — only encode it when it differs, so
+    // every pre-existing shared link (no ?tab= at all) still keeps working.
+    if (s.clientTab && s.clientTab !== "tasks") p.set("tab", s.clientTab);
+    if (s.vaultFolder) p.set("folder", s.vaultFolder);
+  }
   if (s.task) p.set("task", s.task);
   const q = p.toString();
   return q ? `?${q}` : "";
@@ -86,11 +94,14 @@ function buildSearch(s: NavState): string {
 function parseSearch(search: string): NavState {
   const p = new URLSearchParams(search);
   const v = p.get("view");
+  const tab = p.get("tab");
   return {
     view: v === "work" || v === "personal" || v === "inbox" ? v : null,
     client: p.get("client") ?? "all",
     project: p.get("project"),
     task: p.get("task"),
+    clientTab: tab === "chat" || tab === "vault" ? tab : null,
+    vaultFolder: p.get("folder"),
   };
 }
 
@@ -107,8 +118,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [territoriesOpen, setTerritoriesOpen] = useState(false);
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
   const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [vaultFolders, setVaultFolders] = useState<VaultFolder[]>([]);
   const [importingTasks, setImportingTasks] = useState(false);
   const [clientTab, setClientTab] = useState<"tasks" | "chat" | "vault">("tasks");
+  // Set once from a deep link's ?folder= param (see applyNav); VaultView
+  // reads it only as its initial selected-folder value, not a live prop.
+  const [initialVaultFolder, setInitialVaultFolder] = useState<string | null>(null);
   const [linkModal, setLinkModal] = useState<{ initial?: ClientLink } | null>(null);
   const [ghlLinkOpen, setGhlLinkOpen] = useState(false); // "Link to GHL" contact-picker
   const [ghlLinkSearch, setGhlLinkSearch] = useState("");
@@ -315,10 +330,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const currentNav = (): NavState => ({
     view: myWork ? "work" : personalView ? "personal" : inboxView ? "inbox" : null,
     client: activeClient, project: activeProject, task: openTaskId,
+    clientTab, vaultFolder: null, // vaultFolder is write-only (via copyFolderLink) — not mirrored into the live URL as you browse
   });
   const applyNav = (s: NavState) => {
     setMyWork(s.view === "work"); setPersonalView(s.view === "personal"); setInboxView(s.view === "inbox");
     setActiveClient(s.view ? "all" : s.client); setActiveProject(s.view ? null : s.project); setOpenTaskId(s.task);
+    if (s.clientTab) setClientTab(s.clientTab);
+    setInitialVaultFolder(s.vaultFolder);
   };
   // The URL-writing effect below is inert until this flips, so nothing can
   // clobber the deep link before we read it here.
@@ -421,6 +439,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setClientLinks(d.clientLinks); setClientNotes(d.clientNotes); setMessages(d.messages);
         setTerritories(d.territories);
         setTaskTemplates(d.taskTemplates);
+        setVaultFolders(d.vaultFolders);
         fetchClaudeQueue().then((ids) => setClaudeQueue(new Set(ids)));
       } catch (e) {
         setDbError(e instanceof Error ? e.message : "Failed to load data.");
@@ -450,6 +469,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const url = `${window.location.origin}${window.location.pathname}${buildSearch(nav)}`;
     navigator.clipboard?.writeText(url).then(() => pushToast("🔗 Link copied"), () => pushToast("⚠️ Couldn't copy link"));
   };
+  // A folder link is just the current client/project link with tab=vault
+  // and folder=<id> layered on — built fresh at click time, not mirrored
+  // into the live URL bar as you browse (see currentNav's vaultFolder note).
+  const copyFolderLink = (folderId: string) => copyLink({ ...currentNav(), view: null, clientTab: "vault", vaultFolder: folderId });
   // Surfaces every failed background save (see db.ts logErr) so a dropped
   // connection is never silent — was previously console.error-only.
   useEffect(() => {
@@ -572,6 +595,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setNotifications((prev) => mergeById(prev, d.notifications));
         setMessages((prev) => mergeById(prev, d.messages));
         setClientNotes((prev) => mergeById(prev, d.clientNotes));
+        setVaultFolders((prev) => mergeById(prev, d.vaultFolders));
       } catch (e) { console.warn("[realtime] visibility refetch failed", e); }
     };
     document.addEventListener("visibilitychange", refetch);
@@ -812,15 +836,57 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // pattern. Redundant-but-harmless for VAs, who are already fully
   // restricted by scopedTasks; only changes anything for admins.
   const baseTasks = scopedTasks.filter((t) => t.clientId.startsWith("cl_") && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject) && (activeClient !== "all" || allTasksScope === "all" || t.assigneeId === me.id));
+  // Vault folder assignment — three different write-back paths since an
+  // attachment can live on a task, nested inside one of that task's
+  // comments, or on a Chat note, and none of those three has an existing
+  // per-attachment patch mutator. All three go through the full-row
+  // update()/upsertClientNote path (no atomic RPC like append_comment) —
+  // not worth building one for a rare, low-collision action, unlike live
+  // commenting.
+  const setTaskAttachmentFolder = (taskId: string, attId: string, folderId: string | null) => {
+    const t = tasks.find((x) => x.id === taskId);
+    if (!t) return;
+    update(taskId, { attachments: t.attachments.map((a) => (a.id === attId ? { ...a, folderId: folderId ?? undefined } : a)) });
+  };
+  const setCommentAttachmentFolder = (taskId: string, commentId: string, attId: string, folderId: string | null) => {
+    const t = tasks.find((x) => x.id === taskId);
+    if (!t) return;
+    const comments = t.comments.map((c) => (c.id !== commentId ? c : { ...c, attachments: (c.attachments ?? []).map((a) => (a.id === attId ? { ...a, folderId: folderId ?? undefined } : a)) }));
+    update(taskId, { comments });
+  };
+  const setNoteAttachmentFolder = (note: ClientNote, attId: string, folderId: string | null) => {
+    const updated: ClientNote = { ...note, attachments: (note.attachments ?? []).map((a) => (a.id === attId ? { ...a, folderId: folderId ?? undefined } : a)) };
+    setClientNotes((ns) => ns.map((n) => (n.id === note.id ? updated : n)));
+    upsertClientNote(updated);
+  };
+  const createVaultFolder = (clientId: string, name: string) => {
+    const f: VaultFolder = { id: newId("vf_"), clientId, projectId: null, name, createdAt: new Date().toISOString() };
+    setVaultFolders((fs) => [...fs, f]);
+    upsertVaultFolder(f);
+    return f;
+  };
+  const renameVaultFolder = (folder: VaultFolder, name: string) => {
+    const nf = { ...folder, name };
+    setVaultFolders((fs) => fs.map((f) => (f.id === folder.id ? nf : f)));
+    upsertVaultFolder(nf);
+  };
+  // Deleting a folder doesn't touch the attachments that referenced it —
+  // their folderId just stops matching anything and they fall back to
+  // "Unfiled." No cascade needed; JSONB isn't relationally enforced anyway.
+  const deleteVaultFolder = (id: string) => {
+    setVaultFolders((fs) => fs.filter((f) => f.id !== id));
+    deleteVaultFolderDb(id);
+  };
   // Every attachment anywhere in the current client/project scope — task
   // attachments, task comment images, and Chat message images — collected
   // into one flat list for the Vault tab. Only computed when the Vault tab
   // is reachable at all (a real client, not "All tasks"/My Work/etc.).
+  const activeVaultFolders = activeClient === "all" ? [] : vaultFolders.filter((f) => f.clientId === activeClient);
   const vaultItems: VaultItem[] = activeClient === "all" ? [] : [
-    ...baseTasks.flatMap((t) => t.attachments.map((a) => ({ ...a, sourceLabel: t.title, onOpenSource: () => { setClientTab("tasks"); setOpenTaskId(t.id); } }))),
-    ...baseTasks.flatMap((t) => t.comments.flatMap((c) => (c.attachments ?? []).map((a) => ({ ...a, sourceLabel: t.title, onOpenSource: () => { setClientTab("tasks"); setOpenTaskId(t.id); } })))),
+    ...baseTasks.flatMap((t) => t.attachments.map((a) => ({ ...a, sourceLabel: t.title, onOpenSource: () => { setClientTab("tasks"); setOpenTaskId(t.id); }, onSetFolder: (folderId: string | null) => setTaskAttachmentFolder(t.id, a.id, folderId) }))),
+    ...baseTasks.flatMap((t) => t.comments.flatMap((c) => (c.attachments ?? []).map((a) => ({ ...a, sourceLabel: t.title, onOpenSource: () => { setClientTab("tasks"); setOpenTaskId(t.id); }, onSetFolder: (folderId: string | null) => setCommentAttachmentFolder(t.id, c.id, a.id, folderId) })))),
     ...clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId))
-      .flatMap((n) => (n.attachments ?? []).map((a) => ({ ...a, sourceLabel: "Chat", onOpenSource: () => setClientTab("chat") }))),
+      .flatMap((n) => (n.attachments ?? []).map((a) => ({ ...a, sourceLabel: "Chat", onOpenSource: () => setClientTab("chat"), onSetFolder: (folderId: string | null) => setNoteAttachmentFolder(n, a.id, folderId) }))),
   ];
   const projectsForClient = (clientId: string) => projects.filter((p) => p.clientId === clientId);
   const projectProgress = (projectId: string) => { const ts = scopedTasks.filter((t) => t.projectId === projectId); const done = ts.filter((t) => t.status === "done").length; return { done, total: ts.length, pct: ts.length ? Math.round((done / ts.length) * 100) : 0 }; };
@@ -1815,7 +1881,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 {headerMoreOpen && (<>
                   <div className="fixed inset-0 z-40" onClick={() => setHeaderMoreOpen(false)} />
                   <div className="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg border bg-surface p-1 shadow-soft-md">
-                    <button onClick={() => { setHeaderMoreOpen(false); copyLink({ view: null, client: activeClient, project: activeProject, task: null }); }}
+                    <button onClick={() => { setHeaderMoreOpen(false); copyLink({ view: null, client: activeClient, project: activeProject, task: null, clientTab, vaultFolder: null }); }}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy link</button>
                     {canAdmin && (
                       <button onClick={() => { setHeaderMoreOpen(false); setLinkModal({}); }}
@@ -1970,7 +2036,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onOpenFile={downloadFile}
           />
         ) : activeClient !== "all" && clientTab === "vault" ? (
-          <VaultView items={vaultItems} onDownloadFile={downloadFile} onGetSignedUrl={signedUrlForFile} onCopyLink={copyAttachmentLink} />
+          <VaultView items={vaultItems} folders={activeVaultFolders} onDownloadFile={downloadFile} onGetSignedUrl={signedUrlForFile} onCopyLink={copyAttachmentLink}
+            onCopyFolderLink={copyFolderLink}
+            onCreateFolder={(name) => createVaultFolder(activeClient, name)}
+            onRenameFolder={(id, name) => { const f = vaultFolders.find((x) => x.id === id); if (f) renameVaultFolder(f, name); }}
+            onDeleteFolder={deleteVaultFolder}
+            initialFolderId={initialVaultFolder} />
         ) : (
           <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} queuedIds={claudeQueue} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
         )}
@@ -1993,7 +2064,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={orderedTaskIds.length} navTasks={orderedTaskIds.map((id) => tasks.find((t) => t.id === id)).filter((t): t is Task => !!t)} onOpenTask={setOpenTaskId} onAddSibling={(title) => addTaskToList(openTask.clientId, openTask.projectId, openTask.private, title)} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(attachments) => addComment(openTask.id, comment, attachments)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...clientList].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} isQueued={claudeQueue.has(openTask.id)} onToggleQueue={() => toggleClaudeQueue(openTask.id)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id })} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={(() => { const ct = contactForClient(openTask.clientId); return ct ? messages.filter((m) => m.contactId === ct.id) : null; })()} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canSendMessages ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc) : undefined} sendingMessage={sendingMessage} onRegenerateAiSummary={() => regenerateAiSummary(openTask.clientId)} aiSummaryBusy={aiSummaryBusyId === openTask.clientId} />
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...clientList].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} isQueued={claudeQueue.has(openTask.id)} onToggleQueue={() => toggleClaudeQueue(openTask.id)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null })} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={(() => { const ct = contactForClient(openTask.clientId); return ct ? messages.filter((m) => m.contactId === ct.id) : null; })()} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canSendMessages ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc) : undefined} sendingMessage={sendingMessage} onRegenerateAiSummary={() => regenerateAiSummary(openTask.clientId)} aiSummaryBusy={aiSummaryBusyId === openTask.clientId} />
       )}
 
       {teamOpen && <TeamPanel me={me} onClose={() => setTeamOpen(false)} />}

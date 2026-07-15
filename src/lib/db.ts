@@ -15,6 +15,7 @@ import {
   type Notification,
   type ClientLink,
   type ClientNote,
+  type VaultFolder,
   type NoteType,
   type Comment,
   type Message,
@@ -80,6 +81,9 @@ const rowToClientLink = (r: any): ClientLink => ({ id: r.id, clientId: r.client_
 const clientNoteToRow = (n: ClientNote) => ({ id: n.id, client_id: n.clientId, project_id: n.projectId ?? null, type: n.type, body: n.body, author_id: n.authorId, created_at: n.at, attachments: n.attachments ?? [] });
 export const rowToClientNote = (r: any): ClientNote => ({ id: r.id, clientId: r.client_id, projectId: r.project_id ?? null, type: (r.type as NoteType) ?? "note", body: r.body ?? "", authorId: r.author_id, at: r.created_at, attachments: r.attachments ?? [] });
 
+const vaultFolderToRow = (f: VaultFolder) => ({ id: f.id, client_id: f.clientId, project_id: f.projectId, name: f.name, created_at: f.createdAt });
+const rowToVaultFolder = (r: any): VaultFolder => ({ id: r.id, clientId: r.client_id, projectId: r.project_id ?? null, name: r.name, createdAt: r.created_at });
+
 const territoryToRow = (t: Territory) => ({ id: t.id, name: t.name, city: t.city, state: t.state, member_id: t.memberId });
 const rowToTerritory = (r: any): Territory => ({ id: r.id, name: r.name, city: r.city, state: r.state, memberId: r.member_id ?? null });
 
@@ -137,7 +141,7 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true) 
 }
 
 export async function fetchAll() {
-  const [c, ct, p, t, n, cl, cn, m, tr, tt] = await Promise.all([
+  const [c, ct, p, t, n, cl, cn, m, tr, tt, vf] = await Promise.all([
     fetchAllRows("clients", "created_at"),
     fetchAllRows("contacts"),
     fetchAllRows("projects"),
@@ -151,6 +155,7 @@ export async function fetchAll() {
     fetchAllRows("messages", "created_at"),
     fetchAllRows("territories", "created_at"),
     fetchAllRows("task_templates", "created_at"),
+    fetchAllRows("vault_folders", "created_at"),
   ]);
   const err = c.error || ct.error || p.error || t.error || n.error;
   if (err) throw err;
@@ -159,6 +164,7 @@ export async function fetchAll() {
   if (m.error) console.warn("[db] messages unavailable — run supabase/messages.sql", m.error.message);
   if (tr.error) console.warn("[db] territories unavailable — run supabase/territories.sql", tr.error.message);
   if (tt.error) console.warn("[db] task_templates unavailable — run supabase/task-templates.sql", tt.error.message);
+  if (vf.error) console.warn("[db] vault_folders unavailable — run supabase/vault-folders.sql", vf.error.message);
   return {
     clients: (c.data ?? []).map(rowToClient),
     contacts: (ct.data ?? []).map(rowToContact),
@@ -170,6 +176,7 @@ export async function fetchAll() {
     messages: m.error ? [] : (m.data ?? []).map(rowToMessage),
     territories: tr.error ? [] : (tr.data ?? []).map(rowToTerritory),
     taskTemplates: tt.error ? [] : (tt.data ?? []).map(rowToTaskTemplate),
+    vaultFolders: vf.error ? [] : (vf.data ?? []).map(rowToVaultFolder),
   };
 }
 
@@ -212,6 +219,8 @@ export const deleteTerritoryDb = (id: string) => supabase.from("territories").de
 export const upsertTaskTemplate = (t: TaskTemplate) => supabase.from("task_templates").upsert(taskTemplateToRow(t)).then(logErr);
 export const deleteTaskTemplateDb = (id: string) => supabase.from("task_templates").delete().eq("id", id).then(logErr);
 export const deleteClientNoteDb = (id: string) => supabase.from("client_notes").delete().eq("id", id).then(logErr);
+export const upsertVaultFolder = (f: VaultFolder) => supabase.from("vault_folders").upsert(vaultFolderToRow(f)).then(logErr);
+export const deleteVaultFolderDb = (id: string) => supabase.from("vault_folders").delete().eq("id", id).then(logErr);
 // Messages are append-only (never edited), so insert not upsert. The caller
 // awaits the GHL send first (see Cockpit.tsx sendMessage) and only inserts an
 // outbound row after a confirmed success; this call itself is still
