@@ -272,13 +272,18 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       {STATUS_ORDER.map((s) => {
         const m = STATUS_META[s];
         const on = task.status === s;
-        const iconCls = on ? "text-white" : "opacity-50";
+        // Each icon has its own native size (check=13px, search=16px,
+        // repeat=12px) — h-3 w-3 pins all four to the same rendered size
+        // (CSS width/height on the <svg> wins over its own attrs), and full-
+        // opacity color (not dimmed to 50%) keeps the outline circle for "To
+        // do" actually visible instead of nearly invisible at small size.
+        const iconCls = `h-3 w-3 shrink-0 ${on ? "text-white" : ""}`;
         return (
           <button key={s} onClick={() => onPatch({ status: s })} className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[13px] font-medium transition ${on ? "text-white shadow-soft" : "border-transparent text-muted hover:bg-background"}`} style={on ? { background: m.dot, borderColor: m.dot } : {}}>
             {s === "done" ? <I.check className={iconCls} />
               : s === "review" ? <I.search className={iconCls} />
               : s === "in_progress" ? <I.repeat className={iconCls} />
-              : <span className={`block h-2.5 w-2.5 rounded-full border-2 ${on ? "border-white" : "opacity-50"}`} style={!on ? { borderColor: m.dot } : {}} />}
+              : <span className={`block h-3 w-3 shrink-0 rounded-full border-2 ${on ? "border-white" : ""}`} style={!on ? { borderColor: m.dot } : {}} />}
             {m.label}
           </button>
         );
@@ -561,7 +566,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
             return (
               <button key={t.id} onClick={() => { if (!active) onOpenTask(t.id); }} disabled={active}
                 className={`flex w-full items-center gap-2.5 border-b px-3 py-2 text-left text-[15px] last:border-0 ${active ? "bg-accent-soft font-medium text-accent" : "hover:bg-background"}`}>
-                <Avatar id={t.assigneeId} size={20} />
+                <Avatar id={t.assigneeId} size={18} />
                 <span className={`min-w-0 flex-1 truncate ${t.status === "done" ? "text-muted line-through" : ""}`}>{t.title}</span>
                 <span className="shrink-0 rounded px-1.5 py-0 text-[11px] font-semibold" style={{ background: badge.color + "1a", color: badge.color }}>{badge.label}</span>
                 {t.due && (
