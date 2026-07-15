@@ -177,7 +177,7 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
             <span className="flex min-w-0 items-center gap-1.5">
               {delegated && <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">Delegated</span>}
               {queued && <span title="Queued for Claude Code" className="shrink-0 text-amber-500">★</span>}
-              <span className="min-w-0 flex-1 whitespace-normal break-words text-[17px] font-medium leading-snug">{task.title}</span>
+              <span className="line-clamp-2 min-w-0 flex-1 break-words text-[17px] font-medium leading-snug" title={task.title}>{task.title}</span>
               {task.recurrence !== "none" && <span title={describeRecurrence(task.recurrence, task.recurrenceInterval, task.recurrenceUnit)}><I.repeat className="shrink-0 text-muted" /></span>}
               {task.attachments.length > 0 && <I.clip className="shrink-0 text-muted" />}
               {task.subtasks.length > 0 && <span className="inline-flex shrink-0 items-center gap-0.5 text-[13px] text-muted"><I.check />{doneSubs}/{task.subtasks.length}</span>}
