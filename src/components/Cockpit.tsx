@@ -1970,7 +1970,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onOpenFile={downloadFile}
           />
         ) : activeClient !== "all" && clientTab === "vault" ? (
-          <VaultView items={vaultItems} onDownloadFile={downloadFile} onGetSignedUrl={signedUrlForFile} />
+          <VaultView items={vaultItems} onDownloadFile={downloadFile} onGetSignedUrl={signedUrlForFile} onCopyLink={copyAttachmentLink} />
         ) : (
           <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} queuedIds={claudeQueue} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
         )}

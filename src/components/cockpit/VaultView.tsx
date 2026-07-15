@@ -21,10 +21,11 @@ const KIND_LABEL: Record<Attachment["kind"], string> = { image: "Images", pdf: "
 // Matches the default names macOS/Windows screenshot tools produce.
 const SCREENSHOT_RE = /^(screenshot|screen shot|cleanshot|snip)/i;
 
-export function VaultView({ items, onDownloadFile, onGetSignedUrl }: {
+export function VaultView({ items, onDownloadFile, onGetSignedUrl, onCopyLink }: {
   items: VaultItem[];
   onDownloadFile: (path: string) => void;
   onGetSignedUrl: (path: string) => Promise<string | null>;
+  onCopyLink: (path: string) => void;
 }) {
   const images = items.filter((a) => a.kind === "image");
   const photos = images.filter((a) => !SCREENSHOT_RE.test(a.name));
@@ -71,7 +72,7 @@ export function VaultView({ items, onDownloadFile, onGetSignedUrl }: {
             <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Photos · {photos.length}</div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
               {photos.map((a) => (
-                <ImageTile key={a.id} item={a} url={a.path ? urls[a.path] : undefined} onClick={() => setPreview(a)} />
+                <ImageTile key={a.id} item={a} url={a.path ? urls[a.path] : undefined} onClick={() => setPreview(a)} onCopyLink={onCopyLink} />
               ))}
             </div>
           </div>
@@ -85,7 +86,7 @@ export function VaultView({ items, onDownloadFile, onGetSignedUrl }: {
             {screenshotsOpen && (
               <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-6 md:grid-cols-8">
                 {screenshots.map((a) => (
-                  <ImageTile key={a.id} item={a} url={a.path ? urls[a.path] : undefined} onClick={() => setPreview(a)} small />
+                  <ImageTile key={a.id} item={a} url={a.path ? urls[a.path] : undefined} onClick={() => setPreview(a)} onCopyLink={onCopyLink} small />
                 ))}
               </div>
             )}
@@ -123,7 +124,12 @@ export function VaultView({ items, onDownloadFile, onGetSignedUrl }: {
           ) : (
             <span className="h-8 w-8 animate-spin rounded-full border-2 border-white border-t-transparent" />
           )}
-          <button onClick={() => preview.onOpenSource()} className="text-[13px] text-white/80 hover:text-white hover:underline" onClickCapture={(e) => e.stopPropagation()}>{preview.sourceLabel}</button>
+          <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => preview.onOpenSource()} className="text-[13px] text-white/80 hover:text-white hover:underline">{preview.sourceLabel}</button>
+            {preview.path && (
+              <button onClick={() => onCopyLink(preview.path!)} className="inline-flex items-center gap-1 text-[13px] text-white/80 hover:text-white hover:underline"><I.link className="h-3 w-3" /> Copy link</button>
+            )}
+          </div>
           <button onClick={() => setPreview(null)} className="absolute right-4 top-4 text-white/80 hover:text-white"><I.close /></button>
         </div>
       )}
@@ -131,16 +137,23 @@ export function VaultView({ items, onDownloadFile, onGetSignedUrl }: {
   );
 }
 
-function ImageTile({ item, url, onClick, small }: { item: VaultItem; url?: string; onClick: () => void; small?: boolean }) {
+function ImageTile({ item, url, onClick, onCopyLink, small }: { item: VaultItem; url?: string; onClick: () => void; onCopyLink: (path: string) => void; small?: boolean }) {
   return (
-    <button onClick={onClick} title={item.name} className={`group relative aspect-square overflow-hidden rounded-lg border bg-surface ${small ? "opacity-80 hover:opacity-100" : ""}`}>
-      {url ? (
-        // eslint-disable-next-line @next/next/no-img-element -- signed-URL thumbnail, not a next/image-friendly static asset.
-        <img src={url} alt={item.name} className="h-full w-full object-cover transition group-hover:scale-105" />
-      ) : (
-        <span className="flex h-full w-full items-center justify-center"><FileBadge kind="image" /></span>
+    <div className={`group relative aspect-square overflow-hidden rounded-lg border bg-surface ${small ? "opacity-80 hover:opacity-100" : ""}`}>
+      <button onClick={onClick} title={item.name} className="block h-full w-full">
+        {url ? (
+          // eslint-disable-next-line @next/next/no-img-element -- signed-URL thumbnail, not a next/image-friendly static asset.
+          <img src={url} alt={item.name} className="h-full w-full object-cover transition group-hover:scale-105" />
+        ) : (
+          <span className="flex h-full w-full items-center justify-center"><FileBadge kind="image" /></span>
+        )}
+        {!small && <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent px-2 py-1.5 text-[12px] text-white opacity-0 transition group-hover:opacity-100">{item.sourceLabel}</span>}
+      </button>
+      {item.path && (
+        <button onClick={(e) => { e.stopPropagation(); onCopyLink(item.path!); }} title="Copy link" className={`absolute right-1 top-1 flex items-center justify-center rounded-md bg-black/60 text-white opacity-0 transition hover:bg-black/80 group-hover:opacity-100 ${small ? "h-5 w-5" : "h-7 w-7"}`}>
+          <I.link className={small ? "h-2.5 w-2.5" : "h-3.5 w-3.5"} />
+        </button>
       )}
-      {!small && <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent px-2 py-1.5 text-[12px] text-white opacity-0 transition group-hover:opacity-100">{item.sourceLabel}</span>}
-    </button>
+    </div>
   );
 }
