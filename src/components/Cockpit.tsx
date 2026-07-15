@@ -128,6 +128,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [myWorkUser, setMyWorkUser] = useState<string>(me.id);
   const [personalView, setPersonalView] = useState(false);
   const [inboxView, setInboxView] = useState(false);
+  // All Tasks defaults to just your own — admins can flip to "all"; for VAs
+  // this is inert either way since scopedTasks already fully restricts them.
+  const [allTasksScope, setAllTasksScope] = useState<"mine" | "all">("mine");
   const [groupBy, setGroupBy] = useState<"project" | "status" | "priority" | "due">("priority");
   const [filters, setFilters] = useState<FilterState>({ status: "all", assignee: "all", priority: "all" });
   const [sortBy, setSortBy] = useState<SortBy>("due");
@@ -795,7 +798,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   };
 
   const visibleProjects = useMemo(() => projects.filter((p) => p.clientId.startsWith("cl_") && (activeClient === "all" || p.clientId === activeClient)), [projects, activeClient]);
-  const baseTasks = scopedTasks.filter((t) => t.clientId.startsWith("cl_") && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject));
+  // On the All Tasks tab (activeClient === "all"), further restrict to your
+  // own tasks by default — reusing scopedTasks' own assigneeId === me.id
+  // pattern. Redundant-but-harmless for VAs, who are already fully
+  // restricted by scopedTasks; only changes anything for admins.
+  const baseTasks = scopedTasks.filter((t) => t.clientId.startsWith("cl_") && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject) && (activeClient !== "all" || allTasksScope === "all" || t.assigneeId === me.id));
   // Every attachment anywhere in the current client/project scope — task
   // attachments, task comment images, and Chat message images — collected
   // into one flat list for the Vault tab. Only computed when the Vault tab
@@ -1736,6 +1743,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </div>
 
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+          {!myWork && !personalView && !inboxView && activeClient === "all" && canAdmin && (
+            <div className="inline-flex overflow-hidden rounded-md border" title="VAs only ever see their own tasks here regardless of this toggle">
+              <button onClick={() => setAllTasksScope("mine")} className={`px-2.5 py-1.5 text-[13px] font-medium ${allTasksScope === "mine" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Mine</button>
+              <button onClick={() => setAllTasksScope("all")} className={`px-2.5 py-1.5 text-[13px] font-medium ${allTasksScope === "all" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>All</button>
+            </div>
+          )}
           {!myWork && !personalView && !inboxView && activeClient !== "all" && (
             <div className="inline-flex overflow-hidden rounded-md border">
               <button onClick={() => setClientTab("tasks")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "tasks" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Tasks</button>
