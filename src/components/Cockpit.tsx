@@ -1947,7 +1947,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         ) : myWork ? (
           <ClientsBoard groups={myWorkGroups} clientTaskCount={clientTaskCount} projectTaskCount={projectTaskCount} hasUnreadMessage={hasUnreadMessage}
             onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }}
-            onOpenProject={(id) => { const p = projects.find((x) => x.id === id); if (!p) return; setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(p.clientId); setActiveProject(id); setOpenTaskId(null); }} />
+            onOpenProject={(id) => {
+              if (id === PERSONAL_PROJECT_ID) { setMyWork(false); setPersonalView(true); setInboxView(false); setOpenTaskId(null); return; }
+              const p = projects.find((x) => x.id === id); if (!p) return;
+              setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(p.clientId); setActiveProject(id); setOpenTaskId(null);
+            }} />
         ) : activeClient !== "all" && clientTab === "chat" ? (
           <ClientNotes
             key={activeProject ?? activeClient}
@@ -2042,7 +2046,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       {cmdkOpen && <CommandK tasks={scopedTasks} clients={clientList} projects={projects} contacts={contacts} addedContactIds={addedContactIds} clientById={clientById}
         onOpenTask={(id) => { setOpenTaskId(id); setCmdkOpen(false); }}
         onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(id); setActiveProject(null); setCmdkOpen(false); }}
-        onOpenProject={(id) => { const p = projects.find((x) => x.id === id); if (p) { setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(p.clientId); setActiveProject(id); } setCmdkOpen(false); }}
+        onOpenProject={(id) => {
+          if (id === PERSONAL_PROJECT_ID) { setMyWork(false); setPersonalView(true); setInboxView(false); setCmdkOpen(false); return; }
+          const p = projects.find((x) => x.id === id); if (p) { setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(p.clientId); setActiveProject(id); } setCmdkOpen(false);
+        }}
         onAddContact={(contact) => { addClientContact(contact); setCmdkOpen(false); }}
         onClose={() => setCmdkOpen(false)} />}
 
