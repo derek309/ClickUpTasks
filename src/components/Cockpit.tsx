@@ -658,13 +658,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // can point this at a teammate instead of yourself.
   const assignedClientsFor = (userId: string) => clientList.filter((c) => scopedTasks.some((t) => t.clientId === c.id && t.status !== "done" && (t.assigneeId === userId || t.subtasks.some((s) => s.assigneeId === userId))) || (c.assignedTo ?? []).includes(userId));
   // Same rule, applied to projects — but only "Projects" in Derek's sense
-  // (Administration, Idea board, etc. — not tied to a real GHL client). A
-  // client's own internal sub-lists ("Tasks", "Website") are excluded here:
-  // clicking the client already shows every task across all of its lists,
-  // so a per-client project row would just duplicate the client row right
-  // next to it. A project with no assignedTo field yet (pre-migration rows)
-  // just falls back to an empty follow-list, matching rowToProject's `?? []`.
-  const assignedProjectsFor = (userId: string) => projects.filter((p) => !p.clientId.startsWith("cl_") && (scopedTasks.some((t) => t.projectId === p.id && t.status !== "done" && (t.assigneeId === userId || t.subtasks.some((s) => s.assigneeId === userId))) || (p.assignedTo ?? []).includes(userId)));
+  // (the sidebar's Administration/Idea board/etc. list, i.e. workspaceProjects
+  // above — not tied to a real GHL client). A client's own internal
+  // sub-lists ("Tasks", "Website") are excluded here: clicking the client
+  // already shows every task across all of its lists, so a per-client
+  // project row would just duplicate the client row right next to it.
+  // NOTE: can't test this with `!clientId.startsWith("cl_")` — the
+  // workspace pseudo-client's id is literally "cl_workspace", so that
+  // heuristic wrongly excluded every real project too. Test the two known
+  // non-client-scoped ids explicitly instead. A project with no assignedTo
+  // field yet (pre-migration rows) just falls back to an empty follow-list,
+  // matching rowToProject's `?? []`.
+  const assignedProjectsFor = (userId: string) => projects.filter((p) => (p.clientId === WORKSPACE_CLIENT_ID || p.clientId === PERSONAL_CLIENT_ID) && (scopedTasks.some((t) => t.projectId === p.id && t.status !== "done" && (t.assigneeId === userId || t.subtasks.some((s) => s.assigneeId === userId))) || (p.assignedTo ?? []).includes(userId)));
   const myAssignedClients = assignedClientsFor(me.id);
   const myTerritories = territories.filter((t) => t.memberId === me.id);
   // ⌘K's "Not imported" search — any type counts as "already added" here,
