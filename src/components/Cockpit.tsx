@@ -895,10 +895,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // and feed rendering carry them for free — excluded from comment counts.
   const describeFieldChange = (before: Task, patch: Partial<Task>): string[] => {
     const lines: string[] = [];
-    if (patch.status && patch.status !== before.status) lines.push(`changed status to ${STATUS_META[patch.status].label}`);
-    if (patch.assigneeId !== undefined && patch.assigneeId !== before.assigneeId) lines.push(patch.assigneeId ? `assigned to ${userById(patch.assigneeId)?.name ?? "someone"}` : "unassigned");
-    if (patch.due !== undefined && patch.due !== before.due) lines.push(patch.due ? `set due date to ${formatDue(patch.due)}` : "cleared the due date");
-    if (patch.priority && patch.priority !== before.priority) lines.push(`set priority to ${PRIORITY_META[patch.priority].label}`);
+    if (patch.status && patch.status !== before.status) lines.push(`changed status from ${STATUS_META[before.status].label} to ${STATUS_META[patch.status].label}`);
+    if (patch.assigneeId !== undefined && patch.assigneeId !== before.assigneeId) {
+      if (!before.assigneeId && patch.assigneeId) lines.push(`assigned to ${userById(patch.assigneeId)?.name ?? "someone"}`);
+      else if (before.assigneeId && !patch.assigneeId) lines.push(`unassigned (was ${userById(before.assigneeId)?.name ?? "someone"})`);
+      else lines.push(`reassigned from ${userById(before.assigneeId!)?.name ?? "someone"} to ${userById(patch.assigneeId!)?.name ?? "someone"}`);
+    }
+    if (patch.due !== undefined && patch.due !== before.due) {
+      if (!before.due && patch.due) lines.push(`set due date to ${formatDue(patch.due)}`);
+      else if (before.due && !patch.due) lines.push(`cleared the due date (was ${formatDue(before.due)})`);
+      else lines.push(`changed due date from ${formatDue(before.due)} to ${formatDue(patch.due!)}`);
+    }
+    if (patch.priority && patch.priority !== before.priority) lines.push(`changed priority from ${PRIORITY_META[before.priority].label} to ${PRIORITY_META[patch.priority].label}`);
     return lines;
   };
 

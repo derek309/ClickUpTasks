@@ -3,7 +3,7 @@
 // The task detail window (sidebar or full-page "document" view).
 import { useEffect, useRef, useState } from "react";
 import {
-  users, labels, userById, labelById, timeAgo, isOverdue,
+  users, labels, userById, labelById, timeAgo, isOverdue, formatDue,
   STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message,
 } from "@/lib/data";
@@ -269,9 +269,31 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   );
   const statusBlock = (
     <div className="mt-3 flex flex-wrap items-center gap-1.5">
-      {STATUS_ORDER.map((s) => { const m = STATUS_META[s]; const on = task.status === s; return (<button key={s} onClick={() => onPatch({ status: s })} className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[13px] font-medium transition ${on ? "text-white shadow-soft" : "border-transparent text-muted hover:bg-background"}`} style={on ? { background: m.dot, borderColor: m.dot } : {}}><span className={`h-1.5 w-1.5 rounded-full ${on ? "" : "opacity-40"}`} style={{ background: on ? "#fff" : m.dot }} /> {m.label}</button>); })}
+      {STATUS_ORDER.map((s) => {
+        const m = STATUS_META[s];
+        const on = task.status === s;
+        const iconCls = on ? "text-white" : "opacity-50";
+        return (
+          <button key={s} onClick={() => onPatch({ status: s })} className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[13px] font-medium transition ${on ? "text-white shadow-soft" : "border-transparent text-muted hover:bg-background"}`} style={on ? { background: m.dot, borderColor: m.dot } : {}}>
+            {s === "done" ? <I.check className={iconCls} />
+              : s === "review" ? <I.search className={iconCls} />
+              : s === "in_progress" ? <I.repeat className={iconCls} />
+              : <span className={`block h-2.5 w-2.5 rounded-full border-2 ${on ? "border-white" : "opacity-50"}`} style={!on ? { borderColor: m.dot } : {}} />}
+            {m.label}
+          </button>
+        );
+      })}
     </div>
   );
+  // Prominent warning, not just the compact badge buried in the properties
+  // grid below — a client with no linked GHL contact/location is a real
+  // gap (this task can never sync), worth catching at a glance.
+  const ghlWarningBanner = !task.ghlTaskId && !ghlLinkable ? (
+    <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[13px] text-amber-800">
+      <I.bolt className="mt-0.5 shrink-0 text-amber-500" />
+      <span>This client has no linked GoHighLevel contact or location, so this task can&apos;t sync to GHL.</span>
+    </div>
+  ) : null;
   const propsBlock = (
     <dl className={full ? "grid grid-cols-1 gap-x-12 gap-y-2 lg:grid-cols-2" : "space-y-3"}>
       <Row label="Due date">
@@ -424,7 +446,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       {task.subtasks.length > 0 && (<div className="mb-2 h-1.5 overflow-hidden rounded-full bg-background"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${(doneSubs / task.subtasks.length) * 100}%` }} /></div>)}
       <div className="space-y-1">{task.subtasks.map((s) => (
         <div key={s.id}>
-          <div className="group/sub flex items-center gap-2 rounded-md px-1 py-1 hover:bg-background"><button onClick={() => onToggleSub(s.id)} className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${s.done ? "border-accent bg-accent text-white" : "border-border"}`}>{s.done && <I.check />}</button><input value={s.title} onChange={(e) => onRenameSub(s.id, e.target.value)} className={`-mx-1 flex-1 rounded bg-transparent px-1 text-[15px] outline-none transition focus:bg-background ${s.done ? "text-muted line-through" : ""}`} /><input type="date" value={s.due ?? ""} onChange={(e) => onPatchSub(s.id, { due: e.target.value || null })} title="Due date" className="shrink-0 rounded border border-transparent bg-transparent px-1 py-0.5 text-[13px] text-muted outline-none transition hover:border-border hover:bg-surface focus:border-accent focus:bg-surface" /><InlineAssignee value={s.assigneeId ?? null} onChange={(a) => onPatchSub(s.id, { assigneeId: a })} size={20} /><button onClick={() => onDeleteSub(s.id)} title="Delete checklist item" className="shrink-0 text-muted opacity-0 hover:text-red-500 group-hover/sub:opacity-100"><I.trash /></button></div>
+          <div className="group/sub flex items-center gap-2 rounded-md px-1 py-1 hover:bg-background"><button onClick={() => onToggleSub(s.id)} className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${s.done ? "border-accent bg-accent text-white" : "border-border"}`}>{s.done && <I.check />}</button><input value={s.title} onChange={(e) => onRenameSub(s.id, e.target.value)} className={`-mx-1 flex-1 rounded bg-transparent px-1 text-[15px] outline-none transition focus:bg-background ${s.done ? "text-muted line-through" : ""}`} /><input type="date" value={s.due ?? ""} onChange={(e) => onPatchSub(s.id, { due: e.target.value || null })} title="Due date" className={`shrink-0 rounded border border-transparent bg-transparent px-1 py-0.5 text-[13px] outline-none transition hover:border-border hover:bg-surface focus:border-accent focus:bg-surface ${isOverdue(s.due ?? null) && !s.done ? "font-medium text-danger" : "text-muted"}`} /><InlineAssignee value={s.assigneeId ?? null} onChange={(a) => onPatchSub(s.id, { assigneeId: a })} size={20} /><button onClick={() => onDeleteSub(s.id)} title="Delete checklist item" className="shrink-0 text-muted opacity-0 hover:text-red-500 group-hover/sub:opacity-100"><I.trash /></button></div>
           {s.assigneeId && (
             <div className="mb-1 ml-7 flex items-center gap-1.5">
               <span className="rounded bg-accent-soft px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-accent">Delegated</span>
@@ -511,31 +533,46 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       )}
     </div>
   );
-  // Quick-jump list of the other tasks in this same list (project), so you
-  // don't have to close the drawer and reopen another. Shown below
-  // attachments. Scoped to the current task's list, not the whole view.
-  // Collapsed state persists per-browser, same pattern as activityW. The
-  // current task is excluded — this is navigation to *other* tasks, so
-  // re-listing (and disabling) the one you're already looking at was just
-  // clutter.
-  const listSiblings = navTasks.filter((t) => t.projectId === task.projectId && t.id !== task.id);
+  // Quick-jump list of the *whole* list (project) this task belongs to,
+  // including itself (highlighted, not clickable) — so the completion
+  // fraction/bar below is accurate and you can see where this task sits
+  // among its siblings without leaving the drawer. Collapsed state
+  // persists per-browser, same pattern as activityW.
+  const listSiblings = navTasks.filter((t) => t.projectId === task.projectId);
+  const siblingsDone = listSiblings.filter((t) => t.status === "done").length;
+  const siblingsPct = listSiblings.length ? Math.round((siblingsDone / listSiblings.length) * 100) : 0;
   const siblingsBlock = (
     <div className="mt-6 border-t pt-5">
       <button onClick={() => setSiblingsCollapsed((c) => !c)} className="mb-2 flex w-full items-center gap-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-muted hover:text-foreground">
         <I.chevron className={`transition ${siblingsCollapsed ? "-rotate-90" : "rotate-180"}`} />
-        Other tasks in {project?.name ?? "this list"} · {listSiblings.length}
+        {project?.name ?? "This list"} · {siblingsDone} of {listSiblings.length} done · {siblingsPct}%
       </button>
-      {!siblingsCollapsed && (
+      {!siblingsCollapsed && (<>
+        {listSiblings.length > 0 && (<div className="mb-2 h-1.5 overflow-hidden rounded-full bg-background"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${siblingsPct}%` }} /></div>)}
         <div className="overflow-hidden rounded-lg border">
-          {listSiblings.map((t) => (
-            <button key={t.id} onClick={() => onOpenTask(t.id)}
-              className="flex w-full items-center gap-2.5 border-b px-3 py-2 text-left text-[15px] last:border-0 hover:bg-background">
-              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[t.status].dot }} title={STATUS_META[t.status].label} />
-              <Avatar id={t.assigneeId} size={20} />
-              <span className={`min-w-0 flex-1 truncate ${t.status === "done" ? "text-muted line-through" : ""}`}>{t.title}</span>
-              {t.due && <span className="shrink-0 text-[13px] text-muted">{t.due}</span>}
-            </button>
-          ))}
+          {listSiblings.map((t) => {
+            const active = t.id === task.id;
+            // The one badge per row: priority if it's Urgent (the thing most
+            // worth flagging), otherwise the task's status — matches the
+            // overdue treatment used everywhere else (InlineDue in the
+            // properties grid and the main list view), not a bespoke one.
+            const badge = t.priority === "urgent" ? { label: PRIORITY_META.urgent.label, color: PRIORITY_META.urgent.color } : { label: STATUS_META[t.status].label, color: STATUS_META[t.status].dot };
+            const overdue = isOverdue(t.due) && t.status !== "done";
+            return (
+              <button key={t.id} onClick={() => { if (!active) onOpenTask(t.id); }} disabled={active}
+                className={`flex w-full items-center gap-2.5 border-b px-3 py-2 text-left text-[15px] last:border-0 ${active ? "bg-accent-soft font-medium text-accent" : "hover:bg-background"}`}>
+                <Avatar id={t.assigneeId} size={20} />
+                <span className={`min-w-0 flex-1 truncate ${t.status === "done" ? "text-muted line-through" : ""}`}>{t.title}</span>
+                <span className="shrink-0 rounded px-1.5 py-0 text-[11px] font-semibold" style={{ background: badge.color + "1a", color: badge.color }}>{badge.label}</span>
+                {t.due && (
+                  <span className={`inline-flex shrink-0 items-center gap-1 text-[13px] ${overdue ? "font-medium text-danger" : "text-muted"}`}>
+                    {formatDue(t.due)}
+                    {overdue && <span className="rounded bg-danger-soft px-1 py-0 text-[10px] font-semibold uppercase text-danger">Overdue</span>}
+                  </span>
+                )}
+              </button>
+            );
+          })}
           <div className="flex items-center gap-2 border-t px-3 py-2">
             <I.plus className="shrink-0 text-muted" />
             <input value={siblingDraft} onChange={(e) => setSiblingDraft(e.target.value)}
@@ -543,7 +580,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               placeholder="Add task…" className="flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted" />
           </div>
         </div>
-      )}
+      </>)}
     </div>
   );
   // Sent/received emails and texts aren't tied to one task in the data
@@ -656,6 +693,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               <div className="mx-auto w-full max-w-4xl">
                 {titleBlock}
                 {statusBlock}
+                {ghlWarningBanner}
                 <div className="my-6 border-t" />
                 {propsBlock}
                 <div className="my-6 border-t" />
@@ -679,6 +717,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               <div className="mx-auto w-full max-w-4xl">
                 {titleBlock}
                 {statusBlock}
+                {ghlWarningBanner}
                 <div className="my-6 border-t" />
                 {propsBlock}
                 <div className="my-6 border-t" />
@@ -706,6 +745,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
             <div className="flex-1 overflow-y-auto px-5 py-4">
               {titleBlock}
               {statusBlock}
+              {ghlWarningBanner}
               <div className="mt-5">{propsBlock}</div>
               {descriptionBlock}
               {subtasksBlock}
