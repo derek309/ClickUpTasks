@@ -836,6 +836,50 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // pattern. Redundant-but-harmless for VAs, who are already fully
   // restricted by scopedTasks; only changes anything for admins.
   const baseTasks = scopedTasks.filter((t) => t.clientId.startsWith("cl_") && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject) && (activeClient !== "all" || allTasksScope === "all" || t.assigneeId === me.id));
+
+  // Client/project-wide equivalents of TaskDrawer's per-task copyForClaude /
+  // onToggleQueue — same clipboard+paste and queue-and-let-Claude-pull-it
+  // hand-off patterns, just widened from one task to every open task under
+  // the currently open client/project.
+  const copyClientForClaude = async () => {
+    const client = clientById(activeClient);
+    if (!client) return;
+    const project = activeProject ? projectById(activeProject) : null;
+    const contact = contactForClient(activeClient);
+    const openTasks = sortTasks(baseTasks.filter((t) => t.status !== "done"));
+    const shown = openTasks.slice(0, 30);
+    const notes = clientNotes
+      .filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId))
+      .slice(0, 5);
+    const ghlUrl = ghlContactUrlFor(activeClient);
+    const brief = [
+      `Work on this client/project from ClickUpTasks (https://clickuptasks.vercel.app):`,
+      ``,
+      `Client: ${client.name}${contact?.email ? ` (${contact.email})` : ""}`,
+      `Project: ${project ? project.name : "All projects"}`,
+      ``,
+      `Open tasks (${openTasks.length}):`,
+      ...shown.map((t) => `- ${t.title} — ${STATUS_META[t.status].label} · ${PRIORITY_META[t.priority].label}${t.due ? ` · Due: ${t.due}` : ""}`),
+      openTasks.length > shown.length ? `...and ${openTasks.length - shown.length} more (showing top ${shown.length} by priority/due)` : "",
+      notes.length ? `\nRecent chat notes:\n${notes.map((n) => `- ${userById(n.authorId)?.name ?? "?"}: ${n.body}`).join("\n")}` : "",
+      ghlUrl ? `\nGHL contact: ${ghlUrl}` : "",
+    ].filter(Boolean).join("\n");
+    try {
+      await navigator.clipboard.writeText(brief);
+      pushToast("Copied client brief for Claude.");
+    } catch {
+      pushToast("Couldn't copy to clipboard.");
+    }
+  };
+  const queueClientForClaude = () => {
+    const openTasks = baseTasks.filter((t) => t.status !== "done");
+    const toQueue = openTasks.filter((t) => !claudeQueue.has(t.id));
+    if (!toQueue.length) { pushToast("All open tasks here are already queued for Claude."); return; }
+    setClaudeQueue((prev) => new Set([...prev, ...toQueue.map((t) => t.id)]));
+    toQueue.forEach((t) => queueTaskDb(t.id, me.id));
+    pushToast(`Queued ${toQueue.length} task${toQueue.length === 1 ? "" : "s"} for Claude.`);
+  };
+
   // Vault folder assignment — three different write-back paths since an
   // attachment can live on a task, nested inside one of that task's
   // comments, or on a Chat note, and none of those three has an existing
@@ -1883,6 +1927,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   <div className="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg border bg-surface p-1 shadow-soft-md">
                     <button onClick={() => { setHeaderMoreOpen(false); copyLink({ view: null, client: activeClient, project: activeProject, task: null, clientTab, vaultFolder: null }); }}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy link</button>
+                    <button onClick={() => { setHeaderMoreOpen(false); copyClientForClaude(); }}
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>✳</span> Copy for Claude</button>
+                    <button onClick={() => { setHeaderMoreOpen(false); queueClientForClaude(); }}
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>★</span> Queue for Claude</button>
                     {canAdmin && (
                       <button onClick={() => { setHeaderMoreOpen(false); setLinkModal({}); }}
                         className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.plus /> Add quick link</button>
