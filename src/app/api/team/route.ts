@@ -25,6 +25,7 @@ export async function PATCH(req: NextRequest) {
   const body = await req.json();
   const patch: Record<string, unknown> = {};
   if (body.role) patch.role = body.role;
+  if (typeof body.can_send_messages === "boolean") patch.can_send_messages = body.can_send_messages;
   const { error } = await supabaseAdmin.from("profiles").update(patch).eq("id", body.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ ok: true });

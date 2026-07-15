@@ -152,8 +152,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   // Sidebar client ordering: star to pin, sort mode, manual drag order.
   // Personal preferences → persisted per-browser (localStorage), not the DB.
-  type ClientSort = "manual" | "az" | "tasks" | "recent" | "urgent";
+  type ClientSort = "manual" | "az" | "tasks" | "recent" | "used" | "urgent";
   const [clientSort, setClientSort] = useState<ClientSort>("urgent");
+  // Recently-used ordering: clientId → last-opened epoch, persisted locally.
+  // Opening a client stamps it (see the effect below), floating it to the top
+  // when the "Recently used" sort is active.
+  const [clientUsed, setClientUsed] = useState<Record<string, number>>({});
   const [starred, setStarred] = useState<Set<string>>(new Set());
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [claudeQueue, setClaudeQueue] = useState<Set<string>>(new Set());
@@ -229,8 +233,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       const he = localStorage.getItem("cut_hideEmpty"); if (he !== null) setHideEmpty(he === "1");
       const hd = localStorage.getItem("cut_hideDone"); if (hd !== null) setHideDone(hd === "1");
       const colo = localStorage.getItem("cut_colOrder"); if (colo) setColOrder(JSON.parse(colo));
+      const cu = localStorage.getItem("cut_clientUsed"); if (cu) setClientUsed(JSON.parse(cu));
     } catch { /* fresh browser */ }
   }, []);
+  // Stamp a client's last-opened time whenever it becomes the active client,
+  // by any path (sidebar, ⌘K, board, deep link) — so "Recently used" ordering
+  // reflects real use without threading a call through every open site.
+  useEffect(() => {
+    if (!activeClient.startsWith("cl_")) return;
+    setClientUsed((m) => { const n = { ...m, [activeClient]: Date.now() }; try { localStorage.setItem("cut_clientUsed", JSON.stringify(n)); } catch {} return n; });
+  }, [activeClient]);
   const toggleHideEmpty = () => setHideEmpty((v) => { const n = !v; try { localStorage.setItem("cut_hideEmpty", n ? "1" : "0"); } catch {} return n; });
   const toggleHideDone = () => setHideDone((v) => { const n = !v; try { localStorage.setItem("cut_hideDone", n ? "1" : "0"); } catch {} return n; });
   const saveClientSort = (v: ClientSort) => { setClientSort(v); try { localStorage.setItem("cut_clientSort", v); } catch {} };
@@ -578,6 +590,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const toggleCol = (key: string) => setVisibleCols((c) => (c.includes(key) ? c.filter((x) => x !== key) : [...c, key]));
 
   const canAdmin = me.role === "admin";
+  // Sending email/SMS is gated per-user (admins always, VAs when granted).
+  // When false, the SMS/Email composers are never even rendered — passing an
+  // undefined send handler hides them (see TaskDrawer's hasMessaging).
+  const canSendMessages = me.role === "admin" || me.canSendMessages;
   const scopedTasks = canAdmin ? tasks : tasks.filter((t) => t.assigneeId === me.id);
   // Sub-accounts (Agency/Directory) are the contact source; clients (cl_*) are contacts you've added.
   const subAccounts = clients.filter((c) => !c.id.startsWith("cl_"));
@@ -610,6 +626,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (clientSort === "az") base.sort((a, b) => a.name.localeCompare(b.name));
     else if (clientSort === "tasks") base.sort((a, b) => clientTaskCountRef(b.id) - clientTaskCountRef(a.id));
     else if (clientSort === "recent") base.reverse(); // fetch order is created_at asc
+    else if (clientSort === "used") base.sort((a, b) => (clientUsed[b.id] ?? 0) - (clientUsed[a.id] ?? 0)); // most recently opened first
     else if (clientSort === "urgent") {
       // A client who's actually messaged us goes first — they're waiting on
       // a reply, which trumps everything else. Then: overdue, then due
@@ -1499,7 +1516,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               {sortMenuOpen && (<>
                 <div className="fixed inset-0 z-30" onClick={() => setSortMenuOpen(false)} />
                 <div className="absolute right-0 top-full z-40 mt-1 w-44 rounded-lg border border-white/15 bg-[#2c3140] p-1 shadow-2xl">
-                  {([["urgent", "Overdue first"], ["manual", "Manual (drag to order)"], ["az", "A → Z"], ["tasks", "Most active"], ["recent", "Recently added"]] as const).map(([v, label]) => (
+                  {([["urgent", "Overdue first"], ["used", "Recently used"], ["manual", "Manual (drag to order)"], ["az", "A → Z"], ["tasks", "Most active"], ["recent", "Recently added"]] as const).map(([v, label]) => (
                     <button key={v} onClick={() => { saveClientSort(v); setSortMenuOpen(false); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-white/10">
                       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${clientSort === v ? "bg-accent" : "bg-transparent"}`} />{label}
                     </button>
@@ -1847,7 +1864,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onDelete={deleteNote}
             onOpenTask={(id) => { setClientTab("tasks"); setOpenTaskId(id); }}
             onOpenMessages={() => { const ct = contactForClient(activeClient); if (ct) { setMessages((ms) => ms.map((m) => (m.contactId === ct.id ? { ...m, read: true } : m))); markMessagesReadDb(ct.id); } }}
-            onSendMessage={activeProject ? undefined : (channel, subject, body) => sendMessage(activeClient, channel, subject, body)}
+            onSendMessage={activeProject || !canSendMessages ? undefined : (channel, subject, body) => sendMessage(activeClient, channel, subject, body)}
             sendingMessage={sendingMessage}
             onUploadImage={(file) => uploadOneImage("notes", file)}
             onOpenFile={downloadFile}
@@ -1876,7 +1893,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={orderedTaskIds.length} navTasks={orderedTaskIds.map((id) => tasks.find((t) => t.id === id)).filter((t): t is Task => !!t)} onOpenTask={setOpenTaskId} onAddSibling={(title) => addTaskToList(openTask.clientId, openTask.projectId, openTask.private, title)} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(attachments) => addComment(openTask.id, comment, attachments)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...clientList].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} isQueued={claudeQueue.has(openTask.id)} onToggleQueue={() => toggleClaudeQueue(openTask.id)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id })} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={(() => { const ct = contactForClient(openTask.clientId); return ct ? messages.filter((m) => m.contactId === ct.id) : null; })()} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={(channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc)} sendingMessage={sendingMessage} />
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...clientList].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} isQueued={claudeQueue.has(openTask.id)} onToggleQueue={() => toggleClaudeQueue(openTask.id)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id })} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={(() => { const ct = contactForClient(openTask.clientId); return ct ? messages.filter((m) => m.contactId === ct.id) : null; })()} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canSendMessages ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc) : undefined} sendingMessage={sendingMessage} />
       )}
 
       {teamOpen && <TeamPanel me={me} onClose={() => setTeamOpen(false)} />}

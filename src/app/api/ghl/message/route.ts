@@ -23,7 +23,12 @@ import { requireUser } from "@/lib/serverAuth";
 const GHL = "https://services.leadconnectorhq.com";
 
 export async function POST(req: NextRequest) {
-  if (!(await requireUser(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const caller = await requireUser(req);
+  if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Sending email/SMS is gated per-user — admins always, VAs only when granted.
+  // Enforced here (not just hidden in the UI) so it can't be bypassed by
+  // calling the endpoint directly.
+  if (!caller.canSendMessages) return NextResponse.json({ error: "You don't have permission to send messages. Ask an admin to enable it for you." }, { status: 403 });
   const b = await req.json().catch(() => ({} as any));
   const { locationId, ghlContactId, channel, subject, body, attachments, cc, bcc } = b as {
     locationId?: string;

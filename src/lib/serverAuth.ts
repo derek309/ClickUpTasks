@@ -5,7 +5,7 @@
 import { NextRequest } from "next/server";
 import { supabaseAdmin, adminConfigured } from "./supabaseAdmin";
 
-export type AuthedUser = { id: string; email: string; role: "admin" | "va" };
+export type AuthedUser = { id: string; email: string; role: "admin" | "va"; canSendMessages: boolean };
 
 /** Returns the signed-in user or null. */
 export async function requireUser(req: NextRequest): Promise<AuthedUser | null> {
@@ -14,8 +14,9 @@ export async function requireUser(req: NextRequest): Promise<AuthedUser | null> 
   if (!token) return null;
   const { data } = await supabaseAdmin.auth.getUser(token);
   if (!data.user) return null;
-  const { data: profile } = await supabaseAdmin.from("profiles").select("role").eq("id", data.user.id).maybeSingle();
-  return { id: data.user.id, email: data.user.email ?? "", role: profile?.role === "admin" ? "admin" : "va" };
+  const { data: profile } = await supabaseAdmin.from("profiles").select("role, can_send_messages").eq("id", data.user.id).maybeSingle();
+  const isAdmin = profile?.role === "admin";
+  return { id: data.user.id, email: data.user.email ?? "", role: isAdmin ? "admin" : "va", canSendMessages: isAdmin || !!profile?.can_send_messages };
 }
 
 /** Returns the signed-in user only if they are an admin; otherwise null. */

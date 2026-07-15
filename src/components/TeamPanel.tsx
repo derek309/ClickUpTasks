@@ -6,7 +6,7 @@ import { type Me } from "@/lib/data";
 import { ConfirmModal, type ConfirmSpec } from "./cockpit/modals";
 import { I } from "./cockpit/ui";
 
-type Profile = { id: string; email: string; name: string; role: "admin" | "va"; color: string; pending?: boolean; avatar_url?: string | null };
+type Profile = { id: string; email: string; name: string; role: "admin" | "va"; color: string; pending?: boolean; avatar_url?: string | null; can_send_messages?: boolean };
 
 export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void }) {
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -44,7 +44,7 @@ export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void
 
   async function patch(id: string, body: Record<string, unknown>) {
     setSaving(id);
-    setProfiles((ps) => ps.map((p) => (p.id === id ? { ...p, ...(body.role ? { role: body.role as Profile["role"] } : {}) } : p)));
+    setProfiles((ps) => ps.map((p) => (p.id === id ? { ...p, ...(body.role ? { role: body.role as Profile["role"] } : {}), ...(typeof body.can_send_messages === "boolean" ? { can_send_messages: body.can_send_messages } : {}) } : p)));
     try {
       const res = await authedFetch("/api/team", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...body }) });
       if (!res.ok) { const j = await res.json(); throw new Error(j.error); }
@@ -157,6 +157,20 @@ export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void
                 <div className="truncate text-[13px] text-muted">{p.email}</div>
               </div>
 
+              {/* Send email/SMS permission. Admins always can (shown locked-on);
+                  VAs are off by default and an admin flips this to grant it. */}
+              {(() => {
+                const canSend = p.role === "admin" || !!p.can_send_messages;
+                return (
+                  <button
+                    disabled={saving === p.id || p.role === "admin"}
+                    onClick={() => patch(p.id, { can_send_messages: !p.can_send_messages })}
+                    title={p.role === "admin" ? "Admins can always send email & SMS" : canSend ? "Can send email & SMS — click to revoke" : "Can't send email & SMS — click to allow"}
+                    className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[13px] font-medium disabled:opacity-60 ${canSend ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}>
+                    <I.bolt /> {canSend ? "Can send" : "No send"}
+                  </button>
+                );
+              })()}
               <div className="inline-flex overflow-hidden rounded-md border">
                 {(["admin", "va"] as const).map((r) => (
                   <button key={r} disabled={saving === p.id || (p.id === me.id && r === "va")} onClick={() => patch(p.id, { role: r })}

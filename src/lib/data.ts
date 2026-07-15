@@ -37,6 +37,7 @@ export interface Me {
   initials: string;
   color: string;
   role: Role;
+  canSendMessages: boolean; // admins always true; VAs only when an admin grants it
 }
 export type TaskStatus = "todo" | "in_progress" | "review" | "done";
 export type Priority = "conversation" | "urgent" | "normal" | "none";

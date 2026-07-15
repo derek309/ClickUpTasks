@@ -37,6 +37,7 @@ export default function App() {
       initials: roster?.initials ?? initialsOf(data?.name ?? email),
       color: roster?.color ?? data?.color ?? "#a855f7",
       role: (data?.role as Role) ?? "va",
+      canSendMessages: data?.role === "admin" || !!data?.can_send_messages,
     });
     setChecking(false);
   }
