@@ -11,6 +11,34 @@ import { I, Avatar, Row, CollapsibleText, FileBadge, newId } from "./ui";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 import { InlineAssignee, InlineDue } from "./GroupedList";
 
+// Parses describeFieldChange's (Cockpit.tsx) event strings into a structured
+// before/after pair for the Activity feed's diff cards, without a schema
+// change — events are still stored as plain text in task.comments, this just
+// recognizes the handful of phrasings that function produces. Anything that
+// doesn't match (e.g. future event copy) falls back to the old plain line.
+function parseEventDiff(body: string): { field: string; from: string | null; to: string } | null {
+  let m: RegExpExecArray | null;
+  if ((m = /^changed (.+?) from (.+) to (.+)$/.exec(body))) return { field: m[1], from: m[2], to: m[3] };
+  if ((m = /^reassigned from (.+) to (.+)$/.exec(body))) return { field: "assignee", from: m[1], to: m[2] };
+  if ((m = /^assigned to (.+)$/.exec(body))) return { field: "assignee", from: null, to: m[1] };
+  if ((m = /^unassigned \(was (.+)\)$/.exec(body))) return { field: "assignee", from: m[1], to: "Unassigned" };
+  if ((m = /^set due date to (.+)$/.exec(body))) return { field: "due date", from: null, to: m[1] };
+  if ((m = /^cleared the due date \(was (.+)\)$/.exec(body))) return { field: "due date", from: m[1], to: "No date" };
+  return null;
+}
+function EventDiffCard({ diff }: { diff: { field: string; from: string | null; to: string } }) {
+  return (
+    <div className="mt-1 inline-block rounded-lg border bg-background px-2.5 py-1.5">
+      <div className="mb-0.5 text-[11px] font-medium capitalize text-muted">{diff.field}</div>
+      <div className="flex items-center gap-1.5 text-[13px]">
+        {diff.from && <span className="text-muted line-through">{diff.from}</span>}
+        {diff.from && <span className="text-muted">→</span>}
+        <span className="font-medium text-foreground">{diff.to}</span>
+      </div>
+    </div>
+  );
+}
+
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 // A chip-style multi-recipient input for email Cc/Bcc — type to search the
 // synced contact list by name or email, or type a raw address and hit Enter.
@@ -268,7 +296,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     <textarea value={task.title} onChange={(e) => onPatch({ title: e.target.value })} rows={1} className={`-mx-1 w-full resize-none rounded-md bg-transparent px-1 font-semibold leading-snug outline-none [field-sizing:content] transition focus:bg-background ${full ? "text-[28px]" : "text-[18px]"}`} />
   );
   const statusBlock = (
-    <div className="mt-3 flex flex-wrap items-center gap-1.5">
+    <div className="mt-4 grid grid-cols-4 overflow-hidden rounded-lg border">
       {STATUS_ORDER.map((s) => {
         const m = STATUS_META[s];
         const on = task.status === s;
@@ -279,7 +307,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
         // do" actually visible instead of nearly invisible at small size.
         const iconCls = `h-3 w-3 shrink-0 ${on ? "text-white" : ""}`;
         return (
-          <button key={s} onClick={() => onPatch({ status: s })} className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[13px] font-medium transition ${on ? "text-white shadow-soft" : "border-transparent text-muted hover:bg-background"}`} style={on ? { background: m.dot, borderColor: m.dot } : {}}>
+          <button key={s} onClick={() => onPatch({ status: s })} className={`flex items-center justify-center gap-1.5 border-r px-2 py-2.5 text-[13px] font-medium transition last:border-r-0 ${on ? "text-white" : "text-muted hover:bg-background"}`} style={on ? { background: m.dot, borderColor: m.dot } : {}}>
             {s === "done" ? <I.check className={iconCls} />
               : s === "review" ? <I.search className={iconCls} />
               : s === "in_progress" ? <I.repeat className={iconCls} />
@@ -300,6 +328,8 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     </div>
   ) : null;
   const propsBlock = (
+    <div className="mt-5 rounded-xl border bg-surface p-5">
+    <div className="mb-4 text-[15px] font-semibold">Task Details</div>
     <dl className={full ? "grid grid-cols-1 gap-x-12 gap-y-2 lg:grid-cols-2" : "space-y-3"}>
       <Row label="Due date">
         <span className="inline-flex flex-wrap items-center gap-1.5">
@@ -343,13 +373,14 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
         <span className="inline-flex items-center gap-1.5 rounded-md bg-background px-2 py-1 text-[13px] text-muted" title="This client has no linked GHL contact/location, so this task can't sync to GoHighLevel."><I.bolt className="opacity-40" /> Not linkable</span>
       )}</Row>
     </dl>
+    </div>
   );
   const descriptionBlock = (
     // Auto-grows to fit its content (same [field-sizing:content] technique as
     // the title) instead of a fixed 3-row box with an inner scrollbar — on a
     // full page there's room, and description is the one field with real
     // substance, so it shouldn't be the cramped part.
-    <div className="mt-5"><div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted">Description</div><textarea value={task.description} onChange={(e) => onPatch({ description: e.target.value })} placeholder="Add a description…" rows={3} className="-mx-3 min-h-[80px] w-full resize-none rounded-lg border border-transparent px-3 py-2 text-[15px] outline-none transition [field-sizing:content] placeholder:text-muted hover:bg-background focus:border-accent focus:bg-background" /></div>
+    <div className="mt-5 rounded-xl border bg-surface p-5"><div className="mb-2 text-[15px] font-semibold">Description</div><textarea value={task.description} onChange={(e) => onPatch({ description: e.target.value })} placeholder="Add a description…" rows={3} className="-mx-2 min-h-[80px] w-full resize-none rounded-lg border border-transparent px-2 py-1.5 text-[15px] outline-none transition [field-sizing:content] placeholder:text-muted hover:bg-background focus:border-accent focus:bg-background" /></div>
   );
   // Message this task's linked GHL contact directly, without leaving the
   // drawer — sends via the same GHL Conversations API path as the Chat
@@ -428,9 +459,9 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     </div>
   );
   const subtasksBlock = (
-    <div className="mt-5">
+    <div className="mt-5 rounded-xl border bg-surface p-5">
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">Checklist {task.subtasks.length > 0 && `· ${doneSubs}/${task.subtasks.length}`}</span>
+        <span className="text-[15px] font-semibold">Checklist {task.subtasks.length > 0 && <span className="text-muted">· {doneSubs}/{task.subtasks.length}</span>}</span>
         {templates.length > 0 && (
           <div className="relative">
             <button onClick={() => setTemplateOpen((o) => !o)} className="inline-flex items-center gap-1 text-[13px] font-medium text-accent"><I.clipboard /> From template</button>
@@ -470,9 +501,9 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     return 0; // "added" — keep stored order (oldest first, matches how they were attached)
   });
   const attachmentsBlock = (
-    <div className="mt-5">
+    <div className="mt-5 rounded-xl border bg-surface p-5">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">Attachments · {task.attachments.length}</span>
+        <span className="text-[15px] font-semibold">Attachments {task.attachments.length > 0 && <span className="text-muted">· {task.attachments.length}</span>}</span>
         <span className="flex items-center gap-3">
           {task.attachments.length > 1 && (
             <select value={attSort} onChange={(e) => setAttSort(e.target.value as typeof attSort)} className="rounded-md border bg-background px-1.5 py-1 text-[13px] outline-none" title="Sort attachments">
@@ -599,7 +630,18 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const commentsFeed = (
     <div className="space-y-2.5">
       {activityItems.map((item) => {
-        if (item.kind === "event") { const c = item.comment; const u = userById(c.authorId); return (<div key={c.id} className="flex items-center gap-2 py-0.5 text-[13px] text-muted"><Avatar id={c.authorId} size={16} /><span><span className="font-medium text-foreground">{u?.name}</span> {c.body} · {timeAgo(c.at)}</span></div>); }
+        if (item.kind === "event") {
+          const c = item.comment; const u = userById(c.authorId); const diff = parseEventDiff(c.body);
+          return (
+            <div key={c.id} className="flex items-start gap-2 py-0.5 text-[13px] text-muted">
+              <Avatar id={c.authorId} size={16} />
+              <div>
+                <span><span className="font-medium text-foreground">{u?.name}</span> {diff ? `updated ${diff.field}` : c.body} · {timeAgo(c.at)}</span>
+                {diff && <EventDiffCard diff={diff} />}
+              </div>
+            </div>
+          );
+        }
         if (item.kind === "message") {
           const m = item.message;
           return (
