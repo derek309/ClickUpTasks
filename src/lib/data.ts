@@ -106,6 +106,10 @@ export interface Client {
    * itself "cl_" + a contact id (e.g. ClickUp-origin imports). When set, it
    * overrides the id-derived contact for Open-in-GHL and task import. */
   linkedContactId?: string | null;
+  /** Cached AI relationship summary (Gemini) — regenerated on demand from
+   * the AI tab, never automatically, so opening a task never spends money. */
+  aiSummary?: string | null;
+  aiSummaryAt?: string | null;
 }
 
 /** A quick-access link on a client's page (live site, WP admin, etc.), stored

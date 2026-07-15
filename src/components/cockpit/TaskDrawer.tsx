@@ -83,7 +83,7 @@ function RecipientField({ label, value, onChange, contacts }: { label: string; v
   );
 }
 
-export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, isQueued, onToggleQueue, onCopyLink, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, sendingMessage }: {
+export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, isQueued, onToggleQueue, onCopyLink, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, sendingMessage, onRegenerateAiSummary, aiSummaryBusy }: {
   task: Task; comment: string; setComment: (v: string) => void;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; navTasks: Task[]; onOpenTask: (id: string) => void; onAddSibling: (title: string) => void; onPrev: () => void; onNext: () => void;
@@ -98,6 +98,8 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   onUploadMessageImage?: (file: File) => Promise<Attachment | null>;
   onSendTaskMessage?: (channel: MessageChannel, subject: string, body: string, attachments?: Attachment[], cc?: string[], bcc?: string[]) => void;
   sendingMessage?: boolean;
+  onRegenerateAiSummary?: () => void; // AI tab's "Regenerate" — only ever called on click, never automatically
+  aiSummaryBusy?: boolean;
 }) {
   const client = clientById(task.clientId)!;
   const project = projectById(task.projectId)!;
@@ -147,9 +149,9 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   // comment thread are both "activity on this task", just different
   // channels. The channel is just whichever tab is active, not separate
   // state, so there's one source of truth for what Send will do.
-  const [rightTab, setRightTab] = useState<"activity" | "sms" | "email">("activity");
+  const [rightTab, setRightTab] = useState<"activity" | "sms" | "email" | "ai">("activity");
   const submitTaskMessage = () => {
-    if ((!msgBody.trim() && pendingMsgAtts.length === 0) || !onSendTaskMessage || rightTab === "activity") return;
+    if ((!msgBody.trim() && pendingMsgAtts.length === 0) || !onSendTaskMessage || rightTab === "activity" || rightTab === "ai") return;
     // Cc/Bcc ride along only on email; SMS ignores them (Cockpit also guards this).
     const cc = rightTab === "email" ? msgCc : undefined;
     const bcc = rightTab === "email" ? msgBcc : undefined;
@@ -454,8 +456,9 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     </div>
   ) : null;
   // Falls back to "activity" if an SMS/Email tab was active but the
-  // contact got unlinked out from under it.
-  const activeRightTab = hasMessaging ? rightTab : "activity";
+  // contact got unlinked out from under it. AI isn't gated on hasMessaging —
+  // it summarizes tasks even without a linked contact, messages just add to it.
+  const activeRightTab = (rightTab === "sms" || rightTab === "email") && !hasMessaging ? "activity" : rightTab;
   const rightTabBar = (
     <div className="flex items-center gap-1">
       <button onClick={() => setRightTab("activity")} className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium ${activeRightTab === "activity" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Activity · {commentCount}</button>
@@ -463,6 +466,27 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
         <button onClick={() => setRightTab("sms")} className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium ${activeRightTab === "sms" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>SMS</button>
         <button onClick={() => setRightTab("email")} className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium ${activeRightTab === "email" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Email</button>
       </>)}
+      {onRegenerateAiSummary && (
+        <button onClick={() => setRightTab("ai")} className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium ${activeRightTab === "ai" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>AI</button>
+      )}
+    </div>
+  );
+  const aiSummaryBlock = (
+    <div className="flex-1 overflow-y-auto px-5 py-4">
+      <div className="mb-3 flex items-center justify-between">
+        <span className="text-[13px] font-medium text-muted">{client.aiSummaryAt ? `Updated ${timeAgo(client.aiSummaryAt)}` : "No summary yet"}</span>
+        <button onClick={onRegenerateAiSummary} disabled={aiSummaryBusy} className="inline-flex items-center gap-1.5 rounded-md border border-accent px-2.5 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft disabled:opacity-50">
+          {aiSummaryBusy ? "Summarizing…" : client.aiSummary ? "Regenerate" : "Summarize"}
+        </button>
+      </div>
+      {client.aiSummary ? (
+        <p className="whitespace-pre-wrap text-[15px] leading-relaxed">{client.aiSummary}</p>
+      ) : (
+        <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted">
+          <span className="text-[15px]">No AI summary yet</span>
+          <span className="text-[13px]">Pulls from this client&apos;s recent messages and tasks.</span>
+        </div>
+      )}
     </div>
   );
   const subtasksBlock = (
@@ -829,7 +853,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               {activeRightTab === "activity" ? (<>
                 <div className="flex-1 overflow-y-auto px-5 py-4">{commentsFeed}</div>
                 {composer}
-              </>) : activeRightTab === "sms" ? smsComposerBlock : emailComposerBlock}
+              </>) : activeRightTab === "sms" ? smsComposerBlock : activeRightTab === "ai" ? aiSummaryBlock : emailComposerBlock}
             </div>
           </div>
           )
@@ -847,10 +871,11 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               {siblingsBlock}
               <div className="mt-6">
                 {rightTabBar}
-                <div className="mt-2">{commentsFeed}</div>
+                {activeRightTab === "activity" && <div className="mt-2">{commentsFeed}</div>}
+                {activeRightTab === "ai" && <div className="mt-2">{aiSummaryBlock}</div>}
               </div>
             </div>
-            {activeRightTab === "activity" ? composer : activeRightTab === "sms" ? smsComposerBlock : emailComposerBlock}
+            {activeRightTab === "activity" ? composer : activeRightTab === "sms" ? smsComposerBlock : activeRightTab === "ai" ? null : emailComposerBlock}
           </>
         )}
       </aside>
