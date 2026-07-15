@@ -39,8 +39,8 @@ export const rowToClient = (r: any): Client => ({ id: r.id, name: titleCase(r.na
 const contactToRow = (c: Contact) => ({ id: c.id, client_id: c.clientId, name: c.name, email: c.email, phone: c.phone ?? null, ghl_contact_id: c.ghlContactId, company_name: c.company ?? null, city: c.city ?? null, state: c.state ?? null });
 const rowToContact = (r: any): Contact => ({ id: r.id, clientId: r.client_id, name: titleCase(r.name), email: r.email ?? "", phone: r.phone ?? "", ghlContactId: r.ghl_contact_id ?? "", company: r.company_name ?? "", city: r.city ?? "", state: r.state ?? "" });
 
-const projectToRow = (p: Project) => ({ id: p.id, client_id: p.clientId, name: p.name, description: p.description });
-const rowToProject = (r: any): Project => ({ id: r.id, clientId: r.client_id, name: r.name, description: r.description ?? "" });
+const projectToRow = (p: Project) => ({ id: p.id, client_id: p.clientId, name: p.name, description: p.description, assigned_to: p.assignedTo ?? [] });
+const rowToProject = (r: any): Project => ({ id: r.id, clientId: r.client_id, name: r.name, description: r.description ?? "", assignedTo: r.assigned_to ?? [] });
 
 // `updatedBy` is DB-only metadata (Realtime echo-suppression signal) — it is
 // not part of the domain Task type, so it's a separate write-time parameter

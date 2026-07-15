@@ -249,6 +249,11 @@ export interface Project {
   clientId: string;
   name: string;
   description: string;
+  /** Roster ids "following" this project — same concept as Client.assignedTo,
+   * scoped to just this project rather than the whole client. Drives the
+   * "My Work" tab's assigned-or-following filter; not an RLS/visibility
+   * change (a project's own client-level following already covers that). */
+  assignedTo?: string[];
 }
 
 export interface Label {

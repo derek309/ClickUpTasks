@@ -213,6 +213,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     markOwnClientWrite(nc.id);
     upsertClient(nc);
   };
+  // "Follow" a project directly — same idea as toggleClientAssignment, just
+  // scoped to one project instead of the whole client. App-level only (no
+  // RLS change, no realtime subscription on `projects` to echo-suppress).
+  const toggleProjectAssignment = (projectId: string, memberId: string) => {
+    const p = projectById(projectId);
+    if (!p) return;
+    const current = p.assignedTo ?? [];
+    const np = { ...p, assignedTo: current.includes(memberId) ? current.filter((id) => id !== memberId) : [...current, memberId] };
+    setProjects((ps) => ps.map((x) => (x.id === projectId ? np : x)));
+    upsertProject(np);
+  };
   // Point a client at a synced GHL contact (or null to unlink). Used for
   // clients whose id isn't itself a contact id, so GHL features can't derive
   // one from the id — see contactForClient.
@@ -1715,6 +1726,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     title={following ? "Following — click to stop following this client" : "Follow this client to keep it in My Clients"}
                     className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-[13px] font-medium ${following ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>
                     {following ? <><I.check /> Following</> : <><I.plus /> Follow</>}
+                  </button>
+                );
+              })()}
+              {activeProject && projectById(activeProject) && (() => {
+                const followingProject = (projectById(activeProject)!.assignedTo ?? []).includes(me.id);
+                return (
+                  <button onClick={() => toggleProjectAssignment(activeProject, me.id)}
+                    title={followingProject ? "Following — click to stop following this project" : "Follow this project to keep it in My Work"}
+                    className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-[13px] font-medium ${followingProject ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>
+                    {followingProject ? <><I.check /> Following project</> : <><I.plus /> Follow project</>}
                   </button>
                 );
               })()}
