@@ -66,7 +66,7 @@ import { TaskDrawer } from "./cockpit/TaskDrawer";
 import { QuickLinksBar } from "./cockpit/ClientLinks";
 import { ClientNotes } from "./cockpit/ClientNotes";
 import { VaultView, type VaultItem } from "./cockpit/VaultView";
-import { ClientsBoard, type ClientBoardGroup } from "./cockpit/ClientsBoard";
+import { ClientsBoard, type WorkBoardGroup, type WorkItem } from "./cockpit/ClientsBoard";
 
 // --- Deep-link URL state ----------------------------------------------------
 // The whole app lives on "/", so we encode what you're looking at into the
@@ -645,13 +645,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // client if they have a task on it OR they're explicitly following it —
   // this is a display-layer echo of that DB rule, not the enforcement of it.
   const visibleClients = canAdmin ? clientList : clientList.filter((c) => scopedTasks.some((t) => t.clientId === c.id) || (c.assignedTo ?? []).includes(me.id));
-  // "My Clients" is a strictly personal view — only clients with a
-  // currently *open* task assigned to me specifically (or that I'm
-  // explicitly following), even for admins, who otherwise see every client
-  // via visibleClients above. A client whose only connection to me is a
-  // task I already finished, and that I'm not following, drops off the
-  // board entirely rather than lingering in "No open tasks" forever.
-  const myAssignedClients = clientList.filter((c) => scopedTasks.some((t) => t.clientId === c.id && t.status !== "done" && (t.assigneeId === me.id || t.subtasks.some((s) => s.assigneeId === me.id))) || (c.assignedTo ?? []).includes(me.id));
+  // "My Work" is a strictly personal-to-someone view — only clients with a
+  // currently *open* task assigned to that person specifically (or that
+  // they're explicitly following), even for admins, who otherwise see every
+  // client via visibleClients above. A client whose only connection is a
+  // task already finished, and not followed, drops off the board entirely
+  // rather than lingering in "No open tasks" forever. Parametrized by
+  // userId (not just `me`) so the admin-only "viewing work for" selector
+  // can point this at a teammate instead of yourself.
+  const assignedClientsFor = (userId: string) => clientList.filter((c) => scopedTasks.some((t) => t.clientId === c.id && t.status !== "done" && (t.assigneeId === userId || t.subtasks.some((s) => s.assigneeId === userId))) || (c.assignedTo ?? []).includes(userId));
+  // Same rule, applied to projects — a project with no assignedTo field yet
+  // (pre-migration rows) just falls back to an empty follow-list, matching
+  // rowToProject's `?? []` default.
+  const assignedProjectsFor = (userId: string) => projects.filter((p) => scopedTasks.some((t) => t.projectId === p.id && t.status !== "done" && (t.assigneeId === userId || t.subtasks.some((s) => s.assigneeId === userId))) || (p.assignedTo ?? []).includes(userId));
+  const myAssignedClients = assignedClientsFor(me.id);
   const myTerritories = territories.filter((t) => t.memberId === me.id);
   // ⌘K's "Not imported" search — any type counts as "already added" here,
   // not just type 'client', so a contact never shows as addable twice.
@@ -708,10 +715,27 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const tier = soonest < TODAY ? 1 : soonest === TODAY ? 2 : 3;
     return { tier, due: soonest, priorityRank: Math.max(...atSoonest.map((t) => PRIORITY_META[t.priority].rank)) };
   }
-  // "My Clients" — the same urgency tiers as the sidebar's "Overdue first"
-  // sort, but as grouped sections of clients (My Work's layout, client rows
-  // instead of task rows) rather than a single flat re-ordered list.
-  const myClientsGroups: ClientBoardGroup[] = (() => {
+  // Same tiering as clientUrgencyKey, scoped to one project's tasks instead
+  // of a whole client's. No tier-0 "New message" boost — that's driven by a
+  // client-level Conversation task, not a project concept.
+  function projectUrgencyKey(projectId: string, forAssignee?: string): { tier: number; due: string; priorityRank: number } {
+    const open = scopedTasks.filter((t) => t.projectId === projectId && t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
+    if (open.length === 0) return { tier: 5, due: "", priorityRank: 0 };
+    const withDue = open.filter((t) => t.due);
+    if (withDue.length === 0) return { tier: 4, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
+    const soonest = withDue.reduce((a, b) => (b.due! < a.due! ? b : a)).due!;
+    const atSoonest = withDue.filter((t) => t.due === soonest);
+    const tier = soonest < TODAY ? 1 : soonest === TODAY ? 2 : 3;
+    return { tier, due: soonest, priorityRank: Math.max(...atSoonest.map((t) => PRIORITY_META[t.priority].rank)) };
+  }
+  const projectTaskCount = (projectId: string) => scopedTasks.filter((t) => t.projectId === projectId && t.status !== "done").length;
+  // "My Work" — the same urgency tiers as the sidebar's "Overdue first"
+  // sort, as grouped sections of clients AND projects (interleaved together
+  // within each tier, sorted by the same due/priority/name comparator)
+  // rather than two separate lists. Scoped by myWorkUser, not always `me` —
+  // that's what lets the admin "viewing work for" selector repoint this at
+  // a teammate.
+  const myWorkGroups: WorkBoardGroup[] = (() => {
     const defs: [number, string, string][] = [
       [0, "New message", "#8b5cf6"],
       [1, "Overdue", "#ef4444"],
@@ -720,18 +744,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       [4, "No due date", "#94a3b8"],
       [5, "No open tasks", "#cbd5e1"],
     ];
-    const withKey = myAssignedClients.map((c) => ({ c, k: clientUrgencyKey(c.id, me.id) }));
+    const clientKeys = assignedClientsFor(myWorkUser).map((c) => ({ kind: "client" as const, item: { kind: "client" as const, client: c }, name: c.name, k: clientUrgencyKey(c.id, myWorkUser) }));
+    const projectKeys = assignedProjectsFor(myWorkUser).map((p) => ({ kind: "project" as const, item: { kind: "project" as const, project: p, clientName: clientById(p.clientId)?.name ?? "—" } as WorkItem, name: p.name, k: projectUrgencyKey(p.id, myWorkUser) }));
+    const withKey = [...clientKeys, ...projectKeys];
     return defs
       .map(([tier, label, color]) => ({
         key: String(tier),
         label,
         color,
-        clients: withKey
+        items: withKey
           .filter((x) => x.k.tier === tier)
-          .sort((a, b) => a.k.due.localeCompare(b.k.due) || b.k.priorityRank - a.k.priorityRank || a.c.name.localeCompare(b.c.name))
-          .map((x) => x.c),
+          .sort((a, b) => a.k.due.localeCompare(b.k.due) || b.k.priorityRank - a.k.priorityRank || a.name.localeCompare(b.name))
+          .map((x) => x.item),
       }))
-      .filter((g) => g.clients.length > 0);
+      .filter((g) => g.items.length > 0);
   })();
   // Sidebar sections by client status, funnel order; Active Client has no
   // header (it's the main working set), the rest only show when non-empty.
@@ -1512,7 +1538,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         <nav className="shrink-0 space-y-0.5 px-2">
           {navVisible.inbox && <SideItem active={inboxView} onClick={() => { setInboxView(true); setMyWork(false); setPersonalView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.bell className="text-muted" /> <span>Inbox</span>{unread > 0 && <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{unread}</span>}</SideItem>}
           {navVisible.all && <SideItem active={!myWork && !personalView && !inboxView && activeClient === "all"} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>All Tasks</span><span className="ml-auto text-[13px] text-muted">{scopedTasks.filter((t) => t.clientId.startsWith("cl_")).length}</span></SideItem>}
-          {navVisible.work && <SideItem active={myWork} onClick={() => { setMyWork(true); setPersonalView(false); setInboxView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.user className="text-muted" /> <span>My Work</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length}</span></SideItem>}
+          {navVisible.work && <SideItem active={myWork} onClick={() => { setMyWork(true); setPersonalView(false); setInboxView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.user className="text-muted" /> <span>My Work</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
           {navVisible.personal && <SideItem active={personalView} onClick={() => { setPersonalView(true); setMyWork(false); setInboxView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>}
         </nav>
 
@@ -1897,8 +1923,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         ) : personalView ? (
           <GroupedList groups={buildGroups(myPersonalTasks, "due")} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty queuedIds={claudeQueue} colOrder={colOrder} onReorderCols={reorderCols} />
         ) : myWork ? (
-          <ClientsBoard groups={myClientsGroups} clientTaskCount={clientTaskCount} hasUnreadMessage={hasUnreadMessage}
-            onOpen={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }} />
+          <ClientsBoard groups={myWorkGroups} clientTaskCount={clientTaskCount} projectTaskCount={projectTaskCount} hasUnreadMessage={hasUnreadMessage}
+            onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }}
+            onOpenProject={(id) => { const p = projects.find((x) => x.id === id); if (!p) return; setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(p.clientId); setActiveProject(id); setOpenTaskId(null); }} />
         ) : activeClient !== "all" && clientTab === "chat" ? (
           <ClientNotes
             key={activeProject ?? activeClient}
