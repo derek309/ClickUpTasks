@@ -1832,7 +1832,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           )}
 
 
-          {inboxView || personalView ? null : myWork ? (
+          {inboxView ? null : myWork ? (
             canAdmin ? (
               <label className="flex items-center gap-2"><span className="text-muted">Viewing work for</span>
                 <select value={myWorkUser} onChange={(e) => setMyWorkUser(e.target.value)} className="rounded-md border bg-background px-2 py-1 outline-none">{users.map((u) => (<option key={u.id} value={u.id}>{u.name}{u.role === "va" ? " (VA)" : ""}</option>))}</select>
@@ -1840,7 +1840,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             ) : (
               <span className="text-[13px] text-muted">Your assigned clients and projects</span>
             )
-          ) : clientTab === "chat" || clientTab === "vault" ? null : (
+          ) : !personalView && (clientTab === "chat" || clientTab === "vault") ? null : (
             <div className="relative">
               <button onClick={() => setFilterOpen((o) => !o)} title="Filter & view" className="relative rounded-md border bg-background p-2 text-muted hover:text-foreground">
                 <I.filter />
@@ -1849,7 +1849,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               {filterOpen && (<>
                 <div className="fixed inset-0 z-30" onClick={() => setFilterOpen(false)} />
                 <div className="absolute right-0 z-40 mt-1 w-72 space-y-2.5 rounded-xl border bg-surface p-3 shadow-xl">
-                  {activeClient !== "all" && clientById(activeClient) && (
+                  {!personalView && activeClient !== "all" && clientById(activeClient) && (
                     <div className="space-y-1.5 border-b pb-2.5">
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Following</span>
@@ -1943,7 +1943,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         {inboxView ? (
           <Inbox notifications={myNotifs} clientById={clientById} projectById={projectById} onOpen={openNotification} onMarkAllRead={markAllNotifsRead} />
         ) : personalView ? (
-          <GroupedList groups={buildGroups(myPersonalTasks, "due")} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty queuedIds={claudeQueue} colOrder={colOrder} onReorderCols={reorderCols} />
+          <GroupedList groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} queuedIds={claudeQueue} colOrder={colOrder} onReorderCols={reorderCols} />
         ) : myWork ? (
           <ClientsBoard groups={myWorkGroups} clientTaskCount={clientTaskCount} projectTaskCount={projectTaskCount} hasUnreadMessage={hasUnreadMessage}
             onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }}
