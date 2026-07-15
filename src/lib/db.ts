@@ -91,12 +91,12 @@ const taskTemplateToRow = (t: TaskTemplate) => ({ id: t.id, name: t.name, checkl
 const rowToTaskTemplate = (r: any): TaskTemplate => ({ id: r.id, name: r.name, checklistItems: r.checklist_items ?? [] });
 
 const messageToRow = (m: Message) => ({
-  id: m.id, contact_id: m.contactId, client_id: m.clientId, channel: m.channel, direction: m.direction,
+  id: m.id, contact_id: m.contactId, client_id: m.clientId, task_id: m.taskId ?? null, channel: m.channel, direction: m.direction,
   subject: m.subject, body: m.body, ghl_message_id: m.ghlMessageId, created_by: m.createdBy, read: m.read,
   attachments: m.attachments, cc: m.cc, bcc: m.bcc,
 });
 export const rowToMessage = (r: any): Message => ({
-  id: r.id, contactId: r.contact_id, clientId: r.client_id, channel: (r.channel as MessageChannel) ?? "email",
+  id: r.id, contactId: r.contact_id, clientId: r.client_id, taskId: r.task_id ?? null, channel: (r.channel as MessageChannel) ?? "email",
   direction: r.direction as MessageDirection, subject: r.subject ?? null, body: r.body ?? "",
   ghlMessageId: r.ghl_message_id ?? null, createdBy: r.created_by ?? null, at: r.created_at,
   read: r.read ?? true, attachments: r.attachments ?? [], cc: r.cc ?? [], bcc: r.bcc ?? [],

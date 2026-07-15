@@ -97,8 +97,9 @@ async function handleMessageReply(body: any, custom: any) {
   if (!contact) return NextResponse.json({ ok: true, skipped: "no contact for that ghlContactId" });
 
   const ghlMessageId: string | null = typeof custom?.messageId === "string" ? custom.messageId : null;
+  const messageId = "msg_" + crypto.randomUUID();
   const { error } = await supabaseAdmin.from("messages").insert({
-    id: "msg_" + crypto.randomUUID(),
+    id: messageId,
     contact_id: contact.id,
     client_id: contact.client_id,
     channel: body?.message?.type === 2 ? "sms" : "email",
@@ -117,7 +118,13 @@ async function handleMessageReply(body: any, custom: any) {
     if (!error.message.includes("duplicate key")) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ ok: true });
   }
-  await upsertConversationTask(contact, ghlContactId);
+  // Scope this message to its Conversation task (see the task drawer's
+  // Activity feed filter, which reads messages.task_id) — resolved/created
+  // after the insert above, not before, so a retried delivery still can't
+  // double-bump the task's due date; this is a best-effort backfill, not
+  // part of the duplicate-delivery guard.
+  const taskId = await upsertConversationTask(contact, ghlContactId);
+  if (taskId) await supabaseAdmin.from("messages").update({ task_id: taskId }).eq("id", messageId);
   return NextResponse.json({ ok: true });
 }
 
@@ -148,7 +155,12 @@ function todayPacific(): string {
 // deliveries for the same contact both reach the insert, the loser's insert
 // fails on that constraint and is treated as "someone else already created
 // it," same conservative spirit as the ghl_message_id dedup above.
-async function upsertConversationTask(contact: { id: string; name: string; client_id: string }, ghlContactId: string) {
+// Returns the resolved/created Conversation task's id (used to backfill
+// task_id onto the message row that triggered this), or null if it couldn't
+// be resolved — a lost race against a concurrent delivery for the same
+// contact, or a real insert failure (already logged below). Either way the
+// message itself is unaffected; it just won't carry a task_id this once.
+async function upsertConversationTask(contact: { id: string; name: string; client_id: string }, ghlContactId: string): Promise<string | null> {
   const today = todayPacific();
   const { data: openTasks } = await supabaseAdmin
     .from("tasks")
@@ -159,7 +171,7 @@ async function upsertConversationTask(contact: { id: string; name: string; clien
     .limit(1);
   if (openTasks && openTasks.length > 0) {
     await supabaseAdmin.from("tasks").update({ due: today }).eq("id", openTasks[0].id);
-    return;
+    return openTasks[0].id;
   }
 
   // Reuse whatever project the client's other tasks live under, same "Tasks"
@@ -170,14 +182,15 @@ async function upsertConversationTask(contact: { id: string; name: string; clien
   if (!projectId) {
     projectId = "p_" + crypto.randomUUID();
     const { error: projErr } = await supabaseAdmin.from("projects").insert({ id: projectId, client_id: contact.client_id, name: "Tasks", description: "" });
-    if (projErr) { console.error("[webhook] upsertConversationTask: fallback project insert failed", projErr); return; }
+    if (projErr) { console.error("[webhook] upsertConversationTask: fallback project insert failed", projErr); return null; }
   }
 
   const { data: client } = await supabaseAdmin.from("clients").select("ghl_location_id").eq("id", contact.client_id).maybeSingle();
   const ghlUrl = client?.ghl_location_id ? `https://app.gohighlevel.com/v2/location/${client.ghl_location_id}/contacts/detail/${ghlContactId}` : null;
 
+  const newTaskId = "t_" + crypto.randomUUID();
   const { error: taskErr } = await supabaseAdmin.from("tasks").insert({
-    id: "t_" + crypto.randomUUID(),
+    id: newTaskId,
     project_id: projectId,
     client_id: contact.client_id,
     title: `Reply to ${titleCase(contact.name)}`,
@@ -189,5 +202,9 @@ async function upsertConversationTask(contact: { id: string; name: string; clien
   // A concurrent delivery for the same contact can lose the race to the
   // partial unique index in conversation-task-unique.sql — that's the other
   // request's insert having already won, not a real failure.
-  if (taskErr && !taskErr.message.includes("duplicate key")) console.error("[webhook] upsertConversationTask: task insert failed", taskErr);
+  if (taskErr) {
+    if (!taskErr.message.includes("duplicate key")) console.error("[webhook] upsertConversationTask: task insert failed", taskErr);
+    return null;
+  }
+  return newTaskId;
 }

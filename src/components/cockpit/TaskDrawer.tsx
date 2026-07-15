@@ -92,7 +92,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   onUploadCommentImage: (file: File) => Promise<Attachment | null>;
   onCopyAttachmentLink: (path: string) => void;
   onGetSignedUrl: (path: string) => Promise<string | null>;
-  messages?: Message[] | null; // this task's linked contact's email/SMS history, merged into the Activity feed
+  messages?: Message[] | null; // this task's own email/SMS (composed from here, or an inbound reply matched to this Conversation task), merged into the Activity feed
   linkedContactInfo?: Contact | null; // authoritative send target (matches what onSendTaskMessage actually resolves) — shown as "Sending to" in the SMS/Email composer
   ccContacts?: Contact[]; // searchable contacts for the email Cc/Bcc pickers
   onUploadMessageImage?: (file: File) => Promise<Attachment | null>;

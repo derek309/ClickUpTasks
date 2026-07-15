@@ -218,15 +218,23 @@ export type MessageChannel = "email" | "sms";
 export type MessageDirection = "outbound" | "inbound";
 
 /** A single email/SMS with a Contact, sent or received via GoHighLevel's
- * Conversations API. Belongs to the Contact, not any one Task — a contact can
- * have many tasks, and the conversation is with the person. Outbound rows are
- * inserted by the client right after a successful send; inbound rows are
- * inserted by the GHL webhook (src/app/api/ghl/webhook/route.ts) using the
- * service-role client, so they bypass RLS like the existing task-sync path. */
+ * Conversations API. Belongs to the Contact first — a contact can have many
+ * tasks, and the conversation is with the person — but is also optionally
+ * scoped to the one Task it's most associated with via taskId (set when
+ * composed from a task, or when it's an inbound reply matched to that
+ * contact's open Conversation task), which is what the task drawer's
+ * Activity feed filters by. Outbound rows are inserted by the client right
+ * after a successful send; inbound rows are inserted by the GHL webhook
+ * (src/app/api/ghl/webhook/route.ts) using the service-role client, so they
+ * bypass RLS like the existing task-sync path. */
 export interface Message {
   id: string;
   contactId: string;
   clientId: string;
+  /** Null for client-level Chat-tab sends (no task context) and for
+   * historical rows inserted before this field existed — never backfilled,
+   * see supabase/message-task-scope.sql. */
+  taskId?: string | null;
   channel: MessageChannel;
   direction: MessageDirection;
   subject: string | null;
