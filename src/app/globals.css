@@ -1,19 +1,21 @@
 @import "tailwindcss";
 
 :root {
-  --background: #eef0f6;
+  --background: #eef4fb;
   --surface: #ffffff;
   --foreground: #1c2030;
   --muted: #6b7280;
-  --border: #e6e8f0;
-  --accent: #7c3aed;
-  --accent-soft: #f1ecff;
+  --border: #d0dce8;
+  --accent: #1b3a5c;
+  --accent-soft: #e1eaf4;
+  --highlight: #e87722;
+  --highlight-soft: #fdece1;
   --success: #16a34a;
   --success-soft: #ecfdf3;
   --danger: #ef4444;
   --danger-soft: #fef2f2;
-  --scrollbar-thumb: #d7d7e2;
-  --scrollbar-thumb-hover: #c3c3d4;
+  --scrollbar-thumb: #c3d0de;
+  --scrollbar-thumb-hover: #aebdcf;
   --shadow-sm: 0 1px 2px rgba(20, 24, 40, 0.04), 0 1px 3px rgba(20, 24, 40, 0.05);
   --shadow-md: 0 4px 12px rgba(20, 24, 40, 0.06), 0 2px 4px rgba(20, 24, 40, 0.04);
 }
@@ -24,8 +26,10 @@
   --foreground: #e6e8ee;
   --muted: #99a1af;
   --border: #262b35;
-  --accent: #a879f5;
-  --accent-soft: #2a2140;
+  --accent: #5c8ac4;
+  --accent-soft: #1e2e42;
+  --highlight: #f2934a;
+  --highlight-soft: #3a2718;
   --success: #4ade80;
   --success-soft: #12291c;
   --danger: #f87171;
@@ -44,6 +48,8 @@
   --color-border: var(--border);
   --color-accent: var(--accent);
   --color-accent-soft: var(--accent-soft);
+  --color-highlight: var(--highlight);
+  --color-highlight-soft: var(--highlight-soft);
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
   --color-danger: var(--danger);
@@ -116,8 +122,10 @@ body {
   --foreground: #e8eaf0;
   --muted: #9aa2af;
   --border: #2b313d;
-  --accent: #b794f6;
-  --accent-soft: #322a55;
+  --accent: #6fa0d6;
+  --accent-soft: #253547;
+  --highlight: #f2934a;
+  --highlight-soft: #3a2718;
   background: var(--surface);
   color: var(--foreground);
 }
