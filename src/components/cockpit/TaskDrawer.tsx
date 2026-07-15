@@ -3,13 +3,14 @@
 // The task detail window (sidebar or full-page "document" view).
 import { useEffect, useRef, useState } from "react";
 import {
-  users, labels, userById, labelById, timeAgo, isOverdue, formatDue,
+  users, labels, userById, labelById, timeAgo, isOverdue, formatDue, htmlToText, clientStatusMeta,
   STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, FileBadge, newId } from "./ui";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 import { InlineAssignee, InlineDue } from "./GroupedList";
+import { RichTextEditor } from "./RichTextEditor";
 
 // Parses describeFieldChange's (Cockpit.tsx) event strings into a structured
 // before/after pair for the Activity feed's diff cards, without a schema
@@ -216,6 +217,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   // clipboard + paste is the reliable hand-off.)
   const copyForClaude = async () => {
     const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId);
+    const descText = htmlToText(task.description);
     const brief = [
       `Work on this task from ClickUpTasks (https://clickuptasks.vercel.app):`,
       ``,
@@ -223,7 +225,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       `Client: ${client.name}${ct?.email ? ` (${ct.email})` : ""}`,
       `Project: ${project?.name ?? "—"}`,
       `Status: ${STATUS_META[task.status].label} · Priority: ${PRIORITY_META[task.priority].label}${task.due ? ` · Due: ${task.due}` : ""}`,
-      task.description ? `\nDescription:\n${task.description}` : "",
+      descText ? `\nDescription:\n${descText}` : "",
       task.subtasks.length ? `\nSubtasks:\n${task.subtasks.map((s) => `- [${s.done ? "x" : " "}] ${s.title}`).join("\n")}` : "",
       task.comments.length ? `\nRecent comments:\n${task.comments.slice(-3).map((c) => `- ${userById(c.authorId)?.name ?? "?"}: ${c.body}`).join("\n")}` : "",
       ghlContactUrl ? `\nGHL contact: ${ghlContactUrl}` : "",
@@ -382,11 +384,10 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     </div>
   );
   const descriptionBlock = (
-    // Auto-grows to fit its content (same [field-sizing:content] technique as
-    // the title) instead of a fixed 3-row box with an inner scrollbar — on a
-    // full page there's room, and description is the one field with real
-    // substance, so it shouldn't be the cramped part.
-    <div className="mt-4 rounded-xl border bg-surface p-4"><div className="mb-2 text-[15px] font-semibold">Description</div><textarea value={task.description} onChange={(e) => onPatch({ description: e.target.value })} placeholder="Add a description…" rows={3} className="-mx-2 min-h-[80px] w-full resize-none rounded-lg border border-transparent px-2 py-1.5 text-[15px] outline-none transition [field-sizing:content] placeholder:text-muted hover:bg-background focus:border-accent focus:bg-background" /></div>
+    <div className="mt-4 rounded-xl border bg-surface p-4">
+      <div className="mb-2 text-[15px] font-semibold">Description</div>
+      <RichTextEditor value={task.description} onChange={(html) => onPatch({ description: html })} placeholder="Add a description…" />
+    </div>
   );
   // Message this task's linked GHL contact directly, without leaving the
   // drawer — sends via the same GHL Conversations API path as the Chat
@@ -804,6 +805,24 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
             <div className="relative flex shrink-0 flex-col border-l bg-background/50" style={{ width: activityW }}>
               <div onMouseDown={startResize} title="Drag to resize"
                 className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize hover:bg-accent/30 active:bg-accent/40" />
+              {hasMessaging && (
+                <div className="border-b bg-surface px-3 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: clientStatusMeta(client.status).dot }} />
+                    <span className="min-w-0 flex-1 truncate text-[14px] font-semibold">{client.name}</span>
+                  </div>
+                  <div className="mb-2 mt-0.5 text-[12px] text-muted">{clientStatusMeta(client.status).label}</div>
+                  <div className="flex items-center gap-1.5">
+                    {messageDest?.phone ? (
+                      <a href={`tel:${messageDest.phone}`} className="flex-1 rounded-md border px-2 py-1 text-center text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">Call</a>
+                    ) : (
+                      <span title="No phone on file" className="flex-1 cursor-not-allowed rounded-md border px-2 py-1 text-center text-[13px] font-medium text-muted opacity-40">Call</span>
+                    )}
+                    <button onClick={() => setRightTab("sms")} className={`flex-1 rounded-md border px-2 py-1 text-[13px] font-medium transition ${activeRightTab === "sms" ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>Text</button>
+                    <button onClick={() => setRightTab("email")} className={`flex-1 rounded-md border px-2 py-1 text-[13px] font-medium transition ${activeRightTab === "email" ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>Email</button>
+                  </div>
+                </div>
+              )}
               <div className="flex items-center gap-1 border-b bg-surface px-3 py-2">
                 {rightTabBar}
               </div>

@@ -82,6 +82,33 @@ body {
 .shadow-soft { box-shadow: var(--shadow-sm); }
 .shadow-soft-md { box-shadow: var(--shadow-md); }
 
+/* Task description rich-text editor (RichTextEditor.tsx / Tiptap) — Tiptap
+   ships no CSS of its own, so block/list/quote/code spacing and the empty-
+   state placeholder live here, keyed off the same color tokens as the rest
+   of the app rather than a Tailwind Typography plugin. */
+.rte-content p { margin: 0.35em 0; }
+.rte-content p:first-child { margin-top: 0; }
+.rte-content p:last-child { margin-bottom: 0; }
+.rte-content p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: var(--muted);
+  pointer-events: none;
+}
+.rte-content h2 { font-size: 1.15em; font-weight: 600; margin: 0.6em 0 0.3em; }
+.rte-content h3 { font-size: 1.05em; font-weight: 600; margin: 0.5em 0 0.25em; }
+.rte-content ul, .rte-content ol { margin: 0.3em 0; padding-left: 1.4em; }
+.rte-content li { margin: 0.15em 0; }
+.rte-content ul[data-type="taskList"] { list-style: none; padding-left: 0; }
+.rte-content ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 0.4em; }
+.rte-content ul[data-type="taskList"] li > label { margin-top: 0.2em; }
+.rte-content blockquote { border-left: 3px solid var(--border); margin: 0.4em 0; padding-left: 0.8em; color: var(--muted); }
+.rte-content code { background: var(--background); border-radius: 4px; padding: 0.1em 0.35em; font-size: 0.9em; font-family: var(--font-mono); }
+.rte-content pre { background: var(--background); border-radius: 8px; padding: 0.6em 0.8em; overflow-x: auto; margin: 0.4em 0; }
+.rte-content pre code { background: none; padding: 0; }
+.rte-content a { color: var(--accent); text-decoration: underline; }
+
 /* dark navy sidebar — scopes a dark palette to its subtree so every element flips automatically */
 .sidebar-dark {
   --surface: #191c24;

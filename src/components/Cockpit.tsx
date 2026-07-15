@@ -9,6 +9,7 @@ import {
   formatDue,
   advanceDue,
   timeAgo,
+  htmlToText,
   TODAY,
   TOMORROW,
   addDaysIso,
@@ -1063,7 +1064,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return authedFetch("/api/ghl/task", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ op, ...target, ghlTaskId: t.ghlTaskId, title: t.title, body: t.description, due: t.due, completed: t.status === "done" }),
+      body: JSON.stringify({ op, ...target, ghlTaskId: t.ghlTaskId, title: t.title, body: htmlToText(t.description), due: t.due, completed: t.status === "done" }),
     }).then((r) => r.json()).catch(() => ({ error: "Network error reaching GoHighLevel." }));
   };
   // Fields that, when changed on an already-synced task, we mirror to GHL.

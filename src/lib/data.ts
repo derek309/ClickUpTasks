@@ -636,6 +636,21 @@ export function timeAgo(at: string): string {
   return new Date(t).toLocaleDateString();
 }
 
+/** Converts stored rich-text HTML (task.description) to a plain-text
+ *  approximation for consumers that can't render markup — the GHL task
+ *  sync body and the "Copy for Claude" brief. Browser-only (real DOM text
+ *  extraction beats a regex); server-side callers get a best-effort tag
+ *  strip instead. Never appended to the document, so this carries no XSS
+ *  risk despite using innerHTML — it's read-only text extraction. */
+export function htmlToText(html: string): string {
+  if (!html) return "";
+  if (typeof document === "undefined") return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const div = document.createElement("div");
+  div.innerHTML = html;
+  div.querySelectorAll("p, li, h1, h2, h3, blockquote, br").forEach((el) => el.after(document.createTextNode("\n")));
+  return (div.textContent || "").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 export type ClientHealth = "danger" | "stale" | "calm";
 export const HEALTH_META: Record<ClientHealth, { label: string; dot: string }> = {
   danger: { label: "Overdue work", dot: "#ef4444" },

@@ -28,6 +28,15 @@ const GHL = "https://services.leadconnectorhq.com";
 const SUB2LOC = { c_agency: "7B0Y8xCOblcTHzYnM1Kc", c_directory: "GN4HK1ybbTBWcolEjLHl" };
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36";
 const toGhlDate = (due) => `${/^\d{4}-\d{2}-\d{2}$/.test(due || "") ? due : new Date().toISOString().slice(0, 10)}T17:00:00.000Z`;
+// task.description is now rich-text HTML (the web app's description editor) —
+// no DOM available here, so a regex-based strip stands in for htmlToText()
+// (src/lib/data.ts) to keep task briefs readable plain text.
+const stripHtml = (html) => (html || "")
+  .replace(/<\/(p|li|h[1-6]|blockquote)>/gi, "\n")
+  .replace(/<br\s*\/?>/gi, "\n")
+  .replace(/<[^>]+>/g, "")
+  .replace(/\n{3,}/g, "\n\n")
+  .trim();
 
 // Push a status change to GoHighLevel for a GHL-linked task (best-effort).
 async function pushGhlStatus(t) {
@@ -97,7 +106,7 @@ server.tool("get_task",
     const comments = (t.comments || []).filter((c) => c.kind !== "event").slice(-5).map((c) => `  - ${c.body}`).join("\n");
     const text = [
       brief(t),
-      t.description ? `\nDescription:\n${t.description}` : "",
+      t.description ? `\nDescription:\n${stripHtml(t.description)}` : "",
       checklist.length ? `\nChecklist: ${JSON.stringify(checklist)}` : "",
       links ? `\nLinks:\n${links}` : "",
       comments ? `\nRecent comments:\n${comments}` : "",
