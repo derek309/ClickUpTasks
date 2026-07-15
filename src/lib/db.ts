@@ -89,13 +89,13 @@ const rowToTaskTemplate = (r: any): TaskTemplate => ({ id: r.id, name: r.name, c
 const messageToRow = (m: Message) => ({
   id: m.id, contact_id: m.contactId, client_id: m.clientId, channel: m.channel, direction: m.direction,
   subject: m.subject, body: m.body, ghl_message_id: m.ghlMessageId, created_by: m.createdBy, read: m.read,
-  attachments: m.attachments,
+  attachments: m.attachments, cc: m.cc, bcc: m.bcc,
 });
 export const rowToMessage = (r: any): Message => ({
   id: r.id, contactId: r.contact_id, clientId: r.client_id, channel: (r.channel as MessageChannel) ?? "email",
   direction: r.direction as MessageDirection, subject: r.subject ?? null, body: r.body ?? "",
   ghlMessageId: r.ghl_message_id ?? null, createdBy: r.created_by ?? null, at: r.created_at,
-  read: r.read ?? true, attachments: r.attachments ?? [],
+  read: r.read ?? true, attachments: r.attachments ?? [], cc: r.cc ?? [], bcc: r.bcc ?? [],
 });
 
 // --- load + seed ------------------------------------------------------------

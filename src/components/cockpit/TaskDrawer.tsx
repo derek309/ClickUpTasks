@@ -11,7 +11,50 @@ import { I, Avatar, Row, CollapsibleText, FileBadge, newId } from "./ui";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 import { InlineAssignee, InlineDue } from "./GroupedList";
 
-export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, isQueued, onToggleQueue, onCopyLink, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, linkedContactInfo, onUploadMessageImage, onSendTaskMessage, sendingMessage }: {
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+// A chip-style multi-recipient input for email Cc/Bcc — type to search the
+// synced contact list by name or email, or type a raw address and hit Enter.
+// Stores plain email strings (that's what GHL's emailCc/emailBcc expect).
+function RecipientField({ label, value, onChange, contacts }: { label: string; value: string[]; onChange: (next: string[]) => void; contacts: Contact[] }) {
+  const [q, setQ] = useState("");
+  const ql = q.trim().toLowerCase();
+  const matches = ql
+    ? contacts.filter((c) => c.email && !value.includes(c.email) && (c.name.toLowerCase().includes(ql) || c.email.toLowerCase().includes(ql))).slice(0, 6)
+    : [];
+  const add = (email: string) => { const e = email.trim(); if (e && !value.includes(e)) onChange([...value, e]); setQ(""); };
+  const remove = (email: string) => onChange(value.filter((x) => x !== email));
+  return (
+    <div className="relative">
+      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border bg-background px-2 py-1.5 focus-within:border-accent">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</span>
+        {value.map((e) => (
+          <span key={e} className="inline-flex items-center gap-1 rounded bg-accent-soft px-1.5 py-0.5 text-[12px] text-accent">
+            {e}<button onClick={() => remove(e)} title="Remove" className="hover:text-foreground">×</button>
+          </span>
+        ))}
+        <input value={q} onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => {
+            if ((e.key === "Enter" || e.key === ",") && EMAIL_RE.test(q.trim())) { e.preventDefault(); add(q); }
+            else if (e.key === "Backspace" && !q && value.length) { remove(value[value.length - 1]); }
+          }}
+          placeholder={value.length ? "" : "Search contacts or type an email…"}
+          className="min-w-[150px] flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted" />
+      </div>
+      {matches.length > 0 && (
+        <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-lg border bg-surface shadow-soft-md">
+          {matches.map((c) => (
+            <button key={c.id} onClick={() => add(c.email)} className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left hover:bg-background">
+              <span className="truncate text-[13px] font-medium">{c.name}</span>
+              <span className="shrink-0 truncate text-[12px] text-muted">{c.email}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, isQueued, onToggleQueue, onCopyLink, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, sendingMessage }: {
   task: Task; comment: string; setComment: (v: string) => void;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; navTasks: Task[]; onOpenTask: (id: string) => void; onAddSibling: (title: string) => void; onPrev: () => void; onNext: () => void;
@@ -22,8 +65,9 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   onGetSignedUrl: (path: string) => Promise<string | null>;
   messages?: Message[] | null; // this task's linked contact's email/SMS history, merged into the Activity feed
   linkedContactInfo?: Contact | null; // authoritative send target (matches what onSendTaskMessage actually resolves) — shown as "Sending to" in the SMS/Email composer
+  ccContacts?: Contact[]; // searchable contacts for the email Cc/Bcc pickers
   onUploadMessageImage?: (file: File) => Promise<Attachment | null>;
-  onSendTaskMessage?: (channel: MessageChannel, subject: string, body: string, attachments?: Attachment[]) => void;
+  onSendTaskMessage?: (channel: MessageChannel, subject: string, body: string, attachments?: Attachment[], cc?: string[], bcc?: string[]) => void;
   sendingMessage?: boolean;
 }) {
   const client = clientById(task.clientId)!;
@@ -49,6 +93,9 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const [copied, setCopied] = useState(false);
   const [msgSubject, setMsgSubject] = useState("");
   const [msgBody, setMsgBody] = useState("");
+  const [msgCc, setMsgCc] = useState<string[]>([]);
+  const [msgBcc, setMsgBcc] = useState<string[]>([]);
+  const [showCcBcc, setShowCcBcc] = useState(false);
   const [pendingMsgAtts, setPendingMsgAtts] = useState<Attachment[]>([]);
   const [uploadingMsgAtt, setUploadingMsgAtt] = useState(false);
   const handleMsgPaste = async (e: React.ClipboardEvent) => {
@@ -74,8 +121,11 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const [rightTab, setRightTab] = useState<"activity" | "sms" | "email">("activity");
   const submitTaskMessage = () => {
     if ((!msgBody.trim() && pendingMsgAtts.length === 0) || !onSendTaskMessage || rightTab === "activity") return;
-    onSendTaskMessage(rightTab, msgSubject, msgBody.trim(), pendingMsgAtts.length ? pendingMsgAtts : undefined);
-    setMsgSubject(""); setMsgBody(""); setPendingMsgAtts([]);
+    // Cc/Bcc ride along only on email; SMS ignores them (Cockpit also guards this).
+    const cc = rightTab === "email" ? msgCc : undefined;
+    const bcc = rightTab === "email" ? msgBcc : undefined;
+    onSendTaskMessage(rightTab, msgSubject, msgBody.trim(), pendingMsgAtts.length ? pendingMsgAtts : undefined, cc, bcc);
+    setMsgSubject(""); setMsgBody(""); setPendingMsgAtts([]); setMsgCc([]); setMsgBcc([]); setShowCcBcc(false);
     setRightTab("activity"); // so the send is immediately visible in the feed
   };
   // Rough SMS segment estimate, matching how carriers actually bill: GSM-7
@@ -309,7 +359,16 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   ) : null;
   const emailComposerBlock = hasMessaging ? (
     <div className="flex flex-1 flex-col border-t bg-surface p-3">
-      <div className="mb-2 shrink-0 text-[13px] text-muted">Sending to: <span className="font-medium text-foreground">{messageDest?.email || "no email on file"}</span></div>
+      <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
+        <span className="min-w-0 truncate text-[13px] text-muted">To: <span className="font-medium text-foreground">{messageDest?.email || "no email on file"}</span></span>
+        {!showCcBcc && <button onClick={() => setShowCcBcc(true)} className="shrink-0 text-[12px] font-medium text-accent hover:underline">Cc / Bcc</button>}
+      </div>
+      {showCcBcc && (
+        <div className="mb-2 flex shrink-0 flex-col gap-1.5">
+          <RecipientField label="Cc" value={msgCc} onChange={setMsgCc} contacts={ccContacts ?? []} />
+          <RecipientField label="Bcc" value={msgBcc} onChange={setMsgBcc} contacts={ccContacts ?? []} />
+        </div>
+      )}
       <input value={msgSubject} onChange={(e) => setMsgSubject(e.target.value)} placeholder="Subject"
         className="mb-2 w-full shrink-0 rounded-lg border bg-background px-3 py-2 text-[15px] font-medium outline-none placeholder:text-muted focus:border-accent" />
       {msgAttBar}
@@ -505,6 +564,13 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                 <span>· {timeAgo(m.at)}</span>
               </div>
               {m.subject && <div className="mt-1 text-[15px] font-medium">{m.subject}</div>}
+              {((m.cc && m.cc.length > 0) || (m.bcc && m.bcc.length > 0)) && (
+                <div className="mt-0.5 text-[12px] text-muted">
+                  {m.cc && m.cc.length > 0 && <span>Cc: {m.cc.join(", ")}</span>}
+                  {m.cc && m.cc.length > 0 && m.bcc && m.bcc.length > 0 && <span> · </span>}
+                  {m.bcc && m.bcc.length > 0 && <span>Bcc: {m.bcc.join(", ")}</span>}
+                </div>
+              )}
               <CollapsibleText text={m.body} className="mt-1 text-[15px]" />
               {m.attachments && m.attachments.length > 0 && <div className="mt-1.5"><AttachmentThumbs items={m.attachments} onOpen={onDownloadFile} /></div>}
             </div>

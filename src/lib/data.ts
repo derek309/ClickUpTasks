@@ -234,6 +234,8 @@ export interface Message {
    * conversation — see the Conversations inbox in Cockpit.tsx. */
   read: boolean;
   attachments: Attachment[];
+  cc: string[];  // email addresses — email channel only
+  bcc: string[];
 }
 
 /** Our own grouping layer — GHL has no concept of this. */
