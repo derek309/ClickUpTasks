@@ -313,12 +313,16 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       ) : ghlLinkable ? (
         <button onClick={onPushGhl} disabled={ghlBusy} className="inline-flex items-center gap-1.5 rounded-md border border-accent px-2.5 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft disabled:opacity-50"><I.bolt /> {ghlBusy ? "Pushing…" : "Push to GHL"}</button>
       ) : (
-        <span className="text-[13px] text-muted">Not linkable — this client has no GHL contact/location.</span>
+        <span className="inline-flex items-center gap-1.5 rounded-md bg-background px-2 py-1 text-[13px] text-muted" title="This client has no linked GHL contact/location, so this task can't sync to GoHighLevel."><I.bolt className="opacity-40" /> Not linkable</span>
       )}</Row>
     </dl>
   );
   const descriptionBlock = (
-    <div className="mt-5"><div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted">Description</div><textarea value={task.description} onChange={(e) => onPatch({ description: e.target.value })} placeholder="Add a description…" rows={3} className="-mx-3 min-h-[80px] w-full resize-y rounded-lg border border-transparent px-3 py-2 text-[15px] outline-none transition placeholder:text-muted hover:bg-background focus:border-accent focus:bg-background" /></div>
+    // Auto-grows to fit its content (same [field-sizing:content] technique as
+    // the title) instead of a fixed 3-row box with an inner scrollbar — on a
+    // full page there's room, and description is the one field with real
+    // substance, so it shouldn't be the cramped part.
+    <div className="mt-5"><div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted">Description</div><textarea value={task.description} onChange={(e) => onPatch({ description: e.target.value })} placeholder="Add a description…" rows={3} className="-mx-3 min-h-[80px] w-full resize-none rounded-lg border border-transparent px-3 py-2 text-[15px] outline-none transition [field-sizing:content] placeholder:text-muted hover:bg-background focus:border-accent focus:bg-background" /></div>
   );
   // Message this task's linked GHL contact directly, without leaving the
   // drawer — sends via the same GHL Conversations API path as the Chat
@@ -469,7 +473,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
         </div>
       )}
       <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files.length) onAddFiles(e.dataTransfer.files); }} className="space-y-1.5">
-        {task.attachments.length === 0 && !uploadProgress && (<div className="rounded-lg border border-dashed px-3 py-4 text-center text-[13px] text-muted">Drop, paste, or click Attach · max 25MB each</div>)}
+        {task.attachments.length === 0 && !uploadProgress && (<div className="rounded-lg border border-dashed px-3 py-2 text-[13px] text-muted">Drop, paste, or click Attach · max 25MB each</div>)}
         {sortedAttachments.map((a) => (
           <div key={a.id} className="group/att flex items-center gap-2 rounded-lg border bg-background px-3 py-2">
             <FileBadge kind={a.kind} />
@@ -510,28 +514,28 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   // Quick-jump list of the other tasks in this same list (project), so you
   // don't have to close the drawer and reopen another. Shown below
   // attachments. Scoped to the current task's list, not the whole view.
-  // Collapsed state persists per-browser, same pattern as activityW.
-  const listSiblings = navTasks.filter((t) => t.projectId === task.projectId);
+  // Collapsed state persists per-browser, same pattern as activityW. The
+  // current task is excluded — this is navigation to *other* tasks, so
+  // re-listing (and disabling) the one you're already looking at was just
+  // clutter.
+  const listSiblings = navTasks.filter((t) => t.projectId === task.projectId && t.id !== task.id);
   const siblingsBlock = (
     <div className="mt-6 border-t pt-5">
       <button onClick={() => setSiblingsCollapsed((c) => !c)} className="mb-2 flex w-full items-center gap-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-muted hover:text-foreground">
         <I.chevron className={`transition ${siblingsCollapsed ? "-rotate-90" : "rotate-180"}`} />
-        {project?.name ?? "This list"} · {listSiblings.length}
+        Other tasks in {project?.name ?? "this list"} · {listSiblings.length}
       </button>
       {!siblingsCollapsed && (
         <div className="overflow-hidden rounded-lg border">
-          {listSiblings.map((t) => {
-            const active = t.id === task.id;
-            return (
-              <button key={t.id} onClick={() => { if (!active) onOpenTask(t.id); }} disabled={active}
-                className={`flex w-full items-center gap-2.5 border-b px-3 py-2 text-left text-[15px] last:border-0 ${active ? "bg-accent-soft font-medium text-accent" : "hover:bg-background"}`}>
-                <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[t.status].dot }} title={STATUS_META[t.status].label} />
-                <Avatar id={t.assigneeId} size={20} />
-                <span className={`min-w-0 flex-1 truncate ${t.status === "done" ? "text-muted line-through" : ""}`}>{t.title}</span>
-                {t.due && <span className="shrink-0 text-[13px] text-muted">{t.due}</span>}
-              </button>
-            );
-          })}
+          {listSiblings.map((t) => (
+            <button key={t.id} onClick={() => onOpenTask(t.id)}
+              className="flex w-full items-center gap-2.5 border-b px-3 py-2 text-left text-[15px] last:border-0 hover:bg-background">
+              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[t.status].dot }} title={STATUS_META[t.status].label} />
+              <Avatar id={t.assigneeId} size={20} />
+              <span className={`min-w-0 flex-1 truncate ${t.status === "done" ? "text-muted line-through" : ""}`}>{t.title}</span>
+              {t.due && <span className="shrink-0 text-[13px] text-muted">{t.due}</span>}
+            </button>
+          ))}
           <div className="flex items-center gap-2 border-t px-3 py-2">
             <I.plus className="shrink-0 text-muted" />
             <input value={siblingDraft} onChange={(e) => setSiblingDraft(e.target.value)}
@@ -598,6 +602,13 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       </div>
     </div>
   );
+  // A task with no linked contact (so SMS/Email can never appear) and no
+  // comments yet has nothing the Activity rail could show — in full-page
+  // mode that's a ~400px column of dead space next to a document with room
+  // to spare. Fold Activity into the document column instead of reserving
+  // a wide empty rail for it; the moment it has a linked contact or a first
+  // comment, it's no longer "light" and gets the full two-column layout.
+  const isLightTask = full && !hasMessaging && activityItems.length === 0;
 
   return (
     <>
@@ -637,6 +648,29 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
         </div>
 
         {full ? (
+          isLightTask ? (
+            // No linked contact and no comments yet — nothing the Activity
+            // rail could show, so fold it into the document instead of
+            // reserving a wide empty column for it (see isLightTask above).
+            <div className="flex-1 overflow-y-auto px-8 py-7 lg:px-12">
+              <div className="mx-auto w-full max-w-4xl">
+                {titleBlock}
+                {statusBlock}
+                <div className="my-6 border-t" />
+                {propsBlock}
+                <div className="my-6 border-t" />
+                {descriptionBlock}
+                {subtasksBlock}
+                {attachmentsBlock}
+                {siblingsBlock}
+                <div className="mt-6 border-t pt-5">
+                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Activity</div>
+                  {commentsFeed}
+                  <div className="mt-3">{composer}</div>
+                </div>
+              </div>
+            </div>
+          ) : (
           // ClickUp-style split: task content (document) on the left,
           // the Activity/comments conversation in its own column on the right
           // with the composer pinned to the bottom.
@@ -666,6 +700,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               </>) : activeRightTab === "sms" ? smsComposerBlock : emailComposerBlock}
             </div>
           </div>
+          )
         ) : (
           <>
             <div className="flex-1 overflow-y-auto px-5 py-4">
