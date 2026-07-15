@@ -48,6 +48,9 @@ export function ClientsBoard({ groups, clientTaskCount, hasUnreadMessage, onOpen
 function ClientRow({ client, taskCount, unread, onOpen }: {
   client: Client; taskCount: number; unread: boolean; onOpen: () => void;
 }) {
+  // Business name lives in ghlLocationId for GHL-synced clients (repurposed
+  // field, same as the sidebar/header use via clientCompany).
+  const business = client.id.startsWith("cl_") ? (client.ghlLocationId ?? "") : "";
   return (
     <button onClick={onOpen} className="flex w-full items-center gap-3 border-b px-4 py-3 text-left transition-colors last:border-0 hover:bg-accent-soft/50">
       <span className="h-2.5 w-2.5 shrink-0 rounded-full" title={clientStatusMeta(client.status).label} style={{ background: clientStatusMeta(client.status).dot }} />
@@ -58,7 +61,8 @@ function ClientRow({ client, taskCount, unread, onOpen }: {
         <span className="truncate text-[17px] font-medium leading-snug">{client.name}</span>
         {unread && <span title="New message — waiting on a reply"><I.comment className="shrink-0 text-accent" /></span>}
       </span>
-      <span className="shrink-0 text-[13px] text-muted">{taskCount} task{taskCount === 1 ? "" : "s"}</span>
+      {business && <span className="hidden w-56 shrink-0 truncate text-[13px] text-muted sm:block" title={business}>{business}</span>}
+      <span className="w-16 shrink-0 text-right text-[13px] text-muted">{taskCount} task{taskCount === 1 ? "" : "s"}</span>
     </button>
   );
 }
