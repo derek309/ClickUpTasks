@@ -633,15 +633,21 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     ...task.comments.map((c) => ({ at: c.at, kind: c.kind === "event" ? ("event" as const) : ("comment" as const), comment: c })),
     ...(messages ?? []).map((m) => ({ at: m.at, kind: "message" as const, message: m })),
   ].sort((a, b) => a.at.localeCompare(b.at));
+  // GitHub/Slack-style vertical timeline: a single connecting line down a
+  // fixed 32px node gutter (line sits at x=16px — the exact center of that
+  // gutter for every node shape, dot or avatar, so nothing needs per-item
+  // positioning math beyond the shared gutter width).
   const commentsFeed = (
-    <div className="space-y-2.5">
-      {activityItems.map((item) => {
+    <div className="relative">
+      {activityItems.length > 0 && <div className="absolute bottom-2 left-4 top-2 w-px bg-border" />}
+      {activityItems.map((item, i) => {
+        const gap = i === activityItems.length - 1 ? "" : "pb-3";
         if (item.kind === "event") {
           const c = item.comment; const u = userById(c.authorId); const diff = parseEventDiff(c.body);
           return (
-            <div key={c.id} className="flex items-start gap-2 py-0.5 text-[13px] text-muted">
-              <Avatar id={c.authorId} size={16} />
-              <div>
+            <div key={c.id} className={`relative flex gap-3 ${gap}`}>
+              <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface bg-muted" /></div>
+              <div className="min-w-0 flex-1 pt-1.5 text-[13px] text-muted">
                 <span><span className="font-medium text-foreground">{u?.name}</span> {diff ? `updated ${diff.field}` : c.body} · {timeAgo(c.at)}</span>
                 {diff && <EventDiffCard diff={diff} />}
               </div>
@@ -650,29 +656,42 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
         }
         if (item.kind === "message") {
           const m = item.message;
+          const dotColor = m.channel === "email" ? "#3b82f6" : "#22c55e";
           return (
-            <div key={m.id} className={`rounded-xl border p-3 ${m.direction === "inbound" ? "bg-surface" : "bg-accent-soft/40"}`}>
-              <div className="flex items-center gap-2 text-[13px] text-muted">
-                <span className="inline-flex items-center gap-1 rounded px-1.5 py-0 font-medium" style={{ background: (m.channel === "email" ? "#3b82f6" : "#22c55e") + "1a", color: m.channel === "email" ? "#3b82f6" : "#22c55e" }}>{m.channel === "email" ? "Email" : "SMS"}</span>
-                <span>{m.direction === "inbound" ? "Received" : "Sent"}</span>
-                <span>· {timeAgo(m.at)}</span>
-              </div>
-              {m.subject && <div className="mt-1 text-[15px] font-medium">{m.subject}</div>}
-              {((m.cc && m.cc.length > 0) || (m.bcc && m.bcc.length > 0)) && (
-                <div className="mt-0.5 text-[12px] text-muted">
-                  {m.cc && m.cc.length > 0 && <span>Cc: {m.cc.join(", ")}</span>}
-                  {m.cc && m.cc.length > 0 && m.bcc && m.bcc.length > 0 && <span> · </span>}
-                  {m.bcc && m.bcc.length > 0 && <span>Bcc: {m.bcc.join(", ")}</span>}
+            <div key={m.id} className={`relative flex gap-3 ${gap}`}>
+              <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface" style={{ background: dotColor }} /></div>
+              <div className={`min-w-0 flex-1 rounded-xl border p-3 ${m.direction === "inbound" ? "bg-surface" : "bg-accent-soft/40"}`}>
+                <div className="flex items-center gap-2 text-[13px] text-muted">
+                  <span className="inline-flex items-center gap-1 rounded px-1.5 py-0 font-medium" style={{ background: dotColor + "1a", color: dotColor }}>{m.channel === "email" ? "Email" : "SMS"}</span>
+                  <span>{m.direction === "inbound" ? "Received" : "Sent"}</span>
+                  <span>· {timeAgo(m.at)}</span>
                 </div>
-              )}
-              <CollapsibleText text={m.body} className="mt-1 text-[15px]" />
-              {m.attachments && m.attachments.length > 0 && <div className="mt-1.5"><AttachmentThumbs items={m.attachments} onOpen={onDownloadFile} /></div>}
+                {m.subject && <div className="mt-1 text-[15px] font-medium">{m.subject}</div>}
+                {((m.cc && m.cc.length > 0) || (m.bcc && m.bcc.length > 0)) && (
+                  <div className="mt-0.5 text-[12px] text-muted">
+                    {m.cc && m.cc.length > 0 && <span>Cc: {m.cc.join(", ")}</span>}
+                    {m.cc && m.cc.length > 0 && m.bcc && m.bcc.length > 0 && <span> · </span>}
+                    {m.bcc && m.bcc.length > 0 && <span>Bcc: {m.bcc.join(", ")}</span>}
+                  </div>
+                )}
+                <CollapsibleText text={m.body} className="mt-1 text-[15px]" />
+                {m.attachments && m.attachments.length > 0 && <div className="mt-1.5"><AttachmentThumbs items={m.attachments} onOpen={onDownloadFile} /></div>}
+              </div>
             </div>
           );
         }
         const c = item.comment;
         const u = userById(c.authorId);
-        return (<div key={c.id} className="flex gap-2.5"><Avatar id={c.authorId} size={28} /><div className="min-w-0 flex-1"><div className="text-[14px]"><span className="font-medium">{u?.name}</span> <span className="text-[12px] text-muted">· {timeAgo(c.at)}</span></div>{c.body && <CollapsibleText text={c.body} className="text-[15px]" />}{c.attachments && c.attachments.length > 0 && <div className="mt-1"><AttachmentThumbs items={c.attachments} onOpen={onDownloadFile} /></div>}</div></div>);
+        return (
+          <div key={c.id} className={`relative flex gap-3 ${gap}`}>
+            <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><Avatar id={c.authorId} size={28} /></div>
+            <div className="min-w-0 flex-1 pt-0.5">
+              <div className="text-[14px]"><span className="font-medium">{u?.name}</span> <span className="text-[12px] text-muted">· {timeAgo(c.at)}</span></div>
+              {c.body && <CollapsibleText text={c.body} className="text-[15px]" />}
+              {c.attachments && c.attachments.length > 0 && <div className="mt-1"><AttachmentThumbs items={c.attachments} onOpen={onDownloadFile} /></div>}
+            </div>
+          </div>
+        );
       })}
       {activityItems.length === 0 && (<div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted"><I.comment /><span className="text-[15px]">No activity yet</span><span className="text-[13px]">Start the thread — type @ to mention a teammate.</span></div>)}
     </div>
