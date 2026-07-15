@@ -168,6 +168,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const toggleCollapse = (key: string) => setCollapsed((s) => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); try { localStorage.setItem("cut_collapsed", JSON.stringify([...n])); } catch {} return n; });
   const [manualOrder, setManualOrder] = useState<string[]>([]);
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  const [headerMoreOpen, setHeaderMoreOpen] = useState(false);
   const [dragClientId, setDragClientId] = useState<string | null>(null);
   const [statusMenuClientId, setStatusMenuClientId] = useState<string | null>(null);
 
@@ -1670,10 +1671,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   </button>
                 );
               })()}
-              <button onClick={() => copyLink({ view: null, client: activeClient, project: activeProject, task: null })}
-                title="Copy a shareable link to this client/project" className="rounded-md border bg-background p-1.5 text-muted hover:text-foreground">
-                <I.link />
-              </button>
               {ghlContactUrlFor(activeClient) && (
                 <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel"
                   className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[13px] font-medium text-accent hover:bg-accent-soft">
@@ -1692,17 +1689,28 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   <I.bolt /> Link to GHL
                 </button>
               )}
-              {canAdmin && clientById(activeClient)?.linkedContactId && (
-                <button onClick={() => linkClientToContact(activeClient, null)} title="Unlink from GoHighLevel"
-                  className="rounded-md border bg-background p-1.5 text-muted hover:text-danger">
-                  <I.close />
-                </button>
-              )}
-              {canAdmin && (
-                <button onClick={() => setLinkModal({})} title="Add a quick link" className="rounded-md border bg-background p-1.5 text-muted hover:text-foreground">
-                  <I.plus />
-                </button>
-              )}
+              {/* Secondary/config actions folded into one overflow menu so the
+                  header leads with Follow / Open in GHL / Import instead of a
+                  cluster of equal-weight icon buttons. */}
+              <div className="relative">
+                <button onClick={() => setHeaderMoreOpen((o) => !o)} title="More actions"
+                  className="rounded-md border bg-background p-1.5 text-muted hover:text-foreground"><I.dots /></button>
+                {headerMoreOpen && (<>
+                  <div className="fixed inset-0 z-40" onClick={() => setHeaderMoreOpen(false)} />
+                  <div className="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg border bg-surface p-1 shadow-soft-md">
+                    <button onClick={() => { setHeaderMoreOpen(false); copyLink({ view: null, client: activeClient, project: activeProject, task: null }); }}
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy link</button>
+                    {canAdmin && (
+                      <button onClick={() => { setHeaderMoreOpen(false); setLinkModal({}); }}
+                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.plus /> Add quick link</button>
+                    )}
+                    {canAdmin && clientById(activeClient)?.linkedContactId && (
+                      <button onClick={() => { setHeaderMoreOpen(false); linkClientToContact(activeClient, null); }}
+                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-muted hover:bg-background hover:text-danger"><I.close /> Unlink from GoHighLevel</button>
+                    )}
+                  </div>
+                </>)}
+              </div>
             </div>
           )}
 
