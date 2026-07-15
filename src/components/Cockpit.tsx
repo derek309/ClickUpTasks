@@ -1831,7 +1831,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         ) : personalView ? (
           <GroupedList groups={buildGroups(myPersonalTasks, "due")} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty queuedIds={claudeQueue} colOrder={colOrder} onReorderCols={reorderCols} />
         ) : myClientsView ? (
-          <ClientsBoard groups={myClientsGroups} scopedTasks={scopedTasks} clientTaskCount={clientTaskCount} hasUnreadMessage={hasUnreadMessage}
+          <ClientsBoard groups={myClientsGroups} clientTaskCount={clientTaskCount} hasUnreadMessage={hasUnreadMessage}
             onOpen={(id) => { setMyWork(false); setMyClientsView(false); setPersonalView(false); setInboxView(false); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }} />
         ) : myWork ? (
           <GroupedList groups={buildGroups(myWorkTasks, "due").filter((g) => g.tasks.length > 0)} showClient clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={false} quickAddHint="" onQuickAdd={() => {}} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} highlightDelegateFor={myWorkUser} queuedIds={claudeQueue} colOrder={colOrder} onReorderCols={reorderCols} />
