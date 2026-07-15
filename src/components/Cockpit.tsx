@@ -1879,22 +1879,21 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           {!myWork && !personalView && !inboxView && activeClient !== "all" && clientById(activeClient) && (
             <div className="flex items-center gap-1.5">
               {(() => {
-                const following = (clientById(activeClient)!.assignedTo ?? []).includes(me.id);
+                // One contextual Follow toggle, not two — it tracks whatever
+                // scope is currently open (the project, if one's selected;
+                // the client otherwise), since that's the only thing that
+                // matters for surfacing it in My Work.
+                const scopedProject = activeProject ? projectById(activeProject) : null;
+                const following = scopedProject
+                  ? (scopedProject.assignedTo ?? []).includes(me.id)
+                  : (clientById(activeClient)!.assignedTo ?? []).includes(me.id);
+                const toggle = () => scopedProject ? toggleProjectAssignment(scopedProject.id, me.id) : toggleClientAssignment(activeClient, me.id);
+                const label = scopedProject ? "this project" : "this client";
                 return (
-                  <button onClick={() => toggleClientAssignment(activeClient, me.id)}
-                    title={following ? "Following — click to stop following this client" : "Follow this client to keep it in My Clients"}
+                  <button onClick={toggle}
+                    title={following ? `Following — click to stop following ${label}` : `Follow ${label} to keep it in My Work`}
                     className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-[13px] font-medium ${following ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>
                     {following ? <><I.check /> Following</> : <><I.plus /> Follow</>}
-                  </button>
-                );
-              })()}
-              {activeProject && projectById(activeProject) && (() => {
-                const followingProject = (projectById(activeProject)!.assignedTo ?? []).includes(me.id);
-                return (
-                  <button onClick={() => toggleProjectAssignment(activeProject, me.id)}
-                    title={followingProject ? "Following — click to stop following this project" : "Follow this project to keep it in My Work"}
-                    className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-[13px] font-medium ${followingProject ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>
-                    {followingProject ? <><I.check /> Following project</> : <><I.plus /> Follow project</>}
                   </button>
                 );
               })()}
