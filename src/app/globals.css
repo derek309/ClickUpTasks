@@ -122,8 +122,10 @@ body {
   --foreground: #e8eaf0;
   --muted: #9aa2af;
   --border: #2b313d;
-  --accent: #6fa0d6;
-  --accent-soft: #253547;
+  /* Blue reads too close to this dark navy background to register as
+     "selected" — orange is the one brand color that actually pops here. */
+  --accent: #f2934a;
+  --accent-soft: #3a2718;
   --highlight: #f2934a;
   --highlight-soft: #3a2718;
   background: var(--surface);
