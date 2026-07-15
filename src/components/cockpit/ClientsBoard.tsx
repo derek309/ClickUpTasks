@@ -65,11 +65,13 @@ function ClientRow({ client, taskCount, unread, onOpen }: {
       <span className="h-8 w-8 shrink-0 rounded-full text-center text-[13px] font-semibold leading-8 text-white" style={{ background: client.color }}>
         {client.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}
       </span>
-      <span className="flex min-w-0 flex-1 items-center gap-1.5">
-        <span className="truncate text-[17px] font-medium leading-snug">{client.name}</span>
-        {unread && <span title="New message — waiting on a reply"><I.comment className="shrink-0 text-accent" /></span>}
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="flex items-center gap-1.5">
+          <span className="truncate text-[17px] font-medium leading-snug">{client.name}</span>
+          {unread && <span title="New message — waiting on a reply"><I.comment className="shrink-0 text-accent" /></span>}
+        </span>
+        {business && <span className="truncate text-[14px] font-medium text-muted" title={business}>{business}</span>}
       </span>
-      {business && <span className="hidden w-56 shrink-0 truncate text-[13px] text-muted sm:block" title={business}>{business}</span>}
       <span className="w-16 shrink-0 text-right text-[13px] text-muted">{taskCount} task{taskCount === 1 ? "" : "s"}</span>
     </button>
   );
