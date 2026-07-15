@@ -295,6 +295,12 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const titleBlock = (
     <textarea value={task.title} onChange={(e) => onPatch({ title: e.target.value })} rows={1} className={`-mx-1 w-full resize-none rounded-md bg-transparent px-1 font-semibold leading-snug outline-none [field-sizing:content] transition focus:bg-background ${full ? "text-[28px]" : "text-[18px]"}`} />
   );
+  // Comment/event timestamps already cover every field-change and message —
+  // the latest one is a true "last updated", not just a metadata guess.
+  const lastActivityAt = task.comments.reduce((max, c) => (c.at > max ? c.at : max), task.createdAt);
+  const metaLine = (
+    <div className="-mt-0.5 mb-1 text-[13px] text-muted">Created {new Date(task.createdAt).toLocaleDateString()} · Updated {timeAgo(lastActivityAt)}</div>
+  );
   const statusBlock = (
     <div className="mt-4 grid grid-cols-4 overflow-hidden rounded-lg border">
       {STATUS_ORDER.map((s) => {
@@ -328,10 +334,10 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     </div>
   ) : null;
   const propsBlock = (
-    <div className="mt-5 rounded-xl border bg-surface p-5">
-    <div className="mb-4 text-[15px] font-semibold">Task Details</div>
-    <dl className={full ? "grid grid-cols-1 gap-x-12 gap-y-2 lg:grid-cols-2" : "space-y-3"}>
-      <Row label="Due date">
+    <div className="mt-4 rounded-xl border bg-surface p-4">
+    <div className="mb-3 text-[15px] font-semibold">Task Details</div>
+    <dl className={full ? "grid grid-cols-1 gap-x-12 gap-y-1.5 lg:grid-cols-2" : "space-y-2"}>
+      <Row label="Due date" icon={<I.calendar />}>
         <span className="inline-flex flex-wrap items-center gap-1.5">
           <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} />
           {task.recurrence === "custom" && (
@@ -347,12 +353,12 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
           )}
         </span>
       </Row>
-      <Row label="Priority"><select value={task.priority} onChange={(e) => onPatch({ priority: e.target.value as Priority })} className="rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background" style={{ color: PRIORITY_META[task.priority].color }}>{manualPriorityOptions(task.priority).map((p) => (<option key={p} value={p}>{PRIORITY_META[p].label}</option>))}</select></Row>
-      <Row label="Assignee"><select value={task.assigneeId ?? ""} onChange={(e) => onPatch({ assigneeId: e.target.value || null })} className="rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background"><option value="">Unassigned</option>{users.map((u) => (<option key={u.id} value={u.id}>{u.name} {u.role === "va" ? "(VA)" : "(Admin)"}</option>))}</select></Row>
-      <Row label="Client"><select value={task.clientId} onChange={(e) => onMoveClient(e.target.value)} className="max-w-[200px] rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background">{allClients.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}{allClients.every((c) => c.id !== task.clientId) && <option value={task.clientId}>{client?.name ?? "—"}</option>}</select></Row>
-      <Row label="Project"><select value={task.projectId} onChange={(e) => { if (e.target.value === "__new") onNewProject(); else onSetProject(e.target.value); }} className="max-w-[200px] rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background">{clientProjects.map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}{clientProjects.every((p) => p.id !== task.projectId) && <option value={task.projectId}>{project?.name ?? "—"}</option>}<option value="__new">+ New project…</option></select></Row>
+      <Row label="Priority" icon={<I.flag />}><select value={task.priority} onChange={(e) => onPatch({ priority: e.target.value as Priority })} className="rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background" style={{ color: PRIORITY_META[task.priority].color }}>{manualPriorityOptions(task.priority).map((p) => (<option key={p} value={p}>{PRIORITY_META[p].label}</option>))}</select></Row>
+      <Row label="Assignee" icon={<I.user />}><select value={task.assigneeId ?? ""} onChange={(e) => onPatch({ assigneeId: e.target.value || null })} className="rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background"><option value="">Unassigned</option>{users.map((u) => (<option key={u.id} value={u.id}>{u.name} {u.role === "va" ? "(VA)" : "(Admin)"}</option>))}</select></Row>
+      <Row label="Client" icon={<I.folder />}><select value={task.clientId} onChange={(e) => onMoveClient(e.target.value)} className="max-w-[200px] rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background">{allClients.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}{allClients.every((c) => c.id !== task.clientId) && <option value={task.clientId}>{client?.name ?? "—"}</option>}</select></Row>
+      <Row label="Project" icon={<I.list />}><select value={task.projectId} onChange={(e) => { if (e.target.value === "__new") onNewProject(); else onSetProject(e.target.value); }} className="max-w-[200px] rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background">{clientProjects.map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}{clientProjects.every((p) => p.id !== task.projectId) && <option value={task.projectId}>{project?.name ?? "—"}</option>}<option value="__new">+ New project…</option></select></Row>
       <Row label="Contact">{(() => { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return ct ? (<span className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[14px] text-muted"><I.user /> {ct.name}</span>) : <span className="text-[14px] text-muted">—</span>; })()}</Row>
-      <Row label="Labels">
+      <Row label="Labels" icon={<I.tag />}>
         <div className="flex flex-wrap items-center gap-1.5">
           {task.labelIds.map((id) => { const l = labelById(id); return l ? (<button key={id} onClick={() => onToggleLabel(id)} className="group inline-flex items-center gap-1 rounded px-1.5 py-0 text-[13px] font-medium" style={{ background: l.color + "1a", color: l.color }}>{l.name} <span className="opacity-50 group-hover:opacity-100">×</span></button>) : null; })}
           <div className="relative">
@@ -361,7 +367,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
           </div>
         </div>
       </Row>
-      <Row label="GoHighLevel">{task.ghlTaskId ? (
+      <Row label="GoHighLevel" icon={<I.bolt />}>{task.ghlTaskId ? (
         <span className="inline-flex flex-wrap items-center gap-2">
           <span className="inline-flex items-center gap-1.5 rounded-md bg-success-soft px-2 py-1 text-[13px] font-medium text-success"><I.bolt /> Synced — changes push automatically</span>
           {ghlContactUrl && <a href={ghlContactUrl} target="_blank" rel="noopener noreferrer" className="text-[13px] font-medium text-accent hover:underline">Open contact ↗</a>}
@@ -380,7 +386,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     // the title) instead of a fixed 3-row box with an inner scrollbar — on a
     // full page there's room, and description is the one field with real
     // substance, so it shouldn't be the cramped part.
-    <div className="mt-5 rounded-xl border bg-surface p-5"><div className="mb-2 text-[15px] font-semibold">Description</div><textarea value={task.description} onChange={(e) => onPatch({ description: e.target.value })} placeholder="Add a description…" rows={3} className="-mx-2 min-h-[80px] w-full resize-none rounded-lg border border-transparent px-2 py-1.5 text-[15px] outline-none transition [field-sizing:content] placeholder:text-muted hover:bg-background focus:border-accent focus:bg-background" /></div>
+    <div className="mt-4 rounded-xl border bg-surface p-4"><div className="mb-2 text-[15px] font-semibold">Description</div><textarea value={task.description} onChange={(e) => onPatch({ description: e.target.value })} placeholder="Add a description…" rows={3} className="-mx-2 min-h-[80px] w-full resize-none rounded-lg border border-transparent px-2 py-1.5 text-[15px] outline-none transition [field-sizing:content] placeholder:text-muted hover:bg-background focus:border-accent focus:bg-background" /></div>
   );
   // Message this task's linked GHL contact directly, without leaving the
   // drawer — sends via the same GHL Conversations API path as the Chat
@@ -459,9 +465,9 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     </div>
   );
   const subtasksBlock = (
-    <div className="mt-5 rounded-xl border bg-surface p-5">
+    <div className="mt-4 rounded-xl border bg-surface p-4">
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-[15px] font-semibold">Checklist {task.subtasks.length > 0 && <span className="text-muted">· {doneSubs}/{task.subtasks.length}</span>}</span>
+        <span className="text-[15px] font-semibold">Checklist {task.subtasks.length > 0 && <span className="text-muted">· {doneSubs}/{task.subtasks.length} · {Math.round((doneSubs / task.subtasks.length) * 100)}%</span>}</span>
         {templates.length > 0 && (
           <div className="relative">
             <button onClick={() => setTemplateOpen((o) => !o)} className="inline-flex items-center gap-1 text-[13px] font-medium text-accent"><I.clipboard /> From template</button>
@@ -479,7 +485,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
           </div>
         )}
       </div>
-      {task.subtasks.length > 0 && (<div className="mb-2 h-1.5 overflow-hidden rounded-full bg-background"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${(doneSubs / task.subtasks.length) * 100}%` }} /></div>)}
+      {task.subtasks.length > 0 && (<div className="mb-2 h-2 overflow-hidden rounded-full bg-background"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${(doneSubs / task.subtasks.length) * 100}%` }} /></div>)}
       <div className="space-y-1">{task.subtasks.map((s) => (
         <div key={s.id}>
           <div className="group/sub flex items-center gap-2 rounded-md px-1 py-1 hover:bg-background"><button onClick={() => onToggleSub(s.id)} className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${s.done ? "border-accent bg-accent text-white" : "border-border"}`}>{s.done && <I.check />}</button><input value={s.title} onChange={(e) => onRenameSub(s.id, e.target.value)} className={`-mx-1 flex-1 rounded bg-transparent px-1 text-[15px] outline-none transition focus:bg-background ${s.done ? "text-muted line-through" : ""}`} /><input type="date" value={s.due ?? ""} onChange={(e) => onPatchSub(s.id, { due: e.target.value || null })} title="Due date" className={`shrink-0 rounded border border-transparent bg-transparent px-1 py-0.5 text-[13px] outline-none transition hover:border-border hover:bg-surface focus:border-accent focus:bg-surface ${isOverdue(s.due ?? null) && !s.done ? "font-medium text-danger" : "text-muted"}`} /><InlineAssignee value={s.assigneeId ?? null} onChange={(a) => onPatchSub(s.id, { assigneeId: a })} size={20} /><button onClick={() => onDeleteSub(s.id)} title="Delete checklist item" className="shrink-0 text-muted opacity-0 hover:text-red-500 group-hover/sub:opacity-100"><I.trash /></button></div>
@@ -501,7 +507,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     return 0; // "added" — keep stored order (oldest first, matches how they were attached)
   });
   const attachmentsBlock = (
-    <div className="mt-5 rounded-xl border bg-surface p-5">
+    <div className="mt-4 rounded-xl border bg-surface p-4">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <span className="text-[15px] font-semibold">Attachments {task.attachments.length > 0 && <span className="text-muted">· {task.attachments.length}</span>}</span>
         <span className="flex items-center gap-3">
@@ -584,7 +590,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
         {project?.name ?? "This list"} · {siblingsDone} of {listSiblings.length} done · {siblingsPct}%
       </button>
       {!siblingsCollapsed && (<>
-        {listSiblings.length > 0 && (<div className="mb-2 h-1.5 overflow-hidden rounded-full bg-background"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${siblingsPct}%` }} /></div>)}
+        {listSiblings.length > 0 && (<div className="mb-2 h-2 overflow-hidden rounded-full bg-background"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${siblingsPct}%` }} /></div>)}
         <div className="overflow-hidden rounded-lg border">
           {listSiblings.map((t) => {
             const active = t.id === task.id;
@@ -736,19 +742,20 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
             // No linked contact and no comments yet — nothing the Activity
             // rail could show, so fold it into the document instead of
             // reserving a wide empty column for it (see isLightTask above).
-            <div className="flex-1 overflow-y-auto px-8 py-7 lg:px-12">
+            <div className="flex-1 overflow-y-auto bg-background px-8 py-6 lg:px-12">
               <div className="mx-auto w-full max-w-4xl">
                 {titleBlock}
+                {metaLine}
                 {statusBlock}
                 {ghlWarningBanner}
-                <div className="my-6 border-t" />
+                <div className="my-4 border-t" />
                 {propsBlock}
-                <div className="my-6 border-t" />
+                <div className="my-4 border-t" />
                 {descriptionBlock}
                 {subtasksBlock}
                 {attachmentsBlock}
                 {siblingsBlock}
-                <div className="mt-6 border-t pt-5">
+                <div className="mt-5 border-t pt-4">
                   <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Activity</div>
                   {commentsFeed}
                   <div className="mt-3">{composer}</div>
@@ -760,14 +767,15 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
           // the Activity/comments conversation in its own column on the right
           // with the composer pinned to the bottom.
           <div className="flex flex-1 overflow-hidden">
-            <div className="min-w-0 flex-1 overflow-y-auto px-8 py-7 lg:px-12">
+            <div className="min-w-0 flex-1 overflow-y-auto bg-background px-8 py-6 lg:px-12">
               <div className="mx-auto w-full max-w-4xl">
                 {titleBlock}
+                {metaLine}
                 {statusBlock}
                 {ghlWarningBanner}
-                <div className="my-6 border-t" />
+                <div className="my-4 border-t" />
                 {propsBlock}
-                <div className="my-6 border-t" />
+                <div className="my-4 border-t" />
                 {descriptionBlock}
                 {subtasksBlock}
                 {attachmentsBlock}
@@ -789,8 +797,9 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
           )
         ) : (
           <>
-            <div className="flex-1 overflow-y-auto px-5 py-4">
+            <div className="flex-1 overflow-y-auto bg-background px-5 py-4">
               {titleBlock}
+              {metaLine}
               {statusBlock}
               {ghlWarningBanner}
               <div className="mt-5">{propsBlock}</div>
