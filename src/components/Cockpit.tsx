@@ -1941,7 +1941,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     <button onClick={() => {
                         setHeaderMoreOpen(false);
                         const scope = activeProject ? `client ${activeClient}, project ${activeProject}` : `client ${activeClient}`;
-                        window.location.href = claudeCodeUrl(`Work through the open tasks for ClickUpTasks ${scope} using the clickuptasks MCP tools — start with list_client_tasks.`);
+                        const clientName = clientById(activeClient)?.name ?? activeClient;
+                        const projectName = activeProject ? projectById(activeProject)?.name : null;
+                        // Same auto-title lean as the task-level button: no
+                        // title param exists, so lead with a readable label.
+                        const label = projectName ? `${clientName} — ${projectName}` : clientName;
+                        window.location.href = claudeCodeUrl(`${label}\n\nWork through the open tasks for ClickUpTasks ${scope} using the clickuptasks MCP tools — start with list_client_tasks.`);
                       }}
                       title="Open this client/project in Claude Desktop, ready to work through its open tasks"
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>▶</span> Work with Claude</button>

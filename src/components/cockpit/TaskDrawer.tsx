@@ -771,7 +771,13 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
             <button onClick={onToggleQueue} title={isQueued ? "In Claude Code's queue — click to remove" : "Queue this task for Claude Code to work (say “work my queue” in Claude Code)"} className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[13px] font-medium ${isQueued ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>
               <span aria-hidden>{isQueued ? "★" : "☆"}</span><span className="hidden sm:inline">{isQueued ? "Queued" : "Queue for Claude"}</span>
             </button>
-            <button onClick={() => { window.location.href = claudeCodeUrl(`Look up and start working on ClickUpTasks task ${task.id} using the clickuptasks MCP tools.`); }} title="Open this task in Claude Desktop, ready to work on it" className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
+            <button onClick={() => {
+                // Claude Desktop has no title/name param for claude://code/new —
+                // it auto-titles the session from the first message, so lead
+                // with "Client — Task" to give that auto-title something
+                // readable to pick up instead of a bare task id.
+                window.location.href = claudeCodeUrl(`${client.name} — ${task.title}\n\nLook up and start working on ClickUpTasks task ${task.id} using the clickuptasks MCP tools.`);
+              }} title="Open this task in Claude Desktop, ready to work on it" className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
               <span aria-hidden>▶</span><span className="hidden sm:inline">Work with Claude</span>
             </button>
             {ghlContactUrl && (
