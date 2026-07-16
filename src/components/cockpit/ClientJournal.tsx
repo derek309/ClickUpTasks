@@ -100,6 +100,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   refreshingMessages?: boolean;
 }) {
   const [filter, setFilter] = useState<JournalFilter>("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [composeMode, setComposeMode] = useState<"note" | "email" | "sms">("note");
   const [draftType, setDraftType] = useState<NoteType>("note");
   const [draft, setDraft] = useState("");
@@ -146,11 +147,19 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
     }).filter((x): x is JournalItem => x !== null)),
   ].sort((a, b) => a.at.localeCompare(b.at));
 
+  const q = searchQuery.trim().toLowerCase();
+  const matchesSearch = (it: JournalItem): boolean => {
+    if (!q) return true;
+    if (it.kind === "note") return it.note.body.toLowerCase().includes(q);
+    if (it.kind === "message") return (it.message.subject ?? "").toLowerCase().includes(q) || it.message.body.toLowerCase().includes(q);
+    return it.comment.body.toLowerCase().includes(q) || it.comment.taskTitle.toLowerCase().includes(q);
+  };
   const filteredItems = journalItems.filter((it) => {
-    if (filter === "all") return true;
-    if (filter === "message") return it.kind === "message";
-    if (filter === "activity") return it.kind === "activity" || it.kind === "completion";
-    return it.kind === "note" && it.note.type === filter;
+    const passesType = filter === "all" ? true
+      : filter === "message" ? it.kind === "message"
+      : filter === "activity" ? (it.kind === "activity" || it.kind === "completion")
+      : (it.kind === "note" && it.note.type === filter);
+    return passesType && matchesSearch(it);
   });
   const feedRows = buildFeedRows(filteredItems);
 
@@ -228,6 +237,11 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
           <button onClick={() => setFilter("activity")} className={`rounded-full border px-2.5 py-1 text-[13px] font-medium transition ${filter === "activity" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}>Task Activity</button>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
+          <div className="relative">
+            <I.search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted" />
+            <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search…"
+              className="w-32 rounded-md border bg-background py-1.5 pl-7 pr-2 text-[13px] outline-none placeholder:text-muted focus:w-48 focus:border-accent sm:w-40 sm:focus:w-56" />
+          </div>
           {onRefreshMessages && messages != null && (
             <button onClick={onRefreshMessages} disabled={refreshingMessages} title="Pull any GoHighLevel emails/texts our webhook missed"
               className="rounded-md border bg-background p-1.5 text-muted hover:text-foreground disabled:opacity-40">
@@ -273,8 +287,13 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
             {filteredItems.length === 0 && (
               <div className="flex flex-col items-center gap-2 py-16 text-center text-muted">
                 <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent-soft text-accent"><I.comment /></span>
-                <span className="text-[15px] font-medium">Nothing here yet</span>
-                <span className="max-w-[260px] text-[13px] leading-relaxed">Notes, emails, texts, and completed work show up here as they happen — for the team and for Claude.</span>
+                {q ? (<>
+                  <span className="text-[15px] font-medium">No results for &quot;{searchQuery.trim()}&quot;</span>
+                  <span className="max-w-[260px] text-[13px] leading-relaxed">Try a different search, or clear it to see everything.</span>
+                </>) : (<>
+                  <span className="text-[15px] font-medium">Nothing here yet</span>
+                  <span className="max-w-[260px] text-[13px] leading-relaxed">Notes, emails, texts, and completed work show up here as they happen — for the team and for Claude.</span>
+                </>)}
               </div>
             )}
             {feedRows.map((row) => {
@@ -338,6 +357,9 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                           <div key={m.id} className={row.messages.length > 1 ? "border-t pt-2 first:border-t-0 first:pt-0" : ""}>
                             {m.subject && <div className="text-[15px] font-medium">{m.subject}</div>}
                             <CollapsibleText text={m.body} className="mt-0.5 whitespace-pre-wrap text-[15px]" />
+                            {m.attachments && m.attachments.length > 0 && (
+                              <div className="mt-1.5"><AttachmentThumbs items={m.attachments} onOpen={onOpenFile} /></div>
+                            )}
                             <div className="mt-1 flex items-center gap-2 text-[12px] text-muted">
                               <span>{timeAgo(m.at)}</span>
                               {m.channel === "email" && onSendMessage && (
