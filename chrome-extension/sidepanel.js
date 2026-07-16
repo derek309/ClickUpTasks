@@ -161,6 +161,7 @@ async function loadTasksFor(clientId) {
 }
 
 function clientLabel(c) {
+  if (c.kind === "project") return c.name;
   return c.company ? `${c.name} — ${c.company}` : c.name;
 }
 
@@ -183,7 +184,7 @@ function renderClientResults(query) {
       const nameEl = document.createElement("div");
       nameEl.className = "result-name";
       nameEl.textContent = c.name;
-      const subBits = [c.company, c.contactName ? `Contact: ${c.contactName}` : null].filter(Boolean);
+      const subBits = c.kind === "project" ? ["Internal project"] : [c.company, c.contactName ? `Contact: ${c.contactName}` : null].filter(Boolean);
       row.appendChild(nameEl);
       if (subBits.length) {
         const subEl = document.createElement("div");
@@ -202,11 +203,20 @@ function renderClientResults(query) {
 
 function selectClient(id) {
   const c = allClients.find((x) => x.id === id);
-  selectedClientId = id;
-  clientSearchInput.value = c ? clientLabel(c) : "";
+  if (!c) return;
+  clientSearchInput.value = clientLabel(c);
   clientResultsEl.classList.remove("open");
-  loadProjectsFor(id);
-  loadTasksFor(id);
+  if (c.kind === "project") {
+    // A workspace project (Administration, Idea board, …) — the task's
+    // client is the workspace pseudo-client; pre-select this exact project
+    // in the List dropdown once it's populated.
+    selectedClientId = c.clientId;
+    loadProjectsFor(selectedClientId).then(() => { projectSel.value = c.id; });
+  } else {
+    selectedClientId = c.id;
+    loadProjectsFor(selectedClientId);
+  }
+  loadTasksFor(selectedClientId);
 }
 
 clientSearchInput.addEventListener("input", () => {
