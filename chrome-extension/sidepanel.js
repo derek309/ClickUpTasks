@@ -468,4 +468,16 @@ createBtn.addEventListener("click", async () => {
   }
 });
 
+// The side panel is persistent — clicking the toolbar icon while it's
+// already open calls chrome.sidePanel.open() on the SAME document instead of
+// reloading it, so init()'s one-time read of pendingCapture never sees a
+// second capture. background.js still writes the new capture to storage on
+// every click, so watch for that write directly and re-run init() to pick
+// it up, covering both "panel was already open" and (harmlessly, since
+// init() already consumed it before this listener could see the same write)
+// the fresh-open case.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.pendingCapture?.newValue) init();
+});
+
 init();
