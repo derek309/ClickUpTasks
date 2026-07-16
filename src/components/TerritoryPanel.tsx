@@ -9,7 +9,7 @@ import { useState } from "react";
 import { users, clientStatusMeta, normalizeState, type Me, type Territory, type Contact, type Client } from "@/lib/data";
 import { I, Avatar } from "./cockpit/ui";
 
-export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onAssignTerritory, onDeleteTerritory, onAddContact, onOpenClient, onClose }: {
+export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onAssignTerritory, onDeleteTerritory, onAddContact, onOpenClient }: {
   me: Me; canAdmin: boolean;
   territories: Territory[]; contacts: Contact[]; clients: Client[];
   onAddTerritory: (t: { name: string; city: string; state: string; memberId: string | null }) => void;
@@ -17,7 +17,6 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
   onDeleteTerritory: (id: string) => void;
   onAddContact: (contact: Contact) => void;
   onOpenClient: (clientId: string) => void;
-  onClose: () => void;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [addOpen, setAddOpen] = useState(false);
@@ -37,17 +36,7 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
   };
 
   return (
-    <>
-      <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
-      <div className="fixed left-1/2 top-1/2 z-50 w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border bg-surface shadow-xl">
-        <div className="flex items-center justify-between border-b px-5 py-3">
-          <div>
-            <h2 className="text-[16px] font-semibold">Territories</h2>
-            <p className="text-[13px] text-muted">{canAdmin ? "Assign cities to ambassadors and track their pipeline." : "Contacts in your assigned territory."}</p>
-          </div>
-          <button onClick={onClose} className="rounded-md p-1 text-muted hover:bg-background"><I.close /></button>
-        </div>
-
+    <div>
         {canAdmin && (
           <div className="border-b bg-background/40 px-5 py-3">
             {addOpen ? (
@@ -89,7 +78,7 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
           </div>
         )}
 
-        <div className="max-h-[60vh] overflow-y-auto px-5 py-3">
+        <div className="px-5 py-3">
           {visible.length === 0 && (
             <div className="py-8 text-center text-[13px] text-muted">
               {canAdmin ? "No territories yet — click \"Add territory\" to assign a city to a teammate." : "No territory assigned to you yet."}
@@ -150,7 +139,6 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
             );
           })}
         </div>
-      </div>
-    </>
+    </div>
   );
 }

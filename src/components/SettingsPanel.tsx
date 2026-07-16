@@ -8,12 +8,10 @@ export default function SettingsPanel({
   clients,
   onSaveClient,
   onSynced,
-  onClose,
 }: {
   clients: Client[];
   onSaveClient: (c: Client) => void;
   onSynced: () => void | Promise<void>;
-  onClose: () => void;
 }) {
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [tokenLocations, setTokenLocations] = useState<string[]>([]);
@@ -72,19 +70,8 @@ export default function SettingsPanel({
   }
 
   return (
-    <>
-      <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
-      <div className="fixed left-1/2 top-1/2 z-50 w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border bg-surface shadow-xl">
-        <div className="flex items-center justify-between border-b px-5 py-3">
-          <div>
-            <h2 className="text-[16px] font-semibold">Settings · Integrations</h2>
-            <p className="text-[13px] text-muted">Connect your GoHighLevel sub-accounts and pull their contacts.</p>
-          </div>
-          <button onClick={onClose} className="rounded-md p-1 text-muted hover:bg-background">✕</button>
-        </div>
-
-        <div className="max-h-[65vh] overflow-y-auto px-5 py-4">
-          <div className="mb-3 flex items-center gap-2">
+    <div>
+      <div className="mb-3 flex items-center gap-2">
             <span className="text-[15px] font-semibold">GoHighLevel</span>
             {configured === null ? (
               <span className="text-[13px] text-muted">checking…</span>
@@ -150,8 +137,6 @@ export default function SettingsPanel({
               );
             })}
           </div>
-        </div>
-      </div>
-    </>
+    </div>
   );
 }

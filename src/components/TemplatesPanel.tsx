@@ -10,14 +10,13 @@ import { useState } from "react";
 import { type TaskTemplate, type Client, type Project } from "@/lib/data";
 import { I } from "./cockpit/ui";
 
-export default function TemplatesPanel({ templates, clients, projects, onSave, onDelete, onUseAsTask, onClose }: {
+export default function TemplatesPanel({ templates, clients, projects, onSave, onDelete, onUseAsTask }: {
   templates: TaskTemplate[];
   clients: Client[];
   projects: Project[];
   onSave: (id: string | undefined, spec: { name: string; checklistItems: string[] }) => void;
   onDelete: (id: string) => void;
   onUseAsTask: (templateId: string, clientId: string, projectId: string) => void;
-  onClose: () => void;
 }) {
   const [addOpen, setAddOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -45,17 +44,7 @@ export default function TemplatesPanel({ templates, clients, projects, onSave, o
   };
 
   return (
-    <>
-      <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
-      <div className="fixed left-1/2 top-1/2 z-50 w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border bg-surface shadow-xl">
-        <div className="flex items-center justify-between border-b px-5 py-3">
-          <div>
-            <h2 className="text-[16px] font-semibold">Task templates</h2>
-            <p className="text-[13px] text-muted">Reusable checklists — apply to a new or existing task.</p>
-          </div>
-          <button onClick={onClose} className="rounded-md p-1 text-muted hover:bg-background"><I.close /></button>
-        </div>
-
+    <div>
         <div className="border-b bg-background/40 px-5 py-3">
           {addOpen ? (
             <div className="space-y-2.5">
@@ -81,7 +70,7 @@ export default function TemplatesPanel({ templates, clients, projects, onSave, o
           )}
         </div>
 
-        <div className="max-h-[55vh] overflow-y-auto px-5 py-3">
+        <div className="px-5 py-3">
           {templates.length === 0 && (
             <div className="py-8 text-center text-[13px] text-muted">No templates yet — click &quot;Add template&quot; to create one.</div>
           )}
@@ -114,7 +103,6 @@ export default function TemplatesPanel({ templates, clients, projects, onSave, o
             </div>
           ))}
         </div>
-      </div>
-    </>
+    </div>
   );
 }

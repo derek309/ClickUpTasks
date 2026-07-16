@@ -51,12 +51,8 @@ import {
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
 import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertVaultFolder, deleteVaultFolderDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, markMessagesReadDb, insertMessage } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
-import TeamPanel from "./TeamPanel";
-import ApiTokensPanel from "./ApiTokensPanel";
-import TerritoryPanel from "./TerritoryPanel";
-import TemplatesPanel from "./TemplatesPanel";
 import { Inbox } from "./cockpit/Inbox";
-import SettingsPanel from "./SettingsPanel";
+import SettingsHub from "./SettingsHub";
 import AddClientModal from "./AddClientModal";
 
 
@@ -117,9 +113,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [clientNotes, setClientNotes] = useState<ClientNote[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [territories, setTerritories] = useState<Territory[]>([]);
-  const [territoriesOpen, setTerritoriesOpen] = useState(false);
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
-  const [templatesOpen, setTemplatesOpen] = useState(false);
   const [vaultFolders, setVaultFolders] = useState<VaultFolder[]>([]);
   const [importingTasks, setImportingTasks] = useState(false);
   const [clientTab, setClientTab] = useState<"tasks" | "chat" | "vault">("tasks");
@@ -166,9 +160,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [comment, setComment] = useState("");
 
   const [bellOpen, setBellOpen] = useState(false);
-  const [teamOpen, setTeamOpen] = useState(false);
-  const [apiTokensOpen, setApiTokensOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsHubOpen, setSettingsHubOpen] = useState(false);
   const [addClientOpen, setAddClientOpen] = useState(false);
   const [ghlBusy, setGhlBusy] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
@@ -1840,19 +1832,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         </nav>
         )}
 
-        {(canAdmin || myTerritories.length > 0) && (
-          <nav className="mt-auto flex shrink-0 items-center gap-1 border-t px-3 py-2">
-            {canAdmin && <button onClick={() => { setSettingsOpen(true); setSidebarOpen(false); }} title="Settings" className="rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>}
-            {canAdmin && <button onClick={() => { setTeamOpen(true); setSidebarOpen(false); }} title="Team" className="rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.user /></button>}
-            <button onClick={() => { setTerritoriesOpen(true); setSidebarOpen(false); }} title="Territories" className="rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.flag /></button>
-            {canAdmin && <button onClick={() => { setTemplatesOpen(true); setSidebarOpen(false); }} title="Task templates" className="rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.clipboard /></button>}
-          </nav>
-        )}
-
         <div className="flex shrink-0 items-center gap-2 border-t px-4 py-3">
           <span className="inline-flex shrink-0 items-center justify-center rounded-full text-[15px] font-semibold text-white" style={{ width: 30, height: 30, background: me.color }}>{me.initials}</span>
           <div className="min-w-0 leading-tight"><div className="truncate text-[15px] font-medium">{me.name}</div><div className="text-[13px] capitalize text-muted">{me.role}</div></div>
-          <button onClick={() => setApiTokensOpen(true)} title="API tokens (for the Gmail extension, etc.)" className="ml-auto rounded-lg border p-1.5 text-muted hover:text-foreground"><I.key /></button>
+          <button onClick={() => { setSettingsHubOpen(true); setSidebarOpen(false); }} title="Settings" className="ml-auto rounded-lg border p-1.5 text-muted hover:text-foreground"><I.gear /></button>
           <button onClick={toggleTheme} title="Toggle theme" className="rounded-lg border p-1.5 text-muted hover:text-foreground">{theme === "light" ? <I.moon /> : <I.sun />}</button>
           <button onClick={onSignOut} title="Sign out" className="rounded-lg border p-1.5 text-muted hover:text-red-500"><I.logout /></button>
         </div>
@@ -2142,18 +2125,21 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...clientList].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} isQueued={claudeQueue.has(openTask.id)} onToggleQueue={() => toggleClaudeQueue(openTask.id)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null })} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canSendMessages ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onRegenerateAiSummary={() => regenerateAiSummary(openTask.clientId)} aiSummaryBusy={aiSummaryBusyId === openTask.clientId} />
       )}
 
-      {teamOpen && <TeamPanel me={me} onClose={() => setTeamOpen(false)} />}
-      {apiTokensOpen && <ApiTokensPanel onClose={() => setApiTokensOpen(false)} />}
-      {territoriesOpen && <TerritoryPanel me={me} canAdmin={canAdmin} territories={territories} contacts={contacts} clients={clients}
-        onAddTerritory={addTerritory} onAssignTerritory={assignTerritory} onDeleteTerritory={deleteTerritory}
-        onAddContact={(contact) => addClientContact(contact)}
-        onOpenClient={(id) => { setTerritoriesOpen(false); setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(id); setActiveProject(null); }}
-        onClose={() => setTerritoriesOpen(false)} />}
-      {templatesOpen && <TemplatesPanel templates={taskTemplates} clients={clients} projects={projects}
-        onSave={saveTemplate} onDelete={deleteTemplate} onUseAsTask={useTemplateAsTask} onClose={() => setTemplatesOpen(false)} />}
-      {settingsOpen && <SettingsPanel clients={subAccounts} onClose={() => setSettingsOpen(false)}
-        onSaveClient={(c) => { setClients((cs) => cs.map((x) => (x.id === c.id ? c : x))); markOwnClientWrite(c.id); upsertClient(c); }}
-        onSynced={async () => { try { setContacts(await fetchContacts()); pushToast("Contacts updated from GoHighLevel"); } catch { /* ignore */ } }} />}
+      {settingsHubOpen && (
+        <SettingsHub
+          onClose={() => setSettingsHubOpen(false)}
+          me={me} canAdmin={canAdmin} hasTerritoryAccess={canAdmin || myTerritories.length > 0}
+          subAccounts={subAccounts}
+          onSaveClient={(c) => { setClients((cs) => cs.map((x) => (x.id === c.id ? c : x))); markOwnClientWrite(c.id); upsertClient(c); }}
+          onSynced={async () => { try { setContacts(await fetchContacts()); pushToast("Contacts updated from GoHighLevel"); } catch { /* ignore */ } }}
+          territories={territories} contacts={contacts} clients={clients}
+          onAddTerritory={addTerritory} onAssignTerritory={assignTerritory} onDeleteTerritory={deleteTerritory}
+          onAddContact={(contact) => addClientContact(contact)}
+          onOpenClient={(id) => { setSettingsHubOpen(false); setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(id); setActiveProject(null); }}
+          templates={taskTemplates} projects={projects}
+          onSaveTemplate={saveTemplate} onDeleteTemplate={deleteTemplate} onUseTemplateAsTask={useTemplateAsTask}
+        />
+      )}
       {addClientOpen && <AddClientModal subAccounts={subAccounts} contacts={contacts} existingIds={new Set(clients.map((c) => c.id))} onAdd={addClientContact} onClose={() => setAddClientOpen(false)} />}
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
       {promptDialog && <PromptModal {...promptDialog} onCancel={() => setPromptDialog(null)} />}

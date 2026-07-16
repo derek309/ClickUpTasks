@@ -11,7 +11,7 @@ import { I } from "./cockpit/ui";
 
 type TokenRow = { id: string; name: string; created_at: string; last_used_at: string | null };
 
-export default function ApiTokensPanel({ onClose }: { onClose: () => void }) {
+export default function ApiTokensPanel() {
   const [tokens, setTokens] = useState<TokenRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -89,16 +89,6 @@ export default function ApiTokensPanel({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
-      <div className="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border bg-surface shadow-xl">
-        <div className="flex items-center justify-between border-b px-5 py-3">
-          <div>
-            <h2 className="text-[16px] font-semibold">API tokens</h2>
-            <p className="text-[13px] text-muted">Personal tokens for external tools — like the Gmail Chrome extension — to create tasks as you.</p>
-          </div>
-          <button onClick={onClose} className="rounded-md p-1 text-muted hover:bg-background">✕</button>
-        </div>
-
         {revealedToken ? (
           <div className="px-5 py-4">
             <p className="mb-2 text-[15px] font-medium text-amber-700">Copy this now — you won&apos;t be able to see it again.</p>
@@ -116,7 +106,7 @@ export default function ApiTokensPanel({ onClose }: { onClose: () => void }) {
           </form>
         )}
 
-        <div className="max-h-[50vh] overflow-y-auto px-5 py-3">
+        <div className="px-5 py-3">
           {loading && <div className="py-8 text-center text-[13px] text-muted">Loading tokens…</div>}
           {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-[15px] text-red-600">{error}</div>}
           {!loading && tokens.map((t) => (
@@ -152,7 +142,6 @@ export default function ApiTokensPanel({ onClose }: { onClose: () => void }) {
             <li>Open any email in Gmail and click the extension&apos;s icon in Chrome&apos;s toolbar.</li>
           </ol>
         </div>
-      </div>
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
     </>
   );

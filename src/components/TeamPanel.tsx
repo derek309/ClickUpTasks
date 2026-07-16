@@ -8,7 +8,7 @@ import { I } from "./cockpit/ui";
 
 type Profile = { id: string; email: string; name: string; role: "admin" | "va"; color: string; pending?: boolean; avatar_url?: string | null; can_send_messages?: boolean };
 
-export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void }) {
+export default function TeamPanel({ me }: { me: Me }) {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -119,16 +119,6 @@ export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void
 
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
-      <div className="fixed left-1/2 top-1/2 z-50 w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border bg-surface shadow-xl">
-        <div className="flex items-center justify-between border-b px-5 py-3">
-          <div>
-            <h2 className="text-[16px] font-semibold">Team</h2>
-            <p className="text-[13px] text-muted">Invite teammates by email, then set who&apos;s an admin vs a VA.</p>
-          </div>
-          <button onClick={onClose} className="rounded-md p-1 text-muted hover:bg-background">✕</button>
-        </div>
-
         <form onSubmit={sendInvite} className="flex flex-wrap items-center gap-2 border-b bg-background/40 px-5 py-3">
           <input value={inviteName} onChange={(e) => setInviteName(e.target.value)} placeholder="Name (optional)" className="w-40 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
           <input value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} type="email" required placeholder="teammate@email.com" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
@@ -136,7 +126,7 @@ export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void
           {inviteMsg && <div className={`w-full text-[15px] ${inviteMsg.kind === "err" ? "text-red-500" : "text-green-600"}`}>{inviteMsg.text}</div>}
         </form>
 
-        <div className="max-h-[60vh] overflow-y-auto px-5 py-3">
+        <div className="px-5 py-3">
           {loading && <div className="py-8 text-center text-[13px] text-muted">Loading team…</div>}
           {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-[15px] text-red-600">{error}</div>}
           {!loading && profiles.map((p) => (
@@ -187,7 +177,6 @@ export default function TeamPanel({ me, onClose }: { me: Me; onClose: () => void
           ))}
           {!loading && !error && profiles.length === 0 && <div className="py-8 text-center text-[13px] text-muted">No team members yet.</div>}
         </div>
-      </div>
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
     </>
   );
