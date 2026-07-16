@@ -179,15 +179,18 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
     for (const f of images) { const att = await onUploadImage(f); if (att) setPendingAtts((a) => [...a, att]); }
     setUploadingAtt(false);
   };
-  // Clicking an email quotes it into the composer, like reply in a real
-  // email client — SMS has no equivalent (it's one continuous thread, no
-  // per-message reply concept), so this is email-only.
+  // Clicking Reply switches to Email mode and pre-fills "Re: subject" so it
+  // threads correctly — no quoted body. GHL sends it as a reply on the same
+  // conversation and the recipient's client already shows the prior message
+  // via the thread itself, so re-pasting it inline would just be clutter.
+  // SMS has no equivalent (it's one continuous thread, no per-message reply
+  // concept), so this is email-only.
   const replyToEmail = (m: Message) => {
     setComposeMode("email");
     const subj = m.subject ?? "";
     setMsgSubject(/^re:/i.test(subj) ? subj : `Re: ${subj}`.trim());
-    setMsgBody(`\n\n${m.body.split("\n").map((l) => `> ${l}`).join("\n")}`);
-    requestAnimationFrame(() => { msgBodyRef.current?.focus(); msgBodyRef.current?.setSelectionRange(0, 0); });
+    setMsgBody("");
+    requestAnimationFrame(() => msgBodyRef.current?.focus());
   };
   const submitMessage = () => {
     if (!msgBody.trim() || !onSendMessage || (composeMode !== "email" && composeMode !== "sms")) return;
