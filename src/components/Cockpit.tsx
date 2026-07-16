@@ -767,6 +767,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return { tier, due: soonest, priorityRank: Math.max(...atSoonest.map((t) => PRIORITY_META[t.priority].rank)) };
   }
   const projectTaskCount = (projectId: string) => scopedTasks.filter((t) => t.projectId === projectId && t.status !== "done").length;
+  // Same "Overdue first" urgency ordering the Clients section gets when
+  // clientSort === "urgent" — the sidebar's Projects section had no sort at
+  // all before this. Same comparator as myWorkGroups/sortedClients's
+  // "urgent" branch: tier, then soonest due, then priority, then name.
+  const sortedWorkspaceProjects = clientSort === "urgent"
+    ? [...workspaceProjects].sort((a, b) => {
+        const ka = projectUrgencyKey(a.id), kb = projectUrgencyKey(b.id);
+        return ka.tier - kb.tier || ka.due.localeCompare(kb.due) || kb.priorityRank - ka.priorityRank || a.name.localeCompare(b.name);
+      })
+    : workspaceProjects;
   // "My Work" — the same urgency tiers as the sidebar's "Overdue first"
   // sort, as grouped sections of clients AND projects (interleaved together
   // within each tier, sorted by the same due/priority/name comparator)
@@ -804,19 +814,26 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // falls into this same no-header bucket instead of vanishing from every
   // group — exact-match filtering below would otherwise drop it entirely.
   const knownClientStatuses = new Set<string>(CLIENT_STATUS_ORDER);
-  const clientGroups = ([
-    ["", "active_client"],
-    ["Onboarding", "onboarding"],
-    ["Prospects", "prospect"],
-    ["Leads", "lead"],
-    ["Cancelled", "cancelled"],
-    ["Past Clients", "past_client"],
-  ] as const)
-    .map(([header, st]) => ({
-      header,
-      items: sortedClients.filter((c) => c.status === st || (st === "active_client" && !knownClientStatuses.has(c.status))),
-    }))
-    .filter((g) => g.items.length > 0);
+  // Urgency sort is meant to answer "how soon do I need to work this" — the
+  // status-lifecycle grouping below would otherwise bury that (a client only
+  // ever sorts within its own status section, so an overdue Prospect can
+  // never outrank a no-due-date Active client). Bypass the grouping
+  // entirely in that mode: one flat, fully urgency-ordered list instead.
+  const clientGroups = clientSort === "urgent"
+    ? [{ header: "", items: sortedClients }]
+    : ([
+        ["", "active_client"],
+        ["Onboarding", "onboarding"],
+        ["Prospects", "prospect"],
+        ["Leads", "lead"],
+        ["Cancelled", "cancelled"],
+        ["Past Clients", "past_client"],
+      ] as const)
+        .map(([header, st]) => ({
+          header,
+          items: sortedClients.filter((c) => c.status === st || (st === "active_client" && !knownClientStatuses.has(c.status))),
+        }))
+        .filter((g) => g.items.length > 0);
   // Resolves the GHL contact backing a client: an explicit link (set via
   // "Link to GHL" for clients whose id isn't itself a contact id) wins;
   // otherwise fall back to the id-derived contact ("cl_" + contact id).
@@ -1679,7 +1696,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </div>
           {!collapsed.has("projects") && (
           <nav className="shrink-0 space-y-0.5 px-2">
-            {workspaceProjects.map((p) => {
+            {sortedWorkspaceProjects.map((p) => {
               const pg = projectProgress(p.id);
               const on = !myWork && !personalView && !inboxView && activeClient === WORKSPACE_CLIENT_ID && activeProject === p.id;
               return (
