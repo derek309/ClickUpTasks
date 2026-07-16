@@ -10,6 +10,7 @@ const notesInput = document.getElementById("notes");
 const statusEl = document.getElementById("status");
 const createBtn = document.getElementById("create");
 const enrichBtn = document.getElementById("enrich");
+const refreshBtn = document.getElementById("refresh");
 
 let permalink = null;
 let senderName = null;
@@ -45,7 +46,7 @@ async function getCurrentEmail() {
 }
 
 async function loadClients(token) {
-  // Cache for a few minutes so reopening the popup repeatedly doesn't
+  // Cache for a few minutes so reopening the panel repeatedly doesn't
   // re-fetch every time.
   const cached = await chrome.storage.local.get(["clientsCache", "clientsCacheAt"]);
   const fresh = cached.clientsCacheAt && Date.now() - cached.clientsCacheAt < 5 * 60 * 1000;
@@ -77,6 +78,9 @@ async function loadProjectsFor(clientId) {
 
 clientSel.addEventListener("change", () => loadProjectsFor(clientSel.value));
 
+// A side panel stays open as you browse between emails (unlike a popup,
+// which closes on any click outside it) — Refresh re-reads whatever's
+// currently open in Gmail instead of requiring a full reload.
 async function init() {
   const token = await getToken();
   if (!token) {
@@ -84,6 +88,11 @@ async function init() {
     needsTokenEl.style.display = "block";
     return;
   }
+  formEl.style.display = "";
+  needsTokenEl.style.display = "none";
+  statusEl.textContent = "";
+  statusEl.className = "";
+  matchHintEl.textContent = "";
 
   const [email, clients] = await Promise.all([getCurrentEmail(), loadClients(token).catch(() => [])]);
 
@@ -98,6 +107,7 @@ async function init() {
     opt.textContent = c.name;
     clientSel.appendChild(opt);
   }
+  await loadProjectsFor("");
 
   if (email) {
     titleInput.value = email.subject || "";
@@ -120,6 +130,9 @@ async function init() {
       } catch { /* no match — leave the dropdown unselected */ }
     }
   } else {
+    permalink = null;
+    senderName = null;
+    senderEmail = null;
     // Either this tab isn't Gmail, the content script hasn't loaded yet
     // (a tab open before the extension was installed needs a reload), or
     // Gmail's page structure changed under us — say so instead of leaving
@@ -128,6 +141,8 @@ async function init() {
     statusEl.className = "";
   }
 }
+
+refreshBtn.addEventListener("click", init);
 
 enrichBtn.addEventListener("click", async () => {
   const token = await getToken();
@@ -172,10 +187,17 @@ createBtn.addEventListener("click", async () => {
     });
     statusEl.textContent = "Task created.";
     statusEl.className = "ok";
-    setTimeout(() => window.close(), 900);
+    // The panel stays open (it's a sidebar, not a popup) — clear the form
+    // instead of trying to close anything, ready for the next email.
+    titleInput.value = "";
+    notesInput.value = "";
+    clientSel.value = "";
+    projectSel.value = "";
+    matchHintEl.textContent = "";
   } catch (e) {
     statusEl.textContent = e instanceof Error ? e.message : "Failed to create task.";
     statusEl.className = "err";
+  } finally {
     createBtn.disabled = false;
   }
 });

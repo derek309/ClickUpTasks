@@ -4,11 +4,13 @@
 <meta charset="utf-8" />
 <title>Create ClickUpTasks task</title>
 <style>
-  body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; width: 320px; padding: 14px; color: #1B3A5C; }
-  h1 { font-size: 14px; margin: 0 0 10px; }
+  body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; padding: 14px; color: #1B3A5C; max-width: 420px; }
+  h1 { font-size: 15px; margin: 0 0 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  #refresh { width: auto; margin-top: 0; padding: 5px 8px; font-size: 12px; background: #fff; color: #1B3A5C; border: 1px solid #d0dce8; }
   label { display: block; font-size: 12px; font-weight: 600; margin: 8px 0 4px; }
   select, input, textarea { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid #d0dce8; border-radius: 6px; font-size: 13px; font-family: inherit; }
   textarea { resize: vertical; min-height: 50px; }
+  #title { resize: vertical; min-height: 40px; }
   button { width: 100%; margin-top: 12px; background: #1B3A5C; color: #fff; border: none; border-radius: 6px; padding: 9px; font-size: 13px; font-weight: 600; cursor: pointer; }
   button:disabled { opacity: 0.5; cursor: default; }
   #enrich { margin-top: 8px; background: #fff; color: #E87722; border: 1px solid #E87722; }
@@ -21,7 +23,7 @@
 </style>
 </head>
 <body>
-  <h1>Create ClickUpTasks task</h1>
+  <h1>Create ClickUpTasks task <button id="refresh" type="button" title="Re-read the currently open email">🔄 Refresh</button></h1>
   <div id="form">
     <label for="client">Client</label>
     <select id="client"><option value="">Loading…</option></select>
@@ -29,7 +31,7 @@
     <label for="project">List (optional)</label>
     <select id="project"><option value="">Default</option></select>
     <label for="title">Title</label>
-    <input id="title" type="text" />
+    <textarea id="title" rows="2"></textarea>
     <label for="notes">Notes</label>
     <textarea id="notes"></textarea>
     <button id="enrich" type="button">✨ Enrich with AI</button>
@@ -39,6 +41,6 @@
   <div id="needsToken">
     No API token configured yet. <a href="#" id="openOptions">Open settings</a> to paste one.
   </div>
-  <script src="popup.js"></script>
+  <script src="sidepanel.js"></script>
 </body>
 </html>
