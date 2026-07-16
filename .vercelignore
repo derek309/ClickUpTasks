@@ -1,0 +1,4 @@
+# Separate Tauri/Rust project, not part of the Next.js deployment — and its
+# src-tauri/target/ build output alone can be multiple GB, which blew up an
+# earlier `vercel deploy` upload.
+desktop-helper
