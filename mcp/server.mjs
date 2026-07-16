@@ -70,6 +70,31 @@ async function names() {
   for (const c of await sb("clients?select=id,name")) clientNames[c.id] = c.name;
   for (const p of await sb("projects?select=id,name")) projectNames[p.id] = p.name;
 }
+
+// Roster cache — profiles.member_id is the id actually stored in
+// tasks.assignee_id (see supabase/auth.sql / member-id-backfill.sql), not
+// profiles.id. Any member can be assigned to any client's tasks; this app
+// has no per-client membership restriction, so there's nothing meaningful to
+// scope list_members by.
+let memberNames = {};
+async function members() {
+  if (Object.keys(memberNames).length) return;
+  for (const m of await sb("profiles?select=member_id,name&member_id=not.is.null")) memberNames[m.member_id] = m.name;
+}
+
+// Shared by create_task/update_task so a bad assignee_id fails loudly at the
+// point of the call instead of silently landing a task unassigned (the
+// exact bug this was added to fix). "me" resolves to your own member id —
+// the natural thing to type, which previously just no-op'd.
+async function resolveAssignee(rawId) {
+  if (rawId == null) return { id: null };
+  const trimmed = String(rawId).trim();
+  if (!trimmed) return { id: null };
+  if (trimmed.toLowerCase() === "me") return { id: ME };
+  await members();
+  if (!memberNames[trimmed]) return { error: `Unknown member id "${trimmed}". Call list_members to see valid ids, or use "me" for yourself.` };
+  return { id: trimmed };
+}
 const brief = (t) => `[${t.id}] ${t.title}\n  status: ${t.status} · priority: ${t.priority} · due: ${t.due || "—"}\n  client: ${clientNames[t.client_id] || t.client_id} · list: ${projectNames[t.project_id] || "—"}`;
 
 const server = new McpServer({ name: "clickuptasks", version: "1.0.0" });
@@ -123,7 +148,7 @@ server.tool("create_task",
     description: z.string().optional(),
     due: z.string().optional().describe("yyyy-mm-dd; defaults to tomorrow"),
     priority: z.enum(["none", "normal", "urgent"]).optional().describe("defaults to \"normal\"; \"conversation\" is reserved/auto-created only"),
-    assignee_id: z.string().optional().describe("roster member id; defaults to unassigned"),
+    assignee_id: z.string().optional().describe("roster member id (get one from list_members), or \"me\" for yourself; defaults to unassigned"),
   },
   async ({ client_id, project_id, title, description, due, priority, assignee_id }) => {
     await names();
@@ -139,14 +164,61 @@ server.tool("create_task",
         projectNames[pid] = "Tasks";
       }
     }
+    const resolved = await resolveAssignee(assignee_id);
+    if (resolved.error) return { content: [{ type: "text", text: resolved.error }] };
     const t = {
       id: rid("t_"), project_id: pid, client_id, title: title.trim(), description: description || "",
-      status: "todo", priority: priority || "normal", assignee_id: assignee_id || null,
+      status: "todo", priority: priority || "normal", assignee_id: resolved.id,
       contact_id: client_id.startsWith("cl_") ? client_id.slice(3) : null,
       due: due || addDaysIso(todayIso(), 1),
     };
     await sb("tasks", "POST", t);
-    return { content: [{ type: "text", text: `Created ${t.id}: "${t.title}" in ${clientNames[client_id]} · due ${t.due} · priority ${t.priority}${t.assignee_id ? "" : " · unassigned"}.` }] };
+    await members();
+    const assigneeLabel = t.assignee_id ? (memberNames[t.assignee_id] || t.assignee_id) : "unassigned";
+    return { content: [{ type: "text", text: `Created ${t.id}: "${t.title}" in ${clientNames[client_id]} · due ${t.due} · priority ${t.priority} · assignee: ${assigneeLabel}.` }] };
+  });
+
+server.tool("update_task",
+  "Edit an existing task's title, description, priority, due date, or assignee. Only the fields you pass are changed. Get the id from get_task/list_my_tasks/list_queue.",
+  {
+    id: z.string(),
+    title: z.string().min(1).optional(),
+    description: z.string().optional(),
+    priority: z.enum(["none", "normal", "urgent"]).optional().describe("\"conversation\" is reserved/auto-created only, can't be set manually"),
+    due: z.string().nullable().optional().describe("yyyy-mm-dd, or null to clear the due date"),
+    assignee_id: z.string().nullable().optional().describe("roster member id (get one from list_members), \"me\" for yourself, or null to unassign"),
+  },
+  async ({ id, title, description, priority, due, assignee_id }) => {
+    const patch = {};
+    if (title !== undefined) patch.title = title.trim();
+    if (description !== undefined) patch.description = description;
+    if (priority !== undefined) patch.priority = priority;
+    if (due !== undefined) patch.due = due;
+    if (assignee_id !== undefined) {
+      const resolved = await resolveAssignee(assignee_id);
+      if (resolved.error) return { content: [{ type: "text", text: resolved.error }] };
+      patch.assignee_id = resolved.id;
+    }
+    if (!Object.keys(patch).length) return { content: [{ type: "text", text: "Nothing to update — provide at least one field." }] };
+    const [t] = await sb(`tasks?id=eq.${enc(id)}`, "PATCH", patch);
+    if (!t) return { content: [{ type: "text", text: `No task ${id}.` }] };
+    let ghl = "";
+    if (t.ghl_task_id) { try { const ok = await pushGhlStatus(t); ghl = ok ? " (synced to GoHighLevel)" : " (GoHighLevel push failed)"; } catch { ghl = " (GoHighLevel push errored)"; } }
+    await members();
+    const changed = Object.keys(patch)
+      .map((k) => k === "assignee_id" ? `assignee: ${patch.assignee_id ? (memberNames[patch.assignee_id] || patch.assignee_id) : "unassigned"}` : `${k}: ${JSON.stringify(patch[k])}`)
+      .join(", ");
+    return { content: [{ type: "text", text: `Updated ${id} — ${changed}.${ghl}` }] };
+  });
+
+server.tool("delete_task",
+  "Permanently delete a task — cannot be undone, always confirm with the user first. Automatically removes it from any Claude queue. Does NOT delete its mirror in GoHighLevel if it has one.",
+  { id: z.string() },
+  async ({ id }) => {
+    const [t] = await sb(`tasks?select=id,title&id=eq.${enc(id)}`);
+    if (!t) return { content: [{ type: "text", text: `No task ${id}.` }] };
+    await sb(`tasks?id=eq.${enc(id)}`, "DELETE");
+    return { content: [{ type: "text", text: `Deleted ${id}: "${t.title}".` }] };
   });
 
 server.tool("set_task_status",
@@ -213,6 +285,16 @@ server.tool("list_queue",
     const order = new Map(ids.map((id, i) => [id, i]));
     rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
     return { content: [{ type: "text", text: `${rows.length} queued task(s):\n\n${rows.map(brief).join("\n\n")}` }] };
+  });
+
+server.tool("list_members",
+  "List team members (roster) so you know what a valid assignee_id looks like for create_task/update_task. Any member can be assigned to any client's tasks — there's no per-client membership restriction in this app.",
+  {},
+  async () => {
+    const rows = await sb("profiles?select=member_id,name,email,role&member_id=not.is.null&order=name");
+    if (!rows.length) return { content: [{ type: "text", text: "No team members found." }] };
+    for (const m of rows) memberNames[m.member_id] = m.name;
+    return { content: [{ type: "text", text: rows.map((m) => `${m.name}  [${m.member_id}]  · ${m.role}${m.email ? ` · ${m.email}` : ""}`).join("\n") }] };
   });
 
 server.tool("list_clients",
