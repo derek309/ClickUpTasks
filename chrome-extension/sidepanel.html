@@ -33,13 +33,16 @@
   #screenshotBox.has-shot { display: block; }
   #screenshotPreview { width: 100%; border: 1px solid #d0dce8; border-radius: 6px; display: block; }
   #removeScreenshot { position: absolute; top: 6px; right: 6px; width: auto; margin: 0; padding: 3px 8px; font-size: 11px; background: rgba(27,58,92,0.85); }
+  #pasteZone { margin-top: 8px; padding: 12px; border: 2px dashed #d0dce8; border-radius: 8px; text-align: center; font-size: 12px; color: #64748b; cursor: text; }
+  #pasteZone:focus { outline: none; border-color: #E87722; color: #1B3A5C; }
+  #pasteZone .hint { display: block; margin-top: 3px; font-size: 11px; color: #94a3b8; }
   .mode-toggle { display: flex; gap: 6px; margin-top: 8px; }
   .mode-btn { flex: 1; padding: 6px; border: 1px solid #d0dce8; border-radius: 6px; background: #fff; color: #1B3A5C; font-size: 12px; font-weight: 600; cursor: pointer; text-align: center; }
   .mode-btn.active { background: #1B3A5C; color: #fff; }
 </style>
 </head>
 <body>
-  <h1>Create ClickUpTasks task <button id="refresh" type="button" title="Reset this form. To capture a NEW screenshot, click the toolbar icon instead — that's the only place Chrome allows it.">🔄 Refresh</button></h1>
+  <h1>Create ClickUpTasks task <button id="refresh" type="button" title="Reset this form and re-read the current page's title/link. For a screenshot, click the toolbar icon to auto-capture one, or paste one in below with ⌘V.">🔄 Refresh</button></h1>
   <div id="form">
     <label for="clientSearch">Client</label>
     <div class="combo">
@@ -48,6 +51,10 @@
     </div>
     <div id="matchHint"></div>
 
+    <div id="pasteZone" tabindex="0">
+      📋 Click here and press ⌘V (Mac) / Ctrl+V (Windows) to add a screenshot
+      <span class="hint">Tip: ⌘⌃⇧4 on Mac copies a screenshot straight to your clipboard — no file needed.</span>
+    </div>
     <div id="screenshotBox">
       <img id="screenshotPreview" alt="Captured screenshot" />
       <button id="removeScreenshot" type="button">✕ Remove</button>

@@ -5,6 +5,7 @@ const needsTokenEl = document.getElementById("needsToken");
 const clientSearchInput = document.getElementById("clientSearch");
 const clientResultsEl = document.getElementById("clientResults");
 const matchHintEl = document.getElementById("matchHint");
+const pasteZoneEl = document.getElementById("pasteZone");
 const screenshotBoxEl = document.getElementById("screenshotBox");
 const screenshotPreviewEl = document.getElementById("screenshotPreview");
 const removeScreenshotBtn = document.getElementById("removeScreenshot");
@@ -85,16 +86,44 @@ async function getPendingCapture() {
   return pendingCapture || null;
 }
 
+// Reads the current tab's title/url directly (needs the "tabs" permission —
+// added specifically so this doesn't depend on activeTab having been granted
+// via a toolbar click first). Unlike the screenshot pixels below, there's no
+// Chrome gesture requirement for reading these two fields.
+async function readActiveTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab || null;
+}
+
 function showScreenshot(dataUrl) {
   capturedScreenshot = dataUrl;
   if (dataUrl) {
     screenshotPreviewEl.src = dataUrl;
     screenshotBoxEl.classList.add("has-shot");
+    pasteZoneEl.style.display = "none";
   } else {
     screenshotBoxEl.classList.remove("has-shot");
+    pasteZoneEl.style.display = "";
   }
 }
 removeScreenshotBtn.addEventListener("click", () => showScreenshot(null));
+
+// Manual fallback for the one thing that genuinely needs a toolbar-icon
+// click: capturing pixels. Pasting a system screenshot (e.g. macOS's
+// Cmd+Ctrl+Shift+4, which copies straight to the clipboard) doesn't need any
+// special Chrome permission — a plain paste event works anywhere in the
+// panel, not just when the paste zone itself has focus, since an image can't
+// usefully land in a text field anyway.
+document.addEventListener("paste", (e) => {
+  const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith("image/"));
+  if (!item) return;
+  const blob = item.getAsFile();
+  if (!blob) return;
+  e.preventDefault();
+  const reader = new FileReader();
+  reader.onload = () => showScreenshot(reader.result);
+  reader.readAsDataURL(blob);
+});
 
 async function loadClients(token) {
   // Cache for a few minutes so reopening the panel repeatedly doesn't
@@ -278,10 +307,10 @@ modeExistingBtn.addEventListener("click", () => setMode("existing"));
 
 // A side panel stays open as you browse (unlike a popup, which closes on
 // any click outside it) — Refresh re-reads whatever's currently open
-// instead of requiring a full reload. The toolbar icon itself also opens
-// (or brings forward) the panel via background.js, which always captures a
-// fresh screenshot first — see that file for why it has to happen there
-// and not from a button in here.
+// instead of requiring a full reload. Title/URL are read live below (needs
+// no special permission grant), so they're never dependent on a click. Only
+// the screenshot pixels need either the toolbar-icon click (background.js
+// captures via activeTab) or the in-panel paste zone above.
 async function init() {
   const token = await getToken();
   if (!token) {
@@ -302,36 +331,35 @@ async function init() {
   showScreenshot(null);
   setMode("new");
 
-  const [email, capture, clients] = await Promise.all([
-    getCurrentEmail(), getPendingCapture(), loadClients(token).catch(() => []), loadMembers(token).catch(() => {}),
+  const [email, capture, tab, clients] = await Promise.all([
+    getCurrentEmail(), getPendingCapture(), readActiveTab(), loadClients(token).catch(() => []), loadMembers(token).catch(() => {}),
   ]);
   allClients = clients;
   clientSearchInput.placeholder = clients.length ? "Search by name, business, or contact…" : "No clients available";
   await loadProjectsFor("");
   await loadTasksFor("");
 
+  // The screenshot is the one field that still depends on the toolbar-icon
+  // click (or a manual paste) — everything else below is read live, every
+  // time the panel opens or Refresh is pressed.
   if (capture?.screenshot) showScreenshot(capture.screenshot);
 
   if (email) {
-    // Gmail — same as before, takes priority over the generic page capture.
+    // Gmail — same as before, takes priority over the generic tab data.
     titleInput.value = email.subject || "";
     senderName = email.senderName || null;
     senderEmail = email.senderEmail || null;
     const fromLine = senderName || senderEmail ? `From: ${senderName || ""}${senderEmail ? ` <${senderEmail}>` : ""}` : "";
     notesInput.value = [fromLine, email.snippet || ""].filter(Boolean).join("\n\n");
     permalink = email.permalink || null;
-  } else if (capture) {
-    // Any other page — title/URL are native tab properties, no scraping
-    // needed. Notes stays blank; the screenshot is the main content here.
-    titleInput.value = capture.title || "";
+  } else {
+    // Any other page — title/URL are native tab properties (needs the
+    // "tabs" permission), no scraping or click needed for these two fields.
+    titleInput.value = tab?.title || "";
     senderName = null;
     senderEmail = null;
     notesInput.value = "";
-    permalink = capture.url || null;
-  } else {
-    permalink = null;
-    senderName = null;
-    senderEmail = null;
+    permalink = tab?.url || null;
   }
 
   if (senderEmail) {
@@ -356,16 +384,10 @@ async function init() {
     } catch { /* not a valid URL, or no match — leave the picker empty */ }
   }
 
-  if (!email && !capture) {
-    // Most common cause: the panel is already open and the toolbar icon
-    // wasn't clicked again — a screenshot can only be captured from a real
-    // toolbar-icon click (a Chrome permission rule this "Refresh" button
-    // can't satisfy on its own), so re-reading here finds nothing new.
-    // Less common: this tab can't be read at all (a chrome:// page), the
-    // Gmail content script hasn't loaded yet (a tab open before the
-    // extension was installed needs a reload), or Gmail's page structure
-    // changed under us.
-    statusEl.textContent = "Click the ClickUpTasks icon in Chrome's toolbar (not this Refresh button) to capture the current page — or fill in manually below.";
+  if (!email && !tab?.title && !permalink) {
+    // Rare: this tab can't be read at all (a chrome:// page) and there's no
+    // Gmail email either — the form still opens, fully fillable by hand.
+    statusEl.textContent = "Couldn't read this page — fill in the form manually below.";
     statusEl.className = "";
   }
 }
