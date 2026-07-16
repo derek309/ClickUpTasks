@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Separate toolchain (Rust/Tauri), no shared lint pipeline — same
+    // precedent as chrome-extension/. Its src-tauri/target/ build output
+    // in particular includes auto-generated JS that isn't meant to be
+    // linted at all.
+    "desktop-helper/**",
   ]),
 ]);
 

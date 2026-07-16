@@ -214,9 +214,10 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
 
   const commentCount = task.comments.filter((c) => c.kind !== "event").length;
 
-  // Packages the task as a ready-to-paste brief for a Claude Code session.
-  // (There's no supported deep link to launch Claude Code with a prompt, so
-  // clipboard + paste is the reliable hand-off.)
+  // Packages the task as a ready-to-paste brief for a Claude Code session —
+  // the fallback hand-off for anyone without the desktop helper installed
+  // (see the "Work with Claude" button below, which uses a real deep link
+  // when the helper app is present).
   const copyForClaude = async () => {
     const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId);
     const descText = htmlToText(task.description);
@@ -768,6 +769,9 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
             </button>
             <button onClick={onToggleQueue} title={isQueued ? "In Claude Code's queue — click to remove" : "Queue this task for Claude Code to work (say “work my queue” in Claude Code)"} className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[13px] font-medium ${isQueued ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>
               <span aria-hidden>{isQueued ? "★" : "☆"}</span><span className="hidden sm:inline">{isQueued ? "Queued" : "Queue for Claude"}</span>
+            </button>
+            <button onClick={() => { window.location.href = `clickuptasks://work?task=${task.id}`; }} title="Launch Claude Code locally, focused on this task (requires the ClickUpTasks Helper desktop app)" className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
+              <span aria-hidden>▶</span><span className="hidden sm:inline">Work with Claude</span>
             </button>
             {ghlContactUrl && (
               <a href={ghlContactUrl} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="inline-flex items-center gap-1 rounded-md border border-accent px-2 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft">

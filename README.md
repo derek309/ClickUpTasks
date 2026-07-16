@@ -29,6 +29,19 @@ To learn more about Next.js, take a look at the following resources:
 
 You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
+## Desktop helper
+
+`desktop-helper/` is a small Tauri (Rust) tray app — clicking "Work with Claude" on a task opens a terminal locally with Claude Code already looking up that task, via a `clickuptasks://work?task=<id>` deep link. It's independent of the Next.js app above; see `desktop-helper/src-tauri/src/lib.rs` for how it's wired. Requires the Rust toolchain (`rustup.rs`) and the Tauri CLI (`desktop-helper/package.json`).
+
+```bash
+cd desktop-helper
+npm install
+npm run tauri dev      # runs the bare binary — fine for iterating on the settings UI,
+                        # but macOS deep links only work from a real .app bundle:
+npm run tauri build -- --debug --bundles app
+open "src-tauri/target/debug/bundle/macos/ClickUpTasks Helper.app"
+```
+
 ## Deploy on Vercel
 
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
