@@ -17,25 +17,51 @@ fn show_settings(app: &AppHandle) {
     }
 }
 
-// Parses `clickuptasks://work?task=<id>` and, once the id passes validation,
-// hands off to the OS-branched terminal spawn. Malformed or missing ids are
-// dropped silently (logged to stderr) rather than ever reaching a shell
-// string unvalidated.
+fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
+    query.split('&').find_map(|kv| {
+        let (k, v) = kv.split_once('=')?;
+        (k == key).then_some(v)
+    })
+}
+
+// Parses either `clickuptasks://work?task=<id>` (one task) or
+// `clickuptasks://work?client=<id>[&project=<id>]` (every open task under a
+// client, optionally narrowed to one project) and, once every id present
+// passes validation, hands off to the OS-branched terminal spawn. Malformed
+// or missing ids are dropped silently (logged to stderr) rather than ever
+// reaching a shell string unvalidated.
 fn handle_url(app: &AppHandle, url: &str) {
     let Some(query) = url.split_once('?').map(|(_, q)| q) else {
         return;
     };
-    let Some(task_id) = query.split('&').find_map(|kv| {
-        let (k, v) = kv.split_once('=')?;
-        (k == "task").then(|| v.to_string())
-    }) else {
+
+    let task_id = query_param(query, "task");
+    let client_id = query_param(query, "client");
+    let project_id = query_param(query, "project");
+
+    for id in [task_id, client_id, project_id].into_iter().flatten() {
+        if !terminal::is_valid_id(id) {
+            eprintln!("clickuptasks: rejected malformed id: {id:?}");
+            return;
+        }
+    }
+
+    let (label, prompt) = if let Some(id) = task_id {
+        (id.to_string(), format!("Look up and start working on ClickUpTasks task {id} using the clickuptasks MCP tools."))
+    } else if let Some(cid) = client_id {
+        match project_id {
+            Some(pid) => (
+                format!("{cid}-{pid}"),
+                format!("Work through the open tasks for ClickUpTasks client {cid}, project {pid}, using the clickuptasks MCP tools — start with list_client_tasks."),
+            ),
+            None => (
+                cid.to_string(),
+                format!("Work through the open tasks for ClickUpTasks client {cid} using the clickuptasks MCP tools — start with list_client_tasks."),
+            ),
+        }
+    } else {
         return;
     };
-
-    if !terminal::is_valid_task_id(&task_id) {
-        eprintln!("clickuptasks: rejected malformed task id: {task_id:?}");
-        return;
-    }
 
     let cfg = config::load(app);
     let repo_path = cfg
@@ -44,7 +70,7 @@ fn handle_url(app: &AppHandle, url: &str) {
         .or_else(|| std::env::var("HOME").ok())
         .unwrap_or_else(|| ".".into());
 
-    if let Err(e) = terminal::open_terminal(&repo_path, &task_id) {
+    if let Err(e) = terminal::open_terminal(&repo_path, &label, &prompt) {
         eprintln!("clickuptasks: failed to open terminal: {e}");
     }
 }

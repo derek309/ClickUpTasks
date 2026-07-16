@@ -1,28 +1,29 @@
 use std::process::Command;
 
-// The task id is the only untrusted data that ever gets interpolated into a
-// shell string — this regex *is* the injection control. Applied once, at
-// the point the id is first received (lib.rs), before it touches anything
+// Applies to every id (task, client, project) pulled out of a deep link —
+// this regex *is* the injection control, since ids are the only untrusted
+// data that ever gets interpolated into a shell string. Applied once, at
+// the point each id is first received (lib.rs), before it touches anything
 // below.
-pub fn is_valid_task_id(id: &str) -> bool {
+pub fn is_valid_id(id: &str) -> bool {
     !id.is_empty()
         && id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
-fn seed_prompt(task_id: &str) -> String {
-    format!("Look up and start working on ClickUpTasks task {task_id} using the clickuptasks MCP tools.")
-}
-
-pub fn open_terminal(repo_path: &str, task_id: &str) -> std::io::Result<()> {
+// `label` is only used to build a unique, filesystem-safe temp script name
+// on Windows — pass any already-validated id (task, client, or client+project
+// combined). `prompt` is the actual text seeded into the Claude session.
+#[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
+pub fn open_terminal(repo_path: &str, label: &str, prompt: &str) -> std::io::Result<()> {
     #[cfg(target_os = "macos")]
-    return open_terminal_macos(repo_path, task_id);
+    return open_terminal_macos(repo_path, prompt);
     #[cfg(target_os = "windows")]
-    return open_terminal_windows(repo_path, task_id);
+    return open_terminal_windows(repo_path, label, prompt);
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
-        let _ = (repo_path, task_id);
+        let _ = (repo_path, label, prompt);
         Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
             "clickuptasks helper only supports macOS and Windows",
@@ -31,7 +32,7 @@ pub fn open_terminal(repo_path: &str, task_id: &str) -> std::io::Result<()> {
 }
 
 // POSIX single-quote escaping: close the quote, insert an escaped literal
-// quote, reopen the quote. Safe for any byte string, not just the id.
+// quote, reopen the quote. Safe for any byte string, not just an id.
 #[cfg(target_os = "macos")]
 fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
@@ -46,12 +47,11 @@ fn escape_for_applescript(s: &str) -> String {
 }
 
 #[cfg(target_os = "macos")]
-fn open_terminal_macos(repo_path: &str, task_id: &str) -> std::io::Result<()> {
-    let prompt = seed_prompt(task_id);
+fn open_terminal_macos(repo_path: &str, prompt: &str) -> std::io::Result<()> {
     let shell_cmd = format!(
         "cd {} && claude {}",
         shell_quote(repo_path),
-        shell_quote(&prompt)
+        shell_quote(prompt)
     );
     let osa_script = format!(
         "tell application \"Terminal\" to do script \"{}\"",
@@ -73,9 +73,8 @@ fn open_terminal_macos(repo_path: &str, task_id: &str) -> std::io::Result<()> {
 // written to the temp dir — all the quoting complexity stays in the file,
 // not on wt.exe's command line.
 #[cfg(target_os = "windows")]
-fn open_terminal_windows(repo_path: &str, task_id: &str) -> std::io::Result<()> {
-    let prompt = seed_prompt(task_id);
-    let script_path = std::env::temp_dir().join(format!("clickuptasks-launch-{task_id}.cmd"));
+fn open_terminal_windows(repo_path: &str, label: &str, prompt: &str) -> std::io::Result<()> {
+    let script_path = std::env::temp_dir().join(format!("clickuptasks-launch-{label}.cmd"));
     let script = format!(
         "@echo off\r\ncd /d \"{}\"\r\nclaude \"{}\"\r\n",
         repo_path.replace('"', "\"\""),

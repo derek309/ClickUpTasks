@@ -119,6 +119,27 @@ server.tool("list_my_tasks",
     return { content: [{ type: "text", text: `${rows.length} task(s):\n\n${rows.map(brief).join("\n\n")}` }] };
   });
 
+server.tool("list_client_tasks",
+  "List ALL open tasks under a client (optionally narrowed to one project/list) — not just tasks assigned to you. Use this when working through an entire client's or project's task list end-to-end (e.g. the desktop helper's client/project-level \"Work with Claude\" hand-off), rather than just your own queue. Get ids from list_clients/list_projects.",
+  {
+    client_id: z.string(),
+    project_id: z.string().optional().describe("omit to include every project under this client"),
+    include_done: z.boolean().optional(),
+    limit: z.number().optional(),
+  },
+  async ({ client_id, project_id, include_done, limit }) => {
+    await names();
+    if (!clientNames[client_id]) return { content: [{ type: "text", text: `No client ${client_id}.` }] };
+    if (project_id && !projectNames[project_id]) return { content: [{ type: "text", text: `No project ${project_id}.` }] };
+    let q = `tasks?select=*&client_id=eq.${enc(client_id)}&order=due.asc.nullslast`;
+    if (project_id) q += `&project_id=eq.${enc(project_id)}`;
+    if (!include_done) q += `&status=neq.done`;
+    q += `&limit=${limit || 200}`;
+    const rows = await sb(q);
+    if (!rows.length) return { content: [{ type: "text", text: "No matching tasks." }] };
+    return { content: [{ type: "text", text: `${rows.length} task(s):\n\n${rows.map(brief).join("\n\n")}` }] };
+  });
+
 server.tool("get_task",
   "Get one task's full detail: description, checklist (title + done state), links, client/list context.",
   { id: z.string() },
