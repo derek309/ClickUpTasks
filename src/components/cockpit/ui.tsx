@@ -46,6 +46,7 @@ export const I = {
   underline: (p: { className?: string }) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={p.className} width="13" height="13"><path d="M6 4v6a6 6 0 0 0 12 0V4M4 21h16"/></svg>),
   quote: (p: { className?: string }) => (<svg viewBox="0 0 24 24" fill="currentColor" className={p.className} width="13" height="13"><path d="M6 5C3.8 5 2 6.8 2 9v6h6V9H4.5C4.8 7.3 6.1 6 8 6V5H6zm10 0c-2.2 0-4 1.8-4 4v6h6V9h-3.5c.3-1.7 1.6-3 3.5-3V5h-2z"/></svg>),
   code: (p: { className?: string }) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={p.className} width="13" height="13"><path d="M8 6L2 12l6 6M16 6l6 6-6 6"/></svg>),
+  key: (p: { className?: string }) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={p.className} width="15" height="15"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.5 12.5L20 3M20 3v5h-5M17 6l-3 3"/></svg>),
 };
 
 export function Avatar({ id, size = 26 }: { id: string | null; size?: number }) {
