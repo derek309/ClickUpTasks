@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "ClickUpTasks for Gmail",
+  "version": "1.0.0",
+  "description": "Create a ClickUpTasks task from the email you're viewing in Gmail.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://mail.google.com/*", "https://clickuptasks.vercel.app/*"],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://mail.google.com/*"],
+      "js": ["content.js"]
+    }
+  ],
+  "options_page": "options.html"
+}

@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>ClickUpTasks — Settings</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; width: 360px; padding: 16px; color: #1B3A5C; }
+  h1 { font-size: 15px; margin: 0 0 8px; }
+  p { font-size: 13px; color: #64748b; margin: 0 0 12px; line-height: 1.4; }
+  input { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #d0dce8; border-radius: 6px; font-size: 13px; margin-bottom: 10px; }
+  button { background: #1B3A5C; color: #fff; border: none; border-radius: 6px; padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  #status { font-size: 13px; margin-top: 10px; }
+  .ok { color: #16a34a; }
+  .err { color: #dc2626; }
+</style>
+</head>
+<body>
+  <h1>ClickUpTasks for Gmail</h1>
+  <p>Paste a personal API token from ClickUpTasks — click the 🔑 icon in the app's sidebar (bottom-left) to create one.</p>
+  <input id="token" type="password" placeholder="cut_..." />
+  <button id="save">Save</button>
+  <div id="status"></div>
+  <script src="options.js"></script>
+</body>
+</html>

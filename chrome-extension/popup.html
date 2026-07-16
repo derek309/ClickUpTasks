@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Create ClickUpTasks task</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; width: 320px; padding: 14px; color: #1B3A5C; }
+  h1 { font-size: 14px; margin: 0 0 10px; }
+  label { display: block; font-size: 12px; font-weight: 600; margin: 8px 0 4px; }
+  select, input, textarea { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid #d0dce8; border-radius: 6px; font-size: 13px; font-family: inherit; }
+  textarea { resize: vertical; min-height: 50px; }
+  button { width: 100%; margin-top: 12px; background: #1B3A5C; color: #fff; border: none; border-radius: 6px; padding: 9px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  #status { font-size: 12px; margin-top: 8px; }
+  .ok { color: #16a34a; }
+  .err { color: #dc2626; }
+  #needsToken { font-size: 12px; color: #64748b; display: none; }
+  #needsToken a { color: #E87722; }
+</style>
+</head>
+<body>
+  <h1>Create ClickUpTasks task</h1>
+  <div id="form">
+    <label for="client">Client</label>
+    <select id="client"><option value="">Loading…</option></select>
+    <label for="title">Title</label>
+    <input id="title" type="text" />
+    <label for="notes">Notes</label>
+    <textarea id="notes"></textarea>
+    <button id="create">Create Task</button>
+    <div id="status"></div>
+  </div>
+  <div id="needsToken">
+    No API token configured yet. <a href="#" id="openOptions">Open settings</a> to paste one.
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
