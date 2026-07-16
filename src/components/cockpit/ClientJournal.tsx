@@ -187,7 +187,8 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
       </div>
 
       <div className="flex min-h-0 flex-1">
-        <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-5">
+        <div className="relative flex-1 overflow-hidden">
+        <div className="h-full overflow-y-auto px-4 py-4 sm:px-5">
           <div className="mx-auto max-w-3xl space-y-3">
             {filteredItems.length === 0 && (
               <div className="flex flex-col items-center gap-2 py-16 text-center text-muted">
@@ -283,6 +284,13 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
             })}
             <div ref={feedEndRef} />
           </div>
+        </div>
+        {filteredItems.length > 0 && (
+          <button onClick={() => feedEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })} title="Scroll to latest"
+            className="absolute bottom-4 right-4 z-10 flex h-9 w-9 items-center justify-center rounded-full border bg-surface text-muted shadow-soft-md hover:text-foreground">
+            <I.chevron className="-rotate-90" />
+          </button>
+        )}
         </div>
 
         <div className="relative flex shrink-0 flex-col border-l bg-surface" style={{ width: composerW }}>
