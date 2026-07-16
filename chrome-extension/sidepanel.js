@@ -2,7 +2,8 @@ const API_BASE = "https://clickuptasks.vercel.app";
 
 const formEl = document.getElementById("form");
 const needsTokenEl = document.getElementById("needsToken");
-const clientSel = document.getElementById("client");
+const clientSearchInput = document.getElementById("clientSearch");
+const clientResultsEl = document.getElementById("clientResults");
 const matchHintEl = document.getElementById("matchHint");
 const projectSel = document.getElementById("project");
 const titleInput = document.getElementById("title");
@@ -15,6 +16,8 @@ const refreshBtn = document.getElementById("refresh");
 let permalink = null;
 let senderName = null;
 let senderEmail = null;
+let allClients = []; // [{id, name, company, contactName}]
+let selectedClientId = "";
 
 document.getElementById("openOptions").addEventListener("click", (e) => {
   e.preventDefault();
@@ -76,7 +79,61 @@ async function loadProjectsFor(clientId) {
   } catch { /* leave just "Default" — task creation still works via the fallback */ }
 }
 
-clientSel.addEventListener("change", () => loadProjectsFor(clientSel.value));
+function clientLabel(c) {
+  return c.company ? `${c.name} — ${c.company}` : c.name;
+}
+
+function renderClientResults(query) {
+  const q = query.trim().toLowerCase();
+  const matches = !q ? allClients : allClients.filter((c) =>
+    c.name.toLowerCase().includes(q) || (c.company || "").toLowerCase().includes(q) || (c.contactName || "").toLowerCase().includes(q)
+  );
+  clientResultsEl.innerHTML = "";
+  if (!matches.length) {
+    const empty = document.createElement("div");
+    empty.className = "result-row";
+    empty.style.cssText = "color:#94a3b8;cursor:default;";
+    empty.textContent = "No matches";
+    clientResultsEl.appendChild(empty);
+  } else {
+    for (const c of matches.slice(0, 50)) {
+      const row = document.createElement("div");
+      row.className = "result-row";
+      const nameEl = document.createElement("div");
+      nameEl.className = "result-name";
+      nameEl.textContent = c.name;
+      const subBits = [c.company, c.contactName ? `Contact: ${c.contactName}` : null].filter(Boolean);
+      row.appendChild(nameEl);
+      if (subBits.length) {
+        const subEl = document.createElement("div");
+        subEl.className = "result-sub";
+        subEl.textContent = subBits.join(" · ");
+        row.appendChild(subEl);
+      }
+      // mousedown, not click — fires before the input's blur event, so the
+      // selection registers before the dropdown gets hidden by the blur handler.
+      row.addEventListener("mousedown", (e) => { e.preventDefault(); selectClient(c.id); });
+      clientResultsEl.appendChild(row);
+    }
+  }
+  clientResultsEl.classList.add("open");
+}
+
+function selectClient(id) {
+  const c = allClients.find((x) => x.id === id);
+  selectedClientId = id;
+  clientSearchInput.value = c ? clientLabel(c) : "";
+  clientResultsEl.classList.remove("open");
+  loadProjectsFor(id);
+}
+
+clientSearchInput.addEventListener("input", () => {
+  selectedClientId = ""; // typing invalidates any prior selection/auto-match
+  matchHintEl.textContent = "";
+  renderClientResults(clientSearchInput.value);
+});
+clientSearchInput.addEventListener("focus", () => renderClientResults(clientSearchInput.value));
+clientSearchInput.addEventListener("blur", () => clientResultsEl.classList.remove("open"));
 
 // A side panel stays open as you browse between emails (unlike a popup,
 // which closes on any click outside it) — Refresh re-reads whatever's
@@ -93,20 +150,12 @@ async function init() {
   statusEl.textContent = "";
   statusEl.className = "";
   matchHintEl.textContent = "";
+  selectedClientId = "";
+  clientSearchInput.value = "";
 
   const [email, clients] = await Promise.all([getCurrentEmail(), loadClients(token).catch(() => [])]);
-
-  clientSel.innerHTML = "";
-  const blankOpt = document.createElement("option");
-  blankOpt.value = "";
-  blankOpt.textContent = clients.length ? "Select a client…" : "No clients available";
-  clientSel.appendChild(blankOpt);
-  for (const c of clients) {
-    const opt = document.createElement("option");
-    opt.value = c.id;
-    opt.textContent = c.name;
-    clientSel.appendChild(opt);
-  }
+  allClients = clients;
+  clientSearchInput.placeholder = clients.length ? "Search by name, business, or contact…" : "No clients available";
   await loadProjectsFor("");
 
   if (email) {
@@ -121,13 +170,12 @@ async function init() {
       try {
         const { match } = await apiFetch(`/api/extension/match-client?email=${encodeURIComponent(senderEmail)}`, token);
         if (match) {
-          clientSel.value = match.clientId;
+          selectClient(match.clientId);
           matchHintEl.textContent = match.matchType === "domain"
             ? `Auto-selected via company domain — please verify`
             : `Auto-selected — matched sender's email`;
-          await loadProjectsFor(match.clientId);
         }
-      } catch { /* no match — leave the dropdown unselected */ }
+      } catch { /* no match — leave the picker empty */ }
     }
   } else {
     permalink = null;
@@ -169,7 +217,7 @@ enrichBtn.addEventListener("click", async () => {
 createBtn.addEventListener("click", async () => {
   const token = await getToken();
   if (!token) return;
-  const clientId = clientSel.value;
+  const clientId = selectedClientId;
   const title = titleInput.value.trim();
   if (!clientId || !title) {
     statusEl.textContent = "Pick a client and enter a title.";
@@ -191,7 +239,8 @@ createBtn.addEventListener("click", async () => {
     // instead of trying to close anything, ready for the next email.
     titleInput.value = "";
     notesInput.value = "";
-    clientSel.value = "";
+    selectedClientId = "";
+    clientSearchInput.value = "";
     projectSel.value = "";
     matchHintEl.textContent = "";
   } catch (e) {
