@@ -173,7 +173,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   // Sidebar client ordering: star to pin, sort mode, manual drag order.
   // Personal preferences → persisted per-browser (localStorage), not the DB.
-  type ClientSort = "manual" | "az" | "tasks" | "recent" | "used" | "urgent";
+  type ClientSort = "manual" | "az" | "tasks" | "recent" | "used" | "urgent" | "mine";
   const [clientSort, setClientSort] = useState<ClientSort>("urgent");
   // Recently-used ordering: clientId → last-opened epoch, persisted locally.
   // Opening a client stamps it (see the effect below), floating it to the top
@@ -795,6 +795,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       withIndex.sort((a, b) => a.k.tier - b.k.tier || a.k.due.localeCompare(b.k.due) || b.k.priorityRank - a.k.priorityRank || b.i - a.i);
       base.splice(0, base.length, ...withIndex.map((x) => x.c));
     }
+    else if (clientSort === "mine") {
+      // Same urgency tiering as "Overdue first", but scoped to just my own
+      // open tasks (clientUrgencyKey's forAssignee param, the same scoping
+      // myWorkGroups already uses) — a client only lands in "Overdue"/"Due
+      // today" here because of a task assigned to me, not a teammate's.
+      const withIndex = base.map((c, i) => ({ c, i, k: clientUrgencyKey(c.id, me.id) }));
+      withIndex.sort((a, b) => a.k.tier - b.k.tier || a.k.due.localeCompare(b.k.due) || b.k.priorityRank - a.k.priorityRank || b.i - a.i);
+      base.splice(0, base.length, ...withIndex.map((x) => x.c));
+    }
     else if (manualOrder.length) base.sort((a, b) => { const ia = manualOrder.indexOf(a.id), ib = manualOrder.indexOf(b.id); return (ia < 0 ? 1e9 : ia) - (ib < 0 ? 1e9 : ib); });
     return [...base.filter((c) => starred.has(c.id)), ...base.filter((c) => !starred.has(c.id))];
   })();
@@ -847,9 +856,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // clientSort === "urgent" — the sidebar's Projects section had no sort at
   // all before this. Same comparator as myWorkGroups/sortedClients's
   // "urgent" branch: tier, then soonest due, then priority, then name.
-  const sortedWorkspaceProjects = clientSort === "urgent"
+  const sortedWorkspaceProjects = clientSort === "urgent" || clientSort === "mine"
     ? [...workspaceProjects].sort((a, b) => {
-        const ka = projectUrgencyKey(a.id), kb = projectUrgencyKey(b.id);
+        const forAssignee = clientSort === "mine" ? me.id : undefined;
+        const ka = projectUrgencyKey(a.id, forAssignee), kb = projectUrgencyKey(b.id, forAssignee);
         return ka.tier - kb.tier || ka.due.localeCompare(kb.due) || kb.priorityRank - ka.priorityRank || a.name.localeCompare(b.name);
       })
     : workspaceProjects;
@@ -895,7 +905,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // ever sorts within its own status section, so an overdue Prospect can
   // never outrank a no-due-date Active client). Bypass the grouping
   // entirely in that mode: one flat, fully urgency-ordered list instead.
-  const clientGroups = clientSort === "urgent"
+  // "mine" gets the same flat treatment — it's the same urgency answer, just
+  // scoped to my own tasks instead of the whole client.
+  const clientGroups = clientSort === "urgent" || clientSort === "mine"
     ? [{ header: "", items: sortedClients }]
     : ([
         ["", "active_client"],
@@ -1802,7 +1814,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               {sortMenuOpen && (<>
                 <div className="fixed inset-0 z-30" onClick={() => setSortMenuOpen(false)} />
                 <div className="absolute right-0 top-full z-40 mt-1 w-44 rounded-lg border border-white/15 bg-[#2c3140] p-1 shadow-2xl">
-                  {([["urgent", "Overdue first"], ["used", "Recently used"], ["manual", "Manual (drag to order)"], ["az", "A → Z"], ["tasks", "Most active"], ["recent", "Recently added"]] as const).map(([v, label]) => (
+                  {([["urgent", "Overdue first"], ["mine", "By my work"], ["used", "Recently used"], ["manual", "Manual (drag to order)"], ["az", "A → Z"], ["tasks", "Most active"], ["recent", "Recently added"]] as const).map(([v, label]) => (
                     <button key={v} onClick={() => { saveClientSort(v); setSortMenuOpen(false); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-white/10">
                       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${clientSort === v ? "bg-accent" : "bg-transparent"}`} />{label}
                     </button>
