@@ -43,6 +43,23 @@ export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelet
   const [pendingAtts, setPendingAtts] = useState<Attachment[]>([]);
   const [uploadingAtt, setUploadingAtt] = useState(false);
 
+  // Resizable composer sidebar — same drag-to-resize-the-left-edge pattern
+  // as TaskDrawer's Activity column, so the Chat tab reads the same way:
+  // content (the feed) on the left, an input sidebar on the right.
+  const [composerW, setComposerW] = useState(340);
+  useEffect(() => { try { const w = parseInt(localStorage.getItem("cut_chatComposerW") ?? "", 10); if (w >= 280 && w <= 560) setComposerW(w); } catch {} }, []);
+  const startComposerResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const onMove = (ev: MouseEvent) => setComposerW(Math.min(560, Math.max(280, window.innerWidth - ev.clientX)));
+    const onUp = (ev: MouseEvent) => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      try { localStorage.setItem("cut_chatComposerW", String(Math.min(560, Math.max(280, window.innerWidth - ev.clientX)))); } catch {}
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
   // notes arrives newest-first (matches every other feed in the app); a chat
   // reads oldest-to-newest, so flip it just for display.
   const filtered = filter === "all" ? notes : notes.filter((n) => n.type === filter);
@@ -119,88 +136,94 @@ export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelet
         )}
       </div>
 
-      {view === "chat" ? (<>
-        <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-5">
-          <div className="mx-auto max-w-3xl space-y-3">
-            {chatOrder.length === 0 && (
-              <div className="flex flex-col items-center gap-2 py-16 text-center text-muted">
-                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent-soft text-accent"><I.comment /></span>
-                <span className="text-[15px] font-medium">No messages yet</span>
-                <span className="max-w-[260px] text-[13px] leading-relaxed">Meeting notes, decisions, FYIs — anything worth keeping lives here, for the team and for Claude.</span>
-              </div>
-            )}
-            {chatOrder.map((n) => {
-              const u = userById(n.authorId);
-              const m = NOTE_TYPE_META[n.type];
-              return (
-                <div key={n.id} className="group/note flex gap-2.5">
-                  <Avatar id={n.authorId} size={28} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 text-[14px]">
-                      <span className="font-medium">{u?.name ?? "Unknown"}</span>
-                      <span className="inline-flex items-center gap-1 rounded px-1.5 py-0 text-[12px] font-medium" style={{ background: m.color + "1a", color: m.color }}>{m.label}</span>
-                      <span className="text-[12px] text-muted">· {timeAgo(n.at)}</span>
-                      {canModify(n) && (
-                        <span className="ml-auto flex items-center gap-1 opacity-0 group-hover/note:opacity-100">
-                          <button onClick={() => startEdit(n)} title="Edit" className="rounded p-0.5 text-muted hover:bg-background hover:text-foreground"><I.pencil /></button>
-                          <button onClick={() => askDelete(n)} title="Delete" className="rounded p-0.5 text-muted hover:bg-background hover:text-danger"><I.trash /></button>
-                        </span>
-                      )}
-                    </div>
-                    {editingId === n.id ? (
-                      <div className="mt-1.5">
-                        <textarea value={editBody} onChange={(e) => setEditBody(e.target.value)} rows={2} autoFocus
-                          className="w-full resize-none rounded-lg border bg-surface px-2 py-1.5 text-[15px] outline-none focus:border-accent" />
-                        <div className="mt-1.5 flex gap-2">
-                          <button onClick={() => saveEdit(n)} className="rounded-md bg-accent px-2.5 py-1 text-[13px] font-medium text-white">Save</button>
-                          <button onClick={() => setEditingId(null)} className="rounded-md px-2.5 py-1 text-[13px] text-muted hover:bg-background">Cancel</button>
-                        </div>
-                      </div>
-                    ) : (<>
-                      {n.body && <CollapsibleText text={n.body} className="mt-1 whitespace-pre-wrap rounded-xl rounded-tl-sm border bg-surface px-3 py-2 text-[15px] shadow-soft" />}
-                      {n.attachments && n.attachments.length > 0 && (
-                        <div className="mt-1.5"><AttachmentThumbs items={n.attachments} onOpen={onOpenFile} /></div>
-                      )}
-                    </>)}
-                  </div>
+      {view === "chat" ? (
+        <div className="flex min-h-0 flex-1">
+          <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-5">
+            <div className="mx-auto max-w-3xl space-y-3">
+              {chatOrder.length === 0 && (
+                <div className="flex flex-col items-center gap-2 py-16 text-center text-muted">
+                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent-soft text-accent"><I.comment /></span>
+                  <span className="text-[15px] font-medium">No messages yet</span>
+                  <span className="max-w-[260px] text-[13px] leading-relaxed">Meeting notes, decisions, FYIs — anything worth keeping lives here, for the team and for Claude.</span>
                 </div>
-              );
-            })}
-            <div ref={feedEndRef} />
+              )}
+              {chatOrder.map((n) => {
+                const u = userById(n.authorId);
+                const m = NOTE_TYPE_META[n.type];
+                return (
+                  <div key={n.id} className="group/note flex gap-2.5">
+                    <Avatar id={n.authorId} size={28} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 text-[14px]">
+                        <span className="font-medium">{u?.name ?? "Unknown"}</span>
+                        <span className="inline-flex items-center gap-1 rounded px-1.5 py-0 text-[12px] font-medium" style={{ background: m.color + "1a", color: m.color }}>{m.label}</span>
+                        <span className="text-[12px] text-muted">· {timeAgo(n.at)}</span>
+                        {canModify(n) && (
+                          <span className="ml-auto flex items-center gap-1 opacity-0 group-hover/note:opacity-100">
+                            <button onClick={() => startEdit(n)} title="Edit" className="rounded p-0.5 text-muted hover:bg-background hover:text-foreground"><I.pencil /></button>
+                            <button onClick={() => askDelete(n)} title="Delete" className="rounded p-0.5 text-muted hover:bg-background hover:text-danger"><I.trash /></button>
+                          </span>
+                        )}
+                      </div>
+                      {editingId === n.id ? (
+                        <div className="mt-1.5">
+                          <textarea value={editBody} onChange={(e) => setEditBody(e.target.value)} rows={2} autoFocus
+                            className="w-full resize-none rounded-lg border bg-surface px-2 py-1.5 text-[15px] outline-none focus:border-accent" />
+                          <div className="mt-1.5 flex gap-2">
+                            <button onClick={() => saveEdit(n)} className="rounded-md bg-accent px-2.5 py-1 text-[13px] font-medium text-white">Save</button>
+                            <button onClick={() => setEditingId(null)} className="rounded-md px-2.5 py-1 text-[13px] text-muted hover:bg-background">Cancel</button>
+                          </div>
+                        </div>
+                      ) : (<>
+                        {n.body && <CollapsibleText text={n.body} className="mt-1 whitespace-pre-wrap rounded-xl rounded-tl-sm border bg-surface px-3 py-2 text-[15px] shadow-soft" />}
+                        {n.attachments && n.attachments.length > 0 && (
+                          <div className="mt-1.5"><AttachmentThumbs items={n.attachments} onOpen={onOpenFile} /></div>
+                        )}
+                      </>)}
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={feedEndRef} />
+            </div>
           </div>
-        </div>
 
-        <div className="relative shrink-0 border-t bg-surface p-3">
-          <div className="mx-auto max-w-3xl">
-            {mentionMatch && mentionCands.length > 0 && (
-              <div className="absolute bottom-full left-3 mb-1 w-56 overflow-hidden rounded-lg border bg-surface shadow-lg">
-                {mentionCands.map((u) => (
-                  <button key={u.id} onClick={() => setDraft(draft.replace(/@([\w]*)$/, `@${u.name} `))} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[15px] hover:bg-background">
-                    <Avatar id={u.id} size={22} /> <span className="min-w-0 flex-1 truncate">{u.name}</span>{u.role === "va" && <span className="shrink-0 text-[13px] text-muted">VA</span>}
-                  </button>
-                ))}
-              </div>
-            )}
-            {(pendingAtts.length > 0 || uploadingAtt) && (
-              <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-                <AttachmentThumbs items={pendingAtts} onRemove={(id) => setPendingAtts((a) => a.filter((x) => x.id !== id))} />
-                {uploadingAtt && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" />}
-              </div>
-            )}
-            <div className="flex items-end gap-2">
+          <div className="relative flex shrink-0 flex-col border-l bg-surface" style={{ width: composerW }}>
+            <div onMouseDown={startComposerResize} title="Drag to resize"
+              className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize hover:bg-accent/30 active:bg-accent/40" />
+            <div className="border-b px-3 py-2.5 text-[13px] font-semibold text-muted">Write a message</div>
+            <div className="flex min-h-0 flex-1 flex-col p-3">
               <select value={draftType} onChange={(e) => setDraftType(e.target.value as NoteType)}
-                className="mb-0.5 shrink-0 rounded-md border bg-surface px-1.5 py-1.5 text-[13px] outline-none">
+                className="mb-2 shrink-0 rounded-md border bg-background px-1.5 py-1.5 text-[13px] outline-none">
                 {NOTE_TYPE_ORDER.map((t) => (<option key={t} value={t}>{NOTE_TYPE_META[t].label}</option>))}
               </select>
-              <textarea value={draft} onChange={(e) => setDraft(e.target.value)} onPaste={handlePaste}
-                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !(mentionMatch && mentionCands.length)) { e.preventDefault(); submit(); } }}
-                placeholder="Message the team… (Enter to send, type @ to mention, paste to attach an image)" rows={3}
-                className="max-h-72 min-h-[76px] flex-1 resize-y rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
-              <button onClick={submit} disabled={!draft.trim() && pendingAtts.length === 0} className="mb-0.5 shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">Send</button>
+              {(pendingAtts.length > 0 || uploadingAtt) && (
+                <div className="mb-2 flex shrink-0 flex-wrap items-center gap-1.5">
+                  <AttachmentThumbs items={pendingAtts} onRemove={(id) => setPendingAtts((a) => a.filter((x) => x.id !== id))} />
+                  {uploadingAtt && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" />}
+                </div>
+              )}
+              <div className="relative min-h-0 flex-1">
+                {mentionMatch && mentionCands.length > 0 && (
+                  <div className="absolute bottom-full left-0 z-20 mb-1 w-full overflow-hidden rounded-lg border bg-surface shadow-lg">
+                    {mentionCands.map((u) => (
+                      <button key={u.id} onClick={() => setDraft(draft.replace(/@([\w]*)$/, `@${u.name} `))} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[15px] hover:bg-background">
+                        <Avatar id={u.id} size={22} /> <span className="min-w-0 flex-1 truncate">{u.name}</span>{u.role === "va" && <span className="shrink-0 text-[13px] text-muted">VA</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <textarea value={draft} onChange={(e) => setDraft(e.target.value)} onPaste={handlePaste}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !(mentionMatch && mentionCands.length)) { e.preventDefault(); submit(); } }}
+                  placeholder="Message the team… (Enter to send, Shift+Enter for a new line, type @ to mention, paste to attach an image)"
+                  className="h-full min-h-[160px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
+              </div>
+              <button onClick={submit} disabled={!draft.trim() && pendingAtts.length === 0}
+                className="mt-2 shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">Send</button>
             </div>
           </div>
         </div>
-      </>) : view === "activity" ? (
+      ) : view === "activity" ? (
         <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-5">
           <div className="mx-auto max-w-3xl space-y-2.5">
             {activity.length === 0 && (
