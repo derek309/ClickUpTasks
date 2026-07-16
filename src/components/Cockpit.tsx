@@ -62,7 +62,7 @@ import { CommandK } from "./cockpit/CommandK";
 import { GroupedList } from "./cockpit/GroupedList";
 import { TaskDrawer } from "./cockpit/TaskDrawer";
 import { QuickLinksBar } from "./cockpit/ClientLinks";
-import { ClientNotes } from "./cockpit/ClientNotes";
+import { ClientJournal } from "./cockpit/ClientJournal";
 import { VaultView, type VaultItem } from "./cockpit/VaultView";
 import { ClientsBoard, type WorkBoardGroup, type WorkItem } from "./cockpit/ClientsBoard";
 import { claudeCodeUrl } from "@/lib/claudeLink";
@@ -967,7 +967,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     ...baseTasks.flatMap((t) => t.attachments.map((a) => ({ ...a, sourceLabel: t.title, onOpenSource: () => { setClientTab("tasks"); setOpenTaskId(t.id); }, onSetFolder: (folderId: string | null) => setTaskAttachmentFolder(t.id, a.id, folderId) }))),
     ...baseTasks.flatMap((t) => t.comments.flatMap((c) => (c.attachments ?? []).map((a) => ({ ...a, sourceLabel: t.title, onOpenSource: () => { setClientTab("tasks"); setOpenTaskId(t.id); }, onSetFolder: (folderId: string | null) => setCommentAttachmentFolder(t.id, c.id, a.id, folderId) })))),
     ...clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId))
-      .flatMap((n) => (n.attachments ?? []).map((a) => ({ ...a, sourceLabel: "Chat", onOpenSource: () => setClientTab("chat"), onSetFolder: (folderId: string | null) => setNoteAttachmentFolder(n, a.id, folderId) }))),
+      .flatMap((n) => (n.attachments ?? []).map((a) => ({ ...a, sourceLabel: "Journal", onOpenSource: () => setClientTab("chat"), onSetFolder: (folderId: string | null) => setNoteAttachmentFolder(n, a.id, folderId) }))),
   ];
   const projectsForClient = (clientId: string) => projects.filter((p) => p.clientId === clientId);
   const projectProgress = (projectId: string) => { const ts = scopedTasks.filter((t) => t.projectId === projectId); const done = ts.filter((t) => t.status === "done").length; return { done, total: ts.length, pct: ts.length ? Math.round((done / ts.length) * 100) : 0 }; };
@@ -1900,7 +1900,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           {!myWork && !personalView && !inboxView && activeClient !== "all" && (
             <div className="inline-flex overflow-hidden rounded-md border">
               <button onClick={() => setClientTab("tasks")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "tasks" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Tasks</button>
-              <button onClick={() => setClientTab("chat")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "chat" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Chat · {clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId)).length}</button>
+              <button onClick={() => setClientTab("chat")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "chat" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Journal · {clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId)).length}</button>
               <button onClick={() => setClientTab("vault")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "vault" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Vault · {vaultItems.length}</button>
             </div>
           )}
@@ -2107,7 +2107,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(p.clientId); setActiveProject(id); setOpenTaskId(null);
             }} />
         ) : activeClient !== "all" && clientTab === "chat" ? (
-          <ClientNotes
+          <ClientJournal
             key={activeProject ?? activeClient}
             notes={clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId))}
             tasks={baseTasks}
