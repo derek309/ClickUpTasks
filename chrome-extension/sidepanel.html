@@ -21,18 +21,25 @@
   #needsToken { font-size: 12px; color: #64748b; display: none; }
   #needsToken a { color: #E87722; }
   .combo { position: relative; }
-  #clientResults { position: absolute; z-index: 10; top: 100%; left: 0; right: 0; max-height: 240px; overflow-y: auto; background: #fff; border: 1px solid #d0dce8; border-top: none; border-radius: 0 0 6px 6px; display: none; box-shadow: 0 4px 10px rgba(0,0,0,0.08); }
-  #clientResults.open { display: block; }
+  #clientResults, #taskResults { position: absolute; z-index: 10; top: 100%; left: 0; right: 0; max-height: 240px; overflow-y: auto; background: #fff; border: 1px solid #d0dce8; border-top: none; border-radius: 0 0 6px 6px; display: none; box-shadow: 0 4px 10px rgba(0,0,0,0.08); }
+  #clientResults.open, #taskResults.open { display: block; }
   .result-row { padding: 6px 9px; cursor: pointer; }
   .result-row:hover { background: #EEF4FB; }
   .result-name { font-size: 13px; font-weight: 600; }
   .result-sub { font-size: 11px; color: #64748b; }
   .row2 { display: flex; gap: 8px; }
   .row2 > div { flex: 1; min-width: 0; }
+  #screenshotBox { position: relative; margin-top: 8px; display: none; }
+  #screenshotBox.has-shot { display: block; }
+  #screenshotPreview { width: 100%; border: 1px solid #d0dce8; border-radius: 6px; display: block; }
+  #removeScreenshot { position: absolute; top: 6px; right: 6px; width: auto; margin: 0; padding: 3px 8px; font-size: 11px; background: rgba(27,58,92,0.85); }
+  .mode-toggle { display: flex; gap: 6px; margin-top: 8px; }
+  .mode-btn { flex: 1; padding: 6px; border: 1px solid #d0dce8; border-radius: 6px; background: #fff; color: #1B3A5C; font-size: 12px; font-weight: 600; cursor: pointer; text-align: center; }
+  .mode-btn.active { background: #1B3A5C; color: #fff; }
 </style>
 </head>
 <body>
-  <h1>Create ClickUpTasks task <button id="refresh" type="button" title="Re-read the currently open email">🔄 Refresh</button></h1>
+  <h1>Create ClickUpTasks task <button id="refresh" type="button" title="Re-read the current page">🔄 Refresh</button></h1>
   <div id="form">
     <label for="clientSearch">Client</label>
     <div class="combo">
@@ -40,25 +47,47 @@
       <div id="clientResults"></div>
     </div>
     <div id="matchHint"></div>
-    <label for="project">List (optional)</label>
-    <select id="project"><option value="">Default</option></select>
-    <div class="row2">
-      <div>
-        <label for="due">Due date</label>
-        <input id="due" type="date" />
+
+    <div id="screenshotBox">
+      <img id="screenshotPreview" alt="Captured screenshot" />
+      <button id="removeScreenshot" type="button">✕ Remove</button>
+    </div>
+
+    <div class="mode-toggle">
+      <button id="modeNew" type="button" class="mode-btn active">New task</button>
+      <button id="modeExisting" type="button" class="mode-btn">Add to existing task</button>
+    </div>
+
+    <div id="newTaskFields">
+      <label for="project">List (optional)</label>
+      <select id="project"><option value="">Default</option></select>
+      <div class="row2">
+        <div>
+          <label for="due">Due date</label>
+          <input id="due" type="date" />
+        </div>
+        <div>
+          <label for="priority">Priority</label>
+          <select id="priority">
+            <option value="none">No priority</option>
+            <option value="normal" selected>Normal</option>
+            <option value="urgent">Urgent</option>
+          </select>
+        </div>
       </div>
-      <div>
-        <label for="priority">Priority</label>
-        <select id="priority">
-          <option value="none">No priority</option>
-          <option value="normal" selected>Normal</option>
-          <option value="urgent">Urgent</option>
-        </select>
+      <label for="assignee">Assign to</label>
+      <select id="assignee"><option value="">Me</option></select>
+    </div>
+
+    <div id="existingTaskFields" style="display:none">
+      <label for="taskSearch">Task</label>
+      <div class="combo">
+        <input id="taskSearch" type="text" placeholder="Search this client's open tasks…" autocomplete="off" />
+        <div id="taskResults"></div>
       </div>
     </div>
-    <label for="assignee">Assign to</label>
-    <select id="assignee"><option value="">Me</option></select>
-    <label for="title">Title</label>
+
+    <label for="title" id="titleLabel">Title</label>
     <textarea id="title" rows="2"></textarea>
     <label for="notes">Notes</label>
     <textarea id="notes"></textarea>

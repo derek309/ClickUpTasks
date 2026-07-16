@@ -44,7 +44,11 @@ export async function POST(req: NextRequest) {
   const description = typeof body.description === "string" ? body.description : "";
   const due = typeof body.due === "string" && body.due ? body.due : null;
   const link = typeof body.link === "string" && body.link.trim() ? body.link.trim() : null;
-  const attachments = link ? [{ id: "at_" + randomUUID(), name: "Gmail message", kind: "link", size: "", url: link }] : [];
+  const screenshotPath = typeof body.screenshot_path === "string" && body.screenshot_path.trim() ? body.screenshot_path.trim() : null;
+  const attachments = [
+    ...(link ? [{ id: "at_" + randomUUID(), name: "Source link", kind: "link", size: "", url: link }] : []),
+    ...(screenshotPath ? [{ id: "at_" + randomUUID(), name: "Screenshot", kind: "image", size: "", path: screenshotPath }] : []),
+  ];
   // "conversation" is auto-assigned only (see isManuallyAssignable in
   // src/lib/data.ts) — reject it here rather than silently downgrading it,
   // same spirit as the MCP tool's create_task excluding it from its enum.
@@ -64,4 +68,25 @@ export async function POST(req: NextRequest) {
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ id, title, clientId, projectId });
+}
+
+// Task search for the extension's "add to existing task" flow — open tasks
+// for a client, most-recent-first, optionally narrowed by a title
+// substring. No existing .ilike("title", ...) convention on tasks anywhere
+// in this codebase to defer to, so this filters in JS after fetch, same
+// idiom CommandK.tsx and the extension's own client picker already use.
+export async function GET(req: NextRequest) {
+  if (!adminConfigured) return NextResponse.json({ error: "Service role key not configured." }, { status: 501 });
+  const caller = await requireApiToken(req);
+  if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const clientId = req.nextUrl.searchParams.get("client_id");
+  if (!clientId) return NextResponse.json({ error: "Missing client_id." }, { status: 400 });
+  if (!(await isClientVisible(caller, clientId))) return NextResponse.json({ error: "Unknown or inaccessible client." }, { status: 403 });
+
+  const { data, error } = await supabaseAdmin.from("tasks").select("id, title, status, created_at").eq("client_id", clientId).neq("status", "done").order("created_at", { ascending: false });
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+
+  const query = (req.nextUrl.searchParams.get("query") || "").trim().toLowerCase();
+  const filtered = query ? (data ?? []).filter((t) => t.title.toLowerCase().includes(query)) : (data ?? []);
+  return NextResponse.json({ tasks: filtered.slice(0, 30).map((t) => ({ id: t.id, title: t.title, status: t.status })) });
 }

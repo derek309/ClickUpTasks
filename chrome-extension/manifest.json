@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "ClickUpTasks for Gmail",
-  "version": "1.1.0",
-  "description": "Create a ClickUpTasks task from the email you're viewing in Gmail.",
-  "permissions": ["storage", "sidePanel"],
+  "name": "ClickUpTasks Clipper",
+  "version": "1.2.0",
+  "description": "Create or update a ClickUpTasks task from any page — a Gmail email or a screenshot of a website you're reviewing.",
+  "permissions": ["storage", "sidePanel", "activeTab"],
   "host_permissions": ["https://mail.google.com/*", "https://clickuptasks.vercel.app/*"],
   "action": {},
   "side_panel": {
