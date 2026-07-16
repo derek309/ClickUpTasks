@@ -84,6 +84,13 @@ async function init() {
         if (match) clientSel.value = match.clientId;
       } catch { /* no match — leave the dropdown unselected */ }
     }
+  } else {
+    // Either this tab isn't Gmail, the content script hasn't loaded yet
+    // (a tab open before the extension was installed needs a reload), or
+    // Gmail's page structure changed under us — say so instead of leaving
+    // a blank form with no explanation.
+    statusEl.textContent = "Couldn't read this email automatically — fill in manually, or reload the Gmail tab and try again.";
+    statusEl.className = "";
   }
 }
 
