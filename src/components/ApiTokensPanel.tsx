@@ -5,6 +5,7 @@
 // credential, not a team-management concern.
 import { useEffect, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
+import { CLAUDE_REPO_PATH_KEY, getClaudeRepoPath } from "@/lib/claudeLink";
 import { ConfirmModal, type ConfirmSpec } from "./cockpit/modals";
 import { I } from "./cockpit/ui";
 
@@ -20,6 +21,16 @@ export default function ApiTokensPanel({ onClose }: { onClose: () => void }) {
   const [copied, setCopied] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
   const [revoking, setRevoking] = useState<string | null>(null);
+  const [repoPath, setRepoPath] = useState("");
+  const [repoSaved, setRepoSaved] = useState(false);
+
+  useEffect(() => { setRepoPath(getClaudeRepoPath()); }, []);
+
+  function saveRepoPath() {
+    try { localStorage.setItem(CLAUDE_REPO_PATH_KEY, repoPath.trim()); } catch {}
+    setRepoSaved(true);
+    setTimeout(() => setRepoSaved(false), 2000);
+  }
 
   async function load() {
     try {
@@ -119,6 +130,15 @@ export default function ApiTokensPanel({ onClose }: { onClose: () => void }) {
             </div>
           ))}
           {!loading && !error && tokens.length === 0 && <div className="py-8 text-center text-[13px] text-muted">No tokens yet.</div>}
+        </div>
+
+        <div className="border-t bg-background/40 px-5 py-4">
+          <div className="mb-2 text-[15px] font-semibold">Work with Claude</div>
+          <p className="mb-2 text-[13px] text-muted">The local folder &quot;Work with Claude&quot; opens Claude Code in, on this browser/computer. Set once here — never asks again.</p>
+          <div className="flex items-center gap-2">
+            <input value={repoPath} onChange={(e) => setRepoPath(e.target.value)} placeholder="/path/to/clickuptasks" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
+            <button onClick={saveRepoPath} className="shrink-0 rounded-md border bg-surface px-3 py-1.5 text-[15px] font-medium hover:bg-background">{repoSaved ? "Saved" : "Save"}</button>
+          </div>
         </div>
 
         <div className="border-t bg-background/40 px-5 py-4">
