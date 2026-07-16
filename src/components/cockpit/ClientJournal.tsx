@@ -28,7 +28,7 @@ type JournalItem =
   | { kind: "activity"; at: string; comment: Comment & { taskId: string; taskTitle: string } }
   | { kind: "completion"; at: string; comment: Comment & { taskId: string; taskTitle: string } };
 
-export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, sendingMessage, onUploadImage, onOpenFile, canAdmin, canMessage, onToggleCanMessage }: {
+export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, sendingMessage, onUploadImage, onOpenFile, canAdmin, canMessage, onToggleCanMessage, onDraftMessage, draftingMessage }: {
   notes: ClientNote[];
   tasks: Task[]; // already scoped by the caller to the current client/project
   messages?: Message[] | null; // null/undefined = no linked GHL contact at this scope, so no Email/SMS
@@ -45,6 +45,8 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   canAdmin?: boolean;
   canMessage?: string[]; // roster ids granted permission to send email/SMS as this client
   onToggleCanMessage?: (memberId: string) => void; // admin-only — manages canMessage
+  onDraftMessage?: (channel: MessageChannel) => Promise<{ subject?: string; body: string } | null>; // Gemini status-update draft, never sends
+  draftingMessage?: boolean;
 }) {
   const [filter, setFilter] = useState<JournalFilter>("all");
   const [composeMode, setComposeMode] = useState<"note" | "email" | "sms">("note");
@@ -338,8 +340,21 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                   placeholder={composeMode === "email" ? "Write an email… (Enter to send, Shift+Enter for a new line)" : "Write a text… (Enter to send, Shift+Enter for a new line)"}
                   className="h-full min-h-[160px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
               </div>
-              <button onClick={submitMessage} disabled={!msgBody.trim() || sendingMessage}
-                className="mt-2 shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send"}</button>
+              <div className="mt-2 flex shrink-0 items-center gap-2">
+                {onDraftMessage && (
+                  <button onClick={async () => {
+                      if (composeMode !== "email" && composeMode !== "sms") return;
+                      const d = await onDraftMessage(composeMode);
+                      if (d) { if (composeMode === "email") setMsgSubject(d.subject ?? ""); setMsgBody(d.body); }
+                    }}
+                    disabled={draftingMessage} title="Draft a status update from recent activity — review before sending"
+                    className="rounded-lg border px-2.5 py-1.5 text-[13px] font-medium text-accent disabled:opacity-40">
+                    {draftingMessage ? "Drafting…" : "✨ Draft with AI"}
+                  </button>
+                )}
+                <button onClick={submitMessage} disabled={!msgBody.trim() || sendingMessage}
+                  className="ml-auto shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send"}</button>
+              </div>
             </div>
           )}
         </div>

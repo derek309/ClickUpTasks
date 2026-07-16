@@ -291,6 +291,24 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       setAiSummaryBusyId(null);
     }
   };
+  // Drafts a client-facing status update via Gemini — fills the composer's
+  // subject/body, never sends. Send is independently gated by
+  // canMessageClient regardless of what this returns.
+  const [draftingMessage, setDraftingMessage] = useState(false);
+  const draftMessage = async (clientId: string, channel: MessageChannel): Promise<{ subject?: string; body: string } | null> => {
+    setDraftingMessage(true);
+    try {
+      const res = await authedFetch("/api/ai/draft-message", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId, channel }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { pushToast(j.error || "Failed to draft message."); return null; }
+      return { subject: j.subject, body: j.body };
+    } catch {
+      pushToast("Failed to draft message.");
+      return null;
+    } finally {
+      setDraftingMessage(false);
+    }
+  };
   useEffect(() => {
     try {
       const s = localStorage.getItem("cut_clientSort"); if (s) setClientSort(s as ClientSort);
@@ -2125,6 +2143,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             canAdmin={canAdmin}
             canMessage={clientById(activeClient)?.canMessage}
             onToggleCanMessage={(memberId) => toggleClientMessagePermission(activeClient, memberId)}
+            onDraftMessage={activeProject ? undefined : (channel) => draftMessage(activeClient, channel)}
+            draftingMessage={draftingMessage}
           />
         ) : activeClient !== "all" && clientTab === "vault" ? (
           <VaultView items={vaultItems} folders={activeVaultFolders} onDownloadFile={downloadFile} onGetSignedUrl={signedUrlForFile} onCopyLink={copyAttachmentLink}
