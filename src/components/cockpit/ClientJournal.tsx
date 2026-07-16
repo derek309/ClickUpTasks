@@ -114,6 +114,13 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   const [pendingAtts, setPendingAtts] = useState<Attachment[]>([]);
   const [uploadingAtt, setUploadingAtt] = useState(false);
   const [permPopoverOpen, setPermPopoverOpen] = useState(false);
+  // Snapshot of which messages were unread the moment this Journal opened —
+  // the mark-read effect below flips message.read to true almost instantly,
+  // so rendering off the live value would show "unread" for one flash and
+  // never again. Lazy initializer runs once per mount; this component
+  // remounts per client (key={activeProject ?? activeClient} at the call
+  // site), so "once per mount" is exactly "once per client opened."
+  const [unreadAtOpen] = useState<Set<string>>(() => new Set((messages ?? []).filter((m) => !m.read).map((m) => m.id)));
 
   // Resizable composer sidebar — same drag-to-resize-the-left-edge pattern
   // as TaskDrawer's Activity column, so this tab reads the same way:
@@ -362,6 +369,14 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                             )}
                             <div className="mt-1 flex items-center gap-2 text-[12px] text-muted">
                               <span>{timeAgo(m.at)}</span>
+                              {m.direction === "outbound" && m.createdBy && (
+                                <span className="inline-flex items-center gap-1"><Avatar id={m.createdBy} size={14} /> {userById(m.createdBy)?.name ?? "Unknown"}</span>
+                              )}
+                              {unreadAtOpen.has(m.id) && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-1.5 py-0 text-[11px] font-semibold text-accent">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-accent" /> New
+                                </span>
+                              )}
                               {m.channel === "email" && onSendMessage && (
                                 <button onClick={() => replyToEmail(m)} className="font-medium text-accent hover:underline">Reply</button>
                               )}
