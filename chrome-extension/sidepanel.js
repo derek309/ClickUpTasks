@@ -357,12 +357,15 @@ async function init() {
   }
 
   if (!email && !capture) {
-    // Either this tab can't be read at all (a chrome:// page, capture
-    // failed and it's not Gmail), the content script hasn't loaded yet (a
-    // Gmail tab open before the extension was installed needs a reload), or
-    // Gmail's page structure changed under us — say so instead of leaving a
-    // blank form with no explanation.
-    statusEl.textContent = "Couldn't read this page automatically — fill in manually, or reload the tab and try again.";
+    // Most common cause: the panel is already open and the toolbar icon
+    // wasn't clicked again — a screenshot can only be captured from a real
+    // toolbar-icon click (a Chrome permission rule this "Refresh" button
+    // can't satisfy on its own), so re-reading here finds nothing new.
+    // Less common: this tab can't be read at all (a chrome:// page), the
+    // Gmail content script hasn't loaded yet (a tab open before the
+    // extension was installed needs a reload), or Gmail's page structure
+    // changed under us.
+    statusEl.textContent = "Click the ClickUpTasks icon in Chrome's toolbar (not this Refresh button) to capture the current page — or fill in manually below.";
     statusEl.className = "";
   }
 }
