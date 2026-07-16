@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { tokenForLocation } from "@/lib/ghlTokens";
 import { requireUser } from "@/lib/serverAuth";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -25,12 +26,9 @@ const GHL = "https://services.leadconnectorhq.com";
 export async function POST(req: NextRequest) {
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  // Sending email/SMS is gated per-user — admins always, VAs only when granted.
-  // Enforced here (not just hidden in the UI) so it can't be bypassed by
-  // calling the endpoint directly.
-  if (!caller.canSendMessages) return NextResponse.json({ error: "You don't have permission to send messages. Ask an admin to enable it for you." }, { status: 403 });
   const b = await req.json().catch(() => ({} as any));
-  const { locationId, ghlContactId, channel, subject, body, attachments, cc, bcc } = b as {
+  const { clientId, locationId, ghlContactId, channel, subject, body, attachments, cc, bcc } = b as {
+    clientId?: string;
     locationId?: string;
     ghlContactId?: string;
     channel?: string;
@@ -41,8 +39,20 @@ export async function POST(req: NextRequest) {
     bcc?: string[];
   };
 
-  if (!locationId || !ghlContactId || !body?.trim())
-    return NextResponse.json({ error: "Missing locationId, ghlContactId, or body." }, { status: 400 });
+  if (!clientId || !locationId || !ghlContactId || !body?.trim())
+    return NextResponse.json({ error: "Missing clientId, locationId, ghlContactId, or body." }, { status: 400 });
+
+  // Sending is gated two ways for a non-admin: the global grant
+  // (profiles.can_send_messages) AND this specific client's can_message
+  // roster (supabase/client-message-permission.sql). Enforced here, not
+  // just hidden in the UI, so it can't be bypassed by calling the endpoint
+  // directly. Admins always pass both checks implicitly.
+  if (caller.role !== "admin") {
+    if (!caller.canSendMessages) return NextResponse.json({ error: "You don't have permission to send messages. Ask an admin to enable it for you." }, { status: 403 });
+    const { data: clientRow } = await supabaseAdmin.from("clients").select("can_message").eq("id", clientId).maybeSingle();
+    const allowed = ((clientRow?.can_message as string[] | null) ?? []).includes(caller.memberId ?? "");
+    if (!allowed) return NextResponse.json({ error: "You don't have permission to message this client. Ask an admin to enable it for you." }, { status: 403 });
+  }
 
   const token = await tokenForLocation(locationId);
   if (!token)

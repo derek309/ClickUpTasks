@@ -14,7 +14,7 @@ import { I, Avatar, CollapsibleText } from "./ui";
 import { ConfirmModal, type ConfirmSpec } from "./modals";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 
-export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, sendingMessage, onUploadImage, onOpenFile }: {
+export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, sendingMessage, onUploadImage, onOpenFile, canAdmin, canMessage, onToggleCanMessage }: {
   notes: ClientNote[];
   tasks: Task[]; // already scoped by the caller to the current client/project
   messages?: Message[] | null; // null/undefined = no linked GHL contact at this scope, so no Messages tab
@@ -28,8 +28,12 @@ export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelet
   sendingMessage?: boolean;
   onUploadImage: (file: File) => Promise<Attachment | null>;
   onOpenFile: (path: string) => void;
+  canAdmin?: boolean;
+  canMessage?: string[]; // roster ids granted permission to send email/SMS as this client
+  onToggleCanMessage?: (memberId: string) => void; // admin-only — manages canMessage
 }) {
   const [view, setView] = useState<"chat" | "activity" | "messages">("chat");
+  const [permPopoverOpen, setPermPopoverOpen] = useState(false);
   const [filter, setFilter] = useState<NoteType | "all">("all");
   const [draftType, setDraftType] = useState<NoteType>("note");
   const [draft, setDraft] = useState("");
@@ -113,11 +117,36 @@ export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelet
   return (
     <div className="flex flex-1 flex-col overflow-hidden bg-background">
       <div className="flex shrink-0 items-center justify-between border-b bg-surface px-4 py-2 sm:px-5">
-        <div className="inline-flex overflow-hidden rounded-md border">
-          <button onClick={() => setView("chat")} className={`px-2.5 py-1.5 text-[13px] font-medium ${view === "chat" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Chat</button>
-          <button onClick={() => setView("activity")} className={`px-2.5 py-1.5 text-[13px] font-medium ${view === "activity" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Task Activity · {activity.length}</button>
-          {messages != null && (
-            <button onClick={() => { setView("messages"); onOpenMessages?.(); }} className={`px-2.5 py-1.5 text-[13px] font-medium ${view === "messages" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Messages · {messages.length}</button>
+        <div className="flex items-center gap-2">
+          <div className="inline-flex overflow-hidden rounded-md border">
+            <button onClick={() => setView("chat")} className={`px-2.5 py-1.5 text-[13px] font-medium ${view === "chat" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Chat</button>
+            <button onClick={() => setView("activity")} className={`px-2.5 py-1.5 text-[13px] font-medium ${view === "activity" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Task Activity · {activity.length}</button>
+            {messages != null && (
+              <button onClick={() => { setView("messages"); onOpenMessages?.(); }} className={`px-2.5 py-1.5 text-[13px] font-medium ${view === "messages" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Messages · {messages.length}</button>
+            )}
+          </div>
+          {canAdmin && messages != null && onToggleCanMessage && (
+            <div className="relative">
+              <button onClick={() => setPermPopoverOpen((o) => !o)} title="Who can message this client" className="rounded-md border bg-background p-1.5 text-muted hover:text-foreground"><I.bolt /></button>
+              {permPopoverOpen && (<>
+                <div className="fixed inset-0 z-30" onClick={() => setPermPopoverOpen(false)} />
+                <div className="absolute left-0 top-full z-40 mt-1 w-64 rounded-xl border bg-surface p-3 shadow-xl">
+                  <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Can send email/SMS</div>
+                  <div className="grid grid-cols-2 gap-0.5">
+                    {users.filter((u) => u.role === "va").map((u) => {
+                      const on = (canMessage ?? []).includes(u.id);
+                      return (
+                        <button key={u.id} onClick={() => onToggleCanMessage(u.id)} className="flex items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-background">
+                          <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "border-accent bg-accent text-white" : "border-border"}`}>{on && <I.check />}</span>
+                          <Avatar id={u.id} size={18} /> <span className="truncate text-[13px]">{u.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-1.5 text-[13px] text-muted">Admins can always send.</div>
+                </div>
+              </>)}
+            </div>
           )}
         </div>
         {view === "chat" && (
