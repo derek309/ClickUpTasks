@@ -24,17 +24,27 @@ async function validate() {
 }
 
 async function browse() {
-  const picked = await open({ directory: true, multiple: false, title: "Select the clickuptasks repo folder" });
-  if (typeof picked === "string") {
-    repoPathEl.value = picked;
-    await validate();
+  try {
+    const picked = await open({ directory: true, multiple: false, title: "Select the clickuptasks repo folder" });
+    if (typeof picked === "string") {
+      repoPathEl.value = picked;
+      await validate();
+    }
+  } catch (e) {
+    statusEl.textContent = `Couldn't open the folder picker: ${e}`;
+    statusEl.className = "status warn";
   }
 }
 
 async function save() {
-  await invoke("save_config", { repoPath: repoPathEl.value.trim() });
-  statusEl.textContent = "Saved.";
-  statusEl.className = "status ok";
+  try {
+    await invoke("save_config", { repoPath: repoPathEl.value.trim() });
+    statusEl.textContent = "Saved.";
+    statusEl.className = "status ok";
+  } catch (e) {
+    statusEl.textContent = `Couldn't save: ${e}`;
+    statusEl.className = "status warn";
+  }
 }
 
 window.addEventListener("DOMContentLoaded", () => {
