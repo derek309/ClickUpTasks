@@ -69,6 +69,7 @@ import { QuickLinksBar } from "./cockpit/ClientLinks";
 import { ClientNotes } from "./cockpit/ClientNotes";
 import { VaultView, type VaultItem } from "./cockpit/VaultView";
 import { ClientsBoard, type WorkBoardGroup, type WorkItem } from "./cockpit/ClientsBoard";
+import { claudeCodeUrl } from "@/lib/claudeLink";
 
 // --- Deep-link URL state ----------------------------------------------------
 // The whole app lives on "/", so we encode what you're looking at into the
@@ -1950,8 +1951,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>✳</span> Copy for Claude</button>
                     <button onClick={() => { setHeaderMoreOpen(false); queueClientForClaude(); }}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>★</span> Queue for Claude</button>
-                    <button onClick={() => { setHeaderMoreOpen(false); window.location.href = `clickuptasks://work?client=${activeClient}${activeProject ? `&project=${activeProject}` : ""}`; }}
-                      title="Launch Claude Code locally, focused on this client/project's open tasks (requires the ClickUpTasks Helper desktop app)"
+                    <button onClick={() => {
+                        setHeaderMoreOpen(false);
+                        const scope = activeProject ? `client ${activeClient}, project ${activeProject}` : `client ${activeClient}`;
+                        window.location.href = claudeCodeUrl(`Work through the open tasks for ClickUpTasks ${scope} using the clickuptasks MCP tools — start with list_client_tasks.`);
+                      }}
+                      title="Open this client/project in Claude Desktop, ready to work through its open tasks"
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>▶</span> Work with Claude</button>
                     {canAdmin && (
                       <button onClick={() => { setHeaderMoreOpen(false); setLinkModal({}); }}

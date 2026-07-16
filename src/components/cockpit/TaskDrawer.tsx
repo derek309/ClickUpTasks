@@ -11,6 +11,7 @@ import { I, Avatar, Row, CollapsibleText, FileBadge, newId } from "./ui";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 import { InlineAssignee, InlineDue } from "./GroupedList";
 import { RichTextEditor } from "./RichTextEditor";
+import { claudeCodeUrl } from "@/lib/claudeLink";
 
 // Parses describeFieldChange's (Cockpit.tsx) event strings into a structured
 // before/after pair for the Activity feed's diff cards, without a schema
@@ -770,7 +771,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
             <button onClick={onToggleQueue} title={isQueued ? "In Claude Code's queue — click to remove" : "Queue this task for Claude Code to work (say “work my queue” in Claude Code)"} className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[13px] font-medium ${isQueued ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>
               <span aria-hidden>{isQueued ? "★" : "☆"}</span><span className="hidden sm:inline">{isQueued ? "Queued" : "Queue for Claude"}</span>
             </button>
-            <button onClick={() => { window.location.href = `clickuptasks://work?task=${task.id}`; }} title="Launch Claude Code locally, focused on this task (requires the ClickUpTasks Helper desktop app)" className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
+            <button onClick={() => { window.location.href = claudeCodeUrl(`Look up and start working on ClickUpTasks task ${task.id} using the clickuptasks MCP tools.`); }} title="Open this task in Claude Desktop, ready to work on it" className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
               <span aria-hidden>▶</span><span className="hidden sm:inline">Work with Claude</span>
             </button>
             {ghlContactUrl && (

@@ -29,18 +29,9 @@ To learn more about Next.js, take a look at the following resources:
 
 You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
-## Desktop helper
+## "Work with Claude"
 
-`desktop-helper/` is a small Tauri (Rust) tray app — clicking "Work with Claude" on a task opens a terminal locally with Claude Code already looking up that task, via a `clickuptasks://work?task=<id>` deep link. It's independent of the Next.js app above; see `desktop-helper/src-tauri/src/lib.rs` for how it's wired. Requires the Rust toolchain (`rustup.rs`) and the Tauri CLI (`desktop-helper/package.json`).
-
-```bash
-cd desktop-helper
-npm install
-npm run tauri dev      # runs the bare binary — fine for iterating on the settings UI,
-                        # but macOS deep links only work from a real .app bundle:
-npm run tauri build -- --debug --bundles app
-open "src-tauri/target/debug/bundle/macos/ClickUpTasks Helper.app"
-```
+Clicking "Work with Claude" on a task or client/project (see `src/lib/claudeLink.ts`) opens `claude://code/new?q=...&folder=...` — Anthropic's own deep link, already registered by the Claude Desktop app. No custom app needed on our end; the repo folder is asked for once per browser (stored in `localStorage`) since it's a local filesystem path unique to each person's machine.
 
 ## Deploy on Vercel
 
