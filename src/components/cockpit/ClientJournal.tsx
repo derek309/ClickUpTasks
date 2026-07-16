@@ -378,7 +378,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                                 </span>
                               )}
                               {m.channel === "email" && onSendMessage && (
-                                <button onClick={() => replyToEmail(m)} className="font-medium text-accent hover:underline">Reply</button>
+                                <button onClick={() => replyToEmail(m)} className="ml-auto shrink-0 rounded-md border border-accent/30 px-2 py-0.5 text-[12px] font-medium text-accent hover:bg-accent-soft">Reply</button>
                               )}
                             </div>
                           </div>

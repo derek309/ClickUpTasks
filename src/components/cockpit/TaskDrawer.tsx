@@ -145,6 +145,17 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     setMsgSubject(""); setMsgBody(""); setPendingMsgAtts([]); setMsgCc([]); setMsgBcc([]); setShowCcBcc(false);
     setRightTab("activity"); // so the send is immediately visible in the feed
   };
+  // Switches to Email and pre-fills "Re: subject" — no quoted body, same
+  // reasoning as the client Journal's reply: GHL threads it and the
+  // recipient's client already shows the prior message via the thread.
+  const emailBodyRef = useRef<HTMLTextAreaElement>(null);
+  const replyToEmail = (m: Message) => {
+    setRightTab("email");
+    const subj = m.subject ?? "";
+    setMsgSubject(/^re:/i.test(subj) ? subj : `Re: ${subj}`.trim());
+    setMsgBody("");
+    requestAnimationFrame(() => emailBodyRef.current?.focus());
+  };
   // Rough SMS segment estimate, matching how carriers actually bill: GSM-7
   // encoding (plain ASCII + a handful of accented/Greek chars) fits 160
   // chars in one segment or 153 per segment once concatenated across
@@ -430,7 +441,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       <input value={msgSubject} onChange={(e) => setMsgSubject(e.target.value)} placeholder="Subject"
         className="mb-2 w-full shrink-0 rounded-lg border bg-background px-3 py-2 text-[15px] font-medium outline-none placeholder:text-muted focus:border-accent" />
       {msgAttBar}
-      <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)} onPaste={handleMsgPaste}
+      <textarea ref={emailBodyRef} value={msgBody} onChange={(e) => setMsgBody(e.target.value)} onPaste={handleMsgPaste}
         placeholder="Write an email… (paste to attach an image)"
         className="min-h-[220px] w-full flex-1 resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
       <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
@@ -676,7 +687,18 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                 <div className="flex items-center gap-2 text-[13px] text-muted">
                   <span className="inline-flex items-center gap-1 rounded px-1.5 py-0 font-medium" style={{ background: dotColor + "1a", color: dotColor }}>{m.channel === "email" ? "Email" : "SMS"}</span>
                   <span>{m.direction === "inbound" ? "Received" : "Sent"}</span>
+                  {m.direction === "outbound" && m.createdBy && (
+                    <span className="inline-flex items-center gap-1"><Avatar id={m.createdBy} size={14} /> {userById(m.createdBy)?.name ?? "Unknown"}</span>
+                  )}
                   <span>· {timeAgo(m.at)}</span>
+                  {!m.read && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-1.5 py-0 text-[11px] font-semibold text-accent">
+                      <span className="h-1.5 w-1.5 rounded-full bg-accent" /> New
+                    </span>
+                  )}
+                  {m.channel === "email" && onSendTaskMessage && (
+                    <button onClick={() => replyToEmail(m)} className="ml-auto shrink-0 rounded-md border border-accent/30 px-2 py-0.5 text-[12px] font-medium text-accent hover:bg-accent-soft">Reply</button>
+                  )}
                 </div>
                 {m.subject && <div className="mt-1 text-[15px] font-medium">{m.subject}</div>}
                 {((m.cc && m.cc.length > 0) || (m.bcc && m.bcc.length > 0)) && (
