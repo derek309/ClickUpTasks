@@ -176,6 +176,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Personal preferences → persisted per-browser (localStorage), not the DB.
   type ClientSort = "manual" | "az" | "tasks" | "recent" | "used" | "urgent" | "mine";
   const [clientSort, setClientSort] = useState<ClientSort>("urgent");
+  // Sidebar Clients list defaults to just what you actually have to work on
+  // (open task assigned to you, or explicitly followed) instead of every
+  // client you can see — same "mine vs. all" idea as allTasksScope, just
+  // applied to the client list instead of the task list. Not persisted,
+  // same as allTasksScope — always starts scoped down.
+  const [clientListScope, setClientListScope] = useState<"mine" | "all">("mine");
   // Recently-used ordering: clientId → last-opened epoch, persisted locally.
   // Opening a client stamps it (see the effect below), floating it to the top
   // when the "Recently used" sort is active.
@@ -796,9 +802,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // ⌘K's "Not imported" search — any type counts as "already added" here,
   // not just type 'client', so a contact never shows as addable twice.
   const addedContactIds = new Set(clients.filter((c) => c.id.startsWith("cl_")).map((c) => c.id.slice(3)));
+  // The sidebar's actual source list — scoped down to "mine" by default
+  // (reuses myAssignedClients, the exact same set My Work uses) so a long
+  // client roster doesn't bury what actually needs attention. Toggled to
+  // visibleClients (everyone you can see) via the header's Mine/All control.
+  const clientListBase = clientListScope === "mine" ? myAssignedClients : visibleClients;
   // Apply the user's sort preference; starred clients always float to the top.
   const sortedClients = (() => {
-    const base = [...visibleClients];
+    const base = [...clientListBase];
     if (clientSort === "az") base.sort((a, b) => a.name.localeCompare(b.name));
     else if (clientSort === "tasks") base.sort((a, b) => clientTaskCountRef(b.id) - clientTaskCountRef(a.id));
     else if (clientSort === "recent") base.reverse(); // fetch order is created_at asc
@@ -1847,6 +1858,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <I.chevron className={`transition ${collapsed.has("clients") ? "-rotate-90" : "rotate-180"}`} /> Clients
           </button>
           <span className="flex items-center gap-0.5">
+            <button onClick={() => setClientListScope((s) => (s === "mine" ? "all" : "mine"))}
+              title={clientListScope === "mine" ? "Showing only clients with open work assigned to or followed by you — click to show every client" : "Showing every client — click to show just what needs your attention"}
+              className={`rounded p-0.5 hover:bg-background hover:text-foreground ${clientListScope === "mine" ? "text-accent" : "text-muted"}`}>
+              <I.user className="h-3.5 w-3.5" />
+            </button>
             <span className="relative">
               <button onClick={() => setSortMenuOpen((o) => !o)} title="Sort clients" className={`rounded p-0.5 hover:bg-background hover:text-foreground ${clientSort !== "manual" ? "text-accent" : "text-muted"}`}><I.list className="h-3.5 w-3.5" /></button>
               {sortMenuOpen && (<>
@@ -1961,7 +1977,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </>)}
           </div>
           ))}
-          {visibleClients.length === 0 && <div className="px-3 py-3 text-[13px] leading-relaxed text-muted">No clients yet. Click <b>+</b> to add one from your GoHighLevel contacts.</div>}
+          {clientListBase.length === 0 && (
+            <div className="px-3 py-3 text-[13px] leading-relaxed text-muted">
+              {visibleClients.length === 0
+                ? <>No clients yet. Click <b>+</b> to add one from your GoHighLevel contacts.</>
+                : <>Nothing needs your attention right now. Click the person icon above to see every client.</>}
+            </div>
+          )}
         </nav>
         )}
 
