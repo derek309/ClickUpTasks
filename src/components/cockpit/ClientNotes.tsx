@@ -194,8 +194,8 @@ export function ClientNotes({ notes, tasks, messages, me, onAdd, onEdit, onDelet
               </select>
               <textarea value={draft} onChange={(e) => setDraft(e.target.value)} onPaste={handlePaste}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !(mentionMatch && mentionCands.length)) { e.preventDefault(); submit(); } }}
-                placeholder="Message the team… (Enter to send, type @ to mention, paste to attach an image)" rows={1}
-                className="max-h-72 min-h-[38px] flex-1 resize-y rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
+                placeholder="Message the team… (Enter to send, type @ to mention, paste to attach an image)" rows={3}
+                className="max-h-72 min-h-[76px] flex-1 resize-y rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
               <button onClick={submit} disabled={!draft.trim() && pendingAtts.length === 0} className="mb-0.5 shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">Send</button>
             </div>
           </div>
