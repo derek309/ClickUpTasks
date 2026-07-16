@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   users, userById, timeAgo, isCompletionEvent, NOTE_TYPE_META, NOTE_TYPE_ORDER, MANUAL_NOTE_TYPES, noteTypeMeta,
-  type ClientNote, type NoteType, type Task, type Comment, type Message, type MessageChannel, type Me, type Attachment,
+  type ClientNote, type NoteType, type Task, type Comment, type Message, type MessageChannel, type MessageDirection, type Me, type Attachment,
 } from "@/lib/data";
 import { I, Avatar, CollapsibleText } from "./ui";
 import { ConfirmModal, type ConfirmSpec } from "./modals";
@@ -27,6 +27,53 @@ type JournalItem =
   | { kind: "message"; at: string; message: Message }
   | { kind: "activity"; at: string; comment: Comment & { taskId: string; taskTitle: string } }
   | { kind: "completion"; at: string; comment: Comment & { taskId: string; taskTitle: string } };
+
+// Adjacent same-day items rendered as one flat list read a lot like a chat
+// log, but a client's real history spans months — day dividers give the eye
+// a place to land, same idea as any messaging app's "Today"/"Yesterday" rail.
+function dayLabel(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diffDays = Math.round((startOfDay(now) - startOfDay(d)) / 86400000);
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays > 1 && diffDays < 7) return d.toLocaleDateString(undefined, { weekday: "long" });
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: d.getFullYear() !== now.getFullYear() ? "numeric" : undefined });
+}
+
+// Display-only row shape built from the filtered JournalItems — inserts day
+// dividers and clusters adjacent same-channel/same-direction messages into
+// one card (a fast SMS back-and-forth otherwise renders as a wall of
+// identical bordered cards; grouping keeps the header chrome to once per
+// burst). Filtering itself still happens on the underlying JournalItem[],
+// this is purely a presentation transform on top of that.
+type FeedRow =
+  | { kind: "divider"; key: string; label: string }
+  | { kind: "note"; at: string; note: ClientNote }
+  | { kind: "activity"; at: string; comment: Comment & { taskId: string; taskTitle: string } }
+  | { kind: "completion"; at: string; comment: Comment & { taskId: string; taskTitle: string } }
+  | { kind: "message-group"; key: string; channel: MessageChannel; direction: MessageDirection; messages: Message[] };
+
+function buildFeedRows(items: JournalItem[]): FeedRow[] {
+  const rows: FeedRow[] = [];
+  let lastDayKey = "";
+  for (const item of items) {
+    const dk = new Date(item.at).toDateString();
+    if (dk !== lastDayKey) { rows.push({ kind: "divider", key: dk, label: dayLabel(item.at) }); lastDayKey = dk; }
+    if (item.kind === "message") {
+      const last = rows[rows.length - 1];
+      if (last?.kind === "message-group" && last.channel === item.message.channel && last.direction === item.message.direction) {
+        last.messages.push(item.message);
+        continue;
+      }
+      rows.push({ kind: "message-group", key: item.message.id, channel: item.message.channel, direction: item.message.direction, messages: [item.message] });
+      continue;
+    }
+    rows.push(item);
+  }
+  return rows;
+}
 
 export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, sendingMessage, onUploadImage, onOpenFile, canAdmin, canMessage, onToggleCanMessage, onDraftMessage, draftingMessage }: {
   notes: ClientNote[];
@@ -56,6 +103,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   const [editBody, setEditBody] = useState("");
   const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
   const feedEndRef = useRef<HTMLDivElement>(null);
+  const msgBodyRef = useRef<HTMLTextAreaElement>(null);
   const [msgSubject, setMsgSubject] = useState("");
   const [msgBody, setMsgBody] = useState("");
   const [pendingAtts, setPendingAtts] = useState<Attachment[]>([]);
@@ -100,6 +148,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
     if (filter === "activity") return it.kind === "activity" || it.kind === "completion";
     return it.kind === "note" && it.note.type === filter;
   });
+  const feedRows = buildFeedRows(filteredItems);
 
   const canModify = (n: ClientNote) => me.role === "admin" || n.authorId === me.id;
 
@@ -129,6 +178,16 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
     setUploadingAtt(true);
     for (const f of images) { const att = await onUploadImage(f); if (att) setPendingAtts((a) => [...a, att]); }
     setUploadingAtt(false);
+  };
+  // Clicking an email quotes it into the composer, like reply in a real
+  // email client — SMS has no equivalent (it's one continuous thread, no
+  // per-message reply concept), so this is email-only.
+  const replyToEmail = (m: Message) => {
+    setComposeMode("email");
+    const subj = m.subject ?? "";
+    setMsgSubject(/^re:/i.test(subj) ? subj : `Re: ${subj}`.trim());
+    setMsgBody(`\n\n${m.body.split("\n").map((l) => `> ${l}`).join("\n")}`);
+    requestAnimationFrame(() => { msgBodyRef.current?.focus(); msgBodyRef.current?.setSelectionRange(0, 0); });
   };
   const submitMessage = () => {
     if (!msgBody.trim() || !onSendMessage || (composeMode !== "email" && composeMode !== "sms")) return;
@@ -197,13 +256,20 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                 <span className="max-w-[260px] text-[13px] leading-relaxed">Notes, emails, texts, and completed work show up here as they happen — for the team and for Claude.</span>
               </div>
             )}
-            {filteredItems.map((item) => {
-              if (item.kind === "note") {
-                const n = item.note;
+            {feedRows.map((row) => {
+              if (row.kind === "divider") {
+                return (
+                  <div key={row.key} className="sticky top-0 z-[5] flex items-center justify-center py-1">
+                    <span className="rounded-full border bg-background px-3 py-0.5 text-[12px] font-medium text-muted shadow-soft">{row.label}</span>
+                  </div>
+                );
+              }
+              if (row.kind === "note") {
+                const n = row.note;
                 const u = userById(n.authorId);
                 const m = noteTypeMeta(n.type);
                 return (
-                  <div key={n.id} className="group/note flex gap-2.5">
+                  <div key={n.id} className="group/note flex gap-2.5 rounded-xl border bg-surface p-3 shadow-soft">
                     <Avatar id={n.authorId} size={28} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 text-[14px]">
@@ -220,14 +286,14 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                       {editingId === n.id ? (
                         <div className="mt-1.5">
                           <textarea value={editBody} onChange={(e) => setEditBody(e.target.value)} rows={2} autoFocus
-                            className="w-full resize-none rounded-lg border bg-surface px-2 py-1.5 text-[15px] outline-none focus:border-accent" />
+                            className="w-full resize-none rounded-lg border bg-background px-2 py-1.5 text-[15px] outline-none focus:border-accent" />
                           <div className="mt-1.5 flex gap-2">
                             <button onClick={() => saveEdit(n)} className="rounded-md bg-accent px-2.5 py-1 text-[13px] font-medium text-white">Save</button>
                             <button onClick={() => setEditingId(null)} className="rounded-md px-2.5 py-1 text-[13px] text-muted hover:bg-background">Cancel</button>
                           </div>
                         </div>
                       ) : (<>
-                        {n.body && <CollapsibleText text={n.body} className="mt-1 whitespace-pre-wrap rounded-xl rounded-tl-sm border bg-surface px-3 py-2 text-[15px] shadow-soft" />}
+                        {n.body && <CollapsibleText text={n.body} className="mt-1 whitespace-pre-wrap text-[15px]" />}
                         {n.attachments && n.attachments.length > 0 && (
                           <div className="mt-1.5"><AttachmentThumbs items={n.attachments} onOpen={onOpenFile} /></div>
                         )}
@@ -236,26 +302,38 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                   </div>
                 );
               }
-              if (item.kind === "message") {
-                const m = item.message;
+              if (row.kind === "message-group") {
+                const channelColor = row.channel === "email" ? "#3b82f6" : "#22c55e";
                 return (
-                  <div key={m.id} className={`rounded-xl border p-3 ${m.direction === "inbound" ? "bg-surface" : "bg-accent-soft/40"}`}>
-                    <div className="flex items-center gap-2 text-[13px] text-muted">
-                      <span className="inline-flex items-center gap-1 rounded px-1.5 py-0 font-medium" style={{ background: (m.channel === "email" ? "#3b82f6" : "#22c55e") + "1a", color: m.channel === "email" ? "#3b82f6" : "#22c55e" }}>
-                        {m.channel === "email" ? "Email" : "SMS"}
-                      </span>
-                      <span>{m.direction === "inbound" ? "Received" : "Sent"}</span>
-                      <span>· {timeAgo(m.at)}</span>
+                  <div key={row.key} className={`flex gap-2.5 rounded-xl border p-3 shadow-soft ${row.direction === "outbound" ? "bg-accent-soft/30" : "bg-surface"}`}>
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-white" style={{ background: channelColor }}><I.bolt /></span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 text-[13px] text-muted">
+                        <span className="font-medium" style={{ color: channelColor }}>{row.channel === "email" ? "Email" : "SMS"}</span>
+                        <span>{row.direction === "inbound" ? "Received" : "Sent"}</span>
+                      </div>
+                      <div className="mt-1.5 space-y-2.5">
+                        {row.messages.map((m) => (
+                          <div key={m.id} className={row.messages.length > 1 ? "border-t pt-2 first:border-t-0 first:pt-0" : ""}>
+                            {m.subject && <div className="text-[15px] font-medium">{m.subject}</div>}
+                            <CollapsibleText text={m.body} className="mt-0.5 whitespace-pre-wrap text-[15px]" />
+                            <div className="mt-1 flex items-center gap-2 text-[12px] text-muted">
+                              <span>{timeAgo(m.at)}</span>
+                              {m.channel === "email" && onSendMessage && (
+                                <button onClick={() => replyToEmail(m)} className="font-medium text-accent hover:underline">Reply</button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    {m.subject && <div className="mt-1 text-[15px] font-medium">{m.subject}</div>}
-                    <CollapsibleText text={m.body} className="mt-1 whitespace-pre-wrap text-[15px]" />
                   </div>
                 );
               }
-              if (item.kind === "completion") {
-                const c = item.comment;
+              if (row.kind === "completion") {
+                const c = row.comment;
                 return (
-                  <button key={c.id} onClick={() => onOpenTask(c.taskId)} className="flex w-full items-center gap-2.5 rounded-xl border bg-success-soft px-3 py-2 text-left hover:opacity-90">
+                  <button key={c.id} onClick={() => onOpenTask(c.taskId)} className="flex w-full items-center gap-2.5 rounded-xl border bg-success-soft p-3 text-left shadow-soft hover:opacity-90">
                     <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-success text-white"><I.check /></span>
                     <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-success">{c.taskTitle}</span>
                     <span className="shrink-0 text-[12px] text-muted">Completed · {timeAgo(c.at)}</span>
@@ -263,10 +341,10 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                 );
               }
               // activity — a real comment left on one of this scope's tasks
-              const c = item.comment;
+              const c = row.comment;
               const u = userById(c.authorId);
               return (
-                <button key={c.id} onClick={() => onOpenTask(c.taskId)} className="flex w-full gap-2.5 rounded-xl border bg-surface p-3 text-left hover:border-accent">
+                <button key={c.id} onClick={() => onOpenTask(c.taskId)} className="flex w-full gap-2.5 rounded-xl border bg-surface p-3 text-left shadow-soft hover:border-accent">
                   <Avatar id={c.authorId} size={28} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 text-[14px]">
@@ -343,7 +421,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                   className="mb-2 shrink-0 rounded-lg border bg-background px-3 py-1.5 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
               )}
               <div className="relative min-h-0 flex-1">
-                <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)}
+                <textarea ref={msgBodyRef} value={msgBody} onChange={(e) => setMsgBody(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitMessage(); } }}
                   placeholder={composeMode === "email" ? "Write an email… (Enter to send, Shift+Enter for a new line)" : "Write a text… (Enter to send, Shift+Enter for a new line)"}
                   className="h-full min-h-[160px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
