@@ -15,6 +15,7 @@ import {
   addDaysIso,
   STATUS_META,
   STATUS_ORDER,
+  isCompletionEvent,
   CLIENT_STATUS_META,
   CLIENT_STATUS_ORDER,
   clientStatusMeta,
@@ -1918,7 +1919,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           {!myWork && !personalView && !inboxView && activeClient !== "all" && (
             <div className="inline-flex overflow-hidden rounded-md border">
               <button onClick={() => setClientTab("tasks")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "tasks" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Tasks</button>
-              <button onClick={() => setClientTab("chat")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "chat" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Journal · {clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId)).length}</button>
+              <button onClick={() => setClientTab("chat")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "chat" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Journal · {(() => {
+                // Counts the whole merged feed (notes + messages + task
+                // comments + completions), not just typed notes — matches
+                // what ClientJournal.tsx actually renders, same scoping
+                // it uses for its own `messages`/`tasks` props.
+                const noteCount = clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId)).length;
+                const messageCount = activeProject ? 0 : (() => { const ct = contactForClient(activeClient); return ct ? messages.filter((m) => m.contactId === ct.id).length : 0; })();
+                const activityCount = baseTasks.reduce((sum, t) => sum + t.comments.filter((c) => c.kind !== "event" || isCompletionEvent(c.body)).length, 0);
+                return noteCount + messageCount + activityCount;
+              })()}</button>
               <button onClick={() => setClientTab("vault")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "vault" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Vault · {vaultItems.length}</button>
             </div>
           )}
