@@ -5,10 +5,7 @@ const needsTokenEl = document.getElementById("needsToken");
 const clientSearchInput = document.getElementById("clientSearch");
 const clientResultsEl = document.getElementById("clientResults");
 const matchHintEl = document.getElementById("matchHint");
-const pasteZoneEl = document.getElementById("pasteZone");
-const screenshotBoxEl = document.getElementById("screenshotBox");
-const screenshotPreviewEl = document.getElementById("screenshotPreview");
-const removeScreenshotBtn = document.getElementById("removeScreenshot");
+const screenshotGalleryEl = document.getElementById("screenshotGallery");
 const modeNewBtn = document.getElementById("modeNew");
 const modeExistingBtn = document.getElementById("modeExisting");
 const newTaskFieldsEl = document.getElementById("newTaskFields");
@@ -32,7 +29,7 @@ let senderName = null;
 let senderEmail = null;
 let allClients = []; // [{id, name, company, contactName}]
 let selectedClientId = "";
-let capturedScreenshot = null; // data URL, or null
+let capturedScreenshots = []; // data URLs, in the order added
 let mode = "new"; // "new" | "existing"
 let allTasks = []; // [{id, title, status}] for the current client
 let selectedTaskId = "";
@@ -95,25 +92,47 @@ async function readActiveTab() {
   return tab || null;
 }
 
-function showScreenshot(dataUrl) {
-  capturedScreenshot = dataUrl;
-  if (dataUrl) {
-    screenshotPreviewEl.src = dataUrl;
-    screenshotBoxEl.classList.add("has-shot");
-    pasteZoneEl.style.display = "none";
-  } else {
-    screenshotBoxEl.classList.remove("has-shot");
-    pasteZoneEl.style.display = "";
-  }
+function renderScreenshotGallery() {
+  screenshotGalleryEl.innerHTML = "";
+  capturedScreenshots.forEach((dataUrl, i) => {
+    const thumb = document.createElement("div");
+    thumb.className = "shot-thumb";
+    const img = document.createElement("img");
+    img.src = dataUrl;
+    img.alt = `Screenshot ${i + 1}`;
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "shot-remove";
+    removeBtn.textContent = "✕";
+    removeBtn.addEventListener("click", () => {
+      capturedScreenshots.splice(i, 1);
+      renderScreenshotGallery();
+    });
+    thumb.appendChild(img);
+    thumb.appendChild(removeBtn);
+    screenshotGalleryEl.appendChild(thumb);
+  });
+  // The paste zone stays visible even with screenshots already added — you
+  // can keep pasting more, one at a time.
 }
-removeScreenshotBtn.addEventListener("click", () => showScreenshot(null));
+
+function addScreenshot(dataUrl) {
+  capturedScreenshots.push(dataUrl);
+  renderScreenshotGallery();
+}
+
+function clearScreenshots() {
+  capturedScreenshots = [];
+  renderScreenshotGallery();
+}
 
 // Manual fallback for the one thing that genuinely needs a toolbar-icon
 // click: capturing pixels. Pasting a system screenshot (e.g. macOS's
-// Cmd+Ctrl+Shift+4, which copies straight to the clipboard) doesn't need any
-// special Chrome permission — a plain paste event works anywhere in the
-// panel, not just when the paste zone itself has focus, since an image can't
-// usefully land in a text field anyway.
+// Cmd+Ctrl+Shift+4, which copies straight to the clipboard, or a full-page
+// capture from GoFullPage) doesn't need any special Chrome permission — a
+// plain paste event works anywhere in the panel, not just when the paste
+// zone itself has focus, since an image can't usefully land in a text field
+// anyway. Each paste adds another screenshot rather than replacing the last.
 document.addEventListener("paste", (e) => {
   const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith("image/"));
   if (!item) return;
@@ -121,7 +140,7 @@ document.addEventListener("paste", (e) => {
   if (!blob) return;
   e.preventDefault();
   const reader = new FileReader();
-  reader.onload = () => showScreenshot(reader.result);
+  reader.onload = () => addScreenshot(reader.result);
   reader.readAsDataURL(blob);
 });
 
@@ -328,7 +347,7 @@ async function init() {
   dueInput.value = "";
   prioritySel.value = "normal";
   assigneeSel.value = "";
-  showScreenshot(null);
+  clearScreenshots();
   setMode("new");
 
   const [email, capture, tab, clients] = await Promise.all([
@@ -342,7 +361,7 @@ async function init() {
   // The screenshot is the one field that still depends on the toolbar-icon
   // click (or a manual paste) — everything else below is read live, every
   // time the panel opens or Refresh is pressed.
-  if (capture?.screenshot) showScreenshot(capture.screenshot);
+  if (capture?.screenshot) addScreenshot(capture.screenshot);
 
   if (email) {
     // Gmail — same as before, takes priority over the generic tab data.
@@ -426,7 +445,7 @@ function resetFormAfterSubmit() {
   prioritySel.value = "normal";
   assigneeSel.value = "";
   matchHintEl.textContent = "";
-  showScreenshot(null);
+  clearScreenshots();
   selectedTaskId = "";
   taskSearchInput.value = "";
   allTasks = [];
@@ -457,8 +476,8 @@ createBtn.addEventListener("click", async () => {
   statusEl.textContent = mode === "new" ? "Creating…" : "Adding…";
   statusEl.className = "";
   try {
-    let screenshotPath;
-    if (capturedScreenshot) screenshotPath = await uploadScreenshot(token, capturedScreenshot, clientId);
+    const screenshotPaths = [];
+    for (const dataUrl of capturedScreenshots) screenshotPaths.push(await uploadScreenshot(token, dataUrl, clientId));
 
     if (mode === "new") {
       await apiFetch("/api/extension/tasks", token, {
@@ -466,7 +485,7 @@ createBtn.addEventListener("click", async () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           client_id: clientId, project_id: projectSel.value || undefined, title: titleInput.value.trim(), description: notesInput.value.trim(), link: permalink,
-          due: dueInput.value || undefined, priority: prioritySel.value, assignee_id: assigneeSel.value || undefined, screenshot_path: screenshotPath,
+          due: dueInput.value || undefined, priority: prioritySel.value, assignee_id: assigneeSel.value || undefined, screenshot_paths: screenshotPaths,
         }),
       });
       statusEl.textContent = "Task created.";
@@ -474,7 +493,7 @@ createBtn.addEventListener("click", async () => {
       await apiFetch(`/api/extension/tasks/${encodeURIComponent(selectedTaskId)}/comment`, token, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: notesInput.value.trim(), screenshot_path: screenshotPath }),
+        body: JSON.stringify({ body: notesInput.value.trim(), screenshot_paths: screenshotPaths }),
       });
       statusEl.textContent = "Added to task.";
     }

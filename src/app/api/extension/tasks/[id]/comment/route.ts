@@ -19,8 +19,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const body = await req.json().catch(() => ({}));
   const text = typeof body.body === "string" ? body.body.trim() : "";
-  const screenshotPath = typeof body.screenshot_path === "string" && body.screenshot_path.trim() ? body.screenshot_path.trim() : null;
-  if (!text && !screenshotPath) return NextResponse.json({ error: "Nothing to add — no note or screenshot." }, { status: 400 });
+  const screenshotPaths: string[] = Array.isArray(body.screenshot_paths) ? body.screenshot_paths.filter((p: unknown): p is string => typeof p === "string" && p.trim().length > 0) : [];
+  if (!text && !screenshotPaths.length) return NextResponse.json({ error: "Nothing to add — no note or screenshot." }, { status: 400 });
 
   const { data: task } = await supabaseAdmin.from("tasks").select("client_id").eq("id", taskId).maybeSingle();
   if (!task) return NextResponse.json({ error: "No such task." }, { status: 404 });
@@ -31,7 +31,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     authorId: caller.memberId,
     body: text,
     at: new Date().toISOString(),
-    ...(screenshotPath ? { attachments: [{ id: "at_" + randomUUID(), name: "Screenshot", kind: "image", size: "", path: screenshotPath }] } : {}),
+    ...(screenshotPaths.length
+      ? { attachments: screenshotPaths.map((path: string, i: number) => ({ id: "at_" + randomUUID(), name: screenshotPaths.length > 1 ? `Screenshot ${i + 1}` : "Screenshot", kind: "image", size: "", path })) }
+      : {}),
   };
   const { error } = await supabaseAdmin.rpc("append_comment", { task_id: taskId, comment });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });

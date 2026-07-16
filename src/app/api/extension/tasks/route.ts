@@ -44,10 +44,12 @@ export async function POST(req: NextRequest) {
   const description = typeof body.description === "string" ? body.description : "";
   const due = typeof body.due === "string" && body.due ? body.due : null;
   const link = typeof body.link === "string" && body.link.trim() ? body.link.trim() : null;
-  const screenshotPath = typeof body.screenshot_path === "string" && body.screenshot_path.trim() ? body.screenshot_path.trim() : null;
+  // The extension can attach more than one screenshot per task (e.g. several
+  // areas of a page under review) — each becomes its own image attachment.
+  const screenshotPaths: string[] = Array.isArray(body.screenshot_paths) ? body.screenshot_paths.filter((p: unknown): p is string => typeof p === "string" && p.trim().length > 0) : [];
   const attachments = [
     ...(link ? [{ id: "at_" + randomUUID(), name: "Source link", kind: "link", size: "", url: link }] : []),
-    ...(screenshotPath ? [{ id: "at_" + randomUUID(), name: "Screenshot", kind: "image", size: "", path: screenshotPath }] : []),
+    ...screenshotPaths.map((path: string, i: number) => ({ id: "at_" + randomUUID(), name: screenshotPaths.length > 1 ? `Screenshot ${i + 1}` : "Screenshot", kind: "image", size: "", path })),
   ];
   // "conversation" is auto-assigned only (see isManuallyAssignable in
   // src/lib/data.ts) — reject it here rather than silently downgrading it,
