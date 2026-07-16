@@ -2038,8 +2038,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 return (
                   <button onClick={toggle}
                     title={following ? `Following — click to stop following ${label}` : `Follow ${label} to keep it in My Work`}
-                    className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-[13px] font-medium ${following ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>
-                    {following ? <><I.check /> Following</> : <><I.plus /> Follow</>}
+                    className={`rounded-md border p-1.5 ${following ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>
+                    <I.bookmark filled={following} />
                   </button>
                 );
               })()}
@@ -2048,8 +2048,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 const entity = scopedProject ?? clientById(activeClient)!;
                 const setFollowUp = (d: string | null) => (scopedProject ? setProjectFollowUp(scopedProject.id, d) : setClientFollowUp(activeClient, d));
                 return (
-                  <div className="inline-flex items-center gap-1 rounded-md border px-2 py-1.5 text-[13px] text-muted">
-                    <I.calendar /> Follow up:
+                  <div title="Follow-up date" className="inline-flex items-center gap-1 rounded-md border px-2 py-1.5 text-[13px] text-muted">
+                    <I.calendar />
                     <InlineDue value={entity.followUpAt ?? null} overdue={isOverdue(entity.followUpAt ?? null)} onChange={setFollowUp} />
                   </div>
                 );
