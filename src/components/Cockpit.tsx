@@ -310,6 +310,45 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       setDraftingMessage(false);
     }
   };
+  // Re-pulls one contact's info from GHL on demand — the bulk sync re-syncs
+  // a whole sub-account (~30 sequential API calls for a big location), way
+  // more than needed to check if one person's phone number changed.
+  const [refreshingContact, setRefreshingContact] = useState(false);
+  const refreshContact = async (contact: Contact) => {
+    const target = ghlTargetForContact(contact);
+    if (!target) { pushToast("No GoHighLevel connection for this client's sub-account."); return; }
+    setRefreshingContact(true);
+    try {
+      const res = await authedFetch("/api/ghl/contact", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contactId: contact.id, locationId: target.locationId, ghlContactId: target.ghlContactId }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { pushToast(j.error || "Failed to refresh contact."); return; }
+      setContacts((cs) => cs.map((c) => (c.id === contact.id ? j.contact : c)));
+      pushToast("Contact info refreshed.");
+    } catch {
+      pushToast("Failed to refresh contact.");
+    } finally {
+      setRefreshingContact(false);
+    }
+  };
+  // Backfills any GHL messages our webhook never captured — messages is
+  // realtime-subscribed, so genuinely new rows this inserts show up on their
+  // own; no local state merge needed here.
+  const [refreshingMessages, setRefreshingMessages] = useState(false);
+  const refreshMessages = async (clientId: string, contact: Contact) => {
+    const target = ghlTargetForContact(contact);
+    if (!target) { pushToast("No GoHighLevel connection for this client's sub-account."); return; }
+    setRefreshingMessages(true);
+    try {
+      const res = await authedFetch("/api/ghl/refresh-messages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId, contactId: contact.id, locationId: target.locationId, ghlContactId: target.ghlContactId }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { pushToast(j.error || "Failed to refresh messages."); return; }
+      pushToast(j.inserted > 0 ? `Found ${j.inserted} new message${j.inserted === 1 ? "" : "s"}.` : "No new messages.");
+    } catch {
+      pushToast("Failed to refresh messages.");
+    } finally {
+      setRefreshingMessages(false);
+    }
+  };
   useEffect(() => {
     try {
       const s = localStorage.getItem("cut_clientSort"); if (s) setClientSort(s as ClientSort);
@@ -2155,6 +2194,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onToggleCanMessage={(memberId) => toggleClientMessagePermission(activeClient, memberId)}
             onDraftMessage={activeProject ? undefined : (channel) => draftMessage(activeClient, channel)}
             draftingMessage={draftingMessage}
+            onRefreshContact={activeProject ? undefined : (() => { const ct = contactForClient(activeClient); return ct ? () => refreshContact(ct) : undefined; })()}
+            refreshingContact={refreshingContact}
+            onRefreshMessages={activeProject ? undefined : (() => { const ct = contactForClient(activeClient); return ct ? () => refreshMessages(activeClient, ct) : undefined; })()}
+            refreshingMessages={refreshingMessages}
           />
         ) : activeClient !== "all" && clientTab === "vault" ? (
           <VaultView items={vaultItems} folders={activeVaultFolders} onDownloadFile={downloadFile} onGetSignedUrl={signedUrlForFile} onCopyLink={copyAttachmentLink}

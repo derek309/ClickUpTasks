@@ -75,7 +75,7 @@ function buildFeedRows(items: JournalItem[]): FeedRow[] {
   return rows;
 }
 
-export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, sendingMessage, onUploadImage, onOpenFile, canAdmin, canMessage, onToggleCanMessage, onDraftMessage, draftingMessage }: {
+export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, sendingMessage, onUploadImage, onOpenFile, canAdmin, canMessage, onToggleCanMessage, onDraftMessage, draftingMessage, onRefreshContact, refreshingContact, onRefreshMessages, refreshingMessages }: {
   notes: ClientNote[];
   tasks: Task[]; // already scoped by the caller to the current client/project
   messages?: Message[] | null; // null/undefined = no linked GHL contact at this scope, so no Email/SMS
@@ -94,6 +94,10 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   onToggleCanMessage?: (memberId: string) => void; // admin-only — manages canMessage
   onDraftMessage?: (channel: MessageChannel) => Promise<{ subject?: string; body: string } | null>; // Gemini status-update draft, never sends
   draftingMessage?: boolean;
+  onRefreshContact?: () => void; // admin-only — re-pulls name/email/phone/etc. from GHL
+  refreshingContact?: boolean;
+  onRefreshMessages?: () => void; // backfills any GHL messages the webhook missed
+  refreshingMessages?: boolean;
 }) {
   const [filter, setFilter] = useState<JournalFilter>("all");
   const [composeMode, setComposeMode] = useState<"note" | "email" | "sms">("note");
@@ -223,29 +227,43 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
           )}
           <button onClick={() => setFilter("activity")} className={`rounded-full border px-2.5 py-1 text-[13px] font-medium transition ${filter === "activity" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}>Task Activity</button>
         </div>
-        {canAdmin && messages != null && onToggleCanMessage && (
-          <div className="relative">
-            <button onClick={() => setPermPopoverOpen((o) => !o)} title="Who can message this client" className="rounded-md border bg-background p-1.5 text-muted hover:text-foreground"><I.bolt /></button>
-            {permPopoverOpen && (<>
-              <div className="fixed inset-0 z-30" onClick={() => setPermPopoverOpen(false)} />
-              <div className="absolute right-0 top-full z-40 mt-1 w-64 rounded-xl border bg-surface p-3 shadow-xl">
-                <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Can send email/SMS</div>
-                <div className="grid grid-cols-2 gap-0.5">
-                  {users.filter((u) => u.role === "va").map((u) => {
-                    const on = (canMessage ?? []).includes(u.id);
-                    return (
-                      <button key={u.id} onClick={() => onToggleCanMessage(u.id)} className="flex items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-background">
-                        <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "border-accent bg-accent text-white" : "border-border"}`}>{on && <I.check />}</span>
-                        <Avatar id={u.id} size={18} /> <span className="truncate text-[13px]">{u.name}</span>
-                      </button>
-                    );
-                  })}
+        <div className="flex shrink-0 items-center gap-1.5">
+          {onRefreshMessages && messages != null && (
+            <button onClick={onRefreshMessages} disabled={refreshingMessages} title="Pull any GoHighLevel emails/texts our webhook missed"
+              className="rounded-md border bg-background p-1.5 text-muted hover:text-foreground disabled:opacity-40">
+              <I.repeat className={refreshingMessages ? "animate-spin" : ""} />
+            </button>
+          )}
+          {canAdmin && onRefreshContact && (
+            <button onClick={onRefreshContact} disabled={refreshingContact} title="Re-pull this contact's info from GoHighLevel"
+              className="rounded-md border bg-background p-1.5 text-muted hover:text-foreground disabled:opacity-40">
+              <I.user className={refreshingContact ? "animate-pulse" : ""} />
+            </button>
+          )}
+          {canAdmin && messages != null && onToggleCanMessage && (
+            <div className="relative">
+              <button onClick={() => setPermPopoverOpen((o) => !o)} title="Who can message this client" className="rounded-md border bg-background p-1.5 text-muted hover:text-foreground"><I.bolt /></button>
+              {permPopoverOpen && (<>
+                <div className="fixed inset-0 z-30" onClick={() => setPermPopoverOpen(false)} />
+                <div className="absolute right-0 top-full z-40 mt-1 w-64 rounded-xl border bg-surface p-3 shadow-xl">
+                  <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Can send email/SMS</div>
+                  <div className="grid grid-cols-2 gap-0.5">
+                    {users.filter((u) => u.role === "va").map((u) => {
+                      const on = (canMessage ?? []).includes(u.id);
+                      return (
+                        <button key={u.id} onClick={() => onToggleCanMessage(u.id)} className="flex items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-background">
+                          <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "border-accent bg-accent text-white" : "border-border"}`}>{on && <I.check />}</span>
+                          <Avatar id={u.id} size={18} /> <span className="truncate text-[13px]">{u.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-1.5 text-[13px] text-muted">Admins can always send.</div>
                 </div>
-                <div className="mt-1.5 text-[13px] text-muted">Admins can always send.</div>
-              </div>
-            </>)}
-          </div>
-        )}
+              </>)}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="flex min-h-0 flex-1">
