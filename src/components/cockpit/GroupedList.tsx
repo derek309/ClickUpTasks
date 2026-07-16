@@ -347,7 +347,7 @@ function friendlyDue(iso: string): string {
   return formatDue(iso);
 }
 
-export function InlineDue({ value, overdue, recurrence, onChange, onRecurrenceChange }: { value: string | null; overdue: boolean; recurrence: Recurrence; onChange: (d: string | null) => void; onRecurrenceChange: (r: Recurrence) => void }) {
+export function InlineDue({ value, overdue, recurrence = "none", onChange, onRecurrenceChange }: { value: string | null; overdue: boolean; recurrence?: Recurrence; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
@@ -371,7 +371,7 @@ export function InlineDue({ value, overdue, recurrence, onChange, onRecurrenceCh
   );
 }
 
-function DatePopover({ pos, value, recurrence, onSelect, onRecurrenceChange, onClose }: { pos: { top: number; left: number }; value: string | null; recurrence: Recurrence; onSelect: (d: string | null) => void; onRecurrenceChange: (r: Recurrence) => void; onClose: () => void }) {
+function DatePopover({ pos, value, recurrence, onSelect, onRecurrenceChange, onClose }: { pos: { top: number; left: number }; value: string | null; recurrence: Recurrence; onSelect: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; onClose: () => void }) {
   const [ym, setYm] = useState(() => { const [y, m] = (value ?? TODAY).split("-").map(Number); return { y, m: m - 1 }; });
   const dow = dowIso(TODAY);
   const quicks: [string, string][] = [
@@ -394,12 +394,14 @@ function DatePopover({ pos, value, recurrence, onSelect, onRecurrenceChange, onC
             <button key={label} onClick={() => onSelect(iso)} className="flex w-full items-center justify-between gap-3 whitespace-nowrap rounded px-2 py-1.5 text-left text-[15px] hover:bg-background"><span>{label}</span><span className="text-[13px] text-muted">{formatDue(iso)}</span></button>
           ))}
           <button onClick={() => onSelect(null)} className="mt-0.5 w-full rounded px-2 py-1.5 text-left text-[15px] text-danger hover:bg-background">No date</button>
-          <div className="mt-1 border-t pt-1.5">
-            <div className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Repeat</div>
-            <select value={recurrence} onClick={(e) => e.stopPropagation()} onChange={(e) => onRecurrenceChange(e.target.value as Recurrence)} className="w-full rounded border bg-background px-1.5 py-1 text-[15px] outline-none">
-              {RECURRENCE_ORDER.map((r) => <option key={r} value={r}>{RECURRENCE_LABEL[r]}</option>)}
-            </select>
-          </div>
+          {onRecurrenceChange && (
+            <div className="mt-1 border-t pt-1.5">
+              <div className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Repeat</div>
+              <select value={recurrence} onClick={(e) => e.stopPropagation()} onChange={(e) => onRecurrenceChange(e.target.value as Recurrence)} className="w-full rounded border bg-background px-1.5 py-1 text-[15px] outline-none">
+                {RECURRENCE_ORDER.map((r) => <option key={r} value={r}>{RECURRENCE_LABEL[r]}</option>)}
+              </select>
+            </div>
+          )}
         </div>
         <div className="flex-1 p-2">
           <div className="mb-1 flex items-center justify-between px-1">
