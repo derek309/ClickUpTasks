@@ -6,6 +6,8 @@ const clientSearchInput = document.getElementById("clientSearch");
 const clientResultsEl = document.getElementById("clientResults");
 const matchHintEl = document.getElementById("matchHint");
 const projectSel = document.getElementById("project");
+const dueInput = document.getElementById("due");
+const prioritySel = document.getElementById("priority");
 const titleInput = document.getElementById("title");
 const notesInput = document.getElementById("notes");
 const statusEl = document.getElementById("status");
@@ -152,6 +154,8 @@ async function init() {
   matchHintEl.textContent = "";
   selectedClientId = "";
   clientSearchInput.value = "";
+  dueInput.value = "";
+  prioritySel.value = "normal";
 
   const [email, clients] = await Promise.all([getCurrentEmail(), loadClients(token).catch(() => [])]);
   allClients = clients;
@@ -231,7 +235,10 @@ createBtn.addEventListener("click", async () => {
     await apiFetch("/api/extension/tasks", token, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: clientId, project_id: projectSel.value || undefined, title, description: notesInput.value.trim(), link: permalink }),
+      body: JSON.stringify({
+        client_id: clientId, project_id: projectSel.value || undefined, title, description: notesInput.value.trim(), link: permalink,
+        due: dueInput.value || undefined, priority: prioritySel.value,
+      }),
     });
     statusEl.textContent = "Task created.";
     statusEl.className = "ok";
@@ -242,6 +249,8 @@ createBtn.addEventListener("click", async () => {
     selectedClientId = "";
     clientSearchInput.value = "";
     projectSel.value = "";
+    dueInput.value = "";
+    prioritySel.value = "normal";
     matchHintEl.textContent = "";
   } catch (e) {
     statusEl.textContent = e instanceof Error ? e.message : "Failed to create task.";

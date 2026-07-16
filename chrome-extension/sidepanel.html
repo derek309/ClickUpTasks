@@ -27,6 +27,8 @@
   .result-row:hover { background: #EEF4FB; }
   .result-name { font-size: 13px; font-weight: 600; }
   .result-sub { font-size: 11px; color: #64748b; }
+  .row2 { display: flex; gap: 8px; }
+  .row2 > div { flex: 1; min-width: 0; }
 </style>
 </head>
 <body>
@@ -40,6 +42,22 @@
     <div id="matchHint"></div>
     <label for="project">List (optional)</label>
     <select id="project"><option value="">Default</option></select>
+    <div class="row2">
+      <div>
+        <label for="due">Due date</label>
+        <input id="due" type="date" />
+      </div>
+      <div>
+        <label for="priority">Priority</label>
+        <select id="priority">
+          <option value="none">No priority</option>
+          <option value="normal" selected>Normal</option>
+          <option value="urgent">Urgent</option>
+        </select>
+      </div>
+    </div>
+    <label for="assignee">Assign to</label>
+    <select id="assignee"><option value="">Me</option></select>
     <label for="title">Title</label>
     <textarea id="title" rows="2"></textarea>
     <label for="notes">Notes</label>

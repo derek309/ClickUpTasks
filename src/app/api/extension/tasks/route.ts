@@ -42,17 +42,23 @@ export async function POST(req: NextRequest) {
   }
 
   const description = typeof body.description === "string" ? body.description : "";
-  const due = typeof body.due === "string" ? body.due : null;
+  const due = typeof body.due === "string" && body.due ? body.due : null;
   const link = typeof body.link === "string" && body.link.trim() ? body.link.trim() : null;
   const attachments = link ? [{ id: "at_" + randomUUID(), name: "Gmail message", kind: "link", size: "", url: link }] : [];
+  // "conversation" is auto-assigned only (see isManuallyAssignable in
+  // src/lib/data.ts) — reject it here rather than silently downgrading it,
+  // same spirit as the MCP tool's create_task excluding it from its enum.
+  const ALLOWED_PRIORITIES = new Set(["none", "normal", "urgent"]);
+  const priority = typeof body.priority === "string" && ALLOWED_PRIORITIES.has(body.priority) ? body.priority : "normal";
 
   const id = "t_" + randomUUID();
   const { error } = await supabaseAdmin.from("tasks").insert({
     id, project_id: projectId, client_id: clientId, title, description,
-    status: "todo", priority: "normal",
-    // Self-assign — unlike the MCP tool's "unassigned, creating on someone
-    // else's behalf" default, this route IS the person (their own token).
-    assignee_id: caller.memberId,
+    status: "todo", priority,
+    // Self-assign by default — unlike the MCP tool's "unassigned, creating
+    // on someone else's behalf" default, this route IS the person (their
+    // own token) — but let them explicitly hand it to a teammate instead.
+    assignee_id: typeof body.assignee_id === "string" && body.assignee_id ? body.assignee_id : caller.memberId,
     contact_id: clientId.startsWith("cl_") ? clientId.slice(3) : null,
     due, attachments,
   });
