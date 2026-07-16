@@ -11,6 +11,8 @@
   textarea { resize: vertical; min-height: 50px; }
   button { width: 100%; margin-top: 12px; background: #1B3A5C; color: #fff; border: none; border-radius: 6px; padding: 9px; font-size: 13px; font-weight: 600; cursor: pointer; }
   button:disabled { opacity: 0.5; cursor: default; }
+  #enrich { margin-top: 8px; background: #fff; color: #E87722; border: 1px solid #E87722; }
+  #matchHint { font-size: 11px; margin-top: 3px; color: #64748b; }
   #status { font-size: 12px; margin-top: 8px; }
   .ok { color: #16a34a; }
   .err { color: #dc2626; }
@@ -23,10 +25,14 @@
   <div id="form">
     <label for="client">Client</label>
     <select id="client"><option value="">Loading…</option></select>
+    <div id="matchHint"></div>
+    <label for="project">List (optional)</label>
+    <select id="project"><option value="">Default</option></select>
     <label for="title">Title</label>
     <input id="title" type="text" />
     <label for="notes">Notes</label>
     <textarea id="notes"></textarea>
+    <button id="enrich" type="button">✨ Enrich with AI</button>
     <button id="create">Create Task</button>
     <div id="status"></div>
   </div>

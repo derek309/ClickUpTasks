@@ -21,13 +21,24 @@ export async function POST(req: NextRequest) {
   // that member can't see.
   if (!(await isClientVisible(caller, clientId))) return NextResponse.json({ error: "Unknown or inaccessible client." }, { status: 403 });
 
-  let projectId: string | undefined = (
-    await supabaseAdmin.from("projects").select("id").eq("client_id", clientId).limit(1).maybeSingle()
-  ).data?.id;
-  if (!projectId) {
-    projectId = "p_" + randomUUID();
-    const { error: projErr } = await supabaseAdmin.from("projects").insert({ id: projectId, client_id: clientId, name: "Tasks", description: "" });
-    if (projErr) return NextResponse.json({ error: projErr.message }, { status: 400 });
+  const requestedProjectId = typeof body.project_id === "string" && body.project_id.trim() ? body.project_id.trim() : null;
+  let projectId: string | undefined;
+  if (requestedProjectId) {
+    // Caller picked a specific list — confirm it actually belongs to this
+    // client so a token can't be used to target an arbitrary project under
+    // a different (possibly invisible-to-them) client.
+    const { data: requested } = await supabaseAdmin.from("projects").select("id").eq("id", requestedProjectId).eq("client_id", clientId).maybeSingle();
+    if (!requested) return NextResponse.json({ error: "That project doesn't belong to this client." }, { status: 400 });
+    projectId = requested.id;
+  } else {
+    projectId = (
+      await supabaseAdmin.from("projects").select("id").eq("client_id", clientId).limit(1).maybeSingle()
+    ).data?.id;
+    if (!projectId) {
+      projectId = "p_" + randomUUID();
+      const { error: projErr } = await supabaseAdmin.from("projects").insert({ id: projectId, client_id: clientId, name: "Tasks", description: "" });
+      if (projErr) return NextResponse.json({ error: projErr.message }, { status: 400 });
+    }
   }
 
   const description = typeof body.description === "string" ? body.description : "";

@@ -3,12 +3,17 @@ const API_BASE = "https://clickuptasks.vercel.app";
 const formEl = document.getElementById("form");
 const needsTokenEl = document.getElementById("needsToken");
 const clientSel = document.getElementById("client");
+const matchHintEl = document.getElementById("matchHint");
+const projectSel = document.getElementById("project");
 const titleInput = document.getElementById("title");
 const notesInput = document.getElementById("notes");
 const statusEl = document.getElementById("status");
 const createBtn = document.getElementById("create");
+const enrichBtn = document.getElementById("enrich");
 
 let permalink = null;
+let senderName = null;
+let senderEmail = null;
 
 document.getElementById("openOptions").addEventListener("click", (e) => {
   e.preventDefault();
@@ -50,6 +55,28 @@ async function loadClients(token) {
   return clients;
 }
 
+async function loadProjectsFor(clientId) {
+  projectSel.innerHTML = "";
+  const blankOpt = document.createElement("option");
+  blankOpt.value = "";
+  blankOpt.textContent = "Default";
+  projectSel.appendChild(blankOpt);
+  if (!clientId) return;
+  const token = await getToken();
+  if (!token) return;
+  try {
+    const { projects } = await apiFetch(`/api/extension/projects?client_id=${encodeURIComponent(clientId)}`, token);
+    for (const p of projects) {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = p.name;
+      projectSel.appendChild(opt);
+    }
+  } catch { /* leave just "Default" — task creation still works via the fallback */ }
+}
+
+clientSel.addEventListener("change", () => loadProjectsFor(clientSel.value));
+
 async function init() {
   const token = await getToken();
   if (!token) {
@@ -74,14 +101,22 @@ async function init() {
 
   if (email) {
     titleInput.value = email.subject || "";
-    const fromLine = email.senderName || email.senderEmail ? `From: ${email.senderName || ""}${email.senderEmail ? ` <${email.senderEmail}>` : ""}` : "";
+    senderName = email.senderName || null;
+    senderEmail = email.senderEmail || null;
+    const fromLine = senderName || senderEmail ? `From: ${senderName || ""}${senderEmail ? ` <${senderEmail}>` : ""}` : "";
     notesInput.value = [fromLine, email.snippet || ""].filter(Boolean).join("\n\n");
     permalink = email.permalink || null;
 
-    if (email.senderEmail) {
+    if (senderEmail) {
       try {
-        const { match } = await apiFetch(`/api/extension/match-client?email=${encodeURIComponent(email.senderEmail)}`, token);
-        if (match) clientSel.value = match.clientId;
+        const { match } = await apiFetch(`/api/extension/match-client?email=${encodeURIComponent(senderEmail)}`, token);
+        if (match) {
+          clientSel.value = match.clientId;
+          matchHintEl.textContent = match.matchType === "domain"
+            ? `Auto-selected via company domain — please verify`
+            : `Auto-selected — matched sender's email`;
+          await loadProjectsFor(match.clientId);
+        }
       } catch { /* no match — leave the dropdown unselected */ }
     }
   } else {
@@ -93,6 +128,28 @@ async function init() {
     statusEl.className = "";
   }
 }
+
+enrichBtn.addEventListener("click", async () => {
+  const token = await getToken();
+  if (!token) return;
+  enrichBtn.disabled = true;
+  enrichBtn.textContent = "Enriching…";
+  try {
+    const { title, description } = await apiFetch("/api/extension/enrich", token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subject: titleInput.value, senderName, senderEmail, body: notesInput.value }),
+    });
+    titleInput.value = title;
+    notesInput.value = description;
+  } catch (e) {
+    statusEl.textContent = e instanceof Error ? e.message : "AI enrichment failed.";
+    statusEl.className = "err";
+  } finally {
+    enrichBtn.disabled = false;
+    enrichBtn.textContent = "✨ Enrich with AI";
+  }
+});
 
 createBtn.addEventListener("click", async () => {
   const token = await getToken();
@@ -111,7 +168,7 @@ createBtn.addEventListener("click", async () => {
     await apiFetch("/api/extension/tasks", token, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: clientId, title, description: notesInput.value.trim(), link: permalink }),
+      body: JSON.stringify({ client_id: clientId, project_id: projectSel.value || undefined, title, description: notesInput.value.trim(), link: permalink }),
     });
     statusEl.textContent = "Task created.";
     statusEl.className = "ok";

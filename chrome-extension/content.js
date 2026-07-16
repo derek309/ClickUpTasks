@@ -42,10 +42,13 @@ function scrapeSender() {
   return { name: null, email: null };
 }
 
+// Capped at 2000 chars, not a short preview snippet — this doubles as the
+// input for the "Enrich with AI" button, which needs real content to work
+// with, not just a couple hundred characters.
 function scrapeSnippet() {
   const known = document.querySelectorAll(".a3s.aiL");
   const lastKnown = known[known.length - 1];
-  if (lastKnown?.textContent?.trim()) return lastKnown.textContent.trim().slice(0, 300);
+  if (lastKnown?.textContent?.trim()) return lastKnown.textContent.trim().slice(0, 2000);
   return null;
 }
 
