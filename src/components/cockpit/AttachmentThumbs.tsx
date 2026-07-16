@@ -22,6 +22,8 @@ export function AttachmentThumbs({ items, onRemove, onOpen }: {
           <FileBadge kind={a.kind} />
           {onOpen && a.path ? (
             <button onClick={() => onOpen(a.path!)} className="max-w-[140px] truncate text-[13px] text-accent hover:underline">{a.name}</button>
+          ) : a.url ? (
+            <a href={a.url} target="_blank" rel="noopener noreferrer" className="max-w-[140px] truncate text-[13px] text-accent hover:underline">{a.name}</a>
           ) : (
             <span className="max-w-[140px] truncate text-[13px]">{a.name}</span>
           )}

@@ -109,6 +109,30 @@ export function renderMentions(body: string) {
   return parts.map((p, i) => { const isMention = users.some((u) => "@" + u.name === p); return isMention ? (<span key={i} className="rounded bg-accent-soft px-1 font-medium text-accent">{p}</span>) : <span key={i}>{p}</span>; });
 }
 
+const URL_RE = /(https?:\/\/[^\s<>"']+)/g;
+// Sentence-ending punctuation (or a closing paren from "(see https://x.com)")
+// commonly gets swept into the match — strip it back off the link itself and
+// render it as plain trailing text instead.
+const URL_TRAILING_PUNCT_RE = /[).,;:!?\]}'"]+$/;
+
+// Plain URLs typed into a comment/message/note body — unlike a task
+// description (a TipTap editor with autolink built in) — were rendered as
+// inert text with no way to click through. Splits on URLs first, then runs
+// the existing mention-highlighting over whatever's left.
+export function renderRichText(body: string) {
+  return body.split(URL_RE).map((part, i) => {
+    if (i % 2 === 0) return <span key={i}>{renderMentions(part)}</span>;
+    const trailing = part.match(URL_TRAILING_PUNCT_RE)?.[0] ?? "";
+    const url = trailing ? part.slice(0, -trailing.length) : part;
+    return (
+      <span key={i}>
+        <a href={url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">{url}</a>
+        {trailing}
+      </span>
+    );
+  });
+}
+
 // Meeting transcripts, long emails, and long comments would otherwise push
 // everything else off-screen — collapse past this many words behind a "Show
 // more" toggle. A plain clickable span, not a <button>, so this still works
@@ -124,7 +148,7 @@ export function CollapsibleText({ text, className }: { text: string; className?:
   // instead of forcing the whole feed to scroll horizontally.
   return (
     <div className={`break-words ${className ?? ""}`}>
-      {renderMentions(shown)}
+      {renderRichText(shown)}
       {isLong && (
         <span role="button" tabIndex={0} onClick={toggle} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(e); } }}
           className="mt-1 block cursor-pointer text-[13px] font-medium text-accent hover:underline">
