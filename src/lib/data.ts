@@ -116,6 +116,11 @@ export interface Client {
    * /api/ghl/message. Optional (unlike assignedTo) so existing clientsSeed
    * literals don't need editing; treat as `?? []` everywhere it's read. */
   canMessage?: string[];
+  /** A personal "check in on this again" reminder date, independent of any
+   * task's due date — lets a client stay a real urgency signal (sidebar
+   * sort, My Work) even when none of its tasks carry a due date. Plain ISO
+   * string, matching tasks.due's exact type/comparison semantics. */
+  followUpAt?: string | null;
 }
 
 /** A quick-access link on a client's page (live site, WP admin, etc.), stored
@@ -285,6 +290,9 @@ export interface Project {
    * "My Work" tab's assigned-or-following filter; not an RLS/visibility
    * change (a project's own client-level following already covers that). */
   assignedTo?: string[];
+  /** Same concept as Client.followUpAt, scoped to just this project — kept
+   * fully independent (no rollup into the parent client's urgency). */
+  followUpAt?: string | null;
 }
 
 export interface Label {

@@ -8,6 +8,7 @@ import {
   userById,
   formatDue,
   advanceDue,
+  isOverdue,
   timeAgo,
   htmlToText,
   TODAY,
@@ -60,7 +61,7 @@ import AddClientModal from "./AddClientModal";
 import { I, Avatar, SideItem, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFromName, LIST_COLUMNS, type FilterState, type SortBy, type Toast } from "./cockpit/ui";
 import { ConfirmModal, PromptModal, LinkFormModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
 import { CommandK } from "./cockpit/CommandK";
-import { GroupedList } from "./cockpit/GroupedList";
+import { GroupedList, InlineDue } from "./cockpit/GroupedList";
 import { TaskDrawer } from "./cockpit/TaskDrawer";
 import { QuickLinksBar } from "./cockpit/ClientLinks";
 import { ClientJournal } from "./cockpit/ClientJournal";
@@ -255,6 +256,24 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!p) return;
     const current = p.assignedTo ?? [];
     const np = { ...p, assignedTo: current.includes(memberId) ? current.filter((id) => id !== memberId) : [...current, memberId] };
+    setProjects((ps) => ps.map((x) => (x.id === projectId ? np : x)));
+    upsertProject(np);
+  };
+  // A personal "check on this again" reminder date, independent of any
+  // task's due date — see clientUrgencyKey/projectUrgencyKey, which treat
+  // this as one more urgency candidate alongside open task due dates.
+  const setClientFollowUp = (clientId: string, date: string | null) => {
+    const c = clientById(clientId);
+    if (!c) return;
+    const nc = { ...c, followUpAt: date };
+    setClients((cs) => cs.map((x) => (x.id === clientId ? nc : x)));
+    markOwnClientWrite(nc.id);
+    upsertClient(nc);
+  };
+  const setProjectFollowUp = (projectId: string, date: string | null) => {
+    const p = projectById(projectId);
+    if (!p) return;
+    const np = { ...p, followUpAt: date };
     setProjects((ps) => ps.map((x) => (x.id === projectId ? np : x)));
     upsertProject(np);
   };
@@ -830,26 +849,45 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   function clientUrgencyKey(clientId: string, forAssignee?: string): { tier: number; due: string; priorityRank: number } {
     if (hasOpenConversationTask(clientId)) return { tier: 0, due: "", priorityRank: 0 };
     const open = scopedTasks.filter((t) => t.clientId === clientId && t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
-    if (open.length === 0) return { tier: 5, due: "", priorityRank: 0 };
-    const withDue = open.filter((t) => t.due);
-    if (withDue.length === 0) return { tier: 4, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
-    const soonest = withDue.reduce((a, b) => (b.due! < a.due! ? b : a)).due!;
-    const atSoonest = withDue.filter((t) => t.due === soonest);
+    // Follow-up date is one more urgency candidate alongside task due dates —
+    // "whichever is soonest wins." Deliberately does NOT also scan this
+    // client's projects' own follow-up dates (unlike tasks, which already
+    // roll up from project to client automatically via t.clientId) — kept
+    // independent per client/project for now; add a rollup here later if a
+    // project-only follow-up date turns out to need to surface the client too.
+    const followUp = clientById(clientId)?.followUpAt;
+    const candidates: { date: string; priorityRank: number }[] = [
+      ...open.filter((t) => t.due).map((t) => ({ date: t.due!, priorityRank: PRIORITY_META[t.priority].rank })),
+      ...(followUp ? [{ date: followUp, priorityRank: 0 }] : []),
+    ];
+    if (candidates.length === 0) {
+      if (open.length === 0) return { tier: 5, due: "", priorityRank: 0 };
+      return { tier: 4, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
+    }
+    const soonest = candidates.reduce((a, b) => (b.date < a.date ? b : a)).date;
+    const atSoonest = candidates.filter((c) => c.date === soonest);
     const tier = soonest < TODAY ? 1 : soonest === TODAY ? 2 : 3;
-    return { tier, due: soonest, priorityRank: Math.max(...atSoonest.map((t) => PRIORITY_META[t.priority].rank)) };
+    return { tier, due: soonest, priorityRank: Math.max(...atSoonest.map((c) => c.priorityRank)) };
   }
-  // Same tiering as clientUrgencyKey, scoped to one project's tasks instead
-  // of a whole client's. No tier-0 "New message" boost — that's driven by a
-  // client-level Conversation task, not a project concept.
+  // Same tiering as clientUrgencyKey, scoped to one project's tasks (+ its
+  // own followUpAt) instead of a whole client's. No tier-0 "New message"
+  // boost — that's driven by a client-level Conversation task, not a
+  // project concept.
   function projectUrgencyKey(projectId: string, forAssignee?: string): { tier: number; due: string; priorityRank: number } {
     const open = scopedTasks.filter((t) => t.projectId === projectId && t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
-    if (open.length === 0) return { tier: 5, due: "", priorityRank: 0 };
-    const withDue = open.filter((t) => t.due);
-    if (withDue.length === 0) return { tier: 4, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
-    const soonest = withDue.reduce((a, b) => (b.due! < a.due! ? b : a)).due!;
-    const atSoonest = withDue.filter((t) => t.due === soonest);
+    const followUp = projectById(projectId)?.followUpAt;
+    const candidates: { date: string; priorityRank: number }[] = [
+      ...open.filter((t) => t.due).map((t) => ({ date: t.due!, priorityRank: PRIORITY_META[t.priority].rank })),
+      ...(followUp ? [{ date: followUp, priorityRank: 0 }] : []),
+    ];
+    if (candidates.length === 0) {
+      if (open.length === 0) return { tier: 5, due: "", priorityRank: 0 };
+      return { tier: 4, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
+    }
+    const soonest = candidates.reduce((a, b) => (b.date < a.date ? b : a)).date;
+    const atSoonest = candidates.filter((c) => c.date === soonest);
     const tier = soonest < TODAY ? 1 : soonest === TODAY ? 2 : 3;
-    return { tier, due: soonest, priorityRank: Math.max(...atSoonest.map((t) => PRIORITY_META[t.priority].rank)) };
+    return { tier, due: soonest, priorityRank: Math.max(...atSoonest.map((c) => c.priorityRank)) };
   }
   const projectTaskCount = (projectId: string) => scopedTasks.filter((t) => t.projectId === projectId && t.status !== "done").length;
   // Same "Overdue first" urgency ordering the Clients section gets when
@@ -2003,6 +2041,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-[13px] font-medium ${following ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>
                     {following ? <><I.check /> Following</> : <><I.plus /> Follow</>}
                   </button>
+                );
+              })()}
+              {(() => {
+                const scopedProject = activeProject ? projectById(activeProject) : null;
+                const entity = scopedProject ?? clientById(activeClient)!;
+                const setFollowUp = (d: string | null) => (scopedProject ? setProjectFollowUp(scopedProject.id, d) : setClientFollowUp(activeClient, d));
+                return (
+                  <div className="inline-flex items-center gap-1 rounded-md border px-2 py-1.5 text-[13px] text-muted">
+                    <I.calendar /> Follow up:
+                    <InlineDue value={entity.followUpAt ?? null} overdue={isOverdue(entity.followUpAt ?? null)} onChange={setFollowUp} />
+                  </div>
                 );
               })()}
               {ghlContactUrlFor(activeClient) && (
