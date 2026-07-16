@@ -33,9 +33,9 @@
   .shot-thumb { position: relative; width: 92px; height: 70px; }
   .shot-thumb img { width: 100%; height: 100%; object-fit: cover; border: 1px solid #d0dce8; border-radius: 6px; display: block; }
   .shot-thumb .shot-remove { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; margin: 0; padding: 0; border-radius: 50%; background: rgba(27,58,92,0.9); font-size: 10px; line-height: 18px; }
-  #pasteZone { margin-top: 8px; padding: 12px; border: 2px dashed #d0dce8; border-radius: 8px; text-align: center; font-size: 12px; color: #64748b; cursor: text; }
+  #pasteZone { margin-top: 10px; padding: 8px; border: 1px dashed #d0dce8; border-radius: 6px; text-align: center; font-size: 11px; color: #64748b; cursor: text; }
   #pasteZone:focus { outline: none; border-color: #E87722; color: #1B3A5C; }
-  #pasteZone .hint { display: block; margin-top: 3px; font-size: 11px; color: #94a3b8; }
+  #pasteZone .hint { display: block; margin-top: 2px; font-size: 10px; color: #94a3b8; }
   .mode-toggle { display: flex; gap: 6px; margin-top: 8px; }
   .mode-btn { flex: 1; padding: 6px; border: 1px solid #d0dce8; border-radius: 6px; background: #fff; color: #1B3A5C; font-size: 12px; font-weight: 600; cursor: pointer; text-align: center; }
   .mode-btn.active { background: #1B3A5C; color: #fff; }
@@ -50,12 +50,6 @@
       <div id="clientResults"></div>
     </div>
     <div id="matchHint"></div>
-
-    <div id="pasteZone" tabindex="0">
-      📋 Click here and press ⌘V (Mac) / Ctrl+V (Windows) to add a screenshot
-      <span class="hint">Paste as many as you need, one at a time. Tip: ⌘⌃⇧4 on Mac copies a screenshot straight to your clipboard — no file needed. For a full-page capture, use GoFullPage, then paste its image here.</span>
-    </div>
-    <div id="screenshotGallery"></div>
 
     <div class="mode-toggle">
       <button id="modeNew" type="button" class="mode-btn active">New task</button>
@@ -95,6 +89,13 @@
     <textarea id="title" rows="2"></textarea>
     <label for="notes">Notes</label>
     <textarea id="notes"></textarea>
+
+    <div id="pasteZone" tabindex="0">
+      📋 Click, then ⌘V / Ctrl+V to add a screenshot
+      <span class="hint">Paste as many as you need. ⌘⌃⇧4 on Mac copies straight to your clipboard. For a full page, use GoFullPage then paste its image here.</span>
+    </div>
+    <div id="screenshotGallery"></div>
+
     <button id="enrich" type="button">✨ Enrich with AI</button>
     <button id="create">Create Task</button>
     <div id="status"></div>
