@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, formatDue, htmlToText, clientStatusMeta,
-  STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions,
+  STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseEventDiff,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, FileBadge, newId } from "./ui";
@@ -13,21 +13,6 @@ import { InlineAssignee, InlineDue } from "./GroupedList";
 import { RichTextEditor } from "./RichTextEditor";
 import { claudeCodeUrl } from "@/lib/claudeLink";
 
-// Parses describeFieldChange's (Cockpit.tsx) event strings into a structured
-// before/after pair for the Activity feed's diff cards, without a schema
-// change — events are still stored as plain text in task.comments, this just
-// recognizes the handful of phrasings that function produces. Anything that
-// doesn't match (e.g. future event copy) falls back to the old plain line.
-function parseEventDiff(body: string): { field: string; from: string | null; to: string } | null {
-  let m: RegExpExecArray | null;
-  if ((m = /^changed (.+?) from (.+) to (.+)$/.exec(body))) return { field: m[1], from: m[2], to: m[3] };
-  if ((m = /^reassigned from (.+) to (.+)$/.exec(body))) return { field: "assignee", from: m[1], to: m[2] };
-  if ((m = /^assigned to (.+)$/.exec(body))) return { field: "assignee", from: null, to: m[1] };
-  if ((m = /^unassigned \(was (.+)\)$/.exec(body))) return { field: "assignee", from: m[1], to: "Unassigned" };
-  if ((m = /^set due date to (.+)$/.exec(body))) return { field: "due date", from: null, to: m[1] };
-  if ((m = /^cleared the due date \(was (.+)\)$/.exec(body))) return { field: "due date", from: m[1], to: "No date" };
-  return null;
-}
 function EventDiffCard({ diff }: { diff: { field: string; from: string | null; to: string } }) {
   return (
     <div className="mt-1 inline-block rounded-lg border bg-background px-2.5 py-1.5">

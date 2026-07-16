@@ -110,6 +110,12 @@ export interface Client {
    * the AI tab, never automatically, so opening a task never spends money. */
   aiSummary?: string | null;
   aiSummaryAt?: string | null;
+  /** Roster ids of VAs explicitly granted permission to send email/SMS as
+   * this client (on top of profiles.can_send_messages, which must also be
+   * true). NOT a visibility grant, unlike assignedTo — purely gates
+   * /api/ghl/message. Optional (unlike assignedTo) so existing clientsSeed
+   * literals don't need editing; treat as `?? []` everywhere it's read. */
+  canMessage?: string[];
 }
 
 /** A quick-access link on a client's page (live site, WP admin, etc.), stored
@@ -367,6 +373,27 @@ export const STATUS_META: Record<TaskStatus, { label: string; dot: string; chip:
   done: { label: "Done", dot: "#22c55e", chip: "#f0fdf4" },
 };
 export const STATUS_ORDER: TaskStatus[] = ["todo", "in_progress", "review", "done"];
+
+// Parses describeFieldChange's (Cockpit.tsx) event strings into a structured
+// before/after pair — used by TaskDrawer's Activity diff cards and by the
+// Client Journal feed's completion detection, without a schema change:
+// events are still stored as plain text in task.comments, this just
+// recognizes the handful of phrasings that function produces. Anything that
+// doesn't match (e.g. future event copy) falls back to null.
+export function parseEventDiff(body: string): { field: string; from: string | null; to: string } | null {
+  let m: RegExpExecArray | null;
+  if ((m = /^changed (.+?) from (.+) to (.+)$/.exec(body))) return { field: m[1], from: m[2], to: m[3] };
+  if ((m = /^reassigned from (.+) to (.+)$/.exec(body))) return { field: "assignee", from: m[1], to: m[2] };
+  if ((m = /^assigned to (.+)$/.exec(body))) return { field: "assignee", from: null, to: m[1] };
+  if ((m = /^unassigned \(was (.+)\)$/.exec(body))) return { field: "assignee", from: m[1], to: "Unassigned" };
+  if ((m = /^set due date to (.+)$/.exec(body))) return { field: "due date", from: null, to: m[1] };
+  if ((m = /^cleared the due date \(was (.+)\)$/.exec(body))) return { field: "due date", from: m[1], to: "No date" };
+  return null;
+}
+export function isCompletionEvent(body: string): boolean {
+  const d = parseEventDiff(body);
+  return d?.field === "status" && d.to === STATUS_META.done.label;
+}
 
 // Conversation is auto-created only (an open, unanswered GHL inbound
 // message) — it's excluded from the manual priority pickers unless it's

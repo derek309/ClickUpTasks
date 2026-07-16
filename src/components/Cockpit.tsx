@@ -232,6 +232,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     markOwnClientWrite(nc.id);
     upsertClient(nc);
   };
+  // Per-client-per-VA send permission (layered on top of the global
+  // profiles.can_send_messages) — NOT a visibility grant, purely gates
+  // /api/ghl/message server-side. Admin-only UI (clients_write RLS enforces
+  // that server-side too — a VA calling this directly would just get a
+  // silently-ignored write).
+  const toggleClientMessagePermission = (clientId: string, memberId: string) => {
+    const c = clientById(clientId);
+    if (!c) return;
+    const current = c.canMessage ?? [];
+    const nc = { ...c, canMessage: current.includes(memberId) ? current.filter((id) => id !== memberId) : [...current, memberId] };
+    setClients((cs) => cs.map((x) => (x.id === clientId ? nc : x)));
+    markOwnClientWrite(nc.id);
+    upsertClient(nc);
+  };
   // "Follow" a project directly — same idea as toggleClientAssignment, just
   // scoped to one project instead of the whole client. App-level only (no
   // RLS change, no realtime subscription on `projects` to echo-suppress).
