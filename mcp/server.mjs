@@ -338,7 +338,7 @@ server.tool("list_projects",
     return { content: [{ type: "text", text: rows.map((p) => `${p.name}  [${p.id}]  · ${clientNames[p.client_id] || p.client_id}`).join("\n") }] };
   });
 
-const NOTE_TYPES = ["meeting", "content", "contact", "deliverable", "note"];
+const NOTE_TYPES = ["meeting", "decision", "note"];
 
 server.tool("list_notes",
   "Read the Knowledge chat feed for a client or a specific project within it (get ids from list_clients/list_projects). This is the team's running chat — meeting notes, decisions, FYIs — not task comments (see get_task for those).",

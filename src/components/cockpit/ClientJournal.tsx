@@ -13,7 +13,7 @@
 // "what kind of entry is this" decision rather than switching views first.
 import { useEffect, useRef, useState } from "react";
 import {
-  users, userById, timeAgo, isCompletionEvent, NOTE_TYPE_META, NOTE_TYPE_ORDER,
+  users, userById, timeAgo, isCompletionEvent, NOTE_TYPE_META, NOTE_TYPE_ORDER, MANUAL_NOTE_TYPES, noteTypeMeta,
   type ClientNote, type NoteType, type Task, type Comment, type Message, type MessageChannel, type Me, type Attachment,
 } from "@/lib/data";
 import { I, Avatar, CollapsibleText } from "./ui";
@@ -200,7 +200,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
               if (item.kind === "note") {
                 const n = item.note;
                 const u = userById(n.authorId);
-                const m = NOTE_TYPE_META[n.type];
+                const m = noteTypeMeta(n.type);
                 return (
                   <div key={n.id} className="group/note flex gap-2.5">
                     <Avatar id={n.authorId} size={28} />
@@ -302,7 +302,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
             <div className="flex min-h-0 flex-1 flex-col p-3">
               <select value={draftType} onChange={(e) => setDraftType(e.target.value as NoteType)}
                 className="mb-2 shrink-0 rounded-md border bg-background px-1.5 py-1.5 text-[13px] outline-none">
-                {NOTE_TYPE_ORDER.map((t) => (<option key={t} value={t}>{NOTE_TYPE_META[t].label}</option>))}
+                {MANUAL_NOTE_TYPES.map((t) => (<option key={t} value={t}>{NOTE_TYPE_META[t].label}</option>))}
               </select>
               {(pendingAtts.length > 0 || uploadingAtt) && (
                 <div className="mb-2 flex shrink-0 flex-wrap items-center gap-1.5">

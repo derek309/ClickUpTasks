@@ -140,16 +140,32 @@ export const LINK_COLORS = [
 ];
 export const randomLinkColor = () => LINK_COLORS[Math.floor(Math.random() * LINK_COLORS.length)];
 
-export type NoteType = "meeting" | "content" | "contact" | "deliverable" | "note" | "ai_summary";
+// Streamlined from an earlier 6-type set (meeting/content/contact/
+// deliverable/note/ai_summary) — with the Journal now auto-capturing
+// messages and task completions, the only real gap for a manually-written
+// note is "things nothing else tracks," which these three cover without
+// the ambiguity of the old set (nobody was ever sure whether something was
+// "Content" or "Deliverable"). ai_summary stays as a system-only type (see
+// MANUAL_NOTE_TYPES below), still written automatically by regenerateAiSummary.
+export type NoteType = "meeting" | "decision" | "note" | "ai_summary";
 export const NOTE_TYPE_META: Record<NoteType, { label: string; color: string }> = {
   meeting: { label: "Meeting", color: "#3b82f6" },
-  content: { label: "Content", color: "#ec4899" },
-  contact: { label: "Contact", color: "#0ea5e9" },
-  deliverable: { label: "Deliverable", color: "#22c55e" },
+  decision: { label: "Decision", color: "#f59e0b" },
   note: { label: "Note", color: "#94a3b8" },
   ai_summary: { label: "AI Summary", color: "#8b5cf6" },
 };
-export const NOTE_TYPE_ORDER: NoteType[] = ["meeting", "content", "contact", "deliverable", "note", "ai_summary"];
+export const NOTE_TYPE_ORDER: NoteType[] = ["meeting", "decision", "note", "ai_summary"];
+// Types offered when composing a new note — excludes ai_summary, which is
+// only ever written by the AI-summary regenerate flow, not chosen by hand.
+export const MANUAL_NOTE_TYPES: NoteType[] = ["meeting", "decision", "note"];
+// Safe accessor for a note's display meta: historical notes tagged with a
+// now-retired type (content/contact/deliverable, from before this
+// streamline) fall back to Note's styling instead of crashing — no data
+// migration needed to retire old types, they just stop being offered going
+// forward and render as "Note" from here on.
+export function noteTypeMeta(type: string): { label: string; color: string } {
+  return NOTE_TYPE_META[type as NoteType] ?? NOTE_TYPE_META.note;
+}
 
 /** A freeform, typed log entry on a client — a shared wiki/log, not a task
  * comment thread. Lives in its own `client_notes` table so a VA can be
