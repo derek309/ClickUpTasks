@@ -267,6 +267,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       const j = await res.json();
       if (!res.ok) throw new Error(j.error ?? "AI summary failed.");
       setClients((cs) => cs.map((x) => (x.id === clientId ? { ...x, aiSummary: j.summary, aiSummaryAt: j.generatedAt } : x)));
+      // Log it into the Chat journal too, not just the AI tab's single
+      // overwritable field — this is what makes the journal an actual
+      // history instead of losing every prior summary on regenerate.
+      addNote(clientId, "ai_summary", j.summary);
     } catch (e) {
       pushToast(e instanceof Error ? e.message : "AI summary failed.");
     } finally {

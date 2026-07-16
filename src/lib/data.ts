@@ -134,15 +134,16 @@ export const LINK_COLORS = [
 ];
 export const randomLinkColor = () => LINK_COLORS[Math.floor(Math.random() * LINK_COLORS.length)];
 
-export type NoteType = "meeting" | "content" | "contact" | "deliverable" | "note";
+export type NoteType = "meeting" | "content" | "contact" | "deliverable" | "note" | "ai_summary";
 export const NOTE_TYPE_META: Record<NoteType, { label: string; color: string }> = {
   meeting: { label: "Meeting", color: "#3b82f6" },
   content: { label: "Content", color: "#ec4899" },
   contact: { label: "Contact", color: "#0ea5e9" },
   deliverable: { label: "Deliverable", color: "#22c55e" },
   note: { label: "Note", color: "#94a3b8" },
+  ai_summary: { label: "AI Summary", color: "#8b5cf6" },
 };
-export const NOTE_TYPE_ORDER: NoteType[] = ["meeting", "content", "contact", "deliverable", "note"];
+export const NOTE_TYPE_ORDER: NoteType[] = ["meeting", "content", "contact", "deliverable", "note", "ai_summary"];
 
 /** A freeform, typed log entry on a client — a shared wiki/log, not a task
  * comment thread. Lives in its own `client_notes` table so a VA can be

@@ -359,4 +359,35 @@ server.tool("add_note",
     return { content: [{ type: "text", text: `Posted to ${project_id ? "project" : "client"} feed.` }] };
   });
 
+server.tool("list_links",
+  "List a client's quick links — websites, Google Drive folders, anything URL-based the team keeps handy. Get client_id from list_clients.",
+  { client_id: z.string() },
+  async ({ client_id }) => {
+    await names();
+    if (!clientNames[client_id]) return { content: [{ type: "text", text: `No client ${client_id}.` }] };
+    const rows = await sb(`client_links?select=label,url,group_label&client_id=eq.${enc(client_id)}&order=position.asc`);
+    if (!rows.length) return { content: [{ type: "text", text: "No links yet." }] };
+    return { content: [{ type: "text", text: rows.map((l) => `${l.group_label ? `[${l.group_label}] ` : ""}${l.label}: ${l.url}`).join("\n") }] };
+  });
+
+server.tool("get_client_overview",
+  "One-shot orientation on a client: status, cached AI summary, recent journal notes, quick links (websites/Drive folders), and open task count. Use this before working on a client instead of piecing it together from list_clients + list_notes + list_links + list_client_tasks separately.",
+  { client_id: z.string() },
+  async ({ client_id }) => {
+    const [client] = await sb(`clients?select=name,status,ai_summary,ai_summary_at&id=eq.${enc(client_id)}`);
+    if (!client) return { content: [{ type: "text", text: `No client ${client_id}.` }] };
+    const [notes, links, openTasks] = await Promise.all([
+      sb(`client_notes?select=type,body,created_at&client_id=eq.${enc(client_id)}&project_id=is.null&order=created_at.desc&limit=8`),
+      sb(`client_links?select=label,url,group_label&client_id=eq.${enc(client_id)}&order=position.asc`),
+      sb(`tasks?select=id&client_id=eq.${enc(client_id)}&status=neq.done`),
+    ]);
+    const text = [
+      `${client.name} — status: ${client.status ?? "unknown"} · ${openTasks.length} open task(s)`,
+      client.ai_summary ? `\nAI summary (as of ${client.ai_summary_at || "?"}):\n${client.ai_summary}` : "",
+      links.length ? `\nLinks:\n${links.map((l) => `  - ${l.group_label ? `[${l.group_label}] ` : ""}${l.label}: ${l.url}`).join("\n")}` : "",
+      notes.length ? `\nRecent journal notes (newest first):\n${notes.map((n) => `  - [${n.type}] ${(n.body || "").slice(0, 300)} (${n.created_at})`).join("\n")}` : "",
+    ].filter(Boolean).join("\n");
+    return { content: [{ type: "text", text }] };
+  });
+
 await server.connect(new StdioServerTransport());
