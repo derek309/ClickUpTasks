@@ -8,6 +8,7 @@ const matchHintEl = document.getElementById("matchHint");
 const projectSel = document.getElementById("project");
 const dueInput = document.getElementById("due");
 const prioritySel = document.getElementById("priority");
+const assigneeSel = document.getElementById("assignee");
 const titleInput = document.getElementById("title");
 const notesInput = document.getElementById("notes");
 const statusEl = document.getElementById("status");
@@ -59,6 +60,26 @@ async function loadClients(token) {
   const { clients } = await apiFetch("/api/extension/clients", token);
   await chrome.storage.local.set({ clientsCache: clients, clientsCacheAt: Date.now() });
   return clients;
+}
+
+async function loadMembers(token) {
+  // Same 5-minute cache idiom as loadClients — the roster changes rarely.
+  const cached = await chrome.storage.local.get(["membersCache", "membersCacheAt"]);
+  const fresh = cached.membersCacheAt && Date.now() - cached.membersCacheAt < 5 * 60 * 1000;
+  const members = fresh && cached.membersCache ? cached.membersCache : (await apiFetch("/api/extension/members", token)).members;
+  if (!fresh) await chrome.storage.local.set({ membersCache: members, membersCacheAt: Date.now() });
+
+  assigneeSel.innerHTML = "";
+  const meOpt = document.createElement("option");
+  meOpt.value = "";
+  meOpt.textContent = "Me";
+  assigneeSel.appendChild(meOpt);
+  for (const m of members) {
+    const opt = document.createElement("option");
+    opt.value = m.id;
+    opt.textContent = `${m.name} ${m.role === "va" ? "(VA)" : "(Admin)"}`;
+    assigneeSel.appendChild(opt);
+  }
 }
 
 async function loadProjectsFor(clientId) {
@@ -156,8 +177,9 @@ async function init() {
   clientSearchInput.value = "";
   dueInput.value = "";
   prioritySel.value = "normal";
+  assigneeSel.value = "";
 
-  const [email, clients] = await Promise.all([getCurrentEmail(), loadClients(token).catch(() => [])]);
+  const [email, clients] = await Promise.all([getCurrentEmail(), loadClients(token).catch(() => []), loadMembers(token).catch(() => {})]);
   allClients = clients;
   clientSearchInput.placeholder = clients.length ? "Search by name, business, or contact…" : "No clients available";
   await loadProjectsFor("");
@@ -237,7 +259,7 @@ createBtn.addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         client_id: clientId, project_id: projectSel.value || undefined, title, description: notesInput.value.trim(), link: permalink,
-        due: dueInput.value || undefined, priority: prioritySel.value,
+        due: dueInput.value || undefined, priority: prioritySel.value, assignee_id: assigneeSel.value || undefined,
       }),
     });
     statusEl.textContent = "Task created.";
@@ -251,6 +273,7 @@ createBtn.addEventListener("click", async () => {
     projectSel.value = "";
     dueInput.value = "";
     prioritySel.value = "normal";
+    assigneeSel.value = "";
     matchHintEl.textContent = "";
   } catch (e) {
     statusEl.textContent = e instanceof Error ? e.message : "Failed to create task.";
