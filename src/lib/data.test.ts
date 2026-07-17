@@ -6,6 +6,7 @@ import {
   advanceDue,
   parseDaysOfMonth,
   daysBetween,
+  mostRecentMonday,
   timeAgo,
   initialsOf,
   setUsers,
@@ -116,6 +117,18 @@ describe("daysBetween", () => {
   });
   it("crosses a month boundary correctly", () => {
     expect(daysBetween("2026-07-31", "2026-08-02")).toBe(2);
+  });
+});
+
+describe("mostRecentMonday", () => {
+  it("returns the same date when given a Monday", () => {
+    expect(mostRecentMonday("2026-07-13")).toBe("2026-07-13"); // Jul 13 2026 is a Monday
+  });
+  it("returns the prior Monday for a mid-week date", () => {
+    expect(mostRecentMonday("2026-07-16")).toBe("2026-07-13"); // Thu -> Mon
+  });
+  it("returns the prior Monday for a Sunday", () => {
+    expect(mostRecentMonday("2026-07-19")).toBe("2026-07-13"); // Sun -> that week's Mon
   });
 });
 

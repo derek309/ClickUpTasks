@@ -15,6 +15,8 @@ import {
   TOMORROW,
   addDaysIso,
   daysBetween,
+  THIS_MONDAY,
+  NURTURE_CHECK_IN_DAYS,
   STATUS_META,
   STATUS_ORDER,
   isCompletionEvent,
@@ -284,6 +286,26 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const np = { ...p, followUpAt: date };
     setProjects((ps) => ps.map((x) => (x.id === projectId ? np : x)));
     upsertProject(np);
+  };
+  // Stamp reviewedAt = today, clearing this client/project from the Review
+  // tier until next Monday (weekly) or its next nurture cycle. See
+  // clientNeedsReview.
+  const setClientReviewed = (clientId: string) => {
+    const c = clientById(clientId);
+    if (!c) return;
+    const nc = { ...c, reviewedAt: TODAY };
+    setClients((cs) => cs.map((x) => (x.id === clientId ? nc : x)));
+    markOwnClientWrite(nc.id);
+    upsertClient(nc);
+    pushToast(`Reviewed ${c.name} — cleared until next check-in.`);
+  };
+  const setProjectReviewed = (projectId: string) => {
+    const p = projectById(projectId);
+    if (!p) return;
+    const np = { ...p, reviewedAt: TODAY };
+    setProjects((ps) => ps.map((x) => (x.id === projectId ? np : x)));
+    upsertProject(np);
+    pushToast(`Reviewed ${p.name}.`);
   };
   // Point a client at a synced GHL contact (or null to unlink). Used for
   // clients whose id isn't itself a contact id, so GHL features can't derive
@@ -856,14 +878,51 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   function hasOpenConversationTask(clientId: string): boolean {
     return scopedTasks.some((t) => t.clientId === clientId && t.status !== "done" && t.priority === "conversation");
   }
+  // The Review/Check-in tier (Derek + Justin, Jul 17): a client with open work
+  // but nothing actually dated silently sinks to the bottom and gets
+  // forgotten. This surfaces it at the very top instead — but resets, so it
+  // doesn't nag forever:
+  //  A) has open tasks, none dated (no due dates, no follow-up) AND not yet
+  //     reviewed since this Monday → weekly review.
+  //  B) a "nurture"-status client whose last review was >= NURTURE_CHECK_IN_DAYS
+  //     ago (or never) → monthly relationship check-in, even with zero tasks.
+  // Marking it reviewed (setClientReviewed) stamps reviewedAt=today, dropping
+  // it out until next Monday / next cycle. Conversation-task clients are
+  // excluded — they're already surfaced via the "New message" tier and are
+  // actively being worked, not forgotten.
+  function clientNeedsReview(clientId: string, forAssignee?: string): boolean {
+    const c = clientById(clientId);
+    if (!c) return false;
+    if (hasOpenConversationTask(clientId)) return false;
+    const open = scopedTasks.filter((t) => t.clientId === clientId && t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
+    const hasAnyDate = open.some((t) => t.due) || !!c.followUpAt;
+    const reviewedThisWeek = !!c.reviewedAt && c.reviewedAt >= THIS_MONDAY;
+    if (open.length > 0 && !hasAnyDate && !reviewedThisWeek) return true; // (A)
+    if (c.status === "nurture" && (!c.reviewedAt || daysBetween(c.reviewedAt, TODAY) >= NURTURE_CHECK_IN_DAYS)) return true; // (B)
+    return false;
+  }
+  // Projects have no status, so only condition (A) applies — no nurture cadence.
+  function projectNeedsReview(projectId: string, forAssignee?: string): boolean {
+    const p = projectById(projectId);
+    if (!p) return false;
+    const open = scopedTasks.filter((t) => t.projectId === projectId && t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
+    const hasAnyDate = open.some((t) => t.due) || !!p.followUpAt;
+    const reviewedThisWeek = !!p.reviewedAt && p.reviewedAt >= THIS_MONDAY;
+    return open.length > 0 && !hasAnyDate && !reviewedThisWeek;
+  }
+  // Tier scheme (lower = more urgent, sorts first):
+  //   0 Review · 1 New message · 2 Overdue · 3 Due today · 4 Due tomorrow ·
+  //   5 Upcoming · 6 No due date · 7 No open tasks
+  function tierForDate(soonest: string): number {
+    return soonest < TODAY ? 2 : soonest === TODAY ? 3 : soonest === TOMORROW ? 4 : 5;
+  }
   // forAssignee narrows "open tasks" to just that person's — used by the
-  // personal My Clients board, where a client's tier should reflect *my*
-  // tasks there, not a teammate's (a client can't land in "Overdue" here
-  // because of someone else's overdue task while my own task on it has no
-  // due date). Omitted entirely for the sidebar's "Overdue first" sort,
+  // personal My Work board, where a client's tier should reflect *my* tasks
+  // there, not a teammate's. Omitted for the sidebar's "Overdue first" sort,
   // which is intentionally client-wide across every assignee.
   function clientUrgencyKey(clientId: string, forAssignee?: string): { tier: number; due: string; priorityRank: number } {
-    if (hasOpenConversationTask(clientId)) return { tier: 0, due: "", priorityRank: 0 };
+    if (clientNeedsReview(clientId, forAssignee)) return { tier: 0, due: "", priorityRank: 0 };
+    if (hasOpenConversationTask(clientId)) return { tier: 1, due: "", priorityRank: 0 };
     const open = scopedTasks.filter((t) => t.clientId === clientId && t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
     // Follow-up date is one more urgency candidate alongside task due dates —
     // "whichever is soonest wins." Deliberately does NOT also scan this
@@ -877,19 +936,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       ...(followUp ? [{ date: followUp, priorityRank: 0 }] : []),
     ];
     if (candidates.length === 0) {
-      if (open.length === 0) return { tier: 5, due: "", priorityRank: 0 };
-      return { tier: 4, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
+      if (open.length === 0) return { tier: 7, due: "", priorityRank: 0 };
+      return { tier: 6, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
     }
     const soonest = candidates.reduce((a, b) => (b.date < a.date ? b : a)).date;
     const atSoonest = candidates.filter((c) => c.date === soonest);
-    const tier = soonest < TODAY ? 1 : soonest === TODAY ? 2 : 3;
-    return { tier, due: soonest, priorityRank: Math.max(...atSoonest.map((c) => c.priorityRank)) };
+    return { tier: tierForDate(soonest), due: soonest, priorityRank: Math.max(...atSoonest.map((c) => c.priorityRank)) };
   }
   // Same tiering as clientUrgencyKey, scoped to one project's tasks (+ its
-  // own followUpAt) instead of a whole client's. No tier-0 "New message"
-  // boost — that's driven by a client-level Conversation task, not a
-  // project concept.
+  // own followUpAt). No "New message" tier — that's a client-level Conversation
+  // concept, not a project one.
   function projectUrgencyKey(projectId: string, forAssignee?: string): { tier: number; due: string; priorityRank: number } {
+    if (projectNeedsReview(projectId, forAssignee)) return { tier: 0, due: "", priorityRank: 0 };
     const open = scopedTasks.filter((t) => t.projectId === projectId && t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
     const followUp = projectById(projectId)?.followUpAt;
     const candidates: { date: string; priorityRank: number }[] = [
@@ -897,13 +955,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       ...(followUp ? [{ date: followUp, priorityRank: 0 }] : []),
     ];
     if (candidates.length === 0) {
-      if (open.length === 0) return { tier: 5, due: "", priorityRank: 0 };
-      return { tier: 4, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
+      if (open.length === 0) return { tier: 7, due: "", priorityRank: 0 };
+      return { tier: 6, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
     }
     const soonest = candidates.reduce((a, b) => (b.date < a.date ? b : a)).date;
     const atSoonest = candidates.filter((c) => c.date === soonest);
-    const tier = soonest < TODAY ? 1 : soonest === TODAY ? 2 : 3;
-    return { tier, due: soonest, priorityRank: Math.max(...atSoonest.map((c) => c.priorityRank)) };
+    return { tier: tierForDate(soonest), due: soonest, priorityRank: Math.max(...atSoonest.map((c) => c.priorityRank)) };
   }
   const projectTaskCount = (projectId: string) => scopedTasks.filter((t) => t.projectId === projectId && t.status !== "done").length;
   // Same "Overdue first" urgency ordering the Clients section gets when
@@ -925,12 +982,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // a teammate.
   const myWorkGroups: WorkBoardGroup[] = (() => {
     const defs: [number, string, string][] = [
-      [0, "New message", "#8b5cf6"],
-      [1, "Overdue", "#ef4444"],
-      [2, "Due today", "#f59e0b"],
-      [3, "Upcoming", "#3b82f6"],
-      [4, "No due date", "#94a3b8"],
-      [5, "No open tasks", "#cbd5e1"],
+      [0, "Review", "#14b8a6"],
+      [1, "New message", "#8b5cf6"],
+      [2, "Overdue", "#ef4444"],
+      [3, "Due today", "#f59e0b"],
+      [4, "Due tomorrow", "#eab308"],
+      [5, "Upcoming", "#3b82f6"],
+      [6, "No due date", "#94a3b8"],
+      [7, "No open tasks", "#cbd5e1"],
     ];
     const clientKeys = assignedClientsFor(myWorkUser).map((c) => ({ kind: "client" as const, item: { kind: "client" as const, client: c }, name: c.name, k: clientUrgencyKey(c.id, myWorkUser) }));
     const projectKeys = assignedProjectsFor(myWorkUser).map((p) => ({ kind: "project" as const, item: { kind: "project" as const, project: p, clientName: clientById(p.clientId)?.name ?? "—" } as WorkItem, name: p.name, k: projectUrgencyKey(p.id, myWorkUser) }));
@@ -947,6 +1006,25 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       }))
       .filter((g) => g.items.length > 0);
   })();
+  // The Monday "set up your week" queue: my clients/projects currently in the
+  // Review tier, in the same order My Work shows them. Drives the header
+  // "Review next" button so you can click through them one at a time (the
+  // interaction Derek wanted — open each, decide, advance) instead of hunting.
+  const reviewQueue: { kind: "client" | "project"; id: string }[] = [
+    ...assignedClientsFor(me.id).filter((c) => clientNeedsReview(c.id, me.id)).map((c) => ({ kind: "client" as const, id: c.id })),
+    ...assignedProjectsFor(me.id).filter((p) => projectNeedsReview(p.id, me.id)).map((p) => ({ kind: "project" as const, id: p.id })),
+  ];
+  const goToNextReview = (afterClientId: string, afterProjectId: string | null) => {
+    const curIdx = reviewQueue.findIndex((r) => (afterProjectId ? r.kind === "project" && r.id === afterProjectId : r.kind === "client" && r.id === afterClientId));
+    // Wrap around so the last item's "next" loops back to the first still-
+    // pending one; nothing left → let the caller know via a toast.
+    const next = reviewQueue[(curIdx + 1) % reviewQueue.length] ?? reviewQueue[0];
+    if (!next) { pushToast("Nothing left to review — all caught up. 🎉"); return; }
+    if (next.kind === "project") { const pr = projectById(next.id); setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(pr?.clientId ?? "all"); setActiveProject(next.id); }
+    else { setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(next.id); setActiveProject(null); }
+    setClientTab("tasks");
+    setOpenTaskId(null);
+  };
   // Sidebar sections by client status, funnel order; Active Client has no
   // header (it's the main working set), the rest only show when non-empty.
   // A client whose stored status predates the funnel (e.g. the old
@@ -2096,6 +2174,40 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     <I.calendar />
                     <InlineDue value={entity.followUpAt ?? null} overdue={isOverdue(entity.followUpAt ?? null)} onChange={setFollowUp} />
                   </div>
+                );
+              })()}
+              {/* Client status, promoted from the sidebar-dot popover onto the
+                  main header (Derek, Jul 17). "Nurture" drives the monthly
+                  check-in. Client-scoped, so hidden while a project is open. */}
+              {!activeProject && canAdmin && (() => {
+                const c = clientById(activeClient)!;
+                const meta = clientStatusMeta(c.status);
+                return (
+                  <span className="inline-flex items-center gap-1.5 rounded-md border pl-2 pr-1 py-1" title="Client status">
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: meta.dot }} />
+                    <select value={c.status} onChange={(e) => { setClientStatus(c.id, e.target.value as ClientStatus); }}
+                      className="cursor-pointer rounded bg-transparent py-0.5 text-[13px] font-medium text-foreground outline-none">
+                      {CLIENT_STATUS_ORDER.map((s) => <option key={s} value={s}>{CLIENT_STATUS_META[s].label}</option>)}
+                    </select>
+                  </span>
+                );
+              })()}
+              {/* Review controls — only when the open scope currently needs a
+                  review. "Reviewed" clears it (stamps reviewedAt=today); "Next"
+                  jumps to the next client/project still awaiting review. */}
+              {(() => {
+                const scopedProject = activeProject ? projectById(activeProject) : null;
+                const needsReview = scopedProject ? projectNeedsReview(scopedProject.id, me.id) : clientNeedsReview(activeClient, me.id);
+                if (!needsReview) return null;
+                return (
+                  <span className="inline-flex overflow-hidden rounded-md border border-teal-500/40">
+                    <button onClick={() => (scopedProject ? setProjectReviewed(scopedProject.id) : setClientReviewed(activeClient))}
+                      title="Mark reviewed — clears this from the Review list until the next check-in"
+                      className="inline-flex items-center gap-1 bg-teal-500/10 px-2.5 py-1.5 text-[13px] font-medium text-teal-600 hover:bg-teal-500/20"><I.check /> Reviewed</button>
+                    <button onClick={() => goToNextReview(activeClient, activeProject)}
+                      title="Go to the next client/project that needs review"
+                      className="border-l border-teal-500/40 bg-teal-500/10 px-2 py-1.5 text-[13px] font-medium text-teal-600 hover:bg-teal-500/20">Next ›</button>
+                  </span>
                 );
               })()}
               {ghlContactUrlFor(activeClient) && (
