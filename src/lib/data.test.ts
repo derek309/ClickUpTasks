@@ -4,6 +4,7 @@ import {
   formatDue,
   isOverdue,
   advanceDue,
+  parseDaysOfMonth,
   timeAgo,
   initialsOf,
   setUsers,
@@ -90,6 +91,24 @@ describe("advanceDue (recurrence)", () => {
   it("passes through when there's no recurrence or no date", () => {
     expect(advanceDue("2026-07-07", "none")).toBe("2026-07-07");
     expect(advanceDue(null, "weekly")).toBeNull();
+  });
+  it("custom day-of-month picks the next day in the same month", () => {
+    expect(advanceDue("2026-07-01", "custom", undefined, "day-of-month", [1, 15])).toBe("2026-07-15");
+  });
+  it("custom day-of-month wraps to the first selected day next month", () => {
+    expect(advanceDue("2026-07-15", "custom", undefined, "day-of-month", [1, 15])).toBe("2026-08-01");
+  });
+  it("custom day-of-month clamps a day that doesn't exist in the target month", () => {
+    expect(advanceDue("2026-01-31", "custom", undefined, "day-of-month", [31])).toBe("2026-02-28");
+  });
+});
+
+describe("parseDaysOfMonth", () => {
+  it("parses, dedupes, sorts, and drops out-of-range values", () => {
+    expect(parseDaysOfMonth("15, 1, 1, 40, 0, abc")).toEqual([1, 15]);
+  });
+  it("returns an empty array for blank input", () => {
+    expect(parseDaysOfMonth("")).toEqual([]);
   });
 });
 

@@ -50,6 +50,7 @@ const taskToRow = (t: Task, updatedBy?: string | null) => ({
   id: t.id, project_id: t.projectId, client_id: t.clientId, title: t.title, description: t.description,
   status: t.status, priority: t.priority, assignee_id: t.assigneeId, contact_id: t.contactId, due: t.due,
   recurrence: t.recurrence, recurrence_interval: t.recurrenceInterval ?? null, recurrence_unit: t.recurrenceUnit ?? null,
+  recurrence_days_of_month: t.recurrenceDaysOfMonth ?? null,
   ghl_task_id: t.ghlTaskId, label_ids: t.labelIds, subtasks: t.subtasks,
   attachments: t.attachments, comments: t.comments, updated_by: updatedBy ?? null, is_private: t.private,
   // Derived from checklist-item assignees so RLS can let a delegatee see a
@@ -66,6 +67,7 @@ export const rowToTask = (r: any): Task => ({
   id: r.id, projectId: r.project_id, clientId: r.client_id, title: r.title, description: r.description ?? "",
   status: r.status, priority: asPriority(r.priority), assigneeId: r.assignee_id, contactId: r.contact_id, due: r.due,
   recurrence: r.recurrence, recurrenceInterval: r.recurrence_interval ?? undefined, recurrenceUnit: r.recurrence_unit ?? undefined,
+  recurrenceDaysOfMonth: r.recurrence_days_of_month ?? undefined,
   ghlTaskId: r.ghl_task_id, labelIds: r.label_ids ?? [], subtasks: r.subtasks ?? [],
   attachments: r.attachments ?? [], comments: r.comments ?? [], createdAt: r.created_at ?? new Date().toISOString(),
   private: r.is_private ?? false,

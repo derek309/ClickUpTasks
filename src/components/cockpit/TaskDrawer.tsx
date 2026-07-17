@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, formatDue, htmlToText, clientStatusMeta,
-  STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseEventDiff,
+  STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseEventDiff, parseDaysOfMonth,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, FileBadge, newId } from "./ui";
@@ -344,12 +344,25 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
           <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} />
           {task.recurrence === "custom" && (
             <span className="inline-flex items-center gap-1.5 text-[14px] text-muted">
-              Every
-              <input type="number" min={1} value={task.recurrenceInterval ?? 1} onChange={(e) => onPatch({ recurrenceInterval: Math.max(1, parseInt(e.target.value, 10) || 1) })} className="w-14 rounded-md border bg-background px-1.5 py-1 text-center text-[14px] outline-none focus:border-accent" />
+              {task.recurrenceUnit === "day-of-month" ? (
+                <>
+                  On day(s)
+                  <input type="text" placeholder="1, 15" defaultValue={(task.recurrenceDaysOfMonth ?? []).join(", ")}
+                    onBlur={(e) => onPatch({ recurrenceDaysOfMonth: parseDaysOfMonth(e.target.value) })}
+                    className="w-20 rounded-md border bg-background px-1.5 py-1 text-center text-[14px] outline-none focus:border-accent" />
+                  of the month
+                </>
+              ) : (
+                <>
+                  Every
+                  <input type="number" min={1} value={task.recurrenceInterval ?? 1} onChange={(e) => onPatch({ recurrenceInterval: Math.max(1, parseInt(e.target.value, 10) || 1) })} className="w-14 rounded-md border bg-background px-1.5 py-1 text-center text-[14px] outline-none focus:border-accent" />
+                </>
+              )}
               <select value={task.recurrenceUnit ?? "week"} onChange={(e) => onPatch({ recurrenceUnit: e.target.value as RecurrenceUnit })} className="rounded-md border bg-background px-1.5 py-1 text-[14px] outline-none focus:border-accent">
                 <option value="day">day(s)</option>
                 <option value="week">week(s)</option>
                 <option value="month">month(s)</option>
+                <option value="day-of-month">day(s) of month</option>
               </select>
             </span>
           )}

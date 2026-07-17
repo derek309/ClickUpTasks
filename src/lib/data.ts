@@ -43,7 +43,18 @@ export type TaskStatus = "todo" | "in_progress" | "review" | "done";
 export type Priority = "conversation" | "urgent" | "normal" | "none";
 export type Recurrence = "none" | "daily" | "weekday" | "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly" | "custom";
 export const RECURRENCE_ORDER: Recurrence[] = ["none", "daily", "weekday", "weekly", "biweekly", "monthly", "quarterly", "yearly", "custom"];
-export type RecurrenceUnit = "day" | "week" | "month";
+export type RecurrenceUnit = "day" | "week" | "month" | "day-of-month";
+/** Parses free-typed "1, 15" style input into a clean, deduped, sorted list
+ * of valid calendar days (1-31) — used by the custom-recurrence day-of-month
+ * picker, where a comma-separated text field is simplest for entering an
+ * arbitrary set of days without a 31-cell calendar-grid widget. */
+export function parseDaysOfMonth(s: string): number[] {
+  return [...new Set(s.split(",").map((p) => parseInt(p.trim(), 10)).filter((n) => Number.isInteger(n) && n >= 1 && n <= 31))].sort((a, b) => a - b);
+}
+function ordinal(n: number): string {
+  const s = ["th", "st", "nd", "rd"], v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
 
 export interface User {
   id: string;
@@ -365,6 +376,10 @@ export interface Task {
   /** Only meaningful when recurrence === "custom" — "every N days/weeks/months". */
   recurrenceInterval?: number;
   recurrenceUnit?: RecurrenceUnit;
+  /** Only meaningful when recurrence === "custom" && recurrenceUnit === "day-of-month"
+   * — recur on these specific calendar days each month (e.g. [1, 15]) instead
+   * of "every N units". recurrenceInterval is ignored in this mode. */
+  recurrenceDaysOfMonth?: number[];
   labelIds: string[];
   ghlTaskId: string | null;
   /** A private task is visible only to its own assignee, enforced by RLS —
@@ -452,12 +467,19 @@ export const RECURRENCE_LABEL: Record<Recurrence, string> = {
   yearly: "Every year",
   custom: "Custom…",
 };
-const UNIT_LABEL: Record<RecurrenceUnit, [string, string]> = { day: ["day", "days"], week: ["week", "weeks"], month: ["month", "months"] };
+// "day-of-month" never reaches this table (describeRecurrence branches on it
+// before UNIT_LABEL is consulted) — present only so the Record type is total.
+const UNIT_LABEL: Record<RecurrenceUnit, [string, string]> = { day: ["day", "days"], week: ["week", "weeks"], month: ["month", "months"], "day-of-month": ["day", "days"] };
 // RECURRENCE_LABEL's "custom" entry is just the picker option text — this
 // resolves the actual "every N units" wording once a task's interval/unit
 // are set, for display in the drawer and list row.
-export function describeRecurrence(rec: Recurrence, interval?: number, unit?: RecurrenceUnit): string {
+export function describeRecurrence(rec: Recurrence, interval?: number, unit?: RecurrenceUnit, daysOfMonth?: number[]): string {
   if (rec !== "custom") return RECURRENCE_LABEL[rec];
+  if (unit === "day-of-month") {
+    const days = daysOfMonth ?? [];
+    if (days.length === 0) return "Monthly on selected day(s)";
+    return `Monthly on the ${days.map(ordinal).join(", ")}`;
+  }
   const n = interval && interval > 0 ? interval : 1;
   const u = unit ?? "week";
   const [sing, plur] = UNIT_LABEL[u];
@@ -756,8 +778,14 @@ export function clientHealth(clientId: string, tasks: Task[]): ClientHealth {
   return (Date.now() - last) / 86_400_000 > 30 ? "stale" : "calm";
 }
 
+// Last valid day of the given UTC year/month (0-indexed month), for clamping
+// a target day-of-month that doesn't exist in a shorter month (e.g. day 31
+// requested against February).
+function lastDayOfUtcMonth(y: number, m: number): number {
+  return new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+}
 /** Advance an ISO due date by one recurrence step (deterministic — no now()). */
-export function advanceDue(iso: string | null, rec: Recurrence, interval?: number, unit?: RecurrenceUnit): string | null {
+export function advanceDue(iso: string | null, rec: Recurrence, interval?: number, unit?: RecurrenceUnit, daysOfMonth?: number[]): string | null {
   if (!iso || rec === "none") return iso;
   const [y, m, d] = iso.split("-").map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d));
@@ -768,6 +796,24 @@ export function advanceDue(iso: string | null, rec: Recurrence, interval?: numbe
   else if (rec === "monthly") dt.setUTCMonth(dt.getUTCMonth() + 1);
   else if (rec === "quarterly") dt.setUTCMonth(dt.getUTCMonth() + 3);
   else if (rec === "yearly") dt.setUTCFullYear(dt.getUTCFullYear() + 1);
+  else if (rec === "custom" && unit === "day-of-month") {
+    const days = [...new Set((daysOfMonth ?? []).filter((n) => n >= 1 && n <= 31))].sort((a, b) => a - b);
+    if (days.length === 0) { dt.setUTCDate(1); dt.setUTCMonth(dt.getUTCMonth() + 1); }
+    else {
+      const next = days.find((day) => day > dt.getUTCDate());
+      if (next !== undefined) {
+        dt.setUTCDate(Math.min(next, lastDayOfUtcMonth(dt.getUTCFullYear(), dt.getUTCMonth())));
+      } else {
+        // Reset to day 1 before advancing the month — otherwise a stale
+        // day-of-month near 31 can overflow setUTCMonth into the WRONG
+        // target month (e.g. Jan 31 + 1 month silently becomes March, not
+        // February), which then throws off the clamp below too.
+        dt.setUTCDate(1);
+        dt.setUTCMonth(dt.getUTCMonth() + 1);
+        dt.setUTCDate(Math.min(days[0], lastDayOfUtcMonth(dt.getUTCFullYear(), dt.getUTCMonth())));
+      }
+    }
+  }
   else if (rec === "custom") {
     const n = interval && interval > 0 ? interval : 1;
     const u = unit ?? "week";
