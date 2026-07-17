@@ -9,7 +9,7 @@ import { type Project } from "@/lib/data";
 import { I } from "./ui";
 
 export function ProjectsDirectory({
-  projects, openCount, onOpen, canAdmin, onAddProject, onRename, onDelete,
+  projects, openCount, onOpen, canAdmin, onAddProject, onRename, onDelete, starredLists, onToggleStarList,
 }: {
   projects: Project[]; // workspace projects, in the caller's chosen order
   openCount: (id: string) => number;
@@ -18,6 +18,8 @@ export function ProjectsDirectory({
   onAddProject: () => void;
   onRename: (id: string) => void;
   onDelete: (id: string) => void;
+  starredLists: Set<string>;              // per-user sidebar pins
+  onToggleStarList: (id: string) => void;
 }) {
   const [q, setQ] = useState("");
   const query = q.trim().toLowerCase();
@@ -45,6 +47,8 @@ export function ProjectsDirectory({
             className="group flex min-h-[46px] cursor-pointer items-center gap-3 border-b px-4 py-2 transition-colors last:border-0 hover:bg-accent-soft/50">
             <I.folder className="shrink-0 text-muted" />
             <span className="min-w-0 flex-1 truncate text-[15px] font-medium">{p.name}</span>
+            <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); onToggleStarList(p.id); }} title={starredLists.has(p.id) ? "Unpin from sidebar" : "Pin to sidebar"}
+              className={`shrink-0 rounded p-1 hover:bg-background ${starredLists.has(p.id) ? "text-amber-400" : "text-muted opacity-0 group-hover:opacity-100"}`}><I.star filled={starredLists.has(p.id)} /></span>
             {canAdmin && (<>
               <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); onRename(p.id); }} title="Rename project" className="shrink-0 rounded p-1 text-muted opacity-0 hover:bg-background hover:text-foreground group-hover:opacity-100"><I.pencil /></span>
               <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); onDelete(p.id); }} title="Delete project" className="shrink-0 rounded p-1 text-muted opacity-0 hover:bg-background hover:text-danger group-hover:opacity-100"><I.trash /></span>

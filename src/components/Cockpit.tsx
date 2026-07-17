@@ -204,6 +204,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // when the "Recently used" sort is active.
   const [clientUsed, setClientUsed] = useState<Record<string, number>>({});
   const [starred, setStarred] = useState<Set<string>>(new Set());
+  // Per-user pinned lists (projects), mirroring `starred` for clients — a
+  // starred list gets its own quick-access row in the sidebar's Pinned section.
+  const [starredLists, setStarredLists] = useState<Set<string>>(new Set());
   const [claudeQueue, setClaudeQueue] = useState<Set<string>>(new Set());
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const toggleClaudeQueue = (taskId: string) => {
@@ -410,6 +413,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     try {
       const s = localStorage.getItem("cut_clientSort"); if (s) setClientSort(s as ClientSort);
       const st = localStorage.getItem("cut_starred"); if (st) setStarred(new Set(JSON.parse(st)));
+      const stl = localStorage.getItem("cut_starredLists"); if (stl) setStarredLists(new Set(JSON.parse(stl)));
       const mo = localStorage.getItem("cut_clientOrder"); if (mo) setManualOrder(JSON.parse(mo));
       const he = localStorage.getItem("cut_hideEmpty"); if (he !== null) setHideEmpty(he === "1");
       const hd = localStorage.getItem("cut_hideDone"); if (hd !== null) setHideDone(hd === "1");
@@ -430,6 +434,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const toggleStar = (id: string) => setStarred((prev) => {
     const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id);
     try { localStorage.setItem("cut_starred", JSON.stringify([...n])); } catch {}
+    return n;
+  });
+  const toggleStarList = (id: string) => setStarredLists((prev) => {
+    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id);
+    try { localStorage.setItem("cut_starredLists", JSON.stringify([...n])); } catch {}
     return n;
   });
   const [drawerFull, setDrawerFull] = useState(false);
@@ -1939,6 +1948,26 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           )}
         </nav>
 
+        {/* Pinned lists — per-user quick access to starred lists (B4). */}
+        {(() => {
+          const pinned = [...starredLists].map((id) => projectById(id)).filter((p): p is Project => !!p);
+          if (pinned.length === 0) return null;
+          return (
+            <nav className="mt-2 shrink-0 space-y-0.5 border-t px-2 pt-2">
+              <div className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Pinned</div>
+              {pinned.map((p) => {
+                const active = !myWork && !personalView && !inboxView && !dirView && activeProject === p.id;
+                return (
+                  <SideItem key={p.id} active={active} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setActiveClient(p.clientId); setActiveProject(p.id); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
+                    <I.list className="text-muted" /> <span className="min-w-0 flex-1 truncate text-left">{p.name}</span>
+                    <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); toggleStarList(p.id); }} title="Unpin from sidebar" className="shrink-0 rounded p-0.5 text-amber-400 hover:bg-background"><I.star filled /></span>
+                  </SideItem>
+                );
+              })}
+            </nav>
+          );
+        })()}
+
 
       </aside>
 
@@ -2243,7 +2272,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         ) : dirView === "projects" ? (
           <ProjectsDirectory projects={sortedWorkspaceProjects} openCount={projectTaskCount}
             onOpen={(id) => { setDirView(null); setActiveClient(WORKSPACE_CLIENT_ID); setActiveProject(id); setOpenTaskId(null); setClientTab("tasks"); }}
-            canAdmin={canAdmin} onAddProject={() => addProject(WORKSPACE_CLIENT_ID)} onRename={renameProject} onDelete={deleteProject} />
+            canAdmin={canAdmin} onAddProject={() => addProject(WORKSPACE_CLIENT_ID)} onRename={renameProject} onDelete={deleteProject}
+            starredLists={starredLists} onToggleStarList={toggleStarList} />
         ) : personalView ? (
           <GroupedList groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} queuedIds={claudeQueue} colOrder={colOrder} onReorderCols={reorderCols} />
         ) : myWork ? (
@@ -2298,6 +2328,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             if (cf.length === 0 && cl.filter((l) => !l.folderId).length <= 1 && !canAdmin) return null;
             return (
               <FolderRail folders={cf} lists={cl} activeFolder={activeFolder} activeProject={activeProject} canAdmin={canAdmin}
+                starredLists={starredLists} onToggleStarList={toggleStarList}
                 onSelectAll={() => { setActiveFolder(null); setActiveProject(null); }}
                 onSelectFolder={(id) => { setActiveFolder(id); setActiveProject(null); setGroupBy("project"); }}
                 onSelectList={(id) => { setActiveProject(id); setActiveFolder(null); }}

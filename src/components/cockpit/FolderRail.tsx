@@ -9,7 +9,7 @@ import { type Folder, type Project } from "@/lib/data";
 import { I } from "./ui";
 
 export function FolderRail({
-  folders, lists, activeFolder, activeProject, canAdmin,
+  folders, lists, activeFolder, activeProject, canAdmin, starredLists, onToggleStarList,
   onSelectAll, onSelectFolder, onSelectList,
   onCreateFolder, onCreateList, onRenameFolder, onDeleteFolder, onRenameList, onDeleteList, onMoveList,
 }: {
@@ -18,6 +18,8 @@ export function FolderRail({
   activeFolder: string | null;
   activeProject: string | null;
   canAdmin: boolean;
+  starredLists: Set<string>;   // per-user pinned list ids (sidebar quick access)
+  onToggleStarList: (id: string) => void;
   onSelectAll: () => void;
   onSelectFolder: (id: string) => void;
   onSelectList: (id: string) => void;
@@ -69,7 +71,12 @@ export function FolderRail({
         </>,
       ))}
       {standalone.map((l) => chip(
-        l.name,
+        <>
+          {l.name}
+          <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); onToggleStarList(l.id); }}
+            title={starredLists.has(l.id) ? "Unpin from sidebar" : "Pin to sidebar"}
+            className={`-mr-0.5 rounded p-0.5 ${starredLists.has(l.id) ? "text-amber-400" : "opacity-50 hover:opacity-100"}`}><I.star filled={starredLists.has(l.id)} /></span>
+        </>,
         activeProject === l.id,
         () => onSelectList(l.id),
         `list:${l.id}`,
