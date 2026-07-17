@@ -836,6 +836,12 @@ export function advanceDue(iso: string | null, rec: Recurrence, interval?: numbe
 
 // --- Notifications ----------------------------------------------------------
 
+/** "message" — a direct human communication (an @mention or comment someone
+ * wrote to you). "activity" — an automatic side-effect notice from normal
+ * task work (assignment, status/due-date change, checklist completion).
+ * Lets the Inbox filter the two apart; missing on older rows, treated as
+ * "activity" (the more common case) via `?? "activity"` wherever read. */
+export type NotificationKind = "message" | "activity";
 export interface Notification {
   id: string;
   recipientId: string;
@@ -846,6 +852,7 @@ export interface Notification {
   projectId?: string | null;
   at: string;
   read: boolean;
+  kind?: NotificationKind;
 }
 
 export const seedNotifications: Notification[] = [

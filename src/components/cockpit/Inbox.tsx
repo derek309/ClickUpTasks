@@ -3,8 +3,11 @@
 // The sidebar Inbox — every notification addressed to you (mentions,
 // comments on your tasks, assignments, delegations, status/due changes),
 // as a proper full-page reading list instead of the small bell popover.
+import { useState } from "react";
 import { timeAgo, type Notification, type Client, type Project } from "@/lib/data";
 import { I, Avatar } from "./ui";
+
+type InboxFilter = "all" | "message" | "activity";
 
 export function Inbox({ notifications, clientById, projectById, onOpen, onMarkAllRead }: {
   notifications: Notification[]; // caller's, newest-first
@@ -14,16 +17,31 @@ export function Inbox({ notifications, clientById, projectById, onOpen, onMarkAl
   onMarkAllRead: () => void;
 }) {
   const unreadCount = notifications.filter((n) => !n.read).length;
+  const [filter, setFilter] = useState<InboxFilter>("all");
+  // Older rows predate `kind` (see notification-kind.sql) — treat missing as
+  // "activity", the more common case, same fallback rowToNotif already uses.
+  const filtered = filter === "all" ? notifications : notifications.filter((n) => (n.kind ?? "activity") === filter);
 
   return (
     <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">
       <div className="mx-auto max-w-3xl">
         {notifications.length > 0 && (
-          <div className="mb-3 flex items-center justify-end">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="flex overflow-hidden rounded-lg border">
+              {([["all", "All"], ["message", "Messages"], ["activity", "Task notices"]] as const).map(([v, label]) => (
+                <button key={v} onClick={() => setFilter(v)} className={`px-2.5 py-1 text-[13px] font-medium ${filter === v ? "bg-accent-soft text-accent" : "bg-surface text-muted hover:text-foreground"}`}>{label}</button>
+              ))}
+            </div>
             <button onClick={onMarkAllRead} disabled={unreadCount === 0} className="rounded-md border bg-surface px-2.5 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-40">Mark all as read</button>
           </div>
         )}
         <div className="space-y-1.5">
+          {notifications.length > 0 && filtered.length === 0 && (
+            <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-16 text-center text-muted">
+              <I.bell />
+              <span className="text-[15px]">Nothing in this filter</span>
+            </div>
+          )}
           {notifications.length === 0 && (
             <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-16 text-center text-muted">
               <I.bell />
@@ -31,7 +49,7 @@ export function Inbox({ notifications, clientById, projectById, onOpen, onMarkAl
               <span className="text-[13px]">Mentions, comments, and assignments show up here.</span>
             </div>
           )}
-          {notifications.map((n) => {
+          {filtered.map((n) => {
             const where = n.projectId ? projectById(n.projectId)?.name : n.clientId ? clientById(n.clientId)?.name : null;
             const canOpen = !!(n.taskId || n.clientId);
             return (

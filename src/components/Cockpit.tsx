@@ -37,6 +37,7 @@ import {
   type Contact,
   type Attachment,
   type Notification,
+  type NotificationKind,
   type ClientLink,
   type ClientNote,
   type NoteType,
@@ -700,8 +701,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return () => { document.removeEventListener("visibilitychange", refetch); window.removeEventListener("focus", refetch); };
   }, []);
 
-  const notify = (recipientId: string, text: string, taskId: string | null, extra?: { clientId?: string | null; projectId?: string | null }) => {
-    const n: Notification = { id: newId("n_"), recipientId, text, taskId, actorId: me.id, clientId: extra?.clientId ?? null, projectId: extra?.projectId ?? null, at: new Date().toISOString(), read: false };
+  // kind defaults to "activity" (automatic side-effect notice) — call sites
+  // for a direct human communication (an @mention or comment) pass
+  // kind: "message" explicitly, so the Inbox can filter the two apart.
+  const notify = (recipientId: string, text: string, taskId: string | null, extra?: { clientId?: string | null; projectId?: string | null; kind?: NotificationKind }) => {
+    const n: Notification = { id: newId("n_"), recipientId, text, taskId, actorId: me.id, clientId: extra?.clientId ?? null, projectId: extra?.projectId ?? null, at: new Date().toISOString(), read: false, kind: extra?.kind ?? "activity" };
     setNotifications((ns) => [n, ...ns]);
     insertNotif(n);
   };
@@ -1338,9 +1342,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // Comment notifications: @mentions get "mentioned you"; the task's assignee
     // always hears about new comments on their task (unless they wrote it).
     const mentioned = new Set<string>();
-    users.forEach((u) => { if (u.id !== me.id && body.includes("@" + u.name)) { mentioned.add(u.id); notify(u.id, `${me.name} mentioned you in “${t.title}”`, id); pushToast(`Notified ${u.name}`); } });
+    users.forEach((u) => { if (u.id !== me.id && body.includes("@" + u.name)) { mentioned.add(u.id); notify(u.id, `${me.name} mentioned you in “${t.title}”`, id, { kind: "message" }); pushToast(`Notified ${u.name}`); } });
     if (t.assigneeId && t.assigneeId !== me.id && !mentioned.has(t.assigneeId)) {
-      notify(t.assigneeId, `${me.name} commented on “${t.title}”`, id);
+      notify(t.assigneeId, `${me.name} commented on “${t.title}”`, id, { kind: "message" });
     }
     setComment("");
   };
@@ -1787,7 +1791,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // people back into this feed instead of it going stale and unread.
     const where = projectId ? projectById(projectId)?.name : clientById(clientId)?.name;
     users.forEach((u) => {
-      if (u.id !== me.id && body.includes("@" + u.name)) notify(u.id, `${me.name} mentioned you in the ${where ?? "team"} chat`, null, { clientId, projectId });
+      if (u.id !== me.id && body.includes("@" + u.name)) notify(u.id, `${me.name} mentioned you in the ${where ?? "team"} chat`, null, { clientId, projectId, kind: "message" });
     });
   };
   const editNote = (note: ClientNote, body: string) => {
