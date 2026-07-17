@@ -1040,7 +1040,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return sub?.ghlLocationId ? `https://app.gohighlevel.com/v2/location/${sub.ghlLocationId}/contacts/detail/${ct.ghlContactId}` : null;
   };
 
-  const visibleProjects = useMemo(() => projects.filter((p) => p.clientId.startsWith("cl_") && (activeClient === "all" || p.clientId === activeClient) && (!activeFolder || p.folderId === activeFolder)), [projects, activeClient, activeFolder]);
+  // Sorted by position so folder-grouped list headings match the folder rail's
+  // drag order (B5). Falls back to insertion order for equal/absent positions.
+  const visibleProjects = useMemo(() => projects.filter((p) => p.clientId.startsWith("cl_") && (activeClient === "all" || p.clientId === activeClient) && (!activeFolder || p.folderId === activeFolder)).sort((a, b) => (a.position ?? 0) - (b.position ?? 0)), [projects, activeClient, activeFolder]);
   // On the All Tasks tab (activeClient === "all"), further restrict to your
   // own tasks by default — reusing scopedTasks' own assigneeId === me.id
   // pattern. Redundant-but-harmless for VAs, who are already fully
@@ -1792,6 +1794,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setProjects((ps) => ps.map((x) => (x.id === projectId ? np : x)));
     upsertProject(np);
   };
+  // Drag-sort folders (B5). Renumber the client's folders to match orderedIds
+  // and persist each — mirrors reorderLinks' shape. DB-backed = shared order.
+  const reorderFolders = (clientId: string, orderedIds: string[]) => {
+    const reordered = orderedIds.map((id, i) => { const f = folders.find((x) => x.id === id)!; return { ...f, position: i }; });
+    setFolders((fs) => [...fs.filter((f) => f.clientId !== clientId), ...reordered]);
+    reordered.forEach((f) => upsertFolder(f));
+  };
+  // Drag-sort lists within one bucket (a folder, or the standalone bucket when
+  // folderId is null). Renumber only that bucket so positions stay local to it.
+  const reorderLists = (clientId: string, folderId: string | null, orderedIds: string[]) => {
+    const reordered = orderedIds.map((id, i) => { const p = projects.find((x) => x.id === id)!; return { ...p, position: i }; });
+    setProjects((ps) => [...ps.filter((p) => !(p.clientId === clientId && (p.folderId ?? null) === folderId)), ...reordered]);
+    reordered.forEach((p) => upsertProject(p));
+  };
   const moveTaskToNewProject = (taskId: string, clientId: string) => {
     setPromptDialog({ title: "New project", placeholder: "Project name", confirmLabel: "Create & move", onSubmit: (name) => {
       setPromptDialog(null);
@@ -2333,7 +2349,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 onSelectFolder={(id) => { setActiveFolder(id); setActiveProject(null); setGroupBy("project"); }}
                 onSelectList={(id) => { setActiveProject(id); setActiveFolder(null); }}
                 onCreateFolder={() => createFolder(activeClient)} onCreateList={(fid) => addProject(activeClient, fid)}
-                onRenameFolder={renameFolder} onDeleteFolder={deleteFolder} onRenameList={renameProject} onDeleteList={deleteProject} onMoveList={moveListToFolder} />
+                onRenameFolder={renameFolder} onDeleteFolder={deleteFolder} onRenameList={renameProject} onDeleteList={deleteProject} onMoveList={moveListToFolder}
+                onReorderFolders={(ids) => reorderFolders(activeClient, ids)} onReorderLists={(fid, ids) => reorderLists(activeClient, fid, ids)} />
             );
           })()}
           <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} queuedIds={claudeQueue} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />

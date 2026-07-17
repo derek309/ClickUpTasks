@@ -12,6 +12,7 @@ export function FolderRail({
   folders, lists, activeFolder, activeProject, canAdmin, starredLists, onToggleStarList,
   onSelectAll, onSelectFolder, onSelectList,
   onCreateFolder, onCreateList, onRenameFolder, onDeleteFolder, onRenameList, onDeleteList, onMoveList,
+  onReorderFolders, onReorderLists,
 }: {
   folders: Folder[];           // this client's folders, in order
   lists: Project[];            // this client's lists (projects), all of them
@@ -30,13 +31,33 @@ export function FolderRail({
   onRenameList: (id: string) => void;
   onDeleteList: (id: string) => void;
   onMoveList: (id: string, folderId: string | null) => void;
+  onReorderFolders: (orderedIds: string[]) => void;      // drag-sort folders (B5)
+  onReorderLists: (folderId: string | null, orderedIds: string[]) => void; // drag-sort a bucket
 }) {
   const [menu, setMenu] = useState<string | null>(null); // "folder:<id>" | "list:<id>"
-  const standalone = lists.filter((l) => !l.folderId);
+  const [dragFolder, setDragFolder] = useState<string | null>(null);
+  const [dragList, setDragList] = useState<string | null>(null);
+  const standalone = lists.filter((l) => !l.folderId).sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
   const allActive = !activeFolder && !activeProject;
 
-  const chip = (label: React.ReactNode, active: boolean, onClick: () => void, menuKey?: string, menuBody?: React.ReactNode) => (
-    <span className="relative inline-flex shrink-0">
+  // Drag-sort helpers — same splice-before-target idiom as QuickLinksBar.
+  const dropFolder = (targetId: string) => {
+    if (!dragFolder || dragFolder === targetId) { setDragFolder(null); return; }
+    const ids = folders.map((f) => f.id).filter((id) => id !== dragFolder);
+    ids.splice(ids.indexOf(targetId), 0, dragFolder);
+    onReorderFolders(ids); setDragFolder(null);
+  };
+  const dropList = (targetId: string) => {
+    if (!dragList || dragList === targetId) { setDragList(null); return; }
+    const ids = standalone.map((l) => l.id).filter((id) => id !== dragList);
+    ids.splice(ids.indexOf(targetId), 0, dragList);
+    onReorderLists(null, ids); setDragList(null);
+  };
+
+  const chip = (label: React.ReactNode, active: boolean, onClick: () => void, menuKey?: string, menuBody?: React.ReactNode, drag?: { dim: boolean; onDragStart: () => void; onDrop: () => void }) => (
+    <span className={`relative inline-flex shrink-0 ${drag?.dim ? "opacity-40" : ""}`}
+      draggable={canAdmin && !!drag} onDragStart={drag?.onDragStart}
+      onDragOver={(e) => { if (canAdmin && drag) e.preventDefault(); }} onDrop={(e) => { if (drag) { e.preventDefault(); drag.onDrop(); } }}>
       <button onClick={onClick}
         className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] font-medium ${active ? "border-accent bg-accent-soft text-accent" : "bg-surface text-muted hover:text-foreground"}`}>
         {label}
@@ -69,6 +90,7 @@ export function FolderRail({
           {item("Rename folder", () => onRenameFolder(f.id))}
           {item("Delete folder", () => onDeleteFolder(f.id), true)}
         </>,
+        { dim: dragFolder === f.id, onDragStart: () => setDragFolder(f.id), onDrop: () => dropFolder(f.id) },
       ))}
       {standalone.map((l) => chip(
         <>
@@ -87,6 +109,7 @@ export function FolderRail({
           {item("Rename list", () => onRenameList(l.id))}
           {item("Delete list", () => onDeleteList(l.id), true)}
         </>,
+        { dim: dragList === l.id, onDragStart: () => setDragList(l.id), onDrop: () => dropList(l.id) },
       ))}
       {canAdmin && (
         <span className="ml-1 inline-flex shrink-0 gap-1">
