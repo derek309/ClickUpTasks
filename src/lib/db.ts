@@ -16,6 +16,7 @@ import {
   type ClientLink,
   type ClientNote,
   type VaultFolder,
+  type Folder,
   type NoteType,
   type Comment,
   type Message,
@@ -40,8 +41,10 @@ export const rowToClient = (r: any): Client => ({ id: r.id, name: titleCase(r.na
 const contactToRow = (c: Contact) => ({ id: c.id, client_id: c.clientId, name: c.name, email: c.email, phone: c.phone ?? null, ghl_contact_id: c.ghlContactId, company_name: c.company ?? null, city: c.city ?? null, state: c.state ?? null });
 export const rowToContact = (r: any): Contact => ({ id: r.id, clientId: r.client_id, name: titleCase(r.name), email: r.email ?? "", phone: r.phone ?? "", ghlContactId: r.ghl_contact_id ?? "", company: r.company_name ?? "", city: r.city ?? "", state: r.state ?? "" });
 
-const projectToRow = (p: Project) => ({ id: p.id, client_id: p.clientId, name: p.name, description: p.description, assigned_to: p.assignedTo ?? [], follow_up_at: p.followUpAt ?? null, reviewed_at: p.reviewedAt ?? null });
-const rowToProject = (r: any): Project => ({ id: r.id, clientId: r.client_id, name: r.name, description: r.description ?? "", assignedTo: r.assigned_to ?? [], followUpAt: r.follow_up_at ?? null, reviewedAt: r.reviewed_at ?? null });
+const projectToRow = (p: Project) => ({ id: p.id, client_id: p.clientId, name: p.name, description: p.description, assigned_to: p.assignedTo ?? [], follow_up_at: p.followUpAt ?? null, reviewed_at: p.reviewedAt ?? null, folder_id: p.folderId ?? null, position: p.position ?? 0 });
+const rowToProject = (r: any): Project => ({ id: r.id, clientId: r.client_id, name: r.name, description: r.description ?? "", assignedTo: r.assigned_to ?? [], followUpAt: r.follow_up_at ?? null, reviewedAt: r.reviewed_at ?? null, folderId: r.folder_id ?? null, position: r.position ?? 0 });
+const folderToRow = (f: Folder) => ({ id: f.id, client_id: f.clientId, name: f.name, position: f.position, created_at: f.createdAt });
+const rowToFolder = (r: any): Folder => ({ id: r.id, clientId: r.client_id, name: r.name, position: r.position ?? 0, createdAt: r.created_at });
 
 // `updatedBy` is DB-only metadata (Realtime echo-suppression signal) — it is
 // not part of the domain Task type, so it's a separate write-time parameter
@@ -143,7 +146,7 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true) 
 }
 
 export async function fetchAll() {
-  const [c, ct, p, t, n, cl, cn, m, tr, tt, vf] = await Promise.all([
+  const [c, ct, p, t, n, cl, cn, m, tr, tt, vf, fd] = await Promise.all([
     fetchAllRows("clients", "created_at"),
     fetchAllRows("contacts"),
     fetchAllRows("projects"),
@@ -158,7 +161,11 @@ export async function fetchAll() {
     fetchAllRows("territories", "created_at"),
     fetchAllRows("task_templates", "created_at"),
     fetchAllRows("vault_folders", "created_at"),
+    fetchAllRows("folders", "position"),
   ]);
+  // NB: `projects` stays in the hard-fail set — its new folder_id/position
+  // columns are read via `select *`, which tolerates their absence pre-migration
+  // (rowToProject defaults them), so we never order projects by position here.
   const err = c.error || ct.error || p.error || t.error || n.error;
   if (err) throw err;
   if (cl.error) console.warn("[db] client_links unavailable — run supabase/client-links-notes.sql", cl.error.message);
@@ -167,6 +174,7 @@ export async function fetchAll() {
   if (tr.error) console.warn("[db] territories unavailable — run supabase/territories.sql", tr.error.message);
   if (tt.error) console.warn("[db] task_templates unavailable — run supabase/task-templates.sql", tt.error.message);
   if (vf.error) console.warn("[db] vault_folders unavailable — run supabase/vault-folders.sql", vf.error.message);
+  if (fd.error) console.warn("[db] folders unavailable — run supabase/folders.sql", fd.error.message);
   return {
     clients: (c.data ?? []).map(rowToClient),
     contacts: (ct.data ?? []).map(rowToContact),
@@ -179,6 +187,7 @@ export async function fetchAll() {
     territories: tr.error ? [] : (tr.data ?? []).map(rowToTerritory),
     taskTemplates: tt.error ? [] : (tt.data ?? []).map(rowToTaskTemplate),
     vaultFolders: vf.error ? [] : (vf.data ?? []).map(rowToVaultFolder),
+    folders: fd.error ? [] : (fd.data ?? []).map(rowToFolder),
   };
 }
 
@@ -223,6 +232,8 @@ export const deleteTaskTemplateDb = (id: string) => supabase.from("task_template
 export const deleteClientNoteDb = (id: string) => supabase.from("client_notes").delete().eq("id", id).then(logErr);
 export const upsertVaultFolder = (f: VaultFolder) => supabase.from("vault_folders").upsert(vaultFolderToRow(f)).then(logErr);
 export const deleteVaultFolderDb = (id: string) => supabase.from("vault_folders").delete().eq("id", id).then(logErr);
+export const upsertFolder = (f: Folder) => supabase.from("folders").upsert(folderToRow(f)).then(logErr);
+export const deleteFolderDb = (id: string) => supabase.from("folders").delete().eq("id", id).then(logErr);
 // Messages are append-only (never edited), so insert not upsert. The caller
 // awaits the GHL send first (see Cockpit.tsx sendMessage) and only inserts an
 // outbound row after a confirmed success; this call itself is still

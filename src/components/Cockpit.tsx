@@ -50,12 +50,13 @@ import {
   type Territory,
   type TaskTemplate,
   type VaultFolder,
+  type Folder,
   PERSONAL_CLIENT_ID,
   WORKSPACE_CLIENT_ID,
   PERSONAL_PROJECT_ID,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertVaultFolder, deleteVaultFolderDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, markMessagesReadDb, insertMessage } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, markMessagesReadDb, insertMessage } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import { Inbox } from "./cockpit/Inbox";
 import SettingsHub from "./SettingsHub";
@@ -123,6 +124,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [territories, setTerritories] = useState<Territory[]>([]);
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
   const [vaultFolders, setVaultFolders] = useState<VaultFolder[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
   const [importingTasks, setImportingTasks] = useState(false);
   const [clientTab, setClientTab] = useState<"tasks" | "chat" | "vault">("tasks");
   // Set once from a deep link's ?folder= param (see applyNav); VaultView
@@ -540,6 +542,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setTerritories(d.territories);
         setTaskTemplates(d.taskTemplates);
         setVaultFolders(d.vaultFolders);
+        setFolders(d.folders);
         fetchClaudeQueue().then((ids) => setClaudeQueue(new Set(ids)));
       } catch (e) {
         setDbError(e instanceof Error ? e.message : "Failed to load data.");
@@ -696,6 +699,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setMessages((prev) => mergeById(prev, d.messages));
         setClientNotes((prev) => mergeById(prev, d.clientNotes));
         setVaultFolders((prev) => mergeById(prev, d.vaultFolders));
+        setFolders((prev) => mergeById(prev, d.folders));
       } catch (e) { console.warn("[realtime] visibility refetch failed", e); }
     };
     document.addEventListener("visibilitychange", refetch);
@@ -1123,6 +1127,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       .flatMap((n) => (n.attachments ?? []).map((a) => ({ ...a, sourceLabel: "Journal", onOpenSource: () => setClientTab("chat"), onSetFolder: (folderId: string | null) => setNoteAttachmentFolder(n, a.id, folderId) }))),
   ];
   const projectsForClient = (clientId: string) => projects.filter((p) => p.clientId === clientId);
+  const foldersForClient = (clientId: string) => folders.filter((f) => f.clientId === clientId).sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt));
+  const folderById = (id: string | null | undefined) => (id ? folders.find((f) => f.id === id) ?? null : null);
   const projectProgress = (projectId: string) => { const ts = scopedTasks.filter((t) => t.projectId === projectId); const done = ts.filter((t) => t.status === "done").length; return { done, total: ts.length, pct: ts.length ? Math.round((done / ts.length) * 100) : 0 }; };
   // Open (non-done) count — matches what the client's task list actually shows
   // with "Hide done" on by default, so the sidebar/board badge and the list
@@ -1711,13 +1717,64 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       },
     });
   };
-  const addProject = (clientId: string) => {
-    setPromptDialog({ title: "New project", placeholder: "Project name", confirmLabel: "Create", onSubmit: (name) => {
+  const addProject = (clientId: string, folderId: string | null = null) => {
+    setPromptDialog({ title: folderId ? "New list" : "New list / project", placeholder: "Name", confirmLabel: "Create", onSubmit: (name) => {
       setPromptDialog(null);
-      const p: Project = { id: newId("p_"), clientId, name, description: "" };
+      const pos = projects.filter((p) => p.clientId === clientId && (p.folderId ?? null) === folderId).length;
+      const p: Project = { id: newId("p_"), clientId, name, description: "", folderId, position: pos };
       setProjects((ps) => [...ps, p]);
       upsertProject(p);
     } });
+  };
+  // Folder CRUD (a folder groups lists). Mirrors createVaultFolder's optimistic
+  // + fire-and-forget shape; admin-only per folders_write RLS.
+  const createFolder = (clientId: string) => {
+    setPromptDialog({ title: "New folder", placeholder: "Folder name", confirmLabel: "Create", onSubmit: (name) => {
+      setPromptDialog(null);
+      const pos = folders.filter((f) => f.clientId === clientId).length;
+      const f: Folder = { id: newId("fd_"), clientId, name, position: pos, createdAt: new Date().toISOString() };
+      setFolders((fs) => [...fs, f]);
+      upsertFolder(f);
+    } });
+  };
+  const renameFolder = (id: string) => {
+    const f = folderById(id);
+    if (!f) return;
+    setPromptDialog({ title: "Rename folder", initial: f.name, confirmLabel: "Rename", onSubmit: (name) => {
+      setPromptDialog(null);
+      const nf = { ...f, name };
+      setFolders((fs) => fs.map((x) => (x.id === id ? nf : x)));
+      upsertFolder(nf);
+    } });
+  };
+  // Deleting a folder reparents its lists to standalone (folderId → null) and
+  // KEEPS their tasks — the deliberate contrast to deleteProject, which
+  // cascades tasks. The DB's ON DELETE SET NULL does the same server-side.
+  const deleteFolder = (id: string) => {
+    const f = folderById(id);
+    if (!f) return;
+    setConfirmDialog({
+      title: `Delete folder “${f.name}”?`,
+      message: "Its lists move to standalone — their tasks are kept.",
+      confirmLabel: "Delete folder",
+      onConfirm: () => {
+        setConfirmDialog(null);
+        projects.filter((p) => p.folderId === id).forEach((p) => upsertProject({ ...p, folderId: null }));
+        setProjects((ps) => ps.map((p) => (p.folderId === id ? { ...p, folderId: null } : p)));
+        setFolders((fs) => fs.filter((x) => x.id !== id));
+        deleteFolderDb(id);
+      },
+    });
+  };
+  // Move a list into a folder (or out to standalone with null), appending it to
+  // the end of the target bucket.
+  const moveListToFolder = (projectId: string, folderId: string | null) => {
+    const p = projectById(projectId);
+    if (!p) return;
+    const pos = projects.filter((x) => x.clientId === p.clientId && (x.folderId ?? null) === folderId && x.id !== projectId).length;
+    const np = { ...p, folderId, position: pos };
+    setProjects((ps) => ps.map((x) => (x.id === projectId ? np : x)));
+    upsertProject(np);
   };
   const moveTaskToNewProject = (taskId: string, clientId: string) => {
     setPromptDialog({ title: "New project", placeholder: "Project name", confirmLabel: "Create & move", onSubmit: (name) => {

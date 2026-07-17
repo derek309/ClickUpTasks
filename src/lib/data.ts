@@ -325,12 +325,28 @@ export interface Message {
   bcc: string[];
 }
 
-/** Our own grouping layer — GHL has no concept of this. */
+/** A Folder groups Lists (projects) within a space (client or workspace).
+ * Folder → List → Task. A project with folderId === null is a standalone
+ * list. GHL has no concept of this — it's our own organizing layer. */
+export interface Folder {
+  id: string;
+  clientId: string;
+  name: string;
+  position: number;
+  createdAt: string;
+}
+
+/** Our own grouping layer — GHL has no concept of this. A Project holds tasks
+ * directly, so it IS a "List"; it optionally sits inside a Folder. */
 export interface Project {
   id: string;
   clientId: string;
   name: string;
   description: string;
+  /** Folder this list belongs to, or null/undefined = standalone list. */
+  folderId?: string | null;
+  /** Sort position within its folder bucket (or the standalone bucket). */
+  position?: number;
   /** Roster ids "following" this project — same concept as Client.assignedTo,
    * scoped to just this project rather than the whole client. Drives the
    * "My Work" tab's assigned-or-following filter; not an RLS/visibility
