@@ -347,7 +347,11 @@ function friendlyDue(iso: string): string {
   return formatDue(iso);
 }
 
-export function InlineDue({ value, overdue, recurrence = "none", onChange, onRecurrenceChange }: { value: string | null; overdue: boolean; recurrence?: Recurrence; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void }) {
+// `emptyLabel` overrides the "—" shown when no date is set (e.g. "Follow-up"
+// for the prominent header control). `strong` styles a set value in accent
+// (and gives the empty state a visible affordance) instead of muted grey —
+// for surfaces where the date is a primary action, not a table cell.
+export function InlineDue({ value, overdue, recurrence = "none", onChange, onRecurrenceChange, emptyLabel = "—", strong = false }: { value: string | null; overdue: boolean; recurrence?: Recurrence; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; emptyLabel?: string; strong?: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
@@ -361,10 +365,11 @@ export function InlineDue({ value, overdue, recurrence = "none", onChange, onRec
     }
     setOpen(true);
   };
+  const tone = overdue ? "font-medium text-danger" : strong ? (value ? "font-semibold text-accent" : "font-medium text-accent/70") : "text-muted";
   return (
     <>
-      <button ref={ref} onClick={openIt} className={`inline-flex items-center gap-1 rounded px-1 py-0.5 text-[13px] hover:bg-background ${overdue ? "font-medium text-danger" : "text-muted"}`}>
-        {value ? friendlyDue(value) : "—"}{recurrence !== "none" && <I.repeat className="text-accent" />}
+      <button ref={ref} onClick={openIt} className={`inline-flex items-center gap-1 rounded px-1 py-0.5 text-[13px] hover:bg-background ${tone}`}>
+        {value ? friendlyDue(value) : emptyLabel}{recurrence !== "none" && <I.repeat className="text-accent" />}
       </button>
       {open && <DatePopover pos={pos} value={value} recurrence={recurrence} onSelect={(d) => { onChange(d); setOpen(false); }} onRecurrenceChange={onRecurrenceChange} onClose={() => setOpen(false)} />}
     </>

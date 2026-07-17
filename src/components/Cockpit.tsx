@@ -2127,6 +2127,24 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <button onClick={() => setAllTasksScope("all")} className={`px-2.5 py-1.5 text-[13px] font-medium ${allTasksScope === "all" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>All</button>
             </div>
           )}
+          {/* Follow-up date — Derek's primary planning signal (he works by
+              "when do I next check in", not per-task due dates), so it leads
+              the header actions, ahead of the Tasks/Journal/Vault tabs, as a
+              prominent accent (or red-when-overdue) pill rather than the tiny
+              grey chip it used to be. */}
+          {!myWork && !personalView && !inboxView && activeClient !== "all" && clientById(activeClient) && (() => {
+            const scopedProject = activeProject ? projectById(activeProject) : null;
+            const entity = scopedProject ?? clientById(activeClient)!;
+            const fu = entity.followUpAt ?? null;
+            const overdue = isOverdue(fu);
+            const setFollowUp = (d: string | null) => (scopedProject ? setProjectFollowUp(scopedProject.id, d) : setClientFollowUp(activeClient, d));
+            return (
+              <div title="Follow-up date — when to next check in on this" className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 ${overdue ? "border-danger/40 bg-danger-soft" : fu ? "border-accent/40 bg-accent-soft" : "border-dashed"}`}>
+                <I.calendar className={overdue ? "text-danger" : fu ? "text-accent" : "text-muted"} />
+                <InlineDue value={fu} overdue={overdue} onChange={setFollowUp} emptyLabel="Follow-up" strong />
+              </div>
+            );
+          })()}
           {!myWork && !personalView && !inboxView && activeClient !== "all" && (
             <div className="inline-flex overflow-hidden rounded-md border">
               <button onClick={() => setClientTab("tasks")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "tasks" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Tasks</button>
@@ -2163,17 +2181,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     className={`rounded-md border p-1.5 ${following ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>
                     <I.bookmark filled={following} />
                   </button>
-                );
-              })()}
-              {(() => {
-                const scopedProject = activeProject ? projectById(activeProject) : null;
-                const entity = scopedProject ?? clientById(activeClient)!;
-                const setFollowUp = (d: string | null) => (scopedProject ? setProjectFollowUp(scopedProject.id, d) : setClientFollowUp(activeClient, d));
-                return (
-                  <div title="Follow-up date" className="inline-flex items-center gap-1 rounded-md border px-2 py-1.5 text-[13px] text-muted">
-                    <I.calendar />
-                    <InlineDue value={entity.followUpAt ?? null} overdue={isOverdue(entity.followUpAt ?? null)} onChange={setFollowUp} />
-                  </div>
                 );
               })()}
               {/* Client status, promoted from the sidebar-dot popover onto the
