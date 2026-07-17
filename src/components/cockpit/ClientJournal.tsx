@@ -16,11 +16,11 @@ import {
   users, userById, timeAgo, isCompletionEvent, NOTE_TYPE_META, NOTE_TYPE_ORDER, MANUAL_NOTE_TYPES, noteTypeMeta,
   type ClientNote, type NoteType, type Task, type Comment, type Message, type MessageChannel, type MessageDirection, type Me, type Attachment,
 } from "@/lib/data";
-import { I, Avatar, CollapsibleText } from "./ui";
+import { I, Avatar, CollapsibleText, newId } from "./ui";
 import { ConfirmModal, type ConfirmSpec } from "./modals";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 
-type JournalFilter = "all" | NoteType | "message" | "activity";
+type JournalFilter = "all" | NoteType | "message" | "activity" | "photos" | "links" | "files";
 
 type JournalItem =
   | { kind: "note"; at: string; note: ClientNote }
@@ -116,6 +116,10 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   const [draftPrompt, setDraftPrompt] = useState("");
   const [pendingAtts, setPendingAtts] = useState<Attachment[]>([]);
   const [uploadingAtt, setUploadingAtt] = useState(false);
+  const noteFileRef = useRef<HTMLInputElement>(null);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkLabel, setLinkLabel] = useState("");
   const [permPopoverOpen, setPermPopoverOpen] = useState(false);
   // Snapshot of which messages were unread the moment this Journal opened —
   // the mark-read effect below flips message.read to true almost instantly,
@@ -164,10 +168,20 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
     if (it.kind === "message") return (it.message.subject ?? "").toLowerCase().includes(q) || it.message.body.toLowerCase().includes(q);
     return it.comment.body.toLowerCase().includes(q) || it.comment.taskTitle.toLowerCase().includes(q);
   };
+  // Photos/Links/Files filter by attachment kind, across notes AND messages
+  // (both can carry attachments). Photos = images, Files = pdf/doc/sheet.
+  const itemAtts = (it: JournalItem): Attachment[] =>
+    it.kind === "note" ? (it.note.attachments ?? [])
+      : it.kind === "message" ? (it.message.attachments ?? [])
+      : [];
+  const hasKind = (it: JournalItem, kinds: string[]) => itemAtts(it).some((a) => kinds.includes(a.kind));
   const filteredItems = journalItems.filter((it) => {
     const passesType = filter === "all" ? true
       : filter === "message" ? it.kind === "message"
       : filter === "activity" ? (it.kind === "activity" || it.kind === "completion")
+      : filter === "photos" ? hasKind(it, ["image"])
+      : filter === "links" ? hasKind(it, ["link"])
+      : filter === "files" ? hasKind(it, ["pdf", "doc", "sheet"])
       : (it.kind === "note" && it.note.type === filter);
     return passesType && matchesSearch(it);
   });
@@ -187,6 +201,23 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
     if (!draft.trim() && pendingAtts.length === 0) return;
     onAdd(draftType, draft.trim(), pendingAtts.length ? pendingAtts : undefined);
     setDraft(""); setPendingAtts([]);
+  };
+  // Attach any file (images, PDFs, docs) — onUploadImage handles any kind
+  // (it kind-detects from the filename). Files flow to the Vault too.
+  const handleNoteFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setUploadingAtt(true);
+    for (const f of Array.from(files)) { const att = await onUploadImage(f); if (att) setPendingAtts((a) => [...a, att]); }
+    setUploadingAtt(false);
+  };
+  // Add a link (any URL incl. Google Doc/Drive) as a journal attachment.
+  const addLink = () => {
+    const raw = linkUrl.trim();
+    if (!raw) { setLinkOpen(false); return; }
+    const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    let host = url; try { host = new URL(url).hostname.replace(/^www\./, ""); } catch { /* keep raw */ }
+    setPendingAtts((a) => [...a, { id: newId("a_"), name: linkLabel.trim() || host, size: "", kind: "link", url }]);
+    setLinkUrl(""); setLinkLabel(""); setLinkOpen(false);
   };
   const handlePaste = async (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
@@ -245,6 +276,10 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
             <button onClick={() => setFilter("message")} className={`rounded-full border px-2.5 py-1 text-[13px] font-medium transition ${filter === "message" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}>Message</button>
           )}
           <button onClick={() => setFilter("activity")} className={`rounded-full border px-2.5 py-1 text-[13px] font-medium transition ${filter === "activity" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}>Task Activity</button>
+          <span className="mx-0.5 h-4 w-px bg-border" />
+          <button onClick={() => setFilter("photos")} className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[13px] font-medium transition ${filter === "photos" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}>Photos</button>
+          <button onClick={() => setFilter("links")} className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[13px] font-medium transition ${filter === "links" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}><I.link /> Links</button>
+          <button onClick={() => setFilter("files")} className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[13px] font-medium transition ${filter === "files" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}><I.clip /> Files</button>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <div className="relative">
@@ -469,11 +504,26 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                 )}
                 <textarea value={draft} onChange={(e) => setDraft(e.target.value)} onPaste={handlePaste}
                   onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !(mentionMatch && mentionCands.length)) { e.preventDefault(); submit(); } }}
-                  placeholder="Message the team… (Enter to send, Shift+Enter for a new line, type @ to mention, paste to attach an image)"
+                  placeholder="Message the team… (Enter to send, Shift+Enter for a new line, type @ to mention, paste to attach an image). Or add just a link/file below."
                   className="h-full min-h-[160px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
               </div>
-              <button onClick={submit} disabled={!draft.trim() && pendingAtts.length === 0}
-                className="mt-2 shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">Send</button>
+              {linkOpen && (
+                <div className="mt-2 flex shrink-0 flex-col gap-1.5 rounded-lg border bg-background p-2">
+                  <input autoFocus value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addLink(); } if (e.key === "Escape") setLinkOpen(false); }} placeholder="Paste a link (Google Doc, Drive, any URL)…" className="rounded-md border bg-surface px-2 py-1.5 text-[13px] outline-none focus:border-accent" />
+                  <div className="flex items-center gap-1.5">
+                    <input value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addLink(); } }} placeholder="Label (optional)" className="min-w-0 flex-1 rounded-md border bg-surface px-2 py-1.5 text-[13px] outline-none focus:border-accent" />
+                    <button onClick={addLink} className="shrink-0 rounded-md border border-accent bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white">Add</button>
+                    <button onClick={() => { setLinkOpen(false); setLinkUrl(""); setLinkLabel(""); }} className="shrink-0 rounded-md border px-2.5 py-1.5 text-[13px] text-muted hover:text-foreground">Cancel</button>
+                  </div>
+                </div>
+              )}
+              <div className="mt-2 flex shrink-0 items-center gap-1.5">
+                <button onClick={() => noteFileRef.current?.click()} title="Attach a file (image, PDF, doc)" className="inline-flex items-center gap-1 rounded-md border px-2 py-1.5 text-[13px] text-muted hover:bg-background hover:text-foreground"><I.clip /> Attach</button>
+                <button onClick={() => setLinkOpen((o) => !o)} title="Add a link" className={`inline-flex items-center gap-1 rounded-md border px-2 py-1.5 text-[13px] ${linkOpen ? "border-accent text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}><I.link /> Link</button>
+                <input ref={noteFileRef} type="file" multiple className="hidden" onChange={(e) => { handleNoteFiles(e.target.files); e.target.value = ""; }} />
+                <button onClick={submit} disabled={!draft.trim() && pendingAtts.length === 0}
+                  className="ml-auto rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">Send</button>
+              </div>
             </div>
           ) : (
             <div className="flex min-h-0 flex-1 flex-col p-3">
