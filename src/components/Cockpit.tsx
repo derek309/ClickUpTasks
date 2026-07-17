@@ -2223,21 +2223,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   <I.bolt /> Open in GHL
                 </a>
               )}
-              {ghlContactUrlFor(activeClient) && (
-                <button onClick={importGhlTasks} disabled={importingTasks} title="Import tasks created directly in GoHighLevel"
-                  className="rounded-md border bg-background p-1.5 text-muted hover:text-foreground disabled:opacity-50">
-                  <I.repeat />
-                </button>
-              )}
-              {canAdmin && !ghlContactUrlFor(activeClient) && (
-                <button onClick={() => { setGhlLinkSearch(""); setGhlLinkOpen(true); }} title="Connect this client to a GoHighLevel contact"
-                  className="inline-flex items-center gap-1.5 rounded-md border border-dashed px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
-                  <I.bolt /> Link to GHL
-                </button>
-              )}
               {/* Secondary/config actions folded into one overflow menu so the
-                  header leads with Follow / Open in GHL / Import instead of a
-                  cluster of equal-weight icon buttons. */}
+                  header leads with Follow-up / tabs / Follow / Status / Review /
+                  Open-in-GHL instead of a cluster of equal-weight icon buttons.
+                  The rarer GHL actions (Import, Link) live in here too. */}
               <div className="relative">
                 <button onClick={() => setHeaderMoreOpen((o) => !o)} title="More actions"
                   className="rounded-md border bg-background p-1.5 text-muted hover:text-foreground"><I.dots /></button>
@@ -2250,13 +2239,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>✳</span> Copy for Claude</button>
                     <button onClick={() => { setHeaderMoreOpen(false); queueClientForClaude(); }}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>★</span> Queue for Claude</button>
-                    <label title="Shifts every open dated task here by the same number of days, preserving their relative spacing"
-                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background">
-                      <I.calendar className="shrink-0" /><span className="flex-1">Move all due dates…</span>
+                    <div title="Shifts every open dated task here by the same number of days, preserving their relative spacing"
+                      className="rounded-md px-2.5 py-1.5 hover:bg-background">
+                      <div className="mb-1 flex items-center gap-2 text-[13px]"><I.calendar className="shrink-0" /> Move all due dates to…</div>
                       <input type="date" onClick={(e) => e.stopPropagation()}
                         onChange={(e) => { if (e.target.value) { setHeaderMoreOpen(false); pushAllDatesForward(e.target.value); } e.target.value = ""; }}
-                        className="w-[124px] shrink-0 rounded border bg-background px-1 py-0.5 text-[12px] outline-none" />
-                    </label>
+                        className="w-full rounded border bg-background px-1.5 py-1 text-[13px] outline-none" />
+                    </div>
                     <button onClick={() => {
                         setHeaderMoreOpen(false);
                         const scope = activeProject ? `client ${activeClient}, project ${activeProject}` : `client ${activeClient}`;
@@ -2272,6 +2261,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     {canAdmin && (
                       <button onClick={() => { setHeaderMoreOpen(false); setLinkModal({}); }}
                         className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.plus /> Add quick link</button>
+                    )}
+                    {ghlContactUrlFor(activeClient) && (
+                      <button onClick={() => { setHeaderMoreOpen(false); importGhlTasks(); }} disabled={importingTasks}
+                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background disabled:opacity-50"><I.repeat /> Import tasks from GHL</button>
+                    )}
+                    {canAdmin && !ghlContactUrlFor(activeClient) && (
+                      <button onClick={() => { setHeaderMoreOpen(false); setGhlLinkSearch(""); setGhlLinkOpen(true); }}
+                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.bolt /> Link to GoHighLevel</button>
                     )}
                     {canAdmin && clientById(activeClient)?.linkedContactId && (
                       <button onClick={() => { setHeaderMoreOpen(false); linkClientToContact(activeClient, null); }}
