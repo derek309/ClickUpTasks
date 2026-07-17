@@ -21,8 +21,9 @@ export async function POST(req: NextRequest) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "AI drafting isn't configured yet (missing GEMINI_API_KEY)." }, { status: 501 });
 
-  const { clientId, channel } = (await req.json().catch(() => ({}))) as { clientId?: string; channel?: "email" | "sms" };
+  const { clientId, channel, prompt: userPrompt } = (await req.json().catch(() => ({}))) as { clientId?: string; channel?: "email" | "sms"; prompt?: string };
   if (!clientId || !channel) return NextResponse.json({ error: "Missing clientId or channel." }, { status: 400 });
+  const instruction = (userPrompt ?? "").trim();
 
   const { data: client } = await supabaseAdmin.from("clients").select("name").eq("id", clientId).maybeSingle();
   if (!client) return NextResponse.json({ error: "Client not found." }, { status: 404 });
@@ -48,13 +49,17 @@ export async function POST(req: NextRequest) {
   const noteLines = (notes ?? []).map((n) => `- [${n.type}] ${(n.body || "").slice(0, 200)}`).join("\n") || "(none)";
 
   const prompt = [
-    "You are drafting a client-facing status-update message on behalf of an agency account manager.",
+    "You are drafting a client-facing message on behalf of an agency account manager.",
     "Respond in EXACTLY this format, plain text only — no markdown, no preamble:",
     channel === "email"
       ? "SUBJECT: <a short, specific subject line>\nBODY: <the email body, friendly and professional, 3-6 short paragraphs or bullet points>"
       : "BODY: <the text message, under 300 characters, friendly and concise>",
     "",
-    "Structure the body around two things: what's been completed recently, and what (if anything) we're waiting on from the client. Never invent facts not present below — if there's nothing completed or nothing needed, say so briefly.",
+    // When the account manager typed an instruction, that steers the message;
+    // otherwise fall back to the default "status update" behavior.
+    instruction
+      ? `The account manager's instruction for this message: "${instruction}"\nWrite the message to accomplish that. Use the context below for real facts — never invent anything not present below.`
+      : "Structure the body around two things: what's been completed recently, and what (if anything) we're waiting on from the client. Never invent facts not present below — if there's nothing completed or nothing needed, say so briefly.",
     "",
     `Client: ${client.name}`,
     "",

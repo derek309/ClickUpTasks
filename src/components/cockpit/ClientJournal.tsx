@@ -92,7 +92,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   canAdmin?: boolean;
   canMessage?: string[]; // roster ids granted permission to send email/SMS as this client
   onToggleCanMessage?: (memberId: string) => void; // admin-only — manages canMessage
-  onDraftMessage?: (channel: MessageChannel) => Promise<{ subject?: string; body: string } | null>; // Gemini status-update draft, never sends
+  onDraftMessage?: (channel: MessageChannel, prompt?: string) => Promise<{ subject?: string; body: string } | null>; // Gemini draft, never sends
   draftingMessage?: boolean;
   onRefreshContact?: () => void; // admin-only — re-pulls name/email/phone/etc. from GHL
   refreshingContact?: boolean;
@@ -111,6 +111,9 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   const msgBodyRef = useRef<HTMLTextAreaElement>(null);
   const [msgSubject, setMsgSubject] = useState("");
   const [msgBody, setMsgBody] = useState("");
+  // Free-text instruction for the "Prompt Claude" draft ("check in with them",
+  // "let them know it's on hold", etc.). Empty = the default status-update draft.
+  const [draftPrompt, setDraftPrompt] = useState("");
   const [pendingAtts, setPendingAtts] = useState<Attachment[]>([]);
   const [uploadingAtt, setUploadingAtt] = useState(false);
   const [permPopoverOpen, setPermPopoverOpen] = useState(false);
@@ -484,18 +487,30 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                   placeholder={composeMode === "email" ? "Write an email… (Enter to send, Shift+Enter for a new line)" : "Write a text… (Enter to send, Shift+Enter for a new line)"}
                   className="h-full min-h-[160px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
               </div>
-              <div className="mt-2 flex shrink-0 items-center gap-2">
-                {onDraftMessage && (
-                  <button onClick={async () => {
-                      if (composeMode !== "email" && composeMode !== "sms") return;
-                      const d = await onDraftMessage(composeMode);
+              {onDraftMessage && (
+                <div className="mt-2 flex shrink-0 items-center gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
+                  <span aria-hidden className="pl-1 text-[13px]">✨</span>
+                  <input value={draftPrompt} onChange={(e) => setDraftPrompt(e.target.value)}
+                    onKeyDown={async (e) => {
+                      if (e.key !== "Enter" || draftingMessage || (composeMode !== "email" && composeMode !== "sms")) return;
+                      e.preventDefault();
+                      const d = await onDraftMessage(composeMode, draftPrompt.trim() || undefined);
                       if (d) { if (composeMode === "email") setMsgSubject(d.subject ?? ""); setMsgBody(d.body); }
                     }}
-                    disabled={draftingMessage} title="Draft a status update from recent activity — review before sending"
-                    className="rounded-lg border px-2.5 py-1.5 text-[13px] font-medium text-accent disabled:opacity-40">
-                    {draftingMessage ? "Drafting…" : "✨ Draft with AI"}
+                    placeholder="Tell Claude what to say… (e.g. “check in with them”)"
+                    className="min-w-0 flex-1 bg-transparent px-1 text-[13px] outline-none placeholder:text-muted" />
+                  <button onClick={async () => {
+                      if (composeMode !== "email" && composeMode !== "sms") return;
+                      const d = await onDraftMessage(composeMode, draftPrompt.trim() || undefined);
+                      if (d) { if (composeMode === "email") setMsgSubject(d.subject ?? ""); setMsgBody(d.body); }
+                    }}
+                    disabled={draftingMessage} title={draftPrompt.trim() ? "Draft this with Claude" : "Draft a status update from recent activity — review before sending"}
+                    className="shrink-0 rounded-md border border-accent/40 bg-surface px-2.5 py-1 text-[13px] font-medium text-accent disabled:opacity-40">
+                    {draftingMessage ? "Drafting…" : draftPrompt.trim() ? "Write it" : "Status update"}
                   </button>
-                )}
+                </div>
+              )}
+              <div className="mt-2 flex shrink-0 items-center gap-2">
                 <button onClick={submitMessage} disabled={!msgBody.trim() || sendingMessage}
                   className="ml-auto shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send"}</button>
               </div>

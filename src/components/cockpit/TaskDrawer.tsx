@@ -69,7 +69,7 @@ function RecipientField({ label, value, onChange, contacts }: { label: string; v
   );
 }
 
-export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, isQueued, onToggleQueue, onCopyLink, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, sendingMessage, onRegenerateAiSummary, aiSummaryBusy }: {
+export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, isQueued, onToggleQueue, onCopyLink, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onRegenerateAiSummary, aiSummaryBusy }: {
   task: Task; comment: string; setComment: (v: string) => void;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; navTasks: Task[]; onOpenTask: (id: string) => void; onAddSibling: (title: string) => void; onPrev: () => void; onNext: () => void;
@@ -84,6 +84,8 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   onUploadMessageImage?: (file: File) => Promise<Attachment | null>;
   onSendTaskMessage?: (channel: MessageChannel, subject: string, body: string, attachments?: Attachment[], cc?: string[], bcc?: string[]) => void;
   sendingMessage?: boolean;
+  onDraftMessage?: (channel: "email" | "sms", prompt?: string) => Promise<{ subject?: string; body: string } | null>; // Gemini draft, never sends
+  draftingMessage?: boolean;
   onRegenerateAiSummary?: () => void; // AI tab's "Regenerate" — only ever called on click, never automatically
   aiSummaryBusy?: boolean;
 }) {
@@ -110,6 +112,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const [copied, setCopied] = useState(false);
   const [msgSubject, setMsgSubject] = useState("");
   const [msgBody, setMsgBody] = useState("");
+  const [draftPrompt, setDraftPrompt] = useState("");
   const [msgCc, setMsgCc] = useState<string[]>([]);
   const [msgBcc, setMsgBcc] = useState<string[]>([]);
   const [showCcBcc, setShowCcBcc] = useState(false);
@@ -422,6 +425,27 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     <input ref={msgFileRef} type="file" multiple accept="image/*" className="hidden" onChange={(e) => { handleMsgFileSelect(e.target.files); e.target.value = ""; }} />
   </>);
   const smsSeg = smsSegments(msgBody);
+  // "Prompt Claude" — type an intent, Gemini writes the message (subject+body)
+  // from that + client context. Never sends. Shared by the SMS/Email composers.
+  const runDraft = async (channel: "email" | "sms") => {
+    if (!onDraftMessage || draftingMessage) return;
+    const d = await onDraftMessage(channel, draftPrompt.trim() || undefined);
+    if (d) { if (channel === "email") setMsgSubject(d.subject ?? ""); setMsgBody(d.body); }
+  };
+  const promptClaudeBlock = (channel: "email" | "sms") => onDraftMessage ? (
+    <div className="mb-2 flex shrink-0 items-center gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
+      <span aria-hidden className="pl-1 text-[13px]">✨</span>
+      <input value={draftPrompt} onChange={(e) => setDraftPrompt(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); runDraft(channel); } }}
+        placeholder="Tell Claude what to say… (e.g. “send them an update”)"
+        className="min-w-0 flex-1 bg-transparent px-1 text-[13px] outline-none placeholder:text-muted" />
+      <button onClick={() => runDraft(channel)} disabled={draftingMessage}
+        title={draftPrompt.trim() ? "Draft this with Claude" : "Draft a status update from recent activity"}
+        className="shrink-0 rounded-md border border-accent/40 bg-surface px-2.5 py-1 text-[13px] font-medium text-accent disabled:opacity-40">
+        {draftingMessage ? "Drafting…" : draftPrompt.trim() ? "Write it" : "Status update"}
+      </button>
+    </div>
+  ) : null;
   const smsComposerBlock = hasMessaging ? (
     <div className="flex flex-1 flex-col border-t bg-surface p-3">
       <div className="mb-2 shrink-0 text-[13px] text-muted">Sending to: <span className="font-medium text-foreground">{messageDest?.phone || "no phone on file"}</span></div>
@@ -430,6 +454,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitTaskMessage(); } }}
         placeholder="Write a text… (Enter to send, paste to attach an image)"
         className="min-h-[140px] w-full flex-1 resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
+      <div className="mt-2">{promptClaudeBlock("sms")}</div>
       <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
         <span className="text-[13px] text-muted">{wordCount(msgBody)} word{wordCount(msgBody) === 1 ? "" : "s"} · {smsSeg.count} segment{smsSeg.count === 1 ? "" : "s"}{smsSeg.count > 0 ? ` (${smsSeg.encoding})` : ""}</span>
         <span className="flex items-center gap-1.5">
@@ -457,6 +482,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       <textarea ref={emailBodyRef} value={msgBody} onChange={(e) => setMsgBody(e.target.value)} onPaste={handleMsgPaste}
         placeholder="Write an email… (paste to attach an image)"
         className="min-h-[220px] w-full flex-1 resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
+      <div className="mt-2">{promptClaudeBlock("email")}</div>
       <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
         <span className="text-[13px] text-muted">{wordCount(msgBody)} word{wordCount(msgBody) === 1 ? "" : "s"}</span>
         <span className="flex items-center gap-1.5">
