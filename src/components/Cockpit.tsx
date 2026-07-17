@@ -71,6 +71,8 @@ import { QuickLinksBar } from "./cockpit/ClientLinks";
 import { ClientJournal } from "./cockpit/ClientJournal";
 import { VaultView, type VaultItem } from "./cockpit/VaultView";
 import { ClientsBoard, type WorkBoardGroup, type WorkItem } from "./cockpit/ClientsBoard";
+import { ClientsDirectory } from "./cockpit/ClientsDirectory";
+import { ProjectsDirectory } from "./cockpit/ProjectsDirectory";
 import { claudeCodeUrl } from "@/lib/claudeLink";
 
 // --- Deep-link URL state ----------------------------------------------------
@@ -79,7 +81,7 @@ import { claudeCodeUrl } from "@/lib/claudeLink";
 //   ?view=work|clients|personal   the special boards
 //   ?client=<id>[&project=<id>]   a client (optionally scoped to one project)
 //   ?task=<id>                    the task drawer (layers over any of the above)
-type NavState = { view: "work" | "personal" | "inbox" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | "vault" | null; vaultFolder: string | null };
+type NavState = { view: "work" | "personal" | "inbox" | "clients" | "projects" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | "vault" | null; vaultFolder: string | null };
 function buildSearch(s: NavState): string {
   const p = new URLSearchParams();
   if (s.view) p.set("view", s.view);
@@ -100,7 +102,7 @@ function parseSearch(search: string): NavState {
   const v = p.get("view");
   const tab = p.get("tab");
   return {
-    view: v === "work" || v === "personal" || v === "inbox" ? v : null,
+    view: v === "work" || v === "personal" || v === "inbox" || v === "clients" || v === "projects" ? v : null,
     client: p.get("client") ?? "all",
     project: p.get("project"),
     task: p.get("task"),
@@ -145,6 +147,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [myWorkUser, setMyWorkUser] = useState<string>(me.id);
   const [personalView, setPersonalView] = useState(false);
   const [inboxView, setInboxView] = useState(false);
+  // Full-page Clients / Projects directory views (the "Clients" and "Projects"
+  // nav links). A distinct mode like inbox/personal — when set, the main pane
+  // shows the directory instead of a client/task view. clearViews() below
+  // resets it alongside the others.
+  const [dirView, setDirView] = useState<"clients" | "projects" | null>(null);
   // All Tasks defaults to just your own — admins can flip to "all"; for VAs
   // this is inert either way since scopedTasks already fully restricts them.
   const [allTasksScope, setAllTasksScope] = useState<"mine" | "all">("mine");
@@ -172,11 +179,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
   const [promptDialog, setPromptDialog] = useState<PromptSpec | null>(null);
-  const [menuClientId, setMenuClientId] = useState<string | null>(null);
-  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
-  const [menuProjectId, setMenuProjectId] = useState<string | null>(null);
 
-  // Sidebar client ordering: star to pin, sort mode, manual drag order.
+  // Client ordering: star to pin, sort mode (used by the Clients directory).
   // Personal preferences → persisted per-browser (localStorage), not the DB.
   type ClientSort = "manual" | "az" | "tasks" | "recent" | "used" | "urgent" | "mine";
   const [clientSort, setClientSort] = useState<ClientSort>("urgent");
@@ -191,7 +195,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // when the "Recently used" sort is active.
   const [clientUsed, setClientUsed] = useState<Record<string, number>>({});
   const [starred, setStarred] = useState<Set<string>>(new Set());
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [claudeQueue, setClaudeQueue] = useState<Set<string>>(new Set());
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const toggleClaudeQueue = (taskId: string) => {
@@ -201,12 +204,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       return n;
     });
   };
-  const toggleCollapse = (key: string) => setCollapsed((s) => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); try { localStorage.setItem("cut_collapsed", JSON.stringify([...n])); } catch {} return n; });
   const [manualOrder, setManualOrder] = useState<string[]>([]);
-  const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [headerMoreOpen, setHeaderMoreOpen] = useState(false);
-  const [dragClientId, setDragClientId] = useState<string | null>(null);
-  const [statusMenuClientId, setStatusMenuClientId] = useState<string | null>(null);
 
   // Realtime echo suppression for `clients` writes. Admin-only, low-frequency
   // writes — a short TTL ledger is proportionate here (unlike tasks, which
@@ -402,7 +401,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     try {
       const s = localStorage.getItem("cut_clientSort"); if (s) setClientSort(s as ClientSort);
       const st = localStorage.getItem("cut_starred"); if (st) setStarred(new Set(JSON.parse(st)));
-      const co = localStorage.getItem("cut_collapsed"); if (co) setCollapsed(new Set(JSON.parse(co)));
       const mo = localStorage.getItem("cut_clientOrder"); if (mo) setManualOrder(JSON.parse(mo));
       const he = localStorage.getItem("cut_hideEmpty"); if (he !== null) setHideEmpty(he === "1");
       const hd = localStorage.getItem("cut_hideDone"); if (hd !== null) setHideDone(hd === "1");
@@ -425,15 +423,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     try { localStorage.setItem("cut_starred", JSON.stringify([...n])); } catch {}
     return n;
   });
-  const saveManualOrder = (ids: string[]) => { setManualOrder(ids); try { localStorage.setItem("cut_clientOrder", JSON.stringify(ids)); } catch {} };
-  const dropOnClient = (targetId: string) => {
-    if (!dragClientId || dragClientId === targetId) { setDragClientId(null); return; }
-    const ids = sortedClients.map((c) => c.id).filter((id) => id !== dragClientId);
-    ids.splice(ids.indexOf(targetId), 0, dragClientId);
-    saveManualOrder(ids);
-    if (clientSort !== "manual") saveClientSort("manual"); // dragging implies manual
-    setDragClientId(null);
-  };
   const [drawerFull, setDrawerFull] = useState(false);
   useEffect(() => { try { setDrawerFull(localStorage.getItem("cut_drawerFull") === "1"); } catch {} }, []);
   // Drop the project filter whenever we leave its client (or enter My Work).
@@ -448,12 +437,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   // --- Deep-link URL sync ---------------------------------------------------
   const currentNav = (): NavState => ({
-    view: myWork ? "work" : personalView ? "personal" : inboxView ? "inbox" : null,
+    view: dirView ?? (myWork ? "work" : personalView ? "personal" : inboxView ? "inbox" : null),
     client: activeClient, project: activeProject, task: openTaskId,
     clientTab, vaultFolder: null, // vaultFolder is write-only (via copyFolderLink) — not mirrored into the live URL as you browse
   });
   const applyNav = (s: NavState) => {
     setMyWork(s.view === "work"); setPersonalView(s.view === "personal"); setInboxView(s.view === "inbox");
+    setDirView(s.view === "clients" || s.view === "projects" ? s.view : null);
     setActiveClient(s.view ? "all" : s.client); setActiveProject(s.view ? null : s.project); setOpenTaskId(s.task);
     if (s.clientTab) setClientTab(s.clientTab);
     setInitialVaultFolder(s.vaultFolder);
@@ -503,7 +493,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Which of the 5 top nav items (Inbox/All tasks/My Work/My Clients/
   // Personal) each person wants visible — personal display preference, not
   // an admin setting, so every role can customize their own sidebar.
-  const NAV_ITEM_LABELS: Record<string, string> = { inbox: "Inbox", all: "All Tasks", work: "My Work", personal: "Personal" };
+  const NAV_ITEM_LABELS: Record<string, string> = { inbox: "Inbox", all: "All Tasks", work: "Dashboard", personal: "Personal" };
   const [navVisible, setNavVisible] = useState<Record<string, boolean>>({ inbox: true, all: true, work: true, personal: true });
   const [navMenuOpen, setNavMenuOpen] = useState(false);
   useEffect(() => {
@@ -742,7 +732,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!n.read) { setNotifications((ns) => ns.map((x) => (x.id === n.id ? { ...x, read: true } : x))); markNotifReadDb(n.id); }
     if (n.taskId) { setOpenTaskId(n.taskId); return; }
     if (n.clientId) {
-      setMyWork(false); setPersonalView(false); setInboxView(false);
+      setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null);
       setActiveClient(n.clientId); setActiveProject(n.projectId ?? null); setClientTab("chat");
     }
   };
@@ -1020,40 +1010,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // pending one; nothing left → let the caller know via a toast.
     const next = reviewQueue[(curIdx + 1) % reviewQueue.length] ?? reviewQueue[0];
     if (!next) { pushToast("Nothing left to review — all caught up. 🎉"); return; }
-    if (next.kind === "project") { const pr = projectById(next.id); setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(pr?.clientId ?? "all"); setActiveProject(next.id); }
-    else { setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(next.id); setActiveProject(null); }
+    if (next.kind === "project") { const pr = projectById(next.id); setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setActiveClient(pr?.clientId ?? "all"); setActiveProject(next.id); }
+    else { setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setActiveClient(next.id); setActiveProject(null); }
     setClientTab("tasks");
     setOpenTaskId(null);
   };
-  // Sidebar sections by client status, funnel order; Active Client has no
-  // header (it's the main working set), the rest only show when non-empty.
-  // A client whose stored status predates the funnel (e.g. the old
-  // active/paused/archived values, before client-status-funnel.sql has run)
-  // falls into this same no-header bucket instead of vanishing from every
-  // group — exact-match filtering below would otherwise drop it entirely.
-  const knownClientStatuses = new Set<string>(CLIENT_STATUS_ORDER);
-  // Urgency sort is meant to answer "how soon do I need to work this" — the
-  // status-lifecycle grouping below would otherwise bury that (a client only
-  // ever sorts within its own status section, so an overdue Prospect can
-  // never outrank a no-due-date Active client). Bypass the grouping
-  // entirely in that mode: one flat, fully urgency-ordered list instead.
-  // "mine" gets the same flat treatment — it's the same urgency answer, just
-  // scoped to my own tasks instead of the whole client.
-  const clientGroups = clientSort === "urgent" || clientSort === "mine"
-    ? [{ header: "", items: sortedClients }]
-    : ([
-        ["", "active_client"],
-        ["Onboarding", "onboarding"],
-        ["Prospects", "prospect"],
-        ["Leads", "lead"],
-        ["Cancelled", "cancelled"],
-        ["Past Clients", "past_client"],
-      ] as const)
-        .map(([header, st]) => ({
-          header,
-          items: sortedClients.filter((c) => c.status === st || (st === "active_client" && !knownClientStatuses.has(c.status))),
-        }))
-        .filter((g) => g.items.length > 0);
   // Resolves the GHL contact backing a client: an explicit link (set via
   // "Link to GHL" for clients whose id isn't itself a contact id) wins;
   // otherwise fall back to the id-derived contact ("cl_" + contact id).
@@ -1663,7 +1624,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const clientCompany = (c: Client | null) => (c && c.id.startsWith("cl_") ? c.ghlLocationId : "");
   const addClientContact = async (contact: Contact, type: ClientType = "client") => {
     const id = "cl_" + contact.id;
-    if (clients.some((c) => c.id === id)) { setActiveClient(id); setMyWork(false); setPersonalView(false); setInboxView(false); setAddClientOpen(false); return; }
+    if (clients.some((c) => c.id === id)) { setActiveClient(id); setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setAddClientOpen(false); return; }
     const sub = subAccounts.find((s) => s.id === contact.clientId);
     const c: Client = { id, name: contact.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "lead", type, assignedTo: [] };
     setClients((cs) => [...cs, c]);
@@ -1918,174 +1879,21 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         </div>
 
         <nav className="shrink-0 space-y-0.5 px-2">
-          {navVisible.inbox && <SideItem active={inboxView} onClick={() => { setInboxView(true); setMyWork(false); setPersonalView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.bell className="text-muted" /> <span>Inbox</span>{unread > 0 && <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{unread}</span>}</SideItem>}
-          {navVisible.all && <SideItem active={!myWork && !personalView && !inboxView && activeClient === "all"} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>All Tasks</span><span className="ml-auto text-[13px] text-muted">{scopedTasks.filter((t) => t.clientId.startsWith("cl_")).length}</span></SideItem>}
-          {navVisible.work && <SideItem active={myWork} onClick={() => { setMyWork(true); setPersonalView(false); setInboxView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.user className="text-muted" /> <span>My Work</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
-          {navVisible.personal && <SideItem active={personalView} onClick={() => { setPersonalView(true); setMyWork(false); setInboxView(false); setSidebarOpen(false); setOpenTaskId(null); }}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>}
+          {navVisible.inbox && <SideItem active={inboxView} onClick={() => { setInboxView(true); setMyWork(false); setPersonalView(false); setDirView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.bell className="text-muted" /> <span>Inbox</span>{unread > 0 && <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{unread}</span>}</SideItem>}
+          {navVisible.work && <SideItem active={myWork} onClick={() => { setMyWork(true); setPersonalView(false); setInboxView(false); setDirView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>Dashboard</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
+          {navVisible.all && <SideItem active={!myWork && !personalView && !inboxView && !dirView && activeClient === "all"} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); }}><I.list className="text-muted" /> <span>All Tasks</span><span className="ml-auto text-[13px] text-muted">{scopedTasks.filter((t) => t.clientId.startsWith("cl_")).length}</span></SideItem>}
+          {navVisible.personal && <SideItem active={personalView} onClick={() => { setPersonalView(true); setMyWork(false); setInboxView(false); setDirView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>}
         </nav>
 
-        {clients.some((c) => c.id === WORKSPACE_CLIENT_ID) && (<>
-          <div className="flex shrink-0 items-center justify-between px-4 pb-1 pt-4">
-            <button onClick={() => toggleCollapse("projects")} className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-muted hover:text-foreground">
-              <I.chevron className={`transition ${collapsed.has("projects") ? "-rotate-90" : "rotate-180"}`} /> Projects
-            </button>
-            {canAdmin && <button onClick={() => addProject(WORKSPACE_CLIENT_ID)} title="Add project (internal list)" className="rounded p-0.5 text-muted hover:bg-background hover:text-foreground"><I.plus /></button>}
-          </div>
-          {!collapsed.has("projects") && (
-          <nav className="shrink-0 space-y-0.5 px-2">
-            {sortedWorkspaceProjects.map((p) => {
-              const pg = projectProgress(p.id);
-              const on = !myWork && !personalView && !inboxView && activeClient === WORKSPACE_CLIENT_ID && activeProject === p.id;
-              return (
-                <button key={p.id} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(WORKSPACE_CLIENT_ID); setActiveProject(p.id); setSidebarOpen(false); setOpenTaskId(null); setClientTab("tasks"); }}
-                  className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[15px] transition ${on ? "bg-accent-soft font-medium text-accent" : "text-foreground hover:bg-background"}`}>
-                  <I.folder className="shrink-0 opacity-70" />
-                  <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                  {/* Open count, not done/total — matches the client rows'
-                      convention and what the list actually shows by default
-                      (hideDone is on unless toggled off in Filter & view). */}
-                  <span className="shrink-0 text-[13px] tabular-nums text-muted">{pg.total - pg.done}</span>
-                </button>
-              );
-            })}
-            {workspaceProjects.length === 0 && <div className="px-2.5 py-1 text-[13px] text-muted">No projects yet — click + to add one.</div>}
-          </nav>
+        {/* Projects / Clients are now directory pages, not inline lists — the
+            sidebar stays lean since day-to-day work happens from Dashboard. */}
+        <nav className="mt-2 shrink-0 space-y-0.5 border-t px-2 pt-2">
+          {clients.some((c) => c.id === WORKSPACE_CLIENT_ID) && (
+            <SideItem active={dirView === "projects"} onClick={() => { setDirView("projects"); setMyWork(false); setPersonalView(false); setInboxView(false); setActiveProject(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.folder className="text-muted" /> <span>Projects</span><span className="ml-auto text-[13px] text-muted">{workspaceProjects.length}</span></SideItem>
           )}
-        </>)}
-
-        <div className="flex shrink-0 items-center justify-between px-4 pb-1 pt-4">
-          <button onClick={() => toggleCollapse("clients")} className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-muted hover:text-foreground">
-            <I.chevron className={`transition ${collapsed.has("clients") ? "-rotate-90" : "rotate-180"}`} /> Clients
-          </button>
-          <span className="flex items-center gap-0.5">
-            <button onClick={() => setClientListScope((s) => (s === "mine" ? "all" : "mine"))}
-              title={clientListScope === "mine" ? "Showing only clients with open work assigned to or followed by you — click to show every client" : "Showing every client — click to show just what needs your attention"}
-              className={`rounded p-0.5 hover:bg-background hover:text-foreground ${clientListScope === "mine" ? "text-accent" : "text-muted"}`}>
-              <I.user className="h-3.5 w-3.5" />
-            </button>
-            <span className="relative">
-              <button onClick={() => setSortMenuOpen((o) => !o)} title="Sort clients" className={`rounded p-0.5 hover:bg-background hover:text-foreground ${clientSort !== "manual" ? "text-accent" : "text-muted"}`}><I.list className="h-3.5 w-3.5" /></button>
-              {sortMenuOpen && (<>
-                <div className="fixed inset-0 z-30" onClick={() => setSortMenuOpen(false)} />
-                <div className="absolute right-0 top-full z-40 mt-1 w-44 rounded-lg border border-white/15 bg-[#2c3140] p-1 shadow-2xl">
-                  {([["urgent", "Overdue first"], ["mine", "By my work"], ["used", "Recently used"], ["manual", "Manual (drag to order)"], ["az", "A → Z"], ["tasks", "Most active"], ["recent", "Recently added"]] as const).map(([v, label]) => (
-                    <button key={v} onClick={() => { saveClientSort(v); setSortMenuOpen(false); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-white/10">
-                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${clientSort === v ? "bg-accent" : "bg-transparent"}`} />{label}
-                    </button>
-                  ))}
-                </div>
-              </>)}
-            </span>
-            {canAdmin && <button onClick={() => setAddClientOpen(true)} title="Add client from GHL contacts" className="rounded p-0.5 text-muted hover:bg-background hover:text-foreground"><I.plus /></button>}
-          </span>
-        </div>
-        {!collapsed.has("clients") && (
-        <nav className="shrink-0 space-y-0.5 px-2">
-          {clientGroups.map((g) => (
-          <div key={g.header || "active"}>
-          {g.header && <button onClick={() => toggleCollapse("cli:" + g.header)} className="flex w-full items-center gap-1 px-2.5 pb-0.5 pt-2.5 text-left text-[12px] font-semibold uppercase tracking-wide text-muted hover:text-foreground"><I.chevron className={`transition ${collapsed.has("cli:" + g.header) ? "-rotate-90" : "rotate-180"}`} /> {g.header}</button>}
-          {!(g.header && collapsed.has("cli:" + g.header)) && (<>
-          {g.items.map((c) => {
-            const active = !myWork && !personalView && !inboxView && activeClient === c.id;
-            const clientProjects = projectsForClient(c.id);
-            return (
-              <div key={c.id} className={menuClientId === c.id ? "relative z-50" : undefined}
-                draggable onDragStart={() => setDragClientId(c.id)} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); dropOnClient(c.id); }}>
-                <div className={`group/row relative ${dragClientId === c.id ? "opacity-40" : ""} ${statusMenuClientId === c.id ? "z-50" : ""}`}>
-                  {statusMenuClientId === c.id && (<>
-                    <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setStatusMenuClientId(null); }} />
-                    <div className="absolute left-1 top-full z-40 mt-1 w-44 rounded-lg border border-white/15 bg-[#2c3140] p-1 shadow-2xl">
-                      {CLIENT_STATUS_ORDER.map((st) => (
-                        <button key={st} onClick={(e) => { e.stopPropagation(); setStatusMenuClientId(null); setClientStatus(c.id, st); }}
-                          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-white/10">
-                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: CLIENT_STATUS_META[st].dot }} />
-                          {CLIENT_STATUS_META[st].label}
-                          {c.status === st && <I.check className="ml-auto text-accent" />}
-                        </button>
-                      ))}
-                    </div>
-                  </>)}
-                  <button onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(c.id); setActiveProject(null); setSidebarOpen(false); setOpenTaskId(null); }}
-                    className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[15px] transition ${active ? "bg-accent-soft font-medium text-accent" : "text-foreground hover:bg-background"} ${c.status === "cancelled" || c.status === "past_client" ? "opacity-50" : ""}`}>
-                    <span role="button" title={`${clientStatusMeta(c.status).label} — click to change`}
-                      onClick={(e) => { e.stopPropagation(); setStatusMenuClientId(statusMenuClientId === c.id ? null : c.id); }}
-                      className="h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-transparent transition hover:ring-white/30" style={{ background: clientStatusMeta(c.status).dot }} />
-                    {hasUnreadMessage(c.id) && <span className="shrink-0 text-accent" title="New message — waiting on a reply"><I.comment /></span>}
-                    <span className="min-w-0 flex-1">
-                      <span className="truncate">{c.name}</span>
-                      {clientCompany(c) && <span className="block truncate text-[13px] font-normal text-muted">{clientCompany(c)}</span>}
-                    </span>
-                    <span className="text-[13px] text-muted group-hover/row:opacity-0">{clientTaskCount(c.id)}</span>
-                  </button>
-                  <button onClick={(e) => { e.stopPropagation(); toggleStar(c.id); }} title={starred.has(c.id) ? "Unstar" : "Star — pin to top"}
-                    className={`absolute right-8 top-1/2 -translate-y-1/2 rounded p-1 hover:bg-background ${starred.has(c.id) ? "text-amber-400" : "text-muted opacity-0 group-hover/row:opacity-100"}`}>
-                    <I.star filled={starred.has(c.id)} />
-                  </button>
-                  {canAdmin && (
-                    <div className="absolute right-1.5 top-1/2 -translate-y-1/2">
-                      <button onClick={(e) => { e.stopPropagation(); const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setMenuPos({ top: r.bottom + 4, left: Math.min(r.right - 176, window.innerWidth - 184) }); setMenuClientId(menuClientId === c.id ? null : c.id); }} title="More" className="rounded p-1 text-muted opacity-0 hover:bg-background hover:text-foreground group-hover/row:opacity-100"><I.dots /></button>
-                      {menuClientId === c.id && (<>
-                        <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setMenuClientId(null); }} />
-                        <div style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: 176 }} className="z-50 rounded-lg border border-white/15 bg-[#2c3140] p-1 shadow-2xl">
-                          <button onClick={(e) => { e.stopPropagation(); setMenuClientId(null); addProject(c.id); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[15px] hover:bg-white/10"><I.plus /> Add project</button>
-                          <button onClick={(e) => { e.stopPropagation(); setMenuClientId(null); renameClient(c.id); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[15px] hover:bg-white/10"><I.pencil /> Rename client</button>
-                          <button onClick={(e) => { e.stopPropagation(); setMenuClientId(null); deleteClient(c.id); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[15px] text-red-500 hover:bg-white/10"><I.trash /> Remove client</button>
-                        </div>
-                      </>)}
-                    </div>
-                  )}
-                </div>
-                {active && (
-                  <div className="mb-1 ml-4 mt-0.5 space-y-0.5 border-l pl-2">
-                    {clientProjects.map((p) => {
-                      const pg = projectProgress(p.id);
-                      const on = activeProject === p.id;
-                      return (
-                        <div key={p.id} className={`group/prow relative ${menuProjectId === p.id ? "z-50" : ""}`}>
-                          <button onClick={() => { setActiveProject(on ? null : p.id); setOpenTaskId(null); setClientTab("tasks"); }}
-                            className={`flex w-full items-center gap-2 rounded-md py-1 pl-2 pr-1 text-left text-[13px] transition ${on ? "bg-accent-soft font-medium text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>
-                            <I.folder className="shrink-0 opacity-70" />
-                            <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                            {/* Open count, not done/total — see workspaceProjects badge above. */}
-                            <span className="shrink-0 tabular-nums opacity-70">{pg.total - pg.done}</span>
-                            {canAdmin && (
-                              <span onClick={(e) => { e.stopPropagation(); setMenuProjectId(menuProjectId === p.id ? null : p.id); }}
-                                className="rounded p-0.5 opacity-0 hover:bg-background hover:text-foreground group-hover/prow:opacity-100"><I.dots /></span>
-                            )}
-                          </button>
-                          {menuProjectId === p.id && (<>
-                            <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setMenuProjectId(null); }} />
-                            <div className="absolute right-0 top-full z-40 mt-1 w-40 rounded-lg border border-white/15 bg-[#2c3140] p-1 shadow-2xl">
-                              <button onClick={(e) => { e.stopPropagation(); setMenuProjectId(null); renameProject(p.id); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-white/10"><I.pencil /> Rename</button>
-                              <button onClick={(e) => { e.stopPropagation(); setMenuProjectId(null); deleteProject(p.id); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-red-500 hover:bg-white/10"><I.trash /> Delete</button>
-                            </div>
-                          </>)}
-                        </div>
-                      );
-                    })}
-                    {canAdmin && (
-                      <button onClick={() => addProject(c.id)} title="Add a project (list) to this client"
-                        className="flex w-full items-center gap-2 rounded-md py-1 pl-2 pr-1 text-left text-[13px] text-muted hover:bg-background hover:text-foreground">
-                        <I.plus className="shrink-0 opacity-70" /> Add project
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-          </>)}
-          </div>
-          ))}
-          {clientListBase.length === 0 && (
-            <div className="px-3 py-3 text-[13px] leading-relaxed text-muted">
-              {visibleClients.length === 0
-                ? <>No clients yet. Click <b>+</b> to add one from your GoHighLevel contacts.</>
-                : <>Nothing needs your attention right now. Click the person icon above to see every client.</>}
-            </div>
-          )}
+          <SideItem active={dirView === "clients"} onClick={() => { setDirView("clients"); setMyWork(false); setPersonalView(false); setInboxView(false); setActiveProject(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{clientList.length}</span></SideItem>
         </nav>
-        )}
+
 
         <div className="flex shrink-0 items-center gap-2 border-t px-4 py-3">
           <span className="inline-flex shrink-0 items-center justify-center rounded-full text-[15px] font-semibold text-white" style={{ width: 30, height: 30, background: me.color }}>{me.initials}</span>
@@ -2101,7 +1909,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         <header className="relative z-10 flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-surface px-4 py-3 shadow-soft sm:px-5">
           <button onClick={toggleSidebar} title="Show/hide sidebar" className="rounded-lg border p-2 text-muted hover:text-foreground"><I.menu /></button>
           <div className="min-w-0">
-            {!myWork && !personalView && !inboxView && activeProject && projectById(activeProject) ? (<>
+            {!myWork && !personalView && !inboxView && !dirView && activeProject && projectById(activeProject) ? (<>
               <h1 className="flex items-center gap-1.5 truncate text-[20px] font-semibold"><I.folder className="shrink-0 text-muted" /> {projectById(activeProject)!.name}</h1>
               <p className="hidden items-center gap-2 text-[13px] text-muted sm:flex">
                 <button onClick={() => setActiveProject(null)} className="hover:text-foreground hover:underline">{clientById(activeClient)?.name}</button>
@@ -2110,15 +1918,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </p>
             </>) : (<>
               <h1 className="flex items-center gap-2 truncate text-[20px] font-semibold">
-                {inboxView ? "Inbox" : personalView ? "Personal" : myWork ? "My Work" : activeClient === "all" ? "All Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
-                {!myWork && !personalView && !inboxView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
+                {inboxView ? "Inbox" : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? "All Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
+                {!myWork && !personalView && !inboxView && !dirView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
               </h1>
-              <p className="hidden text-[13px] text-muted sm:block">{inboxView ? "Everything that mentions or notifies you, in one place" : personalView ? "Your private to-dos — only visible to you" : myWork ? "Every client and project you're on, grouped by what needs attention first" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</p>
+              <p className="hidden text-[13px] text-muted sm:block">{inboxView ? "Everything that mentions or notifies you, in one place" : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "Every client and project you're on, grouped by what needs attention first" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</p>
             </>)}
           </div>
 
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-          {!myWork && !personalView && !inboxView && activeClient === "all" && canAdmin && (
+          {!myWork && !personalView && !inboxView && !dirView && activeClient === "all" && canAdmin && (
             <div className="inline-flex overflow-hidden rounded-md border" title="VAs only ever see their own tasks here regardless of this toggle">
               <button onClick={() => setAllTasksScope("mine")} className={`px-2.5 py-1.5 text-[13px] font-medium ${allTasksScope === "mine" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Mine</button>
               <button onClick={() => setAllTasksScope("all")} className={`px-2.5 py-1.5 text-[13px] font-medium ${allTasksScope === "all" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>All</button>
@@ -2129,7 +1937,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               the header actions, ahead of the Tasks/Journal/Vault tabs, as a
               prominent accent (or red-when-overdue) pill rather than the tiny
               grey chip it used to be. */}
-          {!myWork && !personalView && !inboxView && activeClient !== "all" && clientById(activeClient) && (() => {
+          {!myWork && !personalView && !inboxView && !dirView && activeClient !== "all" && clientById(activeClient) && (() => {
             const scopedProject = activeProject ? projectById(activeProject) : null;
             const entity = scopedProject ?? clientById(activeClient)!;
             const fu = entity.followUpAt ?? null;
@@ -2142,7 +1950,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </div>
             );
           })()}
-          {!myWork && !personalView && !inboxView && activeClient !== "all" && (
+          {!myWork && !personalView && !inboxView && !dirView && activeClient !== "all" && (
             <div className="inline-flex overflow-hidden rounded-md border">
               <button onClick={() => setClientTab("tasks")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "tasks" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Tasks</button>
               <button onClick={() => setClientTab("chat")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "chat" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Journal · {(() => {
@@ -2159,7 +1967,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             </div>
           )}
 
-          {!myWork && !personalView && !inboxView && activeClient !== "all" && clientById(activeClient) && (
+          {!myWork && !personalView && !inboxView && !dirView && activeClient !== "all" && clientById(activeClient) && (
             <div className="flex items-center gap-1.5">
               {(() => {
                 // One contextual Follow toggle, not two — it tracks whatever
@@ -2278,7 +2086,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           )}
 
 
-          {inboxView ? null : myWork ? (
+          {inboxView || dirView ? null : myWork ? (
             canAdmin ? (
               <label className="flex items-center gap-2"><span className="text-muted">Viewing work for</span>
                 <select value={myWorkUser} onChange={(e) => setMyWorkUser(e.target.value)} className="rounded-md border bg-background px-2 py-1 outline-none">{users.map((u) => (<option key={u.id} value={u.id}>{u.name}{u.role === "va" ? " (VA)" : ""}</option>))}</select>
@@ -2374,7 +2182,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </div>
         </header>
 
-        {!myWork && !personalView && !inboxView && activeClient !== "all" && (
+        {!myWork && !personalView && !inboxView && !dirView && activeClient !== "all" && (
           <QuickLinksBar
             links={clientLinks.filter((l) => l.clientId === activeClient)}
             canEdit={canAdmin}
@@ -2388,15 +2196,25 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         {/* content */}
         {inboxView ? (
           <Inbox notifications={myNotifs} clientById={clientById} projectById={projectById} onOpen={openNotification} onMarkAllRead={markAllNotifsRead} />
+        ) : dirView === "clients" ? (
+          <ClientsDirectory clients={sortedClients} clientCompany={(c) => clientCompany(c)} taskCount={clientTaskCount} starred={starred} onToggleStar={toggleStar}
+            needsReview={(id) => clientNeedsReview(id, me.id)}
+            onOpen={(id) => { setDirView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); setClientTab("tasks"); }}
+            canAdmin={canAdmin} onAddClient={() => setAddClientOpen(true)} onRename={renameClient} onDelete={deleteClient}
+            sort={clientSort} onSetSort={saveClientSort} scope={clientListScope} onToggleScope={() => setClientListScope((s) => (s === "mine" ? "all" : "mine"))} />
+        ) : dirView === "projects" ? (
+          <ProjectsDirectory projects={sortedWorkspaceProjects} openCount={projectTaskCount}
+            onOpen={(id) => { setDirView(null); setActiveClient(WORKSPACE_CLIENT_ID); setActiveProject(id); setOpenTaskId(null); setClientTab("tasks"); }}
+            canAdmin={canAdmin} onAddProject={() => addProject(WORKSPACE_CLIENT_ID)} onRename={renameProject} onDelete={deleteProject} />
         ) : personalView ? (
           <GroupedList groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} queuedIds={claudeQueue} colOrder={colOrder} onReorderCols={reorderCols} />
         ) : myWork ? (
           <ClientsBoard groups={myWorkGroups} clientTaskCount={clientTaskCount} projectTaskCount={projectTaskCount} hasUnreadMessage={hasUnreadMessage}
-            onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }}
+            onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }}
             onOpenProject={(id) => {
-              if (id === PERSONAL_PROJECT_ID) { setMyWork(false); setPersonalView(true); setInboxView(false); setOpenTaskId(null); return; }
+              if (id === PERSONAL_PROJECT_ID) { setMyWork(false); setPersonalView(true); setInboxView(false); setDirView(null); setOpenTaskId(null); return; }
               const p = projects.find((x) => x.id === id); if (!p) return;
-              setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(p.clientId); setActiveProject(id); setOpenTaskId(null);
+              setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setActiveClient(p.clientId); setActiveProject(id); setOpenTaskId(null);
             }} />
         ) : activeClient !== "all" && clientTab === "chat" ? (
           <ClientJournal
@@ -2453,7 +2271,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={orderedTaskIds.length} navTasks={orderedTaskIds.map((id) => tasks.find((t) => t.id === id)).filter((t): t is Task => !!t)} onOpenTask={setOpenTaskId} onAddSibling={(title) => addTaskToList(openTask.clientId, openTask.projectId, openTask.private, title)} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(attachments) => addComment(openTask.id, comment, attachments)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...clientList].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} isQueued={claudeQueue.has(openTask.id)} onToggleQueue={() => toggleClaudeQueue(openTask.id)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null })} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onRegenerateAiSummary={() => regenerateAiSummary(openTask.clientId)} aiSummaryBusy={aiSummaryBusyId === openTask.clientId} />
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...clientList].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} isQueued={claudeQueue.has(openTask.id)} onToggleQueue={() => toggleClaudeQueue(openTask.id)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null })} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onRegenerateAiSummary={() => regenerateAiSummary(openTask.clientId)} aiSummaryBusy={aiSummaryBusyId === openTask.clientId} />
       )}
 
       {settingsHubOpen && (
@@ -2466,7 +2284,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           territories={territories} contacts={contacts} clients={clients}
           onAddTerritory={addTerritory} onAssignTerritory={assignTerritory} onDeleteTerritory={deleteTerritory}
           onAddContact={(contact) => addClientContact(contact)}
-          onOpenClient={(id) => { setSettingsHubOpen(false); setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(id); setActiveProject(null); }}
+          onOpenClient={(id) => { setSettingsHubOpen(false); setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setActiveClient(id); setActiveProject(null); }}
           templates={taskTemplates} projects={projects}
           onSaveTemplate={saveTemplate} onDeleteTemplate={deleteTemplate} onUseTemplateAsTask={useTemplateAsTask}
         />
@@ -2509,10 +2327,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       </>)}
       {cmdkOpen && <CommandK tasks={scopedTasks} clients={clientList} projects={projects} contacts={contacts} addedContactIds={addedContactIds} clientById={clientById}
         onOpenTask={(id) => { setOpenTaskId(id); setCmdkOpen(false); }}
-        onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(id); setActiveProject(null); setCmdkOpen(false); }}
+        onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setActiveClient(id); setActiveProject(null); setCmdkOpen(false); }}
         onOpenProject={(id) => {
-          if (id === PERSONAL_PROJECT_ID) { setMyWork(false); setPersonalView(true); setInboxView(false); setCmdkOpen(false); return; }
-          const p = projects.find((x) => x.id === id); if (p) { setMyWork(false); setPersonalView(false); setInboxView(false); setActiveClient(p.clientId); setActiveProject(id); } setCmdkOpen(false);
+          if (id === PERSONAL_PROJECT_ID) { setMyWork(false); setPersonalView(true); setInboxView(false); setDirView(null); setCmdkOpen(false); return; }
+          const p = projects.find((x) => x.id === id); if (p) { setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setActiveClient(p.clientId); setActiveProject(id); } setCmdkOpen(false);
         }}
         onAddContact={(contact) => { addClientContact(contact); setCmdkOpen(false); }}
         onClose={() => setCmdkOpen(false)} />}
