@@ -2100,9 +2100,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       <main className="flex min-w-0 flex-1 flex-col">
         <header className="relative z-10 flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-surface px-4 py-3 shadow-soft sm:px-5">
           <button onClick={toggleSidebar} title="Show/hide sidebar" className="rounded-lg border p-2 text-muted hover:text-foreground"><I.menu /></button>
-          {!myWork && !personalView && !inboxView && activeClient !== "all" && clientById(activeClient) && (
-            <span className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[16px] font-semibold text-white shadow-soft sm:flex" style={{ background: clientById(activeClient)!.color }}>{clientById(activeClient)!.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}</span>
-          )}
           <div className="min-w-0">
             {!myWork && !personalView && !inboxView && activeProject && projectById(activeProject) ? (<>
               <h1 className="flex items-center gap-1.5 truncate text-[20px] font-semibold"><I.folder className="shrink-0 text-muted" /> {projectById(activeProject)!.name}</h1>
