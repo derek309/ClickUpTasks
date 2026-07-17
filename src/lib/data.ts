@@ -21,6 +21,16 @@ export function addDaysIso(iso: string, days: number): string {
   return dt.toISOString().slice(0, 10);
 }
 export const TOMORROW = addDaysIso(TODAY, 1);
+/** Whole days from `a` to `b` (positive if `b` is later) — via UTC date math
+ * to dodge DST, matching addDaysIso. Used for bulk "shift all dates forward"
+ * style operations, where one date's move determines the delta applied to
+ * every other date. */
+export function daysBetween(a: string, b: string): number {
+  const [ay, am, ad] = a.split("-").map(Number);
+  const [by, bm, bd] = b.split("-").map(Number);
+  const msPerDay = 86_400_000;
+  return Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / msPerDay);
+}
 
 // Capitalize the first letter of each word (leaves existing caps + numbers
 // alone) — GHL-sourced contact/client names commonly arrive all-lowercase.

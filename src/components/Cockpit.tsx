@@ -14,6 +14,7 @@ import {
   TODAY,
   TOMORROW,
   addDaysIso,
+  daysBetween,
   STATUS_META,
   STATUS_ORDER,
   isCompletionEvent,
@@ -1292,6 +1293,23 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     ids.forEach((id) => patchTask(id, patch));
     pushToast(`Updated ${ids.length} task${ids.length === 1 ? "" : "s"}`);
   };
+  // "Move all due dates forward" — a client/project list can pile up many
+  // dated tasks (a slow week leaves everything overdue) and re-dating each
+  // one by hand is exactly the tedium Derek flagged. Pick a new date for
+  // whichever open task is due soonest; every other dated open task on this
+  // client/project shifts by that same day-delta, preserving relative
+  // spacing (a task 3 days after another stays 3 days after) instead of
+  // collapsing everything onto one date the way the bulk-select toolbar's
+  // due-date field already does for a manually-selected set.
+  const pushAllDatesForward = (newEarliestDate: string) => {
+    const dated = baseTasks.filter((t) => t.status !== "done" && t.due);
+    if (!dated.length) { pushToast("No dated open tasks here to move."); return; }
+    const earliest = dated.reduce((a, b) => (b.due! < a.due! ? b : a)).due!;
+    const delta = daysBetween(earliest, newEarliestDate);
+    if (delta === 0) return;
+    dated.forEach((t) => update(t.id, { due: addDaysIso(t.due!, delta) }));
+    pushToast(`Moved ${dated.length} due date${dated.length === 1 ? "" : "s"} ${delta > 0 ? "forward" : "back"} ${Math.abs(delta)} day${Math.abs(delta) === 1 ? "" : "s"}.`);
+  };
   const deleteTask = (id: string) => {
     setConfirmDialog({
       title: "Delete this task?", message: "This can't be undone.", confirmLabel: "Delete",
@@ -2109,6 +2127,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>✳</span> Copy for Claude</button>
                     <button onClick={() => { setHeaderMoreOpen(false); queueClientForClaude(); }}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>★</span> Queue for Claude</button>
+                    <label title="Shifts every open dated task here by the same number of days, preserving their relative spacing"
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background">
+                      <I.calendar className="shrink-0" /><span className="flex-1">Move all due dates…</span>
+                      <input type="date" onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => { if (e.target.value) { setHeaderMoreOpen(false); pushAllDatesForward(e.target.value); } e.target.value = ""; }}
+                        className="w-[124px] shrink-0 rounded border bg-background px-1 py-0.5 text-[12px] outline-none" />
+                    </label>
                     <button onClick={() => {
                         setHeaderMoreOpen(false);
                         const scope = activeProject ? `client ${activeClient}, project ${activeProject}` : `client ${activeClient}`;

@@ -5,6 +5,7 @@ import {
   isOverdue,
   advanceDue,
   parseDaysOfMonth,
+  daysBetween,
   timeAgo,
   initialsOf,
   setUsers,
@@ -100,6 +101,21 @@ describe("advanceDue (recurrence)", () => {
   });
   it("custom day-of-month clamps a day that doesn't exist in the target month", () => {
     expect(advanceDue("2026-01-31", "custom", undefined, "day-of-month", [31])).toBe("2026-02-28");
+  });
+});
+
+describe("daysBetween", () => {
+  it("is positive when b is later than a", () => {
+    expect(daysBetween("2026-07-01", "2026-07-08")).toBe(7);
+  });
+  it("is negative when b is earlier than a", () => {
+    expect(daysBetween("2026-07-08", "2026-07-01")).toBe(-7);
+  });
+  it("is zero for the same date", () => {
+    expect(daysBetween("2026-07-01", "2026-07-01")).toBe(0);
+  });
+  it("crosses a month boundary correctly", () => {
+    expect(daysBetween("2026-07-31", "2026-08-02")).toBe(2);
   });
 });
 
