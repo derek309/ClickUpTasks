@@ -74,6 +74,7 @@ import { VaultView, type VaultItem } from "./cockpit/VaultView";
 import { ClientsBoard, type WorkBoardGroup, type WorkItem } from "./cockpit/ClientsBoard";
 import { ClientsDirectory } from "./cockpit/ClientsDirectory";
 import { ProjectsDirectory } from "./cockpit/ProjectsDirectory";
+import { FolderRail } from "./cockpit/FolderRail";
 import { claudeCodeUrl } from "@/lib/claudeLink";
 
 // --- Deep-link URL state ----------------------------------------------------
@@ -138,6 +139,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   const [activeClient, setActiveClient] = useState<string>("all");
   const [activeProject, setActiveProject] = useState<string | null>(null);
+  // Container rail scope: when set, the client Tasks view shows just this
+  // folder's lists' tasks, grouped by list. Mutually exclusive with a single
+  // activeProject (a standalone list). Cleared when the client changes.
+  const [activeFolder, setActiveFolder] = useState<string | null>(null);
   // "My Work" — formerly two separate tabs (an assignee/delegate-filtered
   // task list, and "My Clients"'s assigned-or-following client+project
   // board). Merged into one: the board, under the "My Work" name, since
@@ -431,6 +436,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   useEffect(() => { try { setDrawerFull(localStorage.getItem("cut_drawerFull") === "1"); } catch {} }, []);
   // Drop the project filter whenever we leave its client (or enter My Work).
   useEffect(() => { setActiveProject((p) => (p && projects.find((x) => x.id === p)?.clientId === activeClient && !myWork && !personalView && !inboxView ? p : null)); }, [activeClient, myWork, personalView, inboxView, projects]);
+  // Clear the folder-rail scope whenever the client/view changes.
+  useEffect(() => { setActiveFolder(null); }, [activeClient, myWork, personalView, inboxView, dirView]);
   // A bulk selection is scoped to whatever list is on screen — switching
   // clients/views leaves the selected ids referring to now-invisible tasks,
   // which would make the floating bulk-action bar silently apply to rows
@@ -1024,12 +1031,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return sub?.ghlLocationId ? `https://app.gohighlevel.com/v2/location/${sub.ghlLocationId}/contacts/detail/${ct.ghlContactId}` : null;
   };
 
-  const visibleProjects = useMemo(() => projects.filter((p) => p.clientId.startsWith("cl_") && (activeClient === "all" || p.clientId === activeClient)), [projects, activeClient]);
+  const visibleProjects = useMemo(() => projects.filter((p) => p.clientId.startsWith("cl_") && (activeClient === "all" || p.clientId === activeClient) && (!activeFolder || p.folderId === activeFolder)), [projects, activeClient, activeFolder]);
   // On the All Tasks tab (activeClient === "all"), further restrict to your
   // own tasks by default — reusing scopedTasks' own assigneeId === me.id
   // pattern. Redundant-but-harmless for VAs, who are already fully
   // restricted by scopedTasks; only changes anything for admins.
-  const baseTasks = scopedTasks.filter((t) => t.clientId.startsWith("cl_") && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject) && (activeClient !== "all" || allTasksScope === "all" || t.assigneeId === me.id));
+  const baseTasks = scopedTasks.filter((t) => t.clientId.startsWith("cl_") && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject) && (!activeFolder || projectById(t.projectId)?.folderId === activeFolder) && (activeClient !== "all" || allTasksScope === "all" || t.assigneeId === me.id));
 
   // Client/project-wide equivalents of TaskDrawer's per-task copyForClaude /
   // onToggleQueue — same clipboard+paste and queue-and-let-Claude-pull-it
@@ -2281,7 +2288,25 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onDeleteFolder={deleteVaultFolder}
             initialFolderId={initialVaultFolder} />
         ) : (
+          <>
+          {activeClient !== "all" && (() => {
+            const cf = foldersForClient(activeClient);
+            const cl = projectsForClient(activeClient);
+            // Only show the rail when there's real structure to navigate (a
+            // folder, or more than one list) — or for an admin, who always
+            // gets the +Folder/+List affordances to organize.
+            if (cf.length === 0 && cl.filter((l) => !l.folderId).length <= 1 && !canAdmin) return null;
+            return (
+              <FolderRail folders={cf} lists={cl} activeFolder={activeFolder} activeProject={activeProject} canAdmin={canAdmin}
+                onSelectAll={() => { setActiveFolder(null); setActiveProject(null); }}
+                onSelectFolder={(id) => { setActiveFolder(id); setActiveProject(null); setGroupBy("project"); }}
+                onSelectList={(id) => { setActiveProject(id); setActiveFolder(null); }}
+                onCreateFolder={() => createFolder(activeClient)} onCreateList={(fid) => addProject(activeClient, fid)}
+                onRenameFolder={renameFolder} onDeleteFolder={deleteFolder} onRenameList={renameProject} onDeleteList={deleteProject} onMoveList={moveListToFolder} />
+            );
+          })()}
           <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} queuedIds={claudeQueue} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
+          </>
         )}
       </main>
 
