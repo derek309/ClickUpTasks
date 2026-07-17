@@ -493,22 +493,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Which of the 5 top nav items (Inbox/All tasks/My Work/My Clients/
   // Personal) each person wants visible — personal display preference, not
   // an admin setting, so every role can customize their own sidebar.
-  const NAV_ITEM_LABELS: Record<string, string> = { inbox: "Inbox", all: "All Tasks", work: "Dashboard", personal: "Personal" };
-  const [navVisible, setNavVisible] = useState<Record<string, boolean>>({ inbox: true, all: true, work: true, personal: true });
-  const [navMenuOpen, setNavMenuOpen] = useState(false);
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem("cut_navVisible");
-      if (raw) setNavVisible((v) => ({ ...v, ...JSON.parse(raw) }));
-    } catch {}
-  }, []);
-  const toggleNavItem = (key: string) => {
-    setNavVisible((v) => {
-      const next = { ...v, [key]: !v[key] };
-      try { localStorage.setItem("cut_navVisible", JSON.stringify(next)); } catch {}
-      return next;
-    });
-  };
+  // The four primary nav items always show now — the hide/show toggle went
+  // away when the account block replaced the sidebar's branding header. Kept
+  // as a lookup so the render below stays unchanged.
+  const navVisible: Record<string, boolean> = { inbox: true, all: true, work: true, personal: true };
 
   useEffect(() => {
     (async () => {
@@ -1859,23 +1847,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
       {/* ---------- Sidebar ---------- */}
       <aside className={`sidebar-dark fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col overflow-y-auto border-r bg-surface transition-transform ${sidebarHidden ? "md:hidden" : "md:static md:translate-x-0"} ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
-        <div className="flex shrink-0 items-center gap-2.5 px-4 py-4">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-[15px] font-bold text-white">CT</span>
-          <div className="leading-tight"><div className="font-semibold">ClickUpTasks</div><div className="text-[13px] text-muted">GHL Task Cockpit</div></div>
-          <span className="relative ml-auto">
-            <button onClick={() => setNavMenuOpen((o) => !o)} title="Show/hide sidebar items" className="rounded p-1 text-muted hover:bg-background hover:text-foreground"><I.list className="h-3.5 w-3.5" /></button>
-            {navMenuOpen && (<>
-              <div className="fixed inset-0 z-30" onClick={() => setNavMenuOpen(false)} />
-              <div className="absolute right-0 top-full z-40 mt-1 w-48 rounded-lg border border-white/15 bg-[#2c3140] p-1 shadow-2xl">
-                {Object.entries(NAV_ITEM_LABELS).map(([key, label]) => (
-                  <button key={key} onClick={() => toggleNavItem(key)} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-white/10">
-                    <span className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm border ${navVisible[key] ? "border-accent bg-accent" : "border-white/30"}`}>{navVisible[key] && <I.check className="h-2.5 w-2.5 text-white" />}</span>
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </>)}
-          </span>
+        {/* Account block, promoted from the sidebar footer to the top in place
+            of the old app-branding header (Derek's call). */}
+        <div className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
+          <span className="inline-flex shrink-0 items-center justify-center rounded-full text-[15px] font-semibold text-white" style={{ width: 30, height: 30, background: me.color }}>{me.initials}</span>
+          <div className="min-w-0 flex-1 leading-tight"><div className="truncate text-[15px] font-medium">{me.name}</div><div className="text-[13px] capitalize text-muted">{me.role}</div></div>
+          <button onClick={() => { setSettingsHubOpen(true); setSidebarOpen(false); }} title="Settings" className="rounded-lg border p-1.5 text-muted hover:text-foreground"><I.gear /></button>
+          <button onClick={toggleTheme} title="Toggle theme" className="rounded-lg border p-1.5 text-muted hover:text-foreground">{theme === "light" ? <I.moon /> : <I.sun />}</button>
+          <button onClick={onSignOut} title="Sign out" className="rounded-lg border p-1.5 text-muted hover:text-red-500"><I.logout /></button>
         </div>
 
         <nav className="shrink-0 space-y-0.5 px-2">
@@ -1895,13 +1874,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         </nav>
 
 
-        <div className="flex shrink-0 items-center gap-2 border-t px-4 py-3">
-          <span className="inline-flex shrink-0 items-center justify-center rounded-full text-[15px] font-semibold text-white" style={{ width: 30, height: 30, background: me.color }}>{me.initials}</span>
-          <div className="min-w-0 leading-tight"><div className="truncate text-[15px] font-medium">{me.name}</div><div className="text-[13px] capitalize text-muted">{me.role}</div></div>
-          <button onClick={() => { setSettingsHubOpen(true); setSidebarOpen(false); }} title="Settings" className="ml-auto rounded-lg border p-1.5 text-muted hover:text-foreground"><I.gear /></button>
-          <button onClick={toggleTheme} title="Toggle theme" className="rounded-lg border p-1.5 text-muted hover:text-foreground">{theme === "light" ? <I.moon /> : <I.sun />}</button>
-          <button onClick={onSignOut} title="Sign out" className="rounded-lg border p-1.5 text-muted hover:text-red-500"><I.logout /></button>
-        </div>
       </aside>
 
       {/* ---------- Main ---------- */}
