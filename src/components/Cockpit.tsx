@@ -16,6 +16,8 @@ import {
   addDaysIso,
   daysBetween,
   THIS_MONDAY,
+  THIS_WEEK_END,
+  THIS_MONTH_END,
   NURTURE_CHECK_IN_DAYS,
   STATUS_META,
   STATUS_ORDER,
@@ -914,9 +916,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   }
   // Tier scheme (lower = more urgent, sorts first):
   //   0 Review · 1 New message · 2 Overdue · 3 Due today · 4 Due tomorrow ·
-  //   5 Upcoming · 6 No due date · 7 No open tasks
+  //   5 Due this week · 6 Due this month · 7 Upcoming · 8 No due date · 9 No open tasks
   function tierForDate(soonest: string): number {
-    return soonest < TODAY ? 2 : soonest === TODAY ? 3 : soonest === TOMORROW ? 4 : 5;
+    if (soonest < TODAY) return 2;
+    if (soonest === TODAY) return 3;
+    if (soonest === TOMORROW) return 4;
+    if (soonest <= THIS_WEEK_END) return 5;
+    if (soonest <= THIS_MONTH_END) return 6;
+    return 7;
   }
   // forAssignee narrows "open tasks" to just that person's — used by the
   // personal My Work board, where a client's tier should reflect *my* tasks
@@ -938,8 +945,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       ...(followUp ? [{ date: followUp, priorityRank: 0 }] : []),
     ];
     if (candidates.length === 0) {
-      if (open.length === 0) return { tier: 7, due: "", priorityRank: 0 };
-      return { tier: 6, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
+      if (open.length === 0) return { tier: 9, due: "", priorityRank: 0 };
+      return { tier: 8, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
     }
     const soonest = candidates.reduce((a, b) => (b.date < a.date ? b : a)).date;
     const atSoonest = candidates.filter((c) => c.date === soonest);
@@ -957,8 +964,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       ...(followUp ? [{ date: followUp, priorityRank: 0 }] : []),
     ];
     if (candidates.length === 0) {
-      if (open.length === 0) return { tier: 7, due: "", priorityRank: 0 };
-      return { tier: 6, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
+      if (open.length === 0) return { tier: 9, due: "", priorityRank: 0 };
+      return { tier: 8, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
     }
     const soonest = candidates.reduce((a, b) => (b.date < a.date ? b : a)).date;
     const atSoonest = candidates.filter((c) => c.date === soonest);
@@ -989,9 +996,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       [2, "Overdue", "#ef4444"],
       [3, "Due today", "#f59e0b"],
       [4, "Due tomorrow", "#eab308"],
-      [5, "Upcoming", "#3b82f6"],
-      [6, "No due date", "#94a3b8"],
-      [7, "No open tasks", "#cbd5e1"],
+      [5, "Due this week", "#3b82f6"],
+      [6, "Due this month", "#6366f1"],
+      [7, "Upcoming", "#0ea5e9"],
+      [8, "No due date", "#94a3b8"],
+      [9, "No open tasks", "#cbd5e1"],
     ];
     const clientKeys = assignedClientsFor(myWorkUser).map((c) => ({ kind: "client" as const, item: { kind: "client" as const, client: c }, name: c.name, k: clientUrgencyKey(c.id, myWorkUser) }));
     const projectKeys = assignedProjectsFor(myWorkUser).map((p) => ({ kind: "project" as const, item: { kind: "project" as const, project: p, clientName: clientById(p.clientId)?.name ?? "—" } as WorkItem, name: p.name, k: projectUrgencyKey(p.id, myWorkUser) }));

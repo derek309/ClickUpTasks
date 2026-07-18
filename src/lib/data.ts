@@ -34,6 +34,20 @@ export function mostRecentMonday(iso: string): string {
   return dt.toISOString().slice(0, 10);
 }
 export const THIS_MONDAY = mostRecentMonday(TODAY);
+/** yyyy-mm-dd of the Saturday ending the current calendar week (weeks anchored
+ * Sunday, matching the task-list's due grouping) — the boundary for the
+ * "Due this week" urgency tier. */
+export const THIS_WEEK_END = (() => {
+  const [y, m, d] = TODAY.split("-").map(Number);
+  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0=Sun … 6=Sat
+  return addDaysIso(TODAY, 6 - dow);
+})();
+/** yyyy-mm-dd of the last day of the current month — the boundary for the
+ * "Due this month" urgency tier (day 0 of next month = last day of this one). */
+export const THIS_MONTH_END = (() => {
+  const [y, m] = TODAY.split("-").map(Number);
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+})();
 /** Whole days from `a` to `b` (positive if `b` is later) — via UTC date math
  * to dodge DST, matching addDaysIso. Used for bulk "shift all dates forward"
  * style operations, where one date's move determines the delta applied to
