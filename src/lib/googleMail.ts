@@ -34,9 +34,20 @@ const b64url = (buf: Buffer) => buf.toString("base64").replace(/\+/g, "-").repla
 // Send an email as `fromEmail`. Returns Gmail's message + thread ids. Throws on
 // any failure (missing config, token error, non-2xx from Gmail) — callers map
 // that to a 501/502 and can fall back to the GHL path.
+// "Derek Fox <derek@clickuplocal.com>" — quote/encode the display name so a
+// comma or non-ASCII char can't break the header.
+const formatFrom = (email: string, name?: string) => {
+  const n = name?.trim();
+  if (!n) return email;
+  const phrase = /^[\x20-\x7e]*$/.test(n)
+    ? (/[",<>@]/.test(n) ? `"${n.replace(/"/g, '\\"')}"` : n)
+    : encodeHeader(n);
+  return `${phrase} <${email}>`;
+};
+
 export async function sendGmailAs(
   fromEmail: string,
-  msg: { to: string; cc?: string[]; bcc?: string[]; subject?: string; body: string },
+  msg: { to: string; cc?: string[]; bcc?: string[]; subject?: string; body: string; fromName?: string },
 ): Promise<{ id: string; threadId: string }> {
   if (!googleConfigured) throw new Error("Google Workspace sending is not configured.");
 
@@ -45,7 +56,7 @@ export async function sendGmailAs(
   if (!token) throw new Error("Could not obtain a Google access token.");
 
   const headerLines = [
-    `From: ${fromEmail}`,
+    `From: ${formatFrom(fromEmail, msg.fromName)}`,
     `To: ${msg.to}`,
     ...(msg.cc?.length ? [`Cc: ${msg.cc.join(", ")}`] : []),
     ...(msg.bcc?.length ? [`Bcc: ${msg.bcc.join(", ")}`] : []),

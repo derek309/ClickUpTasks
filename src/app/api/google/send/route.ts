@@ -52,6 +52,10 @@ export async function POST(req: NextRequest) {
   const ccList = cc?.filter((e) => e?.trim());
   const bccList = bcc?.filter((e) => e?.trim());
 
+  // Display name for the From header ("Derek Fox <derek@…>").
+  const { data: prof } = await supabaseAdmin.from("profiles").select("name").eq("id", caller.id).maybeSingle();
+  const fromName = (prof?.name as string | null)?.trim() || undefined;
+
   try {
     const { id, threadId } = await sendGmailAs(caller.email, {
       to: toEmail.trim(),
@@ -59,6 +63,7 @@ export async function POST(req: NextRequest) {
       bcc: bccList?.length ? bccList : undefined,
       subject: (subject || "").slice(0, 200),
       body,
+      fromName,
     });
     return NextResponse.json({ ok: true, gmailMessageId: id, gmailThreadId: threadId, from: caller.email });
   } catch (e) {
