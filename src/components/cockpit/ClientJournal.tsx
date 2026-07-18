@@ -111,6 +111,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
   const feedEndRef = useRef<HTMLDivElement>(null);
   const msgBodyRef = useRef<HTMLTextAreaElement>(null);
+  const draftPromptRef = useRef<HTMLTextAreaElement>(null);
   const [msgSubject, setMsgSubject] = useState("");
   const [msgBody, setMsgBody] = useState("");
   const [msgCc, setMsgCc] = useState<string[]>([]);
@@ -258,6 +259,18 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
     const bcc = composeMode === "email" ? msgBcc : undefined;
     onSendMessage(composeMode, msgSubject, msgBody.trim(), cc, bcc);
     setMsgSubject(""); setMsgBody(""); setMsgCc([]); setMsgBcc([]); setShowCcBcc(false);
+  };
+  // "Prompt Claude" draft. On success it fills the email/SMS and clears the
+  // prompt box (also collapsing the auto-grown textarea back to one line).
+  const runDraft = async () => {
+    if (!onDraftMessage || (composeMode !== "email" && composeMode !== "sms")) return;
+    const d = await onDraftMessage(composeMode, draftPrompt.trim() || undefined);
+    if (d) {
+      if (composeMode === "email") setMsgSubject(d.subject ?? "");
+      setMsgBody(d.body);
+      setDraftPrompt("");
+      if (draftPromptRef.current) draftPromptRef.current.style.height = "auto";
+    }
   };
   const startEdit = (n: ClientNote) => { setEditingId(n.id); setEditBody(n.body); };
   const saveEdit = (n: ClientNote) => { if (editBody.trim()) onEdit(n, editBody.trim()); setEditingId(null); };
@@ -555,24 +568,20 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                   className="h-full min-h-[160px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
               </div>
               {onDraftMessage && (
-                <div className="mt-2 flex shrink-0 items-center gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
-                  <span aria-hidden className="pl-1 text-[13px]">✨</span>
-                  <input value={draftPrompt} onChange={(e) => setDraftPrompt(e.target.value)}
-                    onKeyDown={async (e) => {
-                      if (e.key !== "Enter" || draftingMessage || (composeMode !== "email" && composeMode !== "sms")) return;
+                <div className="mt-2 flex shrink-0 items-start gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
+                  <span aria-hidden className="pt-1 pl-1 text-[13px]">✨</span>
+                  <textarea ref={draftPromptRef} value={draftPrompt} rows={1}
+                    onChange={(e) => { setDraftPrompt(e.target.value); e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`; }}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter" || e.shiftKey || draftingMessage || (composeMode !== "email" && composeMode !== "sms")) return;
                       e.preventDefault();
-                      const d = await onDraftMessage(composeMode, draftPrompt.trim() || undefined);
-                      if (d) { if (composeMode === "email") setMsgSubject(d.subject ?? ""); setMsgBody(d.body); }
+                      runDraft();
                     }}
-                    placeholder="Tell Claude what to say… (e.g. “check in with them”)"
-                    className="min-w-0 flex-1 bg-transparent px-1 text-[13px] outline-none placeholder:text-muted" />
-                  <button onClick={async () => {
-                      if (composeMode !== "email" && composeMode !== "sms") return;
-                      const d = await onDraftMessage(composeMode, draftPrompt.trim() || undefined);
-                      if (d) { if (composeMode === "email") setMsgSubject(d.subject ?? ""); setMsgBody(d.body); }
-                    }}
+                    placeholder="Tell Claude what to say… (Enter to write, Shift+Enter for a new line)"
+                    className="max-h-[200px] min-w-0 flex-1 resize-none self-center overflow-y-auto bg-transparent px-1 py-1 text-[13px] leading-snug outline-none placeholder:text-muted" />
+                  <button onClick={runDraft}
                     disabled={draftingMessage} title={draftPrompt.trim() ? "Draft this with Claude" : "Draft a status update from recent activity — review before sending"}
-                    className="shrink-0 rounded-md border border-accent/40 bg-surface px-2.5 py-1 text-[13px] font-medium text-accent disabled:opacity-40">
+                    className="mt-0.5 shrink-0 rounded-md border border-accent/40 bg-surface px-2.5 py-1 text-[13px] font-medium text-accent disabled:opacity-40">
                     {draftingMessage ? "Drafting…" : draftPrompt.trim() ? "Write it" : "Status update"}
                   </button>
                 </div>
