@@ -17,8 +17,14 @@ export function CommandK({ tasks, clients, projects, contacts, addedContactIds, 
   const [q, setQ] = useState("");
   const [idx, setIdx] = useState(0);
   const ql = q.trim().toLowerCase();
+  // The client's linked GHL contact — for showing business + email inline so
+  // two same-named clients (e.g. "Derek Fox") are tell-apart-able at a glance.
+  const contactOf = (c: Client): Contact | undefined =>
+    (c.linkedContactId ? contacts.find((ct) => ct.id === c.linkedContactId) : undefined)
+    ?? contacts.find((ct) => ct.clientId === c.id)
+    ?? (c.id.startsWith("cl_") ? contacts.find((ct) => ct.id === c.id.slice(3)) : undefined);
   // Order matches how people think about the hierarchy: Clients → Projects → Tasks.
-  const clientItems = (ql ? clients.filter((c) => c.name.toLowerCase().includes(ql) || (c.ghlLocationId ?? "").toLowerCase().includes(ql)) : clients).slice(0, 6);
+  const clientItems = (ql ? clients.filter((c) => { const ct = contactOf(c); return c.name.toLowerCase().includes(ql) || (c.ghlLocationId ?? "").toLowerCase().includes(ql) || (ct?.company ?? "").toLowerCase().includes(ql) || (ct?.email ?? "").toLowerCase().includes(ql); }) : clients).slice(0, 6);
   const projectItems = (ql ? projects.filter((p) => p.name.toLowerCase().includes(ql)) : []).slice(0, 6);
   const taskItems = (ql ? tasks.filter((t) => t.title.toLowerCase().includes(ql)) : tasks).slice(0, 8);
   // Only surfaced once you're actually typing — an unfiltered slice of
@@ -54,12 +60,15 @@ export function CommandK({ tasks, clients, projects, contacts, addedContactIds, 
         <div className="max-h-80 overflow-y-auto p-1.5">
           {total === 0 && <div className="px-3 py-6 text-center text-[13px] text-muted">No matches</div>}
           {clientItems.length > 0 && <div className="px-2 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Clients</div>}
-          {clientItems.map((c, i) => (
+          {clientItems.map((c, i) => { const ct = contactOf(c); const sub = [ct?.company, ct?.email].filter(Boolean).join(" · "); return (
             <button key={c.id} onMouseEnter={() => setIdx(i)} onClick={() => activate(i)} className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left ${idx === i ? "bg-background" : ""}`}>
               <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: c.color }} />
-              <span className="truncate text-[15px]">{c.name}</span>
+              <span className="flex min-w-0 flex-col">
+                <span className="truncate text-[15px]">{c.name}</span>
+                {sub && <span className="truncate text-[12px] text-muted">{sub}</span>}
+              </span>
             </button>
-          ))}
+          ); })}
           {projectItems.length > 0 && <div className="px-2 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Projects</div>}
           {projectItems.map((p, i) => { const gi = clientItems.length + i; const client = clientById(p.clientId); return (
             <button key={p.id} onMouseEnter={() => setIdx(gi)} onClick={() => activate(gi)} className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left ${idx === gi ? "bg-background" : ""}`}>
