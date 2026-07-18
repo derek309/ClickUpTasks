@@ -14,11 +14,12 @@
 import { useEffect, useRef, useState } from "react";
 import {
   users, userById, timeAgo, isCompletionEvent, NOTE_TYPE_META, NOTE_TYPE_ORDER, MANUAL_NOTE_TYPES, noteTypeMeta,
-  type ClientNote, type NoteType, type Task, type Comment, type Message, type MessageChannel, type MessageDirection, type Me, type Attachment,
+  type ClientNote, type NoteType, type Task, type Comment, type Message, type MessageChannel, type MessageDirection, type Me, type Attachment, type Contact,
 } from "@/lib/data";
 import { I, Avatar, CollapsibleText, newId } from "./ui";
 import { ConfirmModal, type ConfirmSpec } from "./modals";
 import { AttachmentThumbs } from "./AttachmentThumbs";
+import { RecipientField } from "./TaskDrawer";
 
 type JournalFilter = "all" | NoteType | "message" | "activity" | "photos" | "links" | "files";
 
@@ -75,7 +76,7 @@ function buildFeedRows(items: JournalItem[]): FeedRow[] {
   return rows;
 }
 
-export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, sendingMessage, onUploadImage, onOpenFile, canAdmin, canMessage, onToggleCanMessage, onDraftMessage, draftingMessage, onRefreshContact, refreshingContact, onRefreshMessages, refreshingMessages }: {
+export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, ccContacts, sendingMessage, onUploadImage, onOpenFile, canAdmin, canMessage, onToggleCanMessage, onDraftMessage, draftingMessage, onRefreshContact, refreshingContact, onRefreshMessages, refreshingMessages }: {
   notes: ClientNote[];
   tasks: Task[]; // already scoped by the caller to the current client/project
   messages?: Message[] | null; // null/undefined = no linked GHL contact at this scope, so no Email/SMS
@@ -85,7 +86,8 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   onDelete: (note: ClientNote) => void;
   onOpenTask: (taskId: string) => void;
   onOpenMessages?: () => void; // fires once when a message is first visible, to mark them read
-  onSendMessage?: (channel: MessageChannel, subject: string, body: string) => void;
+  onSendMessage?: (channel: MessageChannel, subject: string, body: string, cc?: string[], bcc?: string[]) => void;
+  ccContacts?: Contact[]; // searchable contacts for the email Cc/Bcc pickers
   sendingMessage?: boolean;
   onUploadImage: (file: File) => Promise<Attachment | null>;
   onOpenFile: (path: string) => void;
@@ -111,6 +113,9 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   const msgBodyRef = useRef<HTMLTextAreaElement>(null);
   const [msgSubject, setMsgSubject] = useState("");
   const [msgBody, setMsgBody] = useState("");
+  const [msgCc, setMsgCc] = useState<string[]>([]);
+  const [msgBcc, setMsgBcc] = useState<string[]>([]);
+  const [showCcBcc, setShowCcBcc] = useState(false);
   // Free-text instruction for the "Prompt Claude" draft ("check in with them",
   // "let them know it's on hold", etc.). Empty = the default status-update draft.
   const [draftPrompt, setDraftPrompt] = useState("");
@@ -248,8 +253,11 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   };
   const submitMessage = () => {
     if (!msgBody.trim() || !onSendMessage || (composeMode !== "email" && composeMode !== "sms")) return;
-    onSendMessage(composeMode, msgSubject, msgBody.trim());
-    setMsgSubject(""); setMsgBody("");
+    // Cc/Bcc ride along only on email; SMS ignores them.
+    const cc = composeMode === "email" ? msgCc : undefined;
+    const bcc = composeMode === "email" ? msgBcc : undefined;
+    onSendMessage(composeMode, msgSubject, msgBody.trim(), cc, bcc);
+    setMsgSubject(""); setMsgBody(""); setMsgCc([]); setMsgBcc([]); setShowCcBcc(false);
   };
   const startEdit = (n: ClientNote) => { setEditingId(n.id); setEditBody(n.body); };
   const saveEdit = (n: ClientNote) => { if (editBody.trim()) onEdit(n, editBody.trim()); setEditingId(null); };
@@ -527,10 +535,19 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
             </div>
           ) : (
             <div className="flex min-h-0 flex-1 flex-col p-3">
-              {composeMode === "email" && (
-                <input value={msgSubject} onChange={(e) => setMsgSubject(e.target.value)} placeholder="Subject"
-                  className="mb-2 shrink-0 rounded-lg border bg-background px-3 py-1.5 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
-              )}
+              {composeMode === "email" && (<>
+                <div className="mb-2 flex shrink-0 items-center gap-2">
+                  <input value={msgSubject} onChange={(e) => setMsgSubject(e.target.value)} placeholder="Subject"
+                    className="min-w-0 flex-1 rounded-lg border bg-background px-3 py-1.5 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
+                  {!showCcBcc && <button onClick={() => setShowCcBcc(true)} className="shrink-0 text-[12px] font-medium text-accent hover:underline">Cc / Bcc</button>}
+                </div>
+                {showCcBcc && (
+                  <div className="mb-2 flex shrink-0 flex-col gap-1.5">
+                    <RecipientField label="Cc" value={msgCc} onChange={setMsgCc} contacts={ccContacts ?? []} />
+                    <RecipientField label="Bcc" value={msgBcc} onChange={setMsgBcc} contacts={ccContacts ?? []} />
+                  </div>
+                )}
+              </>)}
               <div className="relative min-h-0 flex-1">
                 <textarea ref={msgBodyRef} value={msgBody} onChange={(e) => setMsgBody(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitMessage(); } }}

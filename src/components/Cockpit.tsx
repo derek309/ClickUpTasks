@@ -2312,7 +2312,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onDelete={deleteNote}
             onOpenTask={(id) => { setClientTab("tasks"); setOpenTaskId(id); }}
             onOpenMessages={() => { const ct = contactForClient(activeClient); if (ct) { setMessages((ms) => ms.map((m) => (m.contactId === ct.id ? { ...m, read: true } : m))); markMessagesReadDb(ct.id); } }}
-            onSendMessage={activeProject || !canMessageClient(activeClient) ? undefined : (channel, subject, body) => sendMessage(activeClient, channel, subject, body)}
+            onSendMessage={activeProject || !canMessageClient(activeClient) ? undefined : (channel, subject, body, cc, bcc) => sendMessage(activeClient, channel, subject, body, undefined, cc, bcc)}
+            ccContacts={contacts}
             sendingMessage={sendingMessage}
             onUploadImage={(file) => uploadOneImage("notes", file)}
             onOpenFile={downloadFile}

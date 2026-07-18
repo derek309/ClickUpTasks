@@ -30,7 +30,7 @@ const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 // A chip-style multi-recipient input for email Cc/Bcc — type to search the
 // synced contact list by name or email, or type a raw address and hit Enter.
 // Stores plain email strings (that's what GHL's emailCc/emailBcc expect).
-function RecipientField({ label, value, onChange, contacts }: { label: string; value: string[]; onChange: (next: string[]) => void; contacts: Contact[] }) {
+export function RecipientField({ label, value, onChange, contacts }: { label: string; value: string[]; onChange: (next: string[]) => void; contacts: Contact[] }) {
   const [q, setQ] = useState("");
   const ql = q.trim().toLowerCase();
   const matches = ql
