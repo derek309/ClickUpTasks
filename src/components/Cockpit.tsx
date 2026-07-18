@@ -186,6 +186,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [settingsHubOpen, setSettingsHubOpen] = useState(false);
   const [addClientOpen, setAddClientOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
+  // Set by the header Email/SMS buttons — jumps the Journal composer into that
+  // mode. nonce bumps each click so it re-fires even when already on the Journal.
+  const [composeIntent, setComposeIntent] = useState<{ mode: "email" | "sms"; nonce: number } | null>(null);
+  const openCompose = (mode: "email" | "sms") => { setClientTab("chat"); setComposeIntent((c) => ({ mode, nonce: (c?.nonce ?? 0) + 1 })); };
   const [ghlBusy, setGhlBusy] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
@@ -2108,6 +2112,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <button onClick={() => setClientTab("vault")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "vault" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Vault · {vaultItems.length}</button>
             </div>
           )}
+          {/* Quick Email/SMS — jumps straight into the Journal composer in that
+              mode. Client-scoped messaging only (not projects), gated by the
+              same permission as sending. */}
+          {!myWork && !personalView && !inboxView && !dirView && activeClient !== "all" && !activeProject && canMessageClient(activeClient) && (
+            <div className="inline-flex overflow-hidden rounded-md border">
+              <button onClick={() => openCompose("email")} title="Email this client" className="inline-flex items-center gap-1 bg-background px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-accent-soft hover:text-accent"><I.comment /> <span className="hidden sm:inline">Email</span></button>
+              <button onClick={() => openCompose("sms")} title="Text this client" className="border-l bg-background px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-accent-soft hover:text-accent">SMS</button>
+            </div>
+          )}
 
           {!myWork && !personalView && !inboxView && !dirView && activeClient !== "all" && clientById(activeClient) && (
             <div className="flex items-center gap-1.5">
@@ -2164,16 +2177,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   </span>
                 );
               })()}
-              {ghlContactUrlFor(activeClient) && (
-                <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel"
-                  className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[13px] font-medium text-accent hover:bg-accent-soft">
-                  <I.bolt /> <span className="hidden sm:inline">Open in GHL</span>
-                </a>
-              )}
               {/* Secondary/config actions folded into one overflow menu so the
-                  header leads with Follow-up / tabs / Follow / Status / Review /
-                  Open-in-GHL instead of a cluster of equal-weight icon buttons.
-                  The rarer GHL actions (Import, Link) live in here too. */}
+                  header leads with Follow-up / tabs / Email-SMS / Follow / Status
+                  / Review instead of a cluster of equal-weight buttons. The GHL
+                  actions (Open, Import, Link) all live in here too. */}
               <div className="relative">
                 <button onClick={() => setHeaderMoreOpen((o) => !o)} title="More actions"
                   className="rounded-md border bg-background p-1.5 text-muted hover:text-foreground"><I.dots /></button>
@@ -2208,6 +2215,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     {canAdmin && (
                       <button onClick={() => { setHeaderMoreOpen(false); setLinkModal({}); }}
                         className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.plus /> Add quick link</button>
+                    )}
+                    {ghlContactUrlFor(activeClient) && (
+                      <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" onClick={() => setHeaderMoreOpen(false)}
+                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-accent hover:bg-background"><I.bolt /> Open in GoHighLevel</a>
                     )}
                     {ghlContactUrlFor(activeClient) && (
                       <button onClick={() => { setHeaderMoreOpen(false); importGhlTasks(); }} disabled={importingTasks}
@@ -2374,6 +2385,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onSendMessage={activeProject || !canMessageClient(activeClient) ? undefined : (channel, subject, body, cc, bcc) => sendMessage(activeClient, channel, subject, body, undefined, cc, bcc)}
             toContact={activeProject ? null : contactForClient(activeClient)}
             ccContacts={contacts}
+            composeIntent={composeIntent}
             sendingMessage={sendingMessage}
             onUploadImage={(file) => uploadOneImage("notes", file)}
             onOpenFile={downloadFile}

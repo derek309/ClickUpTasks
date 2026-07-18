@@ -76,7 +76,7 @@ function buildFeedRows(items: JournalItem[]): FeedRow[] {
   return rows;
 }
 
-export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, toContact, ccContacts, sendingMessage, onUploadImage, onOpenFile, canAdmin, canMessage, onToggleCanMessage, onDraftMessage, draftingMessage, onRefreshContact, refreshingContact, onRefreshMessages, refreshingMessages }: {
+export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, toContact, ccContacts, sendingMessage, onUploadImage, onOpenFile, canAdmin, canMessage, onToggleCanMessage, onDraftMessage, draftingMessage, onRefreshContact, refreshingContact, onRefreshMessages, refreshingMessages, composeIntent }: {
   notes: ClientNote[];
   tasks: Task[]; // already scoped by the caller to the current client/project
   messages?: Message[] | null; // null/undefined = no linked GHL contact at this scope, so no Email/SMS
@@ -101,6 +101,10 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   refreshingContact?: boolean;
   onRefreshMessages?: () => void; // backfills any GHL messages the webhook missed
   refreshingMessages?: boolean;
+  // A header Email/SMS button sets this to jump the composer straight into that
+  // mode. `nonce` bumps on every click so the effect re-fires even when the
+  // Journal is already open (the component isn't remounted then).
+  composeIntent?: { mode: "email" | "sms"; nonce: number } | null;
 }) {
   const [filter, setFilter] = useState<JournalFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -118,6 +122,14 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   const [msgCc, setMsgCc] = useState<string[]>([]);
   const [msgBcc, setMsgBcc] = useState<string[]>([]);
   const [showCcBcc, setShowCcBcc] = useState(false);
+  // A header Email/SMS button flips the composer into that mode and focuses it.
+  useEffect(() => {
+    if (composeIntent && onSendMessage) {
+      setComposeMode(composeIntent.mode);
+      requestAnimationFrame(() => msgBodyRef.current?.focus());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composeIntent?.nonce]);
   // Free-text instruction for the "Prompt Claude" draft ("check in with them",
   // "let them know it's on hold", etc.). Empty = the default status-update draft.
   const [draftPrompt, setDraftPrompt] = useState("");
