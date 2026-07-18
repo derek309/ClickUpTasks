@@ -64,7 +64,12 @@ export async function POST(req: NextRequest) {
       const msgRes = await fetch(`https://services.leadconnectorhq.com/conversations/${encodeURIComponent(conv.id)}/messages?${q}`, { headers });
       if (!msgRes.ok) break;
       const msgJson = await msgRes.json();
-      const messages: any[] = msgJson?.messages ?? [];
+      // GHL nests the page: { messages: { messages: [...], nextPage, lastMessageId } }.
+      // Tolerate a flat { messages: [...], nextPage, lastMessageId } too.
+      const container = msgJson?.messages;
+      const messages: any[] = Array.isArray(container) ? container : (Array.isArray(container?.messages) ? container.messages : []);
+      const nextPage = Array.isArray(container) ? msgJson?.nextPage : container?.nextPage;
+      const pageLastId = Array.isArray(container) ? msgJson?.lastMessageId : container?.lastMessageId;
 
       const rows = messages
         .filter((m) => m?.id && !known.has(m.id))
@@ -96,8 +101,8 @@ export async function POST(req: NextRequest) {
         const { error } = await supabaseAdmin.from("messages").insert(rows);
         if (!error) inserted += rows.length;
       }
-      if (!msgJson?.nextPage || !msgJson?.lastMessageId) break;
-      lastMessageId = msgJson.lastMessageId;
+      if (!nextPage || !pageLastId) break;
+      lastMessageId = pageLastId;
     }
   }
   return NextResponse.json({ inserted });
