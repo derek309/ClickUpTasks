@@ -76,7 +76,7 @@ function buildFeedRows(items: JournalItem[]): FeedRow[] {
   return rows;
 }
 
-export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, ccContacts, sendingMessage, onUploadImage, onOpenFile, canAdmin, canMessage, onToggleCanMessage, onDraftMessage, draftingMessage, onRefreshContact, refreshingContact, onRefreshMessages, refreshingMessages }: {
+export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, toContact, ccContacts, sendingMessage, onUploadImage, onOpenFile, canAdmin, canMessage, onToggleCanMessage, onDraftMessage, draftingMessage, onRefreshContact, refreshingContact, onRefreshMessages, refreshingMessages }: {
   notes: ClientNote[];
   tasks: Task[]; // already scoped by the caller to the current client/project
   messages?: Message[] | null; // null/undefined = no linked GHL contact at this scope, so no Email/SMS
@@ -87,6 +87,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   onOpenTask: (taskId: string) => void;
   onOpenMessages?: () => void; // fires once when a message is first visible, to mark them read
   onSendMessage?: (channel: MessageChannel, subject: string, body: string, cc?: string[], bcc?: string[]) => void;
+  toContact?: Contact | null; // the recipient (client's linked GHL contact), shown as the To line
   ccContacts?: Contact[]; // searchable contacts for the email Cc/Bcc pickers
   sendingMessage?: boolean;
   onUploadImage: (file: File) => Promise<Attachment | null>;
@@ -548,6 +549,17 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
             </div>
           ) : (
             <div className="flex min-h-0 flex-1 flex-col p-3">
+              {/* Recipient (the client's linked GHL contact) — read-only, so
+                  it's clear who the email/SMS is going to before you send. */}
+              <div className="mb-2 flex shrink-0 items-center gap-2 rounded-lg border bg-background px-3 py-1.5 text-[13px]">
+                <span className="shrink-0 font-medium uppercase tracking-wide text-muted">To</span>
+                {(() => {
+                  const target = composeMode === "sms" ? toContact?.phone : toContact?.email;
+                  return target
+                    ? <span className="min-w-0 flex-1 truncate text-foreground">{toContact?.name ? `${toContact.name} · ` : ""}{target}</span>
+                    : <span className="min-w-0 flex-1 truncate text-muted">{composeMode === "sms" ? "No phone number on file for this client" : "No linked contact email for this client"}</span>;
+                })()}
+              </div>
               {composeMode === "email" && (<>
                 <div className="mb-2 flex shrink-0 items-center gap-2">
                   <input value={msgSubject} onChange={(e) => setMsgSubject(e.target.value)} placeholder="Subject"
