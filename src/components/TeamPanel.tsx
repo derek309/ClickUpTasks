@@ -6,7 +6,7 @@ import { type Me } from "@/lib/data";
 import { ConfirmModal, type ConfirmSpec } from "./cockpit/modals";
 import { I } from "./cockpit/ui";
 
-type Profile = { id: string; email: string; name: string; role: "admin" | "va"; color: string; pending?: boolean; avatar_url?: string | null; can_send_messages?: boolean; send_from_email?: string | null };
+type Profile = { id: string; email: string; name: string; role: "admin" | "va"; color: string; pending?: boolean; avatar_url?: string | null; can_send_messages?: boolean; send_from_email?: string | null; ghl_user_id?: string | null };
 
 export default function TeamPanel({ me }: { me: Me }) {
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -44,7 +44,7 @@ export default function TeamPanel({ me }: { me: Me }) {
 
   async function patch(id: string, body: Record<string, unknown>) {
     setSaving(id);
-    setProfiles((ps) => ps.map((p) => (p.id === id ? { ...p, ...(body.role ? { role: body.role as Profile["role"] } : {}), ...(typeof body.can_send_messages === "boolean" ? { can_send_messages: body.can_send_messages } : {}), ...(typeof body.send_from_email === "string" ? { send_from_email: body.send_from_email.trim() || null } : {}) } : p)));
+    setProfiles((ps) => ps.map((p) => (p.id === id ? { ...p, ...(body.role ? { role: body.role as Profile["role"] } : {}), ...(typeof body.can_send_messages === "boolean" ? { can_send_messages: body.can_send_messages } : {}), ...(typeof body.send_from_email === "string" ? { send_from_email: body.send_from_email.trim() || null } : {}), ...(typeof body.ghl_user_id === "string" ? { ghl_user_id: body.ghl_user_id.trim() || null } : {}) } : p)));
     try {
       const res = await authedFetch("/api/team", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...body }) });
       if (!res.ok) { const j = await res.json(); throw new Error(j.error); }
@@ -149,13 +149,23 @@ export default function TeamPanel({ me }: { me: Me }) {
                     accounts that can send; the domain must be authenticated in
                     the GHL sub-account or GHL rejects it at send time. */}
                 {(p.role === "admin" || !!p.can_send_messages) && (
-                  <div className="mt-1 flex items-center gap-1.5">
-                    <span className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-muted">Sends as</span>
-                    <input type="email" defaultValue={p.send_from_email ?? ""} disabled={saving === p.id}
-                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                      onBlur={(e) => { const v = e.target.value.trim(); if (v !== (p.send_from_email ?? "")) patch(p.id, { send_from_email: v }); }}
-                      placeholder="default sender"
-                      className="min-w-0 max-w-[220px] flex-1 rounded border bg-background px-1.5 py-0.5 text-[12px] outline-none placeholder:text-muted/70 focus:border-accent disabled:opacity-50" />
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-muted">Sends as</span>
+                      <input type="email" defaultValue={p.send_from_email ?? ""} disabled={saving === p.id}
+                        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                        onBlur={(e) => { const v = e.target.value.trim(); if (v !== (p.send_from_email ?? "")) patch(p.id, { send_from_email: v }); }}
+                        placeholder="default sender"
+                        className="min-w-0 max-w-[200px] flex-1 rounded border bg-background px-1.5 py-0.5 text-[12px] outline-none placeholder:text-muted/70 focus:border-accent disabled:opacity-50" />
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-muted" title="Paste this teammate's GoHighLevel user id so email sends as them">GHL user</span>
+                      <input defaultValue={p.ghl_user_id ?? ""} disabled={saving === p.id}
+                        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                        onBlur={(e) => { const v = e.target.value.trim(); if (v !== (p.ghl_user_id ?? "")) patch(p.id, { ghl_user_id: v }); }}
+                        placeholder="GHL user id"
+                        className="min-w-0 max-w-[220px] flex-1 rounded border bg-background px-1.5 py-0.5 text-[12px] outline-none placeholder:text-muted/70 focus:border-accent disabled:opacity-50" />
+                    </div>
                   </div>
                 )}
               </div>

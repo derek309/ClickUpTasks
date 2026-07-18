@@ -30,6 +30,8 @@ export async function PATCH(req: NextRequest) {
   // default sender). Not validated as an email here — an admin sets it, and
   // GHL rejects an unauthenticated sender at send time anyway.
   if (typeof body.send_from_email === "string") patch.send_from_email = body.send_from_email.trim() || null;
+  // The teammate's GoHighLevel user id — used to send email as them.
+  if (typeof body.ghl_user_id === "string") patch.ghl_user_id = body.ghl_user_id.trim() || null;
   const { error } = await supabaseAdmin.from("profiles").update(patch).eq("id", body.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ ok: true });

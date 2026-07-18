@@ -66,18 +66,23 @@ export async function POST(req: NextRequest) {
   const ccList = cc?.filter((e) => e?.trim());
   const bccList = bcc?.filter((e) => e?.trim());
 
-  // "Send as the teammate who clicked send." When this user has a send-from
-  // address set (TeamPanel) and its domain is authenticated in the GHL
-  // sub-account, GHL sends as that address instead of the location default.
+  // "Send as the teammate who clicked send." Primary mechanism: pass the
+  // teammate's GHL user id as `userId`, so GHL attributes the send to that user
+  // and uses their own GHL email as the "from" — the same native behavior as a
+  // manual send inside GHL. send_from_email is an optional secondary hint.
   // Read here (not in serverAuth) and destructure only `data`, so if the
-  // migration hasn't run the column-missing error just leaves this undefined
+  // migration hasn't run the column-missing error just leaves these undefined
   // — the send still works, from the default sender. Fail-safe, no deploy-hold.
   let fromEmail: string | undefined;
   let fromName: string | undefined;
+  let ghlUserId: string | undefined;
   if (channel === "email") {
-    const { data: prof } = await supabaseAdmin.from("profiles").select("send_from_email, name").eq("id", caller.id).maybeSingle();
+    const { data: prof } = await supabaseAdmin.from("profiles").select("send_from_email, ghl_user_id, name").eq("id", caller.id).maybeSingle();
     const e = (prof?.send_from_email as string | null)?.trim();
-    if (e) { fromEmail = e; fromName = (prof?.name as string | null)?.trim() || undefined; }
+    const uid = (prof?.ghl_user_id as string | null)?.trim();
+    if (e) fromEmail = e;
+    if (uid) ghlUserId = uid;
+    if (e || uid) fromName = (prof?.name as string | null)?.trim() || undefined;
   }
 
   // The composer/AI draft produce PLAIN TEXT with \n line breaks. GHL's email
@@ -88,11 +93,12 @@ export async function POST(req: NextRequest) {
   const payload = channel === "sms"
     ? { type: "SMS", contactId: ghlContactId, message: body, ...(attachmentUrls ? { attachments: attachmentUrls } : {}) }
     : { type: "Email", contactId: ghlContactId, subject: (subject || "").slice(0, 200), html: emailHtml,
-        // GHL's exact from-field name for this endpoint wasn't confirmable from
-        // the (JS-rendered) docs; emailFrom is the documented one. fromName is
-        // sent alongside. Both are ignored by GHL if unrecognized, so this is
-        // safe — confirm against a live send and adjust the field name if the
-        // "from" doesn't change.
+        // Attribute the send to the teammate's GHL user so GHL uses their own
+        // email as the "from" (native per-user sending). userId is the primary
+        // lever; emailFrom/fromName are sent alongside as a fallback hint. GHL
+        // ignores unrecognized fields, so this is safe — confirm against a live
+        // send and drop whichever field isn't doing the work.
+        ...(ghlUserId ? { userId: ghlUserId } : {}),
         ...(fromEmail ? { emailFrom: fromEmail } : {}),
         ...(fromName ? { fromName } : {}),
         ...(attachmentUrls ? { attachments: attachmentUrls } : {}),
