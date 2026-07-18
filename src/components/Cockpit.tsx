@@ -796,6 +796,38 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return (clientById(clientId)?.canMessage ?? []).includes(me.id);
   };
   const scopedTasks = canAdmin ? tasks : tasks.filter((t) => t.assigneeId === me.id);
+  // Follow-up date = "always true": auto-track each client/project's
+  // follow-up to the soonest due date among its open (status != done) dated
+  // tasks, so it always reflects the next real deadline. Diff-then-write —
+  // only rows whose stored value actually differs get touched, which also
+  // stops the effect from looping (once written, the next pass matches and
+  // skips). When a client/project has NO dated open task, its followUpAt is
+  // left untouched so a manually-set reminder still sticks. Admin-only: a VA
+  // only sees their own scoped tasks, so they'd compute a too-late value and
+  // (RLS aside) locally clobber the admin-maintained date.
+  useEffect(() => {
+    if (canAdmin === false) return;
+    const soonestByClient = new Map<string, string>();
+    const soonestByProject = new Map<string, string>();
+    for (const t of tasks) {
+      if (t.status === "done" || !t.due) continue;
+      const pc = soonestByClient.get(t.clientId);
+      if (!pc || t.due < pc) soonestByClient.set(t.clientId, t.due);
+      if (t.projectId) {
+        const pp = soonestByProject.get(t.projectId);
+        if (!pp || t.due < pp) soonestByProject.set(t.projectId, t.due);
+      }
+    }
+    for (const c of clients) {
+      const soonest = soonestByClient.get(c.id);
+      if (soonest && soonest !== (c.followUpAt ?? null)) setClientFollowUp(c.id, soonest);
+    }
+    for (const p of projects) {
+      const soonest = soonestByProject.get(p.id);
+      if (soonest && soonest !== (p.followUpAt ?? null)) setProjectFollowUp(p.id, soonest);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, clients, projects, canAdmin]);
   // Sub-accounts (Agency/Directory) are the contact source; clients (cl_*) are contacts you've added.
   const subAccounts = clients.filter((c) => !c.id.startsWith("cl_"));
   // Only type 'client' gets sidebar/⌘K/task presence — prospects/past
@@ -2089,10 +2121,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             const fu = entity.followUpAt ?? null;
             const overdue = isOverdue(fu);
             const setFollowUp = (d: string | null) => (scopedProject ? setProjectFollowUp(scopedProject.id, d) : setClientFollowUp(activeClient, d));
+            // Auto-tracked when this entity has an open dated task — the
+            // recompute effect keeps followUpAt pinned to the soonest one, so
+            // the header shows it read-only (editing would just be overwritten).
+            // With no dated task, it's a free manual reminder you can set.
+            const autoTracked = tasks.some((t) => t.status !== "done" && !!t.due && (scopedProject ? t.projectId === scopedProject.id : t.clientId === activeClient));
             return (
-              <div title="Follow-up date — when to next check in on this" className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 ${overdue ? "border-danger/40 bg-danger-soft" : fu ? "border-accent/40 bg-accent-soft" : "border-dashed"}`}>
+              <div title={autoTracked ? "Follow-up date — auto-tracked to the next task due date" : "Follow-up date — when to next check in on this"}
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 ${overdue ? "border-danger/40 bg-danger-soft" : fu ? "border-accent/40 bg-accent-soft" : "border-dashed"}`}>
                 <I.calendar className={overdue ? "text-danger" : fu ? "text-accent" : "text-muted"} />
-                <InlineDue value={fu} overdue={overdue} onChange={setFollowUp} emptyLabel="Follow-up" strong />
+                {autoTracked ? (
+                  <span className={`text-[13px] font-semibold ${overdue ? "text-danger" : "text-accent"}`}>{fu ? formatDue(fu) : "—"}<span className="ml-1 font-normal text-muted">· auto</span></span>
+                ) : (
+                  <InlineDue value={fu} overdue={overdue} onChange={setFollowUp} emptyLabel="Follow-up" strong />
+                )}
               </div>
             );
           })()}
