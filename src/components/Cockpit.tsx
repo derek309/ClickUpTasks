@@ -186,6 +186,29 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [settingsHubOpen, setSettingsHubOpen] = useState(false);
   const [addClientOpen, setAddClientOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
+  // Draggable quick-add FAB position (viewport px of its top-left). null =
+  // default corner (bottom-left). Persisted per-user in localStorage so it
+  // stays wherever you park it out of the way of the composer/toasts.
+  const [fabPos, setFabPos] = useState<{ x: number; y: number } | null>(null);
+  const fabDragRef = useRef({ down: false, moved: false, offX: 0, offY: 0, startX: 0, startY: 0 });
+  const onFabPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    fabDragRef.current = { down: true, moved: false, offX: e.clientX - r.left, offY: e.clientY - r.top, startX: e.clientX, startY: e.clientY };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onFabPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const d = fabDragRef.current;
+    if (!d.down) return;
+    if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) > 4) d.moved = true;
+    setFabPos({ x: Math.max(4, Math.min(window.innerWidth - 60, e.clientX - d.offX)), y: Math.max(4, Math.min(window.innerHeight - 60, e.clientY - d.offY)) });
+  };
+  const onFabPointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const d = fabDragRef.current;
+    d.down = false;
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch {}
+    if (!d.moved) setQuickAddOpen(true); // a click (no real drag) opens the modal
+  };
+  useEffect(() => { if (fabPos) try { localStorage.setItem("cut_fabPos", JSON.stringify(fabPos)); } catch {} }, [fabPos]);
   // Set by the header Email/SMS buttons — jumps the Journal composer into that
   // mode. nonce bumps each click so it re-fires even when already on the Journal.
   const [composeIntent, setComposeIntent] = useState<{ mode: "email" | "sms"; nonce: number } | null>(null);
@@ -422,6 +445,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       const s = localStorage.getItem("cut_clientSort"); if (s) setClientSort(s as ClientSort);
       const st = localStorage.getItem("cut_starred"); if (st) setStarred(new Set(JSON.parse(st)));
       const stl = localStorage.getItem("cut_starredLists"); if (stl) setStarredLists(new Set(JSON.parse(stl)));
+      const fp = localStorage.getItem("cut_fabPos"); if (fp) setFabPos(JSON.parse(fp));
       const mo = localStorage.getItem("cut_clientOrder"); if (mo) setManualOrder(JSON.parse(mo));
       const he = localStorage.getItem("cut_hideEmpty"); if (he !== null) setHideEmpty(he === "1");
       const hd = localStorage.getItem("cut_hideDone"); if (hd !== null) setHideDone(hd === "1");
@@ -2059,13 +2083,24 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           )}
         </nav>
 
-        {/* Pinned lists — per-user quick access to starred lists (B4). */}
+        {/* Pinned — per-user quick access to starred clients + lists. Starring
+            a client (from the Clients directory or its header) pins it here. */}
         {(() => {
+          const pinnedClients = [...starred].map((id) => clientById(id)).filter((c): c is Client => !!c && c.id.startsWith("cl_"));
           const pinned = [...starredLists].map((id) => projectById(id)).filter((p): p is Project => !!p);
-          if (pinned.length === 0) return null;
+          if (pinnedClients.length === 0 && pinned.length === 0) return null;
           return (
             <nav className="mt-2 shrink-0 space-y-0.5 border-t px-2 pt-2">
               <div className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Pinned</div>
+              {pinnedClients.map((c) => {
+                const active = !myWork && !personalView && !inboxView && !dirView && !activeProject && activeClient === c.id;
+                return (
+                  <SideItem key={c.id} active={active} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setActiveClient(c.id); setActiveProject(null); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: clientStatusMeta(c.status).dot }} /> <span className="min-w-0 flex-1 truncate text-left">{c.name}</span>
+                    <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); toggleStar(c.id); }} title="Unpin from sidebar" className="shrink-0 rounded p-0.5 text-amber-400 hover:bg-background"><I.star filled /></span>
+                  </SideItem>
+                );
+              })}
               {pinned.map((p) => {
                 const active = !myWork && !personalView && !inboxView && !dirView && activeProject === p.id;
                 return (
@@ -2407,7 +2442,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <ClientsDirectory clients={sortedClients} clientCompany={(c) => clientCompany(c)} taskCount={clientTaskCount} starred={starred} onToggleStar={toggleStar}
             needsReview={(id) => clientNeedsReview(id, me.id)}
             onOpen={(id) => { setDirView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); setClientTab("tasks"); }}
-            canAdmin={canAdmin} onAddClient={() => setAddClientOpen(true)} onRename={renameClient} onDelete={deleteClient}
+            canAdmin={canAdmin} onAddClient={() => setAddClientOpen(true)} onRename={renameClient} onDelete={deleteClient} onSetStatus={setClientStatus}
             sort={clientSort} onSetSort={saveClientSort} scope={clientListScope} onToggleScope={() => setClientListScope((s) => (s === "mine" ? "all" : "mine"))} />
         ) : dirView === "projects" ? (
           <ProjectsDirectory projects={sortedWorkspaceProjects} openCount={projectTaskCount}
@@ -2566,12 +2601,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         onAddContact={(contact) => { addClientContact(contact); setCmdkOpen(false); }}
         onClose={() => setCmdkOpen(false)} />}
 
-      {/* Global quick-add-task FAB — bottom-right so it clears the bottom-center
-          toasts/bulk bar; modals (z-40+) cover it when open. */}
-      <button onClick={() => setQuickAddOpen(true)} title="Add a task" aria-label="Add a task"
-        className="fixed bottom-6 right-4 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-accent text-white shadow-lg transition hover:opacity-90 active:scale-95 sm:right-6">
-        <I.plus className="h-6 w-6" />
-      </button>
+      {/* Global quick-add-task FAB — defaults to bottom-LEFT (the composer's
+          Send button and toasts live bottom-right), draggable so it can be
+          parked anywhere, and hidden on the Journal tab so it never covers the
+          message composer while writing/sending. */}
+      {!(!myWork && !personalView && !inboxView && !dirView && activeClient !== "all" && clientTab === "chat") && (
+        <button onPointerDown={onFabPointerDown} onPointerMove={onFabPointerMove} onPointerUp={onFabPointerUp}
+          title="Add a task (drag to move)" aria-label="Add a task"
+          style={fabPos ? { left: fabPos.x, top: fabPos.y, right: "auto", bottom: "auto" } : undefined}
+          className={`fixed z-30 flex h-14 w-14 touch-none items-center justify-center rounded-full bg-accent text-white shadow-lg transition hover:opacity-90 active:scale-95 ${fabPos ? "" : "bottom-6 left-4 sm:left-6"}`}>
+          <I.plus className="h-6 w-6" />
+        </button>
+      )}
       {quickAddOpen && (
         <QuickAddTask
           clients={clientList}

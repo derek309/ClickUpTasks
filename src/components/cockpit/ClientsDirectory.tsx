@@ -5,14 +5,14 @@
 // search box, the sort + Mine/All controls relocated from the sidebar, and an
 // Add-client button. Clicking a row opens that client's task list.
 import { useState } from "react";
-import { clientStatusMeta, type Client } from "@/lib/data";
+import { clientStatusMeta, CLIENT_STATUS_ORDER, CLIENT_STATUS_META, type ClientStatus, type Client } from "@/lib/data";
 import { I } from "./ui";
 
 type ClientSort = "manual" | "az" | "tasks" | "recent" | "used" | "urgent" | "mine";
 
 export function ClientsDirectory({
   clients, clientCompany, taskCount, starred, onToggleStar, needsReview, onOpen,
-  canAdmin, onAddClient, onRename, onDelete, sort, onSetSort, scope, onToggleScope,
+  canAdmin, onAddClient, onRename, onDelete, onSetStatus, sort, onSetSort, scope, onToggleScope,
 }: {
   clients: Client[]; // already sorted + scoped by the caller
   clientCompany: (c: Client) => string;
@@ -25,6 +25,7 @@ export function ClientsDirectory({
   onAddClient: () => void;
   onRename: (id: string) => void;
   onDelete: (id: string) => void;
+  onSetStatus: (id: string, status: ClientStatus) => void;
   sort: ClientSort;
   onSetSort: (s: ClientSort) => void;
   scope: "mine" | "all";
@@ -32,6 +33,7 @@ export function ClientsDirectory({
 }) {
   const [q, setQ] = useState("");
   const [sortOpen, setSortOpen] = useState(false);
+  const [statusOpenId, setStatusOpenId] = useState<string | null>(null);
   const query = q.trim().toLowerCase();
   const shown = query ? clients.filter((c) => c.name.toLowerCase().includes(query) || clientCompany(c).toLowerCase().includes(query)) : clients;
   const sortLabels: [ClientSort, string][] = [["urgent", "Overdue first"], ["mine", "By my work"], ["used", "Recently used"], ["manual", "Manual"], ["az", "A → Z"], ["tasks", "Most active"], ["recent", "Recently added"]];
@@ -67,6 +69,7 @@ export function ClientsDirectory({
       <div className="overflow-hidden rounded-xl border bg-surface shadow-soft">
         <div className="flex items-center gap-3 border-b bg-background/40 px-4 py-2 text-[12px] font-semibold uppercase tracking-wide text-muted">
           <span className="flex-1">Client</span>
+          <span className="hidden w-32 sm:block">Status</span>
           <span className="w-10 text-right">Open</span>
         </div>
         {shown.map((c) => {
@@ -83,6 +86,26 @@ export function ClientsDirectory({
                   {needsReview(c.id) && <span className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold text-teal-600" style={{ background: "#14b8a61a" }}>Review</span>}
                 </span>
                 {company && <span className="block truncate text-[13px] text-muted">{company}</span>}
+              </span>
+              {/* Status pill — admins can change it inline; everyone sees it. */}
+              <span className="relative hidden w-32 shrink-0 sm:block" onClick={(e) => e.stopPropagation()}>
+                <button onClick={() => canAdmin && setStatusOpenId((v) => (v === c.id ? null : c.id))} disabled={!canAdmin}
+                  title={canAdmin ? "Change status" : meta.label}
+                  className={`inline-flex max-w-full items-center gap-1.5 truncate rounded-full border px-2 py-0.5 text-[12px] font-medium ${canAdmin ? "hover:bg-background" : "cursor-default"}`}>
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: meta.dot }} /> <span className="truncate">{meta.label}</span>
+                </button>
+                {statusOpenId === c.id && (<>
+                  <div className="fixed inset-0 z-30" onClick={() => setStatusOpenId(null)} />
+                  <div className="absolute right-0 top-full z-40 mt-1 w-40 rounded-lg border bg-surface p-1 shadow-soft-md">
+                    {CLIENT_STATUS_ORDER.map((s) => (
+                      <button key={s} onClick={() => { onSetStatus(c.id, s); setStatusOpenId(null); }}
+                        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-background">
+                        <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: CLIENT_STATUS_META[s].dot }} />{CLIENT_STATUS_META[s].label}
+                        {c.status === s && <I.check className="ml-auto h-3.5 w-3.5 text-accent" />}
+                      </button>
+                    ))}
+                  </div>
+                </>)}
               </span>
               <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); onToggleStar(c.id); }} title={starred.has(c.id) ? "Unstar" : "Star"}
                 className={`shrink-0 rounded p-1 hover:bg-background ${starred.has(c.id) ? "text-amber-400" : "text-muted opacity-0 group-hover:opacity-100"}`}><I.star filled={starred.has(c.id)} /></span>
