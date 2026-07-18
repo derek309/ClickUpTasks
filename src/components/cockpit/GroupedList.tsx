@@ -78,7 +78,7 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   return (
     <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">
       <div className="overflow-x-auto rounded-xl border bg-surface shadow-soft">
-        <div className="grid items-center gap-2 border-b bg-background/40 px-4 py-2 text-[12px] font-semibold uppercase tracking-wide text-muted" style={{ gridTemplateColumns: template }}>
+        <div className="hidden items-center gap-2 border-b bg-background/40 px-4 py-2 text-[12px] font-semibold uppercase tracking-wide text-muted sm:grid" style={{ gridTemplateColumns: template }}>
           <button onClick={() => onSort("task")} className="flex items-center gap-1 text-left hover:text-foreground">Name <Arrow col="task" /></button>
           {showClient && <span>Client</span>}
           {cols.map((c) => (
@@ -159,7 +159,7 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
   return (
     <>
       <div draggable={draggable} onDragStart={onDragStart} onDragEnd={onDragEnd}
-        className={`group/tr grid min-h-[46px] items-center gap-2 border-b px-4 py-2 transition-colors last:border-0 hover:bg-accent-soft/50 ${delegated ? "border-l-[3px] border-l-accent bg-accent-soft/30" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`} style={{ gridTemplateColumns: template }}>
+        className={`group/tr flex flex-col gap-1.5 border-b px-4 py-3 transition-colors last:border-0 hover:bg-accent-soft/50 sm:grid sm:min-h-[46px] sm:items-center sm:gap-2 sm:py-2 ${delegated ? "border-l-[3px] border-l-accent bg-accent-soft/30" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`} style={{ gridTemplateColumns: template }}>
         <div className="flex min-w-0 items-center gap-0.5">
           {onToggleSelect && (
             <button onClick={(e) => { e.stopPropagation(); onToggleSelect(); }} title="Select"
@@ -177,15 +177,20 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
             <span className="flex min-w-0 items-center gap-1.5">
               {delegated && <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">Delegated</span>}
               {queued && <span title="Queued for Claude Code" className="shrink-0 text-amber-500">★</span>}
-              <span className="line-clamp-2 min-w-0 flex-1 break-words text-[17px] font-medium leading-snug" title={task.title}>{task.title}</span>
+              <span className="line-clamp-none min-w-0 flex-1 break-words text-[17px] font-medium leading-snug sm:line-clamp-2" title={task.title}>{task.title}</span>
               {task.recurrence !== "none" && <span title={describeRecurrence(task.recurrence, task.recurrenceInterval, task.recurrenceUnit, task.recurrenceDaysOfMonth)}><I.repeat className="shrink-0 text-muted" /></span>}
               {task.attachments.length > 0 && <I.clip className="shrink-0 text-muted" />}
               {task.subtasks.length > 0 && <span className="inline-flex shrink-0 items-center gap-0.5 text-[13px] text-muted"><I.check />{doneSubs}/{task.subtasks.length}</span>}
             </span>
           </button>
         </div>
-        {showClient && <span className="flex min-w-0 items-center gap-1.5 text-[15px]"><span className="h-2 w-2 shrink-0 rounded-full" style={{ background: client?.color }} /><span className="truncate">{client?.name}</span></span>}
-        {cols.map((c) => <div key={c.key} className="min-w-0">{cell(c.key)}</div>)}
+        {/* On mobile these wrap into a chip row under the title (indented past
+            the avatar); on sm+ `contents` dissolves the wrapper so each cell
+            drops back into its own grid column. */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pl-11 sm:contents sm:pl-0">
+          {showClient && <span className="flex min-w-0 items-center gap-1.5 text-[15px]"><span className="h-2 w-2 shrink-0 rounded-full" style={{ background: client?.color }} /><span className="truncate">{client?.name}</span></span>}
+          {cols.map((c) => <div key={c.key} className="min-w-0">{cell(c.key)}</div>)}
+        </div>
       </div>
       {expanded && (
         <div className="border-b bg-background/40 py-1.5 pl-10 pr-3">
