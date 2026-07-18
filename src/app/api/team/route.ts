@@ -26,6 +26,10 @@ export async function PATCH(req: NextRequest) {
   const patch: Record<string, unknown> = {};
   if (body.role) patch.role = body.role;
   if (typeof body.can_send_messages === "boolean") patch.can_send_messages = body.can_send_messages;
+  // Per-teammate "send from" email. Empty string clears it (back to the GHL
+  // default sender). Not validated as an email here — an admin sets it, and
+  // GHL rejects an unauthenticated sender at send time anyway.
+  if (typeof body.send_from_email === "string") patch.send_from_email = body.send_from_email.trim() || null;
   const { error } = await supabaseAdmin.from("profiles").update(patch).eq("id", body.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ ok: true });

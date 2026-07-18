@@ -6,7 +6,7 @@ import { type Me } from "@/lib/data";
 import { ConfirmModal, type ConfirmSpec } from "./cockpit/modals";
 import { I } from "./cockpit/ui";
 
-type Profile = { id: string; email: string; name: string; role: "admin" | "va"; color: string; pending?: boolean; avatar_url?: string | null; can_send_messages?: boolean };
+type Profile = { id: string; email: string; name: string; role: "admin" | "va"; color: string; pending?: boolean; avatar_url?: string | null; can_send_messages?: boolean; send_from_email?: string | null };
 
 export default function TeamPanel({ me }: { me: Me }) {
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -44,7 +44,7 @@ export default function TeamPanel({ me }: { me: Me }) {
 
   async function patch(id: string, body: Record<string, unknown>) {
     setSaving(id);
-    setProfiles((ps) => ps.map((p) => (p.id === id ? { ...p, ...(body.role ? { role: body.role as Profile["role"] } : {}), ...(typeof body.can_send_messages === "boolean" ? { can_send_messages: body.can_send_messages } : {}) } : p)));
+    setProfiles((ps) => ps.map((p) => (p.id === id ? { ...p, ...(body.role ? { role: body.role as Profile["role"] } : {}), ...(typeof body.can_send_messages === "boolean" ? { can_send_messages: body.can_send_messages } : {}), ...(typeof body.send_from_email === "string" ? { send_from_email: body.send_from_email.trim() || null } : {}) } : p)));
     try {
       const res = await authedFetch("/api/team", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...body }) });
       if (!res.ok) { const j = await res.json(); throw new Error(j.error); }
@@ -145,6 +145,19 @@ export default function TeamPanel({ me }: { me: Me }) {
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[15px] font-medium">{p.name || p.email}{p.id === me.id && <span className="ml-1 text-[13px] text-muted">(you)</span>}{p.pending && <span className="ml-1.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[13px] font-medium text-amber-700">Invite pending</span>}</div>
                 <div className="truncate text-[13px] text-muted">{p.email}</div>
+                {/* Send-from address for outbound emails. Only meaningful for
+                    accounts that can send; the domain must be authenticated in
+                    the GHL sub-account or GHL rejects it at send time. */}
+                {(p.role === "admin" || !!p.can_send_messages) && (
+                  <div className="mt-1 flex items-center gap-1.5">
+                    <span className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-muted">Sends as</span>
+                    <input type="email" defaultValue={p.send_from_email ?? ""} disabled={saving === p.id}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      onBlur={(e) => { const v = e.target.value.trim(); if (v !== (p.send_from_email ?? "")) patch(p.id, { send_from_email: v }); }}
+                      placeholder="default sender"
+                      className="min-w-0 max-w-[220px] flex-1 rounded border bg-background px-1.5 py-0.5 text-[12px] outline-none placeholder:text-muted/70 focus:border-accent disabled:opacity-50" />
+                  </div>
+                )}
               </div>
 
               {/* Send email/SMS permission. Admins always can (shown locked-on);

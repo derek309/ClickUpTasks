@@ -65,6 +65,21 @@ export async function POST(req: NextRequest) {
   const attachmentUrls = attachments?.length ? attachments : undefined;
   const ccList = cc?.filter((e) => e?.trim());
   const bccList = bcc?.filter((e) => e?.trim());
+
+  // "Send as the teammate who clicked send." When this user has a send-from
+  // address set (TeamPanel) and its domain is authenticated in the GHL
+  // sub-account, GHL sends as that address instead of the location default.
+  // Read here (not in serverAuth) and destructure only `data`, so if the
+  // migration hasn't run the column-missing error just leaves this undefined
+  // — the send still works, from the default sender. Fail-safe, no deploy-hold.
+  let fromEmail: string | undefined;
+  let fromName: string | undefined;
+  if (channel === "email") {
+    const { data: prof } = await supabaseAdmin.from("profiles").select("send_from_email, name").eq("id", caller.id).maybeSingle();
+    const e = (prof?.send_from_email as string | null)?.trim();
+    if (e) { fromEmail = e; fromName = (prof?.name as string | null)?.trim() || undefined; }
+  }
+
   // The composer/AI draft produce PLAIN TEXT with \n line breaks. GHL's email
   // field is HTML, which collapses newlines/whitespace — so send it through
   // escape-then-newline-to-<br> or every paragraph break is lost in the email.
@@ -73,6 +88,13 @@ export async function POST(req: NextRequest) {
   const payload = channel === "sms"
     ? { type: "SMS", contactId: ghlContactId, message: body, ...(attachmentUrls ? { attachments: attachmentUrls } : {}) }
     : { type: "Email", contactId: ghlContactId, subject: (subject || "").slice(0, 200), html: emailHtml,
+        // GHL's exact from-field name for this endpoint wasn't confirmable from
+        // the (JS-rendered) docs; emailFrom is the documented one. fromName is
+        // sent alongside. Both are ignored by GHL if unrecognized, so this is
+        // safe — confirm against a live send and adjust the field name if the
+        // "from" doesn't change.
+        ...(fromEmail ? { emailFrom: fromEmail } : {}),
+        ...(fromName ? { fromName } : {}),
         ...(attachmentUrls ? { attachments: attachmentUrls } : {}),
         ...(ccList?.length ? { emailCc: ccList } : {}),
         ...(bccList?.length ? { emailBcc: bccList } : {}) };
