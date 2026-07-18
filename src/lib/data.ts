@@ -314,6 +314,10 @@ export interface Message {
   subject: string | null;
   body: string;
   ghlMessageId: string | null;
+  /** Gmail message id when this email was sent through Google Workspace (the
+   * per-teammate "from" path) rather than GHL — see supabase/gmail-message-id.sql
+   * and src/lib/googleMail.ts. Null for GHL sends and inbound rows. */
+  gmailMessageId?: string | null;
   createdBy: string | null; // roster id for outbound; null for inbound
   at: string; // ISO
   /** Shared team-wide, not per-user (one flag per message). Outbound rows are

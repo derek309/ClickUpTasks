@@ -38,6 +38,20 @@ export async function POST(req: NextRequest) {
   const { data: existingRows } = await supabaseAdmin.from("messages").select("ghl_message_id").eq("contact_id", contactId).not("ghl_message_id", "is", null);
   const known = new Set((existingRows ?? []).map((r) => r.ghl_message_id as string));
 
+  // Emails sent through Google Workspace (the per-teammate "from" path) are
+  // stored locally with no ghl_message_id, so `known` can't catch the copy GHL
+  // imports via 2-way sync — that would double-post the sent email in the
+  // Journal. Guard by matching an incoming OUTBOUND message against an existing
+  // local outbound row by contact + normalized body within a time window.
+  const norm = (s: string) => (s || "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/\s+/g, " ").trim().toLowerCase().slice(0, 200);
+  const { data: outRows } = await supabaseAdmin.from("messages").select("body, created_at").eq("contact_id", contactId).eq("direction", "outbound");
+  const localOutbound = (outRows ?? []).map((r) => ({ body: norm(r.body as string), at: new Date(r.created_at as string).getTime() }));
+  const DEDUP_MS = 10 * 60 * 1000;
+  const isDupOutbound = (body: string, dateAdded: string) => {
+    const nb = norm(body); const t = new Date(dateAdded).getTime();
+    return localOutbound.some((o) => o.body === nb && Math.abs(o.at - t) <= DEDUP_MS);
+  };
+
   let inserted = 0;
   for (const conv of conversations) {
     let lastMessageId: string | undefined;
@@ -54,6 +68,8 @@ export async function POST(req: NextRequest) {
         .map((m) => {
           const channel = m.messageType === "SMS" ? "sms" : m.messageType === "Email" ? "email" : null;
           if (!channel || !m.dateAdded) return null;
+          // Don't re-import an outbound email we already sent via Google.
+          if (m.direction !== "inbound" && isDupOutbound(m.body ?? "", m.dateAdded)) return null;
           return {
             id: "msg_ghl_" + m.id,
             contact_id: contactId,

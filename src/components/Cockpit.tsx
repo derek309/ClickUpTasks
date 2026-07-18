@@ -1538,6 +1538,32 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const emailBcc = channel === "email" ? bcc : [];
     setSendingMessage(true);
     try {
+      // Per-teammate "from": route attachment-free emails through Google
+      // Workspace (Gmail API) so they come from the sender's own address, not
+      // GHL's default. SMS and attachment-bearing emails (v1 Gmail path has no
+      // attachments yet) stay on GHL. A 501 from the Google route (not
+      // configured, or the caller isn't a domain sender) falls through to GHL,
+      // so nothing breaks before setup.
+      if (channel === "email" && attachments.length === 0 && !!contact.email) {
+        const gres = await authedFetch("/api/google/send", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clientId, toEmail: contact.email, subject, body, cc: emailCc, bcc: emailBcc }),
+        });
+        if (gres.status !== 501) {
+          const gj = await gres.json().catch(() => ({}));
+          if (!gres.ok || gj.error) { pushToast(gj.error || "Failed to send email."); return; }
+          const gm: Message = {
+            id: newId("msg_"), contactId: contact.id, clientId, taskId, channel, direction: "outbound",
+            subject: subject.trim() ? subject.trim() : null, body,
+            ghlMessageId: null, gmailMessageId: gj.gmailMessageId ?? null, createdBy: me.id, at: new Date().toISOString(), read: true,
+            attachments, cc: emailCc, bcc: emailBcc,
+          };
+          setMessages((ms) => [...ms, gm]);
+          insertMessage(gm);
+          return;
+        }
+        // 501 → fall through to the GHL path below.
+      }
       // GHL fetches attachments itself from a URL rather than accepting an
       // upload — an hour is ample time for that fetch, without leaving the
       // private bucket's contents reachable indefinitely.
