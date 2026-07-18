@@ -354,14 +354,17 @@ function friendlyDue(iso: string): string {
 export function InlineDue({ value, overdue, recurrence = "none", onChange, onRecurrenceChange, emptyLabel = "—", strong = false }: { value: string | null; overdue: boolean; recurrence?: Recurrence; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; emptyLabel?: string; strong?: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 440 });
   const openIt = (e: React.MouseEvent) => {
     e.stopPropagation();
     const r = ref.current?.getBoundingClientRect();
     if (r) {
-      const left = Math.max(8, Math.min(r.right - 440, window.innerWidth - 448));
+      // Never wider than the viewport (with an 8px gutter each side) so the
+      // picker can't run off the right edge of a phone.
+      const width = Math.min(440, window.innerWidth - 16);
+      const left = Math.max(8, Math.min(r.right - width, window.innerWidth - width - 8));
       const top = r.bottom + 300 > window.innerHeight ? r.top - 304 : r.bottom + 4;
-      setPos({ top, left });
+      setPos({ top, left, width });
     }
     setOpen(true);
   };
@@ -376,7 +379,7 @@ export function InlineDue({ value, overdue, recurrence = "none", onChange, onRec
   );
 }
 
-function DatePopover({ pos, value, recurrence, onSelect, onRecurrenceChange, onClose }: { pos: { top: number; left: number }; value: string | null; recurrence: Recurrence; onSelect: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; onClose: () => void }) {
+function DatePopover({ pos, value, recurrence, onSelect, onRecurrenceChange, onClose }: { pos: { top: number; left: number; width: number }; value: string | null; recurrence: Recurrence; onSelect: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; onClose: () => void }) {
   const [ym, setYm] = useState(() => { const [y, m] = (value ?? TODAY).split("-").map(Number); return { y, m: m - 1 }; });
   const dow = dowIso(TODAY);
   const quicks: [string, string][] = [
@@ -393,8 +396,8 @@ function DatePopover({ pos, value, recurrence, onSelect, onRecurrenceChange, onC
   return (
     <>
       <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); onClose(); }} />
-      <div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", top: pos.top, left: pos.left, width: 440 }} className="z-50 flex rounded-xl border bg-surface shadow-xl">
-        <div className="w-52 shrink-0 border-r p-1.5">
+      <div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }} className="z-50 flex flex-col rounded-xl border bg-surface shadow-xl sm:flex-row">
+        <div className="w-full shrink-0 border-b p-1.5 sm:w-52 sm:border-b-0 sm:border-r">
           {quicks.map(([label, iso]) => (
             <button key={label} onClick={() => onSelect(iso)} className="flex w-full items-center justify-between gap-3 whitespace-nowrap rounded px-2 py-1.5 text-left text-[15px] hover:bg-background"><span>{label}</span><span className="text-[13px] text-muted">{formatDue(iso)}</span></button>
           ))}

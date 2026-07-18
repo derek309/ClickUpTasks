@@ -347,8 +347,8 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1">
-        <div className="relative flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+        <div className="relative min-h-0 flex-1 overflow-hidden">
         <div className="h-full overflow-y-auto px-4 py-4 sm:px-5">
           <div className="mx-auto max-w-3xl space-y-3">
             {filteredItems.length === 0 && (
@@ -489,9 +489,14 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
         )}
         </div>
 
-        <div className="relative flex shrink-0 flex-col border-l bg-surface" style={{ width: composerW }}>
+        {/* Full-width and stacked under the feed on mobile; fixed, resizable
+            side column at md+. The inline width rides a CSS var so a Tailwind
+            responsive class can override it below md (inline styles otherwise
+            always win). */}
+        <div className="relative flex w-full flex-col border-t bg-surface md:w-[var(--composer-w)] md:shrink-0 md:border-l md:border-t-0"
+          style={{ "--composer-w": `${composerW}px` } as React.CSSProperties}>
           <div onMouseDown={startComposerResize} title="Drag to resize"
-            className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize hover:bg-accent/30 active:bg-accent/40" />
+            className="absolute inset-y-0 -left-1 z-10 hidden w-2 cursor-col-resize hover:bg-accent/30 active:bg-accent/40 md:block" />
           <div className="flex items-center justify-between border-b px-3 py-2.5">
             <span className="text-[13px] font-semibold text-muted">Write</span>
             {onSendMessage && (

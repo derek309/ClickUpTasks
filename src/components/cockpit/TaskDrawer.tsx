@@ -867,8 +867,8 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
           // ClickUp-style split: task content (document) on the left,
           // the Activity/comments conversation in its own column on the right
           // with the composer pinned to the bottom.
-          <div className="flex flex-1 overflow-hidden">
-            <div className="min-w-0 flex-1 overflow-y-auto bg-background px-8 py-6 lg:px-12">
+          <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
+            <div className="min-w-0 flex-1 overflow-y-auto bg-background px-4 py-6 sm:px-8 lg:px-12">
               <div className="mx-auto w-full max-w-4xl">
                 {titleBlock}
                 {metaLine}
@@ -883,9 +883,13 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                 {siblingsBlock}
               </div>
             </div>
-            <div className="relative flex shrink-0 flex-col border-l bg-background/50" style={{ width: activityW }}>
+            {/* Stacks below the document on mobile (each pane its own scroll);
+                fixed, resizable side column at md+. Width rides a CSS var so a
+                responsive class can override the inline value below md. */}
+            <div className="relative flex min-h-0 flex-1 flex-col border-t bg-background/50 md:w-[var(--activity-w)] md:flex-none md:border-l md:border-t-0"
+              style={{ "--activity-w": `${activityW}px` } as React.CSSProperties}>
               <div onMouseDown={startResize} title="Drag to resize"
-                className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize hover:bg-accent/30 active:bg-accent/40" />
+                className="absolute inset-y-0 -left-1 z-10 hidden w-2 cursor-col-resize hover:bg-accent/30 active:bg-accent/40 md:block" />
               {hasMessaging && (
                 <div className="border-b bg-surface px-3 py-2.5">
                   <div className="flex items-center gap-2">

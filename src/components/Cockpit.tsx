@@ -70,6 +70,7 @@ import { GroupedList, InlineDue } from "./cockpit/GroupedList";
 import { TaskDrawer } from "./cockpit/TaskDrawer";
 import { QuickLinksBar } from "./cockpit/ClientLinks";
 import { ClientJournal } from "./cockpit/ClientJournal";
+import { QuickAddTask } from "./cockpit/QuickAddTask";
 import { VaultView, type VaultItem } from "./cockpit/VaultView";
 import { ClientsBoard, type WorkBoardGroup, type WorkItem } from "./cockpit/ClientsBoard";
 import { ClientsDirectory } from "./cockpit/ClientsDirectory";
@@ -182,6 +183,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [bellOpen, setBellOpen] = useState(false);
   const [settingsHubOpen, setSettingsHubOpen] = useState(false);
   const [addClientOpen, setAddClientOpen] = useState(false);
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [ghlBusy, setGhlBusy] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
@@ -1240,6 +1242,28 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     upsertTask(t, me.id);
   };
 
+  // Quick-add-task FAB: create a task for an explicitly-chosen client/list
+  // (from the floating "+" modal). Mirrors quickAdd's Task shape and the
+  // find-or-create-"Tasks"-list idiom; assignee = the creator.
+  const createQuickTask = (clientId: string, projectId: string | null, title: string, due: string | null, priority: Priority) => {
+    if (!title.trim() || !clientId.startsWith("cl_")) return;
+    let pid = projectId ?? "";
+    if (!pid) {
+      const existing = projects.find((p) => p.clientId === clientId);
+      if (existing) pid = existing.id;
+      else { const p: Project = { id: newId("p_"), clientId, name: "Tasks", description: "" }; setProjects((ps) => [...ps, p]); upsertProject(p); pid = p.id; }
+    }
+    const t: Task = {
+      id: newId("t_"), projectId: pid, clientId, title: title.trim(), description: "",
+      status: "todo", priority: isManuallyAssignable(priority) ? priority : "none",
+      assigneeId: me.id, contactId: clientId.slice(3), due,
+      recurrence: "none", labelIds: [], ghlTaskId: null, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
+    };
+    setTasks((ts) => [...ts, t]);
+    upsertTask(t, me.id);
+    pushToast(`Task added to ${clientById(clientId)?.name ?? "client"}.`);
+  };
+
   // Drag a task row onto a different group header to reprioritize/restatus it
   // (grouped list view, priority/status dims only — due/project groupings
   // don't have an unambiguous single-field patch, so drag is disabled there;
@@ -2124,7 +2148,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   <span className="inline-flex overflow-hidden rounded-md border border-teal-500/40">
                     <button onClick={() => (scopedProject ? setProjectReviewed(scopedProject.id) : setClientReviewed(activeClient))}
                       title="Mark reviewed — clears this from the Review list until the next check-in"
-                      className="inline-flex items-center gap-1 bg-teal-500/10 px-2.5 py-1.5 text-[13px] font-medium text-teal-600 hover:bg-teal-500/20"><I.check /> Reviewed</button>
+                      className="inline-flex items-center gap-1 bg-teal-500/10 px-2.5 py-1.5 text-[13px] font-medium text-teal-600 hover:bg-teal-500/20"><I.check /> <span className="hidden sm:inline">Reviewed</span></button>
                     <button onClick={() => goToNextReview(activeClient, activeProject)}
                       title="Go to the next client/project that needs review"
                       className="border-l border-teal-500/40 bg-teal-500/10 px-2 py-1.5 text-[13px] font-medium text-teal-600 hover:bg-teal-500/20">Next ›</button>
@@ -2134,7 +2158,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               {ghlContactUrlFor(activeClient) && (
                 <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel"
                   className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[13px] font-medium text-accent hover:bg-accent-soft">
-                  <I.bolt /> Open in GHL
+                  <I.bolt /> <span className="hidden sm:inline">Open in GHL</span>
                 </a>
               )}
               {/* Secondary/config actions folded into one overflow menu so the
@@ -2466,6 +2490,24 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         }}
         onAddContact={(contact) => { addClientContact(contact); setCmdkOpen(false); }}
         onClose={() => setCmdkOpen(false)} />}
+
+      {/* Global quick-add-task FAB — bottom-right so it clears the bottom-center
+          toasts/bulk bar; modals (z-40+) cover it when open. */}
+      <button onClick={() => setQuickAddOpen(true)} title="Add a task" aria-label="Add a task"
+        className="fixed bottom-6 right-4 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-accent text-white shadow-lg transition hover:opacity-90 active:scale-95 sm:right-6">
+        <I.plus className="h-6 w-6" />
+      </button>
+      {quickAddOpen && (
+        <QuickAddTask
+          clients={clientList}
+          projectsFor={projectsForClient}
+          companyFor={(id) => contactForClient(id)?.company}
+          defaultClientId={activeClient.startsWith("cl_") ? activeClient : ""}
+          defaultProjectId={activeProject}
+          onCreate={createQuickTask}
+          onClose={() => setQuickAddOpen(false)}
+        />
+      )}
 
       <div className="pointer-events-none fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 flex-col items-center gap-2">
         {toasts.map((t) => (<div key={t.id} className="rounded-lg bg-foreground px-3.5 py-2 text-[15px] font-medium text-[color:var(--surface)] shadow-lg">{t.text}</div>))}
