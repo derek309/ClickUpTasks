@@ -451,8 +451,8 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       <div className="mb-2 shrink-0 text-[13px] text-muted">Sending to: <span className="font-medium text-foreground">{messageDest?.phone || "no phone on file"}</span></div>
       {msgAttBar}
       <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)} onPaste={handleMsgPaste}
-        onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitTaskMessage(); } }}
-        placeholder="Write a text… (Enter to send, paste to attach an image)"
+        onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitTaskMessage(); } }}
+        placeholder="Write a message… (⌘↵ to send, paste to attach an image)"
         className="min-h-[140px] w-full flex-1 resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
       <div className="mt-2">{promptClaudeBlock("sms")}</div>
       <div className="mt-2 flex shrink-0 items-center justify-between gap-2">

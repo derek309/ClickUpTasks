@@ -563,8 +563,8 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
               </>)}
               <div className="relative min-h-0 flex-1">
                 <textarea ref={msgBodyRef} value={msgBody} onChange={(e) => setMsgBody(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitMessage(); } }}
-                  placeholder={composeMode === "email" ? "Write an email… (Enter to send, Shift+Enter for a new line)" : "Write a text… (Enter to send, Shift+Enter for a new line)"}
+                  onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitMessage(); } }}
+                  placeholder={composeMode === "email" ? "Write an email… (⌘↵ to send, Enter for a new line)" : "Write a text… (⌘↵ to send, Enter for a new line)"}
                   className="h-full min-h-[160px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
               </div>
               {onDraftMessage && (
