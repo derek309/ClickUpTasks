@@ -23,6 +23,9 @@ export async function POST(req: NextRequest) {
   if (!clientId || !contactId || !locationId || !ghlContactId)
     return NextResponse.json({ error: "Missing clientId, contactId, locationId, or ghlContactId." }, { status: 400 });
 
+  // Wrap the whole GHL/DB flow so a thrown error (network blip, unexpected
+  // response) surfaces its real message to the toast instead of an opaque 500.
+  try {
   const token = await tokenForLocation(locationId);
   if (!token) return NextResponse.json({ error: "No GoHighLevel token configured for this sub-account yet." }, { status: 501 });
   const headers = { Authorization: `Bearer ${token}`, Version: "2021-04-15", Accept: "application/json" };
@@ -98,4 +101,7 @@ export async function POST(req: NextRequest) {
     }
   }
   return NextResponse.json({ inserted });
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed to refresh messages." }, { status: 502 });
+  }
 }
