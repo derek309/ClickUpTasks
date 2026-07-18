@@ -204,7 +204,13 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
       : (it.kind === "note" && it.note.type === filter);
     return passesType && matchesSearch(it);
   });
-  const feedRows = buildFeedRows(filteredItems);
+  // Newest AI recap ("recently done / next up") — pinned as a highlighted
+  // card atop the unfiltered feed so the freshest "where does this stand"
+  // read is always one glance away. Excluded from the chronological list
+  // while pinned so it isn't shown twice; older recaps still flow inline.
+  const latestRecap = notes.filter((n) => n.type === "ai_summary").sort((a, b) => b.at.localeCompare(a.at))[0] ?? null;
+  const pinnedRecap = latestRecap && filter === "all" && !q ? latestRecap : null;
+  const feedRows = buildFeedRows(pinnedRecap ? filteredItems.filter((it) => !(it.kind === "note" && it.note.id === pinnedRecap.id)) : filteredItems);
 
   const canModify = (n: ClientNote) => me.role === "admin" || n.authorId === me.id;
 
@@ -363,6 +369,15 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
         <div className="relative min-h-0 flex-1 overflow-hidden">
         <div className="h-full overflow-y-auto px-4 py-4 sm:px-5">
           <div className="mx-auto max-w-3xl space-y-3">
+            {pinnedRecap && (
+              <div className="rounded-xl border border-accent/40 bg-accent-soft/40 p-3.5 shadow-soft">
+                <div className="mb-1.5 flex items-center gap-2 text-[13px] font-semibold text-accent">
+                  <span aria-hidden>✨</span> What&apos;s next
+                  <span className="ml-auto font-normal text-muted">Updated {timeAgo(pinnedRecap.at)}{userById(pinnedRecap.authorId)?.name ? ` · ${userById(pinnedRecap.authorId)!.name}` : ""}</span>
+                </div>
+                <CollapsibleText text={pinnedRecap.body} className="whitespace-pre-wrap text-[15px] leading-relaxed" />
+              </div>
+            )}
             {filteredItems.length === 0 && (
               <div className="flex flex-col items-center gap-2 py-16 text-center text-muted">
                 <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent-soft text-accent"><I.comment /></span>

@@ -2163,6 +2163,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <button onClick={() => openCompose("sms")} title="Text this client" className="border-l bg-background px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-accent-soft hover:text-accent">SMS</button>
             </div>
           )}
+          {/* On-demand AI recap — "here's what we just did, here's what's next".
+              Client-scoped, never runs on its own (matches the app's "AI never
+              spends without a click" rule). Jumps to the Journal, where the
+              freshest recap is pinned at the top. */}
+          {!myWork && !personalView && !inboxView && !dirView && activeClient !== "all" && !activeProject && clientById(activeClient) && (
+            <button onClick={async () => { setClientTab("chat"); await regenerateAiSummary(activeClient); }}
+              disabled={aiSummaryBusyId === activeClient}
+              title="Generate an up-to-date 'recently done / next up' recap for this client"
+              className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-accent-soft hover:text-accent disabled:opacity-50">
+              <span aria-hidden>✨</span> <span className="hidden sm:inline">{aiSummaryBusyId === activeClient ? "Thinking…" : "What's next"}</span>
+            </button>
+          )}
 
           {!myWork && !personalView && !inboxView && !dirView && activeClient !== "all" && clientById(activeClient) && (
             <div className="flex items-center gap-1.5">
