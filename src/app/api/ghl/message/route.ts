@@ -23,6 +23,10 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 const GHL = "https://services.leadconnectorhq.com";
 
+// Escape HTML-significant chars before placing plain text into GHL's email
+// `html` field — prevents a stray < or & in the body from breaking the markup.
+const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
 export async function POST(req: NextRequest) {
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -61,9 +65,14 @@ export async function POST(req: NextRequest) {
   const attachmentUrls = attachments?.length ? attachments : undefined;
   const ccList = cc?.filter((e) => e?.trim());
   const bccList = bcc?.filter((e) => e?.trim());
+  // The composer/AI draft produce PLAIN TEXT with \n line breaks. GHL's email
+  // field is HTML, which collapses newlines/whitespace — so send it through
+  // escape-then-newline-to-<br> or every paragraph break is lost in the email.
+  // SMS is plain text, so it's left untouched.
+  const emailHtml = escapeHtml(body).replace(/\r\n|\r|\n/g, "<br>");
   const payload = channel === "sms"
     ? { type: "SMS", contactId: ghlContactId, message: body, ...(attachmentUrls ? { attachments: attachmentUrls } : {}) }
-    : { type: "Email", contactId: ghlContactId, subject: (subject || "").slice(0, 200), html: body,
+    : { type: "Email", contactId: ghlContactId, subject: (subject || "").slice(0, 200), html: emailHtml,
         ...(attachmentUrls ? { attachments: attachmentUrls } : {}),
         ...(ccList?.length ? { emailCc: ccList } : {}),
         ...(bccList?.length ? { emailBcc: bccList } : {}) };
