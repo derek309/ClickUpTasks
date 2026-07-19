@@ -9,6 +9,8 @@
 // console for the gmail.send scope, can impersonate any @clickuplocal.com user.
 import { JWT } from "google-auth-library";
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 const SA_EMAIL = process.env.GOOGLE_SA_CLIENT_EMAIL;
 // Private keys pasted into an env var keep literal "\n"; restore real newlines.
 const SA_KEY = process.env.GOOGLE_SA_PRIVATE_KEY?.replace(/\\n/g, "\n");
@@ -19,6 +21,8 @@ export const googleConfigured = Boolean(SA_EMAIL && SA_KEY);
 
 const GMAIL_SEND = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
 const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.send";
+const GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+const GMAIL_LIST = "https://gmail.googleapis.com/gmail/v1/users/me/messages";
 
 const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 // Same plain-text→HTML transform the GHL email path uses, so line breaks survive.
@@ -78,4 +82,61 @@ export async function sendGmailAs(
   }
   const json = await res.json().catch(() => ({}));
   return { id: json.id ?? "", threadId: json.threadId ?? "" };
+}
+
+export type InboundEmail = { gmailId: string; threadId: string; fromEmail: string; fromName: string; subject: string; body: string; internalDate: string };
+
+// Walk a Gmail message payload for the best text body — prefer text/plain,
+// fall back to the first text/html (stripped), then the snippet.
+function extractBody(payload: any, snippet: string): string {
+  const decode = (data?: string) => (data ? Buffer.from(data.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8") : "");
+  const walk = (part: any, want: string): string | null => {
+    if (!part) return null;
+    if (part.mimeType === want && part.body?.data) return decode(part.body.data);
+    for (const p of part.parts ?? []) { const r = walk(p, want); if (r) return r; }
+    return null;
+  };
+  const plain = walk(payload, "text/plain");
+  if (plain) return plain.trim();
+  const html = walk(payload, "text/html");
+  if (html) return html.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+\n/g, "\n").replace(/[ \t]{2,}/g, " ").trim();
+  return snippet;
+}
+
+// Read recent inbound email for a teammate (impersonated via DWD, gmail.readonly
+// scope). Used to pull client replies that came back through Gmail directly
+// (bypassing GHL) so they still land in the app. `query` is a Gmail search
+// string, e.g. "in:inbox newer_than:2d -from:me category:primary".
+export async function readInboundGmail(userEmail: string, query: string, max = 25): Promise<InboundEmail[]> {
+  if (!googleConfigured) throw new Error("Google Workspace is not configured.");
+  const jwt = new JWT({ email: SA_EMAIL, key: SA_KEY, scopes: [GMAIL_READ_SCOPE], subject: userEmail });
+  const { token } = await jwt.getAccessToken();
+  if (!token) throw new Error("Could not obtain a Google access token.");
+  const auth = { Authorization: `Bearer ${token}` };
+
+  const listRes = await fetch(`${GMAIL_LIST}?q=${encodeURIComponent(query)}&maxResults=${max}`, { headers: auth });
+  if (!listRes.ok) throw new Error(`Gmail list failed (${listRes.status}): ${(await listRes.text().catch(() => "")).slice(0, 200)}`);
+  const listJson = await listRes.json().catch(() => ({}));
+  const ids: string[] = (listJson.messages ?? []).map((m: any) => m.id).filter(Boolean);
+
+  const out: InboundEmail[] = [];
+  for (const id of ids) {
+    const mRes = await fetch(`${GMAIL_LIST}/${id}?format=full`, { headers: auth });
+    if (!mRes.ok) continue;
+    const m = await mRes.json().catch(() => null);
+    if (!m) continue;
+    const headers: any[] = m.payload?.headers ?? [];
+    const h = (name: string) => headers.find((x) => x.name?.toLowerCase() === name)?.value ?? "";
+    const fromRaw = h("from");
+    const match = fromRaw.match(/(?:"?([^"<]*)"?\s*)?<?([^<>@\s]+@[^<>\s]+)>?/);
+    const fromName = (match?.[1] ?? "").trim();
+    const fromEmail = (match?.[2] ?? "").trim().toLowerCase();
+    if (!fromEmail) continue;
+    out.push({
+      gmailId: m.id, threadId: m.threadId ?? "", fromEmail, fromName,
+      subject: h("subject"), body: extractBody(m.payload, m.snippet ?? ""),
+      internalDate: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : new Date().toISOString(),
+    });
+  }
+  return out;
 }
