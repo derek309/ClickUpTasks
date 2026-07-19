@@ -78,7 +78,7 @@ export function FolderRail({
   );
 
   return (
-    <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b bg-background/40 px-4 py-2 sm:flex-wrap sm:overflow-visible">
+    <div className="no-scrollbar flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b bg-background/40 px-4 py-2 sm:flex-wrap sm:overflow-visible">
       {chip("All", allActive, onSelectAll)}
       {folders.map((f) => chip(
         <><I.folder className="h-3.5 w-3.5" /> {f.name}</>,

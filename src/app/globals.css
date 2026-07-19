@@ -84,6 +84,15 @@ body {
   background: var(--scrollbar-thumb-hover);
 }
 
+/* Horizontal chip rails (quick links, folder rail) scroll on touch without a
+   visible scrollbar — the bar reads as clutter on those thin one-row strips. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* depth helpers */
 .shadow-soft { box-shadow: var(--shadow-sm); }
 .shadow-soft-md { box-shadow: var(--shadow-md); }
