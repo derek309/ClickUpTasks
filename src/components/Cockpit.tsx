@@ -2127,8 +2127,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       </aside>
 
       {/* ---------- Main ---------- */}
-      <main className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-10 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b bg-surface px-4 py-2 shadow-soft sm:gap-y-2 sm:px-5 sm:py-3">
+      {/* The page itself is the scroll container so the header + quick-links +
+          folder rail scroll away with the task list (rather than staying
+          pinned and shrinking the list's scroll area). Views with their own
+          internal scroll (Journal, Vault, directories) are flex-1 min-h-0, so
+          they still scroll inside and this overflow never engages for them. */}
+      <main className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-background">
+        <header className="relative z-10 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b bg-surface px-4 py-2 shadow-soft sm:gap-y-2 sm:px-5 sm:py-3">
           <button onClick={toggleSidebar} title="Show/hide sidebar" className="rounded-lg border p-2 text-muted hover:text-foreground"><I.menu /></button>
           <div className="min-w-0">
             {!myWork && !personalView && !inboxView && !dirView && activeProject && projectById(activeProject) ? (<>
