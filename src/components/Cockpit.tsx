@@ -2202,7 +2202,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               mode. Client-scoped messaging only (not projects), gated by the
               same permission as sending. */}
           {!myWork && !personalView && !inboxView && !dirView && activeClient !== "all" && !activeProject && canMessageClient(activeClient) && (
-            <div className="inline-flex overflow-hidden rounded-md border">
+            <div className="hidden overflow-hidden rounded-md border sm:inline-flex">
               <button onClick={() => openCompose("email")} title="Email this client" className="inline-flex items-center gap-1 bg-background px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-accent-soft hover:text-accent"><I.comment /> <span className="hidden sm:inline">Email</span></button>
               <button onClick={() => openCompose("sms")} title="Text this client" className="border-l bg-background px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-accent-soft hover:text-accent">SMS</button>
             </div>
@@ -2215,7 +2215,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <button onClick={async () => { setClientTab("chat"); await regenerateAiSummary(activeClient); }}
               disabled={aiSummaryBusyId === activeClient}
               title="Generate an up-to-date 'recently done / next up' recap for this client"
-              className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-accent-soft hover:text-accent disabled:opacity-50">
+              className="hidden items-center gap-1 rounded-md border px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-accent-soft hover:text-accent disabled:opacity-50 sm:inline-flex">
               <span aria-hidden>✨</span> <span className="hidden sm:inline">{aiSummaryBusyId === activeClient ? "Thinking…" : "What's next"}</span>
             </button>
           )}
@@ -2285,6 +2285,21 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 {headerMoreOpen && (<>
                   <div className="fixed inset-0 z-40" onClick={() => setHeaderMoreOpen(false)} />
                   <div className="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg border bg-surface p-1 shadow-soft-md">
+                    {/* Mobile-only: the messaging + recap actions that show as
+                        inline buttons on ≥sm live here instead, so the phone
+                        header stays short. */}
+                    {activeClient !== "all" && !activeProject && canMessageClient(activeClient) && (
+                      <button onClick={() => { setHeaderMoreOpen(false); openCompose("email"); }}
+                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background sm:hidden"><I.comment /> Email</button>
+                    )}
+                    {activeClient !== "all" && !activeProject && canMessageClient(activeClient) && (
+                      <button onClick={() => { setHeaderMoreOpen(false); openCompose("sms"); }}
+                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background sm:hidden"><I.comment /> SMS</button>
+                    )}
+                    {activeClient !== "all" && !activeProject && clientById(activeClient) && (
+                      <button onClick={() => { setHeaderMoreOpen(false); setClientTab("chat"); regenerateAiSummary(activeClient); }} disabled={aiSummaryBusyId === activeClient}
+                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background disabled:opacity-50 sm:hidden"><span aria-hidden>✨</span> {aiSummaryBusyId === activeClient ? "Thinking…" : "What's next"}</button>
+                    )}
                     <button onClick={() => { setHeaderMoreOpen(false); copyLink({ view: null, client: activeClient, project: activeProject, task: null, clientTab, vaultFolder: null }); }}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy link</button>
                     <button onClick={() => { setHeaderMoreOpen(false); copyClientForClaude(); }}
