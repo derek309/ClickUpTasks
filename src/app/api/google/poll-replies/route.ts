@@ -54,9 +54,16 @@ async function run(req: NextRequest) {
     if (e && !byEmail.has(e)) byEmail.set(e, c);
   }
 
+  // Admins triage unknown senders. Deterministic notification ids
+  // (n_um_<gmailId>_<recipient>) make the every-10-min re-poll idempotent —
+  // an unmatched email is surfaced in the Inbox exactly once, not each run.
+  const { data: admins } = await supabaseAdmin.from("profiles").select("member_id").eq("role", "admin");
+  const adminIds: string[] = (admins ?? []).map((a: any) => a.member_id).filter((m: any): m is string => typeof m === "string" && !!m);
+
   const query = "in:inbox newer_than:2d -from:me";
-  let ingested = 0, scanned = 0, matched = 0;
+  let ingested = 0, scanned = 0, matched = 0, unmatched = 0;
   const errors: string[] = [];
+  const unmatchedRows: any[] = [];
 
   for (const mailbox of mailboxes) {
     let emails;
@@ -69,21 +76,41 @@ async function run(req: NextRequest) {
     for (const em of emails) {
       scanned++;
       const contact = byEmail.get(em.fromEmail);
-      if (!contact) continue;
-      matched++;
-      try {
-        const did = await ingestInboundMessage({
-          contact: { id: contact.id, name: contact.name, client_id: contact.client_id },
-          ghlContactId: contact.ghl_contact_id ?? null,
-          channel: "email", subject: em.subject, body: em.body,
-          gmailMessageId: em.gmailId, at: em.internalDate,
-        });
-        if (did) ingested++;
-      } catch (e) {
-        errors.push(`ingest ${em.gmailId}: ${e instanceof Error ? e.message : "failed"}`);
+      if (contact) {
+        // In the system → log it on the client's Journal (+ bump task, ring bell).
+        matched++;
+        try {
+          const did = await ingestInboundMessage({
+            contact: { id: contact.id, name: contact.name, client_id: contact.client_id },
+            ghlContactId: contact.ghl_contact_id ?? null,
+            channel: "email", subject: em.subject, body: em.body,
+            gmailMessageId: em.gmailId, at: em.internalDate,
+          });
+          if (did) ingested++;
+        } catch (e) {
+          errors.push(`ingest ${em.gmailId}: ${e instanceof Error ? e.message : "failed"}`);
+        }
+      } else {
+        // Not in the system → surface in the Inbox so it's not lost; the team
+        // can read it and add them as a client or respond.
+        unmatched++;
+        const snippet = em.body.replace(/\s+/g, " ").trim().slice(0, 120);
+        const who = em.fromName ? `${em.fromName} <${em.fromEmail}>` : em.fromEmail;
+        const text = `📥 New email from ${who}: ${em.subject || "(no subject)"}${snippet ? ` — ${snippet}` : ""}`;
+        const gid = em.gmailId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 24);
+        for (const rid of adminIds) {
+          unmatchedRows.push({ id: `n_um_${gid}_${rid}`, recipient_id: rid, text, task_id: null, actor_id: null, client_id: null, project_id: null, at: em.internalDate, read: false, kind: "message" });
+        }
       }
     }
   }
 
-  return NextResponse.json({ ok: true, mailboxes: mailboxes.length, scanned, matched, ingested, ...(errors.length ? { errors: errors.slice(0, 10) } : {}) });
+  let surfaced = 0;
+  if (unmatchedRows.length) {
+    const { error, count } = await supabaseAdmin.from("notifications").upsert(unmatchedRows, { onConflict: "id", ignoreDuplicates: true, count: "exact" });
+    if (error) errors.push(`unmatched notify: ${error.message}`);
+    else surfaced = count ?? 0;
+  }
+
+  return NextResponse.json({ ok: true, mailboxes: mailboxes.length, scanned, matched, ingested, unmatched, surfaced, ...(errors.length ? { errors: errors.slice(0, 10) } : {}) });
 }
