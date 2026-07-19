@@ -86,6 +86,15 @@ export async function POST(req: NextRequest) {
 // payload — tells us directly). Matching key: contacts.ghl_contact_id (a
 // message isn't tied to any one task, see the Message type's doc comment in
 // src/lib/data.ts).
+// Map a contact to the tracked client that represents it — the client whose
+// id is cl_<contactId>, or one manually linked via linked_contact_id — falling
+// back to the passed value (the sub-account) when the contact isn't a tracked
+// client. Contact ids are alphanumeric + underscore, safe to interpolate.
+async function resolveTrackedClientId(contactId: string, fallback: string): Promise<string> {
+  const { data } = await supabaseAdmin.from("clients").select("id").or(`id.eq.cl_${contactId},linked_contact_id.eq.${contactId}`).limit(1);
+  return data?.[0]?.id ?? fallback;
+}
+
 async function handleMessageReply(body: any, custom: any) {
   const ghlContactId: string | null = custom?.contactId ?? body?.contact_id ?? null;
   const text: string | null = typeof custom?.body === "string" && custom.body.trim() ? custom.body : (typeof body?.message?.body === "string" ? body.message.body : null);
@@ -97,6 +106,11 @@ async function handleMessageReply(body: any, custom: any) {
     .eq("ghl_contact_id", ghlContactId)
     .maybeSingle();
   if (!contact) return NextResponse.json({ ok: true, skipped: "no contact for that ghlContactId" });
+  // A contact's client_id points at the GHL sub-account it was imported from
+  // (c_agency / c_directory), not the tracked client. Re-point to the tracked
+  // client (cl_<contactId>, or a client manually linked to it) so the message
+  // + Conversation task land on the client's page, not off in a sub-account.
+  contact.client_id = await resolveTrackedClientId(contact.id, contact.client_id);
 
   const ghlMessageId: string | null = typeof custom?.messageId === "string" ? custom.messageId : null;
   const messageId = "msg_" + crypto.randomUUID();
@@ -171,6 +185,7 @@ async function handleCall(body: any, custom: any) {
   if (!ghlContactId) return NextResponse.json({ ok: true, skipped: "missing contactId" });
   const { data: contact } = await supabaseAdmin.from("contacts").select("id, name, client_id").eq("ghl_contact_id", ghlContactId).maybeSingle();
   if (!contact) return NextResponse.json({ ok: true, skipped: "no contact for that ghlContactId" });
+  contact.client_id = await resolveTrackedClientId(contact.id, contact.client_id);
   const taskId = await upsertConversationTask(contact, ghlContactId);
   const status: string = typeof custom?.status === "string" ? custom.status : ((custom?.event ?? body?.event) === "missed_call" ? "missed" : "");
   const label = /miss|no.?answer|voicemail|unanswered/i.test(status) ? "Missed call from" : "Call from";

@@ -16,6 +16,14 @@ function todayPacific(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date());
 }
 
+// Map a contact to the tracked client that represents it (cl_<contactId>, or
+// a client linked via linked_contact_id) — a contact's own client_id points at
+// the GHL sub-account it was imported from, not the client's page.
+async function resolveTrackedClientId(contactId: string, fallback: string): Promise<string> {
+  const { data } = await supabaseAdmin.from("clients").select("id").or(`id.eq.cl_${contactId},linked_contact_id.eq.${contactId}`).limit(1);
+  return data?.[0]?.id ?? fallback;
+}
+
 // One open Conversation-priority task per contact — bump due if one exists,
 // else create it under the client's first project (or a fallback "Tasks").
 async function upsertConversationTask(contact: Contact, ghlContactId: string | null): Promise<string | null> {
@@ -70,7 +78,8 @@ export async function ingestInboundMessage(opts: {
   contact: Contact; ghlContactId?: string | null; channel: "email" | "sms";
   subject?: string | null; body: string; gmailMessageId?: string | null; at?: string;
 }): Promise<boolean> {
-  const { contact, channel, subject, body } = opts;
+  const contact = { ...opts.contact, client_id: await resolveTrackedClientId(opts.contact.id, opts.contact.client_id) };
+  const { channel, subject, body } = opts;
   if (opts.gmailMessageId) {
     const { data: dupe } = await supabaseAdmin.from("messages").select("id").eq("gmail_message_id", opts.gmailMessageId).limit(1);
     if (dupe && dupe.length > 0) return false;
