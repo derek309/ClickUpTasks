@@ -51,6 +51,8 @@ export async function POST(req: NextRequest) {
   // (event/contactId/subject/body) lives there.
   const custom = body?.customData ?? {};
   if (custom?.event === "message_reply" || body?.event === "message_reply") return handleMessageReply(body, custom);
+  const ev: string = custom?.event ?? body?.event ?? "";
+  if (ev === "call" || ev === "inbound_call" || ev === "missed_call") return handleCall(body, custom);
 
   // GHL workflow webhook payloads vary; accept the common shapes.
   const ghlTaskId: string | null = body?.task?.id ?? body?.taskId ?? body?.id ?? null;
@@ -125,6 +127,54 @@ async function handleMessageReply(body: any, custom: any) {
   // part of the duplicate-delivery guard.
   const taskId = await upsertConversationTask(contact, ghlContactId);
   if (taskId) await supabaseAdmin.from("messages").update({ task_id: taskId }).eq("id", messageId);
+  const channel = body?.message?.type === 2 ? "sms" : "email";
+  const snippet = text.replace(/\s+/g, " ").trim().slice(0, 80);
+  const notifText = channel === "sms"
+    ? `${titleCase(contact.name)} sent a text: ${snippet}`
+    : `${titleCase(contact.name)} sent an email${typeof custom?.subject === "string" && custom.subject.trim() ? `: ${custom.subject.trim()}` : `: ${snippet}`}`;
+  await notifyInbound(contact, taskId, notifText);
+  return NextResponse.json({ ok: true });
+}
+
+// Ring the bell / add to the Inbox for everyone who should see this client's
+// inbound activity — the client's followers (clients.assigned_to) plus all
+// admins (who see every client) — so a client texting / emailing / calling in
+// surfaces as a notification, not only a Dashboard Conversation task. kind
+// "message" so the Inbox "Messages" filter catches it; deep-links to the
+// Conversation task when there is one, else to the client. notifications is in
+// the realtime publication, so this lights the bell live for open sessions.
+async function notifyInbound(contact: { id: string; name: string; client_id: string }, taskId: string | null, text: string) {
+  const [{ data: client }, { data: admins }] = await Promise.all([
+    supabaseAdmin.from("clients").select("assigned_to").eq("id", contact.client_id).maybeSingle(),
+    supabaseAdmin.from("profiles").select("member_id").eq("role", "admin"),
+  ]);
+  const followers: string[] = Array.isArray(client?.assigned_to) ? (client!.assigned_to as string[]) : [];
+  const adminIds: string[] = (admins ?? []).map((a: any) => a.member_id).filter((m: any): m is string => typeof m === "string" && !!m);
+  const recipients = Array.from(new Set([...followers, ...adminIds]));
+  if (recipients.length === 0) return;
+  const nowIso = new Date().toISOString();
+  const rows = recipients.map((rid) => ({
+    id: "n_" + crypto.randomUUID(), recipient_id: rid, text, task_id: taskId,
+    actor_id: null, client_id: contact.client_id, project_id: null, at: nowIso, read: false, kind: "message",
+  }));
+  const { error } = await supabaseAdmin.from("notifications").insert(rows);
+  if (error) console.error("[webhook] notifyInbound insert failed", error);
+}
+
+// A GHL call event. Configure a "Call"/"Missed Call" workflow → Webhook action
+// with Custom Data rows: event (call | missed_call), contactId ({{contact.id}}),
+// and optionally status ({{message.callStatus}} or similar). Reuses the
+// one-Conversation-task-per-contact path so a call and a text on the same
+// contact share a task, and rings the bell like an inbound message.
+async function handleCall(body: any, custom: any) {
+  const ghlContactId: string | null = custom?.contactId ?? body?.contact_id ?? null;
+  if (!ghlContactId) return NextResponse.json({ ok: true, skipped: "missing contactId" });
+  const { data: contact } = await supabaseAdmin.from("contacts").select("id, name, client_id").eq("ghl_contact_id", ghlContactId).maybeSingle();
+  if (!contact) return NextResponse.json({ ok: true, skipped: "no contact for that ghlContactId" });
+  const taskId = await upsertConversationTask(contact, ghlContactId);
+  const status: string = typeof custom?.status === "string" ? custom.status : ((custom?.event ?? body?.event) === "missed_call" ? "missed" : "");
+  const label = /miss|no.?answer|voicemail|unanswered/i.test(status) ? "Missed call from" : "Call from";
+  await notifyInbound(contact, taskId, `📞 ${label} ${titleCase(contact.name)}`);
   return NextResponse.json({ ok: true });
 }
 
