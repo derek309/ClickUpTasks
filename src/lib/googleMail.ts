@@ -51,7 +51,7 @@ const formatFrom = (email: string, name?: string) => {
 
 export async function sendGmailAs(
   fromEmail: string,
-  msg: { to: string; cc?: string[]; bcc?: string[]; subject?: string; body: string; fromName?: string },
+  msg: { to: string; cc?: string[]; bcc?: string[]; subject?: string; body: string; fromName?: string; attachments?: { filename: string; mimeType: string; contentBase64: string }[] },
 ): Promise<{ id: string; threadId: string }> {
   if (!googleConfigured) throw new Error("Google Workspace sending is not configured.");
 
@@ -59,17 +59,42 @@ export async function sendGmailAs(
   const { token } = await jwt.getAccessToken();
   if (!token) throw new Error("Could not obtain a Google access token.");
 
-  const headerLines = [
+  const commonHeaders = [
     `From: ${formatFrom(fromEmail, msg.fromName)}`,
     `To: ${msg.to}`,
     ...(msg.cc?.length ? [`Cc: ${msg.cc.join(", ")}`] : []),
     ...(msg.bcc?.length ? [`Bcc: ${msg.bcc.join(", ")}`] : []),
     `Subject: ${encodeHeader(msg.subject || "")}`,
     "MIME-Version: 1.0",
-    'Content-Type: text/html; charset="UTF-8"',
-    "Content-Transfer-Encoding: 8bit",
   ];
-  const raw = b64url(Buffer.from(headerLines.join("\r\n") + "\r\n\r\n" + bodyToHtml(msg.body), "utf8"));
+
+  let mime: string;
+  const atts = msg.attachments ?? [];
+  if (atts.length === 0) {
+    mime = [...commonHeaders, 'Content-Type: text/html; charset="UTF-8"', "Content-Transfer-Encoding: 8bit", "", bodyToHtml(msg.body)].join("\r\n");
+  } else {
+    // multipart/mixed: the HTML body, then each attachment as a base64 part.
+    const boundary = `b_${crypto.randomUUID().replace(/-/g, "")}`;
+    const wrap76 = (s: string) => s.replace(/.{1,76}/g, "$&\r\n").trimEnd();
+    const parts = [
+      `--${boundary}`,
+      'Content-Type: text/html; charset="UTF-8"',
+      "Content-Transfer-Encoding: 8bit",
+      "",
+      bodyToHtml(msg.body),
+      ...atts.flatMap((a) => [
+        `--${boundary}`,
+        `Content-Type: ${a.mimeType || "application/octet-stream"}; name="${a.filename.replace(/"/g, "")}"`,
+        "Content-Transfer-Encoding: base64",
+        `Content-Disposition: attachment; filename="${a.filename.replace(/"/g, "")}"`,
+        "",
+        wrap76(a.contentBase64),
+      ]),
+      `--${boundary}--`,
+    ];
+    mime = [...commonHeaders, `Content-Type: multipart/mixed; boundary="${boundary}"`, "", ...parts].join("\r\n");
+  }
+  const raw = b64url(Buffer.from(mime, "utf8"));
 
   const res = await fetch(GMAIL_SEND, {
     method: "POST",

@@ -1649,7 +1649,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // "outbound" half of the Chat tab's Messages view; the webhook (see
   // src/app/api/ghl/webhook/route.ts) covers inbound replies, so together
   // the two capture a full two-way conversation with no gap and no polling.
-  const sendMessage = async (clientId: string, channel: MessageChannel, subject: string, body: string, attachments: Attachment[] = [], cc: string[] = [], bcc: string[] = [], taskId: string | null = null) => {
+  const sendMessage = async (clientId: string, channel: MessageChannel, subject: string, body: string, attachments: Attachment[] = [], cc: string[] = [], bcc: string[] = [], taskId: string | null = null, fromEmail?: string) => {
     if (!body.trim()) return;
     const contact = contactForClient(clientId);
     if (!contact) { pushToast("This client isn't linked to a GHL contact yet."); return; }
@@ -1666,10 +1666,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       // attachments yet) stay on GHL. A 501 from the Google route (not
       // configured, or the caller isn't a domain sender) falls through to GHL,
       // so nothing breaks before setup.
-      if (channel === "email" && attachments.length === 0 && !!contact.email) {
+      if (channel === "email" && !!contact.email) {
         const gres = await authedFetch("/api/google/send", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ clientId, toEmail: contact.email, subject, body, cc: emailCc, bcc: emailBcc }),
+          body: JSON.stringify({ clientId, toEmail: contact.email, subject, body, cc: emailCc, bcc: emailBcc, fromEmail, attachments: attachments.filter((a) => a.path).map((a) => ({ path: a.path, name: a.name })) }),
         });
         if (gres.status !== 501) {
           const gj = await gres.json().catch(() => ({}));
