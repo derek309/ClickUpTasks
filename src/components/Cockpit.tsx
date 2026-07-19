@@ -209,6 +209,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!d.moved) setQuickAddOpen(true); // a click (no real drag) opens the modal
   };
   useEffect(() => { if (fabPos) try { localStorage.setItem("cut_fabPos", JSON.stringify(fabPos)); } catch {} }, [fabPos]);
+  // Fade the FAB out of the way while you're actively scrolling a list, back
+  // in once you stop — so it never sits on top of the content you're reading.
+  const [fabScrolling, setFabScrolling] = useState(false);
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout>;
+    const onScroll = () => { setFabScrolling(true); clearTimeout(t); t = setTimeout(() => setFabScrolling(false), 600); };
+    window.addEventListener("scroll", onScroll, true); // capture phase catches nested scroll containers
+    return () => { window.removeEventListener("scroll", onScroll, true); clearTimeout(t); };
+  }, []);
   // Set by the header Email/SMS buttons — jumps the Journal composer into that
   // mode. nonce bumps each click so it re-fires even when already on the Journal.
   const [composeIntent, setComposeIntent] = useState<{ mode: "email" | "sms"; nonce: number } | null>(null);
@@ -2119,7 +2128,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
       {/* ---------- Main ---------- */}
       <main className="flex min-w-0 flex-1 flex-col">
-        <header className="relative z-10 flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-surface px-4 py-3 shadow-soft sm:px-5">
+        <header className="sticky top-0 z-10 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b bg-surface px-4 py-2 shadow-soft sm:gap-y-2 sm:px-5 sm:py-3">
           <button onClick={toggleSidebar} title="Show/hide sidebar" className="rounded-lg border p-2 text-muted hover:text-foreground"><I.menu /></button>
           <div className="min-w-0">
             {!myWork && !personalView && !inboxView && !dirView && activeProject && projectById(activeProject) ? (<>
@@ -2138,7 +2147,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             </>)}
           </div>
 
-          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
           {!myWork && !personalView && !inboxView && !dirView && activeClient === "all" && canAdmin && (
             <div className="inline-flex overflow-hidden rounded-md border" title="VAs only ever see their own tasks here regardless of this toggle">
               <button onClick={() => setAllTasksScope("mine")} className={`px-2.5 py-1.5 text-[13px] font-medium ${allTasksScope === "mine" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Mine</button>
@@ -2609,7 +2618,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         <button onPointerDown={onFabPointerDown} onPointerMove={onFabPointerMove} onPointerUp={onFabPointerUp}
           title="Add a task (drag to move)" aria-label="Add a task"
           style={fabPos ? { left: fabPos.x, top: fabPos.y, right: "auto", bottom: "auto" } : undefined}
-          className={`fixed z-30 flex h-14 w-14 touch-none items-center justify-center rounded-full bg-accent text-white shadow-lg transition hover:opacity-90 active:scale-95 ${fabPos ? "" : "bottom-6 left-4 sm:left-6"}`}>
+          className={`fixed z-30 flex h-12 w-12 touch-none items-center justify-center rounded-full bg-accent text-white shadow-lg ring-2 ring-[color:var(--surface)] transition-all duration-200 hover:opacity-90 active:scale-95 ${fabScrolling ? "pointer-events-none scale-90 opacity-0" : ""} ${fabPos ? "" : "bottom-6 left-4 sm:left-6"}`}>
           <I.plus className="h-6 w-6" />
         </button>
       )}
