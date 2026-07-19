@@ -9,7 +9,7 @@ import { useState } from "react";
 import { users, clientStatusMeta, normalizeState, type Me, type Territory, type Contact, type Client } from "@/lib/data";
 import { I, Avatar } from "./cockpit/ui";
 
-export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onAssignTerritory, onDeleteTerritory, onAddContact, onOpenClient }: {
+export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onAssignTerritory, onDeleteTerritory, onAddContact, onOpenClient, focusId }: {
   me: Me; canAdmin: boolean;
   territories: Territory[]; contacts: Contact[]; clients: Client[];
   onAddTerritory: (t: { name: string; city: string; state: string; memberId: string | null }) => void;
@@ -17,15 +17,17 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
   onDeleteTerritory: (id: string) => void;
   onAddContact: (contact: Contact) => void;
   onOpenClient: (clientId: string) => void;
+  focusId?: string; // when set, render only this one city, auto-expanded (the sidebar city page)
 }) {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(() => (focusId ? new Set([focusId]) : new Set()));
   const [addOpen, setAddOpen] = useState(false);
   const [name, setName] = useState("");
   const [city, setCity] = useState("");
   const [state, setState] = useState("");
   const [assignTo, setAssignTo] = useState("");
 
-  const visible = canAdmin ? territories : territories.filter((t) => t.memberId === me.id);
+  const scoped = canAdmin ? territories : territories.filter((t) => t.memberId === me.id);
+  const visible = focusId ? scoped.filter((t) => t.id === focusId) : scoped;
   const clientIds = new Set(clients.map((c) => c.id));
   const toggle = (id: string) => setExpanded((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
@@ -37,7 +39,7 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
 
   return (
     <div>
-        {canAdmin && (
+        {canAdmin && !focusId && (
           <div className="border-b bg-background/40 px-5 py-3">
             {addOpen ? (
               <div className="space-y-2.5">
