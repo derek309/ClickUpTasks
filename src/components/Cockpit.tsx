@@ -1792,10 +1792,26 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setClients((cs) => [...cs, c]);
     markOwnClientWrite(c.id);
     upsertClient(c);
+    // Bring any of this contact's stranded conversation onto the new client's
+    // page — inbound created a Conversation task under the GHL sub-account
+    // before they were a tracked client. Re-point those tasks (by contact_id)
+    // to the new client + a project under it.
+    const orphanTasks = tasks.filter((t) => t.contactId === contact.id && t.clientId !== id);
+    if (orphanTasks.length) {
+      let projId = projects.find((p) => p.clientId === id)?.id;
+      if (!projId) {
+        const np: Project = { id: newId("p_"), clientId: id, name: "Tasks", description: "" };
+        setProjects((ps) => [...ps, np]); upsertProject(np); projId = np.id;
+      }
+      const pid = projId;
+      const orphanIds = new Set(orphanTasks.map((t) => t.id));
+      setTasks((ts) => ts.map((t) => (orphanIds.has(t.id) ? { ...t, clientId: id, projectId: pid } : t)));
+      orphanTasks.forEach((t) => upsertTask({ ...t, clientId: id, projectId: pid }, me.id));
+    }
     setActiveClient(id);
     setMyWork(false);
     setPersonalView(false);
-    pushToast(`Added ${contact.name}`);
+    pushToast(orphanTasks.length ? `Added ${contact.name} — brought ${orphanTasks.length} conversation task${orphanTasks.length === 1 ? "" : "s"} over.` : `Added ${contact.name}`);
     try {
       const res = await authedFetch("/api/ghl/company", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ locationId: sub?.ghlLocationId ?? "", contactId: contact.ghlContactId }) });
       const j = await res.json();
