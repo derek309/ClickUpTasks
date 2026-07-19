@@ -39,6 +39,7 @@ import {
   type Client,
   type Project,
   type Contact,
+  type UnmatchedEmail,
   type Attachment,
   type Notification,
   type NotificationKind,
@@ -58,7 +59,7 @@ import {
   PERSONAL_PROJECT_ID,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, markMessagesReadDb, insertMessage } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, markMessagesReadDb, insertMessage, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import { Inbox } from "./cockpit/Inbox";
 import SettingsHub from "./SettingsHub";
@@ -128,6 +129,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [territories, setTerritories] = useState<Territory[]>([]);
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
   const [vaultFolders, setVaultFolders] = useState<VaultFolder[]>([]);
+  const [unmatchedEmails, setUnmatchedEmails] = useState<UnmatchedEmail[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [importingTasks, setImportingTasks] = useState(false);
   const [clientTab, setClientTab] = useState<"tasks" | "chat" | "vault">("tasks");
@@ -600,6 +602,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setTaskTemplates(d.taskTemplates);
         setVaultFolders(d.vaultFolders);
         setFolders(d.folders);
+        setUnmatchedEmails(d.unmatchedEmails);
         fetchClaudeQueue().then((ids) => setClaudeQueue(new Set(ids)));
       } catch (e) {
         setDbError(e instanceof Error ? e.message : "Failed to load data.");
@@ -789,6 +792,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       const res = await authedFetch("/api/google/poll-replies", { method: "POST" });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error ?? "Email sync failed.");
+      if (j.surfaced) setUnmatchedEmails(await fetchUnmatchedDb()); // pull the newly-parked unknown senders into the Inbox
       const parts: string[] = [];
       if (j.ingested) parts.push(`${j.ingested} new to Journal`);
       if (j.surfaced) parts.push(`${j.surfaced} to Inbox`);
@@ -798,6 +802,24 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     } finally {
       setSyncingEmail(false);
     }
+  };
+  // Triage an unknown-sender email parked in the Inbox: dismiss it, or turn the
+  // sender into a tracked client (creating a contact + cl_ client and pulling
+  // any of their conversation onto the new page via addClientContact).
+  const dismissUnmatched = (id: string) => {
+    setUnmatchedEmails((us) => us.filter((u) => u.id !== id));
+    markUnmatchedHandledDb(id);
+  };
+  const addAsClientFromEmail = async (u: UnmatchedEmail) => {
+    const ct: Contact = {
+      id: newId("ct_"), clientId: subAccounts[0]?.id ?? WORKSPACE_CLIENT_ID,
+      name: u.fromName?.trim() || u.fromEmail, email: u.fromEmail,
+      phone: "", ghlContactId: "", company: "", city: "", state: "",
+    };
+    setContacts((cs) => [...cs, ct]);
+    upsertContact(ct);
+    await addClientContact(ct); // creates cl_<ct.id>, opens it, brings any conversation over
+    dismissUnmatched(u.id);
   };
   const openNotification = (n: Notification) => {
     if (!n.read) { setNotifications((ns) => ns.map((x) => (x.id === n.id ? { ...x, read: true } : x))); markNotifReadDb(n.id); }
@@ -2710,7 +2732,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
         {/* content */}
         {inboxView ? (
-          <Inbox notifications={myNotifs} clientById={clientById} projectById={projectById} onOpen={openNotification} onMarkAllRead={markAllNotifsRead} onSyncEmail={canAdmin ? syncEmail : undefined} syncingEmail={syncingEmail} />
+          <Inbox notifications={myNotifs} clientById={clientById} projectById={projectById} onOpen={openNotification} onMarkAllRead={markAllNotifsRead} onSyncEmail={canAdmin ? syncEmail : undefined} syncingEmail={syncingEmail}
+            unmatchedEmails={canAdmin ? unmatchedEmails : []} onAddAsClient={addAsClientFromEmail} onDismissUnmatched={dismissUnmatched} />
         ) : dirView === "clients" ? (
           <ClientsDirectory clients={sortedClients} clientCompany={(c) => clientCompany(c)} taskCount={clientTaskCount} starred={starred} onToggleStar={toggleStar}
             needsReview={(id) => clientNeedsReview(id, me.id)}

@@ -12,6 +12,7 @@ import {
   type Client,
   type Project,
   type Contact,
+  type UnmatchedEmail,
   type Notification,
   type ClientLink,
   type ClientNote,
@@ -146,7 +147,7 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true) 
 }
 
 export async function fetchAll() {
-  const [c, ct, p, t, n, cl, cn, m, tr, tt, vf, fd] = await Promise.all([
+  const [c, ct, p, t, n, cl, cn, m, tr, tt, vf, fd, um] = await Promise.all([
     fetchAllRows("clients", "created_at"),
     fetchAllRows("contacts"),
     fetchAllRows("projects"),
@@ -162,6 +163,7 @@ export async function fetchAll() {
     fetchAllRows("task_templates", "created_at"),
     fetchAllRows("vault_folders", "created_at"),
     fetchAllRows("folders", "position"),
+    fetchAllRows("inbound_unmatched", "created_at", false),
   ]);
   // NB: `projects` stays in the hard-fail set — its new folder_id/position
   // columns are read via `select *`, which tolerates their absence pre-migration
@@ -175,6 +177,7 @@ export async function fetchAll() {
   if (tt.error) console.warn("[db] task_templates unavailable — run supabase/task-templates.sql", tt.error.message);
   if (vf.error) console.warn("[db] vault_folders unavailable — run supabase/vault-folders.sql", vf.error.message);
   if (fd.error) console.warn("[db] folders unavailable — run supabase/folders.sql", fd.error.message);
+  if (um.error) console.warn("[db] inbound_unmatched unavailable — run supabase/inbound-unmatched.sql", um.error.message);
   return {
     clients: (c.data ?? []).map(rowToClient),
     contacts: (ct.data ?? []).map(rowToContact),
@@ -188,8 +191,19 @@ export async function fetchAll() {
     taskTemplates: tt.error ? [] : (tt.data ?? []).map(rowToTaskTemplate),
     vaultFolders: vf.error ? [] : (vf.data ?? []).map(rowToVaultFolder),
     folders: fd.error ? [] : (fd.data ?? []).map(rowToFolder),
+    unmatchedEmails: um.error ? [] : (um.data ?? []).filter((r: any) => !r.handled).map(rowToUnmatched),
   };
 }
+
+export const rowToUnmatched = (r: any): UnmatchedEmail => ({ id: r.id, fromEmail: r.from_email ?? "", fromName: r.from_name ?? "", subject: r.subject ?? "", body: r.body ?? "", at: r.at ?? r.created_at ?? "" });
+// Acted-on rows are marked handled, not deleted, so a re-poll within the
+// 2-day Gmail window can't re-surface them.
+export const markUnmatchedHandledDb = (id: string) => supabase.from("inbound_unmatched").update({ handled: true }).eq("id", id).then(logErr);
+export async function fetchUnmatchedDb(): Promise<UnmatchedEmail[]> {
+  const { data, error } = await supabase.from("inbound_unmatched").select("*").eq("handled", false).order("created_at", { ascending: false });
+  return error ? [] : (data ?? []).map(rowToUnmatched);
+}
+export const upsertContact = (c: Contact) => supabase.from("contacts").upsert(contactToRow(c)).then(logErr);
 
 export async function fetchContacts(): Promise<Contact[]> {
   const { data, error } = await fetchAllRows("contacts");

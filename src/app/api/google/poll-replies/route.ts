@@ -57,9 +57,6 @@ async function run(req: NextRequest) {
   // Admins triage unknown senders. Deterministic notification ids
   // (n_um_<gmailId>_<recipient>) make the every-10-min re-poll idempotent —
   // an unmatched email is surfaced in the Inbox exactly once, not each run.
-  const { data: admins } = await supabaseAdmin.from("profiles").select("member_id").eq("role", "admin");
-  const adminIds: string[] = (admins ?? []).map((a: any) => a.member_id).filter((m: any): m is string => typeof m === "string" && !!m);
-
   // category:primary keeps Gmail's own Promotions/Social/Updates tabs (where
   // newsletters + notifications live) out of what we scan.
   const query = "in:inbox category:primary newer_than:2d -from:me";
@@ -99,21 +96,19 @@ async function run(req: NextRequest) {
         // real person-to-person unknown email is worth surfacing.
         if (em.auto) { skippedAuto++; continue; }
         unmatched++;
-        const snippet = em.body.replace(/\s+/g, " ").trim().slice(0, 120);
-        const who = em.fromName ? `${em.fromName} <${em.fromEmail}>` : em.fromEmail;
-        const text = `📥 New email from ${who}: ${em.subject || "(no subject)"}${snippet ? ` — ${snippet}` : ""}`;
-        const gid = em.gmailId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 24);
-        for (const rid of adminIds) {
-          unmatchedRows.push({ id: `n_um_${gid}_${rid}`, recipient_id: rid, text, task_id: null, actor_id: null, client_id: null, project_id: null, at: em.internalDate, read: false, kind: "message" });
-        }
+        unmatchedRows.push({ id: em.gmailId, from_email: em.fromEmail, from_name: em.fromName || null, subject: em.subject || null, body: em.body || null, at: em.internalDate });
       }
     }
   }
 
+  // Park unknown-but-real senders for triage in the Inbox (read → add as client
+  // / dismiss). Deduped on the Gmail id so the re-poll never re-adds one; a row
+  // deleted when acted on won't reappear because the same message stays out of
+  // newer_than:2d before long, and add-as-client makes them a known contact.
   let surfaced = 0;
   if (unmatchedRows.length) {
-    const { error, count } = await supabaseAdmin.from("notifications").upsert(unmatchedRows, { onConflict: "id", ignoreDuplicates: true, count: "exact" });
-    if (error) errors.push(`unmatched notify: ${error.message}`);
+    const { error, count } = await supabaseAdmin.from("inbound_unmatched").upsert(unmatchedRows, { onConflict: "id", ignoreDuplicates: true, count: "exact" });
+    if (error) errors.push(`unmatched park: ${error.message}`);
     else surfaced = count ?? 0;
   }
 

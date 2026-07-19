@@ -343,6 +343,18 @@ export interface Message {
   bcc: string[];
 }
 
+/** An inbound email pulled from Gmail whose sender isn't a known contact —
+ * parked for triage in the Inbox so the team can read it and either add the
+ * sender as a client or dismiss it. Deleted once acted on. */
+export interface UnmatchedEmail {
+  id: string;        // the Gmail message id
+  fromEmail: string;
+  fromName: string;
+  subject: string;
+  body: string;
+  at: string;        // ISO timestamp
+}
+
 /** A Folder groups Lists (projects) within a space (client or workspace).
  * Folder → List → Task. A project with folderId === null is a standalone
  * list. GHL has no concept of this — it's our own organizing layer. */
