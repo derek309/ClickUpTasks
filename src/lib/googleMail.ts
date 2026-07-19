@@ -84,7 +84,7 @@ export async function sendGmailAs(
   return { id: json.id ?? "", threadId: json.threadId ?? "" };
 }
 
-export type InboundEmail = { gmailId: string; threadId: string; fromEmail: string; fromName: string; subject: string; body: string; internalDate: string };
+export type InboundEmail = { gmailId: string; threadId: string; fromEmail: string; fromName: string; subject: string; body: string; internalDate: string; auto: boolean };
 
 // Walk a Gmail message payload for the best text body — prefer text/plain,
 // fall back to the first text/html (stripped), then the snippet.
@@ -132,10 +132,21 @@ export async function readInboundGmail(userEmail: string, query: string, max = 2
     const fromName = (match?.[1] ?? "").trim();
     const fromEmail = (match?.[2] ?? "").trim().toLowerCase();
     if (!fromEmail) continue;
+    // Bulk / automated mail (newsletters, notifications, no-reply senders) sets
+    // these headers or uses a machine local-part — real person-to-person email
+    // doesn't. Used to keep the "unknown sender → Inbox" path from flooding.
+    const precedence = h("precedence").toLowerCase();
+    const autoSubmitted = h("auto-submitted").toLowerCase();
+    const fromLocal = fromEmail.split("@")[0];
+    const auto = !!h("list-unsubscribe")
+      || ["bulk", "list", "junk", "auto_reply"].includes(precedence)
+      || (!!autoSubmitted && autoSubmitted !== "no")
+      || /^(no-?reply|do-?not-?reply|donotreply|mailer-daemon|postmaster|bounce|notif|newsletter|mailer|updates?|news|marketing|billing|alerts?)\b|[-.]?(no-?reply|noreply)/.test(fromLocal);
     out.push({
       gmailId: m.id, threadId: m.threadId ?? "", fromEmail, fromName,
       subject: h("subject"), body: extractBody(m.payload, m.snippet ?? ""),
       internalDate: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : new Date().toISOString(),
+      auto,
     });
   }
   return out;

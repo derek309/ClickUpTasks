@@ -60,8 +60,10 @@ async function run(req: NextRequest) {
   const { data: admins } = await supabaseAdmin.from("profiles").select("member_id").eq("role", "admin");
   const adminIds: string[] = (admins ?? []).map((a: any) => a.member_id).filter((m: any): m is string => typeof m === "string" && !!m);
 
-  const query = "in:inbox newer_than:2d -from:me";
-  let ingested = 0, scanned = 0, matched = 0, unmatched = 0;
+  // category:primary keeps Gmail's own Promotions/Social/Updates tabs (where
+  // newsletters + notifications live) out of what we scan.
+  const query = "in:inbox category:primary newer_than:2d -from:me";
+  let ingested = 0, scanned = 0, matched = 0, unmatched = 0, skippedAuto = 0;
   const errors: string[] = [];
   const unmatchedRows: any[] = [];
 
@@ -92,7 +94,10 @@ async function run(req: NextRequest) {
         }
       } else {
         // Not in the system → surface in the Inbox so it's not lost; the team
-        // can read it and add them as a client or respond.
+        // can read it and add them as a client or respond. But skip obvious
+        // automated/bulk mail (newsletters, no-reply, notifications) — only
+        // real person-to-person unknown email is worth surfacing.
+        if (em.auto) { skippedAuto++; continue; }
         unmatched++;
         const snippet = em.body.replace(/\s+/g, " ").trim().slice(0, 120);
         const who = em.fromName ? `${em.fromName} <${em.fromEmail}>` : em.fromEmail;
@@ -112,5 +117,5 @@ async function run(req: NextRequest) {
     else surfaced = count ?? 0;
   }
 
-  return NextResponse.json({ ok: true, mailboxes: mailboxes.length, scanned, matched, ingested, unmatched, surfaced, ...(errors.length ? { errors: errors.slice(0, 10) } : {}) });
+  return NextResponse.json({ ok: true, mailboxes: mailboxes.length, scanned, matched, ingested, unmatched, surfaced, skippedAuto, ...(errors.length ? { errors: errors.slice(0, 10) } : {}) });
 }
