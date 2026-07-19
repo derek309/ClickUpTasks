@@ -42,7 +42,7 @@ export function QuickLinksBar({ links, canEdit, onEdit, onDelete, onReorder }: {
   if (links.length === 0) return null;
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 border-b bg-background/40 px-4 py-2 sm:px-5">
+    <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b bg-background/40 px-4 py-2 sm:flex-wrap sm:overflow-visible sm:px-5">
       {groupLinks(links).map((g) => (
         <span key={g.key || "_"} className="inline-flex items-center gap-1.5">
           {g.key && <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">{g.key}</span>}

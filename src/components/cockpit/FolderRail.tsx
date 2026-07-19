@@ -63,7 +63,7 @@ export function FolderRail({
         {label}
         {canAdmin && menuKey && (
           <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); setMenu((m) => (m === menuKey ? null : menuKey)); }}
-            className="-mr-1 rounded p-0.5 opacity-60 hover:opacity-100"><I.dots className="h-3.5 w-3.5" /></span>
+            className="-mr-1 hidden rounded p-0.5 opacity-60 hover:opacity-100 sm:inline-block"><I.dots className="h-3.5 w-3.5" /></span>
         )}
       </button>
       {menu === menuKey && menuKey && (<>
@@ -78,7 +78,7 @@ export function FolderRail({
   );
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 border-b bg-background/40 px-4 py-2">
+    <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b bg-background/40 px-4 py-2 sm:flex-wrap sm:overflow-visible">
       {chip("All", allActive, onSelectAll)}
       {folders.map((f) => chip(
         <><I.folder className="h-3.5 w-3.5" /> {f.name}</>,
