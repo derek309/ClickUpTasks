@@ -2059,6 +2059,164 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     </div>
   );
 
+  // Shared header bits, reused by both the desktop header and the compact
+  // mobile header below so the bell / filter / overflow popovers aren't
+  // duplicated in source. Only one header is ever visible (CSS breakpoint),
+  // so the popovers never double-render on screen.
+  const headerTitleText = inboxView ? "Inbox" : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? "All Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? ""));
+  const isClientDetail = !myWork && !personalView && !inboxView && !dirView && activeClient !== "all" && !!clientById(activeClient);
+  const showFilterControl = !inboxView && !dirView && !myWork && !(activeClient !== "all" && (clientTab === "chat" || clientTab === "vault"));
+  const bellControl = (
+    <div className="relative">
+      <button onClick={() => { const opening = !bellOpen; setBellOpen(opening); if (opening) { setNotifications((ns) => ns.map((n) => (n.recipientId === me.id ? { ...n, read: true } : n))); markNotifsReadDb(me.id); } }} aria-label="Notifications" className="relative rounded-lg border bg-background p-2 text-muted hover:text-foreground">
+        <I.bell />
+        {unread > 0 && <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[15px] font-semibold text-white">{unread}</span>}
+      </button>
+      {bellOpen && (<>
+        <div className="fixed inset-0 z-30" onClick={() => setBellOpen(false)} />
+        <div className="absolute right-0 z-40 mt-1 w-80 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-xl border bg-surface shadow-xl">
+          <div className="border-b px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Notifications</div>
+          <div className="max-h-96 overflow-y-auto">
+            {myNotifs.length === 0 && <div className="px-4 py-6 text-center text-[13px] text-muted">You&apos;re all caught up.</div>}
+            {myNotifs.map((n) => (<button key={n.id} onClick={() => { if (n.taskId) setOpenTaskId(n.taskId); setBellOpen(false); }} className="flex w-full gap-2.5 border-b px-4 py-2.5 text-left last:border-0 hover:bg-background"><I.comment className="mt-0.5 shrink-0 text-accent" /><div><div className="text-[15px] leading-snug">{n.text}</div><div className="text-[13px] text-muted">{timeAgo(n.at)}</div></div></button>))}
+          </div>
+        </div>
+      </>)}
+    </div>
+  );
+  const filterControl = (
+    <div className="relative">
+      <button onClick={() => setFilterOpen((o) => !o)} title="Filter & view" className="relative rounded-md border bg-background p-2 text-muted hover:text-foreground">
+        <I.filter />
+        {activeFilterCount > 0 && <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{activeFilterCount}</span>}
+      </button>
+      {filterOpen && (<>
+        <div className="fixed inset-0 z-30" onClick={() => setFilterOpen(false)} />
+        <div className="absolute right-0 z-40 mt-1 w-72 max-w-[calc(100vw-1.5rem)] space-y-2.5 rounded-xl border bg-surface p-3 shadow-xl">
+          {!personalView && activeClient !== "all" && clientById(activeClient) && (
+            <div className="space-y-1.5 border-b pb-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Following</span>
+                {!canAdmin && (
+                  <div className="flex items-center -space-x-1.5">
+                    {(clientById(activeClient)!.assignedTo ?? []).length === 0 && <span className="text-[13px] text-muted">Nobody yet</span>}
+                    {(clientById(activeClient)!.assignedTo ?? []).map((uid) => (<Avatar key={uid} id={uid} size={20} />))}
+                  </div>
+                )}
+              </div>
+              {canAdmin && (
+                <div className="grid grid-cols-2 gap-0.5">
+                  {users.map((u) => {
+                    const on = (clientById(activeClient)!.assignedTo ?? []).includes(u.id);
+                    return (
+                      <button key={u.id} onClick={() => toggleClientAssignment(activeClient, u.id)} className="flex items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-background">
+                        <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "border-accent bg-accent text-white" : "border-border"}`}>{on && <I.check />}</span>
+                        <Avatar id={u.id} size={18} /> <span className="truncate text-[13px]">{u.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Group &amp; sort</span>
+            {(filtersActive || sortBy !== "due" || groupBy !== "priority") && <button onClick={() => { setFilters({ status: "all", assignee: "all", priority: "all" }); setGroupBy("priority"); setSortBy("due"); }} className="text-[13px] font-medium text-accent">Reset</button>}
+          </div>
+          <label className="flex items-center justify-between gap-3"><span className="text-muted">Group by</span><select value={groupBy} onChange={(e) => setGroupBy(e.target.value as typeof groupBy)} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="status">Status</option><option value="priority">Priority</option><option value="due">Due date</option><option value="project">Project</option></select></label>
+          <label className="flex items-center justify-between gap-3"><span className="text-muted">Sort</span><select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="manual">Manual</option><option value="due">Due date</option><option value="priority">Priority</option><option value="title">Task name</option><option value="status">Status</option><option value="assignee">Assignee</option></select></label>
+          <button onClick={toggleHideEmpty} className="flex w-full items-center gap-2 rounded px-0 py-1 text-left hover:bg-background">
+            <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${hideEmpty ? "border-accent bg-accent text-white" : "border-border"}`}>{hideEmpty && <I.check />}</span>
+            <span className="text-muted">Hide empty groups</span>
+          </button>
+          <button onClick={toggleHideDone} className="flex w-full items-center gap-2 rounded px-0 py-1 text-left hover:bg-background">
+            <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${hideDone ? "border-accent bg-accent text-white" : "border-border"}`}>{hideDone && <I.check />}</span>
+            <span className="text-muted">Hide done tasks</span>
+          </button>
+          <div className="border-t pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Filter</div>
+          <label className="flex items-center justify-between gap-3"><span className="text-muted">Status</span><select value={filters.status} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value as FilterState["status"] }))} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="all">All</option>{STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}</select></label>
+          <label className="flex items-center justify-between gap-3"><span className="text-muted">Assignee</span><select value={filters.assignee} onChange={(e) => setFilters((f) => ({ ...f, assignee: e.target.value }))} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="all">All</option><option value="unassigned">Unassigned</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
+          <label className="flex items-center justify-between gap-3"><span className="text-muted">Priority</span><select value={filters.priority} onChange={(e) => setFilters((f) => ({ ...f, priority: e.target.value as FilterState["priority"] }))} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="all">All</option>{PRIORITY_ORDER.filter((p) => p !== "none").map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}</select></label>
+          <div className="border-t pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Columns</div>
+          <div className="grid grid-cols-2 gap-0.5">
+            {LIST_COLUMNS.map((c) => (
+              <button key={c.key} onClick={() => toggleCol(c.key)} className="flex items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-background">
+                <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${visibleCols.includes(c.key) ? "border-accent bg-accent text-white" : "border-border"}`}>{visibleCols.includes(c.key) && <I.check />}</span>
+                {c.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </>)}
+    </div>
+  );
+  const overflowControl = (
+    <div className="relative">
+      <button onClick={() => setHeaderMoreOpen((o) => !o)} title="More actions"
+        className="rounded-md border bg-background p-1.5 text-muted hover:text-foreground"><I.dots /></button>
+      {headerMoreOpen && (<>
+        <div className="fixed inset-0 z-40" onClick={() => setHeaderMoreOpen(false)} />
+        <div className="absolute right-0 top-full z-50 mt-1 w-56 max-w-[calc(100vw-1.5rem)] rounded-lg border bg-surface p-1 shadow-soft-md">
+          {activeClient !== "all" && !activeProject && canMessageClient(activeClient) && (
+            <button onClick={() => { setHeaderMoreOpen(false); openCompose("email"); }}
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background sm:hidden"><I.comment /> Email</button>
+          )}
+          {activeClient !== "all" && !activeProject && canMessageClient(activeClient) && (
+            <button onClick={() => { setHeaderMoreOpen(false); openCompose("sms"); }}
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background sm:hidden"><I.comment /> SMS</button>
+          )}
+          {activeClient !== "all" && !activeProject && clientById(activeClient) && (
+            <button onClick={() => { setHeaderMoreOpen(false); setClientTab("chat"); regenerateAiSummary(activeClient); }} disabled={aiSummaryBusyId === activeClient}
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background disabled:opacity-50 sm:hidden"><span aria-hidden>✨</span> {aiSummaryBusyId === activeClient ? "Thinking…" : "What's next"}</button>
+          )}
+          <button onClick={() => { setHeaderMoreOpen(false); copyLink({ view: null, client: activeClient, project: activeProject, task: null, clientTab, vaultFolder: null }); }}
+            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy link</button>
+          <button onClick={() => { setHeaderMoreOpen(false); copyClientForClaude(); }}
+            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>✳</span> Copy for Claude</button>
+          <button onClick={() => { setHeaderMoreOpen(false); queueClientForClaude(); }}
+            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>★</span> Queue for Claude</button>
+          <div title="Shifts every open dated task here by the same number of days, preserving their relative spacing"
+            className="rounded-md px-2.5 py-1.5 hover:bg-background">
+            <div className="mb-1 flex items-center gap-2 text-[13px]"><I.calendar className="shrink-0" /> Move all due dates to…</div>
+            <input type="date" onClick={(e) => e.stopPropagation()}
+              onChange={(e) => { if (e.target.value) { setHeaderMoreOpen(false); pushAllDatesForward(e.target.value); } e.target.value = ""; }}
+              className="w-full rounded border bg-background px-1.5 py-1 text-[13px] outline-none" />
+          </div>
+          <button onClick={() => {
+              setHeaderMoreOpen(false);
+              const scope = activeProject ? `client ${activeClient}, project ${activeProject}` : `client ${activeClient}`;
+              const clientName = clientById(activeClient)?.name ?? activeClient;
+              const projectName = activeProject ? projectById(activeProject)?.name : null;
+              const label = projectName ? `${clientName} — ${projectName}` : clientName;
+              window.location.href = claudeCodeUrl(`${label}\n\nWork through the open tasks for ClickUpTasks ${scope} using the clickuptasks MCP tools — start with list_client_tasks.`);
+            }}
+            title="Open this client/project in Claude Desktop, ready to work through its open tasks"
+            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>▶</span> Work with Claude</button>
+          {canAdmin && (
+            <button onClick={() => { setHeaderMoreOpen(false); setLinkModal({}); }}
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.plus /> Add quick link</button>
+          )}
+          {ghlContactUrlFor(activeClient) && (
+            <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" onClick={() => setHeaderMoreOpen(false)}
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-accent hover:bg-background"><I.bolt /> Open in GoHighLevel</a>
+          )}
+          {ghlContactUrlFor(activeClient) && (
+            <button onClick={() => { setHeaderMoreOpen(false); importGhlTasks(); }} disabled={importingTasks}
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background disabled:opacity-50"><I.repeat /> Import tasks from GHL</button>
+          )}
+          {canAdmin && !ghlContactUrlFor(activeClient) && (
+            <button onClick={() => { setHeaderMoreOpen(false); setGhlLinkSearch(""); setGhlLinkOpen(true); }}
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.bolt /> Link to GoHighLevel</button>
+          )}
+          {canAdmin && clientById(activeClient)?.linkedContactId && (
+            <button onClick={() => { setHeaderMoreOpen(false); linkClientToContact(activeClient, null); }}
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-muted hover:bg-background hover:text-danger"><I.close /> Unlink from GoHighLevel</button>
+          )}
+        </div>
+      </>)}
+    </div>
+  );
+
   return (
     <div className="flex h-screen w-full overflow-hidden text-[15px]">
       {/* mobile backdrop */}
@@ -2133,7 +2291,57 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           internal scroll (Journal, Vault, directories) are flex-1 min-h-0, so
           they still scroll inside and this overflow never engages for them. */}
       <main className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-background">
-        <header className="relative z-10 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b bg-surface px-4 py-2 shadow-soft sm:gap-y-2 sm:px-5 sm:py-3">
+        {/* Mobile header (Option A) — compact title bar + full-width segmented
+            tabs. Reuses the shared bell/filter/overflow controls. The full
+            desktop header below is hidden on phones. */}
+        <header className="relative z-10 flex flex-col gap-2 border-b bg-surface px-3 py-2 shadow-soft sm:hidden">
+          <div className="flex items-center gap-2">
+            <button onClick={toggleSidebar} aria-label="Menu" className="shrink-0 rounded-lg border p-2 text-muted"><I.menu /></button>
+            <h1 className="min-w-0 flex-1 truncate text-[17px] font-semibold">{headerTitleText}</h1>
+            {isClientDetail && (() => {
+              const scopedProject = activeProject ? projectById(activeProject) : null;
+              const entity = scopedProject ?? clientById(activeClient)!;
+              const fu = entity.followUpAt ?? null;
+              if (!fu) return null;
+              const overdue = isOverdue(fu);
+              return (
+                <span className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-1 text-[12px] font-medium ${overdue ? "border-danger/40 bg-danger-soft text-danger" : "border-accent/40 bg-accent-soft text-accent"}`} title="Follow-up date">
+                  <I.calendar /> {formatDue(fu)}
+                </span>
+              );
+            })()}
+            {bellControl}
+            {isClientDetail && overflowControl}
+          </div>
+          {isClientDetail ? (
+            <div className="flex items-center gap-2">
+              <div className="flex flex-1 rounded-lg bg-background p-0.5">
+                <button onClick={() => setClientTab("tasks")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${clientTab === "tasks" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Tasks</button>
+                <button onClick={() => setClientTab("chat")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${clientTab === "chat" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Journal</button>
+                <button onClick={() => setClientTab("vault")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${clientTab === "vault" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Vault</button>
+              </div>
+              {clientTab === "tasks" && filterControl}
+            </div>
+          ) : myWork && canAdmin ? (
+            <div className="flex items-center gap-2">
+              <span className="shrink-0 text-[13px] text-muted">Work for</span>
+              <select value={myWorkUser} onChange={(e) => setMyWorkUser(e.target.value)} className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1.5 text-[14px] outline-none">{users.map((u) => (<option key={u.id} value={u.id}>{u.name}{u.role === "va" ? " (VA)" : ""}</option>))}</select>
+            </div>
+          ) : showFilterControl ? (
+            <div className="flex items-center gap-2">
+              {activeClient === "all" && !myWork && canAdmin && (
+                <div className="inline-flex overflow-hidden rounded-md border text-[13px]">
+                  <button onClick={() => setAllTasksScope("mine")} className={`px-3 py-1.5 font-medium ${allTasksScope === "mine" ? "bg-accent-soft text-accent" : "bg-background text-muted"}`}>Mine</button>
+                  <button onClick={() => setAllTasksScope("all")} className={`px-3 py-1.5 font-medium ${allTasksScope === "all" ? "bg-accent-soft text-accent" : "bg-background text-muted"}`}>All</button>
+                </div>
+              )}
+              <div className="flex-1" />
+              {filterControl}
+            </div>
+          ) : null}
+        </header>
+
+        <header className="relative z-10 hidden flex-wrap items-center gap-x-3 gap-y-1.5 border-b bg-surface px-4 py-2 shadow-soft sm:flex sm:gap-y-2 sm:px-5 sm:py-3">
           <button onClick={toggleSidebar} title="Show/hide sidebar" className="rounded-lg border p-2 text-muted hover:text-foreground"><I.menu /></button>
           <div className="min-w-0">
             {!myWork && !personalView && !inboxView && !dirView && activeProject && projectById(activeProject) ? (<>
