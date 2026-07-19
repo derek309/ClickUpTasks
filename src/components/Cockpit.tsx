@@ -779,6 +779,26 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setNotifications((ns) => ns.map((n) => (n.recipientId === me.id ? { ...n, read: true } : n)));
     markNotifsReadDb(me.id);
   };
+  // On-demand pull of client email replies that came back through Gmail
+  // (bypassing GHL). Runs the same poll the cron does, via the admin session
+  // — the reliable trigger on Vercel Hobby (cron only fires once a day there).
+  const [syncingEmail, setSyncingEmail] = useState(false);
+  const syncEmail = async () => {
+    setSyncingEmail(true);
+    try {
+      const res = await authedFetch("/api/google/poll-replies", { method: "POST" });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error ?? "Email sync failed.");
+      const parts: string[] = [];
+      if (j.ingested) parts.push(`${j.ingested} new to Journal`);
+      if (j.surfaced) parts.push(`${j.surfaced} to Inbox`);
+      pushToast(parts.length ? `📥 Synced email — ${parts.join(", ")}.` : "Email synced — nothing new.");
+    } catch (e) {
+      pushToast(e instanceof Error ? e.message : "Email sync failed.");
+    } finally {
+      setSyncingEmail(false);
+    }
+  };
   const openNotification = (n: Notification) => {
     if (!n.read) { setNotifications((ns) => ns.map((x) => (x.id === n.id ? { ...x, read: true } : x))); markNotifReadDb(n.id); }
     if (n.taskId) { setOpenTaskId(n.taskId); return; }
@@ -2674,7 +2694,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
         {/* content */}
         {inboxView ? (
-          <Inbox notifications={myNotifs} clientById={clientById} projectById={projectById} onOpen={openNotification} onMarkAllRead={markAllNotifsRead} />
+          <Inbox notifications={myNotifs} clientById={clientById} projectById={projectById} onOpen={openNotification} onMarkAllRead={markAllNotifsRead} onSyncEmail={canAdmin ? syncEmail : undefined} syncingEmail={syncingEmail} />
         ) : dirView === "clients" ? (
           <ClientsDirectory clients={sortedClients} clientCompany={(c) => clientCompany(c)} taskCount={clientTaskCount} starred={starred} onToggleStar={toggleStar}
             needsReview={(id) => clientNeedsReview(id, me.id)}
