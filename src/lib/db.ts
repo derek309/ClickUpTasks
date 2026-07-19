@@ -51,7 +51,7 @@ const rowToFolder = (r: any): Folder => ({ id: r.id, clientId: r.client_id, name
 // rather than a Task field. See src/lib/realtime.ts for how it's consumed.
 const taskToRow = (t: Task, updatedBy?: string | null) => ({
   id: t.id, project_id: t.projectId, client_id: t.clientId, title: t.title, description: t.description,
-  status: t.status, priority: t.priority, assignee_id: t.assigneeId, contact_id: t.contactId, due: t.due,
+  status: t.status, priority: t.priority, assignee_id: t.assigneeId, waiting_on_client: t.waitingOnClient ?? false, contact_id: t.contactId, due: t.due,
   recurrence: t.recurrence, recurrence_interval: t.recurrenceInterval ?? null, recurrence_unit: t.recurrenceUnit ?? null,
   recurrence_days_of_month: t.recurrenceDaysOfMonth ?? null,
   ghl_task_id: t.ghlTaskId, label_ids: t.labelIds, subtasks: t.subtasks,
@@ -68,7 +68,7 @@ const asPriority = (p: unknown): Priority => (typeof p === "string" && p in PRIO
 
 export const rowToTask = (r: any): Task => ({
   id: r.id, projectId: r.project_id, clientId: r.client_id, title: r.title, description: r.description ?? "",
-  status: r.status, priority: asPriority(r.priority), assigneeId: r.assignee_id, contactId: r.contact_id, due: r.due,
+  status: r.status, priority: asPriority(r.priority), assigneeId: r.assignee_id, waitingOnClient: r.waiting_on_client ?? false, contactId: r.contact_id, due: r.due,
   recurrence: r.recurrence, recurrenceInterval: r.recurrence_interval ?? undefined, recurrenceUnit: r.recurrence_unit ?? undefined,
   recurrenceDaysOfMonth: r.recurrence_days_of_month ?? undefined,
   ghlTaskId: r.ghl_task_id, labelIds: r.label_ids ?? [], subtasks: r.subtasks ?? [],

@@ -441,6 +441,12 @@ export interface Task {
   status: TaskStatus;
   priority: Priority;
   assigneeId: string | null;
+  /** "Assigned to the client" — we're waiting on the client for this, so it's
+   * not a team member's action item. Set from the assignee picker; when true
+   * the row shows a "Waiting on client" pill and the task drops out of anyone's
+   * My Work (it still shows on the client's own task list and keeps the client
+   * visible on the Dashboard). */
+  waitingOnClient?: boolean;
   contactId: string | null;
   due: string | null; // ISO yyyy-mm-dd
   recurrence: Recurrence;
