@@ -780,6 +780,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     insertNotif(n);
   };
 
+  // Best-effort email companion to an @mention notification — the in-app
+  // bell above already fired, so a failure here (Google not configured,
+  // non-Workspace sender, send error) is swallowed rather than surfaced.
+  const sendMentionEmail = (recipientMemberId: string, taskId: string, taskTitle: string, commentBody: string) => {
+    authedFetch("/api/notifications/mention-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ recipientMemberId, taskId, taskTitle, commentBody }),
+    }).catch(() => {});
+  };
+
   const myNotifs = notifications.filter((n) => n.recipientId === me.id);
   const unread = myNotifs.filter((n) => !n.read).length;
   const markAllNotifsRead = () => {
@@ -1552,7 +1563,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // Comment notifications: @mentions get "mentioned you"; the task's assignee
     // always hears about new comments on their task (unless they wrote it).
     const mentioned = new Set<string>();
-    users.forEach((u) => { if (u.id !== me.id && body.includes("@" + u.name)) { mentioned.add(u.id); notify(u.id, `${me.name} mentioned you in “${t.title}”`, id, { kind: "message" }); pushToast(`Notified ${u.name}`); } });
+    users.forEach((u) => {
+      if (u.id !== me.id && body.includes("@" + u.name)) {
+        mentioned.add(u.id);
+        notify(u.id, `${me.name} mentioned you in “${t.title}”`, id, { kind: "message" });
+        pushToast(`Notified ${u.name}`);
+        sendMentionEmail(u.id, id, t.title, body.trim());
+      }
+    });
     if (t.assigneeId && t.assigneeId !== me.id && !mentioned.has(t.assigneeId)) {
       notify(t.assigneeId, `${me.name} commented on “${t.title}”`, id, { kind: "message" });
     }
