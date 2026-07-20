@@ -41,6 +41,14 @@ export async function POST(req: NextRequest) {
   const { data: existingRows } = await supabaseAdmin.from("messages").select("ghl_message_id").eq("contact_id", contactId).not("ghl_message_id", "is", null);
   const known = new Set((existingRows ?? []).map((r) => r.ghl_message_id as string));
 
+  // Scope backfilled rows to this contact's open Interaction task, same as
+  // the webhook does for a freshly-inbound message (see message task-scope:
+  // TaskDrawer's Activity feed filters messages by task_id, so a reply sent
+  // directly in GHL — the whole point of this route — would otherwise never
+  // show up there even after a successful backfill).
+  const { data: openTask } = await supabaseAdmin.from("tasks").select("id").eq("contact_id", contactId).eq("priority", "conversation").neq("status", "done").limit(1).maybeSingle();
+  const taskId: string | null = openTask?.id ?? null;
+
   // Emails sent through Google Workspace (the per-teammate "from" path) are
   // stored locally with no ghl_message_id, so `known` can't catch the copy GHL
   // imports via 2-way sync — that would double-post the sent email in the
@@ -92,6 +100,7 @@ export async function POST(req: NextRequest) {
             ghl_message_id: m.id,
             created_by: null,
             created_at: m.dateAdded,
+            task_id: taskId,
           };
         })
         .filter((r): r is NonNullable<typeof r> => r !== null);

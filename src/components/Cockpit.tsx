@@ -424,6 +424,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // more than needed to check if one person's phone number changed.
   const [refreshingContact, setRefreshingContact] = useState(false);
   const refreshContact = async (contact: Contact) => {
+    // ghlTargetForContact is declared later in this component; harmless in
+    // practice (this only ever runs post-render, from a click handler or
+    // the auto-refresh effect near openTask), same TDZ shape as other
+    // cross-referencing helpers here.
+    // eslint-disable-next-line react-hooks/immutability
     const target = ghlTargetForContact(contact);
     if (!target) { pushToast("No GoHighLevel connection for this client's sub-account."); return; }
     setRefreshingContact(true);
@@ -443,17 +448,22 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // realtime-subscribed, so genuinely new rows this inserts show up on their
   // own; no local state merge needed here.
   const [refreshingMessages, setRefreshingMessages] = useState(false);
-  const refreshMessages = async (clientId: string, contact: Contact) => {
+  // opts.silent: used by the auto-refresh-on-open-Interaction-task effect
+  // below — still surfaces a toast when it actually finds something (that's
+  // the whole point — "already handled elsewhere"), just skips the
+  // no-op/error noise on every task open.
+  const refreshMessages = async (clientId: string, contact: Contact, opts?: { silent?: boolean }) => {
     const target = ghlTargetForContact(contact);
-    if (!target) { pushToast("No GoHighLevel connection for this client's sub-account."); return; }
+    if (!target) { if (!opts?.silent) pushToast("No GoHighLevel connection for this client's sub-account."); return; }
     setRefreshingMessages(true);
     try {
       const res = await authedFetch("/api/ghl/refresh-messages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId, contactId: contact.id, locationId: target.locationId, ghlContactId: target.ghlContactId }) });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok || j.error) { pushToast(j.error || "Failed to refresh messages."); return; }
-      pushToast(j.inserted > 0 ? `Found ${j.inserted} new message${j.inserted === 1 ? "" : "s"}.` : "No new messages.");
+      if (!res.ok || j.error) { if (!opts?.silent) pushToast(j.error || "Failed to refresh messages."); return; }
+      if (j.inserted > 0) pushToast(`Found ${j.inserted} new message${j.inserted === 1 ? "" : "s"} — may already be handled.`);
+      else if (!opts?.silent) pushToast("No new messages.");
     } catch {
-      pushToast("Failed to refresh messages.");
+      if (!opts?.silent) pushToast("Failed to refresh messages.");
     } finally {
       setRefreshingMessages(false);
     }
@@ -1326,6 +1336,22 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const myPersonalTasks = sortTasks(tasks.filter((t) => t.assigneeId === me.id && t.private));
 
   const openTask = tasks.find((t) => t.id === openTaskId) ?? null;
+  // Opening an Interaction task auto-pulls any reply sent directly in GHL's
+  // own UI (not through this app) — the whole point being nobody wastes time
+  // re-replying to something a teammate already answered elsewhere. Scoped
+  // to Interaction tasks only (cheap, bounded — not every task open hits
+  // GHL's API), silent unless it actually finds something new.
+  useEffect(() => {
+    if (!openTask || openTask.priority !== "conversation" || !openTask.contactId) return;
+    const contact = contactById(openTask.contactId);
+    if (!contact) return;
+    // refreshMessages sets a loading flag synchronously; same pattern
+    // already present elsewhere in this file (11 pre-existing instances),
+    // not a new class of issue this component doesn't already have.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    refreshMessages(openTask.clientId, contact, { silent: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openTaskId]);
   const filtersActive = filters.status !== "all" || filters.assignee !== "all" || filters.priority !== "all";
   const activeFilterCount = [filters.status !== "all", filters.assignee !== "all", filters.priority !== "all", sortBy !== "due"].filter(Boolean).length;
 
