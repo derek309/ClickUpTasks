@@ -480,6 +480,25 @@ export interface Task {
   attachments: Attachment[];
   comments: Comment[];
   createdAt: string; // ISO — set by the DB; never overwritten on upsert
+  /** Custom Kanban column (see Stage below), or null/undefined for a project
+   * with no custom stages defined — those keep today's fixed status board. */
+  stageId?: string | null;
+}
+
+/** A custom Kanban-style column for one project's own task board (e.g.
+ * "Backlog / Designing / In Review / Shipped") — layered ON TOP OF the
+ * existing status funnel (todo/in_progress/review/done), not a replacement:
+ * isDone syncs a task's status when it moves in/out of a stage flagged
+ * done, so urgency scoring, GHL sync, MCP, recurrence-on-complete, and
+ * completion detection (isCompletionEvent) all keep working unmodified. A
+ * project with no stages defined just keeps the fixed 4-column board. */
+export interface Stage {
+  id: string;
+  projectId: string;
+  name: string;
+  position: number;
+  isDone: boolean;
+  createdAt: string;
 }
 
 // A single shared client/project pair every private task lives under —

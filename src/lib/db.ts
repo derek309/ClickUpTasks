@@ -18,6 +18,7 @@ import {
   type ClientNote,
   type VaultFolder,
   type Folder,
+  type Stage,
   type NoteType,
   type Comment,
   type Message,
@@ -46,6 +47,8 @@ const projectToRow = (p: Project) => ({ id: p.id, client_id: p.clientId, name: p
 const rowToProject = (r: any): Project => ({ id: r.id, clientId: r.client_id, name: r.name, description: r.description ?? "", assignedTo: r.assigned_to ?? [], followUpAt: r.follow_up_at ?? null, reviewedAt: r.reviewed_at ?? null, folderId: r.folder_id ?? null, position: r.position ?? 0 });
 const folderToRow = (f: Folder) => ({ id: f.id, client_id: f.clientId, name: f.name, position: f.position, created_at: f.createdAt });
 const rowToFolder = (r: any): Folder => ({ id: r.id, clientId: r.client_id, name: r.name, position: r.position ?? 0, createdAt: r.created_at });
+const stageToRow = (s: Stage) => ({ id: s.id, project_id: s.projectId, name: s.name, position: s.position, is_done: s.isDone, created_at: s.createdAt });
+const rowToStage = (r: any): Stage => ({ id: r.id, projectId: r.project_id, name: r.name, position: r.position ?? 0, isDone: r.is_done ?? false, createdAt: r.created_at });
 
 // `updatedBy` is DB-only metadata (Realtime echo-suppression signal) — it is
 // not part of the domain Task type, so it's a separate write-time parameter
@@ -57,6 +60,7 @@ const taskToRow = (t: Task, updatedBy?: string | null) => ({
   recurrence_days_of_month: t.recurrenceDaysOfMonth ?? null,
   ghl_task_id: t.ghlTaskId, label_ids: t.labelIds, subtasks: t.subtasks,
   attachments: t.attachments, comments: t.comments, updated_by: updatedBy ?? null, is_private: t.private,
+  stage_id: t.stageId ?? null,
   // Derived from checklist-item assignees so RLS can let a delegatee see a
   // task delegated to them even when they don't own it or follow the client.
   delegated_to: [...new Set(t.subtasks.map((s) => s.assigneeId).filter((id): id is string => !!id && id !== t.assigneeId))],
@@ -75,6 +79,7 @@ export const rowToTask = (r: any): Task => ({
   ghlTaskId: r.ghl_task_id, labelIds: r.label_ids ?? [], subtasks: r.subtasks ?? [],
   attachments: r.attachments ?? [], comments: r.comments ?? [], createdAt: r.created_at ?? new Date().toISOString(),
   private: r.is_private ?? false,
+  stageId: r.stage_id ?? null,
 });
 
 const notifToRow = (n: Notification) => ({ id: n.id, recipient_id: n.recipientId, text: n.text, task_id: n.taskId, actor_id: n.actorId ?? null, client_id: n.clientId ?? null, project_id: n.projectId ?? null, at: n.at, read: n.read, kind: n.kind ?? "activity" });
@@ -147,7 +152,7 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true) 
 }
 
 export async function fetchAll() {
-  const [c, ct, p, t, n, cl, cn, m, tr, tt, vf, fd, um] = await Promise.all([
+  const [c, ct, p, t, n, cl, cn, m, tr, tt, vf, fd, um, sg] = await Promise.all([
     fetchAllRows("clients", "created_at"),
     fetchAllRows("contacts"),
     fetchAllRows("projects"),
@@ -164,6 +169,7 @@ export async function fetchAll() {
     fetchAllRows("vault_folders", "created_at"),
     fetchAllRows("folders", "position"),
     fetchAllRows("inbound_unmatched", "created_at", false),
+    fetchAllRows("stages", "position"),
   ]);
   // NB: `projects` stays in the hard-fail set — its new folder_id/position
   // columns are read via `select *`, which tolerates their absence pre-migration
@@ -178,6 +184,7 @@ export async function fetchAll() {
   if (vf.error) console.warn("[db] vault_folders unavailable — run supabase/vault-folders.sql", vf.error.message);
   if (fd.error) console.warn("[db] folders unavailable — run supabase/folders.sql", fd.error.message);
   if (um.error) console.warn("[db] inbound_unmatched unavailable — run supabase/inbound-unmatched.sql", um.error.message);
+  if (sg.error) console.warn("[db] stages unavailable — run supabase/stages.sql", sg.error.message);
   return {
     clients: (c.data ?? []).map(rowToClient),
     contacts: (ct.data ?? []).map(rowToContact),
@@ -192,6 +199,7 @@ export async function fetchAll() {
     vaultFolders: vf.error ? [] : (vf.data ?? []).map(rowToVaultFolder),
     folders: fd.error ? [] : (fd.data ?? []).map(rowToFolder),
     unmatchedEmails: um.error ? [] : (um.data ?? []).filter((r: any) => !r.handled).map(rowToUnmatched),
+    stages: sg.error ? [] : (sg.data ?? []).map(rowToStage),
   };
 }
 
@@ -251,6 +259,8 @@ export const upsertVaultFolder = (f: VaultFolder) => supabase.from("vault_folder
 export const deleteVaultFolderDb = (id: string) => supabase.from("vault_folders").delete().eq("id", id).then(logErr);
 export const upsertFolder = (f: Folder) => supabase.from("folders").upsert(folderToRow(f)).then(logErr);
 export const deleteFolderDb = (id: string) => supabase.from("folders").delete().eq("id", id).then(logErr);
+export const upsertStage = (s: Stage) => supabase.from("stages").upsert(stageToRow(s)).then(logErr);
+export const deleteStageDb = (id: string) => supabase.from("stages").delete().eq("id", id).then(logErr);
 // Messages are append-only (never edited), so insert not upsert. The caller
 // awaits the GHL send first (see Cockpit.tsx sendMessage) and only inserts an
 // outbound row after a confirmed success; this call itself is still
