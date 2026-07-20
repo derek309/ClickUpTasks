@@ -13,7 +13,7 @@ import { I, Avatar, LabelChips, COL_WIDTHS, LIST_COLUMNS } from "./ui";
 
 // --- grouped list view (ClickUp-style: group, quick-add, expandable subtasks) --
 
-export function GroupedList({ groups, showClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onDeleteSub, onAddComment, hideEmpty, highlightDelegateFor, queuedIds, onDropInGroup, colOrder, onReorderCols, selectedIds, onToggleSelect }: {
+export function GroupedList({ groups, showClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onDeleteSub, onAddComment, hideEmpty, highlightDelegateFor, queuedIds, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect }: {
   groups: { key: string; label: string; color: string; tasks: Task[] }[];
   showClient: boolean; clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null;
   visibleCols: string[]; sortKey: string; sortDir: "asc" | "desc"; onSort: (key: string) => void;
@@ -25,6 +25,11 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   // meaningful for groupBy dimensions the caller knows how to translate back
   // into a task patch (priority/status), so this is opt-in per render.
   onDropInGroup?: (taskId: string, groupKey: string) => void;
+  // When set, dropping one task row directly onto another merges the
+  // dragged task into the one it was dropped on (see Cockpit.tsx's
+  // requestMerge) — independent of onDropInGroup/groupBy, so it works in
+  // every grouping, not just status/priority.
+  onMergeTasks?: (sourceTaskId: string, targetTaskId: string) => void;
   // Manual column order (all LIST_COLUMNS keys, any order) + its setter —
   // when both are given, column headers become draggable to reorder.
   colOrder?: string[]; onReorderCols?: (keys: string[]) => void;
@@ -41,6 +46,7 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   const [dragTaskId, setDragTaskId] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [dragColKey, setDragColKey] = useState<string | null>(null);
+  const [dragOverTaskId, setDragOverTaskId] = useState<string | null>(null);
 
   const filteredGroups = hideEmpty ? groups.filter((g) => g.tasks.length > 0) : groups;
   // hideEmpty must never hide the only way to add a first task — if filtering
@@ -109,7 +115,11 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
                   {g.tasks.map((t) => (
                     <TaskRow key={t.id} task={t} template={template} cols={cols} showClient={showClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} onAddComment={onAddComment} delegated={!!highlightDelegateFor && t.assigneeId !== highlightDelegateFor && t.subtasks.some((s) => s.assigneeId === highlightDelegateFor)} queued={!!queuedIds?.has(t.id)}
                       selected={!!selectedIds?.has(t.id)} onToggleSelect={onToggleSelect ? () => onToggleSelect(t.id) : undefined}
-                      draggable={!!onDropInGroup} onDragStart={() => setDragTaskId(t.id)} onDragEnd={() => { setDragTaskId(null); setDragOverKey(null); }}
+                      draggable={!!onDropInGroup || !!onMergeTasks} onDragStart={() => setDragTaskId(t.id)} onDragEnd={() => { setDragTaskId(null); setDragOverKey(null); setDragOverTaskId(null); }}
+                      isMergeDropTarget={dragOverTaskId === t.id}
+                      onRowDragOver={onMergeTasks && dragTaskId && dragTaskId !== t.id ? () => setDragOverTaskId(t.id) : undefined}
+                      onRowDragLeave={onMergeTasks ? () => setDragOverTaskId((k) => (k === t.id ? null : k)) : undefined}
+                      onRowDrop={onMergeTasks ? () => { if (dragTaskId && dragTaskId !== t.id) onMergeTasks(dragTaskId, t.id); setDragTaskId(null); setDragOverTaskId(null); } : undefined}
                       expanded={expanded.has(t.id)} onToggleExpand={() => toggle(t.id)} onToggleSub={onToggleSub} onAddSub={onAddSub} onDeleteSub={onDeleteSub}
                       subDraft={subDraft[t.id] ?? ""} setSubDraft={(v) => setSubDraft((s) => ({ ...s, [t.id]: v }))} />
                   ))}
@@ -133,11 +143,14 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   );
 }
 
-function TaskRow({ task, template, cols, showClient, clientById, projectById, contactById, onOpen, onPatch, onAddComment, delegated, queued, selected, onToggleSelect, draggable, onDragStart, onDragEnd, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
+function TaskRow({ task, template, cols, showClient, clientById, projectById, contactById, onOpen, onPatch, onAddComment, delegated, queued, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
   task: Task; template: string; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void; onAddComment: (taskId: string, body: string) => void; delegated?: boolean; queued?: boolean;
   selected?: boolean; onToggleSelect?: () => void;
   draggable?: boolean; onDragStart?: () => void; onDragEnd?: () => void;
+  // Drop-onto-this-row-to-merge — independent of the drag-to-reorder-groups
+  // above, so a row can be both a drag source and a merge target at once.
+  isMergeDropTarget?: boolean; onRowDragOver?: () => void; onRowDragLeave?: () => void; onRowDrop?: () => void;
   expanded: boolean; onToggleExpand: () => void; onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void; onDeleteSub: (taskId: string, subId: string) => void;
   subDraft: string; setSubDraft: (v: string) => void;
 }) {
@@ -159,7 +172,10 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
   return (
     <>
       <div draggable={draggable} onDragStart={onDragStart} onDragEnd={onDragEnd}
-        className={`group/tr flex flex-col gap-1.5 border-b px-4 py-3 transition-colors last:border-0 hover:bg-accent-soft/50 sm:grid sm:min-h-[46px] sm:items-center sm:gap-2 sm:py-2 ${delegated ? "border-l-[3px] border-l-accent bg-accent-soft/30" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`} style={{ gridTemplateColumns: template }}>
+        onDragOver={(e) => { if (onRowDragOver) { e.preventDefault(); onRowDragOver(); } }}
+        onDragLeave={onRowDragLeave}
+        onDrop={(e) => { if (onRowDrop) { e.preventDefault(); onRowDrop(); } }}
+        className={`group/tr flex flex-col gap-1.5 border-b px-4 py-3 transition-colors last:border-0 hover:bg-accent-soft/50 sm:grid sm:min-h-[46px] sm:items-center sm:gap-2 sm:py-2 ${delegated ? "border-l-[3px] border-l-accent bg-accent-soft/30" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${isMergeDropTarget ? "ring-2 ring-inset ring-accent" : ""}`} style={{ gridTemplateColumns: template }}>
         <div className="flex min-w-0 items-center gap-0.5">
           {onToggleSelect && (
             <button onClick={(e) => { e.stopPropagation(); onToggleSelect(); }} title="Select"

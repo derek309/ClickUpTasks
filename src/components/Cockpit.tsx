@@ -260,7 +260,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
   const [promptDialog, setPromptDialog] = useState<PromptSpec | null>(null);
   // Id of the Conversation task currently being merged elsewhere — drives
-  // the target-task picker modal (see mergeConversationIntoTask).
+  // the target-task picker modal (see requestMerge/mergeTasks).
   const [mergeSourceId, setMergeSourceId] = useState<string | null>(null);
 
   // Client ordering: star to pin, sort mode (used by the Clients directory).
@@ -2292,18 +2292,21 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     ids.forEach((id) => moveTaskToClient(id, clientId, true));
     pushToast(`Moved ${ids.length} task${ids.length === 1 ? "" : "s"} to ${clientById(clientId)?.name ?? "client"}`);
   };
-  // Folds a Conversation-priority task into an existing task someone
-  // actually picks — this contact's messages move onto the target and the
-  // conversation task disappears, instead of an open interaction thread
-  // living on forever as its own top-tier item once it's really about a
-  // specific piece of work. mergeSourceId (below) drives the picker modal.
-  const mergeConversationIntoTask = (sourceId: string, targetId: string) => {
+  // Folds one task into another — started life as "merge a Conversation task
+  // into real work" but the mechanics (move messages, fold comments, delete
+  // the source) apply to any two tasks, so it's now a general merge, driven
+  // three ways: the picker modal (mergeSourceId), dragging one row onto
+  // another (GroupedList's onMergeTasks), or checking exactly 2 and using
+  // the bulk-action bar's Merge button. Always go through requestMerge below
+  // — never call this directly — so every path gets the same confirmation.
+  const mergeTasks = (sourceId: string, targetId: string) => {
     const src = tasks.find((t) => t.id === sourceId);
     const target = tasks.find((t) => t.id === targetId);
     if (!src || !target || src.id === target.id) return;
-    // A Conversation task is auto-managed and normally carries no comments
-    // (see ghlConversationTask.ts) — but if someone did type a note on it,
-    // fold it into the target rather than silently losing it on delete.
+    if (src.clientId !== target.clientId) { pushToast("Can't merge tasks across different clients."); return; }
+    // Comments aren't lost on delete — folded into the target in
+    // chronological order. A Conversation task is auto-managed and normally
+    // carries none (see ghlConversationTask.ts) unless someone typed a note.
     if (src.comments.length) {
       const merged = [...target.comments, ...src.comments].sort((a, b) => a.at.localeCompare(b.at));
       update(targetId, { comments: merged });
@@ -2315,6 +2318,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setOpenTaskId((id) => (id === sourceId ? targetId : id));
     deleteTaskDb(sourceId);
     pushToast(`Merged into "${target.title}"`);
+  };
+  // This can't be undone (the source task is deleted), so every entry point
+  // routes through this confirmation instead of calling mergeTasks directly.
+  const requestMerge = (sourceId: string, targetId: string) => {
+    const src = tasks.find((t) => t.id === sourceId);
+    const target = tasks.find((t) => t.id === targetId);
+    if (!src || !target || src.id === target.id) return;
+    setConfirmDialog({
+      title: `Merge "${src.title}" into "${target.title}"?`,
+      message: "Its messages and any notes move onto that task, and this one is removed. This can't be undone.",
+      confirmLabel: "Merge",
+      danger: true,
+      onConfirm: () => { setConfirmDialog(null); clearSelection(); mergeTasks(sourceId, targetId); },
+    });
   };
   const renameProject = (id: string) => {
     const p = projectById(id);
@@ -3182,7 +3199,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               onCreateStage={() => createStage(activeProject)} onRenameStage={renameStage} onToggleStageIsDone={toggleStageIsDone} onDeleteStage={deleteStage}
               onReorderStages={(ids) => reorderStages(activeProject, ids)} />
           ) : (
-            <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} queuedIds={claudeQueue} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
+            <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} queuedIds={claudeQueue} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
           )}
           </>
         )}
@@ -3196,6 +3213,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ priority: e.target.value as Priority }); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Priority…</option>{PRIORITY_ORDER.filter(isManuallyAssignable).map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}</select>
           <input type="date" onChange={(e) => { if (e.target.value) { bulkPatch({ due: e.target.value }); e.target.value = ""; } }} title="Due date" className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none" />
           <select defaultValue="" onChange={(e) => { if (e.target.value) bulkMoveToClient(e.target.value); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Move to…</option>{[...clientList].sort((a, b) => a.name.localeCompare(b.name)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+          {selectedTaskIds.size === 2 && (() => {
+            // The older task is the "keeper" (target); the newer one merges
+            // into it — no separate picker needed for exactly-2 selected.
+            const [a, b] = [...selectedTaskIds].map((id) => tasks.find((t) => t.id === id)).filter((t): t is Task => !!t);
+            if (!a || !b) return null;
+            const [target, source] = a.createdAt <= b.createdAt ? [a, b] : [b, a];
+            return (
+              <button onClick={() => requestMerge(source.id, target.id)} title={`Merge "${source.title}" into "${target.title}"`}
+                className="rounded-md border px-2.5 py-1 text-[15px] font-medium hover:bg-background">Merge</button>
+            );
+          })()}
           <button onClick={clearSelection} className="rounded-md border px-2.5 py-1 text-[15px] font-medium hover:bg-background">Clear</button>
         </div>
       )}
@@ -3238,7 +3266,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           .map((t) => ({ id: t.id, title: t.title, status: t.status }));
         return (
           <MergeTaskModal sourceTitle={src.title} candidates={candidates}
-            onSubmit={(targetId) => { mergeConversationIntoTask(mergeSourceId, targetId); setMergeSourceId(null); }}
+            onSubmit={(targetId) => { setMergeSourceId(null); requestMerge(mergeSourceId, targetId); }}
             onCancel={() => setMergeSourceId(null)} />
         );
       })()}
