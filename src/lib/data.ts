@@ -962,6 +962,17 @@ export const seedNotifications: Notification[] = [
   { id: "n_2", recipientId: "u_derek", text: "James Okoro completed “Map intake questions to custom fields”", taskId: "t_6", at: "3d ago", read: true },
 ];
 
+/** One message in the workspace-wide Team Chat — internal team talk that
+ * isn't tied to any client or project (see supabase/team-chat.sql). Deliberately
+ * not modeled on ClientNote/Message: no clientId/projectId, no channel, no
+ * attachments in v1 — a plain flat feed for "who's covering X today"-style talk. */
+export interface TeamMessage {
+  id: string;
+  authorId: string;
+  body: string;
+  at: string;
+}
+
 // --- Lookups (bound at runtime to live state via the helpers below) ---------
 
 export const userById = (id: string | null) => users.find((u) => u.id === id) ?? null;

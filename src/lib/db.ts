@@ -27,6 +27,7 @@ import {
   type Territory,
   type TaskTemplate,
   type Priority,
+  type TeamMessage,
   titleCase,
   PRIORITY_META,
 } from "./data";
@@ -92,6 +93,9 @@ const rowToClientLink = (r: any): ClientLink => ({ id: r.id, clientId: r.client_
 const clientNoteToRow = (n: ClientNote) => ({ id: n.id, client_id: n.clientId, project_id: n.projectId ?? null, type: n.type, body: n.body, author_id: n.authorId, created_at: n.at, attachments: n.attachments ?? [] });
 export const rowToClientNote = (r: any): ClientNote => ({ id: r.id, clientId: r.client_id, projectId: r.project_id ?? null, type: (r.type as NoteType) ?? "note", body: r.body ?? "", authorId: r.author_id, at: r.created_at, attachments: r.attachments ?? [] });
 
+const teamMessageToRow = (m: TeamMessage) => ({ id: m.id, author_id: m.authorId, body: m.body, created_at: m.at });
+export const rowToTeamMessage = (r: any): TeamMessage => ({ id: r.id, authorId: r.author_id, body: r.body ?? "", at: r.created_at });
+
 const vaultFolderToRow = (f: VaultFolder) => ({ id: f.id, client_id: f.clientId, project_id: f.projectId, name: f.name, created_at: f.createdAt });
 const rowToVaultFolder = (r: any): VaultFolder => ({ id: r.id, clientId: r.client_id, projectId: r.project_id ?? null, name: r.name, createdAt: r.created_at });
 
@@ -152,7 +156,7 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true) 
 }
 
 export async function fetchAll() {
-  const [c, ct, p, t, n, cl, cn, m, tr, tt, vf, fd, um, sg] = await Promise.all([
+  const [c, ct, p, t, n, cl, cn, m, tr, tt, vf, fd, um, sg, tm] = await Promise.all([
     fetchAllRows("clients", "created_at"),
     fetchAllRows("contacts"),
     fetchAllRows("projects"),
@@ -170,6 +174,7 @@ export async function fetchAll() {
     fetchAllRows("folders", "position"),
     fetchAllRows("inbound_unmatched", "created_at", false),
     fetchAllRows("stages", "position"),
+    fetchAllRows("team_messages", "created_at", false),
   ]);
   // NB: `projects` stays in the hard-fail set — its new folder_id/position
   // columns are read via `select *`, which tolerates their absence pre-migration
@@ -185,6 +190,7 @@ export async function fetchAll() {
   if (fd.error) console.warn("[db] folders unavailable — run supabase/folders.sql", fd.error.message);
   if (um.error) console.warn("[db] inbound_unmatched unavailable — run supabase/inbound-unmatched.sql", um.error.message);
   if (sg.error) console.warn("[db] stages unavailable — run supabase/stages.sql", sg.error.message);
+  if (tm.error) console.warn("[db] team_messages unavailable — run supabase/team-chat.sql", tm.error.message);
   return {
     clients: (c.data ?? []).map(rowToClient),
     contacts: (ct.data ?? []).map(rowToContact),
@@ -200,6 +206,7 @@ export async function fetchAll() {
     folders: fd.error ? [] : (fd.data ?? []).map(rowToFolder),
     unmatchedEmails: um.error ? [] : (um.data ?? []).filter((r: any) => !r.handled).map(rowToUnmatched),
     stages: sg.error ? [] : (sg.data ?? []).map(rowToStage),
+    teamMessages: tm.error ? [] : (tm.data ?? []).map(rowToTeamMessage),
   };
 }
 
@@ -255,6 +262,8 @@ export const deleteTerritoryDb = (id: string) => supabase.from("territories").de
 export const upsertTaskTemplate = (t: TaskTemplate) => supabase.from("task_templates").upsert(taskTemplateToRow(t)).then(logErr);
 export const deleteTaskTemplateDb = (id: string) => supabase.from("task_templates").delete().eq("id", id).then(logErr);
 export const deleteClientNoteDb = (id: string) => supabase.from("client_notes").delete().eq("id", id).then(logErr);
+export const insertTeamMessage = (m: TeamMessage) => supabase.from("team_messages").insert(teamMessageToRow(m)).then(logErr);
+export const deleteTeamMessageDb = (id: string) => supabase.from("team_messages").delete().eq("id", id).then(logErr);
 export const upsertVaultFolder = (f: VaultFolder) => supabase.from("vault_folders").upsert(vaultFolderToRow(f)).then(logErr);
 export const deleteVaultFolderDb = (id: string) => supabase.from("vault_folders").delete().eq("id", id).then(logErr);
 export const upsertFolder = (f: Folder) => supabase.from("folders").upsert(folderToRow(f)).then(logErr);

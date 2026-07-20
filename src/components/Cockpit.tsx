@@ -55,15 +55,17 @@ import {
   type VaultFolder,
   type Folder,
   type Stage,
+  type TeamMessage,
   PERSONAL_CLIENT_ID,
   WORKSPACE_CLIENT_ID,
   PERSONAL_PROJECT_ID,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, markMessagesReadDb, insertMessage, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, markMessagesReadDb, insertMessage, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import { Inbox } from "./cockpit/Inbox";
 import SettingsHub from "./SettingsHub";
+import TeamChat from "./TeamChat";
 import AddClientModal from "./AddClientModal";
 import TerritoryPanel from "./TerritoryPanel";
 
@@ -193,6 +195,28 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   const [bellOpen, setBellOpen] = useState(false);
   const [settingsHubOpen, setSettingsHubOpen] = useState(false);
+  // Team Chat — an always-reachable overlay (same shape as SettingsHub), not
+  // a "view" competing with My Work/Personal/etc. — it's internal team talk,
+  // not tied to any client/project, so it doesn't belong in that state machine.
+  const [teamMessages, setTeamMessages] = useState<TeamMessage[]>([]);
+  const [teamChatOpen, setTeamChatOpen] = useState(false);
+  // Per-user "last seen" timestamp for the unread dot — local-only, same
+  // idiom as cut_starred/cut_sidebarHidden (no server-side read-state needed
+  // for a lightweight badge).
+  const [teamChatLastRead, setTeamChatLastRead] = useState<string>("");
+  // One-time localStorage hydration on mount — same accepted pattern as
+  // ClientJournal's composerW / TaskDrawer's activityW/siblingsCollapsed
+  // (already tolerated elsewhere in this file), not a new class of issue.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { try { setTeamChatLastRead(localStorage.getItem("cut_teamChatLastRead") ?? ""); } catch {} }, []);
+  const openTeamChat = () => {
+    setTeamChatOpen(true);
+    setSidebarOpen(false);
+    const now = new Date().toISOString();
+    setTeamChatLastRead(now);
+    try { localStorage.setItem("cut_teamChatLastRead", now); } catch {}
+  };
+  const teamChatUnread = teamMessages.some((m) => m.authorId !== me.id && m.at > teamChatLastRead);
   const [addClientOpen, setAddClientOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   // Draggable quick-add FAB position (viewport px of its top-left). null =
@@ -620,6 +644,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setVaultFolders(d.vaultFolders);
         setFolders(d.folders);
         setStages(d.stages);
+        setTeamMessages(d.teamMessages);
         setUnmatchedEmails(d.unmatchedEmails);
         fetchClaudeQueue().then((ids) => setClaudeQueue(new Set(ids)));
       } catch (e) {
@@ -737,6 +762,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         const n = rowToClientNote(p.new);
         setClientNotes((ns) => (ns.some((x) => x.id === n.id) ? ns.map((x) => (x.id === n.id ? n : x)) : [n, ...ns]));
       },
+      // Same reasoning as messages/client_notes: append-only, so id dedup covers it.
+      onTeamMessage: (p) => {
+        if (p.eventType === "DELETE") {
+          const id = (p.old as { id: string }).id;
+          setTeamMessages((ms) => ms.filter((m) => m.id !== id));
+          return;
+        }
+        const m = rowToTeamMessage(p.new);
+        setTeamMessages((ms) => (ms.some((x) => x.id === m.id) ? ms.map((x) => (x.id === m.id ? m : x)) : [...ms, m]));
+      },
       onStatusChange: (s) => { if (s === "CHANNEL_ERROR") pushToast("⚠️ Live updates interrupted — reconnecting…"); },
     });
     return unsub;
@@ -779,6 +814,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setVaultFolders((prev) => mergeById(prev, d.vaultFolders));
         setFolders((prev) => mergeById(prev, d.folders));
         setStages((prev) => mergeById(prev, d.stages));
+        setTeamMessages((prev) => mergeById(prev, d.teamMessages));
       } catch (e) { console.warn("[realtime] visibility refetch failed", e); }
     };
     document.addEventListener("visibilitychange", refetch);
@@ -786,13 +822,34 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return () => { document.removeEventListener("visibilitychange", refetch); window.removeEventListener("focus", refetch); };
   }, []);
 
+  // Best-effort email companion to ANY in-app notification — the bell above
+  // already fired, so a failure here (Google not configured, non-Workspace
+  // sender, send error) is swallowed rather than surfaced. Generic version of
+  // the older mention-only path (see sendMentionEmail below, which still
+  // covers the one case — task-comment mentions — that has a richer,
+  // quoted-comment email of its own).
+  const sendNotificationEmail = (recipientMemberId: string, subject: string, link?: string) => {
+    authedFetch("/api/notifications/email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ recipientMemberId, subject, link }),
+    }).catch(() => {});
+  };
+
   // kind defaults to "activity" (automatic side-effect notice) — call sites
   // for a direct human communication (an @mention or comment) pass
   // kind: "message" explicitly, so the Inbox can filter the two apart.
-  const notify = (recipientId: string, text: string, taskId: string | null, extra?: { clientId?: string | null; projectId?: string | null; kind?: NotificationKind }) => {
+  // skipEmail is set only by the one call site that already fires its own
+  // richer, quoted-comment email (sendMentionEmail, task-comment mentions) —
+  // every other notification gets this plain generic email automatically.
+  const notify = (recipientId: string, text: string, taskId: string | null, extra?: { clientId?: string | null; projectId?: string | null; kind?: NotificationKind; skipEmail?: boolean }) => {
     const n: Notification = { id: newId("n_"), recipientId, text, taskId, actorId: me.id, clientId: extra?.clientId ?? null, projectId: extra?.projectId ?? null, at: new Date().toISOString(), read: false, kind: extra?.kind ?? "activity" };
     setNotifications((ns) => [n, ...ns]);
     insertNotif(n);
+    if (!extra?.skipEmail) {
+      const link = taskId ? `?task=${encodeURIComponent(taskId)}` : extra?.clientId ? `?client=${encodeURIComponent(extra.clientId)}` : undefined;
+      sendNotificationEmail(recipientId, text, link);
+    }
   };
 
   // Best-effort email companion to an @mention notification — the in-app
@@ -1627,7 +1684,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     users.forEach((u) => {
       if (u.id !== me.id && body.includes("@" + u.name)) {
         mentioned.add(u.id);
-        notify(u.id, `${me.name} mentioned you in “${t.title}”`, id, { kind: "message" });
+        notify(u.id, `${me.name} mentioned you in “${t.title}”`, id, { kind: "message", skipEmail: true });
         pushToast(`Notified ${u.name}`);
         sendMentionEmail(u.id, id, t.title, body.trim());
       }
@@ -2282,6 +2339,24 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     reordered.forEach((l) => upsertClientLink(l));
   };
 
+  // --- team chat -----------------------------------------------------------
+  // Workspace-wide, not tied to any client/project — see supabase/team-chat.sql.
+  const sendTeamMessage = (body: string) => {
+    if (!body.trim()) return;
+    const m: TeamMessage = { id: newId("tm_"), authorId: me.id, body: body.trim(), at: new Date().toISOString() };
+    setTeamMessages((ms) => [...ms, m]);
+    insertTeamMessage(m);
+    // Plain-text @mention detection, same idiom as client-notes' chat mentions
+    // (no autocomplete dropdown — see addNote below) — links to Team Chat itself.
+    users.forEach((u) => {
+      if (u.id !== me.id && body.includes("@" + u.name)) notify(u.id, `${me.name} mentioned you in Team Chat`, null, { kind: "message" });
+    });
+  };
+  const deleteTeamMessage = (id: string) => {
+    setTeamMessages((ms) => ms.filter((m) => m.id !== id));
+    deleteTeamMessageDb(id);
+  };
+
   // --- client notes ------------------------------------------------------
   const addNote = (clientId: string, type: NoteType, body: string, projectId?: string | null, attachments?: Attachment[]) => {
     const note: ClientNote = { id: newId("cn_"), clientId, projectId: projectId ?? null, type, body, authorId: me.id, at: new Date().toISOString(), ...(attachments?.length ? { attachments } : {}) };
@@ -2484,6 +2559,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         <div className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
           <span className="inline-flex shrink-0 items-center justify-center rounded-full text-[15px] font-semibold text-white" style={{ width: 30, height: 30, background: me.color }}>{me.initials}</span>
           <div className="min-w-0 flex-1 leading-tight"><div className="truncate text-[15px] font-medium">{me.name}</div><div className="text-[13px] capitalize text-muted">{me.role}</div></div>
+          <button onClick={openTeamChat} title="Team Chat" className="relative rounded-lg border p-1.5 text-muted hover:text-foreground">
+            <I.comment />
+            {teamChatUnread && <span className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-accent" />}
+          </button>
           <button onClick={() => { setSettingsHubOpen(true); setSidebarOpen(false); }} title="Settings" className="rounded-lg border p-1.5 text-muted hover:text-foreground"><I.gear /></button>
           <button onClick={toggleTheme} title="Toggle theme" className="rounded-lg border p-1.5 text-muted hover:text-foreground">{theme === "light" ? <I.moon /> : <I.sun />}</button>
           <button onClick={onSignOut} title="Sign out" className="rounded-lg border p-1.5 text-muted hover:text-red-500"><I.logout /></button>
@@ -3116,6 +3195,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           templates={taskTemplates} projects={projects}
           onSaveTemplate={saveTemplate} onDeleteTemplate={deleteTemplate} onUseTemplateAsTask={useTemplateAsTask}
         />
+      )}
+      {teamChatOpen && (
+        <TeamChat me={me} messages={teamMessages} onSend={sendTeamMessage} onDelete={deleteTeamMessage} onClose={() => setTeamChatOpen(false)} />
       )}
       {addClientOpen && <AddClientModal subAccounts={subAccounts} contacts={contacts} existingIds={new Set(clients.map((c) => c.id))} onAdd={addClientContact} onClose={() => setAddClientOpen(false)} />}
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
