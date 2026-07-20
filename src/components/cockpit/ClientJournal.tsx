@@ -535,7 +535,8 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
             )}
           </div>
           {composeMode === "note" ? (
-            <div className="flex min-h-0 flex-1 flex-col p-3">
+            <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files.length) handleNoteFiles(e.dataTransfer.files); }}
+              className="flex min-h-0 flex-1 flex-col p-3">
               <select value={draftType} onChange={(e) => setDraftType(e.target.value as NoteType)}
                 className="mb-2 shrink-0 rounded-md border bg-background px-1.5 py-1.5 text-[13px] outline-none">
                 {MANUAL_NOTE_TYPES.map((t) => (<option key={t} value={t}>{NOTE_TYPE_META[t].label}</option>))}
@@ -558,7 +559,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                 )}
                 <textarea value={draft} onChange={(e) => setDraft(e.target.value)} onPaste={handlePaste}
                   onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !(mentionMatch && mentionCands.length)) { e.preventDefault(); submit(); } }}
-                  placeholder="Message the team… (Enter to send, Shift+Enter for a new line, type @ to mention, paste to attach an image). Or add just a link/file below."
+                  placeholder="Message the team… (Enter to send, Shift+Enter for a new line, type @ to mention, paste or drop a file to attach). Or add just a link below."
                   className="h-full min-h-[160px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
               </div>
               {linkOpen && (
