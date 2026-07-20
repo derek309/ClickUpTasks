@@ -8,6 +8,7 @@
 import { useState } from "react";
 import { users, clientStatusMeta, normalizeState, type Me, type Territory, type Contact, type Client } from "@/lib/data";
 import { I, Avatar } from "./cockpit/ui";
+import TerritoryDirectory from "./cockpit/TerritoryDirectory";
 
 export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onDeleteTerritory, onAddContact, onOpenClient, focusId }: {
   me: Me; canAdmin: boolean;
@@ -108,7 +109,7 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                   <I.flag className="shrink-0 text-accent" />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[15px] font-medium">{t.name}</div>
-                    <div className="truncate text-[13px] text-muted">{t.city}, {t.state} · {claimed.length} claimed · {unclaimed.length} unclaimed</div>
+                    <div className="truncate text-[13px] text-muted">{t.city}, {t.state} · {claimed.length} client{claimed.length === 1 ? "" : "s"} · {unclaimed.length} contact{unclaimed.length === 1 ? "" : "s"}</div>
                   </div>
                   <span className="relative flex shrink-0 items-center" onClick={(e) => e.stopPropagation()}>
                     {(t.assignedTo ?? []).length > 0 ? (
@@ -143,7 +144,12 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                     <span onClick={(e) => { e.stopPropagation(); onDeleteTerritory(t.id); }} title="Delete territory" className="shrink-0 rounded p-1 text-muted hover:bg-background hover:text-danger"><I.trash /></span>
                   )}
                 </button>
-                {open && (
+                {open && focusId && (
+                  <div className="border-t px-3 py-3">
+                    <TerritoryDirectory city={t.city} state={t.state} contacts={matched} clients={clients} onAddContact={onAddContact} onOpenClient={onOpenClient} />
+                  </div>
+                )}
+                {open && !focusId && (
                   <div className="space-y-1 border-t px-3 py-2">
                     {matched.length === 0 && <div className="py-3 text-center text-[13px] text-muted">No synced GoHighLevel contacts match {t.city}, {t.state} yet.</div>}
                     {unclaimed.map((c) => (

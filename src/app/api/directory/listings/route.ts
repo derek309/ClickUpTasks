@@ -1,0 +1,71 @@
+import { NextRequest, NextResponse } from "next/server";
+import { requireUser } from "@/lib/serverAuth";
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+// Proxy the ClickUpLocal WordPress directory (GeoDirectory) into the task app
+// so the territory/city view can show a business's real directory listing
+// status the same way the /sales field tool does: claimed vs unclaimed,
+// CUL score, category. Live-fetched per city (no local copy) — the directory
+// is the source of truth, and an ambassador opening a city wants it current.
+//
+// Auth: the caller must be a signed-in task-app user (requireUser). The shared
+// server-to-server key to WordPress (CLICKUPTASKS_API_KEY, sent as the
+// X-ClickUpTasks-Key header that cul_sales_user_can() already accepts) stays
+// server-side and is never exposed to the browser. Returns 501 when the two
+// env vars aren't configured, so the feature degrades cleanly before setup.
+
+const WP_BASE = process.env.CUL_WP_BASE_URL || "";      // e.g. https://clickuplocal.com
+const WP_KEY = process.env.CLICKUPTASKS_API_KEY || "";   // shared secret, same value as wp-config
+const configured = Boolean(WP_BASE && WP_KEY);
+
+export async function GET(req: NextRequest) {
+  const caller = await requireUser(req);
+  if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!configured) return NextResponse.json({ error: "Directory not configured", listings: [] }, { status: 501 });
+
+  const { searchParams } = new URL(req.url);
+  const city = (searchParams.get("city") || "").trim();
+  const state = (searchParams.get("state") || "").trim();
+  if (!city) return NextResponse.json({ error: "city is required", listings: [] }, { status: 400 });
+
+  // The WP /sales/listings endpoint filters by city name and returns the
+  // full per-listing payload (title, phone, email, claimed, score, category,
+  // city, street). We ask for a generous page so a whole city comes back in
+  // one call; the directory per city is well within one page.
+  const qs = new URLSearchParams({ city, per_page: "200", orderby: "cul_score", order: "DESC" });
+  const url = `${WP_BASE.replace(/\/$/, "")}/wp-json/cul/v1/sales/listings?${qs.toString()}`;
+
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: { "X-ClickUpTasks-Key": WP_KEY, Accept: "application/json" } });
+  } catch (e: any) {
+    return NextResponse.json({ error: "Directory fetch failed", detail: String(e?.message ?? e), listings: [] }, { status: 502 });
+  }
+  if (!res.ok) {
+    return NextResponse.json({ error: `Directory responded ${res.status}`, listings: [] }, { status: 502 });
+  }
+  const data = await res.json().catch(() => null);
+  const rawItems: any[] = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
+
+  // Optional state narrowing — the WP endpoint filters on city name only, so
+  // when a state is given we drop rows whose region doesn't match (guards the
+  // rare same-named city in two states).
+  const wantState = state.toLowerCase();
+  const listings = rawItems
+    .filter((it) => !wantState || String(it.region ?? it.state ?? "").toLowerCase() === wantState || String(it.region ?? "").trim() === "")
+    .map((it) => ({
+      id: it.id,
+      name: String(it.title ?? ""),
+      phone: String(it.phone ?? ""),
+      email: String(it.email ?? ""),
+      city: String(it.city ?? ""),
+      street: String(it.street ?? ""),
+      claimed: Boolean(it.claimed),
+      hasOffer: Boolean(it.has_offer),
+      score: typeof it.clickuplocal_score === "number" ? it.clickuplocal_score : null,
+      category: String(it.category ?? ""),
+    }));
+
+  return NextResponse.json({ listings, truncated: Boolean(data?.truncated) });
+}
