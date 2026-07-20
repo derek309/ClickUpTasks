@@ -37,8 +37,12 @@ export type DirectoryListing = {
   followupDue: number;  // unix seconds, 0 = none
   lastTouched: number;  // unix seconds, 0 = never
   rep: string;          // assigned ambassador's name (read-only here)
+  ghlContactId: string; // links to the Prospects-pipeline opportunity
   activityLog?: ActivityEntry[]; // loaded on demand / after a touch
 };
+
+export type Stage = { id: string; name: string };
+export type OppRef = { opportunityId: string; stageId: string };
 
 export type ActivityEntry = {
   id: string;
@@ -112,6 +116,39 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
     return () => { alive = false; };
   }, [city, state]);
 
+  // The GHL Prospects pipeline: ordered stages + a contactId → current-stage
+  // map for every opportunity. One fetch per city; each business matches its
+  // stage locally by ghlContactId. Optional — if GHL is unreachable the funnel
+  // control just doesn't render and the rest of the view still works.
+  const [stages, setStages] = useState<Stage[]>([]);
+  const [oppsByContact, setOppsByContact] = useState<Record<string, OppRef>>({});
+  useEffect(() => {
+    let alive = true;
+    authedFetch("/api/directory/pipeline")
+      .then(async (res) => {
+        const body = await res.json().catch(() => ({}));
+        if (!alive) return;
+        setStages(Array.isArray(body.stages) ? body.stages : []);
+        setOppsByContact(body.byContact && typeof body.byContact === "object" ? body.byContact : {});
+      })
+      .catch(() => { /* funnel optional */ });
+    return () => { alive = false; };
+  }, [city, state]);
+
+  const advanceStage = async (contactId: string, stageId: string, name: string) => {
+    if (!contactId) return;
+    const prev = oppsByContact[contactId];
+    setOppsByContact((m) => ({ ...m, [contactId]: { opportunityId: prev?.opportunityId ?? "", stageId } })); // optimistic
+    try {
+      const res = await authedFetch("/api/directory/opportunity", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contactId, stageId, name, opportunityId: prev?.opportunityId }) });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.ok) setOppsByContact((m) => ({ ...m, [contactId]: { opportunityId: data.opportunityId, stageId: data.stageId } }));
+      else throw new Error(data?.error || `Error ${res.status}`);
+    } catch {
+      setOppsByContact((m) => { const n = { ...m }; if (prev) n[contactId] = prev; else delete n[contactId]; return n; }); // revert
+    }
+  };
+
   // Patch one listing in place after a logged touch returns the fresh state
   // from /sales — keeps the funnel accurate without a full refetch.
   const patchListing = (id: number | string, next: Partial<DirectoryListing>) =>
@@ -180,14 +217,14 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
       {/* Unclaimed (prospects) */}
       {(bucket === "all" || bucket === "unclaimed") && counts.unclaimed > 0 && (
         <Section title="Unclaimed" hint="listings nobody has claimed — prospects to call">
-          {sortRows(unclaimed).map((r) => <ListingRow key={r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} onPatch={patchListing} />)}
+          {sortRows(unclaimed).map((r) => <ListingRow key={r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} onPatch={patchListing} stages={stages} currentStageId={oppsByContact[r.listing.ghlContactId]?.stageId} onAdvance={advanceStage} />)}
         </Section>
       )}
 
       {/* Claimed */}
       {(bucket === "all" || bucket === "claimed") && counts.claimed > 0 && (
         <Section title="Claimed" hint="owner has claimed their directory listing">
-          {sortRows(claimed).map((r) => <ListingRow key={r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} onPatch={patchListing} />)}
+          {sortRows(claimed).map((r) => <ListingRow key={r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} onPatch={patchListing} stages={stages} currentStageId={oppsByContact[r.listing.ghlContactId]?.stageId} onAdvance={advanceStage} />)}
         </Section>
       )}
 
@@ -229,11 +266,14 @@ function Section({ title, hint, children }: { title: string; hint: string; child
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, onPatch }: {
+function ListingRow({ row, onAddContact, onOpenClient, onPatch, stages, currentStageId, onAdvance }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
   onOpenClient: (id: string) => void;
   onPatch: (id: number | string, next: Partial<DirectoryListing>) => void;
+  stages: Stage[];
+  currentStageId?: string;
+  onAdvance: (contactId: string, stageId: string, name: string) => void;
 }) {
   const { listing, contact, client } = row;
   const meta = client ? clientStatusMeta(client.status) : null;
@@ -312,6 +352,14 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch }: {
           {listing.category && <span className="text-muted/70"> · {listing.category}</span>}
         </span>
         {typeof listing.score === "number" && <span title="ClickUpLocal score" className="shrink-0 rounded bg-background px-1.5 py-0.5 text-[11px] font-medium text-muted">{listing.score}</span>}
+        {stages.length > 0 && listing.ghlContactId && (
+          <select value={currentStageId ?? ""} onChange={(e) => e.target.value && onAdvance(listing.ghlContactId, e.target.value, listing.name)}
+            title="Sales funnel stage (GHL Prospects pipeline)"
+            className={`shrink-0 rounded-md border px-1.5 py-1 text-[12px] font-medium outline-none focus:border-accent ${currentStageId ? "bg-accent-soft text-accent" : "bg-background text-muted"}`}>
+            <option value="">Set stage…</option>
+            {stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        )}
         {listing.phone && <button onClick={call} disabled={calling} title={`Bridge-call ${listing.phone}`} className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground disabled:opacity-40">{calling ? "…" : "Call"}</button>}
         <button onClick={toggleHistory} title="Outreach history" className={`shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium ${histOpen ? "bg-accent-soft text-accent" : "text-muted hover:bg-surface hover:text-foreground"}`}>History</button>
         <button onClick={() => setLogOpen((o) => !o)} title="Log an outreach touch" className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">Log</button>

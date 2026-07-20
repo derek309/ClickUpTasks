@@ -75,6 +75,7 @@ export async function GET(req: NextRequest) {
       followupDue: typeof it.followup_due === "number" ? it.followup_due : 0,
       lastTouched: typeof it.last_touched === "number" ? it.last_touched : 0,
       rep: String(it.sales_rep?.name ?? ""),  // assigned ambassador (read-only here)
+      ghlContactId: String(it.ghl_contact_id ?? ""), // links to the Prospects-pipeline opportunity
     }));
 
   return NextResponse.json({ listings, truncated: Boolean(data?.truncated) });
