@@ -987,9 +987,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const assignedProjectsFor = (userId: string) => projects.filter((p) => (p.clientId === WORKSPACE_CLIENT_ID || p.clientId === PERSONAL_CLIENT_ID) && (scopedTasks.some((t) => t.projectId === p.id && t.status !== "done" && (t.assigneeId === userId || t.subtasks.some((s) => s.assigneeId === userId))) || (p.assignedTo ?? []).includes(userId)));
   const myAssignedClients = assignedClientsFor(me.id);
   const myTerritories = territories.filter((t) => (t.assignedTo ?? []).includes(me.id));
-  // Cities shown in the sidebar: an admin sees every territory; a teammate sees
-  // only the cities assigned to them. Sorted by city for a stable list.
-  const visibleTerritories = (canAdmin ? territories : myTerritories).slice().sort((a, b) => a.city.localeCompare(b.city));
+  // Cities shown in the sidebar: only the ones assigned to YOU, admin or not
+  // — an admin managing every territory doesn't mean every admin should see
+  // every rep's territory in their own personal nav just by being an admin.
+  // Seeing/assigning the full roster is still available via "Manage
+  // territories" (openTerritory("all"), canAdmin-gated below), which reads
+  // `territories` directly rather than this filtered list. Sorted by city
+  // for a stable list.
+  const visibleTerritories = myTerritories.slice().sort((a, b) => a.city.localeCompare(b.city));
   const territoryById = (id: string) => territories.find((t) => t.id === id) ?? null;
   const openTerritory = (id: string) => {
     setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null);
