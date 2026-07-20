@@ -52,7 +52,11 @@ export async function GET(req: NextRequest) {
   // full per-listing payload (title, phone, email, claimed, score, category,
   // city, street). We ask for a generous page so a whole city comes back in
   // one call; the directory per city is well within one page.
-  const qs = new URLSearchParams({ city, per_page: "200", orderby: "cul_score", order: "DESC" });
+  // light=1: skip WP's per-row full-detail hydration (photos, activity log,
+  // owner PII, etc.) — the light row it already computes for sort/filter has
+  // everything this list view needs. Cuts load time from many seconds to
+  // near-instant for a dense city. See sales-tool.php's cul_sales_rest_list.
+  const qs = new URLSearchParams({ city, per_page: "200", orderby: "cul_score", order: "DESC", light: "1" });
   const url = `${WP_BASE.replace(/\/$/, "")}/wp-json/cul/v1/sales/listings?${qs.toString()}`;
 
   let res: Response;

@@ -2781,18 +2781,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <div className="flex-1 overflow-auto bg-background py-2">
             <TerritoryPanel me={me} canAdmin={canAdmin} territories={territories} contacts={contacts} clients={clients}
               onAddTerritory={addTerritory} onToggleAssignee={toggleTerritoryAssignee} onDeleteTerritory={(id) => { deleteTerritory(id); if (territoryView === id) setTerritoryView("all"); }}
+              // Territory is a working view over what's already in GHL — no
+              // "become a client" ceremony before you can open/journal a
+              // business. Clicking the name is the same immediate action as
+              // "+ Add as client": no confirm, no separate step.
               onAddContact={(c) => addClientContact(c)}
-              // Clicking a prospect's NAME (vs. the explicit "+ Add as
-              // client" button) needs a confirm gate — a stray click (text
-              // selection, misclick on a long list) shouldn't silently
-              // create a client. The button itself stays immediate, since
-              // its label already says exactly what it does.
-              onOpenOrCreateClient={(c) => setConfirmDialog({
-                title: `Start working “${c.name}”?`,
-                message: "Adds them to Clients as a Lead so you can journal and upload files before they're a paying client.",
-                confirmLabel: "Start",
-                onConfirm: () => { setConfirmDialog(null); addClientContact(c); },
-              })}
               onOpenClient={(id) => { setTerritoryView(null); setActiveClient(id); setActiveProject(null); setClientTab("tasks"); }}
               focusId={territoryView === "all" ? undefined : territoryView} />
           </div>
@@ -2911,12 +2904,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           territories={territories} contacts={contacts} clients={clients}
           onAddTerritory={addTerritory} onToggleAssignee={toggleTerritoryAssignee} onDeleteTerritory={deleteTerritory}
           onAddContact={(contact) => addClientContact(contact)}
-          onOpenOrCreateClient={(c) => setConfirmDialog({
-            title: `Start working “${c.name}”?`,
-            message: "Adds them to Clients as a Lead so you can journal and upload files before they're a paying client.",
-            confirmLabel: "Start",
-            onConfirm: () => { setConfirmDialog(null); addClientContact(c); },
-          })}
           onOpenClient={(id) => { setSettingsHubOpen(false); setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); }}
           templates={taskTemplates} projects={projects}
           onSaveTemplate={saveTemplate} onDeleteTemplate={deleteTemplate} onUseTemplateAsTask={useTemplateAsTask}
