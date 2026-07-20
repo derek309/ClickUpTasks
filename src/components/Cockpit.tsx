@@ -944,7 +944,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // matching rowToProject's `?? []`.
   const assignedProjectsFor = (userId: string) => projects.filter((p) => (p.clientId === WORKSPACE_CLIENT_ID || p.clientId === PERSONAL_CLIENT_ID) && (scopedTasks.some((t) => t.projectId === p.id && t.status !== "done" && (t.assigneeId === userId || t.subtasks.some((s) => s.assigneeId === userId))) || (p.assignedTo ?? []).includes(userId)));
   const myAssignedClients = assignedClientsFor(me.id);
-  const myTerritories = territories.filter((t) => t.memberId === me.id);
+  const myTerritories = territories.filter((t) => (t.assignedTo ?? []).includes(me.id));
   // Cities shown in the sidebar: an admin sees every territory; a teammate sees
   // only the cities assigned to them. Sorted by city for a stable list.
   const visibleTerritories = (canAdmin ? territories : myTerritories).slice().sort((a, b) => a.city.localeCompare(b.city));
@@ -1853,15 +1853,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       if (j.company) { const up: Client = { ...c, ghlLocationId: j.company }; setClients((cs) => cs.map((x) => (x.id === id ? up : x))); markOwnClientWrite(up.id); upsertClient(up); }
     } catch { /* business name is optional */ }
   };
-  const addTerritory = (spec: { name: string; city: string; state: string; memberId: string | null }) => {
+  const addTerritory = (spec: { name: string; city: string; state: string; assignedTo: string[] }) => {
     const t: Territory = { id: newId("terr_"), ...spec };
     setTerritories((ts) => [...ts, t]);
     upsertTerritory(t);
   };
-  const assignTerritory = (id: string, memberId: string | null) => {
-    setTerritories((ts) => ts.map((t) => (t.id === id ? { ...t, memberId } : t)));
+  // Toggle a teammate on/off a city's ambassador list — a city can have several.
+  const toggleTerritoryAssignee = (id: string, memberId: string) => {
     const t = territories.find((x) => x.id === id);
-    if (t) upsertTerritory({ ...t, memberId });
+    if (!t) return;
+    const has = (t.assignedTo ?? []).includes(memberId);
+    const nt = { ...t, assignedTo: has ? t.assignedTo.filter((m) => m !== memberId) : [...(t.assignedTo ?? []), memberId] };
+    setTerritories((ts) => ts.map((x) => (x.id === id ? nt : x)));
+    upsertTerritory(nt);
   };
   const deleteTerritory = (id: string) => {
     setTerritories((ts) => ts.filter((t) => t.id !== id));
@@ -2769,7 +2773,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         {territoryView ? (
           <div className="flex-1 overflow-auto bg-background py-2">
             <TerritoryPanel me={me} canAdmin={canAdmin} territories={territories} contacts={contacts} clients={clients}
-              onAddTerritory={addTerritory} onAssignTerritory={assignTerritory} onDeleteTerritory={(id) => { deleteTerritory(id); if (territoryView === id) setTerritoryView("all"); }}
+              onAddTerritory={addTerritory} onToggleAssignee={toggleTerritoryAssignee} onDeleteTerritory={(id) => { deleteTerritory(id); if (territoryView === id) setTerritoryView("all"); }}
               onAddContact={(c) => addClientContact(c)}
               onOpenClient={(id) => { setTerritoryView(null); setActiveClient(id); setActiveProject(null); setClientTab("tasks"); }}
               focusId={territoryView === "all" ? undefined : territoryView} />
@@ -2887,7 +2891,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           onSaveClient={(c) => { setClients((cs) => cs.map((x) => (x.id === c.id ? c : x))); markOwnClientWrite(c.id); upsertClient(c); }}
           onSynced={async () => { try { setContacts(await fetchContacts()); pushToast("Contacts updated from GoHighLevel"); } catch { /* ignore */ } }}
           territories={territories} contacts={contacts} clients={clients}
-          onAddTerritory={addTerritory} onAssignTerritory={assignTerritory} onDeleteTerritory={deleteTerritory}
+          onAddTerritory={addTerritory} onToggleAssignee={toggleTerritoryAssignee} onDeleteTerritory={deleteTerritory}
           onAddContact={(contact) => addClientContact(contact)}
           onOpenClient={(id) => { setSettingsHubOpen(false); setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); }}
           templates={taskTemplates} projects={projects}

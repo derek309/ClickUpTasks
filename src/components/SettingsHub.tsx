@@ -30,7 +30,7 @@ export default function SettingsHub({
   contacts,
   clients,
   onAddTerritory,
-  onAssignTerritory,
+  onToggleAssignee,
   onDeleteTerritory,
   onAddContact,
   onOpenClient,
@@ -51,8 +51,8 @@ export default function SettingsHub({
   territories: Territory[];
   contacts: Contact[];
   clients: Client[];
-  onAddTerritory: (t: { name: string; city: string; state: string; memberId: string | null }) => void;
-  onAssignTerritory: (id: string, memberId: string | null) => void;
+  onAddTerritory: (t: { name: string; city: string; state: string; assignedTo: string[] }) => void;
+  onToggleAssignee: (id: string, memberId: string) => void;
   onDeleteTerritory: (id: string) => void;
   onAddContact: (contact: Contact) => void;
   onOpenClient: (clientId: string) => void;
@@ -98,7 +98,7 @@ export default function SettingsHub({
             {tab === "team" && canAdmin && <TeamPanel me={me} />}
             {tab === "territories" && hasTerritoryAccess && (
               <TerritoryPanel me={me} canAdmin={canAdmin} territories={territories} contacts={contacts} clients={clients}
-                onAddTerritory={onAddTerritory} onAssignTerritory={onAssignTerritory} onDeleteTerritory={onDeleteTerritory}
+                onAddTerritory={onAddTerritory} onToggleAssignee={onToggleAssignee} onDeleteTerritory={onDeleteTerritory}
                 onAddContact={onAddContact} onOpenClient={onOpenClient} />
             )}
             {tab === "templates" && canAdmin && (

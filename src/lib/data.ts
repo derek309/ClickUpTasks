@@ -269,7 +269,7 @@ export interface Territory {
   name: string;
   city: string;
   state: string;
-  memberId: string | null; // roster id of the assigned ambassador; null = unassigned
+  assignedTo: string[]; // roster ids of the assigned ambassadors (one or more; [] = unassigned)
 }
 
 // A reusable checklist, applied either to quick-populate a new task (title
