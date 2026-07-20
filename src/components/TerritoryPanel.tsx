@@ -27,6 +27,7 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
   const [state, setState] = useState("");
   const [assignSet, setAssignSet] = useState<Set<string>>(new Set());
   const [assignMenu, setAssignMenu] = useState<string | null>(null); // territory id whose assignee popover is open
+  const [sort, setSort] = useState<"score" | "name">("score"); // the focused city's business sort — lives here so it can sit on the same header line as the client/contact counts
 
   const scoped = canAdmin ? territories : territories.filter((t) => (t.assignedTo ?? []).includes(me.id));
   const visible = focusId ? scoped.filter((t) => t.id === focusId) : scoped;
@@ -120,7 +121,17 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                     // the scoped counts would duplicate it, so this is one
                     // compact line, not a second stacked title.
                     <span className="min-w-0 flex-1 truncate text-[13px] text-muted">{claimed.length} client{claimed.length === 1 ? "" : "s"} · {unclaimed.length} contact{unclaimed.length === 1 ? "" : "s"}</span>
-                  ) : (
+                  ) : null}
+                  {focusId && (
+                    // The business-list sort control — kept on this same
+                    // header line rather than its own row below.
+                    <span className="inline-flex shrink-0 overflow-hidden rounded-md border text-[12px]" onClick={(e) => e.stopPropagation()}>
+                      {(["score", "name"] as const).map((k) => (
+                        <button key={k} onClick={() => setSort(k)} className={`px-2 py-1 font-medium ${sort === k ? "bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}>{k === "score" ? "Score" : "A–Z"}</button>
+                      ))}
+                    </span>
+                  )}
+                  {!focusId && (
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[15px] font-medium">{t.name}</div>
                       <div className="truncate text-[13px] text-muted">{t.city}, {t.state} · {claimed.length} client{claimed.length === 1 ? "" : "s"} · {unclaimed.length} contact{unclaimed.length === 1 ? "" : "s"}</div>
@@ -160,7 +171,7 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                   )}
                 </HeaderTag>
                 {open && focusId && (
-                  <TerritoryDirectory city={t.city} state={t.state} contacts={matched} clients={clients} onAddContact={onAddContact} onOpenClient={onOpenClient} />
+                  <TerritoryDirectory city={t.city} state={t.state} contacts={matched} clients={clients} onAddContact={onAddContact} onOpenClient={onOpenClient} sort={sort} onSetSort={setSort} />
                 )}
                 {open && !focusId && (
                   <div className="space-y-1 border-t px-3 py-2">

@@ -115,7 +115,7 @@ const listingsCache = new Map<string, ListingsCacheEntry>();
 type PipelineCacheEntry = { stages: Stage[]; byContact: Record<string, OppRef>; at: number };
 let pipelineCache: PipelineCacheEntry | null = null;
 
-export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onOpenClient }: {
+export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onOpenClient, sort, onSetSort }: {
   city: string;
   state: string;
   contacts: Contact[];   // already scoped to this city/state by the caller
@@ -127,6 +127,10 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // create-and-open (as a Lead) if not.
   onAddContact: (contact: Contact) => void;
   onOpenClient: (clientId: string) => void;
+  // Owned by the caller (TerritoryPanel) so the sort control can sit on the
+  // same header line as the client/contact counts instead of its own row.
+  sort: SortKey;
+  onSetSort: (k: SortKey) => void;
 }) {
   const cacheKey = `${city}|${state}`;
   const warm = () => { const c = listingsCache.get(cacheKey); return c && Date.now() - c.at < CACHE_TTL ? c : null; };
@@ -134,7 +138,6 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   const [loading, setLoading] = useState(() => !warm());
   const [err, setErr] = useState<string | null>(null);
   const [notConfigured, setNotConfigured] = useState(() => warm()?.notConfigured ?? false);
-  const [sort, setSort] = useState<SortKey>("score");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggleGroup = (key: string) => setCollapsed((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
 
@@ -260,17 +263,8 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
     <div className="pt-1">
       {/* No extra padding here — the parent (TerritoryPanel) already gives
           the page px-5/py-3, so this only needs a small top gap under its
-          header, not a second full padding block. */}
-      {/* Sort control — mirrors the sort-by affordance GroupedList's caller
-          places above the table; groups themselves collapse individually
-          instead of a separate bucket-filter row. */}
-      <div className="mb-2 flex items-center justify-end">
-        <span className="inline-flex overflow-hidden rounded-md border text-[12px]">
-          {(["score", "name"] as const).map((k) => (
-            <button key={k} onClick={() => setSort(k)} className={`px-2 py-1 font-medium ${sort === k ? "bg-accent-soft text-accent" : "text-muted hover:bg-surface"}`}>{k === "score" ? "Score" : "A–Z"}</button>
-          ))}
-        </span>
-      </div>
+          header, not a second full padding block. The sort control lives in
+          that same header row now (owned by TerritoryPanel), not here. */}
 
       {notConfigured && (
         <div className="mb-2 rounded-lg border border-amber-400/40 bg-amber-50/50 px-3 py-2 text-[12px] text-amber-800">
