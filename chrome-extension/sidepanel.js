@@ -144,12 +144,17 @@ document.addEventListener("paste", (e) => {
   reader.readAsDataURL(blob);
 });
 
-async function loadClients(token) {
+async function loadClients(token, force = false) {
   // Cache for a few minutes so reopening the panel repeatedly doesn't
-  // re-fetch every time.
-  const cached = await chrome.storage.local.get(["clientsCache", "clientsCacheAt"]);
-  const fresh = cached.clientsCacheAt && Date.now() - cached.clientsCacheAt < 5 * 60 * 1000;
-  if (fresh && cached.clientsCache) return cached.clientsCache;
+  // re-fetch every time. force=true (the Refresh button) always skips this
+  // and re-fetches — otherwise a client added moments ago (e.g. from a
+  // territory sync) stays invisible for up to 5 minutes even after Refresh,
+  // since the button would just re-search the same stale cached list.
+  if (!force) {
+    const cached = await chrome.storage.local.get(["clientsCache", "clientsCacheAt"]);
+    const fresh = cached.clientsCacheAt && Date.now() - cached.clientsCacheAt < 5 * 60 * 1000;
+    if (fresh && cached.clientsCache) return cached.clientsCache;
+  }
   const { clients } = await apiFetch("/api/extension/clients", token);
   await chrome.storage.local.set({ clientsCache: clients, clientsCacheAt: Date.now() });
   return clients;
@@ -330,7 +335,7 @@ modeExistingBtn.addEventListener("click", () => setMode("existing"));
 // no special permission grant), so they're never dependent on a click. Only
 // the screenshot pixels need either the toolbar-icon click (background.js
 // captures via activeTab) or the in-panel paste zone above.
-async function init() {
+async function init(forceClientRefresh = false) {
   const token = await getToken();
   if (!token) {
     formEl.style.display = "none";
@@ -351,7 +356,7 @@ async function init() {
   setMode("new");
 
   const [email, capture, tab, clients] = await Promise.all([
-    getCurrentEmail(), getPendingCapture(), readActiveTab(), loadClients(token).catch(() => []), loadMembers(token).catch(() => {}),
+    getCurrentEmail(), getPendingCapture(), readActiveTab(), loadClients(token, forceClientRefresh).catch(() => []), loadMembers(token).catch(() => {}),
   ]);
   allClients = clients;
   clientSearchInput.placeholder = clients.length ? "Search by name, business, or contact…" : "No clients available";
@@ -411,7 +416,7 @@ async function init() {
   }
 }
 
-refreshBtn.addEventListener("click", init);
+refreshBtn.addEventListener("click", () => init(true));
 
 enrichBtn.addEventListener("click", async () => {
   const token = await getToken();
