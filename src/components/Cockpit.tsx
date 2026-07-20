@@ -54,12 +54,13 @@ import {
   type TaskTemplate,
   type VaultFolder,
   type Folder,
+  type Stage,
   PERSONAL_CLIENT_ID,
   WORKSPACE_CLIENT_ID,
   PERSONAL_PROJECT_ID,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, markMessagesReadDb, insertMessage, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, markMessagesReadDb, insertMessage, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import { Inbox } from "./cockpit/Inbox";
 import SettingsHub from "./SettingsHub";
@@ -71,6 +72,7 @@ import { I, Avatar, SideItem, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFrom
 import { ConfirmModal, PromptModal, LinkFormModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
 import { CommandK } from "./cockpit/CommandK";
 import { GroupedList, InlineDue } from "./cockpit/GroupedList";
+import StageBoard from "./cockpit/StageBoard";
 import { TaskDrawer } from "./cockpit/TaskDrawer";
 import { QuickLinksBar } from "./cockpit/ClientLinks";
 import { ClientJournal } from "./cockpit/ClientJournal";
@@ -135,6 +137,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [vaultFolders, setVaultFolders] = useState<VaultFolder[]>([]);
   const [unmatchedEmails, setUnmatchedEmails] = useState<UnmatchedEmail[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
+  const [stages, setStages] = useState<Stage[]>([]);
   const [importingTasks, setImportingTasks] = useState(false);
   const [clientTab, setClientTab] = useState<"tasks" | "chat" | "vault">("tasks");
   // Set once from a deep link's ?folder= param (see applyNav); VaultView
@@ -606,6 +609,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setTaskTemplates(d.taskTemplates);
         setVaultFolders(d.vaultFolders);
         setFolders(d.folders);
+        setStages(d.stages);
         setUnmatchedEmails(d.unmatchedEmails);
         fetchClaudeQueue().then((ids) => setClaudeQueue(new Set(ids)));
       } catch (e) {
@@ -764,6 +768,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setClientNotes((prev) => mergeById(prev, d.clientNotes));
         setVaultFolders((prev) => mergeById(prev, d.vaultFolders));
         setFolders((prev) => mergeById(prev, d.folders));
+        setStages((prev) => mergeById(prev, d.stages));
       } catch (e) { console.warn("[realtime] visibility refetch failed", e); }
     };
     document.addEventListener("visibilitychange", refetch);
@@ -1292,6 +1297,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   ];
   const projectsForClient = (clientId: string) => projects.filter((p) => p.clientId === clientId);
   const foldersForClient = (clientId: string) => folders.filter((f) => f.clientId === clientId).sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt));
+  const stagesForProject = (projectId: string) => stages.filter((s) => s.projectId === projectId).sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt));
   const folderById = (id: string | null | undefined) => (id ? folders.find((f) => f.id === id) ?? null : null);
   const projectProgress = (projectId: string) => { const ts = scopedTasks.filter((t) => t.projectId === projectId); const done = ts.filter((t) => t.status === "done").length; return { done, total: ts.length, pct: ts.length ? Math.round((done / ts.length) * 100) : 0 }; };
   // Open (non-done) count — matches what the client's task list actually shows
@@ -2047,6 +2053,88 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setProjects((ps) => [...ps.filter((p) => !(p.clientId === clientId && (p.folderId ?? null) === folderId)), ...reordered]);
     reordered.forEach((p) => upsertProject(p));
   };
+  // Custom Kanban stages (a project's own board columns, e.g. "Backlog /
+  // Designing / In Review / Shipped"). Mirrors the folder CRUD shape exactly;
+  // admin-only per stages_write RLS.
+  const createStage = (projectId: string) => {
+    setPromptDialog({ title: "New stage", placeholder: "Stage name", confirmLabel: "Create", onSubmit: (name) => {
+      setPromptDialog(null);
+      const pos = stages.filter((s) => s.projectId === projectId).length;
+      const s: Stage = { id: newId("stg_"), projectId, name, position: pos, isDone: false, createdAt: new Date().toISOString() };
+      setStages((ss) => [...ss, s]);
+      upsertStage(s);
+    } });
+  };
+  const renameStage = (id: string) => {
+    const s = stages.find((x) => x.id === id);
+    if (!s) return;
+    setPromptDialog({ title: "Rename stage", initial: s.name, confirmLabel: "Rename", onSubmit: (name) => {
+      setPromptDialog(null);
+      const ns = { ...s, name };
+      setStages((ss) => ss.map((x) => (x.id === id ? ns : x)));
+      upsertStage(ns);
+    } });
+  };
+  // Toggles whether landing in this stage counts as "done" — see setTaskStage,
+  // which is what actually syncs Task.status when a task moves in/out.
+  const toggleStageIsDone = (id: string) => {
+    const s = stages.find((x) => x.id === id);
+    if (!s) return;
+    const ns = { ...s, isDone: !s.isDone };
+    setStages((ss) => ss.map((x) => (x.id === id ? ns : x)));
+    upsertStage(ns);
+  };
+  // Deleting a stage un-sets it from any task that was in it (ON DELETE SET
+  // NULL server-side) — tasks are kept, never cascaded.
+  const deleteStage = (id: string) => {
+    const s = stages.find((x) => x.id === id);
+    if (!s) return;
+    setConfirmDialog({
+      title: `Delete stage "${s.name}"?`,
+      message: "Tasks in this stage are kept — they just fall back to no stage.",
+      confirmLabel: "Delete stage",
+      onConfirm: () => {
+        setConfirmDialog(null);
+        setStages((ss) => ss.filter((x) => x.id !== id));
+        setTasks((ts) => ts.map((t) => (t.stageId === id ? { ...t, stageId: null } : t)));
+        deleteStageDb(id);
+      },
+    });
+  };
+  const reorderStages = (projectId: string, orderedIds: string[]) => {
+    const reordered = orderedIds.map((id, i) => { const s = stages.find((x) => x.id === id)!; return { ...s, position: i }; });
+    setStages((ss) => [...ss.filter((s) => s.projectId !== projectId), ...reordered]);
+    reordered.forEach((s) => upsertStage(s));
+  };
+  // Move a task into a stage (or out, with null — back to the project's plain
+  // status board). The stage's isDone flag is the single source of truth for
+  // syncing Task.status, so every existing done/not-done consumer (urgency
+  // scoring, GHL sync, MCP, recurrence-on-complete, journal completion
+  // detection) keeps working unmodified: landing in a done-flagged stage
+  // flips status to "done"; leaving one drops it back to "todo".
+  const setTaskStage = (taskId: string, stageId: string | null) => {
+    const t = tasks.find((x) => x.id === taskId);
+    if (!t) return;
+    const targetStage = stageId ? stages.find((s) => s.id === stageId) : null;
+    const nextStatus: TaskStatus = targetStage?.isDone ? "done" : t.status === "done" ? "todo" : t.status;
+    update(taskId, { stageId, status: nextStatus });
+  };
+  // Per-column quick-add on the Kanban board — mirrors quickAdd's Task shape,
+  // just scoped by stage instead of a groupBy key.
+  const quickAddInStage = (projectId: string, stageId: string, title: string) => {
+    if (!title.trim()) return;
+    const p = projectById(projectId);
+    if (!p) return;
+    const stage = stages.find((s) => s.id === stageId);
+    const t: Task = {
+      id: newId("t_"), projectId, clientId: p.clientId, title: title.trim(), description: "",
+      status: stage?.isDone ? "done" : "todo", priority: "normal", assigneeId: me.id, contactId: p.clientId.slice(3), due: null,
+      recurrence: "none", labelIds: [], ghlTaskId: null, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
+      stageId,
+    };
+    setTasks((ts) => [...ts, t]);
+    upsertTask(t, me.id);
+  };
   const moveTaskToNewProject = (taskId: string, clientId: string) => {
     setPromptDialog({ title: "New project", placeholder: "Project name", confirmLabel: "Create & move", onSubmit: (name) => {
       setPromptDialog(null);
@@ -2748,6 +2836,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                       )}
                     </div>
                   )}
+                  {activeProject && canAdmin && stagesForProject(activeProject).length === 0 && (
+                    <button onClick={() => { setHeaderMoreOpen(false); createStage(activeProject); }} className="flex w-full items-center gap-2 rounded px-0 py-1 text-left text-[13px] font-medium text-accent hover:bg-background">
+                      <I.plus /> Set up custom Kanban stages for this list
+                    </button>
+                  )}
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Group &amp; sort</span>
                     {(filtersActive || sortBy !== "due" || groupBy !== "priority") && <button onClick={() => { setFilters({ status: "all", assignee: "all", priority: "all" }); setGroupBy("priority"); setSortBy("due"); }} className="text-[13px] font-medium text-accent">Reset</button>}
@@ -2907,7 +3000,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 onReorderFolders={(ids) => reorderFolders(activeClient, ids)} onReorderLists={(fid, ids) => reorderLists(activeClient, fid, ids)} />
             );
           })()}
-          <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} queuedIds={claudeQueue} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
+          {activeProject && stagesForProject(activeProject).length > 0 ? (
+            <StageBoard stages={stagesForProject(activeProject)} tasks={baseTasks.filter(passesFilters)} canAdmin={canAdmin}
+              onOpenTask={setOpenTaskId} onSetTaskStage={setTaskStage} onQuickAdd={(stageId, title) => quickAddInStage(activeProject, stageId, title)}
+              onCreateStage={() => createStage(activeProject)} onRenameStage={renameStage} onToggleStageIsDone={toggleStageIsDone} onDeleteStage={deleteStage}
+              onReorderStages={(ids) => reorderStages(activeProject, ids)} />
+          ) : (
+            <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} queuedIds={claudeQueue} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
+          )}
           </>
         )}
       </main>
