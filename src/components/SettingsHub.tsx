@@ -3,9 +3,14 @@
 // One settings surface instead of five separate icon-triggered popups
 // (Settings/Integrations, Team, Territories, Templates, API Tokens each used
 // to open their own floating modal). Each panel below still owns its own
-// state/logic exactly as before — this just supplies one shared overlay/
-// frame/header and a tab rail, and each panel's own chrome was stripped down
-// to its content only (see each file's return statement).
+// state/logic exactly as before — this just supplies one shared frame/
+// header and a tab rail, and each panel's own chrome was stripped down to
+// its content only (see each file's return statement).
+//
+// Docked next to the sidebar (not a centered modal) — reads as an extension
+// of the sidebar's own nav rather than a floating dialog interrupting
+// whatever's behind it. On mobile, where the sidebar itself is off-canvas,
+// this just takes the full screen (same effective footprint a modal would).
 import { useState } from "react";
 import { type Me, type Client, type Contact, type Territory, type TaskTemplate, type Project } from "@/lib/data";
 import { I } from "./cockpit/ui";
@@ -74,8 +79,11 @@ export default function SettingsHub({
 
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
-      <div className="fixed left-1/2 top-1/2 z-50 flex h-[80vh] w-full max-w-3xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border bg-surface shadow-xl">
+      {/* Transparent click-catcher over whatever's to the right of the panel
+          — lets clicking away close it, without dimming the sidebar (which
+          stays fully interactive) or the panel itself. */}
+      <div className="fixed inset-y-0 left-0 z-40 md:left-64" onClick={onClose} />
+      <div className="fixed inset-y-0 left-0 z-50 flex w-full max-w-2xl overflow-hidden border-r bg-surface shadow-xl md:left-64">
         <nav className="flex w-44 shrink-0 flex-col gap-0.5 border-r bg-background/40 p-2">
           <div className="px-2 pb-2 pt-1 text-[13px] font-semibold text-muted">Settings</div>
           {visibleTabs.map((t) => {
