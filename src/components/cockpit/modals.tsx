@@ -2,7 +2,7 @@
 
 // Styled in-app replacements for window.confirm()/prompt().
 import { useEffect, useRef, useState } from "react";
-import { LINK_COLORS, randomLinkColor } from "@/lib/data";
+import { LINK_COLORS, randomLinkColor, STATUS_META, type TaskStatus } from "@/lib/data";
 
 export type ConfirmSpec = { title: string; message: string; confirmLabel?: string; danger?: boolean; onConfirm: () => void };
 export function ConfirmModal({ title, message, confirmLabel = "Confirm", danger = true, onConfirm, onCancel }: ConfirmSpec & { onCancel: () => void }) {
@@ -44,6 +44,42 @@ export function PromptModal({ title, label, initial = "", placeholder, confirmLa
         <div className="mt-4 flex justify-end gap-2">
           <button onClick={onCancel} className="rounded-md border px-3 py-1.5 text-[15px] font-medium hover:bg-background">Cancel</button>
           <button onClick={submit} disabled={!value.trim()} className="rounded-md bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{confirmLabel}</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// Merges a Conversation-priority task into an existing, ongoing task —
+// picked from other open tasks under the same client (conversation tasks
+// themselves excluded, since merging one into another doesn't make sense).
+export type MergeTaskSpec = { sourceTitle: string; candidates: { id: string; title: string; status: TaskStatus }[]; onSubmit: (targetTaskId: string) => void };
+export function MergeTaskModal({ sourceTitle, candidates, onSubmit, onCancel }: MergeTaskSpec & { onCancel: () => void }) {
+  const [query, setQuery] = useState("");
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { ref.current?.focus(); }, []);
+  const q = query.trim().toLowerCase();
+  const filtered = q ? candidates.filter((c) => c.title.toLowerCase().includes(q)) : candidates;
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/30" onClick={onCancel} />
+      <div className="fixed left-1/2 top-1/2 z-50 flex max-h-[70vh] w-full max-w-sm -translate-x-1/2 -translate-y-1/2 flex-col rounded-2xl border bg-surface p-5 shadow-xl">
+        <h2 className="text-[16px] font-semibold">Merge &ldquo;{sourceTitle}&rdquo; into…</h2>
+        <p className="mt-1 text-[13px] text-muted">Its messages move onto the task you pick, then this conversation task is removed.</p>
+        <input ref={ref} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search tasks…"
+          onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}
+          className="mt-3 w-full shrink-0 rounded-md border bg-background px-3 py-1.5 text-[15px] outline-none focus:border-accent" />
+        <div className="mt-2 min-h-0 flex-1 overflow-y-auto">
+          {filtered.length === 0 && <div className="py-6 text-center text-[13px] text-muted">No matching tasks.</div>}
+          {filtered.map((t) => (
+            <button key={t.id} onClick={() => onSubmit(t.id)} className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-[14px] hover:bg-background">
+              <span className="min-w-0 flex-1 truncate">{t.title}</span>
+              <span className="shrink-0 text-[12px] text-muted">{STATUS_META[t.status].label}</span>
+            </button>
+          ))}
+        </div>
+        <div className="mt-3 flex shrink-0 justify-end">
+          <button onClick={onCancel} className="rounded-md border px-3 py-1.5 text-[15px] font-medium hover:bg-background">Cancel</button>
         </div>
       </div>
     </>

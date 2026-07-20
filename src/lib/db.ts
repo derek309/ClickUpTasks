@@ -280,6 +280,12 @@ export const insertMessage = (m: Message) => supabase.from("messages").insert(me
 export const markMessagesReadDb = (contactId: string) =>
   supabase.from("messages").update({ read: true }).eq("contact_id", contactId).eq("read", false).then(logErr);
 
+// Re-scopes every message on a Conversation task to a different task —
+// the write side of "merge this conversation into an existing task" (see
+// Cockpit.tsx's mergeConversationIntoTask).
+export const reassignMessagesTaskDb = (fromTaskId: string, toTaskId: string) =>
+  supabase.from("messages").update({ task_id: toTaskId }).eq("task_id", fromTaskId).then(logErr);
+
 // Every upsert/delete above is fire-and-forget from the UI's perspective — this
 // is the single choke point where a failed save gets surfaced. Dispatches a
 // DOM event rather than importing a toast function so db.ts stays UI-agnostic;
