@@ -74,6 +74,7 @@ export async function GET(req: NextRequest) {
       nextActionLabel: String(it.next_action_label ?? ""),
       followupDue: typeof it.followup_due === "number" ? it.followup_due : 0,
       lastTouched: typeof it.last_touched === "number" ? it.last_touched : 0,
+      rep: String(it.sales_rep?.name ?? ""),  // assigned ambassador (read-only here)
     }));
 
   return NextResponse.json({ listings, truncated: Boolean(data?.truncated) });

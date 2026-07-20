@@ -20,6 +20,19 @@ const configured = Boolean(WP_BASE && WP_KEY);
 const OUTCOMES = new Set(["emailed", "called", "sms", "visited", "presented", "posted", "won", "lost"]);
 const NEXT_ACTIONS = new Set(["email", "call", "sms", "visit", "present", "close"]);
 
+// Map a WP formatted activity_log entry to the shape the UI renders.
+export const mapActivityLog = (log: any): any[] =>
+  (Array.isArray(log) ? log : []).map((e: any) => ({
+    id: String(e.id ?? ""),
+    outcomeLabel: String(e.outcome_label ?? ""),
+    nextActionLabel: String(e.next_action_label ?? ""),
+    dateH: String(e.date_h ?? ""),
+    tsH: String(e.ts_h ?? ""),
+    user: String(e.user ?? ""),
+    note: String(e.note ?? ""),
+    amountLabel: String(e.amount_label ?? ""),
+  }));
+
 export async function POST(req: NextRequest) {
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -72,6 +85,7 @@ export async function POST(req: NextRequest) {
       nextActionLabel: String(l.next_action_label ?? ""),
       followupDue: typeof l.followup_due === "number" ? l.followup_due : 0,
       lastTouched: typeof l.last_touched === "number" ? l.last_touched : 0,
+      activityLog: mapActivityLog(l.activity_log),
     },
   });
 }

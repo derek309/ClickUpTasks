@@ -36,6 +36,19 @@ export type DirectoryListing = {
   nextActionLabel: string;
   followupDue: number;  // unix seconds, 0 = none
   lastTouched: number;  // unix seconds, 0 = never
+  rep: string;          // assigned ambassador's name (read-only here)
+  activityLog?: ActivityEntry[]; // loaded on demand / after a touch
+};
+
+export type ActivityEntry = {
+  id: string;
+  outcomeLabel: string;
+  nextActionLabel: string;
+  dateH: string;
+  tsH: string;
+  user: string;
+  note: string;
+  amountLabel: string;
 };
 
 // Mirrors the /sales vocabulary (cul_sales_outcomes / cul_sales_next_actions).
@@ -231,8 +244,41 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch }: {
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [calling, setCalling] = useState(false);
+  const [callMsg, setCallMsg] = useState<string | null>(null);
+  const [histOpen, setHistOpen] = useState(false);
+  const [histLoading, setHistLoading] = useState(false);
 
   const due = fmtDue(listing.followupDue);
+  const log = listing.activityLog;
+
+  const call = async () => {
+    if (!listing.phone) { setCallMsg("No phone on file"); return; }
+    setCalling(true); setCallMsg(null);
+    try {
+      const res = await authedFetch("/api/directory/call", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ listingId: String(listing.id) }) });
+      const data = await res.json().catch(() => ({}));
+      setCallMsg(res.ok && data?.ok ? "Calling… your phone rings first" : (data?.error || `Error ${res.status}`));
+    } catch (e) {
+      setCallMsg(String((e as Error)?.message ?? e));
+    } finally {
+      setCalling(false);
+    }
+  };
+
+  const toggleHistory = async () => {
+    const opening = !histOpen;
+    setHistOpen(opening);
+    if (opening && !log) {
+      setHistLoading(true);
+      try {
+        const res = await authedFetch(`/api/directory/listing?listingId=${listing.id}`);
+        const data = await res.json().catch(() => ({}));
+        onPatch(listing.id, { activityLog: Array.isArray(data.activityLog) ? data.activityLog : [] });
+      } catch { /* leave closed-empty on error */ }
+      finally { setHistLoading(false); }
+    }
+  };
 
   const submit = async () => {
     if (!outcome && !nextAction && !followupDays.trim() && !note.trim()) { setLogOpen(false); return; }
@@ -266,6 +312,8 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch }: {
           {listing.category && <span className="text-muted/70"> · {listing.category}</span>}
         </span>
         {typeof listing.score === "number" && <span title="ClickUpLocal score" className="shrink-0 rounded bg-background px-1.5 py-0.5 text-[11px] font-medium text-muted">{listing.score}</span>}
+        {listing.phone && <button onClick={call} disabled={calling} title={`Bridge-call ${listing.phone}`} className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground disabled:opacity-40">{calling ? "…" : "Call"}</button>}
+        <button onClick={toggleHistory} title="Outreach history" className={`shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium ${histOpen ? "bg-accent-soft text-accent" : "text-muted hover:bg-surface hover:text-foreground"}`}>History</button>
         <button onClick={() => setLogOpen((o) => !o)} title="Log an outreach touch" className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">Log</button>
         {client && meta
           ? <button onClick={() => onOpenClient(client.id)} className="shrink-0 rounded-md px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent-soft"><span className="mr-1 inline-block h-2 w-2 rounded-full align-middle" style={{ background: meta.dot }} />✓ Client</button>
@@ -275,11 +323,32 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch }: {
       </div>
 
       {/* Current pipeline state line */}
-      {(listing.outcomeLabel || listing.nextActionLabel || listing.followupDue > 0) && (
+      {(listing.outcomeLabel || listing.nextActionLabel || listing.followupDue > 0 || listing.rep) && (
         <div className="mt-0.5 flex flex-wrap items-center gap-1.5 pl-6 text-[11px]">
           {listing.outcomeLabel && <span className="rounded bg-background px-1.5 py-0.5 font-medium text-muted">{listing.outcomeLabel}</span>}
           {listing.nextActionLabel && <span className="rounded bg-accent-soft px-1.5 py-0.5 font-medium text-accent">→ {listing.nextActionLabel}</span>}
           {due.label && <span className={`px-1 ${due.overdue ? "font-medium text-danger" : "text-muted"}`}>{due.label}</span>}
+          {listing.rep && <span className="text-muted/70">· {listing.rep}</span>}
+        </div>
+      )}
+      {callMsg && <div className="mt-0.5 pl-6 text-[11px] text-muted">{callMsg}</div>}
+
+      {/* Outreach history */}
+      {histOpen && (
+        <div className="mt-2 space-y-1 rounded-lg border bg-surface p-2 pl-6 text-[12px]">
+          {histLoading && <div className="text-muted">Loading history…</div>}
+          {!histLoading && (!log || log.length === 0) && <div className="text-muted">No touches logged yet.</div>}
+          {!histLoading && log && log.map((e) => (
+            <div key={e.id} className="border-b pb-1 last:border-0 last:pb-0">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {e.outcomeLabel && <span className="rounded bg-background px-1.5 py-0.5 font-medium text-muted">{e.outcomeLabel}</span>}
+                {e.nextActionLabel && <span className="rounded bg-accent-soft px-1.5 py-0.5 font-medium text-accent">→ {e.nextActionLabel}</span>}
+                {e.amountLabel && <span className="font-medium text-emerald-600">{e.amountLabel}</span>}
+                <span className="ml-auto text-muted/70">{e.dateH}{e.user && ` · ${e.user}`}</span>
+              </div>
+              {e.note && <div className="mt-0.5 text-muted">{e.note}</div>}
+            </div>
+          ))}
         </div>
       )}
 
