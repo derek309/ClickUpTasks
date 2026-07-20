@@ -29,6 +29,33 @@ export type DirectoryListing = {
   hasOffer: boolean;
   score: number | null;
   category: string;
+  // Outreach pipeline (from /sales — source of truth)
+  outcome: string;
+  outcomeLabel: string;
+  nextAction: string;
+  nextActionLabel: string;
+  followupDue: number;  // unix seconds, 0 = none
+  lastTouched: number;  // unix seconds, 0 = never
+};
+
+// Mirrors the /sales vocabulary (cul_sales_outcomes / cul_sales_next_actions).
+export const OUTCOMES: [string, string][] = [
+  ["emailed", "Emailed"], ["called", "Called"], ["sms", "SMS'd"], ["visited", "Visited"],
+  ["presented", "Appointment"], ["posted", "Posted"], ["won", "Won"], ["lost", "Lost"],
+];
+export const NEXT_ACTIONS: [string, string][] = [
+  ["email", "Email"], ["call", "Call"], ["sms", "SMS"], ["visit", "Visit"], ["present", "Appointment"], ["close", "Close"],
+];
+
+// Returns { label, overdue }. Kept a module-scope helper (not computed in the
+// component body) so its Date.now() read doesn't trip react-hooks/purity.
+const fmtDue = (unix: number): { label: string; overdue: boolean } => {
+  if (!unix) return { label: "", overdue: false };
+  const days = Math.round((unix * 1000 - Date.now()) / 86400000);
+  if (days < 0) return { label: `overdue ${-days}d`, overdue: true };
+  if (days === 0) return { label: "due today", overdue: false };
+  if (days === 1) return { label: "due tomorrow", overdue: false };
+  return { label: `due in ${days}d`, overdue: false };
 };
 
 // Last 10 digits — normalizes (555) 123-4567 / +1 555 123 4567 / 5551234567 to
@@ -71,6 +98,11 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [city, state]);
+
+  // Patch one listing in place after a logged touch returns the fresh state
+  // from /sales — keeps the funnel accurate without a full refetch.
+  const patchListing = (id: number | string, next: Partial<DirectoryListing>) =>
+    setListings((ls) => (ls ?? []).map((l) => (l.id === id ? { ...l, ...next } : l)));
 
   const clientIds = useMemo(() => new Set(clients.map((c) => c.id)), [clients]);
 
@@ -135,14 +167,14 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
       {/* Unclaimed (prospects) */}
       {(bucket === "all" || bucket === "unclaimed") && counts.unclaimed > 0 && (
         <Section title="Unclaimed" hint="listings nobody has claimed — prospects to call">
-          {sortRows(unclaimed).map((r) => <ListingRow key={r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} />)}
+          {sortRows(unclaimed).map((r) => <ListingRow key={r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} onPatch={patchListing} />)}
         </Section>
       )}
 
       {/* Claimed */}
       {(bucket === "all" || bucket === "claimed") && counts.claimed > 0 && (
         <Section title="Claimed" hint="owner has claimed their directory listing">
-          {sortRows(claimed).map((r) => <ListingRow key={r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} />)}
+          {sortRows(claimed).map((r) => <ListingRow key={r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} onPatch={patchListing} />)}
         </Section>
       )}
 
@@ -184,28 +216,97 @@ function Section({ title, hint, children }: { title: string; hint: string; child
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient }: {
+function ListingRow({ row, onAddContact, onOpenClient, onPatch }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
   onOpenClient: (id: string) => void;
+  onPatch: (id: number | string, next: Partial<DirectoryListing>) => void;
 }) {
   const { listing, contact, client } = row;
   const meta = client ? clientStatusMeta(client.status) : null;
+  const [logOpen, setLogOpen] = useState(false);
+  const [outcome, setOutcome] = useState("");
+  const [nextAction, setNextAction] = useState("");
+  const [followupDays, setFollowupDays] = useState("");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const due = fmtDue(listing.followupDue);
+
+  const submit = async () => {
+    if (!outcome && !nextAction && !followupDays.trim() && !note.trim()) { setLogOpen(false); return; }
+    setSaving(true); setError(null);
+    try {
+      const body: Record<string, unknown> = { listingId: String(listing.id) };
+      if (outcome) body.outcome = outcome;
+      if (nextAction) body.nextAction = nextAction;
+      if (note.trim()) body.note = note.trim();
+      if (followupDays.trim()) body.followupDays = Number(followupDays) || 0;
+      const res = await authedFetch("/api/directory/activity", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok) { setError(data?.error || `Error ${res.status}`); return; }
+      onPatch(listing.id, data.listing);
+      setLogOpen(false); setOutcome(""); setNextAction(""); setFollowupDays(""); setNote("");
+    } catch (e) {
+      setError(String((e as Error)?.message ?? e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
-    <div className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[15px] hover:bg-background">
-      {listing.claimed
-        ? <span title="Directory listing claimed" className="shrink-0 text-emerald-500"><I.check /></span>
-        : <span title="Unclaimed listing" className="h-2 w-2 shrink-0 rounded-full border border-muted/50" />}
-      <span className="min-w-0 flex-1 truncate">
-        {listing.name}
-        {listing.category && <span className="text-muted/70"> · {listing.category}</span>}
-      </span>
-      {typeof listing.score === "number" && <span title="ClickUpLocal score" className="shrink-0 rounded bg-background px-1.5 py-0.5 text-[11px] font-medium text-muted">{listing.score}</span>}
-      {client && meta
-        ? <button onClick={() => onOpenClient(client.id)} className="shrink-0 rounded-md px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent-soft"><span className="mr-1 inline-block h-2 w-2 rounded-full align-middle" style={{ background: meta.dot }} />✓ Client</button>
-        : contact
-          ? <button onClick={() => onAddContact(contact)} className="shrink-0 rounded-md border border-dashed px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent-soft">+ Add as client</button>
-          : <span className="shrink-0 text-[11px] text-muted/60">no contact</span>}
+    <div className="rounded-lg px-2 py-1.5 text-[15px] hover:bg-background">
+      <div className="flex items-center gap-2">
+        {listing.claimed
+          ? <span title="Directory listing claimed" className="shrink-0 text-emerald-500"><I.check /></span>
+          : <span title="Unclaimed listing" className="h-2 w-2 shrink-0 rounded-full border border-muted/50" />}
+        <span className="min-w-0 flex-1 truncate">
+          {listing.name}
+          {listing.category && <span className="text-muted/70"> · {listing.category}</span>}
+        </span>
+        {typeof listing.score === "number" && <span title="ClickUpLocal score" className="shrink-0 rounded bg-background px-1.5 py-0.5 text-[11px] font-medium text-muted">{listing.score}</span>}
+        <button onClick={() => setLogOpen((o) => !o)} title="Log an outreach touch" className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">Log</button>
+        {client && meta
+          ? <button onClick={() => onOpenClient(client.id)} className="shrink-0 rounded-md px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent-soft"><span className="mr-1 inline-block h-2 w-2 rounded-full align-middle" style={{ background: meta.dot }} />✓ Client</button>
+          : contact
+            ? <button onClick={() => onAddContact(contact)} className="shrink-0 rounded-md border border-dashed px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent-soft">+ Add as client</button>
+            : <span className="shrink-0 text-[11px] text-muted/60">no contact</span>}
+      </div>
+
+      {/* Current pipeline state line */}
+      {(listing.outcomeLabel || listing.nextActionLabel || listing.followupDue > 0) && (
+        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 pl-6 text-[11px]">
+          {listing.outcomeLabel && <span className="rounded bg-background px-1.5 py-0.5 font-medium text-muted">{listing.outcomeLabel}</span>}
+          {listing.nextActionLabel && <span className="rounded bg-accent-soft px-1.5 py-0.5 font-medium text-accent">→ {listing.nextActionLabel}</span>}
+          {due.label && <span className={`px-1 ${due.overdue ? "font-medium text-danger" : "text-muted"}`}>{due.label}</span>}
+        </div>
+      )}
+
+      {/* Log-touch form */}
+      {logOpen && (
+        <div className="mt-2 space-y-2 rounded-lg border bg-surface p-2 pl-6">
+          <div className="flex flex-wrap gap-2">
+            <select value={outcome} onChange={(e) => setOutcome(e.target.value)} className="rounded-md border bg-background px-2 py-1 text-[13px] outline-none focus:border-accent">
+              <option value="">Outcome…</option>
+              {OUTCOMES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+            <select value={nextAction} onChange={(e) => setNextAction(e.target.value)} className="rounded-md border bg-background px-2 py-1 text-[13px] outline-none focus:border-accent">
+              <option value="">Next action…</option>
+              {NEXT_ACTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+            <input value={followupDays} onChange={(e) => setFollowupDays(e.target.value.replace(/\D/g, ""))} placeholder="Follow-up (days)" inputMode="numeric"
+              className="w-32 rounded-md border bg-background px-2 py-1 text-[13px] outline-none focus:border-accent" />
+          </div>
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+            className="w-full rounded-md border bg-background px-2 py-1 text-[13px] outline-none focus:border-accent" />
+          {error && <div className="text-[12px] text-danger">{error}</div>}
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setLogOpen(false)} className="rounded-md border px-2.5 py-1 text-[13px] font-medium hover:bg-background">Cancel</button>
+            <button onClick={submit} disabled={saving} className="rounded-md bg-accent px-2.5 py-1 text-[13px] font-medium text-white disabled:opacity-40">{saving ? "Saving…" : "Log touch"}</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

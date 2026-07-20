@@ -65,6 +65,15 @@ export async function GET(req: NextRequest) {
       hasOffer: Boolean(it.has_offer),
       score: typeof it.clickuplocal_score === "number" ? it.clickuplocal_score : null,
       category: String(it.category ?? ""),
+      // Outreach pipeline state (from /sales — the source of truth): last
+      // outcome, queued next action, follow-up due date, last-touched. Drive
+      // the funnel view + the "log a touch" write path.
+      outcome: String(it.outcome ?? ""),
+      outcomeLabel: String(it.outcome_label ?? ""),
+      nextAction: String(it.next_action ?? ""),
+      nextActionLabel: String(it.next_action_label ?? ""),
+      followupDue: typeof it.followup_due === "number" ? it.followup_due : 0,
+      lastTouched: typeof it.last_touched === "number" ? it.last_touched : 0,
     }));
 
   return NextResponse.json({ listings, truncated: Boolean(data?.truncated) });
