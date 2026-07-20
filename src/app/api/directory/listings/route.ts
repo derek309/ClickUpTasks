@@ -63,8 +63,10 @@ export async function GET(req: NextRequest) {
       street: String(it.street ?? ""),
       claimed: Boolean(it.claimed),
       hasOffer: Boolean(it.has_offer),
-      score: typeof it.clickuplocal_score === "number" ? it.clickuplocal_score : null,
-      category: String(it.category ?? ""),
+      // The hydrated /sales payload returns the score as a string ("72") and
+      // categories as an array of breadcrumbs ("A › B › Leaf"); normalize both.
+      score: (() => { const n = parseInt(String(it.clickuplocal_score ?? ""), 10); return Number.isFinite(n) ? n : null; })(),
+      category: Array.isArray(it.categories) && it.categories.length ? String(it.categories[0]).split("›").pop()!.trim() : String(it.category ?? ""),
       // Outreach pipeline state (from /sales — the source of truth): last
       // outcome, queued next action, follow-up due date, last-touched. Drive
       // the funnel view + the "log a touch" write path.
