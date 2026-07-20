@@ -315,10 +315,16 @@ function NoListingRow({ contact, client, onAddContact, onOpenClient }: {
 }) {
   return (
     <div className="flex flex-col gap-1 border-b px-4 py-2.5 text-[15px] transition-colors last:border-0 hover:bg-accent-soft/50 sm:grid sm:min-h-[42px] sm:items-center sm:gap-2 sm:py-1.5" style={{ gridTemplateColumns: TEMPLATE }}>
-      <button onClick={() => (client ? onOpenClient(client.id) : onAddContact(contact))} title={client ? "Open this client" : "Open — starts them as a lead so you can journal/upload before they're a paying client"}
-        className="min-w-0 truncate text-left hover:text-accent hover:underline">
-        {contact.name}{contact.company && <span className="text-muted/70"> · {contact.company}</span>}
-      </button>
+      {client ? (
+        // Only clickable when a client already exists — opening never
+        // mutates anything. Creating one still requires the explicit
+        // "+ Add as client" button below, never a stray click on the name.
+        <button onClick={() => onOpenClient(client.id)} title="Open this client" className="min-w-0 truncate text-left hover:text-accent hover:underline">
+          {contact.name}{contact.company && <span className="text-muted/70"> · {contact.company}</span>}
+        </button>
+      ) : (
+        <div className="min-w-0 truncate">{contact.name}{contact.company && <span className="text-muted/70"> · {contact.company}</span>}</div>
+      )}
       <span className="hidden sm:block" />
       <span className="hidden sm:block" />
       <span className="hidden sm:block" />
@@ -416,9 +422,12 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, stages, currentS
             {listing.claimed
               ? <span title="Directory listing claimed" className="shrink-0 text-emerald-500"><I.check /></span>
               : <span title="Unclaimed listing" className="h-2 w-2 shrink-0 rounded-full border border-muted/50" />}
-            {(client || contact) ? (
-              <button onClick={() => (client ? onOpenClient(client.id) : onAddContact(contact!))}
-                title={client ? "Open this client" : "Open — starts them as a lead so you can journal/upload before they're a paying client"}
+            {client ? (
+              // Only clickable when a client already exists — opening never
+              // mutates anything, so a stray click (e.g. selecting the text)
+              // can't accidentally create one. Creating still requires the
+              // explicit "+ Add as client" button below.
+              <button onClick={() => onOpenClient(client.id)} title="Open this client"
                 className="min-w-0 truncate text-left font-medium hover:text-accent hover:underline">{listing.name}</button>
             ) : (
               <span className="min-w-0 truncate font-medium">{listing.name}</span>
