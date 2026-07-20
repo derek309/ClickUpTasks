@@ -59,7 +59,7 @@ import {
   PERSONAL_PROJECT_ID,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, markMessagesReadDb, insertMessage, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, markMessagesReadDb, insertMessage, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import { Inbox } from "./cockpit/Inbox";
 import SettingsHub from "./SettingsHub";
@@ -1871,6 +1871,24 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       if (j.company) { const up: Client = { ...c, ghlLocationId: j.company }; setClients((cs) => cs.map((x) => (x.id === id ? up : x))); markOwnClientWrite(up.id); upsertClient(up); }
     } catch { /* business name is optional */ }
   };
+  // Territory is a working view over what's already in GHL — a business
+  // showing up in the ClickUpLocal directory for an assigned city means it's
+  // being actively worked, so it just needs to already be here as a Lead
+  // (no manual "+ Add as client" step). Bulk, silent, no navigation/toast —
+  // unlike addClientContact (a single user-initiated add-and-open action),
+  // this can fire for dozens/hundreds of contacts at once as a territory
+  // page loads.
+  const syncTerritoryClients = (matched: Contact[]) => {
+    const missing = matched.filter((c) => !clients.some((cl) => cl.id === "cl_" + c.id));
+    if (!missing.length) return;
+    const newClients: Client[] = missing.map((c) => {
+      const sub = subAccounts.find((s) => s.id === c.clientId);
+      return { id: "cl_" + c.id, name: c.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "lead", type: "client", assignedTo: [] };
+    });
+    setClients((cs) => [...cs, ...newClients]);
+    newClients.forEach((c) => markOwnClientWrite(c.id));
+    bulkUpsertClients(newClients);
+  };
   const addTerritory = (spec: { name: string; city: string; state: string; assignedTo: string[] }) => {
     const t: Territory = { id: newId("terr_"), ...spec };
     setTerritories((ts) => [...ts, t]);
@@ -2804,6 +2822,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               // business. Clicking the name is the same immediate action as
               // "+ Add as client": no confirm, no separate step.
               onAddContact={(c) => addClientContact(c)}
+              onSyncClients={syncTerritoryClients}
+              onSetStatus={setClientStatus}
               onOpenClient={(id) => { setTerritoryView(null); setActiveClient(id); setActiveProject(null); setClientTab("tasks"); }}
               focusId={territoryView === "all" ? undefined : territoryView} />
           </div>

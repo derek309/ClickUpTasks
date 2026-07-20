@@ -229,6 +229,9 @@ export const unqueueTaskDb = (taskId: string) => supabase.from("claude_queue").d
 export const appendCommentDb = (taskId: string, comment: Comment) => supabase.rpc("append_comment", { task_id: taskId, comment }).then(logErr);
 export const deleteTaskDb = (id: string) => supabase.from("tasks").delete().eq("id", id).then(logErr);
 export const upsertClient = (c: Client) => supabase.from("clients").upsert(clientToRow(c)).then(logErr);
+// One request for many new clients at once (e.g. territory auto-sync creating
+// dozens/hundreds of Lead-stage clients) instead of N separate round trips.
+export const bulkUpsertClients = (cs: Client[]) => (cs.length ? supabase.from("clients").upsert(cs.map(clientToRow)).then(logErr) : Promise.resolve());
 export const upsertProject = (p: Project) => supabase.from("projects").upsert(projectToRow(p)).then(logErr);
 export const deleteProjectDb = (id: string) => supabase.from("projects").delete().eq("id", id).then(logErr);
 export const deleteClientDb = (id: string) => supabase.from("clients").delete().eq("id", id).then(logErr);
