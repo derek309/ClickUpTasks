@@ -93,7 +93,7 @@ export function kindFromName(name: string): Attachment["kind"] {
 // --- small building blocks --------------------------------------------------
 
 export function SideItem({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (<button onClick={onClick} className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[15px] transition ${active ? "bg-accent-soft font-medium text-accent" : "text-foreground hover:bg-background"}`}>{children}</button>);
+  return (<button onClick={onClick} className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[15px] transition ${active ? "bg-accent-soft font-medium text-accent" : "text-foreground hover:bg-background"}`}>{children}</button>);
 }
 export function LabelChips({ ids }: { ids: string[] }) {
   if (ids.length === 0) return null;

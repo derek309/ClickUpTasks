@@ -2493,7 +2493,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
         {/* Projects / Clients are now directory pages, not inline lists — the
             sidebar stays lean since day-to-day work happens from Dashboard. */}
-        <nav className="mt-2 shrink-0 space-y-0.5 border-t px-2 pt-2">
+        <nav className="mt-1.5 shrink-0 space-y-0.5 border-t px-2 pt-1.5">
           <SideItem active={dirView === "clients"} onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setActiveProject(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{clientList.length}</span></SideItem>
           {clients.some((c) => c.id === WORKSPACE_CLIENT_ID) && (
             <SideItem active={dirView === "projects"} onClick={() => { setDirView("projects"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setActiveProject(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.folder className="text-muted" /> <span>Projects</span><span className="ml-auto text-[13px] text-muted">{workspaceProjects.length}</span></SideItem>
@@ -2503,7 +2503,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         {/* Territories — cities (city+state) assigned to you; an admin sees all.
             Click a city to work its contacts (claimed vs unclaimed). */}
         {visibleTerritories.length > 0 && (
-          <nav className="mt-2 shrink-0 space-y-0.5 border-t px-2 pt-2">
+          <nav className="mt-1.5 shrink-0 space-y-0.5 border-t px-2 pt-1.5">
             <div className="flex items-center justify-between px-2.5 pb-1">
               <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Territories</span>
               {canAdmin && <button onClick={() => openTerritory("all")} title="Manage territories" className="rounded p-0.5 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>}
@@ -2528,7 +2528,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           const pinned = [...starredLists].map((id) => projectById(id)).filter((p): p is Project => !!p);
           if (pinnedClients.length === 0 && pinned.length === 0) return null;
           return (
-            <nav className="mt-2 shrink-0 space-y-0.5 border-t px-2 pt-2">
+            <nav className="mt-1.5 shrink-0 space-y-0.5 border-t px-2 pt-1.5">
               <div className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Pinned</div>
               {pinnedClients.map((c) => {
                 const active = !myWork && !personalView && !inboxView && !dirView && !activeProject && activeClient === c.id;
