@@ -1105,7 +1105,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // roll up from project to client automatically via t.clientId) — kept
     // independent per client/project for now; add a rollup here later if a
     // project-only follow-up date turns out to need to surface the client too.
-    const followUp = clientById(clientId)?.followUpAt;
+    // Skipped entirely when forAssignee is set: followUpAt auto-computes to
+    // the soonest due date among the client's open tasks *from any assignee*
+    // (see setClientFollowUp's caller, the smart-follow-up effect) — mixing
+    // it into a per-assignee tier let a teammate's due date drive a Dashboard
+    // tier that isn't actually yours (e.g. a followed client's own admin task
+    // showing up on your Dashboard because you follow the client, not because
+    // any of it is assigned to you).
+    const followUp = forAssignee ? null : clientById(clientId)?.followUpAt;
     const candidates: { date: string; priorityRank: number }[] = [
       ...open.filter((t) => t.due).map((t) => ({ date: t.due!, priorityRank: PRIORITY_META[t.priority].rank })),
       ...(followUp ? [{ date: followUp, priorityRank: 0 }] : []),
@@ -1124,7 +1131,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   function projectUrgencyKey(projectId: string, forAssignee?: string): { tier: number; due: string; priorityRank: number } {
     if (projectNeedsReview(projectId, forAssignee)) return { tier: 0, due: "", priorityRank: 0 };
     const open = scopedTasks.filter((t) => t.projectId === projectId && t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
-    const followUp = projectById(projectId)?.followUpAt;
+    // See the matching comment in clientUrgencyKey — same reasoning.
+    const followUp = forAssignee ? null : projectById(projectId)?.followUpAt;
     const candidates: { date: string; priorityRank: number }[] = [
       ...open.filter((t) => t.due).map((t) => ({ date: t.due!, priorityRank: PRIORITY_META[t.priority].rank })),
       ...(followUp ? [{ date: followUp, priorityRank: 0 }] : []),
