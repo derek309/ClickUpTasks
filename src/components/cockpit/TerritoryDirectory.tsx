@@ -98,6 +98,17 @@ const BUCKET_META = {
 // Name | Score | Stage | Actions | Client
 const TEMPLATE = "minmax(0,1fr) 56px 180px 210px 150px";
 
+// Module-scope caches so leaving a city and coming back (or switching tabs)
+// doesn't re-hit the network + show a loading flash every time — the same
+// live data is still current for a minute, which covers normal in-session
+// navigation. A lazy useState initializer reads these synchronously on
+// mount, so a warm revisit renders immediately with no spinner.
+const CACHE_TTL = 60_000;
+type ListingsCacheEntry = { data: DirectoryListing[]; notConfigured: boolean; at: number };
+const listingsCache = new Map<string, ListingsCacheEntry>();
+type PipelineCacheEntry = { stages: Stage[]; byContact: Record<string, OppRef>; at: number };
+let pipelineCache: PipelineCacheEntry | null = null;
+
 export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onOpenClient }: {
   city: string;
   state: string;
@@ -106,16 +117,20 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   onAddContact: (contact: Contact) => void;
   onOpenClient: (clientId: string) => void;
 }) {
-  const [listings, setListings] = useState<DirectoryListing[] | null>(null);
-  const [loading, setLoading] = useState(true);
+  const cacheKey = `${city}|${state}`;
+  const warm = () => { const c = listingsCache.get(cacheKey); return c && Date.now() - c.at < CACHE_TTL ? c : null; };
+  const [listings, setListings] = useState<DirectoryListing[] | null>(() => warm()?.data ?? null);
+  const [loading, setLoading] = useState(() => !warm());
   const [err, setErr] = useState<string | null>(null);
-  const [notConfigured, setNotConfigured] = useState(false);
+  const [notConfigured, setNotConfigured] = useState(() => warm()?.notConfigured ?? false);
   const [sort, setSort] = useState<SortKey>("score");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggleGroup = (key: string) => setCollapsed((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
 
   useEffect(() => {
     let alive = true;
+    const cached = listingsCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < CACHE_TTL) return; // still warm — nothing to fetch
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true); setErr(null); setNotConfigured(false);
     const qs = new URLSearchParams({ city, state });
@@ -123,33 +138,38 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
       .then(async (res) => {
         const body = await res.json().catch(() => ({}));
         if (!alive) return;
-        if (res.status === 501) { setNotConfigured(true); setListings([]); return; }
+        if (res.status === 501) { setNotConfigured(true); setListings([]); listingsCache.set(cacheKey, { data: [], notConfigured: true, at: Date.now() }); return; }
         if (!res.ok) { setErr(body?.error || `Directory error ${res.status}`); setListings([]); return; }
-        setListings(Array.isArray(body.listings) ? body.listings : []);
+        const data = Array.isArray(body.listings) ? body.listings : [];
+        listingsCache.set(cacheKey, { data, notConfigured: false, at: Date.now() });
+        setListings(data);
       })
       .catch((e) => { if (alive) { setErr(String(e?.message ?? e)); setListings([]); } })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [city, state]);
+  }, [city, state, cacheKey]);
 
   // The GHL Prospects pipeline: ordered stages + a contactId → current-stage
-  // map for every opportunity. One fetch per city; each business matches its
-  // stage locally by ghlContactId. Optional — if GHL is unreachable the funnel
-  // control just doesn't render and the rest of the view still works.
-  const [stages, setStages] = useState<Stage[]>([]);
-  const [oppsByContact, setOppsByContact] = useState<Record<string, OppRef>>({});
+  // map for every opportunity. Company-wide (not per-city), so it's cached
+  // once and reused across every city for the same TTL window.
+  const [stages, setStages] = useState<Stage[]>(() => pipelineCache?.stages ?? []);
+  const [oppsByContact, setOppsByContact] = useState<Record<string, OppRef>>(() => pipelineCache?.byContact ?? {});
   useEffect(() => {
     let alive = true;
+    if (pipelineCache && Date.now() - pipelineCache.at < CACHE_TTL) return; // still warm
     authedFetch("/api/directory/pipeline")
       .then(async (res) => {
         const body = await res.json().catch(() => ({}));
         if (!alive) return;
-        setStages(Array.isArray(body.stages) ? body.stages : []);
-        setOppsByContact(body.byContact && typeof body.byContact === "object" ? body.byContact : {});
+        const stagesRes = Array.isArray(body.stages) ? body.stages : [];
+        const byContactRes = body.byContact && typeof body.byContact === "object" ? body.byContact : {};
+        pipelineCache = { stages: stagesRes, byContact: byContactRes, at: Date.now() };
+        setStages(stagesRes);
+        setOppsByContact(byContactRes);
       })
       .catch(() => { /* funnel optional */ });
     return () => { alive = false; };
-  }, [city, state]);
+  }, []);
 
   const advanceStage = async (contactId: string, stageId: string, name: string) => {
     if (!contactId) return;
@@ -158,17 +178,28 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
     try {
       const res = await authedFetch("/api/directory/opportunity", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contactId, stageId, name, opportunityId: prev?.opportunityId }) });
       const data = await res.json().catch(() => ({}));
-      if (res.ok && data?.ok) setOppsByContact((m) => ({ ...m, [contactId]: { opportunityId: data.opportunityId, stageId: data.stageId } }));
-      else throw new Error(data?.error || `Error ${res.status}`);
+      if (res.ok && data?.ok) {
+        setOppsByContact((m) => {
+          const merged = { ...m, [contactId]: { opportunityId: data.opportunityId, stageId: data.stageId } };
+          if (pipelineCache) pipelineCache = { ...pipelineCache, byContact: merged, at: Date.now() }; // keep the cache current so a revisit shows this change
+          return merged;
+        });
+      } else throw new Error(data?.error || `Error ${res.status}`);
     } catch {
       setOppsByContact((m) => { const n = { ...m }; if (prev) n[contactId] = prev; else delete n[contactId]; return n; }); // revert
     }
   };
 
   // Patch one listing in place after a logged touch returns the fresh state
-  // from /sales — keeps the funnel accurate without a full refetch.
+  // from /sales — keeps the funnel accurate without a full refetch, and
+  // writes through to the cache so a revisit within the TTL sees the change.
   const patchListing = (id: number | string, next: Partial<DirectoryListing>) =>
-    setListings((ls) => (ls ?? []).map((l) => (l.id === id ? { ...l, ...next } : l)));
+    setListings((ls) => {
+      const updated = (ls ?? []).map((l) => (l.id === id ? { ...l, ...next } : l));
+      const cached = listingsCache.get(cacheKey);
+      if (cached) listingsCache.set(cacheKey, { ...cached, data: updated, at: Date.now() });
+      return updated;
+    });
 
   const clientIds = useMemo(() => new Set(clients.map((c) => c.id)), [clients]);
 
@@ -215,7 +246,10 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   ];
 
   return (
-    <div className="bg-background p-4 sm:p-5">
+    <div className="pt-1">
+      {/* No extra padding here — the parent (TerritoryPanel) already gives
+          the page px-5/py-3, so this only needs a small top gap under its
+          header, not a second full padding block. */}
       {/* Sort control — mirrors the sort-by affordance GroupedList's caller
           places above the table; groups themselves collapse individually
           instead of a separate bucket-filter row. */}

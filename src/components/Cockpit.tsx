@@ -2336,7 +2336,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             </div>
             {visibleTerritories.map((t) => (
               <SideItem key={t.id} active={territoryView === t.id} onClick={() => openTerritory(t.id)}>
-                <I.flag className="text-muted" /> <span className="min-w-0 flex-1 truncate">{t.city}, {t.state}</span>
+                <I.flag className="shrink-0 text-muted" /> <span className="min-w-0 flex-1 truncate text-left">{t.city}, {t.state}</span>
               </SideItem>
             ))}
           </nav>
