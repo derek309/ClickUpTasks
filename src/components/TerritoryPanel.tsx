@@ -101,11 +101,18 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
             const matched = contacts.filter((c) => (c.city ?? "").trim().toLowerCase() === t.city.toLowerCase() && c.state && normalizeState(c.state) === territoryState);
             const unclaimed = matched.filter((c) => !clientIds.has("cl_" + c.id));
             const claimed = matched.filter((c) => clientIds.has("cl_" + c.id));
-            const open = expanded.has(t.id);
+            const open = focusId ? true : expanded.has(t.id);
+            // The focused single-city page (opened from the sidebar) doesn't
+            // need a click-to-expand accordion around content that's already
+            // the whole page — that read as a "toggle box" unlike how
+            // Tasks/Projects render (a plain header, then the list). Only the
+            // admin multi-city overview (focusId unset) keeps the accordion,
+            // since it's genuinely browsing several cities at once.
+            const HeaderTag = focusId ? "div" : "button";
             return (
-              <div key={t.id} className="mb-2 rounded-xl border">
-                <button onClick={() => toggle(t.id)} className="flex w-full items-center gap-3 px-3 py-2.5 text-left">
-                  <I.chevron className={`shrink-0 text-muted transition ${open ? "rotate-90" : ""}`} />
+              <div key={t.id} className={focusId ? "" : "mb-2 rounded-xl border"}>
+                <HeaderTag {...(focusId ? {} : { onClick: () => toggle(t.id) })} className="flex w-full items-center gap-3 px-1 py-2.5 text-left">
+                  {!focusId && <I.chevron className={`shrink-0 text-muted transition ${open ? "rotate-90" : ""}`} />}
                   <I.flag className="shrink-0 text-accent" />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[15px] font-medium">{t.name}</div>
@@ -143,11 +150,9 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                   {canAdmin && (
                     <span onClick={(e) => { e.stopPropagation(); onDeleteTerritory(t.id); }} title="Delete territory" className="shrink-0 rounded p-1 text-muted hover:bg-background hover:text-danger"><I.trash /></span>
                   )}
-                </button>
+                </HeaderTag>
                 {open && focusId && (
-                  <div className="border-t px-3 py-3">
-                    <TerritoryDirectory city={t.city} state={t.state} contacts={matched} clients={clients} onAddContact={onAddContact} onOpenClient={onOpenClient} />
-                  </div>
+                  <TerritoryDirectory city={t.city} state={t.state} contacts={matched} clients={clients} onAddContact={onAddContact} onOpenClient={onOpenClient} />
                 )}
                 {open && !focusId && (
                   <div className="space-y-1 border-t px-3 py-2">

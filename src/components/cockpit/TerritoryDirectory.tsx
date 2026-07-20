@@ -10,6 +10,11 @@
 // A matched business that we've already onboarded (a tracked client, i.e.
 // clients.id === "cl_"+contactId) gets a ✓ Client badge on top of its bucket.
 //
+// Rendered as one card matching GroupedList's own chrome (rounded-xl border
+// bg-surface shadow-soft, a column header row, colored collapsible group
+// headers with a count pill) so this reads as the same list format as
+// Tasks/Projects instead of a bespoke layout.
+//
 // When the directory isn't configured (the endpoint 501s before Derek sets the
 // WP env vars) or errors, it degrades to showing every city contact under
 // "No listing" — exactly the pre-directory behavior, just relabeled.
@@ -80,8 +85,18 @@ const fmtDue = (unix: number): { label: string; overdue: boolean } => {
 const digits = (s: string | undefined) => (s ?? "").replace(/\D/g, "").slice(-10);
 const lc = (s: string | undefined) => (s ?? "").trim().toLowerCase();
 
-type Bucket = "unclaimed" | "claimed" | "none";
 type SortKey = "score" | "name";
+
+// Group colors, same "colored strip" language GroupedList uses for status/
+// priority groups (g.color + alpha suffix for background/border).
+const BUCKET_META = {
+  unclaimed: { label: "Unclaimed", color: "#f59e0b", hint: "listings nobody has claimed — prospects to call" },
+  claimed: { label: "Claimed", color: "#10b981", hint: "owner has claimed their directory listing" },
+  none: { label: "No listing", color: "#64748b", hint: "contacts in this city with no directory listing" },
+} as const;
+
+// Name | Score | Stage | Actions | Client
+const TEMPLATE = "minmax(0,1fr) 56px 180px 210px 150px";
 
 export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onOpenClient }: {
   city: string;
@@ -95,8 +110,9 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [notConfigured, setNotConfigured] = useState(false);
-  const [bucket, setBucket] = useState<Bucket | "all">("all");
   const [sort, setSort] = useState<SortKey>("score");
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggleGroup = (key: string) => setCollapsed((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
 
   useEffect(() => {
     let alive = true;
@@ -181,87 +197,99 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // "No listing" = city contacts that matched no directory listing.
   const noListing = useMemo(() => contacts.filter((c) => !matchedContactIds.has(c.id)), [contacts, matchedContactIds]);
 
-  const claimed = rows.filter((r) => r.listing.claimed);
-  const unclaimed = rows.filter((r) => !r.listing.claimed);
-
   const sortRows = <T extends { listing: DirectoryListing }>(arr: T[]) =>
     [...arr].sort((a, b) => sort === "name"
       ? a.listing.name.localeCompare(b.listing.name)
       : (b.listing.score ?? -1) - (a.listing.score ?? -1) || a.listing.name.localeCompare(b.listing.name));
 
-  const counts = { claimed: claimed.length, unclaimed: unclaimed.length, none: noListing.length };
+  const claimed = sortRows(rows.filter((r) => r.listing.claimed));
+  const unclaimed = sortRows(rows.filter((r) => !r.listing.claimed));
+  const total = claimed.length + unclaimed.length + noListing.length;
 
-  if (loading) return <div className="py-6 text-center text-[13px] text-muted">Loading directory for {city}…</div>;
+  if (loading) return <div className="bg-background p-4 py-10 text-center text-[13px] text-muted sm:p-5">Loading directory for {city}…</div>;
+
+  const groups: { key: keyof typeof BUCKET_META; count: number }[] = [
+    { key: "unclaimed", count: unclaimed.length },
+    { key: "claimed", count: claimed.length },
+    { key: "none", count: noListing.length },
+  ];
 
   return (
-    <div className="space-y-3">
-      {/* Bucket filter pills + sort */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        {([["all", `All · ${counts.claimed + counts.unclaimed + counts.none}`], ["unclaimed", `Unclaimed · ${counts.unclaimed}`], ["claimed", `Claimed · ${counts.claimed}`], ["none", `No listing · ${counts.none}`]] as const).map(([v, label]) => (
-          <button key={v} onClick={() => setBucket(v)} className={`rounded-full border px-2.5 py-1 text-[12px] font-medium ${bucket === v ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}>{label}</button>
-        ))}
-        <span className="ml-auto inline-flex overflow-hidden rounded-md border text-[12px]">
+    <div className="bg-background p-4 sm:p-5">
+      {/* Sort control — mirrors the sort-by affordance GroupedList's caller
+          places above the table; groups themselves collapse individually
+          instead of a separate bucket-filter row. */}
+      <div className="mb-2 flex items-center justify-end">
+        <span className="inline-flex overflow-hidden rounded-md border text-[12px]">
           {(["score", "name"] as const).map((k) => (
-            <button key={k} onClick={() => setSort(k)} className={`px-2 py-1 font-medium ${sort === k ? "bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}>{k === "score" ? "Score" : "A–Z"}</button>
+            <button key={k} onClick={() => setSort(k)} className={`px-2 py-1 font-medium ${sort === k ? "bg-accent-soft text-accent" : "text-muted hover:bg-surface"}`}>{k === "score" ? "Score" : "A–Z"}</button>
           ))}
         </span>
       </div>
 
       {notConfigured && (
-        <div className="rounded-lg border border-amber-400/40 bg-amber-50/50 px-3 py-2 text-[12px] text-amber-800">
+        <div className="mb-2 rounded-lg border border-amber-400/40 bg-amber-50/50 px-3 py-2 text-[12px] text-amber-800">
           Directory not connected yet — showing city contacts only. Set <code>CUL_WP_BASE_URL</code> + <code>CLICKUPTASKS_API_KEY</code> to pull listing/claimed status.
         </div>
       )}
-      {err && <div className="rounded-lg border border-danger/40 bg-danger/5 px-3 py-2 text-[12px] text-danger">Couldn&apos;t load the directory: {err}</div>}
+      {err && <div className="mb-2 rounded-lg border border-danger/40 bg-danger/5 px-3 py-2 text-[12px] text-danger">Couldn&apos;t load the directory: {err}</div>}
 
-      {/* Unclaimed (prospects) */}
-      {(bucket === "all" || bucket === "unclaimed") && counts.unclaimed > 0 && (
-        <Section title="Unclaimed" hint="listings nobody has claimed — prospects to call">
-          {sortRows(unclaimed).map((r) => <ListingRow key={r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} onPatch={patchListing} stages={stages} currentStageId={oppsByContact[r.listing.ghlContactId]?.stageId} onAdvance={advanceStage} />)}
-        </Section>
-      )}
-
-      {/* Claimed */}
-      {(bucket === "all" || bucket === "claimed") && counts.claimed > 0 && (
-        <Section title="Claimed" hint="owner has claimed their directory listing">
-          {sortRows(claimed).map((r) => <ListingRow key={r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} onPatch={patchListing} stages={stages} currentStageId={oppsByContact[r.listing.ghlContactId]?.stageId} onAdvance={advanceStage} />)}
-        </Section>
-      )}
-
-      {/* No listing */}
-      {(bucket === "all" || bucket === "none") && counts.none > 0 && (
-        <Section title="No listing" hint="contacts in this city with no directory listing">
-          {noListing.map((c) => {
-            const client = clientIds.has("cl_" + c.id) ? clients.find((cl) => cl.id === "cl_" + c.id) ?? null : null;
+      <div className="overflow-x-auto rounded-xl border bg-surface shadow-soft">
+        <div className="hidden items-center gap-2 border-b bg-background/40 px-4 py-2 text-[12px] font-semibold uppercase tracking-wide text-muted sm:grid" style={{ gridTemplateColumns: TEMPLATE }}>
+          <span>Name</span>
+          <span className="text-center">Score</span>
+          <span>Stage</span>
+          <span>Actions</span>
+          <span>Client</span>
+        </div>
+        <div className="divide-y-8 divide-background">
+          {groups.map((g) => {
+            const meta = BUCKET_META[g.key];
+            const isOpen = !collapsed.has(g.key);
             return (
-              <div key={c.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[15px]">
-                <span className="min-w-0 flex-1 truncate">{c.name}{c.company && <span className="text-muted/70"> · {c.company}</span>}</span>
-                {client ? (
-                  <button onClick={() => onOpenClient(client.id)} className="shrink-0 rounded-md px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent-soft">✓ Client</button>
-                ) : (
-                  <button onClick={() => onAddContact(c)} className="shrink-0 rounded-md border border-dashed px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent-soft">+ Add as client</button>
-                )}
+              <div key={g.key}>
+                <button onClick={() => toggleGroup(g.key)} className="flex w-full items-center gap-2 border-y px-4 py-2 text-left transition" style={{ background: meta.color + "22", borderColor: meta.color + "40" }}>
+                  <I.chevron className={`text-muted transition ${isOpen ? "-rotate-90" : "rotate-180"}`} />
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: meta.color }} />
+                  <span className="text-[15px] font-bold">{meta.label}</span>
+                  <span className="rounded-full px-1.5 text-[13px] font-semibold normal-case tracking-normal text-white" style={{ background: meta.color }}>{g.count}</span>
+                  <span className="truncate text-[12px] font-normal normal-case text-muted">{meta.hint}</span>
+                </button>
+                {isOpen && g.key !== "none" && (g.key === "unclaimed" ? unclaimed : claimed).map((r) => (
+                  <ListingRow key={r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} onPatch={patchListing}
+                    stages={stages} currentStageId={oppsByContact[r.listing.ghlContactId]?.stageId} onAdvance={advanceStage} />
+                ))}
+                {isOpen && g.key === "none" && noListing.map((c) => {
+                  const client = clientIds.has("cl_" + c.id) ? clients.find((cl) => cl.id === "cl_" + c.id) ?? null : null;
+                  return <NoListingRow key={c.id} contact={c} client={client} onAddContact={onAddContact} onOpenClient={onOpenClient} />;
+                })}
               </div>
             );
           })}
-        </Section>
-      )}
-
-      {!loading && counts.claimed + counts.unclaimed + counts.none === 0 && (
-        <div className="py-6 text-center text-[13px] text-muted">No directory listings or contacts in {city} yet.</div>
-      )}
+        </div>
+        {total === 0 && <div className="px-4 py-10 text-center text-[13px] text-muted">No directory listings or contacts in {city} yet.</div>}
+      </div>
     </div>
   );
 }
 
-function Section({ title, hint, children }: { title: string; hint: string; children: React.ReactNode }) {
+// Reusable "sm:contents" split — on mobile the row stacks (name, then a wrap
+// of the other fields); at sm+ it drops into the shared grid template. Same
+// technique GroupedList's TaskRow uses.
+function NoListingRow({ contact, client, onAddContact, onOpenClient }: {
+  contact: Contact; client: Client | null; onAddContact: (c: Contact) => void; onOpenClient: (id: string) => void;
+}) {
   return (
-    <div>
-      <div className="mb-1 flex items-baseline gap-2 px-1">
-        <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">{title}</span>
-        <span className="truncate text-[11px] text-muted/70">{hint}</span>
+    <div className="flex flex-col gap-1 border-b px-4 py-2.5 text-[15px] transition-colors last:border-0 hover:bg-accent-soft/50 sm:grid sm:min-h-[42px] sm:items-center sm:gap-2 sm:py-1.5" style={{ gridTemplateColumns: TEMPLATE }}>
+      <div className="min-w-0 truncate">{contact.name}{contact.company && <span className="text-muted/70"> · {contact.company}</span>}</div>
+      <span className="hidden sm:block" />
+      <span className="hidden sm:block" />
+      <span className="hidden sm:block" />
+      <div>
+        {client
+          ? <button onClick={() => onOpenClient(client.id)} className="rounded-md px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent-soft">✓ Client</button>
+          : <button onClick={() => onAddContact(contact)} className="rounded-md border border-dashed px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent-soft">+ Add as client</button>}
       </div>
-      <div className="space-y-0.5">{children}</div>
     </div>
   );
 }
@@ -291,6 +319,7 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, stages, currentS
 
   const due = fmtDue(listing.followupDue);
   const log = listing.activityLog;
+  const expanded = logOpen || histOpen;
 
   const call = async () => {
     if (!listing.phone) { setCallMsg("No phone on file"); return; }
@@ -342,54 +371,69 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, stages, currentS
   };
 
   return (
-    <div className="rounded-lg px-2 py-1.5 text-[15px] hover:bg-background">
-      <div className="flex items-center gap-2">
-        {listing.claimed
-          ? <span title="Directory listing claimed" className="shrink-0 text-emerald-500"><I.check /></span>
-          : <span title="Unclaimed listing" className="h-2 w-2 shrink-0 rounded-full border border-muted/50" />}
-        <span className="min-w-0 flex-1 truncate">
-          {listing.name}
-          {listing.category && <span className="text-muted/70"> · {listing.category}</span>}
-        </span>
-        {typeof listing.score === "number" && <span title="ClickUpLocal score" className="shrink-0 rounded bg-background px-1.5 py-0.5 text-[11px] font-medium text-muted">{listing.score}</span>}
-        {stages.length > 0 && listing.ghlContactId && (
-          <select value={currentStageId ?? ""} onChange={(e) => e.target.value && onAdvance(listing.ghlContactId, e.target.value, listing.name)}
-            title="Sales funnel stage (GHL Prospects pipeline)"
-            className={`shrink-0 rounded-md border px-1.5 py-1 text-[12px] font-medium outline-none focus:border-accent ${currentStageId ? "bg-accent-soft text-accent" : "bg-background text-muted"}`}>
-            <option value="">Set stage…</option>
-            {stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-        )}
-        {listing.phone && <button onClick={call} disabled={calling} title={`Bridge-call ${listing.phone}`} className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground disabled:opacity-40">{calling ? "…" : "Call"}</button>}
-        <button onClick={toggleHistory} title="Outreach history" className={`shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium ${histOpen ? "bg-accent-soft text-accent" : "text-muted hover:bg-surface hover:text-foreground"}`}>History</button>
-        <button onClick={() => setLogOpen((o) => !o)} title="Log an outreach touch" className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">Log</button>
-        {client && meta
-          ? <button onClick={() => onOpenClient(client.id)} className="shrink-0 rounded-md px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent-soft"><span className="mr-1 inline-block h-2 w-2 rounded-full align-middle" style={{ background: meta.dot }} />✓ Client</button>
-          : contact
-            ? <button onClick={() => onAddContact(contact)} className="shrink-0 rounded-md border border-dashed px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent-soft">+ Add as client</button>
-            : <span className="shrink-0 text-[11px] text-muted/60">no contact</span>}
-      </div>
-
-      {/* Current pipeline state line */}
-      {(listing.outcomeLabel || listing.nextActionLabel || listing.followupDue > 0 || listing.rep) && (
-        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 pl-6 text-[11px]">
-          {listing.outcomeLabel && <span className="rounded bg-background px-1.5 py-0.5 font-medium text-muted">{listing.outcomeLabel}</span>}
-          {listing.nextActionLabel && <span className="rounded bg-accent-soft px-1.5 py-0.5 font-medium text-accent">→ {listing.nextActionLabel}</span>}
-          {due.label && <span className={`px-1 ${due.overdue ? "font-medium text-danger" : "text-muted"}`}>{due.label}</span>}
-          {listing.rep && <span className="text-muted/70">· {listing.rep}</span>}
+    <div className={`border-b text-[15px] transition-colors last:border-0 hover:bg-accent-soft/50 ${expanded ? "bg-accent-soft/30" : ""}`}>
+      <div className="flex flex-col gap-1.5 px-4 py-2.5 sm:grid sm:min-h-[42px] sm:items-center sm:gap-2 sm:py-1.5" style={{ gridTemplateColumns: TEMPLATE }}>
+        {/* Name + category + pipeline state chips */}
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-1.5">
+            {listing.claimed
+              ? <span title="Directory listing claimed" className="shrink-0 text-emerald-500"><I.check /></span>
+              : <span title="Unclaimed listing" className="h-2 w-2 shrink-0 rounded-full border border-muted/50" />}
+            <span className="min-w-0 truncate font-medium">{listing.name}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 pl-5 text-[12px] text-muted">
+            {listing.category && <span>{listing.category}</span>}
+            {listing.outcomeLabel && <span className="rounded bg-background px-1.5 py-0.5 font-medium">{listing.outcomeLabel}</span>}
+            {listing.nextActionLabel && <span className="rounded bg-accent-soft px-1.5 py-0.5 font-medium text-accent">→ {listing.nextActionLabel}</span>}
+            {due.label && <span className={due.overdue ? "font-medium text-danger" : ""}>{due.label}</span>}
+            {listing.rep && <span>· {listing.rep}</span>}
+            {callMsg && <span>· {callMsg}</span>}
+          </div>
         </div>
-      )}
-      {callMsg && <div className="mt-0.5 pl-6 text-[11px] text-muted">{callMsg}</div>}
+
+        {/* Score */}
+        <div className="pl-5 sm:pl-0 sm:text-center">
+          {typeof listing.score === "number" && <span title="ClickUpLocal score" className="inline-block rounded bg-background px-1.5 py-0.5 text-[11px] font-medium text-muted">{listing.score}</span>}
+        </div>
+
+        {/* Stage */}
+        <div className="pl-5 sm:pl-0">
+          {stages.length > 0 && listing.ghlContactId && (
+            <select value={currentStageId ?? ""} onChange={(e) => e.target.value && onAdvance(listing.ghlContactId, e.target.value, listing.name)}
+              title="Sales funnel stage (GHL Prospects pipeline)"
+              className={`w-full max-w-[170px] rounded-md border px-1.5 py-1 text-[12px] font-medium outline-none focus:border-accent ${currentStageId ? "bg-accent-soft text-accent" : "bg-background text-muted"}`}>
+              <option value="">Set stage…</option>
+              {stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex flex-wrap items-center gap-1.5 pl-5 sm:pl-0">
+          {listing.phone && <button onClick={call} disabled={calling} title={`Bridge-call ${listing.phone}`} className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground disabled:opacity-40">{calling ? "…" : "Call"}</button>}
+          <button onClick={toggleHistory} title="Outreach history" className={`shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium ${histOpen ? "bg-accent-soft text-accent" : "text-muted hover:bg-surface hover:text-foreground"}`}>History</button>
+          <button onClick={() => setLogOpen((o) => !o)} title="Log an outreach touch" className={`shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium ${logOpen ? "bg-accent-soft text-accent" : "text-muted hover:bg-surface hover:text-foreground"}`}>Log</button>
+        </div>
+
+        {/* Client */}
+        <div className="pl-5 sm:pl-0">
+          {client && meta
+            ? <button onClick={() => onOpenClient(client.id)} className="rounded-md px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent-soft"><span className="mr-1 inline-block h-2 w-2 rounded-full align-middle" style={{ background: meta.dot }} />✓ Client</button>
+            : contact
+              ? <button onClick={() => onAddContact(contact)} className="rounded-md border border-dashed px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent-soft">+ Add as client</button>
+              : <span className="text-[11px] text-muted/60">no contact</span>}
+        </div>
+      </div>
 
       {/* Outreach history */}
       {histOpen && (
-        <div className="mt-2 space-y-1 rounded-lg border bg-surface p-2 pl-6 text-[12px]">
+        <div className="space-y-1 border-t bg-background/40 px-4 py-2 pl-9 text-[12px]">
           {histLoading && <div className="text-muted">Loading history…</div>}
           {!histLoading && (!log || log.length === 0) && <div className="text-muted">No touches logged yet.</div>}
           {!histLoading && log && log.map((e) => (
-            <div key={e.id} className="border-b pb-1 last:border-0 last:pb-0">
+            <div key={e.id} className="border-b border-border/60 pb-1 last:border-0 last:pb-0">
               <div className="flex flex-wrap items-center gap-1.5">
-                {e.outcomeLabel && <span className="rounded bg-background px-1.5 py-0.5 font-medium text-muted">{e.outcomeLabel}</span>}
+                {e.outcomeLabel && <span className="rounded bg-surface px-1.5 py-0.5 font-medium text-muted">{e.outcomeLabel}</span>}
                 {e.nextActionLabel && <span className="rounded bg-accent-soft px-1.5 py-0.5 font-medium text-accent">→ {e.nextActionLabel}</span>}
                 {e.amountLabel && <span className="font-medium text-emerald-600">{e.amountLabel}</span>}
                 <span className="ml-auto text-muted/70">{e.dateH}{e.user && ` · ${e.user}`}</span>
@@ -402,24 +446,24 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, stages, currentS
 
       {/* Log-touch form */}
       {logOpen && (
-        <div className="mt-2 space-y-2 rounded-lg border bg-surface p-2 pl-6">
+        <div className="space-y-2 border-t bg-background/40 px-4 py-2 pl-9">
           <div className="flex flex-wrap gap-2">
-            <select value={outcome} onChange={(e) => setOutcome(e.target.value)} className="rounded-md border bg-background px-2 py-1 text-[13px] outline-none focus:border-accent">
+            <select value={outcome} onChange={(e) => setOutcome(e.target.value)} className="rounded-md border bg-surface px-2 py-1 text-[13px] outline-none focus:border-accent">
               <option value="">Outcome…</option>
               {OUTCOMES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
-            <select value={nextAction} onChange={(e) => setNextAction(e.target.value)} className="rounded-md border bg-background px-2 py-1 text-[13px] outline-none focus:border-accent">
+            <select value={nextAction} onChange={(e) => setNextAction(e.target.value)} className="rounded-md border bg-surface px-2 py-1 text-[13px] outline-none focus:border-accent">
               <option value="">Next action…</option>
               {NEXT_ACTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
             <input value={followupDays} onChange={(e) => setFollowupDays(e.target.value.replace(/\D/g, ""))} placeholder="Follow-up (days)" inputMode="numeric"
-              className="w-32 rounded-md border bg-background px-2 py-1 text-[13px] outline-none focus:border-accent" />
+              className="w-32 rounded-md border bg-surface px-2 py-1 text-[13px] outline-none focus:border-accent" />
           </div>
           <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
-            className="w-full rounded-md border bg-background px-2 py-1 text-[13px] outline-none focus:border-accent" />
+            className="w-full rounded-md border bg-surface px-2 py-1 text-[13px] outline-none focus:border-accent" />
           {error && <div className="text-[12px] text-danger">{error}</div>}
           <div className="flex justify-end gap-2">
-            <button onClick={() => setLogOpen(false)} className="rounded-md border px-2.5 py-1 text-[13px] font-medium hover:bg-background">Cancel</button>
+            <button onClick={() => setLogOpen(false)} className="rounded-md border px-2.5 py-1 text-[13px] font-medium hover:bg-surface">Cancel</button>
             <button onClick={submit} disabled={saving} className="rounded-md bg-accent px-2.5 py-1 text-[13px] font-medium text-white disabled:opacity-40">{saving ? "Saving…" : "Log touch"}</button>
           </div>
         </div>
