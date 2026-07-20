@@ -114,10 +114,18 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                 <HeaderTag {...(focusId ? {} : { onClick: () => toggle(t.id) })} className="flex w-full items-center gap-3 px-1 py-2.5 text-left">
                   {!focusId && <I.chevron className={`shrink-0 text-muted transition ${open ? "rotate-90" : ""}`} />}
                   <I.flag className="shrink-0 text-accent" />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[15px] font-medium">{t.name}</div>
-                    <div className="truncate text-[13px] text-muted">{t.city}, {t.state} · {claimed.length} client{claimed.length === 1 ? "" : "s"} · {unclaimed.length} contact{unclaimed.length === 1 ? "" : "s"}</div>
-                  </div>
+                  {focusId ? (
+                    // The city name/state is already the page's own title
+                    // (the app header above) — repeating it here just to add
+                    // the scoped counts would duplicate it, so this is one
+                    // compact line, not a second stacked title.
+                    <span className="min-w-0 flex-1 truncate text-[13px] text-muted">{claimed.length} client{claimed.length === 1 ? "" : "s"} · {unclaimed.length} contact{unclaimed.length === 1 ? "" : "s"}</span>
+                  ) : (
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[15px] font-medium">{t.name}</div>
+                      <div className="truncate text-[13px] text-muted">{t.city}, {t.state} · {claimed.length} client{claimed.length === 1 ? "" : "s"} · {unclaimed.length} contact{unclaimed.length === 1 ? "" : "s"}</div>
+                    </div>
+                  )}
                   <span className="relative flex shrink-0 items-center" onClick={(e) => e.stopPropagation()}>
                     {(t.assignedTo ?? []).length > 0 ? (
                       <span className="flex items-center -space-x-1.5">
