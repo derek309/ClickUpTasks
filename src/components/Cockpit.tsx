@@ -2140,7 +2140,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // so the popovers never double-render on screen.
   const territoryTitle = territoryView ? (territoryView === "all" ? "Territories" : (territoryById(territoryView) ? `${territoryById(territoryView)!.city}, ${territoryById(territoryView)!.state}` : "Territory")) : null;
   const headerTitleText = territoryTitle ?? (inboxView ? "Inbox" : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? "All Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? "")));
-  const isClientDetail = !myWork && !personalView && !inboxView && !dirView && activeClient !== "all" && !!clientById(activeClient);
+  const isClientDetail = !myWork && !personalView && !inboxView && !dirView && !territoryView && activeClient !== "all" && !!clientById(activeClient);
   const showFilterControl = !territoryView && !inboxView && !dirView && !myWork && !(activeClient !== "all" && (clientTab === "chat" || clientTab === "vault"));
   const bellControl = (
     <div className="relative">
@@ -2451,7 +2451,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             </>) : (<>
               <h1 className="flex items-center gap-2 truncate text-[20px] font-semibold">
                 {territoryTitle ? territoryTitle : inboxView ? "Inbox" : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? "All Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
-                {!myWork && !personalView && !inboxView && !dirView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
+                {!myWork && !personalView && !inboxView && !dirView && !territoryView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
               </h1>
               {/* No subtitle for a territory — it fell through to the
                   generic "All Tasks" branch below (wrong, global counts)
@@ -2476,7 +2476,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               the header actions, ahead of the Tasks/Journal/Vault tabs, as a
               prominent accent (or red-when-overdue) pill rather than the tiny
               grey chip it used to be. */}
-          {!myWork && !personalView && !inboxView && !dirView && activeClient !== "all" && clientById(activeClient) && (() => {
+          {!myWork && !personalView && !inboxView && !dirView && !territoryView && activeClient !== "all" && clientById(activeClient) && (() => {
             const scopedProject = activeProject ? projectById(activeProject) : null;
             const entity = scopedProject ?? clientById(activeClient)!;
             const fu = entity.followUpAt ?? null;
@@ -2499,7 +2499,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </div>
             );
           })()}
-          {!myWork && !personalView && !inboxView && !dirView && activeClient !== "all" && (
+          {!myWork && !personalView && !inboxView && !dirView && !territoryView && activeClient !== "all" && (
             <div className="inline-flex overflow-hidden rounded-md border">
               <button onClick={() => setClientTab("tasks")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "tasks" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Tasks</button>
               <button onClick={() => setClientTab("chat")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "chat" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Journal · {(() => {
@@ -2518,7 +2518,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           {/* Quick Email/SMS — jumps straight into the Journal composer in that
               mode. Client-scoped messaging only (not projects), gated by the
               same permission as sending. */}
-          {!myWork && !personalView && !inboxView && !dirView && activeClient !== "all" && !activeProject && canMessageClient(activeClient) && (
+          {!myWork && !personalView && !inboxView && !dirView && !territoryView && activeClient !== "all" && !activeProject && canMessageClient(activeClient) && (
             <div className="hidden overflow-hidden rounded-md border sm:inline-flex">
               <button onClick={() => openCompose("email")} title="Email this client" className="inline-flex items-center gap-1 bg-background px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-accent-soft hover:text-accent"><I.comment /> <span className="hidden sm:inline">Email</span></button>
               <button onClick={() => openCompose("sms")} title="Text this client" className="border-l bg-background px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-accent-soft hover:text-accent">SMS</button>
@@ -2528,7 +2528,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               Client-scoped, never runs on its own (matches the app's "AI never
               spends without a click" rule). Jumps to the Journal, where the
               freshest recap is pinned at the top. */}
-          {!myWork && !personalView && !inboxView && !dirView && activeClient !== "all" && !activeProject && clientById(activeClient) && (
+          {!myWork && !personalView && !inboxView && !dirView && !territoryView && activeClient !== "all" && !activeProject && clientById(activeClient) && (
             <button onClick={async () => { setClientTab("chat"); await regenerateAiSummary(activeClient); }}
               disabled={aiSummaryBusyId === activeClient}
               title="Generate an up-to-date 'recently done / next up' recap for this client"
@@ -2537,7 +2537,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             </button>
           )}
 
-          {!myWork && !personalView && !inboxView && !dirView && activeClient !== "all" && clientById(activeClient) && (
+          {!myWork && !personalView && !inboxView && !dirView && !territoryView && activeClient !== "all" && clientById(activeClient) && (
             <div className="flex items-center gap-1.5">
               {(() => {
                 // One contextual Follow toggle, not two — it tracks whatever
@@ -2765,7 +2765,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </div>
         </header>
 
-        {!myWork && !personalView && !inboxView && !dirView && activeClient !== "all" && (
+        {!myWork && !personalView && !inboxView && !dirView && !territoryView && activeClient !== "all" && (
           <QuickLinksBar
             links={clientLinks.filter((l) => l.clientId === activeClient)}
             canEdit={canAdmin}
@@ -2782,6 +2782,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <TerritoryPanel me={me} canAdmin={canAdmin} territories={territories} contacts={contacts} clients={clients}
               onAddTerritory={addTerritory} onToggleAssignee={toggleTerritoryAssignee} onDeleteTerritory={(id) => { deleteTerritory(id); if (territoryView === id) setTerritoryView("all"); }}
               onAddContact={(c) => addClientContact(c)}
+              // Clicking a prospect's NAME (vs. the explicit "+ Add as
+              // client" button) needs a confirm gate — a stray click (text
+              // selection, misclick on a long list) shouldn't silently
+              // create a client. The button itself stays immediate, since
+              // its label already says exactly what it does.
+              onOpenOrCreateClient={(c) => setConfirmDialog({
+                title: `Start working “${c.name}”?`,
+                message: "Adds them to Clients as a Lead so you can journal and upload files before they're a paying client.",
+                confirmLabel: "Start",
+                onConfirm: () => { setConfirmDialog(null); addClientContact(c); },
+              })}
               onOpenClient={(id) => { setTerritoryView(null); setActiveClient(id); setActiveProject(null); setClientTab("tasks"); }}
               focusId={territoryView === "all" ? undefined : territoryView} />
           </div>
@@ -2900,6 +2911,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           territories={territories} contacts={contacts} clients={clients}
           onAddTerritory={addTerritory} onToggleAssignee={toggleTerritoryAssignee} onDeleteTerritory={deleteTerritory}
           onAddContact={(contact) => addClientContact(contact)}
+          onOpenOrCreateClient={(c) => setConfirmDialog({
+            title: `Start working “${c.name}”?`,
+            message: "Adds them to Clients as a Lead so you can journal and upload files before they're a paying client.",
+            confirmLabel: "Start",
+            onConfirm: () => { setConfirmDialog(null); addClientContact(c); },
+          })}
           onOpenClient={(id) => { setSettingsHubOpen(false); setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); }}
           templates={taskTemplates} projects={projects}
           onSaveTemplate={saveTemplate} onDeleteTemplate={deleteTemplate} onUseTemplateAsTask={useTemplateAsTask}
@@ -2955,7 +2972,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           Send button and toasts live bottom-right), draggable so it can be
           parked anywhere, and hidden on the Journal tab so it never covers the
           message composer while writing/sending. */}
-      {!(!myWork && !personalView && !inboxView && !dirView && activeClient !== "all" && clientTab === "chat") && (
+      {!(!myWork && !personalView && !inboxView && !dirView && !territoryView && activeClient !== "all" && clientTab === "chat") && (
         <button onPointerDown={onFabPointerDown} onPointerMove={onFabPointerMove} onPointerUp={onFabPointerUp}
           title="Add a task (drag to move)" aria-label="Add a task"
           style={fabPos ? { left: fabPos.x, top: fabPos.y, right: "auto", bottom: "auto" } : undefined}

@@ -109,12 +109,13 @@ const listingsCache = new Map<string, ListingsCacheEntry>();
 type PipelineCacheEntry = { stages: Stage[]; byContact: Record<string, OppRef>; at: number };
 let pipelineCache: PipelineCacheEntry | null = null;
 
-export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onOpenClient }: {
+export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onOpenOrCreateClient, onOpenClient }: {
   city: string;
   state: string;
   contacts: Contact[];   // already scoped to this city/state by the caller
   clients: Client[];
-  onAddContact: (contact: Contact) => void;
+  onAddContact: (contact: Contact) => void; // explicit "+ Add as client" button — immediate
+  onOpenOrCreateClient: (contact: Contact) => void; // clicking a prospect's name — confirm-gated
   onOpenClient: (clientId: string) => void;
 }) {
   const cacheKey = `${city}|${state}`;
@@ -290,12 +291,12 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                   <span className="truncate text-[12px] font-normal normal-case text-muted">{meta.hint}</span>
                 </button>
                 {isOpen && g.key !== "none" && (g.key === "unclaimed" ? unclaimed : claimed).map((r) => (
-                  <ListingRow key={r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} onPatch={patchListing}
+                  <ListingRow key={r.listing.id} row={r} onAddContact={onAddContact} onOpenOrCreateClient={onOpenOrCreateClient} onOpenClient={onOpenClient} onPatch={patchListing}
                     stages={stages} currentStageId={oppsByContact[r.listing.ghlContactId]?.stageId} onAdvance={advanceStage} />
                 ))}
                 {isOpen && g.key === "none" && noListing.map((c) => {
                   const client = clientIds.has("cl_" + c.id) ? clients.find((cl) => cl.id === "cl_" + c.id) ?? null : null;
-                  return <NoListingRow key={c.id} contact={c} client={client} onAddContact={onAddContact} onOpenClient={onOpenClient} />;
+                  return <NoListingRow key={c.id} contact={c} client={client} onAddContact={onAddContact} onOpenOrCreateClient={onOpenOrCreateClient} onOpenClient={onOpenClient} />;
                 })}
               </div>
             );
@@ -310,21 +311,18 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
 // Reusable "sm:contents" split — on mobile the row stacks (name, then a wrap
 // of the other fields); at sm+ it drops into the shared grid template. Same
 // technique GroupedList's TaskRow uses.
-function NoListingRow({ contact, client, onAddContact, onOpenClient }: {
-  contact: Contact; client: Client | null; onAddContact: (c: Contact) => void; onOpenClient: (id: string) => void;
+function NoListingRow({ contact, client, onAddContact, onOpenOrCreateClient, onOpenClient }: {
+  contact: Contact; client: Client | null; onAddContact: (c: Contact) => void; onOpenOrCreateClient: (c: Contact) => void; onOpenClient: (id: string) => void;
 }) {
   return (
     <div className="flex flex-col gap-1 border-b px-4 py-2.5 text-[15px] transition-colors last:border-0 hover:bg-accent-soft/50 sm:grid sm:min-h-[42px] sm:items-center sm:gap-2 sm:py-1.5" style={{ gridTemplateColumns: TEMPLATE }}>
-      {client ? (
-        // Only clickable when a client already exists — opening never
-        // mutates anything. Creating one still requires the explicit
-        // "+ Add as client" button below, never a stray click on the name.
-        <button onClick={() => onOpenClient(client.id)} title="Open this client" className="min-w-0 truncate text-left hover:text-accent hover:underline">
-          {contact.name}{contact.company && <span className="text-muted/70"> · {contact.company}</span>}
-        </button>
-      ) : (
-        <div className="min-w-0 truncate">{contact.name}{contact.company && <span className="text-muted/70"> · {contact.company}</span>}</div>
-      )}
+      {/* Always clickable — opening an existing client is a pure read; a
+          prospect with no client yet goes through onOpenOrCreateClient's
+          confirm gate, so a stray click still can't silently create one. */}
+      <button onClick={() => (client ? onOpenClient(client.id) : onOpenOrCreateClient(contact))} title={client ? "Open this client" : "Start working this prospect"}
+        className="min-w-0 truncate text-left hover:text-accent hover:underline">
+        {contact.name}{contact.company && <span className="text-muted/70"> · {contact.company}</span>}
+      </button>
       <span className="hidden sm:block" />
       <span className="hidden sm:block" />
       <span className="hidden sm:block" />
@@ -337,9 +335,10 @@ function NoListingRow({ contact, client, onAddContact, onOpenClient }: {
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, onPatch, stages, currentStageId, onAdvance }: {
+function ListingRow({ row, onAddContact, onOpenOrCreateClient, onOpenClient, onPatch, stages, currentStageId, onAdvance }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
+  onOpenOrCreateClient: (c: Contact) => void;
   onOpenClient: (id: string) => void;
   onPatch: (id: number | string, next: Partial<DirectoryListing>) => void;
   stages: Stage[];
@@ -423,11 +422,13 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, stages, currentS
               ? <span title="Directory listing claimed" className="shrink-0 text-emerald-500"><I.check /></span>
               : <span title="Unclaimed listing" className="h-2 w-2 shrink-0 rounded-full border border-muted/50" />}
             {client ? (
-              // Only clickable when a client already exists — opening never
-              // mutates anything, so a stray click (e.g. selecting the text)
-              // can't accidentally create one. Creating still requires the
-              // explicit "+ Add as client" button below.
               <button onClick={() => onOpenClient(client.id)} title="Open this client"
+                className="min-w-0 truncate text-left font-medium hover:text-accent hover:underline">{listing.name}</button>
+            ) : contact ? (
+              // No client yet — clicking still opens/starts them, but through
+              // a confirm gate (see Cockpit.tsx), so a stray click (e.g.
+              // selecting the text) can't silently create one.
+              <button onClick={() => onOpenOrCreateClient(contact)} title="Start working this prospect"
                 className="min-w-0 truncate text-left font-medium hover:text-accent hover:underline">{listing.name}</button>
             ) : (
               <span className="min-w-0 truncate font-medium">{listing.name}</span>

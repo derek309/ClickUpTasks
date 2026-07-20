@@ -10,13 +10,14 @@ import { users, clientStatusMeta, normalizeState, type Me, type Territory, type 
 import { I, Avatar } from "./cockpit/ui";
 import TerritoryDirectory from "./cockpit/TerritoryDirectory";
 
-export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onDeleteTerritory, onAddContact, onOpenClient, focusId }: {
+export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onDeleteTerritory, onAddContact, onOpenOrCreateClient, onOpenClient, focusId }: {
   me: Me; canAdmin: boolean;
   territories: Territory[]; contacts: Contact[]; clients: Client[];
   onAddTerritory: (t: { name: string; city: string; state: string; assignedTo: string[] }) => void;
   onToggleAssignee: (id: string, memberId: string) => void; // toggle a teammate on/off a city
   onDeleteTerritory: (id: string) => void;
-  onAddContact: (contact: Contact) => void;
+  onAddContact: (contact: Contact) => void; // the explicit "+ Add as client" button — immediate, no confirm
+  onOpenOrCreateClient: (contact: Contact) => void; // clicking a prospect's name — confirm-gated (see Cockpit.tsx)
   onOpenClient: (clientId: string) => void;
   focusId?: string; // when set, render only this one city, auto-expanded (the sidebar city page)
 }) {
@@ -160,7 +161,7 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                   )}
                 </HeaderTag>
                 {open && focusId && (
-                  <TerritoryDirectory city={t.city} state={t.state} contacts={matched} clients={clients} onAddContact={onAddContact} onOpenClient={onOpenClient} />
+                  <TerritoryDirectory city={t.city} state={t.state} contacts={matched} clients={clients} onAddContact={onAddContact} onOpenOrCreateClient={onOpenOrCreateClient} onOpenClient={onOpenClient} />
                 )}
                 {open && !focusId && (
                   <div className="space-y-1 border-t px-3 py-2">
