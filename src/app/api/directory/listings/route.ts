@@ -19,6 +19,25 @@ const WP_BASE = process.env.CUL_WP_BASE_URL || "";      // e.g. https://clickupl
 const WP_KEY = process.env.CLICKUPTASKS_API_KEY || "";   // shared secret, same value as wp-config
 const configured = Boolean(WP_BASE && WP_KEY);
 
+// GeoDirectory stores region as the full state name ("California"), while the
+// territory sends the 2-letter code ("CA"). Normalize both to the abbreviation
+// so the state guard matches instead of dropping everything.
+const US_STATES: Record<string, string> = {
+  alabama: "al", alaska: "ak", arizona: "az", arkansas: "ar", california: "ca", colorado: "co",
+  connecticut: "ct", delaware: "de", "district of columbia": "dc", florida: "fl", georgia: "ga",
+  hawaii: "hi", idaho: "id", illinois: "il", indiana: "in", iowa: "ia", kansas: "ks", kentucky: "ky",
+  louisiana: "la", maine: "me", maryland: "md", massachusetts: "ma", michigan: "mi", minnesota: "mn",
+  mississippi: "ms", missouri: "mo", montana: "mt", nebraska: "ne", nevada: "nv", "new hampshire": "nh",
+  "new jersey": "nj", "new mexico": "nm", "new york": "ny", "north carolina": "nc", "north dakota": "nd",
+  ohio: "oh", oklahoma: "ok", oregon: "or", pennsylvania: "pa", "rhode island": "ri", "south carolina": "sc",
+  "south dakota": "sd", tennessee: "tn", texas: "tx", utah: "ut", vermont: "vt", virginia: "va",
+  washington: "wa", "west virginia": "wv", wisconsin: "wi", wyoming: "wy",
+};
+const normState = (s: string) => {
+  const t = String(s ?? "").trim().toLowerCase();
+  return t.length === 2 ? t : (US_STATES[t] || t);
+};
+
 export async function GET(req: NextRequest) {
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -51,9 +70,9 @@ export async function GET(req: NextRequest) {
   // Optional state narrowing — the WP endpoint filters on city name only, so
   // when a state is given we drop rows whose region doesn't match (guards the
   // rare same-named city in two states).
-  const wantState = state.toLowerCase();
+  const wantState = normState(state);
   const listings = rawItems
-    .filter((it) => !wantState || String(it.region ?? it.state ?? "").toLowerCase() === wantState || String(it.region ?? "").trim() === "")
+    .filter((it) => !wantState || normState(it.region ?? it.state ?? "") === wantState || String(it.region ?? "").trim() === "")
     .map((it) => ({
       id: it.id,
       name: String(it.title ?? ""),
