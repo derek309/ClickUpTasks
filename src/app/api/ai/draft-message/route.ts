@@ -28,6 +28,13 @@ export async function POST(req: NextRequest) {
   const { data: client } = await supabaseAdmin.from("clients").select("name").eq("id", clientId).maybeSingle();
   if (!client) return NextResponse.json({ error: "Client not found." }, { status: 404 });
 
+  // The prompt had no idea who's actually sending, so Gemini invented a
+  // generic "Your Account Manager" sign-off — sign with the real teammate's
+  // first name instead, matching how the email actually goes out (Gmail
+  // send-as-self, see googleMail.ts).
+  const { data: senderProfile } = await supabaseAdmin.from("profiles").select("name").eq("id", caller.id).maybeSingle();
+  const senderFirstName = ((senderProfile?.name as string | null) ?? "").trim().split(/\s+/)[0] || null;
+
   const { data: tasksRows } = await supabaseAdmin.from("tasks").select("title, status, due, comments").eq("client_id", clientId).limit(60);
   const tasks = tasksRows ?? [];
   const completed = tasks
@@ -60,6 +67,12 @@ export async function POST(req: NextRequest) {
     instruction
       ? `The account manager's instruction for this message: "${instruction}"\nWrite the message to accomplish that. Use the context below for real facts — never invent anything not present below.`
       : "Structure the body around two things: what's been completed recently, and what (if anything) we're waiting on from the client. Never invent facts not present below — if there's nothing completed or nothing needed, say so briefly.",
+    "",
+    channel === "email"
+      ? (senderFirstName
+        ? `Sign off with the sender's actual first name: "${senderFirstName}" (e.g. "Best,\n${senderFirstName}"). Never use a placeholder title like "Your Account Manager" or "The Team".`
+        : "Sign off with a brief, generic closing — no name is available, so don't invent one.")
+      : null,
     "",
     `Client: ${client.name}`,
     "",
