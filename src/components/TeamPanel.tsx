@@ -19,6 +19,17 @@ export default function TeamPanel({ me }: { me: Me }) {
   const [inviteMsg, setInviteMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
   const [uploadingId, setUploadingId] = useState<string | null>(null);
+  // Admin-set-password — the resilient path when Supabase's own invite/reset
+  // email is stuck (rate-limited, wrong inbox, etc.): needs no email delivery
+  // to work at all. passwordFor holds the profile being set; revealed holds
+  // the just-set password for a one-time copy (same "show once" idiom as
+  // ApiTokensPanel's new-token reveal).
+  const [passwordFor, setPasswordFor] = useState<Profile | null>(null);
+  const [passwordValue, setPasswordValue] = useState("");
+  const [settingPassword, setSettingPassword] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [revealed, setRevealed] = useState<{ name: string; password: string } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   async function authedFetch(path: string, init?: RequestInit) {
     const { data } = await supabase.auth.getSession();
@@ -40,7 +51,13 @@ export default function TeamPanel({ me }: { me: Me }) {
     }
   }
 
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => {
+    // Runs once on mount to populate the roster — standard bootstrap-fetch
+    // pattern, same as elsewhere in this app.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function patch(id: string, body: Record<string, unknown>) {
     setSaving(id);
@@ -91,6 +108,31 @@ export default function TeamPanel({ me }: { me: Me }) {
       setInviteMsg({ kind: "err", text: e instanceof Error ? e.message : "Invite failed" });
     } finally {
       setInviting(false);
+    }
+  }
+
+  function randomPassword() {
+    const bytes = crypto.getRandomValues(new Uint8Array(9));
+    return btoa(String.fromCharCode(...bytes)).replace(/[+/=]/g, "").slice(0, 12);
+  }
+
+  async function submitPassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (!passwordFor || passwordValue.length < 8) return;
+    setSettingPassword(true);
+    setPasswordError(null);
+    try {
+      const res = await authedFetch("/api/team/password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: passwordFor.id, password: passwordValue }) });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error ?? "Failed to set password");
+      setRevealed({ name: passwordFor.name || passwordFor.email, password: passwordValue });
+      setPasswordFor(null);
+      setPasswordValue("");
+      load(); // picks up email_confirm flipping "Invite pending" off
+    } catch (e) {
+      setPasswordError(e instanceof Error ? e.message : "Failed to set password");
+    } finally {
+      setSettingPassword(false);
     }
   }
 
@@ -192,6 +234,8 @@ export default function TeamPanel({ me }: { me: Me }) {
                   </button>
                 ))}
               </div>
+              <button onClick={() => { setPasswordFor(p); setPasswordValue(randomPassword()); setPasswordError(null); }} disabled={saving === p.id} title="Set a password directly — works even if their invite/reset email never arrives"
+                className="rounded-md border px-2 py-1 text-muted hover:bg-background hover:text-foreground disabled:opacity-40"><I.key /></button>
               {p.id !== me.id && (
                 <button onClick={() => removeUser(p)} disabled={saving === p.id} title={p.pending ? "Revoke invite" : "Remove user"}
                   className="rounded-md border px-2 py-1 text-[13px] text-muted hover:border-red-300 hover:text-red-500 disabled:opacity-40">✕</button>
@@ -201,6 +245,42 @@ export default function TeamPanel({ me }: { me: Me }) {
           {!loading && !error && profiles.length === 0 && <div className="py-8 text-center text-[13px] text-muted">No team members yet.</div>}
         </div>
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
+      {passwordFor && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/30" onClick={() => setPasswordFor(null)} />
+          <div className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border bg-surface p-5 shadow-xl">
+            <h3 className="text-[16px] font-semibold">Set password for {passwordFor.name || passwordFor.email}</h3>
+            <p className="mt-1 text-[13px] text-muted">They can sign in with this immediately — no email required. You&apos;ll see it once after saving so you can relay it to them.</p>
+            <form onSubmit={submitPassword} className="mt-3 space-y-2.5">
+              <div className="flex items-center gap-2">
+                <input autoFocus value={passwordValue} onChange={(e) => setPasswordValue(e.target.value)} placeholder="Password (min 8 characters)"
+                  className="min-w-0 flex-1 rounded-md border bg-background px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
+                <button type="button" onClick={() => setPasswordValue(randomPassword())} className="shrink-0 rounded-md border px-2.5 py-1.5 text-[13px] font-medium hover:bg-background">Generate</button>
+              </div>
+              {passwordError && <div className="rounded-lg bg-red-50 px-3 py-2 text-[13px] text-red-600">{passwordError}</div>}
+              <div className="flex justify-end gap-2 pt-1">
+                <button type="button" onClick={() => setPasswordFor(null)} className="rounded-md border px-3 py-1.5 text-[15px] font-medium hover:bg-background">Cancel</button>
+                <button type="submit" disabled={settingPassword || passwordValue.length < 8} className="rounded-md bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{settingPassword ? "Saving…" : "Set password"}</button>
+              </div>
+            </form>
+          </div>
+        </>
+      )}
+      {revealed && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/30" onClick={() => setRevealed(null)} />
+          <div className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border bg-surface p-5 shadow-xl">
+            <h3 className="text-[16px] font-semibold">Password set for {revealed.name}</h3>
+            <p className="mb-2 mt-1 text-[13px] font-medium text-amber-700">Copy this now — you won&apos;t be able to see it again.</p>
+            <div className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-2">
+              <code className="min-w-0 flex-1 break-all text-[13px]">{revealed.password}</code>
+              <button onClick={() => { navigator.clipboard.writeText(revealed.password).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }); }}
+                className="shrink-0 rounded-md border bg-surface px-2 py-1 text-[13px] font-medium hover:bg-background">{copied ? "Copied" : "Copy"}</button>
+            </div>
+            <button onClick={() => setRevealed(null)} className="mt-3 rounded-md bg-accent px-3 py-1.5 text-[15px] font-medium text-white">Done</button>
+          </div>
+        </>
+      )}
     </>
   );
 }
