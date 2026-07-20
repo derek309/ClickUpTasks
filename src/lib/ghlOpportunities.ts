@@ -19,7 +19,10 @@ export type Stage = { id: string; name: string };
 export type OppRef = { opportunityId: string; stageId: string };
 
 async function headers(): Promise<Record<string, string> | null> {
-  const token = await tokenForLocation(LOCATION_ID);
+  // Prefer a dedicated Prospects-pipeline token so this never disturbs the
+  // existing per-sub-account messaging tokens. Falls back to the shared
+  // per-location store if the dedicated var isn't set.
+  const token = process.env.GHL_PROSPECTS_TOKEN || (await tokenForLocation(LOCATION_ID));
   if (!token) return null;
   return { Authorization: `Bearer ${token}`, Version: V, Accept: "application/json" };
 }
