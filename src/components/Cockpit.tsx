@@ -2500,29 +2500,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           )}
         </nav>
 
-        {/* Territories — cities (city+state) assigned to you; an admin sees all.
-            Click a city to work its contacts (claimed vs unclaimed). */}
-        {visibleTerritories.length > 0 && (
-          <nav className="mt-1.5 shrink-0 space-y-0.5 border-t px-2 pt-1.5">
-            <div className="flex items-center justify-between px-2.5 pb-1">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Territories</span>
-              {canAdmin && <button onClick={() => openTerritory("all")} title="Manage territories" className="rounded p-0.5 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>}
-            </div>
-            {visibleTerritories.map((t) => (
-              <SideItem key={t.id} active={territoryView === t.id} onClick={() => openTerritory(t.id)}>
-                <I.flag className="shrink-0 text-muted" /> <span className="min-w-0 flex-1 truncate text-left">{t.city}, {t.state}</span>
-              </SideItem>
-            ))}
-          </nav>
-        )}
-        {canAdmin && visibleTerritories.length === 0 && (
-          <nav className="mt-2 shrink-0 border-t px-2 pt-2">
-            <SideItem active={territoryView === "all"} onClick={() => openTerritory("all")}><I.flag className="text-muted" /> <span>Territories</span></SideItem>
-          </nav>
-        )}
-
         {/* Pinned — per-user quick access to starred clients + lists. Starring
-            a client (from the Clients directory or its header) pins it here. */}
+            a client (from the Clients directory or its header) pins it here.
+            Placed right after Clients/Projects, ahead of Territories — a
+            territory roster can run long, and Pinned is the highest-value,
+            most-frequently-tapped section, so it shouldn't get pushed below
+            the fold on a phone (where scrolling past a long Territories list
+            to reach it is what made pins effectively invisible on mobile). */}
         {(() => {
           const pinnedClients = [...starred].map((id) => clientById(id)).filter((c): c is Client => !!c && c.id.startsWith("cl_"));
           const pinned = [...starredLists].map((id) => projectById(id)).filter((p): p is Project => !!p);
@@ -2551,6 +2535,27 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             </nav>
           );
         })()}
+
+        {/* Territories — cities (city+state) assigned to you; an admin sees all.
+            Click a city to work its contacts (claimed vs unclaimed). */}
+        {visibleTerritories.length > 0 && (
+          <nav className="mt-1.5 shrink-0 space-y-0.5 border-t px-2 pt-1.5">
+            <div className="flex items-center justify-between px-2.5 pb-1">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Territories</span>
+              {canAdmin && <button onClick={() => openTerritory("all")} title="Manage territories" className="rounded p-0.5 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>}
+            </div>
+            {visibleTerritories.map((t) => (
+              <SideItem key={t.id} active={territoryView === t.id} onClick={() => openTerritory(t.id)}>
+                <I.flag className="shrink-0 text-muted" /> <span className="min-w-0 flex-1 truncate text-left">{t.city}, {t.state}</span>
+              </SideItem>
+            ))}
+          </nav>
+        )}
+        {canAdmin && visibleTerritories.length === 0 && (
+          <nav className="mt-2 shrink-0 border-t px-2 pt-2">
+            <SideItem active={territoryView === "all"} onClick={() => openTerritory("all")}><I.flag className="text-muted" /> <span>Territories</span></SideItem>
+          </nav>
+        )}
 
 
       </aside>
@@ -2617,7 +2622,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <div className="min-w-0">
             {!myWork && !personalView && !inboxView && !dirView && activeProject && projectById(activeProject) ? (<>
               <h1 className="flex items-center gap-1.5 truncate text-[20px] font-semibold"><I.folder className="shrink-0 text-muted" /> {projectById(activeProject)!.name}</h1>
-              <p className="hidden items-center gap-2 text-[13px] text-muted sm:flex">
+              <p className="hidden items-center gap-1.5 text-[13px] text-muted sm:flex">
+                <button onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
+                <span>›</span>
                 <button onClick={() => setActiveProject(null)} className="hover:text-foreground hover:underline">{clientById(activeClient)?.name}</button>
                 <span>·</span>
                 {(() => { const pg = projectProgress(activeProject); return (<span className="inline-flex items-center gap-1.5">{pg.done}/{pg.total} done<span className="inline-block h-1.5 w-24 overflow-hidden rounded-full bg-border align-middle"><span className="block h-full rounded-full bg-green-500 transition-all" style={{ width: `${pg.pct}%` }} /></span>{pg.pct}%</span>); })()}
@@ -2633,7 +2640,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   territory's own scoped counts render right below instead,
                   so repeating them here would just duplicate the title. */}
               {!territoryTitle && (
-                <p className="hidden text-[13px] text-muted sm:block">{inboxView ? "Everything that mentions or notifies you, in one place" : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "Every client and project you're on, grouped by what needs attention first" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</p>
+                <p className="hidden items-center gap-1.5 text-[13px] text-muted sm:flex">
+                  {/* Breadcrumb back to the Clients directory — only meaningful
+                      when a specific client is the thing being viewed. */}
+                  {!myWork && !personalView && !inboxView && !dirView && activeClient !== "all" && (<>
+                    <button onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
+                    <span>›</span>
+                  </>)}
+                  <span>{inboxView ? "Everything that mentions or notifies you, in one place" : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "Every client and project you're on, grouped by what needs attention first" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</span>
+                </p>
               )}
             </>)}
           </div>
