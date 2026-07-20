@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { titleCase } from "@/lib/data";
+import { resolveTrackedClientId, upsertConversationTask } from "@/lib/ghlConversationTask";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -86,15 +87,6 @@ export async function POST(req: NextRequest) {
 // payload — tells us directly). Matching key: contacts.ghl_contact_id (a
 // message isn't tied to any one task, see the Message type's doc comment in
 // src/lib/data.ts).
-// Map a contact to the tracked client that represents it — the client whose
-// id is cl_<contactId>, or one manually linked via linked_contact_id — falling
-// back to the passed value (the sub-account) when the contact isn't a tracked
-// client. Contact ids are alphanumeric + underscore, safe to interpolate.
-async function resolveTrackedClientId(contactId: string, fallback: string): Promise<string> {
-  const { data } = await supabaseAdmin.from("clients").select("id").or(`id.eq.cl_${contactId},linked_contact_id.eq.${contactId}`).limit(1);
-  return data?.[0]?.id ?? fallback;
-}
-
 async function handleMessageReply(body: any, custom: any) {
   const ghlContactId: string | null = custom?.contactId ?? body?.contact_id ?? null;
   const text: string | null = typeof custom?.body === "string" && custom.body.trim() ? custom.body : (typeof body?.message?.body === "string" ? body.message.body : null);
@@ -193,83 +185,5 @@ async function handleCall(body: any, custom: any) {
   return NextResponse.json({ ok: true });
 }
 
-// "Today" for a Conversation task's due date, in the team's operating
-// timezone (Pacific) rather than the server's UTC clock — due doubles as
-// "last touched" here (see below), and a UTC-computed date can already be
-// tomorrow for a US-based reply that just arrived this evening, which would
-// misrender as "Tomorrow" in the UI's local-time due-date formatting.
-function todayPacific(): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date());
-}
-
-// Priority-system spec (see PRIORITY_META in src/lib/data.ts): every inbound
-// reply keeps exactly one open Conversation-priority task per contact
-// thread — a second reply on the same contact's thread that already has one
-// open just bumps its due date rather than creating a duplicate, per the
-// spec's own "Due date updates" section. Scoped by contact_id, not
-// client_id — a client can have multiple GHL contacts, each with their own
-// thread, and conflating them would silently merge one contact's reply into
-// another's task. due doubles as "last touched" here, not a deadline, since
-// Conversation always sorts to the top on priority alone. Conversation tasks
-// are never auto-completed (spec) — only this creation/due-bump path writes
-// to them; completion is left entirely to a person.
-//
-// The open-task lookup is check-then-act, not backed by a DB constraint that
-// would make it atomic (see supabase/conversation-task-unique.sql) — instead
-// the unique partial index there catches the concurrent-insert race: if two
-// deliveries for the same contact both reach the insert, the loser's insert
-// fails on that constraint and is treated as "someone else already created
-// it," same conservative spirit as the ghl_message_id dedup above.
-// Returns the resolved/created Conversation task's id (used to backfill
-// task_id onto the message row that triggered this), or null if it couldn't
-// be resolved — a lost race against a concurrent delivery for the same
-// contact, or a real insert failure (already logged below). Either way the
-// message itself is unaffected; it just won't carry a task_id this once.
-async function upsertConversationTask(contact: { id: string; name: string; client_id: string }, ghlContactId: string): Promise<string | null> {
-  const today = todayPacific();
-  const { data: openTasks } = await supabaseAdmin
-    .from("tasks")
-    .select("id")
-    .eq("contact_id", contact.id)
-    .eq("priority", "conversation")
-    .neq("status", "done")
-    .limit(1);
-  if (openTasks && openTasks.length > 0) {
-    await supabaseAdmin.from("tasks").update({ due: today }).eq("id", openTasks[0].id);
-    return openTasks[0].id;
-  }
-
-  // Reuse whatever project the client's other tasks live under, same "Tasks"
-  // fallback quickAdd/GHL-import use client-side when a client has none yet.
-  let projectId: string | undefined = (
-    await supabaseAdmin.from("projects").select("id").eq("client_id", contact.client_id).limit(1).maybeSingle()
-  ).data?.id;
-  if (!projectId) {
-    projectId = "p_" + crypto.randomUUID();
-    const { error: projErr } = await supabaseAdmin.from("projects").insert({ id: projectId, client_id: contact.client_id, name: "Tasks", description: "" });
-    if (projErr) { console.error("[webhook] upsertConversationTask: fallback project insert failed", projErr); return null; }
-  }
-
-  const { data: client } = await supabaseAdmin.from("clients").select("ghl_location_id").eq("id", contact.client_id).maybeSingle();
-  const ghlUrl = client?.ghl_location_id ? `https://app.gohighlevel.com/v2/location/${client.ghl_location_id}/contacts/detail/${ghlContactId}` : null;
-
-  const newTaskId = "t_" + crypto.randomUUID();
-  const { error: taskErr } = await supabaseAdmin.from("tasks").insert({
-    id: newTaskId,
-    project_id: projectId,
-    client_id: contact.client_id,
-    title: `Reply to ${titleCase(contact.name)}`,
-    priority: "conversation",
-    contact_id: contact.id,
-    due: today,
-    attachments: ghlUrl ? [{ id: "at_" + crypto.randomUUID(), name: "GHL conversation", kind: "link", size: "", url: ghlUrl }] : [],
-  });
-  // A concurrent delivery for the same contact can lose the race to the
-  // partial unique index in conversation-task-unique.sql — that's the other
-  // request's insert having already won, not a real failure.
-  if (taskErr) {
-    if (!taskErr.message.includes("duplicate key")) console.error("[webhook] upsertConversationTask: task insert failed", taskErr);
-    return null;
-  }
-  return newTaskId;
-}
+// resolveTrackedClientId / upsertConversationTask now live in
+// @/lib/ghlConversationTask (shared with the appointment sync poll).

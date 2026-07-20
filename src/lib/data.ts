@@ -542,12 +542,16 @@ export function isCompletionEvent(body: string): boolean {
   return d?.field === "status" && d.to === STATUS_META.done.label;
 }
 
-// Conversation is auto-created only (an open, unanswered GHL inbound
-// message) — it's excluded from the manual priority pickers unless it's
-// already the task's current value, see GroupedList/TaskDrawer. It always
-// ranks above Urgent so a live thread surfaces before anything else.
+// The "conversation" value (label shown as "Interaction" — a message, call,
+// or meeting, not just a text thread) is auto-created only (an open GHL
+// inbound message/call, or an upcoming synced appointment) — it's excluded
+// from the manual priority pickers unless it's already the task's current
+// value, see GroupedList/TaskDrawer. It always ranks above Urgent so live
+// client activity surfaces before anything else. The underlying value stays
+// "conversation" (not renamed) — it's load-bearing across the DB, the MCP
+// tool schema, and the Python importer; only the display label changed.
 export const PRIORITY_META: Record<Priority, { label: string; color: string; rank: number }> = {
-  conversation: { label: "Conversation", color: "#8b5cf6", rank: 3 },
+  conversation: { label: "Interaction", color: "#8b5cf6", rank: 3 },
   urgent: { label: "Urgent", color: "#ef4444", rank: 2 },
   normal: { label: "Normal", color: "#3b82f6", rank: 1 },
   none: { label: "No priority", color: "#cbd5e1", rank: 0 },

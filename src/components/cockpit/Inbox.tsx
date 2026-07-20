@@ -9,7 +9,7 @@ import { I, Avatar } from "./ui";
 
 type InboxFilter = "all" | "message" | "activity";
 
-export function Inbox({ notifications, clientById, projectById, onOpen, onMarkAllRead, onSyncEmail, syncingEmail, unmatchedEmails = [], onAddAsClient, onDismissUnmatched }: {
+export function Inbox({ notifications, clientById, projectById, onOpen, onMarkAllRead, onSyncEmail, syncingEmail, onSyncAppointments, syncingAppointments, unmatchedEmails = [], onAddAsClient, onDismissUnmatched }: {
   notifications: Notification[]; // caller's, newest-first
   clientById: (id: string) => Client | null;
   projectById: (id: string) => Project | null;
@@ -17,6 +17,8 @@ export function Inbox({ notifications, clientById, projectById, onOpen, onMarkAl
   onMarkAllRead: () => void;
   onSyncEmail?: () => void; // admin-only: pull Gmail replies on demand
   syncingEmail?: boolean;
+  onSyncAppointments?: () => void; // admin-only: pull upcoming GHL appointments on demand
+  syncingAppointments?: boolean;
   unmatchedEmails?: UnmatchedEmail[]; // unknown-sender emails to triage (admin)
   onAddAsClient?: (u: UnmatchedEmail) => void;
   onDismissUnmatched?: (id: string) => void;
@@ -61,7 +63,7 @@ export function Inbox({ notifications, clientById, projectById, onOpen, onMarkAl
             })}
           </div>
         )}
-        {(notifications.length > 0 || onSyncEmail) && (
+        {(notifications.length > 0 || onSyncEmail || onSyncAppointments) && (
           <div className="mb-3 flex items-center justify-between gap-2">
             {notifications.length > 0 ? (
               <div className="flex overflow-hidden rounded-lg border">
@@ -71,6 +73,10 @@ export function Inbox({ notifications, clientById, projectById, onOpen, onMarkAl
               </div>
             ) : <span />}
             <div className="flex items-center gap-2">
+              {onSyncAppointments && (
+                <button onClick={onSyncAppointments} disabled={syncingAppointments} title="Pull upcoming appointments from GoHighLevel into the app"
+                  className="inline-flex items-center gap-1 rounded-md border bg-surface px-2.5 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-50"><I.calendar /> {syncingAppointments ? "Syncing…" : "Sync appointments"}</button>
+              )}
               {onSyncEmail && (
                 <button onClick={onSyncEmail} disabled={syncingEmail} title="Pull recent client email replies from Gmail into the app"
                   className="inline-flex items-center gap-1 rounded-md border bg-surface px-2.5 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-50"><I.repeat /> {syncingEmail ? "Syncing…" : "Sync email"}</button>

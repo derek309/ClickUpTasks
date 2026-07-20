@@ -1,5 +1,6 @@
 {
   "crons": [
-    { "path": "/api/google/poll-replies", "schedule": "0 13 * * *" }
+    { "path": "/api/google/poll-replies", "schedule": "0 13 * * *" },
+    { "path": "/api/ghl/sync-appointments", "schedule": "0 14 * * *" }
   ]
 }

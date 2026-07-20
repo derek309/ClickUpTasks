@@ -823,6 +823,22 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       setSyncingEmail(false);
     }
   };
+  // On-demand pull of upcoming GHL appointments (see sync-appointments/route.ts)
+  // — same Vercel-Hobby-cron-is-once-a-day reasoning as syncEmail above.
+  const [syncingAppointments, setSyncingAppointments] = useState(false);
+  const syncAppointments = async () => {
+    setSyncingAppointments(true);
+    try {
+      const res = await authedFetch("/api/ghl/sync-appointments", { method: "POST" });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error ?? "Appointment sync failed.");
+      pushToast(j.synced ? `📅 Synced ${j.synced} upcoming appointment${j.synced === 1 ? "" : "s"}.` : "Appointments synced — nothing new.");
+    } catch (e) {
+      pushToast(e instanceof Error ? e.message : "Appointment sync failed.");
+    } finally {
+      setSyncingAppointments(false);
+    }
+  };
   // Triage an unknown-sender email parked in the Inbox: dismiss it, or turn the
   // sender into a tracked client (creating a contact + cl_ client and pulling
   // any of their conversation onto the new page via addClientContact).
@@ -1421,7 +1437,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const dropTaskInGroup = (taskId: string, groupKey: string) => {
     if (groupBy === "status") patchTask(taskId, { status: groupKey as TaskStatus });
     else if (groupBy === "priority") {
-      if (!isManuallyAssignable(groupKey as Priority)) { pushToast("Conversation is assigned automatically, not manually."); return; }
+      if (!isManuallyAssignable(groupKey as Priority)) { pushToast("Interaction is assigned automatically, not manually."); return; }
       patchTask(taskId, { priority: groupKey as Priority });
     }
   };
@@ -2921,7 +2937,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               focusId={territoryView === "all" ? undefined : territoryView} />
           </div>
         ) : inboxView ? (
-          <Inbox notifications={myNotifs} clientById={clientById} projectById={projectById} onOpen={openNotification} onMarkAllRead={markAllNotifsRead} onSyncEmail={canAdmin ? syncEmail : undefined} syncingEmail={syncingEmail}
+          <Inbox notifications={myNotifs} clientById={clientById} projectById={projectById} onOpen={openNotification} onMarkAllRead={markAllNotifsRead} onSyncEmail={canAdmin ? syncEmail : undefined} syncingEmail={syncingEmail} onSyncAppointments={canAdmin ? syncAppointments : undefined} syncingAppointments={syncingAppointments}
             unmatchedEmails={canAdmin ? unmatchedEmails : []} onAddAsClient={addAsClientFromEmail} onDismissUnmatched={dismissUnmatched} />
         ) : dirView === "clients" ? (
           <ClientsDirectory clients={sortedClients} clientCompany={(c) => clientCompany(c)} taskCount={clientTaskCount} starred={starred} onToggleStar={toggleStar}
