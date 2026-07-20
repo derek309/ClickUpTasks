@@ -5,6 +5,10 @@ const needsTokenEl = document.getElementById("needsToken");
 const clientSearchInput = document.getElementById("clientSearch");
 const clientResultsEl = document.getElementById("clientResults");
 const matchHintEl = document.getElementById("matchHint");
+const addContactEl = document.getElementById("addContact");
+const subAccountSel = document.getElementById("subAccountSel");
+const addContactBtn = document.getElementById("addContactBtn");
+const addContactNameEl = document.getElementById("addContactName");
 const screenshotGalleryEl = document.getElementById("screenshotGallery");
 const modeNewBtn = document.getElementById("modeNew");
 const modeExistingBtn = document.getElementById("modeExisting");
@@ -160,6 +164,17 @@ async function loadClients(token, force = false) {
   return clients;
 }
 
+async function loadSubAccounts(token) {
+  // Same 5-minute cache idiom as loadClients/loadMembers — admin-only, 403s
+  // silently for a VA token (caught by the caller).
+  const cached = await chrome.storage.local.get(["subAccountsCache", "subAccountsCacheAt"]);
+  const fresh = cached.subAccountsCacheAt && Date.now() - cached.subAccountsCacheAt < 5 * 60 * 1000;
+  if (fresh && cached.subAccountsCache) return cached.subAccountsCache;
+  const { subAccounts } = await apiFetch("/api/extension/subaccounts", token);
+  await chrome.storage.local.set({ subAccountsCache: subAccounts, subAccountsCacheAt: Date.now() });
+  return subAccounts;
+}
+
 async function loadMembers(token) {
   // Same 5-minute cache idiom as loadClients — the roster changes rarely.
   const cached = await chrome.storage.local.get(["membersCache", "membersCacheAt"]);
@@ -254,11 +269,70 @@ function renderClientResults(query) {
   clientResultsEl.classList.add("open");
 }
 
+// The sender's email didn't match any existing client — offer to create a
+// real GHL contact for them right here instead of leaving a dead end. Only
+// meaningful when there's a sender to name (Gmail path); silently a no-op
+// if the caller's token isn't an admin (POST .../contacts 403s with a clear
+// message rather than this ever guessing at permissions client-side).
+async function showAddContact() {
+  addContactNameEl.textContent = senderName || senderEmail;
+  addContactEl.style.display = "";
+  subAccountSel.innerHTML = "<option value=''>Loading sub-accounts…</option>";
+  const token = await getToken();
+  if (!token) return;
+  try {
+    const subAccounts = await loadSubAccounts(token);
+    subAccountSel.innerHTML = "";
+    if (!subAccounts.length) {
+      const opt = document.createElement("option");
+      opt.value = ""; opt.textContent = "No sub-accounts available";
+      subAccountSel.appendChild(opt);
+      return;
+    }
+    for (const s of subAccounts) {
+      const opt = document.createElement("option");
+      opt.value = s.id; opt.textContent = s.name;
+      subAccountSel.appendChild(opt);
+    }
+  } catch {
+    subAccountSel.innerHTML = "<option value=''>Couldn't load sub-accounts</option>";
+  }
+}
+
+addContactBtn.addEventListener("click", async () => {
+  if (!subAccountSel.value) return;
+  const token = await getToken();
+  if (!token) return;
+  // Just disable (existing button:disabled CSS dims it) — never touch
+  // innerHTML here, or the nested #addContactName span gets replaced and
+  // the cached DOM reference above goes stale on the next showAddContact().
+  addContactBtn.disabled = true;
+  try {
+    const data = await apiFetch("/api/extension/contacts", token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subAccountId: subAccountSel.value, name: senderName || senderEmail, email: senderEmail }),
+    });
+    // Force-refresh so the newly created client is actually in allClients —
+    // this is exactly the cache the Refresh-button fix above addresses.
+    allClients = await loadClients(token, true);
+    selectClient(data.clientId);
+    statusEl.textContent = `Added ${data.name} as a contact.`;
+    statusEl.className = "ok";
+  } catch (e) {
+    statusEl.textContent = String(e?.message ?? e);
+    statusEl.className = "err";
+  } finally {
+    addContactBtn.disabled = false;
+  }
+});
+
 function selectClient(id) {
   const c = allClients.find((x) => x.id === id);
   if (!c) return;
   clientSearchInput.value = clientLabel(c);
   clientResultsEl.classList.remove("open");
+  addContactEl.style.display = "none";
   if (c.kind === "project") {
     // A workspace project (Administration, Idea board, …) — the task's
     // client is the workspace pseudo-client; pre-select this exact project
@@ -347,6 +421,7 @@ async function init(forceClientRefresh = false) {
   statusEl.textContent = "";
   statusEl.className = "";
   matchHintEl.textContent = "";
+  addContactEl.style.display = "none";
   selectedClientId = "";
   clientSearchInput.value = "";
   dueInput.value = "";
@@ -392,8 +467,10 @@ async function init(forceClientRefresh = false) {
       if (match) {
         selectClient(match.clientId);
         matchHintEl.textContent = match.matchType === "domain" ? `Auto-selected via company domain — please verify` : `Auto-selected — matched sender's email`;
+      } else {
+        showAddContact();
       }
-    } catch { /* no match — leave the picker empty */ }
+    } catch { /* match lookup failed — leave the picker empty, no add-contact offer either */ }
   } else if (!email && permalink) {
     // Only for the generic-page capture path — a Gmail email with no
     // detected sender shouldn't fall back to matching mail.google.com's
