@@ -286,6 +286,25 @@ export interface TaskTemplate {
   checklistItems: string[];
 }
 
+// A playbook is several separate tasks loaded onto a client at once — e.g.
+// "Prospect" (a first-touch sequence) or "Claimed" (an onboarding kickoff
+// list) — distinct from TaskTemplate above, which populates one task's own
+// checklist. Loaded manually today ("Load…" in Settings); the plan is to
+// eventually trigger a playbook automatically when a client enters a given
+// stage, but that trigger doesn't exist yet — this is the authoring +
+// manual-load half only.
+export interface PlaybookTask {
+  title: string;
+  /** Days from when the playbook is loaded; null/omitted = no due date. */
+  dueOffsetDays?: number | null;
+  priority?: Priority;
+}
+export interface Playbook {
+  id: string;
+  name: string;
+  tasks: PlaybookTask[];
+}
+
 // GHL contacts store state inconsistently — full name ("California"), abbreviation
 // ("CA"), or mixed case ("Ca") all show up for the same state in practice. Territory
 // matching needs both sides normalized to the 2-letter form or a typed "CA" silently

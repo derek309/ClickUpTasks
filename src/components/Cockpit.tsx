@@ -52,6 +52,8 @@ import {
   type Me,
   type Territory,
   type TaskTemplate,
+  type Playbook,
+  type PlaybookTask,
   type VaultFolder,
   type Folder,
   type Stage,
@@ -62,7 +64,7 @@ import {
   normalizeState,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, markMessagesReadDb, reassignMessagesTaskDb, insertMessage, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, markMessagesReadDb, reassignMessagesTaskDb, insertMessage, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import { Inbox } from "./cockpit/Inbox";
 import SettingsHub from "./SettingsHub";
@@ -137,6 +139,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // all overview. Its own top-level view alongside inbox/dashboard/etc.
   const [territoryView, setTerritoryView] = useState<string | null>(null);
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
+  const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
   const [vaultFolders, setVaultFolders] = useState<VaultFolder[]>([]);
   const [unmatchedEmails, setUnmatchedEmails] = useState<UnmatchedEmail[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -195,10 +198,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [comment, setComment] = useState("");
 
   const [bellOpen, setBellOpen] = useState(false);
-  const [settingsHubOpen, setSettingsHubOpen] = useState(false);
-  // Team Chat — an always-reachable overlay (same shape as SettingsHub), not
-  // a "view" competing with My Work/Personal/etc. — it's internal team talk,
-  // not tied to any client/project, so it doesn't belong in that state machine.
+  // A real page, like My Work/Personal/Team Chat — not a popup or slide-out
+  // (it used to be a fixed-position overlay; Derek asked more than once for
+  // it to render in the normal content area instead).
+  const [settingsView, setSettingsView] = useState(false);
   const [teamMessages, setTeamMessages] = useState<TeamMessage[]>([]);
   // Which half of the Team Chat page is showing. Chat leads — per Derek, the
   // inbox "is really what team chat was supposed to be": talk to the team
@@ -223,7 +226,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // header shortcut so there's exactly one home for it.
   const openTeamChat = () => {
     setInboxView(true); setInboxTab("chat");
-    setMyWork(false); setPersonalView(false); setDirView(null); setTerritoryView(null);
+    setMyWork(false); setPersonalView(false); setDirView(null); setTerritoryView(null); setSettingsView(false);
     setOpenTaskId(null); setSidebarOpen(false);
     markTeamChatRead();
   };
@@ -550,7 +553,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [drawerFull, setDrawerFull] = useState(false);
   useEffect(() => { try { setDrawerFull(localStorage.getItem("cut_drawerFull") === "1"); } catch {} }, []);
   // Drop the project filter whenever we leave its client (or enter My Work).
-  useEffect(() => { setActiveProject((p) => (p && projects.find((x) => x.id === p)?.clientId === activeClient && !myWork && !personalView && !inboxView ? p : null)); }, [activeClient, myWork, personalView, inboxView, projects]);
+  useEffect(() => { setActiveProject((p) => (p && projects.find((x) => x.id === p)?.clientId === activeClient && !myWork && !personalView && !inboxView && !settingsView ? p : null)); }, [activeClient, myWork, personalView, inboxView, settingsView, projects]);
   // Clear the folder-rail scope whenever the client/view changes.
   useEffect(() => { setActiveFolder(null); }, [activeClient, myWork, personalView, inboxView, dirView]);
   // A bulk selection is scoped to whatever list is on screen — switching
@@ -663,6 +666,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setClientLinks(d.clientLinks); setClientNotes(d.clientNotes); setMessages(d.messages);
         setTerritories(d.territories);
         setTaskTemplates(d.taskTemplates);
+        setPlaybooks(d.playbooks);
         setVaultFolders(d.vaultFolders);
         setFolders(d.folders);
         setStages(d.stages);
@@ -950,7 +954,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!n.read) { setNotifications((ns) => ns.map((x) => (x.id === n.id ? { ...x, read: true } : x))); markNotifReadDb(n.id); }
     if (n.taskId) { setOpenTaskId(n.taskId); return; }
     if (n.clientId) {
-      setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null);
+      setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null);
       setActiveClient(n.clientId); setActiveProject(n.projectId ?? null); setClientTab("chat");
       return;
     }
@@ -1082,7 +1086,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const visibleTerritories = myTerritories.slice().sort((a, b) => a.city.localeCompare(b.city));
   const territoryById = (id: string) => territories.find((t) => t.id === id) ?? null;
   const openTerritory = (id: string) => {
-    setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null);
+    setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null);
     setActiveClient("all"); setActiveProject(null); setOpenTaskId(null); setSidebarOpen(false);
     setTerritoryView(id);
   };
@@ -1297,8 +1301,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // pending one; nothing left → let the caller know via a toast.
     const next = reviewQueue[(curIdx + 1) % reviewQueue.length] ?? reviewQueue[0];
     if (!next) { pushToast("Nothing left to review — all caught up. 🎉"); return; }
-    if (next.kind === "project") { const pr = projectById(next.id); setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setActiveClient(pr?.clientId ?? "all"); setActiveProject(next.id); }
-    else { setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setActiveClient(next.id); setActiveProject(null); }
+    if (next.kind === "project") { const pr = projectById(next.id); setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(pr?.clientId ?? "all"); setActiveProject(next.id); }
+    else { setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(next.id); setActiveProject(null); }
     setClientTab("tasks");
     setOpenTaskId(null);
   };
@@ -1987,14 +1991,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const clientCompany = (c: Client | null) => (c && c.id.startsWith("cl_") ? c.ghlLocationId : "");
   const addClientContact = async (contact: Contact, type: ClientType = "client") => {
     const id = "cl_" + contact.id;
-    if (clients.some((c) => c.id === id)) { setActiveClient(id); setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setAddClientOpen(false); return; }
+    if (clients.some((c) => c.id === id)) { setActiveClient(id); setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setAddClientOpen(false); return; }
     // Prevent a duplicate: if this contact matches a client we already track
     // (same email/phone/name, e.g. the same business in the other GHL
     // account), link it to that one and open it instead of making a second.
     const dupe = findDuplicateTrackedClient(contact);
     if (dupe) {
       linkContactToClient(dupe, contact.id);
-      setActiveClient(dupe); setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setAddClientOpen(false);
+      setActiveClient(dupe); setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setAddClientOpen(false);
       pushToast(`${contact.name} is already tracked as “${clientById(dupe)?.name}” — linked to it.`);
       return;
     }
@@ -2195,6 +2199,33 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setTasks((ts) => [...ts, t]);
     upsertTask(t, me.id);
     pushToast(`Created "${t.title}" from template`);
+  };
+  const savePlaybook = (id: string | undefined, spec: { name: string; tasks: PlaybookTask[] }) => {
+    const p: Playbook = { id: id ?? newId("pb_"), ...spec };
+    setPlaybooks((ps) => (id ? ps.map((x) => (x.id === id ? p : x)) : [...ps, p]));
+    upsertPlaybook(p);
+  };
+  const deletePlaybook = (id: string) => {
+    setPlaybooks((ps) => ps.filter((p) => p.id !== id));
+    deletePlaybookDb(id);
+  };
+  // Manual for now, per Derek: author + load here; auto-loading a playbook
+  // when a client enters a given stage is planned but not wired up yet — no
+  // stage-change hook calls this.
+  const loadPlaybook = (playbookId: string, clientId: string, projectId: string) => {
+    const pb = playbooks.find((p) => p.id === playbookId);
+    if (!pb || !pb.tasks.length) return;
+    const contactId = clientId.startsWith("cl_") ? clientId.slice(3) : null;
+    const created: Task[] = pb.tasks.map((pt) => ({
+      id: newId("t_"), projectId, clientId, title: pt.title, description: "",
+      status: "todo", priority: pt.priority ?? "normal", assigneeId: me.id, contactId,
+      due: typeof pt.dueOffsetDays === "number" ? addDaysIso(TODAY, pt.dueOffsetDays) : null,
+      recurrence: "none", labelIds: [], ghlTaskId: null, private: false,
+      subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
+    }));
+    setTasks((ts) => [...ts, ...created]);
+    created.forEach((t) => upsertTask(t, me.id));
+    pushToast(`Loaded "${pb.name}" — ${created.length} task${created.length === 1 ? "" : "s"} added.`);
   };
   const renameClient = (id: string) => {
     const c = clientById(id);
@@ -2670,8 +2701,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // duplicated in source. Only one header is ever visible (CSS breakpoint),
   // so the popovers never double-render on screen.
   const territoryTitle = territoryView ? (territoryView === "all" ? "Territories" : (territoryById(territoryView) ? `${territoryById(territoryView)!.city}, ${territoryById(territoryView)!.state}` : "Territory")) : null;
-  const headerTitleText = territoryTitle ?? (inboxView ? "Team Chat" : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? "All Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? "")));
-  const isClientDetail = !myWork && !personalView && !inboxView && !dirView && !territoryView && activeClient !== "all" && !!clientById(activeClient);
+  const headerTitleText = territoryTitle ?? (settingsView ? "Settings" : inboxView ? "Team Chat" : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? "All Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? "")));
+  const isClientDetail = !myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && !!clientById(activeClient);
   const showFilterControl = !territoryView && !inboxView && !dirView && !myWork && !(activeClient !== "all" && (clientTab === "chat" || clientTab === "vault"));
   const bellControl = (
     <div className="relative">
@@ -2846,7 +2877,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         <div className="flex shrink-0 items-center gap-1 border-b px-3 py-3">
           <span className="inline-flex shrink-0 items-center justify-center rounded-full text-[15px] font-semibold text-white" style={{ width: 30, height: 30, background: me.color }}>{me.initials}</span>
           <div className="ml-1 min-w-0 flex-1 leading-tight"><div className="truncate text-[15px] font-medium">{me.name}</div><div className="text-[13px] capitalize text-muted">{me.role}</div></div>
-          <button onClick={() => { setSettingsHubOpen(true); setSidebarOpen(false); }} title="Settings" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>
+          <button onClick={() => { setSettingsView(true); setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); }} title="Settings" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>
           <button onClick={toggleTheme} title="Toggle theme" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-foreground">{theme === "light" ? <I.moon /> : <I.sun />}</button>
           <button onClick={onSignOut} title="Sign out" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-red-500"><I.logout /></button>
         </div>
@@ -2861,17 +2892,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               {unread > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{unread}</span>}
             </span>
           )}</SideItem>}
-          {navVisible.work && <SideItem active={myWork} onClick={() => { setMyWork(true); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>Dashboard</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
-          {navVisible.all && <SideItem active={!myWork && !personalView && !inboxView && !dirView && !territoryView && activeClient === "all"} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); }}><I.list className="text-muted" /> <span>All Tasks</span><span className="ml-auto text-[13px] text-muted">{scopedTasks.filter((t) => t.clientId.startsWith("cl_")).length}</span></SideItem>}
-          {navVisible.personal && <SideItem active={personalView} onClick={() => { setPersonalView(true); setMyWork(false); setInboxView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>}
+          {navVisible.work && <SideItem active={myWork} onClick={() => { setMyWork(true); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>Dashboard</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
+          {navVisible.all && <SideItem active={!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient === "all"} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); }}><I.list className="text-muted" /> <span>All Tasks</span><span className="ml-auto text-[13px] text-muted">{scopedTasks.filter((t) => t.clientId.startsWith("cl_")).length}</span></SideItem>}
+          {navVisible.personal && <SideItem active={personalView} onClick={() => { setPersonalView(true); setMyWork(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>}
         </nav>
 
         {/* Projects / Clients are now directory pages, not inline lists — the
             sidebar stays lean since day-to-day work happens from Dashboard. */}
         <nav className="mt-1.5 shrink-0 space-y-0.5 border-t px-2 pt-1.5">
-          <SideItem active={dirView === "clients"} onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setActiveProject(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{clientList.length}</span></SideItem>
+          <SideItem active={dirView === "clients"} onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setActiveProject(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{clientList.length}</span></SideItem>
           {clients.some((c) => c.id === WORKSPACE_CLIENT_ID) && (
-            <SideItem active={dirView === "projects"} onClick={() => { setDirView("projects"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setActiveProject(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.folder className="text-muted" /> <span>Projects</span><span className="ml-auto text-[13px] text-muted">{workspaceProjects.length}</span></SideItem>
+            <SideItem active={dirView === "projects"} onClick={() => { setDirView("projects"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setActiveProject(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.folder className="text-muted" /> <span>Projects</span><span className="ml-auto text-[13px] text-muted">{workspaceProjects.length}</span></SideItem>
           )}
         </nav>
 
@@ -2890,18 +2921,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <nav className="mt-1.5 shrink-0 space-y-0.5 border-t px-2 pt-1.5">
               <div className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Pinned</div>
               {pinnedClients.map((c) => {
-                const active = !myWork && !personalView && !inboxView && !dirView && !activeProject && activeClient === c.id;
+                const active = !myWork && !personalView && !inboxView && !settingsView && !dirView && !activeProject && activeClient === c.id;
                 return (
-                  <SideItem key={c.id} active={active} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setActiveClient(c.id); setActiveProject(null); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
+                  <SideItem key={c.id} active={active} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(c.id); setActiveProject(null); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: clientStatusMeta(c.status).dot }} /> <span className="min-w-0 flex-1 truncate text-left">{c.name}</span>
                     <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); toggleStar(c.id); }} title="Unpin from sidebar" className="shrink-0 rounded p-0.5 text-amber-400 hover:bg-background"><I.star filled /></span>
                   </SideItem>
                 );
               })}
               {pinned.map((p) => {
-                const active = !myWork && !personalView && !inboxView && !dirView && activeProject === p.id;
+                const active = !myWork && !personalView && !inboxView && !settingsView && !dirView && activeProject === p.id;
                 return (
-                  <SideItem key={p.id} active={active} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setActiveClient(p.clientId); setActiveProject(p.id); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
+                  <SideItem key={p.id} active={active} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(p.clientId); setActiveProject(p.id); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
                     <I.list className="text-muted" /> <span className="min-w-0 flex-1 truncate text-left">{p.name}</span>
                     <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); toggleStarList(p.id); }} title="Unpin from sidebar" className="shrink-0 rounded p-0.5 text-amber-400 hover:bg-background"><I.star filled /></span>
                   </SideItem>
@@ -2995,10 +3026,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         <header className="relative z-10 hidden flex-wrap items-center gap-x-3 gap-y-1.5 border-b bg-surface px-4 py-2 shadow-soft sm:flex sm:gap-y-2 sm:px-5 sm:py-3">
           <button onClick={toggleSidebar} title="Show/hide sidebar" className="rounded-lg border p-2 text-muted hover:text-foreground"><I.menu /></button>
           <div className="min-w-0">
-            {!myWork && !personalView && !inboxView && !dirView && activeProject && projectById(activeProject) ? (<>
+            {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeProject && projectById(activeProject) ? (<>
               <h1 className="flex items-center gap-1.5 truncate text-[20px] font-semibold"><I.folder className="shrink-0 text-muted" /> {projectById(activeProject)!.name}</h1>
               <p className="hidden items-center gap-1.5 text-[13px] text-muted sm:flex">
-                <button onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
+                <button onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
                 <span>›</span>
                 <button onClick={() => setActiveProject(null)} className="hover:text-foreground hover:underline">{clientById(activeClient)?.name}</button>
                 <span>·</span>
@@ -3006,8 +3037,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </p>
             </>) : (<>
               <h1 className="flex items-center gap-2 truncate text-[20px] font-semibold">
-                {territoryTitle ? territoryTitle : inboxView ? "Team Chat" : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? "All Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
-                {!myWork && !personalView && !inboxView && !dirView && !territoryView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
+                {territoryTitle ? territoryTitle : settingsView ? "Settings" : inboxView ? "Team Chat" : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? "All Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
+                {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
               </h1>
               {/* No subtitle for a territory — it fell through to the
                   generic "All Tasks" branch below (wrong, global counts)
@@ -3018,18 +3049,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 <p className="hidden items-center gap-1.5 text-[13px] text-muted sm:flex">
                   {/* Breadcrumb back to the Clients directory — only meaningful
                       when a specific client is the thing being viewed. */}
-                  {!myWork && !personalView && !inboxView && !dirView && activeClient !== "all" && (<>
-                    <button onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
+                  {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && (<>
+                    <button onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
                     <span>›</span>
                   </>)}
-                  <span>{inboxView ? (inboxTab === "chat" ? "Talk to the team — @mention someone to notify them" : "Everything that mentions or notifies you, in one place") : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "Every client and project you're on, grouped by what needs attention first" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</span>
+                  <span>{settingsView ? "Integrations, team, territories, templates, playbooks, and API tokens" : inboxView ? (inboxTab === "chat" ? "Talk to the team — @mention someone to notify them" : "Everything that mentions or notifies you, in one place") : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "Every client and project you're on, grouped by what needs attention first" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</span>
                 </p>
               )}
             </>)}
           </div>
 
           <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
-          {!myWork && !personalView && !inboxView && !dirView && activeClient === "all" && canAdmin && (
+          {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient === "all" && canAdmin && (
             <div className="inline-flex overflow-hidden rounded-md border" title="VAs only ever see their own tasks here regardless of this toggle">
               <button onClick={() => setAllTasksScope("mine")} className={`px-2.5 py-1.5 text-[13px] font-medium ${allTasksScope === "mine" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Mine</button>
               <button onClick={() => setAllTasksScope("all")} className={`px-2.5 py-1.5 text-[13px] font-medium ${allTasksScope === "all" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>All</button>
@@ -3040,7 +3071,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               the header actions, ahead of the Tasks/Journal/Vault tabs, as a
               prominent accent (or red-when-overdue) pill rather than the tiny
               grey chip it used to be. */}
-          {!myWork && !personalView && !inboxView && !dirView && !territoryView && activeClient !== "all" && clientById(activeClient) && (() => {
+          {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && clientById(activeClient) && (() => {
             const scopedProject = activeProject ? projectById(activeProject) : null;
             const entity = scopedProject ?? clientById(activeClient)!;
             const fu = entity.followUpAt ?? null;
@@ -3063,7 +3094,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </div>
             );
           })()}
-          {!myWork && !personalView && !inboxView && !dirView && !territoryView && activeClient !== "all" && (
+          {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && (
             <div className="inline-flex overflow-hidden rounded-md border">
               <button onClick={() => setClientTab("tasks")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "tasks" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Tasks</button>
               <button onClick={() => setClientTab("chat")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "chat" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Journal · {(() => {
@@ -3082,7 +3113,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           {/* Quick Email/SMS — jumps straight into the Journal composer in that
               mode. Client-scoped messaging only (not projects), gated by the
               same permission as sending. */}
-          {!myWork && !personalView && !inboxView && !dirView && !territoryView && activeClient !== "all" && !activeProject && canMessageClient(activeClient) && (
+          {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && !activeProject && canMessageClient(activeClient) && (
             <div className="hidden overflow-hidden rounded-md border sm:inline-flex">
               <button onClick={() => openCompose("email")} title="Email this client" className="inline-flex items-center gap-1 bg-background px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-accent-soft hover:text-accent"><I.comment /> <span className="hidden sm:inline">Email</span></button>
               <button onClick={() => openCompose("sms")} title="Text this client" className="border-l bg-background px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-accent-soft hover:text-accent">SMS</button>
@@ -3092,7 +3123,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               Client-scoped, never runs on its own (matches the app's "AI never
               spends without a click" rule). Jumps to the Journal, where the
               freshest recap is pinned at the top. */}
-          {!myWork && !personalView && !inboxView && !dirView && !territoryView && activeClient !== "all" && !activeProject && clientById(activeClient) && (
+          {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && !activeProject && clientById(activeClient) && (
             <button onClick={async () => { setClientTab("chat"); await regenerateAiSummary(activeClient); }}
               disabled={aiSummaryBusyId === activeClient}
               title="Generate an up-to-date 'recently done / next up' recap for this client"
@@ -3101,7 +3132,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             </button>
           )}
 
-          {!myWork && !personalView && !inboxView && !dirView && !territoryView && activeClient !== "all" && clientById(activeClient) && (
+          {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && clientById(activeClient) && (
             <div className="flex items-center gap-1.5">
               {(() => {
                 // One contextual Follow toggle, not two — it tracks whatever
@@ -3237,7 +3268,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           )}
 
 
-          {territoryView || inboxView || dirView ? null : myWork ? (
+          {territoryView || inboxView || settingsView || dirView ? null : myWork ? (
             canAdmin ? (
               <label className="flex items-center gap-2"><span className="text-muted">Viewing work for</span>
                 <select value={myWorkUser} onChange={(e) => setMyWorkUser(e.target.value)} className="rounded-md border bg-background px-2 py-1 outline-none">{users.map((u) => (<option key={u.id} value={u.id}>{u.name}{u.role === "va" ? " (VA)" : ""}</option>))}</select>
@@ -3338,7 +3369,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </div>
         </header>
 
-        {!myWork && !personalView && !inboxView && !dirView && !territoryView && activeClient !== "all" && (
+        {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && (
           <QuickLinksBar
             links={clientLinks.filter((l) => l.clientId === activeClient)}
             canEdit={canAdmin}
@@ -3350,7 +3381,21 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
 
         {/* content */}
-        {territoryView ? (
+        {settingsView ? (
+          <SettingsHub
+            me={me} canAdmin={canAdmin} hasTerritoryAccess={canAdmin || myTerritories.length > 0}
+            subAccounts={subAccounts}
+            onSaveClient={(c) => { setClients((cs) => cs.map((x) => (x.id === c.id ? c : x))); markOwnClientWrite(c.id); upsertClient(c); }}
+            onSynced={async () => { try { setContacts(await fetchContacts()); pushToast("Contacts updated from GoHighLevel"); } catch { /* ignore */ } }}
+            territories={territories} contacts={contacts} clients={clients}
+            onAddTerritory={addTerritory} onToggleAssignee={toggleTerritoryAssignee} onDeleteTerritory={deleteTerritory}
+            onAddContact={(contact) => addClientContact(contact)}
+            onOpenClient={(id) => { setSettingsView(false); setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); }}
+            templates={taskTemplates} projects={projects}
+            onSaveTemplate={saveTemplate} onDeleteTemplate={deleteTemplate} onUseTemplateAsTask={useTemplateAsTask}
+            playbooks={playbooks} onSavePlaybook={savePlaybook} onDeletePlaybook={deletePlaybook} onLoadPlaybook={loadPlaybook}
+          />
+        ) : territoryView ? (
           <div className="flex-1 overflow-auto bg-background py-2">
             <TerritoryPanel me={me} canAdmin={canAdmin} territories={territories} contacts={contacts} clients={clients}
               onAddTerritory={addTerritory} onToggleAssignee={toggleTerritoryAssignee} onDeleteTerritory={(id) => { deleteTerritory(id); if (territoryView === id) setTerritoryView("all"); }}
@@ -3406,11 +3451,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <GroupedList groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} queuedIds={claudeQueue} colOrder={colOrder} onReorderCols={reorderCols} />
         ) : myWork ? (
           <ClientsBoard groups={myWorkGroups} clientTaskCount={clientTaskCount} projectTaskCount={projectTaskCount} hasUnreadMessage={hasUnreadMessage}
-            onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }}
+            onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }}
             onOpenProject={(id) => {
-              if (id === PERSONAL_PROJECT_ID) { setMyWork(false); setPersonalView(true); setInboxView(false); setDirView(null); setTerritoryView(null); setOpenTaskId(null); return; }
+              if (id === PERSONAL_PROJECT_ID) { setMyWork(false); setPersonalView(true); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setOpenTaskId(null); return; }
               const p = projects.find((x) => x.id === id); if (!p) return;
-              setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setActiveClient(p.clientId); setActiveProject(id); setOpenTaskId(null);
+              setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(p.clientId); setActiveProject(id); setOpenTaskId(null);
             }} />
         ) : activeClient !== "all" && clientTab === "chat" ? (
           <ClientJournal
@@ -3508,24 +3553,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={orderedTaskIds.length} navTasks={orderedTaskIds.map((id) => tasks.find((t) => t.id === id)).filter((t): t is Task => !!t)} onOpenTask={setOpenTaskId} onAddSibling={(title) => addTaskToList(openTask.clientId, openTask.projectId, openTask.private, title)} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(attachments) => addComment(openTask.id, comment, attachments)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...clientList].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} isQueued={claudeQueue.has(openTask.id)} onToggleQueue={() => toggleClaudeQueue(openTask.id)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null })} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt)} draftingMessage={draftingMessage} onRegenerateAiSummary={() => regenerateAiSummary(openTask.clientId)} aiSummaryBusy={aiSummaryBusyId === openTask.clientId} />
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...clientList].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} isQueued={claudeQueue.has(openTask.id)} onToggleQueue={() => toggleClaudeQueue(openTask.id)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null })} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt)} draftingMessage={draftingMessage} onRegenerateAiSummary={() => regenerateAiSummary(openTask.clientId)} aiSummaryBusy={aiSummaryBusyId === openTask.clientId} />
       )}
 
-      {settingsHubOpen && (
-        <SettingsHub
-          onClose={() => setSettingsHubOpen(false)}
-          me={me} canAdmin={canAdmin} hasTerritoryAccess={canAdmin || myTerritories.length > 0}
-          subAccounts={subAccounts}
-          onSaveClient={(c) => { setClients((cs) => cs.map((x) => (x.id === c.id ? c : x))); markOwnClientWrite(c.id); upsertClient(c); }}
-          onSynced={async () => { try { setContacts(await fetchContacts()); pushToast("Contacts updated from GoHighLevel"); } catch { /* ignore */ } }}
-          territories={territories} contacts={contacts} clients={clients}
-          onAddTerritory={addTerritory} onToggleAssignee={toggleTerritoryAssignee} onDeleteTerritory={deleteTerritory}
-          onAddContact={(contact) => addClientContact(contact)}
-          onOpenClient={(id) => { setSettingsHubOpen(false); setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); }}
-          templates={taskTemplates} projects={projects}
-          onSaveTemplate={saveTemplate} onDeleteTemplate={deleteTemplate} onUseTemplateAsTask={useTemplateAsTask}
-        />
-      )}
       {addClientOpen && <AddClientModal subAccounts={subAccounts} contacts={contacts} existingIds={new Set(clients.map((c) => c.id))} onAdd={addClientContact} onClose={() => setAddClientOpen(false)} />}
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
       {promptDialog && <PromptModal {...promptDialog} onCancel={() => setPromptDialog(null)} />}
@@ -3596,10 +3626,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       </>)}
       {cmdkOpen && <CommandK tasks={scopedTasks} clients={clientList} projects={projects} contacts={contacts} addedContactIds={addedContactIds} clientById={clientById}
         onOpenTask={(id) => { setOpenTaskId(id); setCmdkOpen(false); }}
-        onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); setCmdkOpen(false); }}
+        onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); setCmdkOpen(false); }}
         onOpenProject={(id) => {
-          if (id === PERSONAL_PROJECT_ID) { setMyWork(false); setPersonalView(true); setInboxView(false); setDirView(null); setTerritoryView(null); setCmdkOpen(false); return; }
-          const p = projects.find((x) => x.id === id); if (p) { setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setActiveClient(p.clientId); setActiveProject(id); } setCmdkOpen(false);
+          if (id === PERSONAL_PROJECT_ID) { setMyWork(false); setPersonalView(true); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setCmdkOpen(false); return; }
+          const p = projects.find((x) => x.id === id); if (p) { setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(p.clientId); setActiveProject(id); } setCmdkOpen(false);
         }}
         onAddContact={(contact) => { addClientContact(contact); setCmdkOpen(false); }}
         onClose={() => setCmdkOpen(false)} />}
@@ -3608,7 +3638,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           Send button and toasts live bottom-right), draggable so it can be
           parked anywhere, and hidden on the Journal tab so it never covers the
           message composer while writing/sending. */}
-      {!(!myWork && !personalView && !inboxView && !dirView && !territoryView && activeClient !== "all" && clientTab === "chat") && (
+      {!(!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && clientTab === "chat") && (
         <button onPointerDown={onFabPointerDown} onPointerMove={onFabPointerMove} onPointerUp={onFabPointerUp}
           title="Add a task (drag to move)" aria-label="Add a task"
           style={fabPos ? { left: fabPos.x, top: fabPos.y, right: "auto", bottom: "auto" } : undefined}

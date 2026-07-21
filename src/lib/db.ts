@@ -26,6 +26,7 @@ import {
   type MessageDirection,
   type Territory,
   type TaskTemplate,
+  type Playbook,
   type Priority,
   type TeamMessage,
   titleCase,
@@ -105,6 +106,9 @@ const rowToTerritory = (r: any): Territory => ({ id: r.id, name: r.name, city: r
 const taskTemplateToRow = (t: TaskTemplate) => ({ id: t.id, name: t.name, checklist_items: t.checklistItems });
 const rowToTaskTemplate = (r: any): TaskTemplate => ({ id: r.id, name: r.name, checklistItems: r.checklist_items ?? [] });
 
+const playbookToRow = (p: Playbook) => ({ id: p.id, name: p.name, tasks: p.tasks });
+const rowToPlaybook = (r: any): Playbook => ({ id: r.id, name: r.name, tasks: r.tasks ?? [] });
+
 const messageToRow = (m: Message) => ({
   id: m.id, contact_id: m.contactId, client_id: m.clientId, task_id: m.taskId ?? null, channel: m.channel, direction: m.direction,
   subject: m.subject, body: m.body, ghl_message_id: m.ghlMessageId, gmail_message_id: m.gmailMessageId ?? null, created_by: m.createdBy, read: m.read,
@@ -156,7 +160,7 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true) 
 }
 
 export async function fetchAll() {
-  const [c, ct, p, t, n, cl, cn, m, tr, tt, vf, fd, um, sg, tm] = await Promise.all([
+  const [c, ct, p, t, n, cl, cn, m, tr, tt, vf, fd, um, sg, tm, pb] = await Promise.all([
     fetchAllRows("clients", "created_at"),
     fetchAllRows("contacts"),
     fetchAllRows("projects"),
@@ -175,6 +179,7 @@ export async function fetchAll() {
     fetchAllRows("inbound_unmatched", "created_at", false),
     fetchAllRows("stages", "position"),
     fetchAllRows("team_messages", "created_at", false),
+    fetchAllRows("playbooks", "created_at"),
   ]);
   // NB: `projects` stays in the hard-fail set — its new folder_id/position
   // columns are read via `select *`, which tolerates their absence pre-migration
@@ -191,6 +196,7 @@ export async function fetchAll() {
   if (um.error) console.warn("[db] inbound_unmatched unavailable — run supabase/inbound-unmatched.sql", um.error.message);
   if (sg.error) console.warn("[db] stages unavailable — run supabase/stages.sql", sg.error.message);
   if (tm.error) console.warn("[db] team_messages unavailable — run supabase/team-chat.sql", tm.error.message);
+  if (pb.error) console.warn("[db] playbooks unavailable — run supabase/playbooks.sql", pb.error.message);
   return {
     clients: (c.data ?? []).map(rowToClient),
     contacts: (ct.data ?? []).map(rowToContact),
@@ -207,6 +213,7 @@ export async function fetchAll() {
     unmatchedEmails: um.error ? [] : (um.data ?? []).filter((r: any) => !r.handled).map(rowToUnmatched),
     stages: sg.error ? [] : (sg.data ?? []).map(rowToStage),
     teamMessages: tm.error ? [] : (tm.data ?? []).map(rowToTeamMessage),
+    playbooks: pb.error ? [] : (pb.data ?? []).map(rowToPlaybook),
   };
 }
 
@@ -266,6 +273,8 @@ export const deleteTerritoryDb = (id: string) => supabase.from("territories").de
 
 export const upsertTaskTemplate = (t: TaskTemplate) => supabase.from("task_templates").upsert(taskTemplateToRow(t)).then(logErr);
 export const deleteTaskTemplateDb = (id: string) => supabase.from("task_templates").delete().eq("id", id).then(logErr);
+export const upsertPlaybook = (p: Playbook) => supabase.from("playbooks").upsert(playbookToRow(p)).then(logErr);
+export const deletePlaybookDb = (id: string) => supabase.from("playbooks").delete().eq("id", id).then(logErr);
 export const deleteClientNoteDb = (id: string) => supabase.from("client_notes").delete().eq("id", id).then(logErr);
 export const insertTeamMessage = (m: TeamMessage) => supabase.from("team_messages").insert(teamMessageToRow(m)).then(logErr);
 export const deleteTeamMessageDb = (id: string) => supabase.from("team_messages").delete().eq("id", id).then(logErr);
