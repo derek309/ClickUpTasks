@@ -3095,6 +3095,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <button onClick={onSignOut} title="Sign out" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-red-500"><I.logout /></button>
         </div>
 
+        {/* Dashboard leads — the single place everyone works from (Derek).
+            Chat and the Clients/Projects/Personal group follow below it. */}
+        <nav className="shrink-0 space-y-0.5 px-2">
+          {navVisible.work && <SideItem active={myWork} onClick={() => { setMyWork(true); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>Dashboard</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
+        </nav>
+
         {/* Chat hub: Team Chat + one row per teammate for private DMs, merged
             into a single section per Derek's ask — "different chat groups...
             a team chat that's everyone but then we can all private chat with
@@ -3103,7 +3109,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             no extra state to derive, matches how Territories/Pinned already
             work at this scale. */}
         {navVisible.inbox && (
-          <div className="shrink-0 space-y-0.5 px-2">
+          <div className="mt-1.5 shrink-0 space-y-0.5 border-t px-2 pt-1.5">
             <div className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Chat</div>
             <SideItem active={inboxView && dmUserId === null} onClick={openTeamChat}><I.comment className="text-muted" /> <span>Team</span>{(teamChatUnread || unread > 0) && (
               // Both indicators, not either/or: notifications accumulate
@@ -3122,18 +3128,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             ))}
           </div>
         )}
-        <nav className="shrink-0 space-y-0.5 px-2">
-          {navVisible.work && <SideItem active={myWork} onClick={() => { setMyWork(true); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>Dashboard</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
-          {navVisible.personal && <SideItem active={personalView} onClick={() => { setPersonalView(true); setMyWork(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>}
-        </nav>
 
-        {/* Projects / Clients are now directory pages, not inline lists — the
-            sidebar stays lean since day-to-day work happens from Dashboard. */}
+        {/* Clients / Projects / Personal, grouped together — Projects is
+            still a directory page rather than an inline list (day-to-day
+            work happens from Dashboard), and Personal sits last in this
+            group rather than up by Dashboard. */}
         <nav className="mt-1.5 shrink-0 space-y-0.5 border-t px-2 pt-1.5">
           <SideItem active={dirView === "clients"} onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{clientList.length}</span></SideItem>
           {clients.some((c) => c.id === WORKSPACE_CLIENT_ID) && (
             <SideItem active={dirView === "projects"} onClick={() => { setDirView("projects"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.folder className="text-muted" /> <span>Projects</span><span className="ml-auto text-[13px] text-muted">{workspaceProjects.length}</span></SideItem>
           )}
+          {navVisible.personal && <SideItem active={personalView} onClick={() => { setPersonalView(true); setMyWork(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>}
         </nav>
 
         {/* Pinned — per-user quick access to starred clients + lists. Starring

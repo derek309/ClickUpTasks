@@ -439,7 +439,11 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
               if (row.kind === "message-group") {
                 const channelColor = row.channel === "email" ? "#3b82f6" : "#22c55e";
                 return (
-                  <div key={row.key} className={`flex gap-2.5 rounded-xl border p-3 shadow-soft ${row.direction === "outbound" ? "bg-accent-soft/30" : "bg-surface"}`}>
+                  // Solid bg-surface for both directions — a translucent
+                  // accent tint on outbound (bg-accent-soft/30) let the page
+                  // background show through and read as washed-out; the
+                  // Sent/Received label already carries that distinction.
+                  <div key={row.key} className="flex gap-2.5 rounded-xl border bg-surface p-3 shadow-soft">
                     <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-white" style={{ background: channelColor }}><I.bolt /></span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 text-[13px] text-muted">
