@@ -228,28 +228,27 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
       ? a.listing.name.localeCompare(b.listing.name)
       : (b.listing.score ?? -1) - (a.listing.score ?? -1) || a.listing.name.localeCompare(b.listing.name));
 
-  // Free-text filter across all three buckets — by business/contact name,
-  // email, phone, or company. Lincoln (and other dense cities) can list a lot
-  // of businesses, so this is the fast way to jump to one.
+  // Free-text filter — by business/contact name, email, phone, or company.
   const ql = q.trim().toLowerCase();
   const qDigits = ql.replace(/\D/g, "");
   const matchRow = (r: { listing: DirectoryListing; contact: Contact | null }) => !ql
     || lc(r.listing.name).includes(ql)
     || (!!qDigits && digits(r.listing.phone).includes(qDigits))
     || (!!r.contact && (lc(r.contact.name).includes(ql) || lc(r.contact.email).includes(ql) || lc(r.contact.company).includes(ql) || (!!qDigits && digits(r.contact.phone).includes(qDigits))));
-  const matchContact = (c: Contact) => !ql
-    || lc(c.name).includes(ql) || lc(c.email).includes(ql) || lc(c.company).includes(ql) || (!!qDigits && digits(c.phone).includes(qDigits));
   const claimed = sortRows(rows.filter((r) => r.listing.claimed)).filter(matchRow);
   const unclaimed = sortRows(rows.filter((r) => !r.listing.claimed)).filter(matchRow);
-  const noListingShown = noListing.filter(matchContact);
-  const total = claimed.length + unclaimed.length + noListingShown.length;
+  const total = claimed.length + unclaimed.length;
+  // A territory business = a contact on the WordPress directory. Contacts with
+  // no directory listing aren't businesses we prospect here (they're residents
+  // / agency-side contacts), so they're deliberately NOT shown — just counted,
+  // so nothing feels lost. (See noListing = contacts matching no listing.)
+  const nonBusinessCount = noListing.length;
 
   if (loading) return <div className="bg-background p-4 py-10 text-center text-[13px] text-muted sm:p-5">Loading directory for {city}…</div>;
 
   const groups: { key: keyof typeof BUCKET_META; count: number }[] = [
     { key: "unclaimed", count: unclaimed.length },
     { key: "claimed", count: claimed.length },
-    { key: "none", count: noListingShown.length },
   ];
 
   return (
@@ -298,43 +297,26 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                   <span className="rounded-full px-1.5 text-[13px] font-semibold normal-case tracking-normal text-white" style={{ background: meta.color }}>{g.count}</span>
                   <span className="truncate text-[12px] font-normal normal-case text-muted">{meta.hint}</span>
                 </button>
-                {isOpen && g.key !== "none" && (g.key === "unclaimed" ? unclaimed : claimed).map((r) => (
+                {isOpen && (g.key === "unclaimed" ? unclaimed : claimed).map((r) => (
                   <ListingRow key={r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} onPatch={patchListing} onSetStatus={onSetStatus} />
                 ))}
-                {isOpen && g.key === "none" && noListingShown.map((c) => {
-                  const client = clientIds.has("cl_" + c.id) ? clients.find((cl) => cl.id === "cl_" + c.id) ?? null : null;
-                  return <NoListingRow key={c.id} contact={c} client={client} onAddContact={onAddContact} onOpenClient={onOpenClient} />;
-                })}
               </div>
             );
           })}
         </div>
-        {total === 0 && <div className="px-4 py-10 text-center text-[13px] text-muted">{ql ? `No businesses in ${city} match “${q}”.` : `No directory listings or contacts in ${city} yet.`}</div>}
+        {total === 0 && (
+          <div className="px-4 py-10 text-center text-[13px] text-muted">
+            {ql ? `No businesses in ${city} match “${q}”.`
+              : err ? `No directory businesses to show — the directory is unavailable right now.`
+              : `No directory-listed businesses in ${city} yet.`}
+          </div>
+        )}
       </div>
-    </div>
-  );
-}
-
-// Reusable "sm:contents" split — on mobile the row stacks (name, then a wrap
-// of the other fields); at sm+ it drops into the shared grid template. Same
-// technique GroupedList's TaskRow uses.
-function NoListingRow({ contact, client, onAddContact, onOpenClient }: {
-  contact: Contact; client: Client | null; onAddContact: (c: Contact) => void; onOpenClient: (id: string) => void;
-}) {
-  return (
-    <div className="flex flex-col gap-1 border-b px-4 py-2.5 text-[15px] transition-colors last:border-0 hover:bg-accent-soft/50 sm:grid sm:min-h-[42px] sm:items-center sm:gap-2 sm:py-1.5" style={{ gridTemplateColumns: TEMPLATE }}>
-      <button onClick={() => { if (!isRealClick()) return; if (client) onOpenClient(client.id); else onAddContact(contact); }} title={client ? "Open this client" : "Open this business"}
-        className="min-w-0 truncate text-left hover:text-accent hover:underline">
-        {contact.name}{contact.company && <span className="text-muted/70"> · {contact.company}</span>}
-      </button>
-      <span className="hidden sm:block" />
-      <span className="hidden sm:block" />
-      <span className="hidden sm:block" />
-      <div>
-        {client
-          ? <button onClick={() => onOpenClient(client.id)} className="rounded-md px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent-soft">✓ Client</button>
-          : <button onClick={() => onAddContact(contact)} className="rounded-md border border-dashed px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent-soft">+ Add as client</button>}
-      </div>
+      {nonBusinessCount > 0 && (
+        <div className="mt-2 px-1 text-[12px] text-muted">
+          {nonBusinessCount} other {nonBusinessCount === 1 ? "contact" : "contacts"} in {city} {nonBusinessCount === 1 ? "isn’t" : "aren’t"} on the business directory — those live on the agency side and aren’t shown here as territory prospects.
+        </div>
+      )}
     </div>
   );
 }
