@@ -227,6 +227,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     markTeamChatRead();
   };
   const teamChatUnread = teamMessages.some((m) => m.authorId !== me.id && m.at > teamChatLastRead);
+  // Messages arriving while you're looking at the Chat tab are already read —
+  // without this the realtime insert lights an unread dot for a message
+  // that's on screen, and it only clears by navigating away and back.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { if (inboxView && inboxTab === "chat" && teamChatUnread) markTeamChatRead(); }, [inboxView, inboxTab, teamChatUnread]);
   const [addClientOpen, setAddClientOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   // Draggable quick-add FAB position (viewport px of its top-left). null =
@@ -946,7 +951,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (n.clientId) {
       setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null);
       setActiveClient(n.clientId); setActiveProject(n.projectId ?? null); setClientTab("chat");
+      return;
     }
+    // A direct message with no task and no client is a Team Chat mention —
+    // the only notification kind with nowhere else to point. Without this it
+    // was a dead click: "X mentioned you in Team Chat" marked itself read and
+    // did nothing, with the chat one tab away.
+    if (n.kind === "message") setInboxTab("chat");
   };
 
   const passesFilters = (t: Task) =>
@@ -2028,14 +2039,32 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // exactly how duplicate client records were getting made.
     const missing = matched.filter((c) => !clients.some((cl) => cl.id === "cl_" + c.id) && !findDuplicateTrackedClient(c));
     if (!missing.length) return;
-    // Dedupe by contact id before building the batch. Two directory listings
-    // can resolve to the SAME GHL contact (shared phone/name — franchise
-    // locations, duplicate listings), and the caller maps over listings, so
-    // the same cl_<id> can appear twice. Postgres rejects an upsert whose
-    // statement touches one row twice ("ON CONFLICT DO UPDATE command cannot
-    // affect row a second time"), which failed the whole batch — and since
-    // nothing persisted, every refresh retried the identical failing write.
-    const unique = [...new Map(missing.map((c) => [c.id, c])).values()];
+    // Dedupe before building the batch, on two axes:
+    //
+    // 1. Same contact id twice. The caller maps over LISTINGS, and two
+    //    listings can resolve to the same GHL contact, so the same cl_<id>
+    //    could appear twice. Postgres rejects an upsert whose statement
+    //    touches one row twice ("ON CONFLICT DO UPDATE command cannot affect
+    //    row a second time"), failing the whole batch — and since nothing
+    //    persisted, every refresh retried the identical failing write.
+    //
+    // 2. Distinct contact ids that are the same business (shared email,
+    //    phone, or name). findDuplicateTrackedClient above only compares
+    //    against already-persisted clients, never members of this batch
+    //    against each other, so these sailed through with different primary
+    //    keys — no error, no toast, just the same business silently listed
+    //    twice after a first sync. Same rule as the persisted check.
+    const seenEmail = new Set<string>(), seenPhone = new Set<string>(), seenName = new Set<string>();
+    const unique = [...new Map(missing.map((c) => [c.id, c])).values()].filter((c) => {
+      const email = (c.email ?? "").trim().toLowerCase();
+      const phone = dedupPhone(c.phone);
+      const name = dedupName(c.name);
+      if ((email && seenEmail.has(email)) || (phone && seenPhone.has(phone)) || (name.length > 3 && seenName.has(name))) return false;
+      if (email) seenEmail.add(email);
+      if (phone) seenPhone.add(phone);
+      if (name.length > 3) seenName.add(name);
+      return true;
+    });
     const newClients: Client[] = unique.map((c) => {
       const sub = subAccounts.find((s) => s.id === c.clientId);
       return { id: "cl_" + c.id, name: c.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "lead", type: "client", assignedTo: [] };
@@ -2517,9 +2546,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // this looks for; the lowercase compare is a safety net for someone typing
     // it by hand with different casing. A bare first name still won't match —
     // that's what the picker is for.
+    // Word-boundary match, not a bare substring: "@Samantha" must not also
+    // notify a "Sam" on the roster. Case-insensitive so a hand-typed
+    // "@derek fox" still lands; the picker inserts the exact name anyway.
     const lower = body.toLowerCase();
     users.forEach((u) => {
-      if (u.id !== me.id && lower.includes("@" + u.name.toLowerCase())) notify(u.id, `${me.name} mentioned you in Team Chat`, null, { kind: "message" });
+      if (u.id === me.id) return;
+      const at = "@" + u.name.toLowerCase();
+      let from = lower.indexOf(at);
+      while (from !== -1) {
+        const after = lower[from + at.length];
+        if (after === undefined || !/[\w]/.test(after)) { notify(u.id, `${me.name} mentioned you in Team Chat`, null, { kind: "message" }); return; }
+        from = lower.indexOf(at, from + 1);
+      }
     });
   };
   const deleteTeamMessage = (id: string) => {
@@ -2745,7 +2784,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         </div>
 
         <nav className="shrink-0 space-y-0.5 px-2">
-          {navVisible.inbox && <SideItem active={inboxView} onClick={openTeamChat}><I.comment className="text-muted" /> <span>Team Chat</span>{unread > 0 ? <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{unread}</span> : teamChatUnread ? <span className="ml-auto h-2 w-2 rounded-full bg-accent" /> : null}</SideItem>}
+          {navVisible.inbox && <SideItem active={inboxView} onClick={openTeamChat}><I.comment className="text-muted" /> <span>Team Chat</span>{(teamChatUnread || unread > 0) && (
+            // Both indicators, not either/or: notifications accumulate
+            // routinely, and an exclusive check meant a real unread chat
+            // message showed nothing at all whenever any notice was pending.
+            <span className="ml-auto flex items-center gap-1.5">
+              {teamChatUnread && <span title="Unread team chat" className="h-2 w-2 rounded-full bg-accent" />}
+              {unread > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{unread}</span>}
+            </span>
+          )}</SideItem>}
           {navVisible.work && <SideItem active={myWork} onClick={() => { setMyWork(true); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>Dashboard</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
           {navVisible.all && <SideItem active={!myWork && !personalView && !inboxView && !dirView && !territoryView && activeClient === "all"} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); }}><I.list className="text-muted" /> <span>All Tasks</span><span className="ml-auto text-[13px] text-muted">{scopedTasks.filter((t) => t.clientId.startsWith("cl_")).length}</span></SideItem>}
           {navVisible.personal && <SideItem active={personalView} onClick={() => { setPersonalView(true); setMyWork(false); setInboxView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>}

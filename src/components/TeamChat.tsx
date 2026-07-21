@@ -4,11 +4,12 @@
 // client or project (see supabase/team-chat.sql).
 //
 // Renders two ways off one implementation:
-//   • embedded (no onClose) — fills the Team Chat page's Chat tab, which is
-//     its primary home: "the inbox is really where you review task comments
-//     and chat with the team."
-//   • overlay (onClose given) — the original lightweight modal, same shell as
-//     SettingsHub, still used for quick access from anywhere.
+//   • embedded (no onClose) — fills the Team Chat page's Chat tab. This is
+//     the only mount today: "the inbox is really where you review task
+//     comments and chat with the team."
+//   • overlay (onClose given) — the original modal shell, same as
+//     SettingsHub. Currently unused; kept because it's a few lines and the
+//     obvious shape for a future quick-peek from another view.
 import { useEffect, useRef, useState } from "react";
 import { type Me, type TeamMessage, users, userById, timeAgo } from "@/lib/data";
 import { I, Avatar } from "./cockpit/ui";
@@ -38,9 +39,14 @@ export default function TeamChat({ me, messages, onSend, onDelete, onClose }: {
   // sendTeamMessage notifies on an exact `@Full Name` match, so picking from
   // this list is what actually makes the mention reach the person. Typing
   // "@justin" by hand matches nobody.
-  const mentionMatch = /@([\w]*)$/.exec(draft);
-  const mentionCands = mentionMatch ? users.filter((u) => u.name.toLowerCase().includes(mentionMatch[1].toLowerCase())) : [];
-  const pickMention = (name: string) => setDraft(draft.replace(/@([\w]*)$/, `@${name} `));
+  // The @ must start the draft or follow whitespace, so an email address
+  // ("derek@", "me@clickuplocal.com") never opens the picker and never gets
+  // its Enter key hijacked into a name completion.
+  const [mentionDismissed, setMentionDismissed] = useState(false);
+  const mentionMatch = /(^|\s)@([\w]*)$/.exec(draft);
+  const mentionCands = mentionMatch && !mentionDismissed ? users.filter((u) => u.name.toLowerCase().includes(mentionMatch[2].toLowerCase())) : [];
+  const mentionOpen = mentionCands.length > 0;
+  const pickMention = (name: string) => setDraft(draft.replace(/(^|\s)@([\w]*)$/, (_m, pre: string) => `${pre}@${name} `));
 
   // The feed + composer, identical in both modes — only the chrome around
   // them differs (page pane vs centered modal).
@@ -72,8 +78,11 @@ export default function TeamChat({ me, messages, onSend, onDelete, onClose }: {
         </div>
 
         <div className="relative border-t p-3">
-          {mentionMatch && mentionCands.length > 0 && (
-            <div className="absolute bottom-full left-3 mb-1 z-10 w-56 overflow-hidden rounded-lg border bg-surface shadow-lg">
+          {mentionOpen && (
+            // max-h + scroll: the embedded wrapper is overflow-hidden, so an
+            // unbounded list would get clipped at the top and be unreachable
+            // once the roster outgrows the window.
+            <div className="absolute bottom-full left-3 mb-1 z-10 max-h-56 w-56 overflow-y-auto rounded-lg border bg-surface shadow-lg">
               {mentionCands.map((u) => (
                 <button key={u.id} onClick={() => pickMention(u.name)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[14px] hover:bg-background">
                   <Avatar id={u.id} size={22} /> <span className="min-w-0 flex-1 truncate">{u.name}</span>
@@ -84,12 +93,14 @@ export default function TeamChat({ me, messages, onSend, onDelete, onClose }: {
           )}
           <textarea
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => { setDraft(e.target.value); setMentionDismissed(false); }}
             onKeyDown={(e) => {
-              // While the mention list is open, Enter picks the top match
-              // (standard chat behavior) instead of inserting a newline.
-              if (e.key === "Enter" && !e.shiftKey && mentionMatch && mentionCands.length > 0) { e.preventDefault(); pickMention(mentionCands[0].name); return; }
-              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submit(); }
+              // ⌘↵/Ctrl↵ always sends — checked first, so mentioning someone
+              // and sending in one motion doesn't silently swallow the send.
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submit(); return; }
+              if (e.key === "Escape" && mentionOpen) { e.preventDefault(); setMentionDismissed(true); return; }
+              // Plain Enter picks the top match only while the list is open.
+              if (e.key === "Enter" && !e.shiftKey && mentionOpen) { e.preventDefault(); pickMention(mentionCands[0].name); return; }
             }}
             placeholder="Message the team… (type @ to mention, ⌘↵ to send)"
             rows={2}

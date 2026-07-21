@@ -32,7 +32,10 @@ export function Inbox({ notifications, clientById, projectById, onOpen, onMarkAl
   const filtered = filter === "all" ? notifications : notifications.filter((n) => (n.kind ?? "activity") === filter);
 
   return (
-    <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">
+    // min-h-0 matters now that this sits under the Team Chat tab bar in a
+    // flex column: without it the list keeps its content height, overflow
+    // never engages, and the tab bar scrolls away with the list.
+    <div className="min-h-0 flex-1 overflow-auto bg-background p-4 sm:p-5">
       <div className="mx-auto max-w-3xl">
         {/* Unsorted email — real people who emailed but aren't clients yet.
             Read, then add them as a client (pulls their conversation onto a
