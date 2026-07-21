@@ -59,6 +59,7 @@ import {
   PERSONAL_CLIENT_ID,
   WORKSPACE_CLIENT_ID,
   PERSONAL_PROJECT_ID,
+  normalizeState,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
 import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, markMessagesReadDb, reassignMessagesTaskDb, insertMessage, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact } from "@/lib/db";
@@ -2073,6 +2074,56 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     newClients.forEach((c) => markOwnClientWrite(c.id));
     bulkUpsertClients(newClients);
   };
+  // The list every feature's touches land in. Named by us, not the user, so
+  // deriving "has this business been featured?" off it is stable.
+  const FEATURE_LIST = "Newsletter feature";
+  // Businesses already run through the newsletter motion, so the territory
+  // can show who's been used and you never double-feature a city.
+  const featuredClientIds = useMemo(() => {
+    const listIds = new Set(projects.filter((p) => p.name === FEATURE_LIST).map((p) => p.id));
+    return new Set(tasks.filter((t) => listIds.has(t.projectId)).map((t) => t.clientId));
+  }, [projects, tasks]);
+
+  // G2-SOP Stage 3, turned into dated work. Per the Jul 20 2026 field note in
+  // 02-SOP-Sales-Process.md, the feature invite IS the opener ("we want to
+  // write an article about your business") — cold calling is the low-yield
+  // path. Day 0 is the day you click, because that's when the invite goes
+  // out; the newsletter itself ships the following Wednesday.
+  const featureBusiness = (opts: { clientId: string; name: string; city: string; state: string }) => {
+    const { clientId, name, city, state } = opts;
+    let projectId = projects.find((p) => p.clientId === clientId && p.name === FEATURE_LIST)?.id;
+    if (!projectId) {
+      const p: Project = { id: newId("p_"), clientId, name: FEATURE_LIST, description: "" };
+      setProjects((ps) => [...ps, p]);
+      upsertProject(p);
+      projectId = p.id;
+    }
+    // The city's ambassador owns the sequence when there's exactly one;
+    // otherwise it lands on whoever pressed the button rather than guessing.
+    const terr = territories.find((t) => t.city.trim().toLowerCase() === city.trim().toLowerCase() && normalizeState(t.state) === normalizeState(state));
+    const roster = terr?.assignedTo ?? [];
+    const owner = roster.length === 1 ? roster[0] : me.id;
+    const contactId = clientId.startsWith("cl_") ? clientId.slice(3) : null;
+    // Day offsets straight from the SOP's touch timeline.
+    const touches: [number, string][] = [
+      [0, `Feature invite email — ${name}`],
+      [1, `Call or drop-in — ${name}`],
+      [3, `Value email: what the feature looks like — ${name}`],
+      [5, `Second attempt — still want to feature you — ${name}`],
+      [8, `Break-up note — ${name}`],
+    ];
+    const created: Task[] = touches.map(([offset, title]) => ({
+      id: newId("t_"), projectId: projectId!, clientId, title, description: "",
+      status: "todo", priority: "normal", assigneeId: owner, contactId,
+      due: addDaysIso(TODAY, offset), recurrence: "none", labelIds: [], ghlTaskId: null, private: false,
+      subtasks: [], comments: [], attachments: [], createdAt: new Date().toISOString(),
+    }));
+    setTasks((ts) => [...ts, ...created]);
+    created.forEach((t) => upsertTask(t, me.id));
+    if (owner !== me.id) notify(owner, `${me.name} queued ${name} for a newsletter feature — ${created.length} touches`, created[0].id, { clientId });
+    pushToast(`${name} featured — ${created.length} touches added to ${userById(owner)?.name ?? "you"}.`);
+  };
+
   const addTerritory = (spec: { name: string; city: string; state: string; assignedTo: string[] }) => {
     const t: Territory = { id: newId("terr_"), ...spec };
     setTerritories((ts) => [...ts, t]);
@@ -3293,6 +3344,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               onAddContact={(c) => addClientContact(c)}
               onSyncClients={syncTerritoryClients}
               onSetStatus={setClientStatus}
+              featuredClientIds={featuredClientIds}
+              onFeature={featureBusiness}
               onOpenClient={(id) => { setTerritoryView(null); setActiveClient(id); setActiveProject(null); setClientTab("tasks"); }}
               focusId={territoryView === "all" ? undefined : territoryView} />
           </div>

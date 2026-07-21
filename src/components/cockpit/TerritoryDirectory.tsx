@@ -111,7 +111,7 @@ const REFRESH_INTERVAL = 60_000;
 type ListingsCacheEntry = { data: DirectoryListing[]; notConfigured: boolean; at: number };
 const listingsCache = new Map<string, ListingsCacheEntry>();
 
-export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onSetStatus, onOpenClient, sort, onSetSort }: {
+export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onSetStatus, onOpenClient, featuredClientIds, onFeature, sort, onSetSort }: {
   city: string;
   state: string;
   contacts: Contact[];   // already scoped to this city/state by the caller
@@ -128,6 +128,11 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   onSyncClients?: (contacts: Contact[]) => void;
   onSetStatus?: (clientId: string, status: ClientStatus) => void;
   onOpenClient: (clientId: string) => void;
+  // Newsletter feature motion (G2-SOP Stage 2/3). Optional so the admin
+  // multi-city overview, which has no ambassador context, degrades to a
+  // read-only list.
+  featuredClientIds?: Set<string>;
+  onFeature?: (opts: { clientId: string; name: string; city: string; state: string }) => void;
   // Owned by the caller (TerritoryPanel) so the sort control can sit on the
   // same header line as the client/contact counts instead of its own row.
   sort: SortKey;
@@ -298,7 +303,9 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                   <span className="truncate text-[12px] font-normal normal-case text-muted">{meta.hint}</span>
                 </button>
                 {isOpen && (g.key === "unclaimed" ? unclaimed : claimed).map((r) => (
-                  <ListingRow key={r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} onPatch={patchListing} onSetStatus={onSetStatus} />
+                  <ListingRow key={r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} onPatch={patchListing} onSetStatus={onSetStatus}
+                    featured={!!r.client && !!featuredClientIds?.has(r.client.id)}
+                    onFeature={onFeature && ((rr) => { if (rr.client) onFeature({ clientId: rr.client.id, name: rr.listing.name, city, state }); })} />
                 ))}
               </div>
             );
@@ -321,12 +328,16 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, onPatch, onSetStatus }: {
+function ListingRow({ row, onAddContact, onOpenClient, onPatch, onSetStatus, featured, onFeature }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
   onOpenClient: (id: string) => void;
   onPatch: (id: number | string, next: Partial<DirectoryListing>) => void;
   onSetStatus?: (clientId: string, status: ClientStatus) => void;
+  // Newsletter feature motion: whether this business has already been run
+  // through it, and the trigger that starts the Stage-3 touch sequence.
+  featured: boolean;
+  onFeature?: (row: { listing: DirectoryListing; contact: Contact | null; client: Client | null }) => void;
 }) {
   const { listing, contact, client } = row;
   const meta = client ? clientStatusMeta(client.status) : null;
@@ -451,6 +462,12 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, onSetStatus }: {
           {listing.phone && <button onClick={call} disabled={calling} title={`Bridge-call ${listing.phone}`} className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground disabled:opacity-40">{calling ? "…" : "Call"}</button>}
           <button onClick={toggleHistory} title="Outreach history" className={`shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium ${histOpen ? "bg-accent-soft text-accent" : "text-muted hover:bg-surface hover:text-foreground"}`}>History</button>
           <button onClick={() => setLogOpen((o) => !o)} title="Log an outreach touch" className={`shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium ${logOpen ? "bg-accent-soft text-accent" : "text-muted hover:bg-surface hover:text-foreground"}`}>Log</button>
+          {/* The gameplan's opener: featuring the business is the give that
+              earns the conversation, so this generates the whole Stage-3
+              touch sequence rather than just tagging a row. */}
+          {onFeature && (featured
+            ? <span title="Already run through the newsletter feature motion" className="shrink-0 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[12px] font-medium text-emerald-600">★ Featured</span>
+            : <button onClick={() => onFeature(row)} title="Feature in the newsletter — creates the Stage-3 outreach sequence" className="shrink-0 rounded-md border border-dashed px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">★ Feature</button>)}
         </div>
 
         {/* Client */}

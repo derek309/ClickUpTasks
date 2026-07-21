@@ -10,7 +10,7 @@ import { users, clientStatusMeta, normalizeState, type Me, type Territory, type 
 import { I, Avatar } from "./cockpit/ui";
 import TerritoryDirectory from "./cockpit/TerritoryDirectory";
 
-export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onDeleteTerritory, onAddContact, onSyncClients, onSetStatus, onOpenClient, focusId }: {
+export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onDeleteTerritory, onAddContact, onSyncClients, onSetStatus, onOpenClient, featuredClientIds, onFeature, focusId }: {
   me: Me; canAdmin: boolean;
   territories: Territory[]; contacts: Contact[]; clients: Client[];
   onAddTerritory: (t: { name: string; city: string; state: string; assignedTo: string[] }) => void;
@@ -23,6 +23,9 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
   onSyncClients?: (contacts: Contact[]) => void;
   onSetStatus?: (clientId: string, status: ClientStatus) => void;
   onOpenClient: (clientId: string) => void;
+  // Newsletter feature motion, threaded straight through to the city view.
+  featuredClientIds?: Set<string>;
+  onFeature?: (opts: { clientId: string; name: string; city: string; state: string }) => void;
   focusId?: string; // when set, render only this one city, auto-expanded (the sidebar city page)
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(() => (focusId ? new Set([focusId]) : new Set()));
@@ -177,7 +180,8 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                 </HeaderTag>
                 {open && focusId && (
                   <TerritoryDirectory city={t.city} state={t.state} contacts={matched} clients={clients} onAddContact={onAddContact}
-                    onSyncClients={onSyncClients} onSetStatus={onSetStatus} onOpenClient={onOpenClient} sort={sort} onSetSort={setSort} />
+                    onSyncClients={onSyncClients} onSetStatus={onSetStatus} onOpenClient={onOpenClient}
+                    featuredClientIds={featuredClientIds} onFeature={onFeature} sort={sort} onSetSort={setSort} />
                 )}
                 {open && !focusId && (
                   <div className="space-y-1 border-t px-3 py-2">
