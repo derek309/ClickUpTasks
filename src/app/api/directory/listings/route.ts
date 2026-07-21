@@ -59,12 +59,28 @@ export async function GET(req: NextRequest) {
   // _cb: unique per request so any caching layer in front of WordPress
   // (Cloudflare, a page-rule cache, etc.) can't serve a stale response —
   // the directory should always reflect the live /sales state.
-  const qs = new URLSearchParams({ city, per_page: "200", orderby: "cul_score", order: "DESC", light: "1", _cb: String(Date.now()) });
-  const url = `${WP_BASE.replace(/\/$/, "")}/wp-json/cul/v1/sales/listings?${qs.toString()}`;
+  // WP hard-caps per_page at 200 (min(200, ...) in cul_sales_rest_list), and a
+  // real city can exceed that — Lincoln has 231. A single request silently
+  // dropped the tail, which hid actual claimed clients from the territory, and
+  // WP's own `truncated` flag reports false while truncating, so nothing
+  // warned. Page until we've collected `total`.
+  const PER_PAGE = 200;
+  const MAX_PAGES = 10; // 2000 listings/city — far past any real city, but a hard stop
+  const base = `${WP_BASE.replace(/\/$/, "")}/wp-json/cul/v1/sales/listings`;
+  const pageUrl = (page: number) => {
+    const qs = new URLSearchParams({
+      city, per_page: String(PER_PAGE), page: String(page),
+      orderby: "cul_score", order: "DESC", light: "1",
+      // Unique per request so no cache layer in front of WordPress can serve
+      // a stale page — the directory should always reflect live /sales state.
+      _cb: String(Date.now()),
+    });
+    return `${base}?${qs.toString()}`;
+  };
 
   let res: Response;
   try {
-    res = await fetch(url, { cache: "no-store", headers: { "X-ClickUpTasks-Key": WP_KEY, Accept: "application/json", "Cache-Control": "no-cache" } });
+    res = await fetch(pageUrl(1), { cache: "no-store", headers: { "X-ClickUpTasks-Key": WP_KEY, Accept: "application/json", "Cache-Control": "no-cache" } });
   } catch (e: any) {
     return NextResponse.json({ error: "Directory fetch failed", detail: String(e?.message ?? e), listings: [] }, { status: 502 });
   }
@@ -86,6 +102,28 @@ export async function GET(req: NextRequest) {
   }
   const data = await res.json().catch(() => null);
   const rawItems: any[] = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
+
+  // Pull the remaining pages when the city has more than one. Sequential
+  // rather than parallel: this is a handful of requests at most, and it keeps
+  // a big city from hammering the WP box. A page that fails just stops the
+  // loop — better to return what we have (and say so) than fail the whole
+  // territory over the tail.
+  const total = typeof data?.total === "number" ? data.total : rawItems.length;
+  let truncated = false;
+  if (rawItems.length > 0 && total > rawItems.length) {
+    const lastPage = Math.min(Math.ceil(total / PER_PAGE), MAX_PAGES);
+    for (let page = 2; page <= lastPage; page++) {
+      try {
+        const r = await fetch(pageUrl(page), { cache: "no-store", headers: { "X-ClickUpTasks-Key": WP_KEY, Accept: "application/json", "Cache-Control": "no-cache" } });
+        if (!r.ok) { truncated = true; break; }
+        const d = await r.json().catch(() => null);
+        const items: any[] = Array.isArray(d?.items) ? d.items : [];
+        if (items.length === 0) break;
+        rawItems.push(...items);
+      } catch { truncated = true; break; }
+    }
+    if (rawItems.length < total) truncated = true;
+  }
 
   // Optional state narrowing — the WP endpoint filters on city name only, so
   // when a state is given we drop rows whose region doesn't match (guards the
@@ -119,5 +157,7 @@ export async function GET(req: NextRequest) {
       ghlContactId: String(it.ghl_contact_id ?? ""), // links to the Prospects-pipeline opportunity
     }));
 
-  return NextResponse.json({ listings, truncated: Boolean(data?.truncated) });
+  // Our own truncation flag, not WP's — WP reports truncated:false even when
+  // it capped the result at per_page, so trusting it hid the missing tail.
+  return NextResponse.json({ listings, total, truncated });
 }
