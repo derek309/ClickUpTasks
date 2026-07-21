@@ -757,6 +757,29 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // and folder=<id> layered on — built fresh at click time, not mirrored
   // into the live URL bar as you browse (see currentNav's vaultFolder note).
   const copyFolderLink = (folderId: string) => copyLink({ ...currentNav(), view: null, clientTab: "vault", vaultFolder: folderId });
+  // Public "here's what we need from you" link for this client — see
+  // supabase/client-share-token.sql. Unlike copyLink above, this is a share
+  // link, not an app deep-link: it needs to keep working (and copy to the
+  // same URL) every time it's clicked, so the token is generated once and
+  // reused, not regenerated per click. crypto.randomUUID() is fine here —
+  // this only needs to be unguessable, not secret from the browser that's
+  // about to hand it to the client.
+  const copyClientShareLink = (clientId: string) => {
+    const c = clientById(clientId);
+    if (!c) return;
+    const token = c.shareToken ?? crypto.randomUUID().replace(/-/g, "");
+    if (!c.shareToken) {
+      const nc = { ...c, shareToken: token };
+      setClients((cs) => cs.map((x) => (x.id === clientId ? nc : x)));
+      markOwnClientWrite(nc.id);
+      upsertClient(nc);
+    }
+    const url = `${window.location.origin}/waiting/${token}`;
+    navigator.clipboard?.writeText(url).then(
+      () => pushToast("🔗 Client link copied — shows what we're waiting on them for"),
+      () => pushToast("⚠️ Couldn't copy link"),
+    );
+  };
   // Surfaces every failed background save (see db.ts logErr) so a dropped
   // connection is never silent — was previously console.error-only.
   useEffect(() => {
@@ -3022,6 +3045,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           )}
           <button onClick={() => { setHeaderMoreOpen(false); copyLink({ view: null, client: activeClient, project: activeProject, task: null, clientTab, vaultFolder: null }); }}
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy link</button>
+          {activeClient !== "all" && !activeProject && clientById(activeClient) && (
+            <button onClick={() => { setHeaderMoreOpen(false); copyClientShareLink(activeClient); }} title="A public, no-login link showing this client what we're waiting on them for"
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy client link</button>
+          )}
           <button onClick={() => { setHeaderMoreOpen(false); copyClientForClaude(); }}
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>✳</span> Copy for Claude</button>
           <button onClick={() => { setHeaderMoreOpen(false); queueClientForClaude(); }}
@@ -3470,6 +3497,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     )}
                     <button onClick={() => { setHeaderMoreOpen(false); copyLink({ view: null, client: activeClient, project: activeProject, task: null, clientTab, vaultFolder: null }); }}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy link</button>
+                    {activeClient !== "all" && !activeProject && clientById(activeClient) && (
+                      <button onClick={() => { setHeaderMoreOpen(false); copyClientShareLink(activeClient); }} title="A public, no-login link showing this client what we're waiting on them for"
+                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy client link</button>
+                    )}
                     <button onClick={() => { setHeaderMoreOpen(false); copyClientForClaude(); }}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>✳</span> Copy for Claude</button>
                     <button onClick={() => { setHeaderMoreOpen(false); queueClientForClaude(); }}

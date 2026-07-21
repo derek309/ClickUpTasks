@@ -186,6 +186,13 @@ export interface Client {
   /** yyyy-mm-dd of the last time this client was reviewed — powers the
    * weekly/monthly Review tier reset (see clientUrgencyKey). */
   reviewedAt?: string | null;
+  /** Unguessable token backing this client's public "what we're waiting on
+   * you for" page (/waiting/[token], see supabase/client-share-token.sql) —
+   * lazily generated the first time "Copy client link" is clicked, then
+   * reused (not a login credential, so it's fine to store retrievably —
+   * more like a Google Docs share link than an API key). Grants read-only
+   * visibility into that one client's open waitingOnClient tasks only. */
+  shareToken?: string | null;
 }
 
 /** A quick-access link on a client's page (live site, WP admin, etc.), stored
