@@ -2,16 +2,18 @@
 
 // The Vault tab on a client or project — every attachment from anywhere in
 // scope (task attachments, task comment images, Chat message images)
-// collected into one place. Images render as an actual photo gallery
-// (Derek's ask: "kind of turn it into a gallery") split into two tiers —
-// real photos shown large and prominent, screenshots shown small and
-// collapsed by default since they're the "lowest quality" of the bunch.
-// Everything else (PDFs/docs/sheets/links) stays the plain row list below.
+// collected into one place. Everything renders as a tile grid via the
+// shared AttachmentTile (Derek's ask: "kind of turn it into a gallery") —
+// images split into two tiers, real photos shown large and prominent,
+// screenshots shown small and collapsed by default since they're the
+// "lowest quality" of the bunch; PDFs/docs/sheets/links get the same grid
+// with an icon tile in place of a thumbnail.
 // Folders are a pure organizational overlay — filing an item into a folder
 // never moves the underlying file, just tags it (see Attachment.folderId).
 import { useEffect, useState } from "react";
 import { type Attachment, type VaultFolder } from "@/lib/data";
-import { I, FileBadge } from "./ui";
+import { I } from "./ui";
+import { AttachmentTile } from "./AttachmentTile";
 
 export type VaultItem = Attachment & { sourceLabel: string; onOpenSource: () => void; onSetFolder: (folderId: string | null) => void };
 
@@ -136,7 +138,16 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
             <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Photos · {photos.length}</div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
               {photos.map((a) => (
-                <ImageTile key={a.id} item={a} url={a.path ? urls[a.path] : undefined} onClick={() => setPreview(a)} onCopyLink={onCopyLink} folders={folders} />
+                <AttachmentTile key={a.id} item={a} url={a.path ? urls[a.path] : undefined} onOpen={() => setPreview(a)} overlayCaption={a.sourceLabel}
+                  actions={
+                    <>
+                      <FolderMenu item={a} folders={folders} triggerClassName="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80" />
+                      {a.path && (
+                        <button onClick={(e) => { e.stopPropagation(); onCopyLink(a.path!); }} title="Copy link" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-3.5 w-3.5" /></button>
+                      )}
+                    </>
+                  }
+                />
               ))}
             </div>
           </div>
@@ -150,7 +161,11 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
             {screenshotsOpen && (
               <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-6 md:grid-cols-8">
                 {screenshots.map((a) => (
-                  <ImageTile key={a.id} item={a} url={a.path ? urls[a.path] : undefined} onClick={() => setPreview(a)} onCopyLink={onCopyLink} folders={folders} small />
+                  <AttachmentTile key={a.id} item={a} url={a.path ? urls[a.path] : undefined} onOpen={() => setPreview(a)} small
+                    actions={a.path && (
+                      <button onClick={(e) => { e.stopPropagation(); onCopyLink(a.path!); }} title="Copy link" className="flex h-5 w-5 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-2.5 w-2.5" /></button>
+                    )}
+                  />
                 ))}
               </div>
             )}
@@ -160,20 +175,25 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
         {otherGroups.map((g) => (
           <div key={g.kind}>
             <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">{g.label} · {g.items.length}</div>
-            <div className="space-y-1.5">
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
               {g.items.map((a) => (
-                <div key={a.id} className="flex items-center gap-2.5 rounded-lg border bg-surface px-3 py-2">
-                  <FileBadge kind={a.kind} />
-                  {a.url ? (
-                    <a href={a.url} target="_blank" rel="noopener noreferrer" className="min-w-0 flex-1 truncate text-[15px] text-accent hover:underline" title={a.url}>{a.name}</a>
-                  ) : a.path ? (
-                    <button onClick={() => onDownloadFile(a.path!)} className="min-w-0 flex-1 truncate text-left text-[15px] text-accent hover:underline">{a.name}</button>
-                  ) : (
-                    <span className="min-w-0 flex-1 truncate text-[15px]">{a.name}</span>
-                  )}
-                  <FolderMenu item={a} folders={folders} />
-                  <button onClick={a.onOpenSource} className="shrink-0 truncate text-[13px] text-muted hover:text-foreground hover:underline">{a.sourceLabel}</button>
-                  {a.size && <span className="shrink-0 text-[13px] text-muted">{a.size}</span>}
+                <div key={a.id} className="flex flex-col gap-1">
+                  <AttachmentTile
+                    item={a}
+                    href={a.url || undefined}
+                    onOpen={!a.url && a.path ? () => onDownloadFile(a.path!) : undefined}
+                    actions={
+                      <>
+                        <FolderMenu item={a} folders={folders} triggerClassName="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80" />
+                        {a.path && (
+                          <button onClick={(e) => { e.stopPropagation(); onCopyLink(a.path!); }} title="Copy link" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-3.5 w-3.5" /></button>
+                        )}
+                      </>
+                    }
+                  />
+                  <div className="truncate text-center text-[12px]" title={a.name}>{a.name}</div>
+                  <button onClick={a.onOpenSource} className="truncate text-center text-[11px] text-muted hover:text-foreground hover:underline">{a.sourceLabel}</button>
+                  {a.size && <div className="text-center text-[11px] text-muted">{a.size}</div>}
                 </div>
               ))}
             </div>
@@ -221,32 +241,6 @@ function FolderMenu({ item, folders, triggerClassName }: { item: VaultItem; fold
           ))}
         </div>
       </>)}
-    </div>
-  );
-}
-
-function ImageTile({ item, url, onClick, onCopyLink, folders, small }: { item: VaultItem; url?: string; onClick: () => void; onCopyLink: (path: string) => void; folders: VaultFolder[]; small?: boolean }) {
-  return (
-    <div className={`group relative aspect-square overflow-hidden rounded-lg border bg-surface ${small ? "opacity-80 hover:opacity-100" : ""}`}>
-      <button onClick={onClick} title={item.name} className="block h-full w-full">
-        {url ? (
-          // eslint-disable-next-line @next/next/no-img-element -- signed-URL thumbnail, not a next/image-friendly static asset.
-          <img src={url} alt={item.name} className="h-full w-full object-cover transition group-hover:scale-105" />
-        ) : (
-          <span className="flex h-full w-full items-center justify-center"><FileBadge kind="image" /></span>
-        )}
-        {!small && <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent px-2 py-1.5 text-[12px] text-white opacity-0 transition group-hover:opacity-100">{item.sourceLabel}</span>}
-      </button>
-      <div className={`absolute right-1 top-1 flex items-center gap-0.5 opacity-0 transition group-hover:opacity-100`}>
-        {!small && (
-          <FolderMenu item={item} folders={folders} triggerClassName="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80" />
-        )}
-        {item.path && (
-          <button onClick={(e) => { e.stopPropagation(); onCopyLink(item.path!); }} title="Copy link" className={`flex items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80 ${small ? "h-5 w-5" : "h-7 w-7"}`}>
-            <I.link className={small ? "h-2.5 w-2.5" : "h-3.5 w-3.5"} />
-          </button>
-        )}
-      </div>
     </div>
   );
 }

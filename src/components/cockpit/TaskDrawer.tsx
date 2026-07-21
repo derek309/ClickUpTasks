@@ -7,8 +7,9 @@ import {
   STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseEventDiff, parseDaysOfMonth,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message,
 } from "@/lib/data";
-import { I, Avatar, Row, CollapsibleText, FileBadge, newId } from "./ui";
+import { I, Avatar, Row, CollapsibleText, newId } from "./ui";
 import { AttachmentThumbs } from "./AttachmentThumbs";
+import { AttachmentTile } from "./AttachmentTile";
 import { InlineAssignee, InlineDue } from "./GroupedList";
 import { RichTextEditor } from "./RichTextEditor";
 import { claudeCodeUrl } from "@/lib/claudeLink";
@@ -180,6 +181,22 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     setPreviewUrl(null);
     if (att.path) setPreviewUrl(await onGetSignedUrl(att.path));
   };
+  // Gallery grid needs every visible image thumbnail up front, not resolved
+  // one at a time on click like openPreview above — batch-fetch in
+  // parallel, mirroring VaultView's identical pattern.
+  const attImagePaths = task.attachments.filter((a) => a.kind === "image" && a.path).map((a) => a.path as string).join(",");
+  const [attImageUrls, setAttImageUrls] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let cancelled = false;
+    const paths = attImagePaths ? attImagePaths.split(",") : [];
+    if (paths.length === 0) return;
+    Promise.all(paths.map(async (p) => [p, await onGetSignedUrl(p)] as const)).then((pairs) => {
+      if (cancelled) return;
+      setAttImageUrls((prev) => ({ ...prev, ...Object.fromEntries(pairs.filter(([, u]) => u).map(([p, u]) => [p, u as string])) }));
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attImagePaths]);
   const fileRef = useRef<HTMLInputElement>(null);
   const msgFileRef = useRef<HTMLInputElement>(null);
   const handleMsgFileSelect = async (files: FileList | null) => {
@@ -598,28 +615,31 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
           Uploading {uploadProgress.done + 1} of {uploadProgress.total}…
         </div>
       )}
-      <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files.length) onAddFiles(e.dataTransfer.files); }} className="space-y-1.5">
-        {task.attachments.length === 0 && !uploadProgress && (<div className="rounded-lg border border-dashed px-3 py-2 text-[13px] text-muted">Drop, paste, or click Attach · max 25MB each</div>)}
-        {sortedAttachments.map((a) => (
-          <div key={a.id} className="group/att flex items-center gap-2 rounded-lg border bg-background px-3 py-2">
-            <FileBadge kind={a.kind} />
-            {a.url ? (
-              <a href={a.url} target="_blank" rel="noopener noreferrer" className="truncate text-left text-[15px] text-accent hover:underline" title={a.url}>{a.name}</a>
-            ) : a.path ? (
-              <button onClick={() => onDownloadFile(a.path!)} className="truncate text-left text-[15px] text-accent hover:underline" title="Download">{a.name}</button>
-            ) : (
-              <span className="truncate text-[15px]" title="Not stored — re-upload once the storage bucket exists">{a.name}</span>
-            )}
-            <span className="ml-auto text-[13px] text-muted">{a.size}</span>
-            {a.kind === "image" && a.path && (
-              <button onClick={() => openPreview(a)} title="Preview" className="text-muted opacity-0 hover:text-foreground group-hover/att:opacity-100"><I.search /></button>
-            )}
-            {a.path && (
-              <button onClick={() => onCopyAttachmentLink(a.path!)} title="Copy direct link" className="text-muted opacity-0 hover:text-foreground group-hover/att:opacity-100"><I.link /></button>
-            )}
-            <button onClick={() => onRemoveFile(a)} title="Remove" className="text-muted opacity-0 hover:text-red-500 group-hover/att:opacity-100"><I.trash /></button>
-          </div>
-        ))}
+      <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files.length) onAddFiles(e.dataTransfer.files); }} className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
+        {task.attachments.length === 0 && !uploadProgress && (<div className="col-span-full rounded-lg border border-dashed px-3 py-2 text-[13px] text-muted">Drop, paste, or click Attach · max 25MB each</div>)}
+        {sortedAttachments.map((a) => {
+          const isLink = a.kind !== "image" && !!a.url;
+          return (
+            <div key={a.id} className="flex flex-col gap-1">
+              <AttachmentTile
+                item={a}
+                url={a.kind === "image" && a.path ? attImageUrls[a.path] : undefined}
+                href={isLink ? a.url : undefined}
+                onOpen={a.kind === "image" && a.path ? () => openPreview(a) : !isLink && a.path ? () => onDownloadFile(a.path!) : undefined}
+                actions={
+                  <>
+                    {a.path && (
+                      <button onClick={() => onCopyAttachmentLink(a.path!)} title="Copy direct link" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-3.5 w-3.5" /></button>
+                    )}
+                    <button onClick={() => onRemoveFile(a)} title="Remove" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-red-500"><I.trash className="h-3.5 w-3.5" /></button>
+                  </>
+                }
+              />
+              <div className="truncate text-center text-[12px]" title={a.name}>{a.name}</div>
+              <div className="text-center text-[11px] text-muted">{a.size}</div>
+            </div>
+          );
+        })}
       </div>
       {previewAtt && (
         <>
