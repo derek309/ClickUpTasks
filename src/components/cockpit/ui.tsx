@@ -111,7 +111,12 @@ export function renderMentions(body: string) {
   return parts.map((p, i) => { const isMention = users.some((u) => "@" + u.name === p); return isMention ? (<span key={i} className="rounded bg-accent-soft px-1 font-medium text-accent">{p}</span>) : <span key={i}>{p}</span>; });
 }
 
-const URL_RE = /(https?:\/\/[^\s<>"']+)/g;
+// [ and ] are excluded too: GHL's own HTML-to-plaintext conversion of a
+// source email sometimes renders an inline image as "[image-url]" directly
+// followed by the next link's URL with no space between them — without this
+// exclusion the greedy match swallows straight through the "]" and merges
+// both URLs into one garbled link.
+const URL_RE = /(https?:\/\/[^\s<>"'[\]]+)/g;
 // Sentence-ending punctuation (or a closing paren from "(see https://x.com)")
 // commonly gets swept into the match — strip it back off the link itself and
 // render it as plain trailing text instead.
@@ -140,11 +145,21 @@ export function renderRichText(body: string) {
 // more" toggle. A plain clickable span, not a <button>, so this still works
 // nested inside a parent <button> (e.g. the Task Activity rollup row).
 const LONG_TEXT_WORD_THRESHOLD = 200;
+// A signature/address block (several short lines) reads as "long" — pushes
+// the card tall and clunky — well before it hits the word threshold above.
+// Whichever limit is crossed first decides how the preview gets truncated.
+const LONG_TEXT_LINE_THRESHOLD = 10;
 export function CollapsibleText({ text, className }: { text: string; className?: string }) {
   const [expanded, setExpanded] = useState(false);
-  const words = text.trim().split(/\s+/);
-  const isLong = words.length > LONG_TEXT_WORD_THRESHOLD;
-  const shown = isLong && !expanded ? words.slice(0, LONG_TEXT_WORD_THRESHOLD).join(" ") + "…" : text;
+  const trimmed = text.trim();
+  const words = trimmed.split(/\s+/);
+  const lines = trimmed.split("\n");
+  const overWordLimit = words.length > LONG_TEXT_WORD_THRESHOLD;
+  const overLineLimit = lines.length > LONG_TEXT_LINE_THRESHOLD;
+  const isLong = overWordLimit || overLineLimit;
+  const shown = !isLong || expanded
+    ? text
+    : (overWordLimit ? words.slice(0, LONG_TEXT_WORD_THRESHOLD).join(" ") : lines.slice(0, LONG_TEXT_LINE_THRESHOLD).join("\n")) + "…";
   const toggle = (e: React.SyntheticEvent) => { e.stopPropagation(); setExpanded((x) => !x); };
   // break-words so a long unbroken string (a long URL, most commonly) wraps
   // instead of forcing the whole feed to scroll horizontally.
