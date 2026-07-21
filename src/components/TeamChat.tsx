@@ -10,7 +10,7 @@
 //   • overlay (onClose given) — the original lightweight modal, same shell as
 //     SettingsHub, still used for quick access from anywhere.
 import { useEffect, useRef, useState } from "react";
-import { type Me, type TeamMessage, userById, timeAgo } from "@/lib/data";
+import { type Me, type TeamMessage, users, userById, timeAgo } from "@/lib/data";
 import { I, Avatar } from "./cockpit/ui";
 
 export default function TeamChat({ me, messages, onSend, onDelete, onClose }: {
@@ -32,6 +32,15 @@ export default function TeamChat({ me, messages, onSend, onDelete, onClose }: {
     onSend(draft);
     setDraft("");
   };
+
+  // @mention autocomplete — same idiom as TaskDrawer's and ClientJournal's
+  // comment composers. This isn't just a convenience: Cockpit's
+  // sendTeamMessage notifies on an exact `@Full Name` match, so picking from
+  // this list is what actually makes the mention reach the person. Typing
+  // "@justin" by hand matches nobody.
+  const mentionMatch = /@([\w]*)$/.exec(draft);
+  const mentionCands = mentionMatch ? users.filter((u) => u.name.toLowerCase().includes(mentionMatch[1].toLowerCase())) : [];
+  const pickMention = (name: string) => setDraft(draft.replace(/@([\w]*)$/, `@${name} `));
 
   // The feed + composer, identical in both modes — only the chrome around
   // them differs (page pane vs centered modal).
@@ -62,12 +71,27 @@ export default function TeamChat({ me, messages, onSend, onDelete, onClose }: {
           })}
         </div>
 
-        <div className="border-t p-3">
+        <div className="relative border-t p-3">
+          {mentionMatch && mentionCands.length > 0 && (
+            <div className="absolute bottom-full left-3 mb-1 z-10 w-56 overflow-hidden rounded-lg border bg-surface shadow-lg">
+              {mentionCands.map((u) => (
+                <button key={u.id} onClick={() => pickMention(u.name)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[14px] hover:bg-background">
+                  <Avatar id={u.id} size={22} /> <span className="min-w-0 flex-1 truncate">{u.name}</span>
+                  {u.role === "va" && <span className="shrink-0 text-[13px] text-muted">VA</span>}
+                </button>
+              ))}
+            </div>
+          )}
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submit(); } }}
-            placeholder="Message the team… (@name to mention, ⌘↵ to send)"
+            onKeyDown={(e) => {
+              // While the mention list is open, Enter picks the top match
+              // (standard chat behavior) instead of inserting a newline.
+              if (e.key === "Enter" && !e.shiftKey && mentionMatch && mentionCands.length > 0) { e.preventDefault(); pickMention(mentionCands[0].name); return; }
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submit(); }
+            }}
+            placeholder="Message the team… (type @ to mention, ⌘↵ to send)"
             rows={2}
             className="w-full resize-none rounded-lg border bg-background px-3 py-2 text-[14px] outline-none focus:border-accent"
           />

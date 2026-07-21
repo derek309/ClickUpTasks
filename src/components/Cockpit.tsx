@@ -2513,10 +2513,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const m: TeamMessage = { id: newId("tm_"), authorId: me.id, body: body.trim(), at: new Date().toISOString() };
     setTeamMessages((ms) => [...ms, m]);
     insertTeamMessage(m);
-    // Plain-text @mention detection, same idiom as client-notes' chat mentions
-    // (no autocomplete dropdown — see addNote below) — links to Team Chat itself.
+    // @mention detection. The composer's picker inserts the exact "@Full Name"
+    // this looks for; the lowercase compare is a safety net for someone typing
+    // it by hand with different casing. A bare first name still won't match —
+    // that's what the picker is for.
+    const lower = body.toLowerCase();
     users.forEach((u) => {
-      if (u.id !== me.id && body.includes("@" + u.name)) notify(u.id, `${me.name} mentioned you in Team Chat`, null, { kind: "message" });
+      if (u.id !== me.id && lower.includes("@" + u.name.toLowerCase())) notify(u.id, `${me.name} mentioned you in Team Chat`, null, { kind: "message" });
     });
   };
   const deleteTeamMessage = (id: string) => {
@@ -2902,7 +2905,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     <button onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
                     <span>›</span>
                   </>)}
-                  <span>{inboxView ? "Everything that mentions or notifies you, in one place" : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "Every client and project you're on, grouped by what needs attention first" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</span>
+                  <span>{inboxView ? (inboxTab === "chat" ? "Talk to the team — @mention someone to notify them" : "Everything that mentions or notifies you, in one place") : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "Every client and project you're on, grouped by what needs attention first" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</span>
                 </p>
               )}
             </>)}
