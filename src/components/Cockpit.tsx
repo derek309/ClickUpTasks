@@ -3222,7 +3222,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               // "+ Add as client": no confirm, no separate step.
               onAddContact={(c) => addClientContact(c)}
               onSyncClients={syncTerritoryClients}
-              onSetStatus={setClientStatus}
               onOpenClient={(id) => { setTerritoryView(null); setActiveClient(id); setActiveProject(null); setClientTab("tasks"); }}
               focusId={territoryView === "all" ? undefined : territoryView} />
           </div>

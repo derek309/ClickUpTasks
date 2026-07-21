@@ -20,7 +20,7 @@
 // "No listing" — exactly the pre-directory behavior, just relabeled.
 import { useEffect, useMemo, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
-import { clientStatusMeta, CLIENT_STATUS_ORDER, type Contact, type Client, type ClientStatus } from "@/lib/data";
+import { clientStatusMeta, type Contact, type Client } from "@/lib/data";
 import { I } from "./ui";
 
 export type DirectoryListing = {
@@ -111,7 +111,18 @@ const REFRESH_INTERVAL = 60_000;
 type ListingsCacheEntry = { data: DirectoryListing[]; notConfigured: boolean; at: number };
 const listingsCache = new Map<string, ListingsCacheEntry>();
 
-export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onSetStatus, onOpenClient, sort, onSetSort }: {
+// The GHL Prospects pipeline — the gameplan's locked 9-stage sales funnel
+// (G2 SOP: New – Not Contacted → In Outreach → Engaged / Interested →
+// Listing Claimed → First Visit Booked → In Trial → Won – Active, plus the
+// Nurture and Lost off-ramps). Stages come live from GHL, so this list is
+// whatever the pipeline says it is — never a hardcoded copy that can drift.
+export type PipelineStage = { id: string; name: string };
+export type OppRef = { opportunityId: string; stageId: string };
+// One pipeline for every city (city-tagged, per the SOP), so this cache is
+// module-scope and shared across territories rather than keyed per city.
+let oppCache: { stages: PipelineStage[]; byContact: Record<string, OppRef>; at: number } | null = null;
+
+export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onOpenClient, sort, onSetSort }: {
   city: string;
   state: string;
   contacts: Contact[];   // already scoped to this city/state by the caller
@@ -122,11 +133,11 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // open if a client already exists for the matched contact, silently
   // create-and-open (as a Lead) if not.
   onAddContact: (contact: Contact) => void;
-  // Bulk auto-sync (see below) + inline "Stage" editing (Lead → Prospect →
-  // Onboarding → Active → Nurture → Cancel/Past). Optional so this component
-  // still degrades gracefully if a caller doesn't wire them.
+  // Bulk auto-sync (see below). Optional so this component still degrades
+  // gracefully if a caller doesn't wire it. Stage editing is NOT here: it
+  // writes to the GHL Prospects pipeline via /api/directory/opportunity,
+  // which this component owns directly (see the effect below).
   onSyncClients?: (contacts: Contact[]) => void;
-  onSetStatus?: (clientId: string, status: ClientStatus) => void;
   onOpenClient: (clientId: string) => void;
   // Owned by the caller (TerritoryPanel) so the sort control can sit on the
   // same header line as the client/contact counts instead of its own row.
@@ -142,6 +153,8 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggleGroup = (key: string) => setCollapsed((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
   const [q, setQ] = useState("");
+  const [stages, setStages] = useState<PipelineStage[]>(() => oppCache?.stages ?? []);
+  const [oppByContact, setOppByContact] = useState<Record<string, OppRef>>(() => oppCache?.byContact ?? {});
 
   useEffect(() => {
     let alive = true;
@@ -172,6 +185,68 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
     const interval = setInterval(() => fetchListings(true), REFRESH_INTERVAL);
     return () => { alive = false; clearInterval(interval); };
   }, [city, state, cacheKey]);
+
+  // The Prospects pipeline (stages + who's in which stage). Deliberately its
+  // own effect rather than folded into the listings fetch: it's one shared
+  // pipeline across all cities, so it neither depends on nor should refetch
+  // per city/state. Fails soft — a 501 (not configured) or an error just
+  // leaves `stages` empty, which hides the Stage control instead of breaking
+  // the whole territory view.
+  useEffect(() => {
+    let alive = true;
+    const fetchOpps = () => {
+      authedFetch("/api/directory/opportunity")
+        .then(async (res) => {
+          if (!res.ok) return;
+          const body = await res.json().catch(() => ({}));
+          if (!alive) return;
+          const s: PipelineStage[] = Array.isArray(body.stages) ? body.stages : [];
+          const b: Record<string, OppRef> = body.byContact ?? {};
+          oppCache = { stages: s, byContact: b, at: Date.now() };
+          setStages(s);
+          setOppByContact(b);
+        })
+        .catch(() => { /* fail soft — Stage column just stays hidden */ });
+    };
+    fetchOpps();
+    const interval = setInterval(fetchOpps, REFRESH_INTERVAL);
+    return () => { alive = false; clearInterval(interval); };
+  }, []);
+
+  // Move a business to a pipeline stage. Optimistic: the select reflects the
+  // new stage immediately, and rolls back if GHL rejects it. Creates the
+  // opportunity when the business isn't in the pipeline yet, which is how an
+  // ambassador starts the funnel on an untouched listing from the field.
+  const setStageFor = async (listing: DirectoryListing, stageId: string) => {
+    const contactId = listing.ghlContactId;
+    if (!contactId) return;
+    const prev = oppByContact[contactId];
+    const optimistic = { opportunityId: prev?.opportunityId ?? "", stageId };
+    setOppByContact((m) => ({ ...m, [contactId]: optimistic }));
+    try {
+      const res = await authedFetch("/api/directory/opportunity", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contactId, stageId, name: listing.name, opportunityId: prev?.opportunityId }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      const body = await res.json().catch(() => ({}));
+      const next: OppRef = { opportunityId: body.opportunityId ?? optimistic.opportunityId, stageId: body.stageId ?? stageId };
+      setOppByContact((m) => {
+        const updated = { ...m, [contactId]: next };
+        if (oppCache) oppCache = { ...oppCache, byContact: updated };
+        return updated;
+      });
+    } catch {
+      // Roll back to whatever GHL last told us, so the UI never claims a
+      // stage change that didn't land.
+      setOppByContact((m) => {
+        const updated = { ...m };
+        if (prev) updated[contactId] = prev; else delete updated[contactId];
+        return updated;
+      });
+    }
+  };
 
   // Patch one listing in place after a logged touch returns the fresh state
   // from /sales — keeps the funnel accurate without a full refetch, and
@@ -298,7 +373,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                   <span className="truncate text-[12px] font-normal normal-case text-muted">{meta.hint}</span>
                 </button>
                 {isOpen && (g.key === "unclaimed" ? unclaimed : claimed).map((r) => (
-                  <ListingRow key={r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} onPatch={patchListing} onSetStatus={onSetStatus} />
+                  <ListingRow key={r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} onPatch={patchListing} stages={stages} opp={oppByContact[r.listing.ghlContactId]} onSetStage={setStageFor} />
                 ))}
               </div>
             );
@@ -321,12 +396,17 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, onPatch, onSetStatus }: {
+function ListingRow({ row, onAddContact, onOpenClient, onPatch, stages, opp, onSetStage }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
   onOpenClient: (id: string) => void;
   onPatch: (id: number | string, next: Partial<DirectoryListing>) => void;
-  onSetStatus?: (clientId: string, status: ClientStatus) => void;
+  // The GHL Prospects pipeline for the Stage column: the ordered stages, this
+  // business's current position (undefined = not in the pipeline yet), and the
+  // mover.
+  stages: PipelineStage[];
+  opp?: OppRef;
+  onSetStage: (listing: DirectoryListing, stageId: string) => void;
 }) {
   const { listing, contact, client } = row;
   const meta = client ? clientStatusMeta(client.status) : null;
@@ -433,17 +513,24 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, onSetStatus }: {
           {typeof listing.score === "number" && <span title="ClickUpLocal score" className="inline-block rounded bg-background px-1.5 py-0.5 text-[11px] font-medium text-muted">{listing.score}</span>}
         </div>
 
-        {/* Stage — the client lifecycle funnel (Lead → Prospect → Onboarding
-            → Active → Nurture → Cancel/Past), the same one thing shown on a
-            client's own header. Editable once a client exists (which, with
-            the auto-sync above, is effectively always for a matched row). */}
+        {/* Stage — the GHL Prospects pipeline, i.e. the gameplan's locked
+            9-stage sales funnel (G2 SOP). This is the outreach funnel, NOT
+            the client lifecycle: these rows are directory businesses being
+            worked, and GHL stays the source of truth for sales tracking. The
+            client's own lifecycle (Lead → Active → Past) lives on the client
+            header, where it belongs. Hidden when the pipeline isn't
+            configured or the listing has no GHL contact to attach an
+            opportunity to. */}
         <div className="pl-5 sm:pl-0">
-          {client && onSetStatus && (
-            <select value={client.status} onChange={(e) => onSetStatus(client.id, e.target.value as ClientStatus)}
-              title="Client stage" className="w-full max-w-[170px] rounded-md border px-1.5 py-1 text-[12px] font-medium outline-none focus:border-accent bg-accent-soft text-accent">
-              {CLIENT_STATUS_ORDER.map((s) => <option key={s} value={s}>{clientStatusMeta(s).label}</option>)}
+          {stages.length > 0 && listing.ghlContactId ? (
+            <select value={opp?.stageId ?? ""} onChange={(e) => onSetStage(listing, e.target.value)}
+              title="Sales pipeline stage (GoHighLevel)" className="w-full max-w-[170px] rounded-md border px-1.5 py-1 text-[12px] font-medium outline-none focus:border-accent bg-accent-soft text-accent">
+              {/* Not yet in the pipeline — picking any stage creates the
+                  opportunity, so this placeholder is only ever the initial state. */}
+              {!opp && <option value="">— not in pipeline —</option>}
+              {stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
-          )}
+          ) : null}
         </div>
 
         {/* Actions */}
