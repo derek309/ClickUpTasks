@@ -1199,18 +1199,25 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // roll up from project to client automatically via t.clientId) — kept
     // independent per client/project for now; add a rollup here later if a
     // project-only follow-up date turns out to need to surface the client too.
-    // Always included, even when forAssignee is set: followUpAt has no
-    // assignee dimension to leak — it's one field on the client, either set
-    // by hand or auto-computed from the soonest due date across ANY
-    // assignee's open tasks (see the smart-follow-up effect). Suppressing it
-    // per-assignee used to mean an overdue follow-up never surfaced on the
-    // Dashboard at all, since myWorkUser always has a value (no "everyone"
-    // option) — exactly the "silently drops off your radar" case this field
-    // exists to prevent.
+    // Follow-up date only counts on a per-assignee tier when it's standing
+    // alone as a genuine manual reminder — i.e. when nobody currently has a
+    // dated open task for this client. The recompute effect above pins
+    // followUpAt to the soonest dated open task from ANY assignee the moment
+    // one exists, so once that's true the field is just a mirror of
+    // whichever task happens to be earliest, not an independent signal.
+    // Blanket-including it per-assignee let a teammate's task make a client
+    // look overdue on someone else's Dashboard even though nothing of
+    // theirs was due (Derek: Michaella's task was overdue on Michael
+    // Swaleh, Derek's own wasn't due till Monday, but Derek's Dashboard
+    // showed Overdue anyway). When forAssignee isn't set (the unfiltered
+    // "Overdue first" sort), always include it — it's already redundant
+    // with `open` there since nothing is being filtered out by assignee.
     const followUp = clientById(clientId)?.followUpAt;
+    const clientHasAnyDatedOpenTask = tasks.some((t) => t.clientId === clientId && t.status !== "done" && !!t.due);
+    const includeFollowUp = !forAssignee || !clientHasAnyDatedOpenTask;
     const candidates: { date: string; priorityRank: number }[] = [
       ...open.filter((t) => t.due).map((t) => ({ date: t.due!, priorityRank: PRIORITY_META[t.priority].rank })),
-      ...(followUp ? [{ date: followUp, priorityRank: 0 }] : []),
+      ...(followUp && includeFollowUp ? [{ date: followUp, priorityRank: 0 }] : []),
     ];
     if (candidates.length === 0) {
       if (open.length === 0) return { tier: 9, due: "", priorityRank: 0 };
@@ -1226,12 +1233,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   function projectUrgencyKey(projectId: string, forAssignee?: string): { tier: number; due: string; priorityRank: number } {
     if (projectNeedsReview(projectId, forAssignee)) return { tier: 0, due: "", priorityRank: 0 };
     const open = scopedTasks.filter((t) => t.projectId === projectId && t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
-    // Always included regardless of forAssignee — see the matching comment
-    // in clientUrgencyKey.
+    // Same rule as clientUrgencyKey: only counts per-assignee when nobody
+    // currently has a dated open task in this project.
     const followUp = projectById(projectId)?.followUpAt;
+    const projectHasAnyDatedOpenTask = tasks.some((t) => t.projectId === projectId && t.status !== "done" && !!t.due);
+    const includeFollowUp = !forAssignee || !projectHasAnyDatedOpenTask;
     const candidates: { date: string; priorityRank: number }[] = [
       ...open.filter((t) => t.due).map((t) => ({ date: t.due!, priorityRank: PRIORITY_META[t.priority].rank })),
-      ...(followUp ? [{ date: followUp, priorityRank: 0 }] : []),
+      ...(followUp && includeFollowUp ? [{ date: followUp, priorityRank: 0 }] : []),
     ];
     if (candidates.length === 0) {
       if (open.length === 0) return { tier: 9, due: "", priorityRank: 0 };
