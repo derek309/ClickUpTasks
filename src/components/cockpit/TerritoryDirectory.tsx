@@ -141,6 +141,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   const [notConfigured, setNotConfigured] = useState(() => warm()?.notConfigured ?? false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggleGroup = (key: string) => setCollapsed((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
+  const [q, setQ] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -227,16 +228,28 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
       ? a.listing.name.localeCompare(b.listing.name)
       : (b.listing.score ?? -1) - (a.listing.score ?? -1) || a.listing.name.localeCompare(b.listing.name));
 
-  const claimed = sortRows(rows.filter((r) => r.listing.claimed));
-  const unclaimed = sortRows(rows.filter((r) => !r.listing.claimed));
-  const total = claimed.length + unclaimed.length + noListing.length;
+  // Free-text filter across all three buckets — by business/contact name,
+  // email, phone, or company. Lincoln (and other dense cities) can list a lot
+  // of businesses, so this is the fast way to jump to one.
+  const ql = q.trim().toLowerCase();
+  const qDigits = ql.replace(/\D/g, "");
+  const matchRow = (r: { listing: DirectoryListing; contact: Contact | null }) => !ql
+    || lc(r.listing.name).includes(ql)
+    || (!!qDigits && digits(r.listing.phone).includes(qDigits))
+    || (!!r.contact && (lc(r.contact.name).includes(ql) || lc(r.contact.email).includes(ql) || lc(r.contact.company).includes(ql) || (!!qDigits && digits(r.contact.phone).includes(qDigits))));
+  const matchContact = (c: Contact) => !ql
+    || lc(c.name).includes(ql) || lc(c.email).includes(ql) || lc(c.company).includes(ql) || (!!qDigits && digits(c.phone).includes(qDigits));
+  const claimed = sortRows(rows.filter((r) => r.listing.claimed)).filter(matchRow);
+  const unclaimed = sortRows(rows.filter((r) => !r.listing.claimed)).filter(matchRow);
+  const noListingShown = noListing.filter(matchContact);
+  const total = claimed.length + unclaimed.length + noListingShown.length;
 
   if (loading) return <div className="bg-background p-4 py-10 text-center text-[13px] text-muted sm:p-5">Loading directory for {city}…</div>;
 
   const groups: { key: keyof typeof BUCKET_META; count: number }[] = [
     { key: "unclaimed", count: unclaimed.length },
     { key: "claimed", count: claimed.length },
-    { key: "none", count: noListing.length },
+    { key: "none", count: noListingShown.length },
   ];
 
   return (
@@ -252,6 +265,13 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
         </div>
       )}
       {err && <div className="mb-2 rounded-lg border border-danger/40 bg-danger/5 px-3 py-2 text-[12px] text-danger">Couldn&apos;t load the directory: {err}</div>}
+
+      <div className="relative mb-2">
+        <I.search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${city} businesses…`}
+          className="w-full rounded-lg border bg-surface py-1.5 pl-8 pr-8 text-[14px] outline-none focus:border-accent" />
+        {q && <button onClick={() => setQ("")} title="Clear" className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted hover:text-foreground"><I.close /></button>}
+      </div>
 
       <div className="overflow-x-auto rounded-xl border bg-surface shadow-soft">
         <div className="hidden items-center gap-2 border-b bg-background/40 px-4 py-2 text-[12px] font-semibold uppercase tracking-wide text-muted sm:grid" style={{ gridTemplateColumns: TEMPLATE }}>
@@ -277,7 +297,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                 {isOpen && g.key !== "none" && (g.key === "unclaimed" ? unclaimed : claimed).map((r) => (
                   <ListingRow key={r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} onPatch={patchListing} onSetStatus={onSetStatus} />
                 ))}
-                {isOpen && g.key === "none" && noListing.map((c) => {
+                {isOpen && g.key === "none" && noListingShown.map((c) => {
                   const client = clientIds.has("cl_" + c.id) ? clients.find((cl) => cl.id === "cl_" + c.id) ?? null : null;
                   return <NoListingRow key={c.id} contact={c} client={client} onAddContact={onAddContact} onOpenClient={onOpenClient} />;
                 })}
@@ -285,7 +305,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
             );
           })}
         </div>
-        {total === 0 && <div className="px-4 py-10 text-center text-[13px] text-muted">No directory listings or contacts in {city} yet.</div>}
+        {total === 0 && <div className="px-4 py-10 text-center text-[13px] text-muted">{ql ? `No businesses in ${city} match “${q}”.` : `No directory listings or contacts in ${city} yet.`}</div>}
       </div>
     </div>
   );
