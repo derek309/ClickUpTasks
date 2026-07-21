@@ -197,7 +197,7 @@ export default function WaitingView({ token }: { token: string }) {
             {tasks.length === 0 ? (
               <div className="py-8 text-center text-[15px] text-muted">Nothing needed from you right now — you&apos;re all caught up. 🎉</div>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {sorted.map((t) => {
                   const isDone = t.status === "done";
                   const isEditing = !isDone && (t.needsResponse || editingIds.has(t.id));
@@ -206,7 +206,16 @@ export default function WaitingView({ token }: { token: string }) {
                   const uploading = uploadingIds.has(t.id);
                   const justSaved = savedIds.has(t.id);
                   return (
-                    <div key={t.id} className={`rounded-xl border p-3.5 ${isDone ? "border-green-200 bg-green-50" : ""}`}>
+                    <div
+                      key={t.id}
+                      className={`rounded-xl border border-l-4 p-3.5 shadow-sm ${isDone ? "bg-green-50" : ""}`}
+                      // A global `* { border-color: var(--border) }` rule in globals.css is
+                      // unlayered, so per CSS cascade-layer rules it beats ANY Tailwind
+                      // border-color utility (including border-l-accent, border-green-200,
+                      // etc.) regardless of specificity — inline style is the reliable way
+                      // to override it.
+                      style={{ borderColor: isDone ? "#bbf7d0" : undefined, borderLeftColor: isDone ? "#22c55e" : "var(--accent)" }}
+                    >
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex items-center gap-2 text-[15px] font-medium">
                           {isDone && <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-500 text-[11px] text-white">✓</span>}
