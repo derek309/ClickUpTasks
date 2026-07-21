@@ -160,7 +160,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
           // A background refresh failing transiently shouldn't blow away
           // perfectly good data already on screen — only surface the error
           // (and clear the list) on a real foreground/cold load.
-          if (!res.ok) { if (!background) { setErr(body?.error || `Directory error ${res.status}`); setListings([]); } return; }
+          if (!res.ok) { if (!background) { setErr((body?.error || `Directory error ${res.status}`) + (body?.detail ? ` — ${body.detail}` : "")); setListings([]); } return; }
           const data = Array.isArray(body.listings) ? body.listings : [];
           listingsCache.set(cacheKey, { data, notConfigured: false, at: Date.now() });
           setListings(data);

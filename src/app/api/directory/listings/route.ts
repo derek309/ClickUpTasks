@@ -66,7 +66,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Directory fetch failed", detail: String(e?.message ?? e), listings: [] }, { status: 502 });
   }
   if (!res.ok) {
-    return NextResponse.json({ error: `Directory responded ${res.status}`, listings: [] }, { status: 502 });
+    // Surface WordPress's actual error instead of an opaque status — strip
+    // HTML (a PHP fatal renders the "critical error" page) down to readable
+    // text so the real cause (undefined function, unknown SQL column, etc.)
+    // is visible in the UI/logs rather than hidden behind a bare 500.
+    const detail = (await res.text().catch(() => "")).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
+    return NextResponse.json({ error: `Directory responded ${res.status}`, detail, listings: [] }, { status: 502 });
   }
   const data = await res.json().catch(() => null);
   const rawItems: any[] = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
