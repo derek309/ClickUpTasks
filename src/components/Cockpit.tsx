@@ -668,7 +668,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // The four primary nav items always show now — the hide/show toggle went
   // away when the account block replaced the sidebar's branding header. Kept
   // as a lookup so the render below stays unchanged.
-  const navVisible: Record<string, boolean> = { inbox: true, all: true, work: true, personal: true };
+  const navVisible: Record<string, boolean> = { inbox: true, work: true, personal: true };
+  // All Tasks dropped out of the sidebar (Derek: "I want everyone to use the
+  // dashboard" — the sidebar should steer people there, not offer a
+  // parallel flat-list home). Still reachable, just de-emphasized — a small
+  // button on the Dashboard header, not a primary nav item.
+  const openAllTasks = () => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); };
 
   useEffect(() => {
     (async () => {
@@ -3087,7 +3092,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         )}
         <nav className="shrink-0 space-y-0.5 px-2">
           {navVisible.work && <SideItem active={myWork} onClick={() => { setMyWork(true); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>Dashboard</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
-          {navVisible.all && <SideItem active={!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient === "all"} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); }}><I.list className="text-muted" /> <span>All Tasks</span><span className="ml-auto text-[13px] text-muted">{scopedTasks.filter((t) => t.clientId.startsWith("cl_")).length}</span></SideItem>}
           {navVisible.personal && <SideItem active={personalView} onClick={() => { setPersonalView(true); setMyWork(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>}
         </nav>
 
@@ -3463,13 +3467,22 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
 
           {territoryView || inboxView || settingsView || dirView ? null : myWork ? (
-            canAdmin ? (
-              <label className="flex items-center gap-2"><span className="text-muted">Viewing work for</span>
-                <select value={myWorkUser} onChange={(e) => setMyWorkUser(e.target.value)} className="rounded-md border bg-background px-2 py-1 outline-none">{users.map((u) => (<option key={u.id} value={u.id}>{u.name}{u.role === "va" ? " (VA)" : ""}</option>))}</select>
-              </label>
-            ) : (
-              <span className="text-[13px] text-muted">Your assigned clients and projects</span>
-            )
+            <div className="flex items-center gap-2">
+              {canAdmin ? (
+                <label className="flex items-center gap-2"><span className="text-muted">Viewing work for</span>
+                  <select value={myWorkUser} onChange={(e) => setMyWorkUser(e.target.value)} className="rounded-md border bg-background px-2 py-1 outline-none">{users.map((u) => (<option key={u.id} value={u.id}>{u.name}{u.role === "va" ? " (VA)" : ""}</option>))}</select>
+                </label>
+              ) : (
+                <span className="text-[13px] text-muted">Your assigned clients and projects</span>
+              )}
+              {/* De-emphasized on purpose — the Dashboard is meant to be the
+                  one place everyone works from; this is just an escape
+                  hatch to the flat list, not a peer to it. */}
+              <button onClick={openAllTasks} title="See every task across all clients and projects"
+                className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 text-[13px] text-muted hover:bg-accent-soft hover:text-accent">
+                <I.list className="h-3.5 w-3.5" /> All tasks
+              </button>
+            </div>
           ) : !personalView && (clientTab === "chat" || clientTab === "vault") ? null : (
             <div className="relative">
               <button onClick={() => setFilterOpen((o) => !o)} title="Filter & view" className="relative rounded-md border bg-background p-2 text-muted hover:text-foreground">
