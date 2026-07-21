@@ -58,19 +58,20 @@ export default function TeamChat({ me, messages, onSend, onDelete, onClose }: {
           )}
           {sorted.map((m) => {
             const author = userById(m.authorId);
+            const isMe = m.authorId === me.id;
             const canDelete = me.role === "admin" || m.authorId === me.id;
             return (
-              <div key={m.id} className="group/msg flex items-start gap-2.5">
-                <Avatar id={m.authorId} size={28} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline gap-1.5">
-                    <span className="text-[13px] font-semibold">{author?.name ?? "Someone"}</span>
+              <div key={m.id} className={`group/msg flex items-end gap-2 ${isMe ? "flex-row-reverse" : ""}`}>
+                {!isMe && <Avatar id={m.authorId} size={28} />}
+                <div className={`flex min-w-0 max-w-[70%] flex-col ${isMe ? "items-end" : "items-start"}`}>
+                  <div className={`flex items-baseline gap-1.5 px-1 ${isMe ? "flex-row-reverse" : ""}`}>
+                    {!isMe && <span className="text-[12px] font-semibold">{author?.name ?? "Someone"}</span>}
                     <span className="text-[11px] text-muted">{timeAgo(m.at)}</span>
                     {canDelete && (
-                      <button onClick={() => onDelete(m.id)} title="Delete" className="ml-auto shrink-0 rounded p-0.5 text-muted opacity-0 hover:text-danger group-hover/msg:opacity-100"><I.trash /></button>
+                      <button onClick={() => onDelete(m.id)} title="Delete" className="rounded p-0.5 text-muted opacity-0 hover:text-danger group-hover/msg:opacity-100"><I.trash /></button>
                     )}
                   </div>
-                  <p className="whitespace-pre-wrap break-words text-[14px]">{m.body}</p>
+                  <p className={`whitespace-pre-wrap break-words rounded-2xl px-3 py-1.5 text-[14px] ${isMe ? "bg-accent text-white" : "bg-background"}`}>{m.body}</p>
                 </div>
               </div>
             );
