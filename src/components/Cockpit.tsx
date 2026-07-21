@@ -2700,7 +2700,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // another (GroupedList's onMergeTasks), or checking exactly 2 and using
   // the bulk-action bar's Merge button. Always go through requestMerge below
   // — never call this directly — so every path gets the same confirmation.
-  const mergeTasks = (sourceId: string, targetId: string) => {
+  const mergeTasks = async (sourceId: string, targetId: string) => {
     const src = tasks.find((t) => t.id === sourceId);
     const target = tasks.find((t) => t.id === targetId);
     if (!src || !target || src.id === target.id) return;
@@ -2713,7 +2713,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       update(targetId, { comments: merged });
     }
     setMessages((ms) => ms.map((m) => (m.taskId === sourceId ? { ...m, taskId: targetId } : m)));
-    reassignMessagesTaskDb(sourceId, targetId);
+    // Awaited, not fire-and-forget: messages.task_id references tasks(id) on
+    // delete set null. Deleting the source task before this UPDATE actually
+    // commits let the FK's own "set null" action win the race — the reassign
+    // then matched zero rows (they'd already been nulled), permanently
+    // orphaning the message from both tasks. Symptom: the message flashed
+    // into the target's activity feed from the optimistic local update above,
+    // then vanished again the moment the resulting realtime echo (task_id →
+    // null) landed.
+    await reassignMessagesTaskDb(sourceId, targetId);
     if (src.ghlTaskId) ghlCall("delete", src);
     setTasks((ts) => ts.filter((t) => t.id !== sourceId));
     setOpenTaskId((id) => (id === sourceId ? targetId : id));
