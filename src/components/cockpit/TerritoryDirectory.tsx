@@ -191,21 +191,31 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
 
   const clientIds = useMemo(() => new Set(clients.map((c) => c.id)), [clients]);
 
-  // Match each listing to a city contact (phone → email → name). A contact can
-  // back at most one listing; first match wins. Track which contacts got
-  // matched so the leftovers form the "No listing" bucket.
+  // Match each listing to a city contact — ghl_contact_id first (exact,
+  // authoritative: WordPress already resolved and stores it per listing), then
+  // phone → email → name as a fallback for listings that don't carry one yet.
+  // The fallback chain alone isn't reliable: our synced `contacts` table is a
+  // point-in-time snapshot, and a GHL-side contact merge can rewrite a
+  // contact's phone/primary-email out from under it (a business's own contact
+  // merged into an owner's personal one, business name → person name, its old
+  // phone/email replaced) — exactly what happened to Claytown CrossFit,
+  // silently un-matching an already-active client. ghlContactId is immune to
+  // all of that: it's the same id on both sides regardless of what GHL did to
+  // the contact's other fields.
   const { rows, matchedContactIds } = useMemo(() => {
+    const byGhlId = new Map<string, Contact>();
     const byPhone = new Map<string, Contact>();
     const byEmail = new Map<string, Contact>();
     const byName = new Map<string, Contact>();
     for (const c of contacts) {
+      if (c.ghlContactId) byGhlId.set(c.ghlContactId, c);
       const p = digits(c.phone); if (p) byPhone.set(p, c);
       const e = lc(c.email); if (e) byEmail.set(e, c);
       const n = lc(c.name); if (n && !byName.has(n)) byName.set(n, c);
     }
     const matched = new Set<string>();
     const out = (listings ?? []).map((l) => {
-      const c = byPhone.get(digits(l.phone)) ?? byEmail.get(lc(l.email)) ?? byName.get(lc(l.name)) ?? null;
+      const c = (l.ghlContactId && byGhlId.get(l.ghlContactId)) || byPhone.get(digits(l.phone)) || byEmail.get(lc(l.email)) || byName.get(lc(l.name)) || null;
       if (c) matched.add(c.id);
       const client = c && clientIds.has("cl_" + c.id) ? clients.find((cl) => cl.id === "cl_" + c.id) ?? null : null;
       return { listing: l, contact: c, client };
