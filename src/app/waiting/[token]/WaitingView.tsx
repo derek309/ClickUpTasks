@@ -217,7 +217,7 @@ export default function WaitingView({ token }: { token: string }) {
                       style={{ borderColor: isDone ? "#bbf7d0" : undefined, borderLeftColor: isDone ? "#22c55e" : "var(--accent)" }}
                     >
                       <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-2 text-[15px] font-medium">
+                        <div className="flex items-center gap-2 text-[17px] font-medium">
                           {isDone && <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-500 text-[11px] text-white">✓</span>}
                           <span className={isDone ? "text-green-800" : ""}>{t.title}</span>
                         </div>
