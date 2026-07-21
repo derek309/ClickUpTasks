@@ -506,6 +506,13 @@ export interface Task {
    * My Work (it still shows on the client's own task list and keeps the client
    * visible on the Dashboard). */
   waitingOnClient?: boolean;
+  /** The client's own reply, submitted through the public /waiting/[token]
+   * page — a single overwritable field (not a growing thread), so the
+   * client can revise it right up until the team marks the task done.
+   * Submitting while waitingOnClient is true clears that flag, reassigns,
+   * and bumps due to today (see /api/waiting/[token]/respond); editing an
+   * already-submitted response afterward just updates this field in place. */
+  clientResponse?: { body: string; attachments: Attachment[]; submittedAt: string } | null;
   contactId: string | null;
   due: string | null; // ISO yyyy-mm-dd
   recurrence: Recurrence;

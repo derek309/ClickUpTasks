@@ -197,7 +197,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   // Gallery grid needs every visible image thumbnail up front, not resolved
   // one at a time on click like openPreview above — batch-fetch in
   // parallel, mirroring VaultView's identical pattern.
-  const attImagePaths = task.attachments.filter((a) => a.kind === "image" && a.path).map((a) => a.path as string).join(",");
+  const attImagePaths = [...task.attachments, ...(task.clientResponse?.attachments ?? [])].filter((a) => a.kind === "image" && a.path).map((a) => a.path as string).join(",");
   const [attImageUrls, setAttImageUrls] = useState<Record<string, string>>({});
   useEffect(() => {
     let cancelled = false;
@@ -429,6 +429,37 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     </dl>
     </div>
   );
+  // The client's own reply, submitted through the public /waiting/[token]
+  // page — surfaced prominently (its own bordered card, above Description)
+  // since it's the reason this task just landed back on someone's plate.
+  const clientResponseBlock = task.clientResponse && (task.clientResponse.body || task.clientResponse.attachments.length > 0) ? (
+    <div className="mt-4 rounded-xl border border-accent/30 bg-accent-soft/20 p-4">
+      <div className="mb-2 flex items-center gap-1.5 text-[15px] font-semibold text-accent"><I.user className="h-4 w-4" /> Client response</div>
+      {task.clientResponse.body && <p className="whitespace-pre-wrap text-[14px]">{task.clientResponse.body}</p>}
+      {task.clientResponse.attachments.length > 0 && (
+        <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
+          {task.clientResponse.attachments.map((a) => {
+            const isLink = a.kind !== "image" && !!a.url;
+            return (
+              <div key={a.id} className="flex flex-col gap-1">
+                <AttachmentTile
+                  item={a}
+                  url={a.kind === "image" && a.path ? attImageUrls[a.path] : undefined}
+                  href={isLink ? a.url : undefined}
+                  onOpen={a.kind === "image" && a.path ? () => openPreview(a) : !isLink && a.path ? () => onDownloadFile(a.path!) : undefined}
+                  actions={a.path ? (
+                    <button onClick={() => onCopyAttachmentLink(a.path!)} title="Copy direct link" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-3.5 w-3.5" /></button>
+                  ) : undefined}
+                />
+                <div className="truncate text-center text-[11px]" title={a.name}>{a.name}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <div className="mt-1.5 text-[12px] text-muted">Submitted {timeAgo(task.clientResponse.submittedAt)}</div>
+    </div>
+  ) : null;
   const descriptionBlock = (
     <div className="mt-4 rounded-xl border bg-surface p-4">
       <div className="mb-2 text-[15px] font-semibold">Description</div>
@@ -896,6 +927,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                 <div className="my-4 border-t" />
                 {propsBlock}
                 <div className="my-4 border-t" />
+                {clientResponseBlock}
                 {descriptionBlock}
                 {subtasksBlock}
                 {attachmentsBlock}
@@ -921,6 +953,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                 <div className="my-4 border-t" />
                 {propsBlock}
                 <div className="my-4 border-t" />
+                {clientResponseBlock}
                 {descriptionBlock}
                 {subtasksBlock}
                 {attachmentsBlock}
@@ -970,6 +1003,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               {statusBlock}
               {ghlWarningBanner}
               <div className="mt-5">{propsBlock}</div>
+              {clientResponseBlock}
               {descriptionBlock}
               {subtasksBlock}
               {attachmentsBlock}

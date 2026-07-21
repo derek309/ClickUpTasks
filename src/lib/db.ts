@@ -63,7 +63,7 @@ const taskToRow = (t: Task, updatedBy?: string | null) => ({
   recurrence_days_of_month: t.recurrenceDaysOfMonth ?? null,
   ghl_task_id: t.ghlTaskId, label_ids: t.labelIds, subtasks: t.subtasks,
   attachments: t.attachments, comments: t.comments, updated_by: updatedBy ?? null, is_private: t.private,
-  stage_id: t.stageId ?? null,
+  stage_id: t.stageId ?? null, client_response: t.clientResponse ?? null,
   // Derived from checklist-item assignees so RLS can let a delegatee see a
   // task delegated to them even when they don't own it or follow the client.
   delegated_to: [...new Set(t.subtasks.map((s) => s.assigneeId).filter((id): id is string => !!id && id !== t.assigneeId))],
@@ -83,6 +83,7 @@ export const rowToTask = (r: any): Task => ({
   attachments: r.attachments ?? [], comments: r.comments ?? [], createdAt: r.created_at ?? new Date().toISOString(),
   private: r.is_private ?? false,
   stageId: r.stage_id ?? null,
+  clientResponse: r.client_response ?? null,
 });
 
 const notifToRow = (n: Notification) => ({ id: n.id, recipient_id: n.recipientId, text: n.text, task_id: n.taskId, actor_id: n.actorId ?? null, client_id: n.clientId ?? null, project_id: n.projectId ?? null, at: n.at, read: n.read, kind: n.kind ?? "activity" });
