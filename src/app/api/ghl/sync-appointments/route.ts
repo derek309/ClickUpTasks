@@ -83,7 +83,7 @@ async function run(req: NextRequest) {
     // calendar for this sub-account — one Conversation-task bump per
     // contact, not per appointment (a contact with two upcoming meetings
     // just shows the sooner one, same "one open task" spirit as messages).
-    const soonestByContact = new Map<string, { startTime: string; title: string }>();
+    const soonestByContact = new Map<string, { startTime: string; title: string; location: string | null }>();
     for (const cal of calendars) {
       let events: any[] = [];
       try {
@@ -103,7 +103,10 @@ async function run(req: NextRequest) {
         if (!ev.contactId || !ev.startTime) continue;
         const existing = soonestByContact.get(ev.contactId);
         if (!existing || ev.startTime < existing.startTime) {
-          soonestByContact.set(ev.contactId, { startTime: ev.startTime, title: typeof ev.title === "string" ? ev.title : "" });
+          // "address" is GHL's field for this even though it's usually a
+          // join link, not a physical address — e.g. a native Zoom/Google
+          // Meet integration puts the meeting URL here.
+          soonestByContact.set(ev.contactId, { startTime: ev.startTime, title: typeof ev.title === "string" ? ev.title : "", location: typeof ev.address === "string" && ev.address.trim() ? ev.address.trim() : null });
         }
       }
     }
@@ -115,6 +118,7 @@ async function run(req: NextRequest) {
       const taskId = await upsertConversationTask(contact, ghlContactId, {
         due: toPacificDate(appt.startTime),
         title: `Meeting with ${titleCase(contact.name)}`,
+        location: appt.location,
       });
       if (taskId) synced++; else skipped++;
     }

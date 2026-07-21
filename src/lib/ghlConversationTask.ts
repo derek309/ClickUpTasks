@@ -58,23 +58,43 @@ export function toPacificDate(iso: string): string {
 // Returns the resolved/created Conversation task's id, or null if it
 // couldn't be resolved — a lost race against a concurrent delivery for the
 // same contact, or a real insert failure (already logged below).
+// A booked appointment's join link/location, kept as its own named
+// attachment rather than written into the task's free-text description —
+// the description is a person's own notes, and an appointment-details sync
+// silently overwriting it on every poll would be destructive. An attachment
+// is safe to replace wholesale: find-by-name, swap it out, leave everything
+// else (including any manually attached files) untouched.
+const MEETING_LOCATION_ATTACHMENT_NAME = "Meeting location";
+function withMeetingLocation(existing: { id: string; name: string; kind: string; size: string; url?: string }[], location: string | null | undefined) {
+  const rest = existing.filter((a) => a.name !== MEETING_LOCATION_ATTACHMENT_NAME);
+  if (!location) return rest;
+  return [...rest, { id: "at_" + crypto.randomUUID(), name: MEETING_LOCATION_ATTACHMENT_NAME, kind: "link", size: "", url: location }];
+}
+
 export async function upsertConversationTask(
   contact: { id: string; name: string; client_id: string },
   ghlContactId: string,
-  opts?: { due?: string; title?: string },
+  opts?: { due?: string; title?: string; location?: string | null },
 ): Promise<string | null> {
   const due = opts?.due ?? todayPacific();
   const { data: openTasks } = await supabaseAdmin
     .from("tasks")
-    .select("id")
+    .select("id, attachments")
     .eq("contact_id", contact.id)
     .eq("priority", "conversation")
     .neq("status", "done")
     .limit(1);
   if (openTasks && openTasks.length > 0) {
     // Bumping never touches title — a second message on a thread that
-    // already has an open task shouldn't silently relabel it.
-    await supabaseAdmin.from("tasks").update({ due }).eq("id", openTasks[0].id);
+    // already has an open task shouldn't silently relabel it. The meeting
+    // location DOES get kept current on every poll (opts.location undefined
+    // for the message/call callers, so their attachments are untouched) —
+    // this is the "pushed and kept up to date" part: a rescheduled or
+    // relocated meeting's join link updates here without creating a
+    // duplicate task or touching anything else on it.
+    const patch: Record<string, unknown> = { due };
+    if (opts?.location !== undefined) patch.attachments = withMeetingLocation(openTasks[0].attachments ?? [], opts.location);
+    await supabaseAdmin.from("tasks").update(patch).eq("id", openTasks[0].id);
     return openTasks[0].id;
   }
 
@@ -101,7 +121,7 @@ export async function upsertConversationTask(
     priority: "conversation",
     contact_id: contact.id,
     due,
-    attachments: ghlUrl ? [{ id: "at_" + crypto.randomUUID(), name: "GHL conversation", kind: "link", size: "", url: ghlUrl }] : [],
+    attachments: withMeetingLocation(ghlUrl ? [{ id: "at_" + crypto.randomUUID(), name: "GHL conversation", kind: "link", size: "", url: ghlUrl }] : [], opts?.location),
   });
   // A concurrent delivery for the same contact can lose the race to the
   // partial unique index in conversation-task-unique.sql — that's the other
