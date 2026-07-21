@@ -132,8 +132,8 @@ export default function WaitingView({ token }: { token: string }) {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
-      <div className="w-full max-w-lg rounded-2xl border bg-surface p-7 shadow-sm">
+    <div className="flex min-h-screen items-start justify-center bg-background px-4 py-10">
+      <div className="w-full max-w-7xl rounded-2xl border bg-surface p-7 shadow-sm">
         <div className="mb-5 flex items-center gap-2.5">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent text-[15px] font-bold text-white">CT</span>
           <div className="leading-tight">
@@ -152,7 +152,7 @@ export default function WaitingView({ token }: { token: string }) {
             {tasks.length === 0 ? (
               <div className="py-8 text-center text-[15px] text-muted">Nothing needed from you right now — you&apos;re all caught up. 🎉</div>
             ) : (
-              <div className="space-y-3">
+              <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {sorted.map((t) => {
                   const isDone = t.status === "done";
                   const isEditing = !isDone && (t.needsResponse || editingIds.has(t.id));
