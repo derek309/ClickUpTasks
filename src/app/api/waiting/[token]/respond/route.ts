@@ -32,6 +32,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     client_response: { body: text, attachments, submittedAt: new Date().toISOString() },
   };
 
+  // A client attaching an image (a marked-up screenshot, a photo of
+  // something wrong) is treated as feedback that needs the team's eyes on
+  // it — flip status so it stands out in the list/board, distinct from a
+  // plain text-only reply.
+  if (attachments.some((a) => a.kind === "image")) patch.status = "changes_requested";
+
   let notifyRecipient: string | null = null;
   if (task.waiting_on_client === true) {
     const followers: string[] = Array.isArray(client.assigned_to) ? client.assigned_to : [];

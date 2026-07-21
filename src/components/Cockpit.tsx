@@ -1811,7 +1811,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       pushToast(`Notified ${userById(patch.assigneeId)?.name}`);
     }
     // Finishing work is worth surfacing to the rest of the team, not just silence.
-    if (patch.status && (patch.status === "review" || patch.status === "done") && patch.status !== before.status) {
+    if (patch.status && (patch.status === "review" || patch.status === "changes_requested" || patch.status === "done") && patch.status !== before.status) {
       users.filter((u) => u.id !== me.id && (u.role === "admin" || before.assigneeId === u.id)).forEach((u) => {
         notify(u.id, `${me.name} moved “${before.title}” to ${STATUS_META[patch.status as TaskStatus].label}`, id);
       });

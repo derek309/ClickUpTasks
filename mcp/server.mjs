@@ -23,7 +23,7 @@ async function sb(path, method = "GET", body) {
   return t ? JSON.parse(t) : null;
 }
 const enc = encodeURIComponent;
-const STATUSES = ["todo", "in_progress", "review", "done"];
+const STATUSES = ["todo", "in_progress", "review", "changes_requested", "done"];
 const GHL = "https://services.leadconnectorhq.com";
 const SUB2LOC = { c_agency: "7B0Y8xCOblcTHzYnM1Kc", c_directory: "GN4HK1ybbTBWcolEjLHl" };
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36";

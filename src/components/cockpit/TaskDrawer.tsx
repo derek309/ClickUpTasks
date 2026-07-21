@@ -337,7 +337,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     <div className="-mt-0.5 mb-1 text-[13px] text-muted">Created {new Date(task.createdAt).toLocaleDateString()} · Updated {timeAgo(lastActivityAt)}</div>
   );
   const statusBlock = (
-    <div className="mt-4 grid grid-cols-4 overflow-hidden rounded-lg border">
+    <div className="mt-4 grid grid-cols-5 overflow-hidden rounded-lg border">
       {STATUS_ORDER.map((s) => {
         const m = STATUS_META[s];
         const on = task.status === s;
@@ -350,6 +350,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
         return (
           <button key={s} onClick={() => onPatch({ status: s })} className={`flex items-center justify-center gap-1.5 border-r px-2 py-2.5 text-[13px] font-medium transition last:border-r-0 ${on ? "text-white" : "text-muted hover:bg-background"}`} style={on ? { background: m.dot, borderColor: m.dot } : {}}>
             {s === "done" ? <I.check className={iconCls} />
+              : s === "changes_requested" ? <I.flag className={iconCls} />
               : s === "review" ? <I.search className={iconCls} />
               : s === "in_progress" ? <I.repeat className={iconCls} />
               : <span className={`block h-3 w-3 shrink-0 rounded-full border-2 ${on ? "border-white" : ""}`} style={!on ? { borderColor: m.dot } : {}} />}

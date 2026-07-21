@@ -87,7 +87,7 @@ export interface Me {
   role: Role;
   canSendMessages: boolean; // admins always true; VAs only when an admin grants it
 }
-export type TaskStatus = "todo" | "in_progress" | "review" | "done";
+export type TaskStatus = "todo" | "in_progress" | "review" | "changes_requested" | "done";
 export type Priority = "conversation" | "urgent" | "normal" | "none";
 export type Recurrence = "none" | "daily" | "weekday" | "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly" | "custom";
 export const RECURRENCE_ORDER: Recurrence[] = ["none", "daily", "weekday", "weekly", "biweekly", "monthly", "quarterly", "yearly", "custom"];
@@ -571,9 +571,10 @@ export const STATUS_META: Record<TaskStatus, { label: string; dot: string; chip:
   todo: { label: "To do", dot: "#94a3b8", chip: "#f1f5f9" },
   in_progress: { label: "In progress", dot: "#3b82f6", chip: "#eff6ff" },
   review: { label: "Review", dot: "#f59e0b", chip: "#fffbeb" },
+  changes_requested: { label: "Change Requests", dot: "#ef4444", chip: "#fef2f2" },
   done: { label: "Done", dot: "#22c55e", chip: "#f0fdf4" },
 };
-export const STATUS_ORDER: TaskStatus[] = ["todo", "in_progress", "review", "done"];
+export const STATUS_ORDER: TaskStatus[] = ["todo", "in_progress", "review", "changes_requested", "done"];
 
 // Parses describeFieldChange's (Cockpit.tsx) event strings into a structured
 // before/after pair — used by TaskDrawer's Activity diff cards and by the
