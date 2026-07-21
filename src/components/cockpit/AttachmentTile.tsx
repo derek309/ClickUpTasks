@@ -10,7 +10,7 @@ import { type ReactNode } from "react";
 import { type Attachment } from "@/lib/data";
 import { FileBadge } from "./ui";
 
-export function AttachmentTile({ item, url, href, onOpen, small, overlayCaption, actions }: {
+export function AttachmentTile({ item, url, href, onOpen, small, overlayCaption, actions, drag }: {
   item: Attachment;
   /** Resolved thumbnail URL for kind==="image"; omit to show the FileBadge fallback. */
   url?: string;
@@ -23,6 +23,8 @@ export function AttachmentTile({ item, url, href, onOpen, small, overlayCaption,
   overlayCaption?: string;
   /** Hover-revealed action buttons, top-right corner. */
   actions?: ReactNode;
+  /** Drag-to-reorder wiring — same splice-before-target idiom as FolderRail/ClientLinks. Omit to disable dragging on this tile. */
+  drag?: { dragging: boolean; onDragStart: () => void; onDrop: () => void };
 }) {
   const isImage = item.kind === "image" && !!url;
   const body = (
@@ -39,7 +41,13 @@ export function AttachmentTile({ item, url, href, onOpen, small, overlayCaption,
     </>
   );
   return (
-    <div className={`group relative aspect-square overflow-hidden rounded-lg border bg-surface ${small ? "opacity-80 hover:opacity-100" : ""}`}>
+    <div
+      className={`group relative aspect-square overflow-hidden rounded-lg border bg-surface ${small ? "opacity-80 hover:opacity-100" : ""} ${drag?.dragging ? "opacity-40" : ""}`}
+      draggable={!!drag}
+      onDragStart={drag?.onDragStart}
+      onDragOver={drag ? (e) => { e.preventDefault(); e.stopPropagation(); } : undefined}
+      onDrop={drag ? (e) => { e.preventDefault(); e.stopPropagation(); drag.onDrop(); } : undefined}
+    >
       {href ? (
         <a href={href} target="_blank" rel="noopener noreferrer" title={item.name} className="block h-full w-full">{body}</a>
       ) : (

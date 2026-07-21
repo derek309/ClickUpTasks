@@ -174,6 +174,19 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   };
   const wordCount = (text: string) => (text.trim() ? text.trim().split(/\s+/).length : 0);
   const [attSort, setAttSort] = useState<"added" | "name" | "type">("added");
+  // Drag-to-reorder — only meaningful in "added" order (the stored array
+  // order); dragging a name/type-sorted view and writing that back as
+  // storage order would surprise the user the next time they switch back.
+  const [dragAttId, setDragAttId] = useState<string | null>(null);
+  const reorderAttachments = (targetId: string) => {
+    if (!dragAttId || dragAttId === targetId) { setDragAttId(null); return; }
+    const ids = task.attachments.map((a) => a.id).filter((id) => id !== dragAttId);
+    ids.splice(ids.indexOf(targetId), 0, dragAttId);
+    const byId = new Map(task.attachments.map((a) => [a.id, a] as const));
+    onPatch({ attachments: ids.map((id) => byId.get(id)!) });
+    setDragAttId(null);
+  };
+  const [attFileDragOver, setAttFileDragOver] = useState(false);
   const [previewAtt, setPreviewAtt] = useState<Attachment | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const openPreview = async (att: Attachment) => {
@@ -615,7 +628,12 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
           Uploading {uploadProgress.done + 1} of {uploadProgress.total}…
         </div>
       )}
-      <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files.length) onAddFiles(e.dataTransfer.files); }} className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
+      <div
+        onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setAttFileDragOver(true); } }}
+        onDragLeave={(e) => { if (e.currentTarget === e.target) setAttFileDragOver(false); }}
+        onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); setAttFileDragOver(false); onAddFiles(e.dataTransfer.files); } }}
+        className={`grid grid-cols-3 gap-2 rounded-lg transition sm:grid-cols-4 md:grid-cols-5 ${attFileDragOver ? "outline-2 outline-dashed outline-accent bg-accent-soft/30" : ""}`}
+      >
         {task.attachments.length === 0 && !uploadProgress && (<div className="col-span-full rounded-lg border border-dashed px-3 py-2 text-[13px] text-muted">Drop, paste, or click Attach · max 25MB each</div>)}
         {sortedAttachments.map((a) => {
           const isLink = a.kind !== "image" && !!a.url;
@@ -626,6 +644,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                 url={a.kind === "image" && a.path ? attImageUrls[a.path] : undefined}
                 href={isLink ? a.url : undefined}
                 onOpen={a.kind === "image" && a.path ? () => openPreview(a) : !isLink && a.path ? () => onDownloadFile(a.path!) : undefined}
+                drag={attSort === "added" ? { dragging: dragAttId === a.id, onDragStart: () => setDragAttId(a.id), onDrop: () => reorderAttachments(a.id) } : undefined}
                 actions={
                   <>
                     {a.path && (

@@ -449,6 +449,11 @@ export interface Attachment {
    * underlying file; the attachment still lives on whichever task/comment/
    * note it was originally attached to. */
   folderId?: string;
+  /** Manual drag-to-reorder position within its Vault kind-group (Photos,
+   * Screenshots, PDFs, etc). Unset = falls to the end, after any positioned
+   * items, in original (added) order. Purely organizational, same spirit as
+   * folderId — doesn't move the underlying file. */
+  position?: number;
 }
 
 /** A named group in the Vault tab for organizing a client's photos/files.

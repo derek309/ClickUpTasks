@@ -10,12 +10,12 @@
 // with an icon tile in place of a thumbnail.
 // Folders are a pure organizational overlay — filing an item into a folder
 // never moves the underlying file, just tags it (see Attachment.folderId).
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { type Attachment, type VaultFolder } from "@/lib/data";
 import { I } from "./ui";
 import { AttachmentTile } from "./AttachmentTile";
 
-export type VaultItem = Attachment & { sourceLabel: string; onOpenSource: () => void; onSetFolder: (folderId: string | null) => void };
+export type VaultItem = Attachment & { sourceLabel: string; onOpenSource: () => void; onSetFolder: (folderId: string | null) => void; onSetPosition: (position: number) => void };
 
 const OTHER_KIND_ORDER: Attachment["kind"][] = ["pdf", "doc", "sheet", "link"];
 const KIND_LABEL: Record<Attachment["kind"], string> = { image: "Images", pdf: "PDFs", doc: "Docs", sheet: "Sheets", link: "Links" };
@@ -25,7 +25,12 @@ const KIND_LABEL: Record<Attachment["kind"], string> = { image: "Images", pdf: "
 // Matches the default names macOS/Windows screenshot tools produce.
 const SCREENSHOT_RE = /^(screenshot|screen shot|cleanshot|snip)/i;
 
-export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCopyLink, onCopyFolderLink, onCreateFolder, onRenameFolder, onDeleteFolder, initialFolderId }: {
+// Manual drag order first (unset = end, stable in original/added order for
+// ties) — same "position, fallback to stored order" idiom used everywhere
+// else drag-sort exists in this app (folders/lists).
+const sortByPosition = (list: VaultItem[]) => [...list].sort((a, b) => (a.position ?? Infinity) - (b.position ?? Infinity));
+
+export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCopyLink, onCopyFolderLink, onCreateFolder, onRenameFolder, onDeleteFolder, onAddFiles, initialFolderId }: {
   items: VaultItem[];
   folders: VaultFolder[];
   onDownloadFile: (path: string) => void;
@@ -35,6 +40,9 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
   onCreateFolder: (name: string) => void;
   onRenameFolder: (folderId: string, name: string) => void;
   onDeleteFolder: (folderId: string) => void;
+  /** Drop files anywhere on the Vault (or click "+ Add files") to upload —
+   * no owning task, filed as a bodyless Journal note under the hood. */
+  onAddFiles: (files: FileList) => void;
   /** From a deep link's ?folder= param — read once as the initial selection
    * only, not a live-controlled prop (this component owns folder browsing
    * after that). */
@@ -44,9 +52,27 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
   const displayed = selectedFolder === null ? items : selectedFolder === "unfiled" ? items.filter((a) => !a.folderId) : items.filter((a) => a.folderId === selectedFolder);
 
   const images = displayed.filter((a) => a.kind === "image");
-  const photos = images.filter((a) => !SCREENSHOT_RE.test(a.name));
-  const screenshots = images.filter((a) => SCREENSHOT_RE.test(a.name));
-  const otherGroups = OTHER_KIND_ORDER.map((k) => ({ kind: k, label: KIND_LABEL[k], items: displayed.filter((a) => a.kind === k) })).filter((g) => g.items.length > 0);
+  const photos = sortByPosition(images.filter((a) => !SCREENSHOT_RE.test(a.name)));
+  const screenshots = sortByPosition(images.filter((a) => SCREENSHOT_RE.test(a.name)));
+  const otherGroups = OTHER_KIND_ORDER.map((k) => ({ kind: k, label: KIND_LABEL[k], items: sortByPosition(displayed.filter((a) => a.kind === k)) })).filter((g) => g.items.length > 0);
+
+  // Drag-to-reorder within one kind-group — same splice-before-target idiom
+  // as FolderRail/ClientLinks. Vault items are a merge of three
+  // independently-ordered owning rows (task/comment/note), so a drop
+  // renumbers every item in just the affected group via each item's own
+  // bound onSetPosition rather than one shared array mutation.
+  const [dragItemId, setDragItemId] = useState<string | null>(null);
+  const reorderGroup = (groupItems: VaultItem[], targetId: string) => {
+    if (!dragItemId || dragItemId === targetId) { setDragItemId(null); return; }
+    const ids = groupItems.map((a) => a.id).filter((id) => id !== dragItemId);
+    ids.splice(ids.indexOf(targetId), 0, dragItemId);
+    ids.forEach((id, i) => groupItems.find((a) => a.id === id)?.onSetPosition(i));
+    setDragItemId(null);
+  };
+
+  // Drag files from the desktop straight onto the Vault to attach them.
+  const [fileDragOver, setFileDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Signed URLs are private-bucket, short-lived, and normally fetched one at
   // a time on click (TaskDrawer's preview, downloadFile) — a gallery grid
@@ -87,7 +113,18 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
   };
 
   return (
-    <div className="flex-1 overflow-y-auto bg-background px-4 py-4 sm:px-5">
+    <div
+      className="relative flex-1 overflow-y-auto bg-background px-4 py-4 sm:px-5"
+      onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setFileDragOver(true); } }}
+      onDragLeave={(e) => { if (e.currentTarget === e.target) setFileDragOver(false); }}
+      onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); setFileDragOver(false); onAddFiles(e.dataTransfer.files); } }}
+    >
+      {fileDragOver && (
+        <div className="pointer-events-none fixed inset-0 z-40 flex items-center justify-center bg-accent/10">
+          <div className="rounded-xl border-2 border-dashed border-accent bg-surface px-6 py-4 text-[15px] font-medium text-accent shadow-lg">Drop to attach to the Vault</div>
+        </div>
+      )}
+      <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => { if (e.target.files?.length) onAddFiles(e.target.files); e.target.value = ""; }} />
       <div className="mx-auto w-full max-w-5xl">
         {/* Folder rail */}
         <div className="mb-5 flex flex-wrap items-center gap-1.5">
@@ -122,6 +159,7 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
           ) : (
             <button onClick={() => setAddingFolder(true)} className="inline-flex items-center gap-1 rounded-full border border-dashed px-3 py-1 text-[13px] font-medium text-muted hover:bg-surface"><I.plus className="h-3 w-3" /> New folder</button>
           )}
+          <button onClick={() => fileInputRef.current?.click()} className="ml-auto inline-flex items-center gap-1 rounded-full border border-dashed px-3 py-1 text-[13px] font-medium text-muted hover:bg-surface"><I.plus className="h-3 w-3" /> Add files</button>
         </div>
 
         <div className="space-y-8">
@@ -129,7 +167,7 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
           <div className="flex flex-col items-center gap-2 py-16 text-center text-muted">
             <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent-soft text-accent"><I.clipboard /></span>
             <span className="text-[15px] font-medium">{selectedFolder === null ? "Nothing in the vault yet" : "Nothing filed here yet"}</span>
-            <span className="max-w-[280px] text-[13px] leading-relaxed">{selectedFolder === null ? "Every image, doc, sheet, and link attached to a task or posted in Chat shows up here automatically." : "Move an item here from its ‹⋯› menu."}</span>
+            <span className="max-w-[280px] text-[13px] leading-relaxed">{selectedFolder === null ? "Every image, doc, sheet, and link attached to a task or posted in Chat shows up here automatically — or drag files in, or click Add files." : "Move an item here from its ‹⋯› menu."}</span>
           </div>
         )}
 
@@ -139,6 +177,7 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
               {photos.map((a) => (
                 <AttachmentTile key={a.id} item={a} url={a.path ? urls[a.path] : undefined} onOpen={() => setPreview(a)} overlayCaption={a.sourceLabel}
+                  drag={{ dragging: dragItemId === a.id, onDragStart: () => setDragItemId(a.id), onDrop: () => reorderGroup(photos, a.id) }}
                   actions={
                     <>
                       <FolderMenu item={a} folders={folders} triggerClassName="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80" />
@@ -162,6 +201,7 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
               <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-6 md:grid-cols-8">
                 {screenshots.map((a) => (
                   <AttachmentTile key={a.id} item={a} url={a.path ? urls[a.path] : undefined} onOpen={() => setPreview(a)} small
+                    drag={{ dragging: dragItemId === a.id, onDragStart: () => setDragItemId(a.id), onDrop: () => reorderGroup(screenshots, a.id) }}
                     actions={a.path && (
                       <button onClick={(e) => { e.stopPropagation(); onCopyLink(a.path!); }} title="Copy link" className="flex h-5 w-5 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-2.5 w-2.5" /></button>
                     )}
@@ -182,6 +222,7 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
                     item={a}
                     href={a.url || undefined}
                     onOpen={!a.url && a.path ? () => onDownloadFile(a.path!) : undefined}
+                    drag={{ dragging: dragItemId === a.id, onDragStart: () => setDragItemId(a.id), onDrop: () => reorderGroup(g.items, a.id) }}
                     actions={
                       <>
                         <FolderMenu item={a} folders={folders} triggerClassName="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80" />

@@ -1517,6 +1517,36 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setClientNotes((ns) => ns.map((n) => (n.id === note.id ? updated : n)));
     upsertClientNote(updated);
   };
+  // Vault drag-to-reorder — same three write-back paths as the folder
+  // mutators above, writing Attachment.position instead of folderId. Vault
+  // items are a merge of three independently-ordered owning rows, so
+  // reordering can't just splice one array the way a task's own attachment
+  // grid can; each item carries its own bound setter (see vaultItems below)
+  // and VaultView renumbers a whole kind-group after a drop.
+  const setTaskAttachmentPosition = (taskId: string, attId: string, position: number) => {
+    const t = tasks.find((x) => x.id === taskId);
+    if (!t) return;
+    update(taskId, { attachments: t.attachments.map((a) => (a.id === attId ? { ...a, position } : a)) });
+  };
+  const setCommentAttachmentPosition = (taskId: string, commentId: string, attId: string, position: number) => {
+    const t = tasks.find((x) => x.id === taskId);
+    if (!t) return;
+    const comments = t.comments.map((c) => (c.id !== commentId ? c : { ...c, attachments: (c.attachments ?? []).map((a) => (a.id === attId ? { ...a, position } : a)) }));
+    update(taskId, { comments });
+  };
+  const setNoteAttachmentPosition = (note: ClientNote, attId: string, position: number) => {
+    const updated: ClientNote = { ...note, attachments: (note.attachments ?? []).map((a) => (a.id === attId ? { ...a, position } : a)) };
+    setClientNotes((ns) => ns.map((n) => (n.id === note.id ? updated : n)));
+    upsertClientNote(updated);
+  };
+  // Drop files directly onto the Vault (no owning task/note yet) — reuses
+  // the same no-owning-row upload path as Chat/Journal paste-attach, then
+  // files the result as a bodyless client note. Slots straight into
+  // vaultItems' existing clientNotes branch below with no new table.
+  const addVaultFiles = async (clientId: string, projectId: string | null, files: FileList) => {
+    const uploaded = (await Promise.all(Array.from(files).map((f) => uploadOneImage("vault", f)))).filter((a): a is Attachment => !!a);
+    if (uploaded.length) addNote(clientId, "note", "", projectId, uploaded);
+  };
   const createVaultFolder = (clientId: string, name: string) => {
     const f: VaultFolder = { id: newId("vf_"), clientId, projectId: null, name, createdAt: new Date().toISOString() };
     setVaultFolders((fs) => [...fs, f]);
@@ -1541,10 +1571,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // is reachable at all (a real client, not "All tasks"/My Work/etc.).
   const activeVaultFolders = activeClient === "all" ? [] : vaultFolders.filter((f) => f.clientId === activeClient);
   const vaultItems: VaultItem[] = activeClient === "all" ? [] : [
-    ...baseTasks.flatMap((t) => t.attachments.map((a) => ({ ...a, sourceLabel: t.title, onOpenSource: () => { setClientTab("tasks"); setOpenTaskId(t.id); }, onSetFolder: (folderId: string | null) => setTaskAttachmentFolder(t.id, a.id, folderId) }))),
-    ...baseTasks.flatMap((t) => t.comments.flatMap((c) => (c.attachments ?? []).map((a) => ({ ...a, sourceLabel: t.title, onOpenSource: () => { setClientTab("tasks"); setOpenTaskId(t.id); }, onSetFolder: (folderId: string | null) => setCommentAttachmentFolder(t.id, c.id, a.id, folderId) })))),
+    ...baseTasks.flatMap((t) => t.attachments.map((a) => ({ ...a, sourceLabel: t.title, onOpenSource: () => { setClientTab("tasks"); setOpenTaskId(t.id); }, onSetFolder: (folderId: string | null) => setTaskAttachmentFolder(t.id, a.id, folderId), onSetPosition: (position: number) => setTaskAttachmentPosition(t.id, a.id, position) }))),
+    ...baseTasks.flatMap((t) => t.comments.flatMap((c) => (c.attachments ?? []).map((a) => ({ ...a, sourceLabel: t.title, onOpenSource: () => { setClientTab("tasks"); setOpenTaskId(t.id); }, onSetFolder: (folderId: string | null) => setCommentAttachmentFolder(t.id, c.id, a.id, folderId), onSetPosition: (position: number) => setCommentAttachmentPosition(t.id, c.id, a.id, position) })))),
     ...clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId))
-      .flatMap((n) => (n.attachments ?? []).map((a) => ({ ...a, sourceLabel: "Journal", onOpenSource: () => setClientTab("chat"), onSetFolder: (folderId: string | null) => setNoteAttachmentFolder(n, a.id, folderId) }))),
+      .flatMap((n) => (n.attachments ?? []).map((a) => ({ ...a, sourceLabel: "Journal", onOpenSource: () => setClientTab("chat"), onSetFolder: (folderId: string | null) => setNoteAttachmentFolder(n, a.id, folderId), onSetPosition: (position: number) => setNoteAttachmentPosition(n, a.id, position) }))),
   ];
   const projectsForClient = (clientId: string) => projects.filter((p) => p.clientId === clientId);
   const foldersForClient = (clientId: string) => folders.filter((f) => f.clientId === clientId).sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt));
@@ -3797,6 +3827,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onCreateFolder={(name) => createVaultFolder(activeClient, name)}
             onRenameFolder={(id, name) => { const f = vaultFolders.find((x) => x.id === id); if (f) renameVaultFolder(f, name); }}
             onDeleteFolder={deleteVaultFolder}
+            onAddFiles={(files) => addVaultFiles(activeClient, activeProject, files)}
             initialFolderId={initialVaultFolder} />
         ) : (
           <>
