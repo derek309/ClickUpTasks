@@ -199,7 +199,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // a "view" competing with My Work/Personal/etc. — it's internal team talk,
   // not tied to any client/project, so it doesn't belong in that state machine.
   const [teamMessages, setTeamMessages] = useState<TeamMessage[]>([]);
-  const [teamChatOpen, setTeamChatOpen] = useState(false);
+  // Which half of the Team Chat page is showing. Chat leads — per Derek, the
+  // inbox "is really what team chat was supposed to be": talk to the team
+  // first, review the task comments/mentions addressed to you second.
+  const [inboxTab, setInboxTab] = useState<"chat" | "activity">("chat");
   // Per-user "last seen" timestamp for the unread dot — local-only, same
   // idiom as cut_starred/cut_sidebarHidden (no server-side read-state needed
   // for a lightweight badge).
@@ -209,12 +212,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // (already tolerated elsewhere in this file), not a new class of issue.
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { try { setTeamChatLastRead(localStorage.getItem("cut_teamChatLastRead") ?? ""); } catch {} }, []);
-  const openTeamChat = () => {
-    setTeamChatOpen(true);
-    setSidebarOpen(false);
+  const markTeamChatRead = () => {
     const now = new Date().toISOString();
     setTeamChatLastRead(now);
     try { localStorage.setItem("cut_teamChatLastRead", now); } catch {}
+  };
+  // Team Chat is a real view now, not an overlay — open the page on its Chat
+  // tab and clear the unread dot. Used by both the sidebar item and the
+  // header shortcut so there's exactly one home for it.
+  const openTeamChat = () => {
+    setInboxView(true); setInboxTab("chat");
+    setMyWork(false); setPersonalView(false); setDirView(null); setTerritoryView(null);
+    setOpenTaskId(null); setSidebarOpen(false);
+    markTeamChatRead();
   };
   const teamChatUnread = teamMessages.some((m) => m.authorId !== me.id && m.at > teamChatLastRead);
   const [addClientOpen, setAddClientOpen] = useState(false);
@@ -2550,7 +2560,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // duplicated in source. Only one header is ever visible (CSS breakpoint),
   // so the popovers never double-render on screen.
   const territoryTitle = territoryView ? (territoryView === "all" ? "Territories" : (territoryById(territoryView) ? `${territoryById(territoryView)!.city}, ${territoryById(territoryView)!.state}` : "Territory")) : null;
-  const headerTitleText = territoryTitle ?? (inboxView ? "Inbox" : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? "All Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? "")));
+  const headerTitleText = territoryTitle ?? (inboxView ? "Team Chat" : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? "All Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? "")));
   const isClientDetail = !myWork && !personalView && !inboxView && !dirView && !territoryView && activeClient !== "all" && !!clientById(activeClient);
   const showFilterControl = !territoryView && !inboxView && !dirView && !myWork && !(activeClient !== "all" && (clientTab === "chat" || clientTab === "vault"));
   const bellControl = (
@@ -2730,7 +2740,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         </div>
 
         <nav className="shrink-0 space-y-0.5 px-2">
-          {navVisible.inbox && <SideItem active={inboxView} onClick={() => { setInboxView(true); setMyWork(false); setPersonalView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.bell className="text-muted" /> <span>Inbox</span>{unread > 0 && <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{unread}</span>}</SideItem>}
+          {navVisible.inbox && <SideItem active={inboxView} onClick={openTeamChat}><I.comment className="text-muted" /> <span>Team Chat</span>{unread > 0 ? <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{unread}</span> : teamChatUnread ? <span className="ml-auto h-2 w-2 rounded-full bg-accent" /> : null}</SideItem>}
           {navVisible.work && <SideItem active={myWork} onClick={() => { setMyWork(true); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>Dashboard</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
           {navVisible.all && <SideItem active={!myWork && !personalView && !inboxView && !dirView && !territoryView && activeClient === "all"} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); }}><I.list className="text-muted" /> <span>All Tasks</span><span className="ml-auto text-[13px] text-muted">{scopedTasks.filter((t) => t.clientId.startsWith("cl_")).length}</span></SideItem>}
           {navVisible.personal && <SideItem active={personalView} onClick={() => { setPersonalView(true); setMyWork(false); setInboxView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>}
@@ -2876,7 +2886,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </p>
             </>) : (<>
               <h1 className="flex items-center gap-2 truncate text-[20px] font-semibold">
-                {territoryTitle ? territoryTitle : inboxView ? "Inbox" : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? "All Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
+                {territoryTitle ? territoryTitle : inboxView ? "Team Chat" : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? "All Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
                 {!myWork && !personalView && !inboxView && !dirView && !territoryView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
               </h1>
               {/* No subtitle for a territory — it fell through to the
@@ -3235,8 +3245,30 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               focusId={territoryView === "all" ? undefined : territoryView} />
           </div>
         ) : inboxView ? (
-          <Inbox notifications={myNotifs} clientById={clientById} projectById={projectById} onOpen={openNotification} onMarkAllRead={markAllNotifsRead} onSyncEmail={canAdmin ? syncEmail : undefined} syncingEmail={syncingEmail} onSyncAppointments={canAdmin ? syncAppointments : undefined} syncingAppointments={syncingAppointments}
-            unmatchedEmails={canAdmin ? unmatchedEmails : []} onAddAsClient={addAsClientFromEmail} onDismissUnmatched={dismissUnmatched} />
+          // Team Chat page — the two halves of "talk to the team" in one
+          // place: the workspace chat, and the task comments/mentions
+          // addressed to you. Deliberately two tabs rather than one merged
+          // feed: chat is a conversation you write into, Activity is a list
+          // you triage and mark read — interleaving them would bury the
+          // composer and make "mark all read" ambiguous.
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="flex shrink-0 items-center gap-1 border-b bg-surface px-4 py-2">
+              {([["chat", "Chat"], ["activity", "Activity"]] as const).map(([v, label]) => (
+                <button key={v} onClick={() => { setInboxTab(v); if (v === "chat") markTeamChatRead(); }}
+                  className={`relative rounded-md px-3 py-1.5 text-[13px] font-medium ${inboxTab === v ? "bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>
+                  {label}
+                  {v === "chat" && teamChatUnread && inboxTab !== "chat" && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-accent" />}
+                  {v === "activity" && unread > 0 && <span className="ml-1.5 rounded-full bg-accent px-1.5 text-[11px] font-semibold text-white">{unread}</span>}
+                </button>
+              ))}
+            </div>
+            {inboxTab === "chat" ? (
+              <TeamChat me={me} messages={teamMessages} onSend={sendTeamMessage} onDelete={deleteTeamMessage} />
+            ) : (
+              <Inbox notifications={myNotifs} clientById={clientById} projectById={projectById} onOpen={openNotification} onMarkAllRead={markAllNotifsRead} onSyncEmail={canAdmin ? syncEmail : undefined} syncingEmail={syncingEmail} onSyncAppointments={canAdmin ? syncAppointments : undefined} syncingAppointments={syncingAppointments}
+                unmatchedEmails={canAdmin ? unmatchedEmails : []} onAddAsClient={addAsClientFromEmail} onDismissUnmatched={dismissUnmatched} />
+            )}
+          </div>
         ) : dirView === "clients" ? (
           <ClientsDirectory clients={sortedClients} clientCompany={(c) => clientCompany(c)} taskCount={clientTaskCount} starred={starred} onToggleStar={toggleStar}
             needsReview={(id) => clientNeedsReview(id, me.id)}
@@ -3371,9 +3403,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           templates={taskTemplates} projects={projects}
           onSaveTemplate={saveTemplate} onDeleteTemplate={deleteTemplate} onUseTemplateAsTask={useTemplateAsTask}
         />
-      )}
-      {teamChatOpen && (
-        <TeamChat me={me} messages={teamMessages} onSend={sendTeamMessage} onDelete={deleteTeamMessage} onClose={() => setTeamChatOpen(false)} />
       )}
       {addClientOpen && <AddClientModal subAccounts={subAccounts} contacts={contacts} existingIds={new Set(clients.map((c) => c.id))} onAdd={addClientContact} onClose={() => setAddClientOpen(false)} />}
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
