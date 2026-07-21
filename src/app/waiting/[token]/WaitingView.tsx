@@ -197,7 +197,7 @@ export default function WaitingView({ token }: { token: string }) {
             {tasks.length === 0 ? (
               <div className="py-8 text-center text-[15px] text-muted">Nothing needed from you right now — you&apos;re all caught up. 🎉</div>
             ) : (
-              <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="space-y-3">
                 {sorted.map((t) => {
                   const isDone = t.status === "done";
                   const isEditing = !isDone && (t.needsResponse || editingIds.has(t.id));
