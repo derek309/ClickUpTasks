@@ -65,6 +65,17 @@ export function daysBetween(a: string, b: string): number {
 // db.ts's browser Supabase client; db.ts re-exports it for existing callers.
 export const titleCase = (s: string) => (s || "").replace(/\b([a-z])/g, (m) => m.toUpperCase());
 
+// First letter of the first two words ("Amanda Standley" -> "AS"), or the
+// first two characters of a one-word name — same shape as a User's own
+// `initials` field, just derived on the fly since Client has no such field
+// (258 GHL-sourced names, not worth hand-maintaining).
+export function clientInitials(name: string): string {
+  const words = (name || "").trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "?";
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[1][0]).toUpperCase();
+}
+
 export type Role = "admin" | "va";
 
 /** The logged-in identity, derived from a Supabase auth profile. */

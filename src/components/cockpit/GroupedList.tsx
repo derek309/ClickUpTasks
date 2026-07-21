@@ -4,7 +4,7 @@
 // expandable subtasks, and the inline cell editors (priority/assignee/due).
 import { useRef, useState } from "react";
 import {
-  users, formatDue, isOverdue, TODAY, timeAgo, userById,
+  users, formatDue, isOverdue, TODAY, timeAgo, userById, clientInitials,
   PRIORITY_META, manualPriorityOptions,
   STATUS_META, STATUS_ORDER, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence,
   type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus,
@@ -162,7 +162,7 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
   const cell = (key: string) => {
     if (key === "status") return <InlineStatus value={task.status} onChange={(s) => onPatch(task.id, { status: s })} />;
     if (key === "priority") return <InlinePriority value={task.priority} onChange={(p) => onPatch(task.id, { priority: p })} />;
-    if (key === "assignee") return <InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} onChange={(a) => onPatch(task.id, { assigneeId: a, waitingOnClient: false })} onSetWaiting={() => onPatch(task.id, { waitingOnClient: true, assigneeId: null })} />;
+    if (key === "assignee") return <InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a, waitingOnClient: false })} onSetWaiting={() => onPatch(task.id, { waitingOnClient: true, assigneeId: null })} />;
     if (key === "due") return <InlineDue value={task.due} overdue={overdue} recurrence={task.recurrence} onChange={(d) => onPatch(task.id, { due: d })} onRecurrenceChange={(r) => onPatch(task.id, { recurrence: r })} />;
     if (key === "comments") return <InlineComments task={task} onAddComment={onAddComment} />;
     if (key === "contact") { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return <span className="truncate text-[13px] text-muted">{ct?.name ?? "—"}</span>; }
@@ -184,7 +184,7 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
             </button>
           )}
           <button onClick={onToggleExpand} className={`shrink-0 rounded p-0.5 text-muted hover:text-foreground ${task.subtasks.length ? "" : "opacity-0 group-hover/tr:opacity-40"}`} title="Subtasks"><I.chevron className={`transition ${expanded ? "-rotate-90" : "rotate-180"}`} /></button>
-          <InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} onChange={(a) => onPatch(task.id, { assigneeId: a, waitingOnClient: false })} onSetWaiting={() => onPatch(task.id, { waitingOnClient: true, assigneeId: null })} size={36} />
+          <InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a, waitingOnClient: false })} onSetWaiting={() => onPatch(task.id, { waitingOnClient: true, assigneeId: null })} size={36} />
           <button onClick={onOpen} className="flex min-w-0 flex-1 flex-col justify-center py-0.5 pl-1 text-left">
             {/* Project crumb is redundant once the Client column is already
                 shown (My Work, All tasks) — keep it only in single-client
@@ -293,15 +293,21 @@ function InlinePriority({ value, onChange }: { value: Priority; onChange: (p: Pr
   );
 }
 
-export function InlineAssignee({ value, onChange, waiting, onSetWaiting, size = 22 }: { value: string | null; onChange: (a: string | null) => void; waiting?: boolean; onSetWaiting?: (v: boolean) => void; size?: number }) {
+export function InlineAssignee({ value, onChange, waiting, onSetWaiting, client, size = 22 }: { value: string | null; onChange: (a: string | null) => void; waiting?: boolean; onSetWaiting?: (v: boolean) => void; client?: Client | null; size?: number }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   return (
     <div className="relative">
-      <button ref={ref} title={waiting ? "Waiting on the client" : undefined} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 190, (users.length + 2) * 32 + 8)); setOpen((o) => !o); }} className="rounded-full hover:opacity-80">
+      <button ref={ref} title={waiting ? (client ? `Waiting on ${client.name}` : "Waiting on the client") : undefined} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 190, (users.length + 2) * 32 + 8)); setOpen((o) => !o); }} className="rounded-full hover:opacity-80">
         {waiting
-          ? <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/60 bg-amber-50 px-2 font-medium text-amber-700" style={{ height: size, fontSize: Math.max(11, size * 0.5) }}><I.user /> Client</span>
+          // Same visual language as a user's own Avatar (colored circle +
+          // initials) — this task's blocker is that specific client, not a
+          // generic "someone external" state, so it should read like one at
+          // a glance instead of a plain "Client" pill.
+          ? (client
+              ? <span className="inline-flex items-center justify-center rounded-full font-semibold text-white" style={{ width: size, height: size, background: client.color, fontSize: size * 0.4 }}>{clientInitials(client.name)}</span>
+              : <span className="inline-flex items-center justify-center rounded-full border border-amber-400/60 bg-amber-50 text-amber-700" style={{ width: size, height: size, fontSize: size * 0.42 }}><I.user /></span>)
           : <Avatar id={value} size={size} />}
       </button>
       {open && (<>
