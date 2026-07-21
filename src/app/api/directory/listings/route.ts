@@ -56,12 +56,15 @@ export async function GET(req: NextRequest) {
   // owner PII, etc.) — the light row it already computes for sort/filter has
   // everything this list view needs. Cuts load time from many seconds to
   // near-instant for a dense city. See sales-tool.php's cul_sales_rest_list.
-  const qs = new URLSearchParams({ city, per_page: "200", orderby: "cul_score", order: "DESC", light: "1" });
+  // _cb: unique per request so any caching layer in front of WordPress
+  // (Cloudflare, a page-rule cache, etc.) can't serve a stale response —
+  // the directory should always reflect the live /sales state.
+  const qs = new URLSearchParams({ city, per_page: "200", orderby: "cul_score", order: "DESC", light: "1", _cb: String(Date.now()) });
   const url = `${WP_BASE.replace(/\/$/, "")}/wp-json/cul/v1/sales/listings?${qs.toString()}`;
 
   let res: Response;
   try {
-    res = await fetch(url, { headers: { "X-ClickUpTasks-Key": WP_KEY, Accept: "application/json" } });
+    res = await fetch(url, { cache: "no-store", headers: { "X-ClickUpTasks-Key": WP_KEY, Accept: "application/json", "Cache-Control": "no-cache" } });
   } catch (e: any) {
     return NextResponse.json({ error: "Directory fetch failed", detail: String(e?.message ?? e), listings: [] }, { status: 502 });
   }
