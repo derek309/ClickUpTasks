@@ -29,6 +29,7 @@ import {
   type Playbook,
   type Priority,
   type TeamMessage,
+  type DmMessage,
   titleCase,
   PRIORITY_META,
 } from "./data";
@@ -96,6 +97,8 @@ export const rowToClientNote = (r: any): ClientNote => ({ id: r.id, clientId: r.
 
 const teamMessageToRow = (m: TeamMessage) => ({ id: m.id, author_id: m.authorId, body: m.body, created_at: m.at });
 export const rowToTeamMessage = (r: any): TeamMessage => ({ id: r.id, authorId: r.author_id, body: r.body ?? "", at: r.created_at });
+const dmMessageToRow = (m: DmMessage) => ({ id: m.id, conversation_id: m.conversationId, author_id: m.authorId, recipient_id: m.recipientId, body: m.body, created_at: m.at });
+export const rowToDmMessage = (r: any): DmMessage => ({ id: r.id, conversationId: r.conversation_id, authorId: r.author_id, recipientId: r.recipient_id, body: r.body ?? "", at: r.created_at });
 
 const vaultFolderToRow = (f: VaultFolder) => ({ id: f.id, client_id: f.clientId, project_id: f.projectId, name: f.name, created_at: f.createdAt });
 const rowToVaultFolder = (r: any): VaultFolder => ({ id: r.id, clientId: r.client_id, projectId: r.project_id ?? null, name: r.name, createdAt: r.created_at });
@@ -160,7 +163,7 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true) 
 }
 
 export async function fetchAll() {
-  const [c, ct, p, t, n, cl, cn, m, tr, tt, vf, fd, um, sg, tm, pb] = await Promise.all([
+  const [c, ct, p, t, n, cl, cn, m, tr, tt, vf, fd, um, sg, tm, pb, dm] = await Promise.all([
     fetchAllRows("clients", "created_at"),
     fetchAllRows("contacts"),
     fetchAllRows("projects"),
@@ -180,6 +183,7 @@ export async function fetchAll() {
     fetchAllRows("stages", "position"),
     fetchAllRows("team_messages", "created_at", false),
     fetchAllRows("playbooks", "created_at"),
+    fetchAllRows("dm_messages", "created_at", false),
   ]);
   // NB: `projects` stays in the hard-fail set — its new folder_id/position
   // columns are read via `select *`, which tolerates their absence pre-migration
@@ -197,6 +201,7 @@ export async function fetchAll() {
   if (sg.error) console.warn("[db] stages unavailable — run supabase/stages.sql", sg.error.message);
   if (tm.error) console.warn("[db] team_messages unavailable — run supabase/team-chat.sql", tm.error.message);
   if (pb.error) console.warn("[db] playbooks unavailable — run supabase/playbooks.sql", pb.error.message);
+  if (dm.error) console.warn("[db] dm_messages unavailable — run supabase/dm-chat.sql", dm.error.message);
   return {
     clients: (c.data ?? []).map(rowToClient),
     contacts: (ct.data ?? []).map(rowToContact),
@@ -214,6 +219,7 @@ export async function fetchAll() {
     stages: sg.error ? [] : (sg.data ?? []).map(rowToStage),
     teamMessages: tm.error ? [] : (tm.data ?? []).map(rowToTeamMessage),
     playbooks: pb.error ? [] : (pb.data ?? []).map(rowToPlaybook),
+    dmMessages: dm.error ? [] : (dm.data ?? []).map(rowToDmMessage),
   };
 }
 
@@ -278,6 +284,8 @@ export const deletePlaybookDb = (id: string) => supabase.from("playbooks").delet
 export const deleteClientNoteDb = (id: string) => supabase.from("client_notes").delete().eq("id", id).then(logErr);
 export const insertTeamMessage = (m: TeamMessage) => supabase.from("team_messages").insert(teamMessageToRow(m)).then(logErr);
 export const deleteTeamMessageDb = (id: string) => supabase.from("team_messages").delete().eq("id", id).then(logErr);
+export const insertDmMessage = (m: DmMessage) => supabase.from("dm_messages").insert(dmMessageToRow(m)).then(logErr);
+export const deleteDmMessageDb = (id: string) => supabase.from("dm_messages").delete().eq("id", id).then(logErr);
 export const upsertVaultFolder = (f: VaultFolder) => supabase.from("vault_folders").upsert(vaultFolderToRow(f)).then(logErr);
 export const deleteVaultFolderDb = (id: string) => supabase.from("vault_folders").delete().eq("id", id).then(logErr);
 export const upsertFolder = (f: Folder) => supabase.from("folders").upsert(folderToRow(f)).then(logErr);

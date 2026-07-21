@@ -5,7 +5,8 @@
 // (supabase/messages.sql — an inbound GHL reply appears in an open thread
 // without a manual reload), client_notes (supabase/realtime-client-
 // notes.sql — the Chat tab, so a teammate's message shows up live), and
-// team_messages (supabase/team-chat.sql — Team Chat is pointless without live updates).
+// team_messages (supabase/team-chat.sql — Team Chat is pointless without live updates),
+// and dm_messages (supabase/dm-chat.sql — same reasoning, for private 1:1 DMs).
 import { supabase } from "./supabase";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 
@@ -53,6 +54,7 @@ export function subscribeRealtime(handlers: {
   onMessage: (p: Payload) => void;
   onClientNote: (p: Payload) => void;
   onTeamMessage: (p: Payload) => void;
+  onDmMessage: (p: Payload) => void;
   onStatusChange?: (status: string) => void;
 }): () => void {
   const unsubs = [
@@ -62,6 +64,7 @@ export function subscribeRealtime(handlers: {
     subscribeOne("messages", handlers.onMessage),
     subscribeOne("client_notes", handlers.onClientNote),
     subscribeOne("team_messages", handlers.onTeamMessage),
+    subscribeOne("dm_messages", handlers.onDmMessage),
   ];
   return () => unsubs.forEach((u) => u());
 }

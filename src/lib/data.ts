@@ -965,9 +965,12 @@ export function advanceDue(iso: string | null, rec: Recurrence, interval?: numbe
 /** "message" — a direct human communication (an @mention or comment someone
  * wrote to you). "activity" — an automatic side-effect notice from normal
  * task work (assignment, status/due-date change, checklist completion).
- * Lets the Inbox filter the two apart; missing on older rows, treated as
- * "activity" (the more common case) via `?? "activity"` wherever read. */
-export type NotificationKind = "message" | "activity";
+ * "dm" — someone sent you a private 1:1 message; routes to that DM thread
+ * instead of Team Chat (see openNotification), but still counts as a
+ * "Messages" notification for Inbox's filter tab. Lets the Inbox filter the
+ * two apart; missing on older rows, treated as "activity" (the more common
+ * case) via `?? "activity"` wherever read. */
+export type NotificationKind = "message" | "activity" | "dm";
 export interface Notification {
   id: string;
   recipientId: string;
@@ -995,6 +998,28 @@ export interface TeamMessage {
   authorId: string;
   body: string;
   at: string;
+}
+
+/** One message in a private 1:1 DM thread between two teammates (see
+ * supabase/dm-chat.sql). Modeled directly on TeamMessage — same flat,
+ * insert-only shape, no clientId/projectId/channel/attachments in v1 — plus
+ * the two participant columns a DM needs that a single global feed doesn't:
+ * recipientId (who this is addressed to, for RLS/unread/notify) and
+ * conversationId (the sorted-pair thread key, so a thread's messages are one
+ * indexed lookup instead of an OR of two id checks). 1:1 only — no group DMs. */
+export interface DmMessage {
+  id: string;
+  conversationId: string; // dmConversationId(authorId, recipientId)
+  authorId: string;
+  recipientId: string;
+  body: string;
+  at: string;
+}
+
+/** Canonical 1:1 thread key — sorted so either participant resolves to the
+ * same id (e.g. dmConversationId("u_derek","u_maria") === dmConversationId("u_maria","u_derek")). */
+export function dmConversationId(a: string, b: string): string {
+  return `dm_${[a, b].sort().join("__")}`;
 }
 
 // --- Lookups (bound at runtime to live state via the helpers below) ---------

@@ -1,22 +1,29 @@
 "use client";
 
-// Workspace-wide Team Chat — internal team talk that isn't tied to any
-// client or project (see supabase/team-chat.sql).
+// Team Chat + Direct Messages — one component renders both. Team Chat is the
+// workspace-wide feed (see supabase/team-chat.sql); a DM is a private 1:1
+// thread with one teammate (see supabase/dm-chat.sql). The `scope` prop is
+// the only thing that differs structurally: which feed, who to notify, and
+// whether @mention makes sense at all (a DM has exactly one addressee by
+// construction, so mentioning is meaningless there).
 //
-// Renders two ways off one implementation:
-//   • embedded (no onClose) — fills the Team Chat page's Chat tab. This is
-//     the only mount today: "the inbox is really where you review task
-//     comments and chat with the team."
+// Renders two ways off one implementation (orthogonal to `scope`):
+//   • embedded (no onClose) — fills the Chat hub's pane. This is the only
+//     mount today: "the inbox is really where you review task comments and
+//     chat with the team."
 //   • overlay (onClose given) — the original modal shell, same as
 //     SettingsHub. Currently unused; kept because it's a few lines and the
 //     obvious shape for a future quick-peek from another view.
 import { useEffect, useRef, useState } from "react";
-import { type Me, type TeamMessage, users, userById, timeAgo } from "@/lib/data";
+import { type Me, type User, type TeamMessage, type DmMessage, users, userById, timeAgo } from "@/lib/data";
 import { I, Avatar } from "./cockpit/ui";
 
-export default function TeamChat({ me, messages, onSend, onDelete, onClose }: {
+type Scope = { type: "team" } | { type: "dm"; other: User };
+
+export default function TeamChat({ me, scope, messages, onSend, onDelete, onClose }: {
   me: Me;
-  messages: TeamMessage[];
+  scope: Scope;
+  messages: (TeamMessage | DmMessage)[];
   onSend: (body: string) => void;
   onDelete: (id: string) => void;
   onClose?: () => void; // omit to embed inline instead of as an overlay
@@ -34,16 +41,17 @@ export default function TeamChat({ me, messages, onSend, onDelete, onClose }: {
     setDraft("");
   };
 
-  // @mention autocomplete — same idiom as TaskDrawer's and ClientJournal's
-  // comment composers. This isn't just a convenience: Cockpit's
-  // sendTeamMessage notifies on an exact `@Full Name` match, so picking from
-  // this list is what actually makes the mention reach the person. Typing
-  // "@justin" by hand matches nobody.
+  // @mention autocomplete — team-scope only. Same idiom as TaskDrawer's and
+  // ClientJournal's comment composers. This isn't just a convenience:
+  // Cockpit's sendTeamMessage notifies on an exact `@Full Name` match, so
+  // picking from this list is what actually makes the mention reach the
+  // person. Typing "@justin" by hand matches nobody. A DM has exactly one
+  // addressee already, so there's nothing to mention.
   // The @ must start the draft or follow whitespace, so an email address
   // ("derek@", "me@clickuplocal.com") never opens the picker and never gets
   // its Enter key hijacked into a name completion.
   const [mentionDismissed, setMentionDismissed] = useState(false);
-  const mentionMatch = /(^|\s)@([\w]*)$/.exec(draft);
+  const mentionMatch = scope.type === "team" ? /(^|\s)@([\w]*)$/.exec(draft) : null;
   const mentionCands = mentionMatch && !mentionDismissed ? users.filter((u) => u.name.toLowerCase().includes(mentionMatch[2].toLowerCase())) : [];
   const mentionOpen = mentionCands.length > 0;
   const pickMention = (name: string) => setDraft(draft.replace(/(^|\s)@([\w]*)$/, (_m, pre: string) => `${pre}@${name} `));
@@ -54,7 +62,9 @@ export default function TeamChat({ me, messages, onSend, onDelete, onClose }: {
     <>
         <div ref={feedRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
           {sorted.length === 0 && (
-            <div className="py-10 text-center text-[13px] text-muted">No messages yet — say hi 👋</div>
+            <div className="py-10 text-center text-[13px] text-muted">
+              {scope.type === "dm" ? `No messages yet — say hi to ${scope.other.name} 👋` : "No messages yet — say hi 👋"}
+            </div>
           )}
           {sorted.map((m) => {
             const author = userById(m.authorId);
@@ -65,7 +75,8 @@ export default function TeamChat({ me, messages, onSend, onDelete, onClose }: {
                 {!isMe && <Avatar id={m.authorId} size={28} />}
                 <div className={`flex min-w-0 max-w-[70%] flex-col ${isMe ? "items-end" : "items-start"}`}>
                   <div className={`flex items-baseline gap-1.5 px-1 ${isMe ? "flex-row-reverse" : ""}`}>
-                    {!isMe && <span className="text-[12px] font-semibold">{author?.name ?? "Someone"}</span>}
+                    {/* In a DM the other person's name is already the thread header — repeating it per-bubble is redundant. */}
+                    {!isMe && scope.type === "team" && <span className="text-[12px] font-semibold">{author?.name ?? "Someone"}</span>}
                     <span className="text-[11px] text-muted">{timeAgo(m.at)}</span>
                     {canDelete && (
                       <button onClick={() => onDelete(m.id)} title="Delete" className="rounded p-0.5 text-muted opacity-0 hover:text-danger group-hover/msg:opacity-100"><I.trash /></button>
@@ -103,7 +114,7 @@ export default function TeamChat({ me, messages, onSend, onDelete, onClose }: {
               // Plain Enter picks the top match only while the list is open.
               if (e.key === "Enter" && !e.shiftKey && mentionOpen) { e.preventDefault(); pickMention(mentionCands[0].name); return; }
             }}
-            placeholder="Message the team… (type @ to mention, ⌘↵ to send)"
+            placeholder={scope.type === "dm" ? `Message ${scope.other.name}… (⌘↵ to send)` : "Message the team… (type @ to mention, ⌘↵ to send)"}
             rows={2}
             className="w-full resize-none rounded-lg border bg-background px-3 py-2 text-[14px] outline-none focus:border-accent"
           />
@@ -123,7 +134,7 @@ export default function TeamChat({ me, messages, onSend, onDelete, onClose }: {
       <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
       <div className="fixed left-1/2 top-1/2 z-50 flex h-[80vh] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border bg-surface shadow-xl">
         <div className="flex items-center justify-between border-b px-5 py-3">
-          <h2 className="flex items-center gap-1.5 text-[16px] font-semibold"><I.comment /> Team Chat</h2>
+          <h2 className="flex items-center gap-1.5 text-[16px] font-semibold"><I.comment /> {scope.type === "dm" ? scope.other.name : "Team Chat"}</h2>
           <button onClick={onClose} className="rounded-md p-1 text-muted hover:bg-background"><I.close /></button>
         </div>
         {inner}

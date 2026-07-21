@@ -29,7 +29,10 @@ export function Inbox({ notifications, clientById, projectById, onOpen, onMarkAl
   const [filter, setFilter] = useState<InboxFilter>("all");
   // Older rows predate `kind` (see notification-kind.sql) — treat missing as
   // "activity", the more common case, same fallback rowToNotif already uses.
-  const filtered = filter === "all" ? notifications : notifications.filter((n) => (n.kind ?? "activity") === filter);
+  // A DM notification (kind "dm") counts as a "Messages" notice too — it's a
+  // direct human communication, same bucket as an @mention/comment, just
+  // routed to a DM thread instead of Team Chat when opened.
+  const filtered = filter === "all" ? notifications : notifications.filter((n) => (filter === "message" ? n.kind === "message" || n.kind === "dm" : (n.kind ?? "activity") === filter));
 
   return (
     // min-h-0 matters now that this sits under the Team Chat tab bar in a

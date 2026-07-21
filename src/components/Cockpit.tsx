@@ -58,13 +58,15 @@ import {
   type Folder,
   type Stage,
   type TeamMessage,
+  type DmMessage,
+  dmConversationId,
   PERSONAL_CLIENT_ID,
   WORKSPACE_CLIENT_ID,
   PERSONAL_PROJECT_ID,
   normalizeState,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, markMessagesReadDb, reassignMessagesTaskDb, insertMessage, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, markMessagesReadDb, reassignMessagesTaskDb, insertMessage, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import { Inbox } from "./cockpit/Inbox";
 import SettingsHub from "./SettingsHub";
@@ -203,6 +205,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // it to render in the normal content area instead).
   const [settingsView, setSettingsView] = useState(false);
   const [teamMessages, setTeamMessages] = useState<TeamMessage[]>([]);
+  const [dmMessages, setDmMessages] = useState<DmMessage[]>([]);
   // Which half of the Team Chat page is showing. Chat leads — per Derek, the
   // inbox "is really what team chat was supposed to be": talk to the team
   // first, review the task comments/mentions addressed to you second.
@@ -221,11 +224,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setTeamChatLastRead(now);
     try { localStorage.setItem("cut_teamChatLastRead", now); } catch {}
   };
+  // Which DM thread (if any) is open — the Chat hub's "Team" row and each
+  // teammate's row are mutually exclusive, so a non-null value here means
+  // "showing a DM thread" and null means "showing Team Chat" (see the Team
+  // Chat page's render branch further down).
+  const [dmUserId, setDmUserId] = useState<string | null>(null);
   // Team Chat is a real view now, not an overlay — open the page on its Chat
   // tab and clear the unread dot. Used by both the sidebar item and the
   // header shortcut so there's exactly one home for it.
   const openTeamChat = () => {
-    setInboxView(true); setInboxTab("chat");
+    setInboxView(true); setInboxTab("chat"); setDmUserId(null);
     setMyWork(false); setPersonalView(false); setDirView(null); setTerritoryView(null); setSettingsView(false);
     setOpenTaskId(null); setSidebarOpen(false);
     markTeamChatRead();
@@ -235,7 +243,42 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // without this the realtime insert lights an unread dot for a message
   // that's on screen, and it only clears by navigating away and back.
   // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { if (inboxView && inboxTab === "chat" && teamChatUnread) markTeamChatRead(); }, [inboxView, inboxTab, teamChatUnread]);
+  useEffect(() => { if (inboxView && dmUserId === null && inboxTab === "chat" && teamChatUnread) markTeamChatRead(); }, [inboxView, dmUserId, inboxTab, teamChatUnread]);
+
+  // DM read-state — same local-only "last seen" idiom as Team Chat above,
+  // just one timestamp per conversation instead of one global timestamp.
+  // Not a DB-backed read table: this is a 5-10 person internal tool that
+  // already accepts a single shared Message.read boolean for client SMS/
+  // email, so an occasionally-stale-across-devices unread dot is a
+  // proportionate cost for how much simpler this is to ship and maintain.
+  const [dmLastRead, setDmLastRead] = useState<Record<string, string>>({});
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { try { setDmLastRead(JSON.parse(localStorage.getItem("cut_dmLastRead") ?? "{}")); } catch {} }, []);
+  const markDmRead = (conversationId: string) => {
+    const now = new Date().toISOString();
+    setDmLastRead((m) => {
+      const next = { ...m, [conversationId]: now };
+      try { localStorage.setItem("cut_dmLastRead", JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+  const dmUnread = (otherUserId: string) => {
+    const cid = dmConversationId(me.id, otherUserId);
+    return dmMessages.some((m) => m.conversationId === cid && m.authorId !== me.id && m.at > (dmLastRead[cid] ?? ""));
+  };
+  // Mirrors openTeamChat exactly, for a specific teammate's thread instead
+  // of the shared feed.
+  const openDm = (userId: string) => {
+    setInboxView(true); setDmUserId(userId);
+    setMyWork(false); setPersonalView(false); setDirView(null); setTerritoryView(null); setSettingsView(false);
+    setOpenTaskId(null); setSidebarOpen(false);
+    markDmRead(dmConversationId(me.id, userId));
+  };
+  // Same reasoning as the Team Chat effect above: a DM message arriving
+  // while its thread is already open is already read.
+  const openDmThreadUnread = dmUserId !== null && dmUnread(dmUserId);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { if (dmUserId && openDmThreadUnread) markDmRead(dmConversationId(me.id, dmUserId)); }, [dmUserId, openDmThreadUnread, me.id]);
   const [addClientOpen, setAddClientOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   // Draggable quick-add FAB position (viewport px of its top-left). null =
@@ -671,6 +714,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setFolders(d.folders);
         setStages(d.stages);
         setTeamMessages(d.teamMessages);
+        setDmMessages(d.dmMessages);
         setUnmatchedEmails(d.unmatchedEmails);
         fetchClaudeQueue().then((ids) => setClaudeQueue(new Set(ids)));
       } catch (e) {
@@ -691,11 +735,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     document.documentElement.dataset.theme = next;
   };
 
-  const pushToast = (text: string) => {
+  // Toasts with an action (undo) linger ~4x longer — 2.8s is not enough time
+  // to read what happened and decide to reverse it.
+  const pushToast = (text: string, action?: { label: string; run: () => void }) => {
     const id = newId("toast_");
-    setToasts((t) => [...t, { id, text }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2800);
+    setToasts((t) => [...t, { id, text, action }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), action ? 11000 : 2800);
   };
+  const dismissToast = (id: string) => setToasts((t) => t.filter((x) => x.id !== id));
   // Copy a shareable deep link (see buildSearch) to the clipboard.
   const copyLink = (nav: NavState) => {
     const url = `${window.location.origin}${window.location.pathname}${buildSearch(nav)}`;
@@ -798,6 +845,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         const m = rowToTeamMessage(p.new);
         setTeamMessages((ms) => (ms.some((x) => x.id === m.id) ? ms.map((x) => (x.id === m.id ? m : x)) : [...ms, m]));
       },
+      // Same reasoning as team_messages: append-only, so id dedup covers it.
+      onDmMessage: (p) => {
+        if (p.eventType === "DELETE") {
+          const id = (p.old as { id: string }).id;
+          setDmMessages((ms) => ms.filter((m) => m.id !== id));
+          return;
+        }
+        const m = rowToDmMessage(p.new);
+        setDmMessages((ms) => (ms.some((x) => x.id === m.id) ? ms.map((x) => (x.id === m.id ? m : x)) : [...ms, m]));
+      },
       onStatusChange: (s) => { if (s === "CHANNEL_ERROR") pushToast("⚠️ Live updates interrupted — reconnecting…"); },
     });
     return unsub;
@@ -841,6 +898,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setFolders((prev) => mergeById(prev, d.folders));
         setStages((prev) => mergeById(prev, d.stages));
         setTeamMessages((prev) => mergeById(prev, d.teamMessages));
+        setDmMessages((prev) => mergeById(prev, d.dmMessages));
       } catch (e) { console.warn("[realtime] visibility refetch failed", e); }
     };
     document.addEventListener("visibilitychange", refetch);
@@ -952,9 +1010,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   };
   const openNotification = (n: Notification) => {
     if (!n.read) { setNotifications((ns) => ns.map((x) => (x.id === n.id ? { ...x, read: true } : x))); markNotifReadDb(n.id); }
+    // A DM notification's actorId is exactly who sent it — that's the thread to open.
+    if (n.kind === "dm" && n.actorId) { openDm(n.actorId); return; }
     if (n.taskId) { setOpenTaskId(n.taskId); return; }
     if (n.clientId) {
-      setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null);
+      setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null);
       setActiveClient(n.clientId); setActiveProject(n.projectId ?? null); setClientTab("chat");
       return;
     }
@@ -1086,7 +1146,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const visibleTerritories = myTerritories.slice().sort((a, b) => a.city.localeCompare(b.city));
   const territoryById = (id: string) => territories.find((t) => t.id === id) ?? null;
   const openTerritory = (id: string) => {
-    setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null);
+    setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null);
     setActiveClient("all"); setActiveProject(null); setOpenTaskId(null); setSidebarOpen(false);
     setTerritoryView(id);
   };
@@ -1310,8 +1370,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // pending one; nothing left → let the caller know via a toast.
     const next = reviewQueue[(curIdx + 1) % reviewQueue.length] ?? reviewQueue[0];
     if (!next) { pushToast("Nothing left to review — all caught up. 🎉"); return; }
-    if (next.kind === "project") { const pr = projectById(next.id); setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(pr?.clientId ?? "all"); setActiveProject(next.id); }
-    else { setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(next.id); setActiveProject(null); }
+    if (next.kind === "project") { const pr = projectById(next.id); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(pr?.clientId ?? "all"); setActiveProject(next.id); }
+    else { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(next.id); setActiveProject(null); }
     setClientTab("tasks");
     setOpenTaskId(null);
   };
@@ -1674,10 +1734,46 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Reuses patchTask per task (not a raw update()) so a bulk change still
   // gets the same event-log comments, notifications, and GHL sync a single
   // edit would — just applied to every selected task at once.
-  const bulkPatch = (patch: Partial<Task>) => {
+  //
+  // Every bulk edit is gated behind a confirm and hands back an undo. These
+  // controls sit one careless click away from rewriting a whole list (picking
+  // "Done" from the status dropdown used to fire instantly, with no warning
+  // and no way back), and the blast radius scales with the selection.
+  //
+  // Undo snapshots only the keys being written, so reverting restores exactly
+  // what changed and can't clobber edits made to other fields in between.
+  const bulkPatch = (patch: Partial<Task>, summary: string) => {
     const ids = [...selectedTaskIds];
-    ids.forEach((id) => patchTask(id, patch));
-    pushToast(`Updated ${ids.length} task${ids.length === 1 ? "" : "s"}`);
+    if (!ids.length) return;
+    const n = ids.length;
+    const plural = n === 1 ? "" : "s";
+    setConfirmDialog({
+      title: `${summary} for ${n} task${plural}?`,
+      message: `This updates all ${n} selected task${plural} at once. You can undo it right after.`,
+      confirmLabel: `Update ${n} task${plural}`,
+      danger: false,
+      onConfirm: () => {
+        const keys = Object.keys(patch) as (keyof Task)[];
+        const before = ids
+          .map((id) => {
+            const t = tasks.find((x) => x.id === id);
+            if (!t) return null;
+            const prev: Partial<Task> = {};
+            keys.forEach((k) => { (prev as Record<string, unknown>)[k] = t[k]; });
+            return { id, prev };
+          })
+          .filter((x): x is { id: string; prev: Partial<Task> } => !!x);
+        ids.forEach((id) => patchTask(id, patch));
+        setConfirmDialog(null);
+        pushToast(`${summary} for ${n} task${plural}`, {
+          label: "Undo",
+          run: () => {
+            before.forEach(({ id, prev }) => patchTask(id, prev));
+            pushToast(`Reverted ${before.length} task${before.length === 1 ? "" : "s"}`);
+          },
+        });
+      },
+    });
   };
   // "Move all due dates forward" — a client/project list can pile up many
   // dated tasks (a slow week leaves everything overdue) and re-dating each
@@ -2000,14 +2096,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const clientCompany = (c: Client | null) => (c && c.id.startsWith("cl_") ? c.ghlLocationId : "");
   const addClientContact = async (contact: Contact, type: ClientType = "client") => {
     const id = "cl_" + contact.id;
-    if (clients.some((c) => c.id === id)) { setActiveClient(id); setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setAddClientOpen(false); return; }
+    if (clients.some((c) => c.id === id)) { setActiveClient(id); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setAddClientOpen(false); return; }
     // Prevent a duplicate: if this contact matches a client we already track
     // (same email/phone/name, e.g. the same business in the other GHL
     // account), link it to that one and open it instead of making a second.
     const dupe = findDuplicateTrackedClient(contact);
     if (dupe) {
       linkContactToClient(dupe, contact.id);
-      setActiveClient(dupe); setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setAddClientOpen(false);
+      setActiveClient(dupe); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setAddClientOpen(false);
       pushToast(`${contact.name} is already tracked as “${clientById(dupe)?.name}” — linked to it.`);
       return;
     }
@@ -2546,11 +2642,40 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!silent) pushToast(`Moved to ${clientById(newClientId)?.name ?? "client"}${wasLinked ? " — unlinked from GoHighLevel" : ""}`);
   };
   // Bulk version of the above — moves every selected task in one pass with a
-  // single summary toast instead of one per task.
+  // single summary toast instead of one per task. Confirmed and undoable for
+  // the same reason as bulkPatch, and more so: a move rewrites client,
+  // project, and contact together, so putting it back by hand is real work.
   const bulkMoveToClient = (clientId: string) => {
     const ids = [...selectedTaskIds];
-    ids.forEach((id) => moveTaskToClient(id, clientId, true));
-    pushToast(`Moved ${ids.length} task${ids.length === 1 ? "" : "s"} to ${clientById(clientId)?.name ?? "client"}`);
+    if (!ids.length) return;
+    const name = clientById(clientId)?.name ?? "client";
+    const movable = ids.filter((id) => tasks.find((t) => t.id === id)?.clientId !== clientId);
+    if (!movable.length) { pushToast(`Already in ${name}`); return; }
+    const n = movable.length;
+    const plural = n === 1 ? "" : "s";
+    setConfirmDialog({
+      title: `Move ${n} task${plural} to ${name}?`,
+      message: `Each task's project and contact move too, and any GoHighLevel link is cleared. You can undo it right after.`,
+      confirmLabel: `Move ${n} task${plural}`,
+      danger: false,
+      onConfirm: () => {
+        const before = movable
+          .map((id) => {
+            const t = tasks.find((x) => x.id === id);
+            return t ? { id, prev: { clientId: t.clientId, projectId: t.projectId, contactId: t.contactId, ghlTaskId: t.ghlTaskId } as Partial<Task> } : null;
+          })
+          .filter((x): x is { id: string; prev: Partial<Task> } => !!x);
+        movable.forEach((id) => moveTaskToClient(id, clientId, true));
+        setConfirmDialog(null);
+        pushToast(`Moved ${n} task${plural} to ${name}`, {
+          label: "Undo",
+          run: () => {
+            before.forEach(({ id, prev }) => patchTask(id, prev));
+            pushToast(`Moved ${before.length} task${before.length === 1 ? "" : "s"} back`);
+          },
+        });
+      },
+    });
   };
   // Folds one task into another — started life as "merge a Conversation task
   // into real work" but the mechanics (move messages, fold comments, delete
@@ -2674,6 +2799,22 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     deleteTeamMessageDb(id);
   };
 
+  // --- direct messages -----------------------------------------------------
+  // Private 1:1 chat between two teammates — see supabase/dm-chat.sql. A DM
+  // has exactly one addressee by construction, so unlike sendTeamMessage
+  // there's no @mention scan: every send notifies the recipient directly.
+  const sendDmMessage = (otherUserId: string, body: string) => {
+    if (!body.trim()) return;
+    const m: DmMessage = { id: newId("dm_"), conversationId: dmConversationId(me.id, otherUserId), authorId: me.id, recipientId: otherUserId, body: body.trim(), at: new Date().toISOString() };
+    setDmMessages((ms) => [...ms, m]);
+    insertDmMessage(m);
+    notify(otherUserId, `${me.name} sent you a message`, null, { kind: "dm" });
+  };
+  const deleteDmMessage = (id: string) => {
+    setDmMessages((ms) => ms.filter((m) => m.id !== id));
+    deleteDmMessageDb(id);
+  };
+
   // --- client notes ------------------------------------------------------
   const addNote = (clientId: string, type: NoteType, body: string, projectId?: string | null, attachments?: Attachment[]) => {
     const note: ClientNote = { id: newId("cn_"), clientId, projectId: projectId ?? null, type, body, authorId: me.id, at: new Date().toISOString(), ...(attachments?.length ? { attachments } : {}) };
@@ -2710,7 +2851,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // duplicated in source. Only one header is ever visible (CSS breakpoint),
   // so the popovers never double-render on screen.
   const territoryTitle = territoryView ? (territoryView === "all" ? "Territories" : (territoryById(territoryView) ? `${territoryById(territoryView)!.city}, ${territoryById(territoryView)!.state}` : "Territory")) : null;
-  const headerTitleText = territoryTitle ?? (settingsView ? "Settings" : inboxView ? "Team Chat" : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? "All Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? "")));
+  const headerTitleText = territoryTitle ?? (settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Team Chat") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? "All Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? "")));
   const isClientDetail = !myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && !!clientById(activeClient);
   const showFilterControl = !territoryView && !inboxView && !dirView && !myWork && !(activeClient !== "all" && (clientTab === "chat" || clientTab === "vault"));
   const bellControl = (
@@ -2886,32 +3027,50 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         <div className="flex shrink-0 items-center gap-1 border-b px-3 py-3">
           <span className="inline-flex shrink-0 items-center justify-center rounded-full text-[15px] font-semibold text-white" style={{ width: 30, height: 30, background: me.color }}>{me.initials}</span>
           <div className="ml-1 min-w-0 flex-1 leading-tight"><div className="truncate text-[15px] font-medium">{me.name}</div><div className="text-[13px] capitalize text-muted">{me.role}</div></div>
-          <button onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); setSettingsView(true); }} title="Settings" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>
+          <button onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); setSettingsView(true); }} title="Settings" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>
           <button onClick={toggleTheme} title="Toggle theme" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-foreground">{theme === "light" ? <I.moon /> : <I.sun />}</button>
           <button onClick={onSignOut} title="Sign out" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-red-500"><I.logout /></button>
         </div>
 
+        {/* Chat hub: Team Chat + one row per teammate for private DMs, merged
+            into a single section per Derek's ask — "different chat groups...
+            a team chat that's everyone but then we can all private chat with
+            each other." Roster is small (a handful of people), so every
+            teammate gets a row rather than only ones you've messaged before —
+            no extra state to derive, matches how Territories/Pinned already
+            work at this scale. */}
+        {navVisible.inbox && (
+          <div className="shrink-0 space-y-0.5 px-2">
+            <div className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Chat</div>
+            <SideItem active={inboxView && dmUserId === null} onClick={openTeamChat}><I.comment className="text-muted" /> <span>Team</span>{(teamChatUnread || unread > 0) && (
+              // Both indicators, not either/or: notifications accumulate
+              // routinely, and an exclusive check meant a real unread chat
+              // message showed nothing at all whenever any notice was pending.
+              <span className="ml-auto flex items-center gap-1.5">
+                {teamChatUnread && <span title="Unread team chat" className="h-2 w-2 rounded-full bg-accent" />}
+                {unread > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{unread}</span>}
+              </span>
+            )}</SideItem>
+            {users.filter((u) => u.id !== me.id && u.id !== "u_claude").map((u) => (
+              <SideItem key={u.id} active={inboxView && dmUserId === u.id} onClick={() => openDm(u.id)}>
+                <Avatar id={u.id} size={20} /> <span className="min-w-0 flex-1 truncate text-left">{u.name}</span>
+                {dmUnread(u.id) && <span title="Unread messages" className="ml-auto h-2 w-2 rounded-full bg-accent" />}
+              </SideItem>
+            ))}
+          </div>
+        )}
         <nav className="shrink-0 space-y-0.5 px-2">
-          {navVisible.inbox && <SideItem active={inboxView} onClick={openTeamChat}><I.comment className="text-muted" /> <span>Team Chat</span>{(teamChatUnread || unread > 0) && (
-            // Both indicators, not either/or: notifications accumulate
-            // routinely, and an exclusive check meant a real unread chat
-            // message showed nothing at all whenever any notice was pending.
-            <span className="ml-auto flex items-center gap-1.5">
-              {teamChatUnread && <span title="Unread team chat" className="h-2 w-2 rounded-full bg-accent" />}
-              {unread > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{unread}</span>}
-            </span>
-          )}</SideItem>}
-          {navVisible.work && <SideItem active={myWork} onClick={() => { setMyWork(true); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>Dashboard</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
-          {navVisible.all && <SideItem active={!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient === "all"} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); }}><I.list className="text-muted" /> <span>All Tasks</span><span className="ml-auto text-[13px] text-muted">{scopedTasks.filter((t) => t.clientId.startsWith("cl_")).length}</span></SideItem>}
-          {navVisible.personal && <SideItem active={personalView} onClick={() => { setPersonalView(true); setMyWork(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>}
+          {navVisible.work && <SideItem active={myWork} onClick={() => { setMyWork(true); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>Dashboard</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
+          {navVisible.all && <SideItem active={!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient === "all"} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); }}><I.list className="text-muted" /> <span>All Tasks</span><span className="ml-auto text-[13px] text-muted">{scopedTasks.filter((t) => t.clientId.startsWith("cl_")).length}</span></SideItem>}
+          {navVisible.personal && <SideItem active={personalView} onClick={() => { setPersonalView(true); setMyWork(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>}
         </nav>
 
         {/* Projects / Clients are now directory pages, not inline lists — the
             sidebar stays lean since day-to-day work happens from Dashboard. */}
         <nav className="mt-1.5 shrink-0 space-y-0.5 border-t px-2 pt-1.5">
-          <SideItem active={dirView === "clients"} onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setActiveProject(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{clientList.length}</span></SideItem>
+          <SideItem active={dirView === "clients"} onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{clientList.length}</span></SideItem>
           {clients.some((c) => c.id === WORKSPACE_CLIENT_ID) && (
-            <SideItem active={dirView === "projects"} onClick={() => { setDirView("projects"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setActiveProject(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.folder className="text-muted" /> <span>Projects</span><span className="ml-auto text-[13px] text-muted">{workspaceProjects.length}</span></SideItem>
+            <SideItem active={dirView === "projects"} onClick={() => { setDirView("projects"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.folder className="text-muted" /> <span>Projects</span><span className="ml-auto text-[13px] text-muted">{workspaceProjects.length}</span></SideItem>
           )}
         </nav>
 
@@ -2932,7 +3091,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               {pinnedClients.map((c) => {
                 const active = !myWork && !personalView && !inboxView && !settingsView && !dirView && !activeProject && activeClient === c.id;
                 return (
-                  <SideItem key={c.id} active={active} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(c.id); setActiveProject(null); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
+                  <SideItem key={c.id} active={active} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(c.id); setActiveProject(null); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: clientStatusMeta(c.status).dot }} /> <span className="min-w-0 flex-1 truncate text-left">{c.name}</span>
                     <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); toggleStar(c.id); }} title="Unpin from sidebar" className="shrink-0 rounded p-0.5 text-amber-400 hover:bg-background"><I.star filled /></span>
                   </SideItem>
@@ -2941,7 +3100,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               {pinned.map((p) => {
                 const active = !myWork && !personalView && !inboxView && !settingsView && !dirView && activeProject === p.id;
                 return (
-                  <SideItem key={p.id} active={active} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(p.clientId); setActiveProject(p.id); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
+                  <SideItem key={p.id} active={active} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(p.clientId); setActiveProject(p.id); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
                     <I.list className="text-muted" /> <span className="min-w-0 flex-1 truncate text-left">{p.name}</span>
                     <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); toggleStarList(p.id); }} title="Unpin from sidebar" className="shrink-0 rounded p-0.5 text-amber-400 hover:bg-background"><I.star filled /></span>
                   </SideItem>
@@ -3038,7 +3197,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeProject && projectById(activeProject) ? (<>
               <h1 className="flex items-center gap-1.5 truncate text-[20px] font-semibold"><I.folder className="shrink-0 text-muted" /> {projectById(activeProject)!.name}</h1>
               <p className="hidden items-center gap-1.5 text-[13px] text-muted sm:flex">
-                <button onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
+                <button onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
                 <span>›</span>
                 <button onClick={() => setActiveProject(null)} className="hover:text-foreground hover:underline">{clientById(activeClient)?.name}</button>
                 <span>·</span>
@@ -3046,7 +3205,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </p>
             </>) : (<>
               <h1 className="flex items-center gap-2 truncate text-[20px] font-semibold">
-                {territoryTitle ? territoryTitle : settingsView ? "Settings" : inboxView ? "Team Chat" : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? "All Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
+                {territoryTitle ? territoryTitle : settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Team Chat") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? "All Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
                 {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
               </h1>
               {/* No subtitle for a territory — it fell through to the
@@ -3059,10 +3218,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   {/* Breadcrumb back to the Clients directory — only meaningful
                       when a specific client is the thing being viewed. */}
                   {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && (<>
-                    <button onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
+                    <button onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
                     <span>›</span>
                   </>)}
-                  <span>{settingsView ? "Integrations, team, territories, templates, playbooks, and API tokens" : inboxView ? (inboxTab === "chat" ? "Talk to the team — @mention someone to notify them" : "Everything that mentions or notifies you, in one place") : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "Every client and project you're on, grouped by what needs attention first" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</span>
+                  <span>{settingsView ? "Integrations, team, territories, templates, playbooks, and API tokens" : inboxView ? (dmUserId ? "Private — only the two of you can see this" : inboxTab === "chat" ? "Talk to the team — @mention someone to notify them" : "Everything that mentions or notifies you, in one place") : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "Every client and project you're on, grouped by what needs attention first" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</span>
                 </p>
               )}
             </>)}
@@ -3399,7 +3558,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             territories={territories} contacts={contacts} clients={clients}
             onAddTerritory={addTerritory} onToggleAssignee={toggleTerritoryAssignee} onDeleteTerritory={deleteTerritory}
             onAddContact={(contact) => addClientContact(contact)}
-            onOpenClient={(id) => { setSettingsView(false); setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); }}
+            onOpenClient={(id) => { setSettingsView(false); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); }}
             templates={taskTemplates} projects={projects}
             onSaveTemplate={saveTemplate} onDeleteTemplate={deleteTemplate} onUseTemplateAsTask={useTemplateAsTask}
             playbooks={playbooks} onSavePlaybook={savePlaybook} onDeletePlaybook={deletePlaybook} onLoadPlaybook={loadPlaybook}
@@ -3420,6 +3579,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               onOpenClient={(id) => { setTerritoryView(null); setActiveClient(id); setActiveProject(null); setClientTab("tasks"); }}
               focusId={territoryView === "all" ? undefined : territoryView} />
           </div>
+        ) : inboxView && dmUserId ? (
+          // A DM thread has no "Activity" sub-view (that's a Team Chat-page
+          // concept — task comments/mentions addressed to you, not private
+          // messages), so it skips the Chat/Activity tab bar entirely.
+          <TeamChat me={me} scope={{ type: "dm", other: userById(dmUserId)! }}
+            messages={dmMessages.filter((m) => m.conversationId === dmConversationId(me.id, dmUserId))}
+            onSend={(body) => sendDmMessage(dmUserId, body)} onDelete={deleteDmMessage} />
         ) : inboxView ? (
           // Team Chat page — the two halves of "talk to the team" in one
           // place: the workspace chat, and the task comments/mentions
@@ -3439,7 +3605,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               ))}
             </div>
             {inboxTab === "chat" ? (
-              <TeamChat me={me} messages={teamMessages} onSend={sendTeamMessage} onDelete={deleteTeamMessage} />
+              <TeamChat me={me} scope={{ type: "team" }} messages={teamMessages} onSend={sendTeamMessage} onDelete={deleteTeamMessage} />
             ) : (
               <Inbox notifications={myNotifs} clientById={clientById} projectById={projectById} onOpen={openNotification} onMarkAllRead={markAllNotifsRead} onSyncEmail={canAdmin ? syncEmail : undefined} syncingEmail={syncingEmail} onSyncAppointments={canAdmin ? syncAppointments : undefined} syncingAppointments={syncingAppointments}
                 unmatchedEmails={canAdmin ? unmatchedEmails : []} onAddAsClient={addAsClientFromEmail} onDismissUnmatched={dismissUnmatched} />
@@ -3460,11 +3626,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <GroupedList groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} queuedIds={claudeQueue} colOrder={colOrder} onReorderCols={reorderCols} />
         ) : myWork ? (
           <ClientsBoard groups={myWorkGroups} clientTaskCount={clientTaskCount} projectTaskCount={projectTaskCount} hasUnreadMessage={hasUnreadMessage}
-            onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }}
+            onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }}
             onOpenProject={(id) => {
-              if (id === PERSONAL_PROJECT_ID) { setMyWork(false); setPersonalView(true); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setOpenTaskId(null); return; }
+              if (id === PERSONAL_PROJECT_ID) { setMyWork(false); setPersonalView(true); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setOpenTaskId(null); return; }
               const p = projects.find((x) => x.id === id); if (!p) return;
-              setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(p.clientId); setActiveProject(id); setOpenTaskId(null);
+              setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(p.clientId); setActiveProject(id); setOpenTaskId(null);
             }} />
         ) : activeClient !== "all" && clientTab === "chat" ? (
           <ClientJournal
@@ -3537,10 +3703,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       {selectedTaskIds.size > 0 && (
         <div className="fixed bottom-4 left-1/2 z-30 flex -translate-x-1/2 flex-wrap items-center gap-2 rounded-xl border bg-surface px-3 py-2 shadow-xl">
           <span className="text-[15px] font-medium">{selectedTaskIds.size} selected</span>
-          <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ assigneeId: e.target.value === "unassigned" ? null : e.target.value }); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Assignee…</option><option value="unassigned">Unassigned</option><option value="waiting">⏳ Waiting on client</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
-          <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ status: e.target.value as TaskStatus }); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Status…</option>{STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}</select>
-          <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ priority: e.target.value as Priority }); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Priority…</option>{PRIORITY_ORDER.filter(isManuallyAssignable).map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}</select>
-          <input type="date" onChange={(e) => { if (e.target.value) { bulkPatch({ due: e.target.value }); e.target.value = ""; } }} title="Due date" className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none" />
+          <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ assigneeId: e.target.value === "unassigned" ? null : e.target.value }, e.target.value === "unassigned" ? "Unassign" : `Assign to ${users.find((u) => u.id === e.target.value)?.name ?? "user"}`); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Assignee…</option><option value="unassigned">Unassigned</option><option value="waiting">⏳ Waiting on client</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
+          <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ status: e.target.value as TaskStatus }, `Set status to ${STATUS_META[e.target.value as TaskStatus]?.label ?? e.target.value}`); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Status…</option>{STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}</select>
+          <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ priority: e.target.value as Priority }, `Set priority to ${PRIORITY_META[e.target.value as Priority]?.label ?? e.target.value}`); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Priority…</option>{PRIORITY_ORDER.filter(isManuallyAssignable).map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}</select>
+          <input type="date" onChange={(e) => { if (e.target.value) { bulkPatch({ due: e.target.value }, `Set due date to ${e.target.value}`); e.target.value = ""; } }} title="Due date" className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none" />
           <select defaultValue="" onChange={(e) => { if (e.target.value) bulkMoveToClient(e.target.value); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Move to…</option>{[...clientList].sort((a, b) => a.name.localeCompare(b.name)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
           {selectedTaskIds.size === 2 && (() => {
             // The older task is the "keeper" (target); the newer one merges
@@ -3562,7 +3728,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={orderedTaskIds.length} navTasks={orderedTaskIds.map((id) => tasks.find((t) => t.id === id)).filter((t): t is Task => !!t)} onOpenTask={setOpenTaskId} onAddSibling={(title) => addTaskToList(openTask.clientId, openTask.projectId, openTask.private, title)} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(attachments) => addComment(openTask.id, comment, attachments)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...clientList].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} isQueued={claudeQueue.has(openTask.id)} onToggleQueue={() => toggleClaudeQueue(openTask.id)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null })} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt)} draftingMessage={draftingMessage} onRegenerateAiSummary={() => regenerateAiSummary(openTask.clientId)} aiSummaryBusy={aiSummaryBusyId === openTask.clientId} />
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...clientList].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} isQueued={claudeQueue.has(openTask.id)} onToggleQueue={() => toggleClaudeQueue(openTask.id)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null })} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt)} draftingMessage={draftingMessage} onRegenerateAiSummary={() => regenerateAiSummary(openTask.clientId)} aiSummaryBusy={aiSummaryBusyId === openTask.clientId} />
       )}
 
       {addClientOpen && <AddClientModal subAccounts={subAccounts} contacts={contacts} existingIds={new Set(clients.map((c) => c.id))} onAdd={addClientContact} onClose={() => setAddClientOpen(false)} />}
@@ -3635,10 +3801,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       </>)}
       {cmdkOpen && <CommandK tasks={scopedTasks} clients={clientList} projects={projects} contacts={contacts} addedContactIds={addedContactIds} clientById={clientById}
         onOpenTask={(id) => { setOpenTaskId(id); setCmdkOpen(false); }}
-        onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); setCmdkOpen(false); }}
+        onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); setCmdkOpen(false); }}
         onOpenProject={(id) => {
-          if (id === PERSONAL_PROJECT_ID) { setMyWork(false); setPersonalView(true); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setCmdkOpen(false); return; }
-          const p = projects.find((x) => x.id === id); if (p) { setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(p.clientId); setActiveProject(id); } setCmdkOpen(false);
+          if (id === PERSONAL_PROJECT_ID) { setMyWork(false); setPersonalView(true); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setCmdkOpen(false); return; }
+          const p = projects.find((x) => x.id === id); if (p) { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(p.clientId); setActiveProject(id); } setCmdkOpen(false);
         }}
         onAddContact={(contact) => { addClientContact(contact); setCmdkOpen(false); }}
         onClose={() => setCmdkOpen(false)} />}
@@ -3668,7 +3834,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       )}
 
       <div className="pointer-events-none fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 flex-col items-center gap-2">
-        {toasts.map((t) => (<div key={t.id} className="rounded-lg bg-foreground px-3.5 py-2 text-[15px] font-medium text-[color:var(--surface)] shadow-lg">{t.text}</div>))}
+        {toasts.map((t) => (<div key={t.id} className="flex items-center gap-3 rounded-lg bg-foreground px-3.5 py-2 text-[15px] font-medium text-[color:var(--surface)] shadow-lg"><span>{t.text}</span>{t.action && (<button onClick={() => { t.action!.run(); dismissToast(t.id); }} className="shrink-0 rounded-md border border-[color:var(--surface)]/35 px-2 py-0.5 text-[14px] font-semibold hover:bg-[color:var(--surface)]/15">{t.action.label}</button>)}</div>))}
       </div>
     </div>
   );
