@@ -3166,9 +3166,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               })}
               {pinned.map((p) => {
                 const active = !myWork && !personalView && !inboxView && !settingsView && !dirView && activeProject === p.id;
+                // A list name alone ("Website") doesn't say whose — several
+                // clients can have a same-named list. Show the owning
+                // client small above it, same idea as ProjectsDirectory's
+                // subtitle for the same ambiguity.
+                const clientName = clientById(p.clientId)?.name;
                 return (
                   <SideItem key={p.id} active={active} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(p.clientId); setActiveProject(p.id); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
-                    <I.list className="text-muted" /> <span className="min-w-0 flex-1 truncate text-left">{p.name}</span>
+                    <I.list className="shrink-0 text-muted" />
+                    <span className="min-w-0 flex-1 text-left">
+                      {clientName && <span className="block truncate text-[11px] leading-tight text-muted">{clientName}</span>}
+                      <span className="block truncate leading-tight">{p.name}</span>
+                    </span>
                     <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); toggleStarList(p.id); }} title="Unpin from sidebar" className="shrink-0 rounded p-0.5 text-amber-400 hover:bg-background"><I.star filled /></span>
                   </SideItem>
                 );
