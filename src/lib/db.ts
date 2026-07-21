@@ -95,10 +95,10 @@ const rowToClientLink = (r: any): ClientLink => ({ id: r.id, clientId: r.client_
 const clientNoteToRow = (n: ClientNote) => ({ id: n.id, client_id: n.clientId, project_id: n.projectId ?? null, type: n.type, body: n.body, author_id: n.authorId, created_at: n.at, attachments: n.attachments ?? [] });
 export const rowToClientNote = (r: any): ClientNote => ({ id: r.id, clientId: r.client_id, projectId: r.project_id ?? null, type: (r.type as NoteType) ?? "note", body: r.body ?? "", authorId: r.author_id, at: r.created_at, attachments: r.attachments ?? [] });
 
-const teamMessageToRow = (m: TeamMessage) => ({ id: m.id, author_id: m.authorId, body: m.body, created_at: m.at });
-export const rowToTeamMessage = (r: any): TeamMessage => ({ id: r.id, authorId: r.author_id, body: r.body ?? "", at: r.created_at });
-const dmMessageToRow = (m: DmMessage) => ({ id: m.id, conversation_id: m.conversationId, author_id: m.authorId, recipient_id: m.recipientId, body: m.body, created_at: m.at });
-export const rowToDmMessage = (r: any): DmMessage => ({ id: r.id, conversationId: r.conversation_id, authorId: r.author_id, recipientId: r.recipient_id, body: r.body ?? "", at: r.created_at });
+const teamMessageToRow = (m: TeamMessage) => ({ id: m.id, author_id: m.authorId, body: m.body, created_at: m.at, reply_to_id: m.replyToId ?? null, attachments: m.attachments ?? [], pinned: m.pinned ?? false, pinned_by: m.pinnedBy ?? null, pinned_at: m.pinnedAt ?? null });
+export const rowToTeamMessage = (r: any): TeamMessage => ({ id: r.id, authorId: r.author_id, body: r.body ?? "", at: r.created_at, replyToId: r.reply_to_id ?? null, attachments: r.attachments ?? [], pinned: r.pinned ?? false, pinnedBy: r.pinned_by ?? null, pinnedAt: r.pinned_at ?? null });
+const dmMessageToRow = (m: DmMessage) => ({ id: m.id, conversation_id: m.conversationId, author_id: m.authorId, recipient_id: m.recipientId, body: m.body, created_at: m.at, reply_to_id: m.replyToId ?? null, attachments: m.attachments ?? [], pinned: m.pinned ?? false, pinned_by: m.pinnedBy ?? null, pinned_at: m.pinnedAt ?? null });
+export const rowToDmMessage = (r: any): DmMessage => ({ id: r.id, conversationId: r.conversation_id, authorId: r.author_id, recipientId: r.recipient_id, body: r.body ?? "", at: r.created_at, replyToId: r.reply_to_id ?? null, attachments: r.attachments ?? [], pinned: r.pinned ?? false, pinnedBy: r.pinned_by ?? null, pinnedAt: r.pinned_at ?? null });
 
 const vaultFolderToRow = (f: VaultFolder) => ({ id: f.id, client_id: f.clientId, project_id: f.projectId, name: f.name, created_at: f.createdAt });
 const rowToVaultFolder = (r: any): VaultFolder => ({ id: r.id, clientId: r.client_id, projectId: r.project_id ?? null, name: r.name, createdAt: r.created_at });
@@ -284,8 +284,14 @@ export const deletePlaybookDb = (id: string) => supabase.from("playbooks").delet
 export const deleteClientNoteDb = (id: string) => supabase.from("client_notes").delete().eq("id", id).then(logErr);
 export const insertTeamMessage = (m: TeamMessage) => supabase.from("team_messages").insert(teamMessageToRow(m)).then(logErr);
 export const deleteTeamMessageDb = (id: string) => supabase.from("team_messages").delete().eq("id", id).then(logErr);
+// Narrow patch, not a full-row upsert — pin toggle is the only in-place edit
+// a chat message supports (see chat-reply-attachments-pins.sql's update policy).
+export const updateTeamMessageDb = (id: string, patch: { pinned: boolean; pinnedBy: string | null; pinnedAt: string | null }) =>
+  supabase.from("team_messages").update({ pinned: patch.pinned, pinned_by: patch.pinnedBy, pinned_at: patch.pinnedAt }).eq("id", id).then(logErr);
 export const insertDmMessage = (m: DmMessage) => supabase.from("dm_messages").insert(dmMessageToRow(m)).then(logErr);
 export const deleteDmMessageDb = (id: string) => supabase.from("dm_messages").delete().eq("id", id).then(logErr);
+export const updateDmMessageDb = (id: string, patch: { pinned: boolean; pinnedBy: string | null; pinnedAt: string | null }) =>
+  supabase.from("dm_messages").update({ pinned: patch.pinned, pinned_by: patch.pinnedBy, pinned_at: patch.pinnedAt }).eq("id", id).then(logErr);
 export const upsertVaultFolder = (f: VaultFolder) => supabase.from("vault_folders").upsert(vaultFolderToRow(f)).then(logErr);
 export const deleteVaultFolderDb = (id: string) => supabase.from("vault_folders").delete().eq("id", id).then(logErr);
 export const upsertFolder = (f: Folder) => supabase.from("folders").upsert(folderToRow(f)).then(logErr);

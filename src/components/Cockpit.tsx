@@ -66,7 +66,7 @@ import {
   normalizeState,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, markMessagesReadDb, reassignMessagesTaskDb, insertMessage, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, markMessagesReadDb, reassignMessagesTaskDb, insertMessage, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import { Inbox } from "./cockpit/Inbox";
 import SettingsHub from "./SettingsHub";
@@ -2770,9 +2770,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   // --- team chat -----------------------------------------------------------
   // Workspace-wide, not tied to any client/project — see supabase/team-chat.sql.
-  const sendTeamMessage = (body: string) => {
-    if (!body.trim()) return;
-    const m: TeamMessage = { id: newId("tm_"), authorId: me.id, body: body.trim(), at: new Date().toISOString() };
+  const sendTeamMessage = (body: string, attachments?: Attachment[], replyToId?: string | null) => {
+    if (!body.trim() && !attachments?.length) return;
+    const m: TeamMessage = { id: newId("tm_"), authorId: me.id, body: body.trim(), at: new Date().toISOString(), replyToId: replyToId ?? null, attachments: attachments ?? [] };
     setTeamMessages((ms) => [...ms, m]);
     insertTeamMessage(m);
     // @mention detection. The composer's picker inserts the exact "@Full Name"
@@ -2798,14 +2798,22 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setTeamMessages((ms) => ms.filter((m) => m.id !== id));
     deleteTeamMessageDb(id);
   };
+  // Pin is a shared team curation flag, not message ownership — any teammate
+  // can toggle it (see chat-reply-attachments-pins.sql's team_messages_update
+  // policy, deliberately open unlike the author-scoped delete policy).
+  const pinTeamMessage = (id: string, pinned: boolean) => {
+    const patch = { pinned, pinnedBy: pinned ? me.id : null, pinnedAt: pinned ? new Date().toISOString() : null };
+    setTeamMessages((ms) => ms.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+    updateTeamMessageDb(id, patch);
+  };
 
   // --- direct messages -----------------------------------------------------
   // Private 1:1 chat between two teammates — see supabase/dm-chat.sql. A DM
   // has exactly one addressee by construction, so unlike sendTeamMessage
   // there's no @mention scan: every send notifies the recipient directly.
-  const sendDmMessage = (otherUserId: string, body: string) => {
-    if (!body.trim()) return;
-    const m: DmMessage = { id: newId("dm_"), conversationId: dmConversationId(me.id, otherUserId), authorId: me.id, recipientId: otherUserId, body: body.trim(), at: new Date().toISOString() };
+  const sendDmMessage = (otherUserId: string, body: string, attachments?: Attachment[], replyToId?: string | null) => {
+    if (!body.trim() && !attachments?.length) return;
+    const m: DmMessage = { id: newId("dm_"), conversationId: dmConversationId(me.id, otherUserId), authorId: me.id, recipientId: otherUserId, body: body.trim(), at: new Date().toISOString(), replyToId: replyToId ?? null, attachments: attachments ?? [] };
     setDmMessages((ms) => [...ms, m]);
     insertDmMessage(m);
     notify(otherUserId, `${me.name} sent you a message`, null, { kind: "dm" });
@@ -2813,6 +2821,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const deleteDmMessage = (id: string) => {
     setDmMessages((ms) => ms.filter((m) => m.id !== id));
     deleteDmMessageDb(id);
+  };
+  // Both participants (or admin) can pin — matches dm_messages_update's RLS
+  // predicate exactly (the same people who can already read the thread).
+  const pinDmMessage = (id: string, pinned: boolean) => {
+    const patch = { pinned, pinnedBy: pinned ? me.id : null, pinnedAt: pinned ? new Date().toISOString() : null };
+    setDmMessages((ms) => ms.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+    updateDmMessageDb(id, patch);
   };
 
   // --- client notes ------------------------------------------------------
@@ -3585,7 +3600,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           // messages), so it skips the Chat/Activity tab bar entirely.
           <TeamChat me={me} scope={{ type: "dm", other: userById(dmUserId)! }}
             messages={dmMessages.filter((m) => m.conversationId === dmConversationId(me.id, dmUserId))}
-            onSend={(body) => sendDmMessage(dmUserId, body)} onDelete={deleteDmMessage} />
+            onSend={(body, attachments, replyToId) => sendDmMessage(dmUserId, body, attachments, replyToId)} onDelete={deleteDmMessage}
+            onPin={pinDmMessage} onUploadFile={(file) => uploadOneImage(`dm/${dmConversationId(me.id, dmUserId)}`, file)} onOpenFile={downloadFile} />
         ) : inboxView ? (
           // Team Chat page — the two halves of "talk to the team" in one
           // place: the workspace chat, and the task comments/mentions
@@ -3605,7 +3621,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               ))}
             </div>
             {inboxTab === "chat" ? (
-              <TeamChat me={me} scope={{ type: "team" }} messages={teamMessages} onSend={sendTeamMessage} onDelete={deleteTeamMessage} />
+              <TeamChat me={me} scope={{ type: "team" }} messages={teamMessages} onSend={sendTeamMessage} onDelete={deleteTeamMessage}
+                onPin={pinTeamMessage} onUploadFile={(file) => uploadOneImage("team-chat", file)} onOpenFile={downloadFile} />
             ) : (
               <Inbox notifications={myNotifs} clientById={clientById} projectById={projectById} onOpen={openNotification} onMarkAllRead={markAllNotifsRead} onSyncEmail={canAdmin ? syncEmail : undefined} syncingEmail={syncingEmail} onSyncAppointments={canAdmin ? syncAppointments : undefined} syncingAppointments={syncingAppointments}
                 unmatchedEmails={canAdmin ? unmatchedEmails : []} onAddAsClient={addAsClientFromEmail} onDismissUnmatched={dismissUnmatched} />

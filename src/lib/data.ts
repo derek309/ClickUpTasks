@@ -990,23 +990,33 @@ export const seedNotifications: Notification[] = [
 ];
 
 /** One message in the workspace-wide Team Chat — internal team talk that
- * isn't tied to any client or project (see supabase/team-chat.sql). Deliberately
- * not modeled on ClientNote/Message: no clientId/projectId, no channel, no
- * attachments in v1 — a plain flat feed for "who's covering X today"-style talk. */
+ * isn't tied to any client or project (see supabase/team-chat.sql).
+ * Deliberately not modeled on ClientNote/Message: no clientId/projectId, no
+ * channel — a plain flat feed for "who's covering X today"-style talk, plus
+ * the three optional extras any chat needs: quote-reply (replyToId, a
+ * same-table message id — resolved client-side, no join), attachments
+ * (mirrors Comment.attachments' shape exactly), and pin (pinned/pinnedBy/
+ * pinnedAt — any team member can toggle it, a shared curation flag, not
+ * message ownership like delete is). */
 export interface TeamMessage {
   id: string;
   authorId: string;
   body: string;
   at: string;
+  replyToId?: string | null;
+  attachments?: Attachment[];
+  pinned?: boolean;
+  pinnedBy?: string | null;
+  pinnedAt?: string | null;
 }
 
 /** One message in a private 1:1 DM thread between two teammates (see
  * supabase/dm-chat.sql). Modeled directly on TeamMessage — same flat,
- * insert-only shape, no clientId/projectId/channel/attachments in v1 — plus
- * the two participant columns a DM needs that a single global feed doesn't:
- * recipientId (who this is addressed to, for RLS/unread/notify) and
- * conversationId (the sorted-pair thread key, so a thread's messages are one
- * indexed lookup instead of an OR of two id checks). 1:1 only — no group DMs. */
+ * insert-only-plus-pin shape — plus the two participant columns a DM needs
+ * that a single global feed doesn't: recipientId (who this is addressed to,
+ * for RLS/unread/notify) and conversationId (the sorted-pair thread key, so
+ * a thread's messages are one indexed lookup instead of an OR of two id
+ * checks). 1:1 only — no group DMs. */
 export interface DmMessage {
   id: string;
   conversationId: string; // dmConversationId(authorId, recipientId)
@@ -1014,6 +1024,11 @@ export interface DmMessage {
   recipientId: string;
   body: string;
   at: string;
+  replyToId?: string | null;
+  attachments?: Attachment[];
+  pinned?: boolean;
+  pinnedBy?: string | null;
+  pinnedAt?: string | null;
 }
 
 /** Canonical 1:1 thread key — sorted so either participant resolves to the
