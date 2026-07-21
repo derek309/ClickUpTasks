@@ -14,6 +14,7 @@ import { formatDue, isOverdue, type Attachment } from "@/lib/data";
 type WaitingAttachment = { id: string; name: string; kind: Attachment["kind"]; size: string; path: string | null; url: string | null };
 type WaitingTask = {
   id: string; title: string; due: string | null; description: string; status: string; needsResponse: boolean;
+  attachments: WaitingAttachment[];
   response: { body: string; submittedAt: string; attachments: WaitingAttachment[] } | null;
 };
 type DraftAttachment = { id: string; name: string; kind: Attachment["kind"]; size: string; path: string };
@@ -36,6 +37,35 @@ function kindFromName(name: string): Attachment["kind"] {
   return "doc";
 }
 const localId = () => `a_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+
+// Mockups/screenshots/staging links the team attached to a task, or the
+// client's own reply attachments — same tile treatment either way, so the
+// client can actually review the page/media in question, not just read a
+// text description. Images get a real thumbnail; everything else (a
+// staging-page link, a PDF, a doc) is a small labeled chip.
+function AttachmentGallery({ items }: { items: WaitingAttachment[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {items.map((a) => {
+        if (!a.url) return <span key={a.id} className="rounded-md border bg-background px-2 py-1 text-[12px] text-muted">{a.name}</span>;
+        if (a.kind === "image") {
+          return (
+            <a key={a.id} href={a.url} target="_blank" rel="noopener noreferrer" title={a.name} className="block h-20 w-20 overflow-hidden rounded-lg border">
+              {/* eslint-disable-next-line @next/next/no-img-element -- signed-URL thumbnail, not a next/image-friendly static asset. */}
+              <img src={a.url} alt={a.name} className="h-full w-full object-cover" />
+            </a>
+          );
+        }
+        return (
+          <a key={a.id} href={a.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-[12px] text-accent hover:underline">
+            {a.kind === "link" ? "🔗" : "📄"} {a.name}
+          </a>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function WaitingView({ token }: { token: string }) {
   const [clientName, setClientName] = useState<string | null>(null);
@@ -228,19 +258,14 @@ export default function WaitingView({ token }: { token: string }) {
                         )}
                       </div>
                       {t.description && <p className="mt-1.5 whitespace-pre-wrap text-[14px] text-muted">{t.description}</p>}
+                      <AttachmentGallery items={t.attachments} />
 
                       {isDone ? (
                         t.response && (t.response.body || t.response.attachments.length > 0) && (
                           <div className="mt-2 rounded-lg bg-white/70 p-2.5 text-[13px] text-green-900">
                             <div className="mb-1 font-medium">Completed</div>
                             {t.response.body && <p className="whitespace-pre-wrap">{t.response.body}</p>}
-                            {t.response.attachments.length > 0 && (
-                              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                                {t.response.attachments.map((a) => a.url && (
-                                  <a key={a.id} href={a.url} target="_blank" rel="noopener noreferrer" className="rounded-md border border-green-200 bg-white px-2 py-1 text-[12px] text-green-800 hover:underline">{a.name}</a>
-                                ))}
-                              </div>
-                            )}
+                            <AttachmentGallery items={t.response.attachments} />
                           </div>
                         )
                       ) : isEditing ? (

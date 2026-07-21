@@ -23,8 +23,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   const { data: client } = await supabaseAdmin.from("clients").select("id, name").eq("share_token", token).maybeSingle();
   if (!client) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  type Row = { id: string; title: string; due: string | null; description: string | null; status: string; waiting_on_client: boolean | null; client_response: { body: string; attachments: Attachment[]; submittedAt: string } | null };
-  const cols = "id, title, due, description, status, waiting_on_client, client_response";
+  type Row = {
+    id: string; title: string; due: string | null; description: string | null; status: string;
+    waiting_on_client: boolean | null; client_response: { body: string; attachments: Attachment[]; submittedAt: string } | null;
+    attachments: Attachment[] | null;
+  };
+  const cols = "id, title, due, description, status, waiting_on_client, client_response, attachments";
   const [{ data: waiting }, { data: responded }] = await Promise.all([
     supabaseAdmin.from("tasks").select(cols).eq("client_id", client.id).eq("waiting_on_client", true),
     supabaseAdmin.from("tasks").select(cols).eq("client_id", client.id).not("client_response", "is", null),
@@ -33,21 +37,32 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   [...(waiting ?? []), ...(responded ?? [])].forEach((t) => byId.set((t as Row).id, t as Row));
   const rows = [...byId.values()].sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999"));
 
+  // Resolve any attachment's storage path to a short-lived signed URL — used
+  // for both the task's own attachments (mockups/screenshots/staging links
+  // the team put there for the client to review) and the client's own reply
+  // attachments.
+  const resolveAttachments = async (list: Attachment[]) => Promise.all(list.map(async (a) => ({
+    id: a.id, name: a.name, kind: a.kind, size: a.size, path: a.path ?? null,
+    url: a.path ? (await supabaseAdmin.storage.from(TASK_FILES_BUCKET).createSignedUrl(a.path, 3600)).data?.signedUrl ?? null : a.url ?? null,
+  })));
+
   const tasks = await Promise.all(rows.map(async (t) => {
     const cr = t.client_response as { body: string; attachments: Attachment[]; submittedAt: string } | null;
-    const attachments = cr
-      ? await Promise.all(cr.attachments.map(async (a) => ({
-          id: a.id, name: a.name, kind: a.kind, size: a.size, path: a.path ?? null,
-          url: a.path ? (await supabaseAdmin.storage.from(TASK_FILES_BUCKET).createSignedUrl(a.path, 3600)).data?.signedUrl ?? null : a.url ?? null,
-        })))
-      : [];
+    const [attachments, responseAttachments] = await Promise.all([
+      resolveAttachments(t.attachments ?? []),
+      cr ? resolveAttachments(cr.attachments) : Promise.resolve([]),
+    ]);
     return {
       id: t.id, title: t.title, due: t.due ?? null,
       // Stripped to plain text server-side — no HTML ever reaches this public
       // response, and the page never needs the TipTap editor bundle to render it.
       description: htmlToText(t.description ?? ""),
       status: t.status, needsResponse: t.waiting_on_client === true,
-      response: cr ? { body: cr.body, submittedAt: cr.submittedAt, attachments } : null,
+      // Mockups/screenshots/staging links the team attached — the "review
+      // pages, media, etc" surface, so the client sees what they're
+      // approving/responding to, not just a text description.
+      attachments,
+      response: cr ? { body: cr.body, submittedAt: cr.submittedAt, attachments: responseAttachments } : null,
     };
   }));
 
