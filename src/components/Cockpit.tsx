@@ -2886,7 +2886,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         <div className="flex shrink-0 items-center gap-1 border-b px-3 py-3">
           <span className="inline-flex shrink-0 items-center justify-center rounded-full text-[15px] font-semibold text-white" style={{ width: 30, height: 30, background: me.color }}>{me.initials}</span>
           <div className="ml-1 min-w-0 flex-1 leading-tight"><div className="truncate text-[15px] font-medium">{me.name}</div><div className="text-[13px] capitalize text-muted">{me.role}</div></div>
-          <button onClick={() => { setSettingsView(true); setMyWork(false); setPersonalView(false); setInboxView(false); setSettingsView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); }} title="Settings" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>
+          <button onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); setSettingsView(true); }} title="Settings" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>
           <button onClick={toggleTheme} title="Toggle theme" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-foreground">{theme === "light" ? <I.moon /> : <I.sun />}</button>
           <button onClick={onSignOut} title="Sign out" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-red-500"><I.logout /></button>
         </div>
