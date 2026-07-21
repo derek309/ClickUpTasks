@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { tokenForLocation } from "@/lib/ghlTokens";
+import { tokenForLocation, configuredLocations } from "@/lib/ghlTokens";
 import { requireAdmin } from "@/lib/serverAuth";
 import { rowToContact } from "@/lib/db";
 
@@ -12,22 +12,51 @@ import { rowToContact } from "@/lib/db";
 // calls), which is overkill when someone just wants to check whether a
 // single contact's info changed. Admin-gated, matching contacts write
 // being admin-only everywhere else in this app.
-export async function POST(req: NextRequest) {
-  if (!(await requireAdmin(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const { contactId, locationId, ghlContactId } = await req.json().catch(() => ({} as any));
-  if (!contactId || !locationId || !ghlContactId)
-    return NextResponse.json({ error: "Missing contactId, locationId, or ghlContactId." }, { status: 400 });
-
-  const token = await tokenForLocation(locationId);
-  if (!token) return NextResponse.json({ error: "No GoHighLevel token configured for this sub-account yet." }, { status: 501 });
-
+//
+// `locationId` is optional and mostly vestigial: a client's own
+// `ghlLocationId` field is unreliable for this purpose — it's empty for
+// most clients, and where it IS set it's often been repurposed to just
+// hold a company-name label rather than a real GHL location id (see
+// Cockpit.tsx's `clientCompany` comment). Since a GHL Private Integration
+// token is scoped to one location and `GET /contacts/{id}` doesn't take a
+// location in the URL, it's safe to just try every CONNECTED token (the
+// ones actually set up in Settings) until one successfully returns this
+// exact contact — this is read-only, so trying several is harmless (unlike
+// outbound actions like pushing a task or sending an SMS, which stay
+// strictly gated on a known-correct location — guessing wrong there could
+// send something from the wrong business).
+async function fetchContactWithToken(token: string, ghlContactId: string): Promise<any | null> {
   const res = await fetch(`https://services.leadconnectorhq.com/contacts/${encodeURIComponent(ghlContactId)}`, {
     headers: { Authorization: `Bearer ${token}`, Version: "2021-07-28", Accept: "application/json" },
   });
-  if (!res.ok) { const text = await res.text().catch(() => ""); return NextResponse.json({ error: `GoHighLevel API ${res.status}: ${text.slice(0, 240)}` }, { status: 502 }); }
-  const json = await res.json();
-  const c = json?.contact;
-  if (!c) return NextResponse.json({ error: "Contact not found in GoHighLevel." }, { status: 404 });
+  if (!res.ok) return null;
+  const json = await res.json().catch(() => null);
+  return json?.contact ?? null;
+}
+
+export async function POST(req: NextRequest) {
+  if (!(await requireAdmin(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { contactId, locationId, ghlContactId } = await req.json().catch(() => ({} as any));
+  if (!contactId || !ghlContactId)
+    return NextResponse.json({ error: "Missing contactId or ghlContactId." }, { status: 400 });
+
+  let c: any = null;
+  if (locationId) {
+    const token = await tokenForLocation(locationId);
+    if (token) c = await fetchContactWithToken(token, ghlContactId);
+  }
+  if (!c) {
+    const locations = await configuredLocations();
+    for (const loc of locations) {
+      if (loc === locationId) continue; // already tried above
+      const token = await tokenForLocation(loc);
+      if (!token) continue;
+      c = await fetchContactWithToken(token, ghlContactId);
+      if (c) break;
+    }
+  }
+  if (!c && process.env.GHL_TOKEN) c = await fetchContactWithToken(process.env.GHL_TOKEN, ghlContactId);
+  if (!c) return NextResponse.json({ error: "Couldn't find this contact in any connected GoHighLevel sub-account." }, { status: 404 });
 
   const row = {
     name: [c.firstName, c.lastName].filter(Boolean).join(" ") || c.name || c.email || "Unnamed contact",

@@ -516,16 +516,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // more than needed to check if one person's phone number changed.
   const [refreshingContact, setRefreshingContact] = useState(false);
   const refreshContact = async (contact: Contact) => {
-    // ghlTargetForContact is declared later in this component; harmless in
-    // practice (this only ever runs post-render, from a click handler or
-    // the auto-refresh effect near openTask), same TDZ shape as other
-    // cross-referencing helpers here.
-    // eslint-disable-next-line react-hooks/immutability
-    const target = ghlTargetForContact(contact);
-    if (!target) { pushToast("No GoHighLevel connection for this client's sub-account."); return; }
+    if (!contact.ghlContactId) { pushToast("This contact isn't linked to GoHighLevel."); return; }
     setRefreshingContact(true);
     try {
-      const res = await authedFetch("/api/ghl/contact", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contactId: contact.id, locationId: target.locationId, ghlContactId: target.ghlContactId }) });
+      // No locationId needed — the route tries every connected sub-account's
+      // token itself, since a client's own ghlLocationId field is
+      // unreliable for this (often empty, or repurposed as a company-name
+      // label — see the route's comment). This is read-only, so trying
+      // several tokens is safe.
+      const res = await authedFetch("/api/ghl/contact", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contactId: contact.id, ghlContactId: contact.ghlContactId }) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) { pushToast(j.error || "Failed to refresh contact."); return; }
       setContacts((cs) => cs.map((c) => (c.id === contact.id ? j.contact : c)));
@@ -545,6 +544,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // the whole point — "already handled elsewhere"), just skips the
   // no-op/error noise on every task open.
   const refreshMessages = async (clientId: string, contact: Contact, opts?: { silent?: boolean }) => {
+    // ghlTargetForContact is declared later in this component; harmless in
+    // practice (this only ever runs post-render, from a click handler or
+    // the auto-refresh effect near openTask), same TDZ shape as other
+    // cross-referencing helpers here.
+    // eslint-disable-next-line react-hooks/immutability
     const target = ghlTargetForContact(contact);
     if (!target) { if (!opts?.silent) pushToast("No GoHighLevel connection for this client's sub-account."); return; }
     setRefreshingMessages(true);
