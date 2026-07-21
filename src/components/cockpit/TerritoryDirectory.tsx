@@ -264,7 +264,11 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
           Directory not connected yet — showing city contacts only. Set <code>CUL_WP_BASE_URL</code> + <code>CLICKUPTASKS_API_KEY</code> to pull listing/claimed status.
         </div>
       )}
-      {err && <div className="mb-2 rounded-lg border border-danger/40 bg-danger/5 px-3 py-2 text-[12px] text-danger">Couldn&apos;t load the directory: {err}</div>}
+      {err && (
+        <div className="mb-2 rounded-lg border border-amber-400/40 bg-amber-50/50 px-3 py-2 text-[12px] text-amber-800">
+          Directory listings are unavailable right now, so claimed/unclaimed status can&apos;t be shown — every contact below is grouped under &ldquo;No listing.&rdquo; You can still open and work them; the listing overlay returns once the directory is reachable. <span className="text-amber-800/60">({err})</span>
+        </div>
+      )}
 
       <div className="relative mb-2">
         <I.search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
