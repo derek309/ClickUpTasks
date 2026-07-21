@@ -66,11 +66,19 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Directory fetch failed", detail: String(e?.message ?? e), listings: [] }, { status: 502 });
   }
   if (!res.ok) {
-    // Surface WordPress's actual error instead of an opaque status — strip
-    // HTML (a PHP fatal renders the "critical error" page) down to readable
-    // text so the real cause (undefined function, unknown SQL column, etc.)
-    // is visible in the UI/logs rather than hidden behind a bare 500.
-    const detail = (await res.text().catch(() => "")).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
+    // Surface WordPress's actual error instead of an opaque status. WP's REST
+    // 500 comes back as JSON carrying the precise PHP error (file + line) in
+    // data.error.message — pull that when present; otherwise strip the HTML
+    // "critical error" page down to readable text. Wider slice so the
+    // "…on line N" tail isn't cut off.
+    const bodyText = await res.text().catch(() => "");
+    let detail = "";
+    try {
+      const j = JSON.parse(bodyText);
+      detail = j?.data?.error?.message || j?.message || "";
+    } catch { /* not JSON — fall through to HTML strip */ }
+    if (!detail) detail = bodyText.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    detail = detail.replace(/\s+/g, " ").trim().slice(0, 600);
     return NextResponse.json({ error: `Directory responded ${res.status}`, detail, listings: [] }, { status: 502 });
   }
   const data = await res.json().catch(() => null);
