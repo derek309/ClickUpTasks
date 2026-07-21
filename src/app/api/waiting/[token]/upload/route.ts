@@ -19,19 +19,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   if (!client) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const form = await req.formData().catch(() => null);
-  const taskId = form?.get("task_id");
+  const taskId = form?.get("task_id"); // optional — omitted when attaching to a brand-new request (see ../request/route.ts), which has no task yet
   const file = form?.get("file");
-  if (typeof taskId !== "string" || !taskId) return NextResponse.json({ error: "Missing task_id." }, { status: 400 });
   if (!(file instanceof File)) return NextResponse.json({ error: "Missing file." }, { status: 400 });
   if (file.size > MAX_BYTES) return NextResponse.json({ error: "File must be under 25MB." }, { status: 400 });
 
   // Confirm the task actually belongs to this token's own client before
   // writing anywhere — same boundary the respond route enforces.
-  const { data: task } = await supabaseAdmin.from("tasks").select("id, client_id").eq("id", taskId).maybeSingle();
-  if (!task || task.client_id !== client.id) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (typeof taskId === "string" && taskId) {
+    const { data: task } = await supabaseAdmin.from("tasks").select("id, client_id").eq("id", taskId).maybeSingle();
+    if (!task || task.client_id !== client.id) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
 
   const safe = file.name.replace(/[^\w.\-]+/g, "_");
-  const path = `waiting/${client.id}/${taskId}/${randomUUID()}-${safe}`;
+  const path = `waiting/${client.id}/${typeof taskId === "string" && taskId ? taskId : "new"}/${randomUUID()}-${safe}`;
   const { error } = await supabaseAdmin.storage.from(TASK_FILES_BUCKET).upload(path, file, { upsert: false, contentType: file.type || undefined });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ path });

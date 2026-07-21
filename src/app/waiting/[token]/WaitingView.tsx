@@ -48,6 +48,15 @@ export default function WaitingView({ token }: { token: string }) {
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [saveErrors, setSaveErrors] = useState<Record<string, string>>({});
 
+  // A separate "need something else?" composer — raises a brand-new task
+  // rather than replying to one already waiting on the client.
+  const [newBody, setNewBody] = useState("");
+  const [newAttachments, setNewAttachments] = useState<DraftAttachment[]>([]);
+  const [newUploading, setNewUploading] = useState(false);
+  const [newSaving, setNewSaving] = useState(false);
+  const [newError, setNewError] = useState<string | null>(null);
+  const [newSent, setNewSent] = useState(false);
+
   const load = async () => {
     try {
       const res = await fetch(`/api/waiting/${token}`);
@@ -128,6 +137,42 @@ export default function WaitingView({ token }: { token: string }) {
       await load();
     } finally {
       setSavingIds((s) => { const n = new Set(s); n.delete(taskId); return n; });
+    }
+  };
+
+  const handleNewFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setNewUploading(true);
+    for (const f of Array.from(files)) {
+      if (f.size > MAX_UPLOAD_BYTES) continue;
+      const form = new FormData();
+      form.append("file", f);
+      try {
+        const res = await fetch(`/api/waiting/${token}/upload`, { method: "POST", body: form });
+        const j = await res.json().catch(() => ({}));
+        if (res.ok && j.path) setNewAttachments((prev) => [...prev, { id: localId(), name: f.name, kind: kindFromName(f.name), size: formatBytes(f.size), path: j.path }]);
+      } catch { /* one file failing shouldn't block the rest */ }
+    }
+    setNewUploading(false);
+  };
+
+  const submitNewRequest = async () => {
+    setNewSaving(true);
+    try {
+      const res = await fetch(`/api/waiting/${token}/request`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: newBody, attachments: newAttachments }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { setNewError(j.error || "Couldn't send — try again."); return; }
+      setNewError(null);
+      setNewBody("");
+      setNewAttachments([]);
+      setNewSent(true);
+      setTimeout(() => setNewSent(false), 3000);
+      await load();
+    } finally {
+      setNewSaving(false);
     }
   };
 
@@ -239,6 +284,43 @@ export default function WaitingView({ token }: { token: string }) {
                 })}
               </div>
             )}
+
+            <div className="mt-4 rounded-xl border border-dashed p-3.5">
+              <div className="text-[15px] font-medium">Need something else?</div>
+              <div className="mt-0.5 text-[13px] text-muted">Tell us what you need and we&apos;ll take a look.</div>
+              <textarea
+                value={newBody}
+                onChange={(e) => setNewBody(e.target.value)}
+                placeholder="What do you need?"
+                rows={3}
+                className="mt-2 w-full rounded-lg border bg-background px-2.5 py-2 text-[14px] outline-none focus:border-accent"
+              />
+              {newAttachments.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {newAttachments.map((a) => (
+                    <span key={a.id} className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-[12px]">
+                      {a.name} <span className="text-muted">{a.size}</span>
+                      <button onClick={() => setNewAttachments((prev) => prev.filter((x) => x.id !== a.id))} title="Remove" className="text-muted hover:text-red-500">✕</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <label className="inline-flex cursor-pointer items-center gap-1 text-[13px] font-medium text-accent">
+                  + Attach files
+                  <input type="file" multiple className="hidden" onChange={(e) => { handleNewFiles(e.target.files); e.target.value = ""; }} />
+                </label>
+                <button
+                  onClick={submitNewRequest}
+                  disabled={newSaving || newUploading || (!newBody.trim() && newAttachments.length === 0)}
+                  className="rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-40"
+                >
+                  {newSaving ? "Sending…" : newUploading ? "Uploading…" : "Send"}
+                </button>
+              </div>
+              {newError && <div className="mt-1.5 text-[13px] text-red-600">{newError}</div>}
+              {newSent && <div className="mt-1.5 text-[13px] text-green-700">Sent — we&apos;ll take a look!</div>}
+            </div>
           </>
         )}
       </div>
