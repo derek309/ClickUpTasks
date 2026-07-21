@@ -38,8 +38,8 @@ export { titleCase };
 
 // --- mappers ----------------------------------------------------------------
 
-const clientToRow = (c: Client) => ({ id: c.id, name: c.name, color: c.color, ghl_location_id: c.ghlLocationId, status: c.status ?? "lead", type: c.type ?? "client", assigned_to: c.assignedTo ?? [], can_message: c.canMessage ?? [], linked_contact_id: c.linkedContactId ?? null, follow_up_at: c.followUpAt ?? null, reviewed_at: c.reviewedAt ?? null });
-export const rowToClient = (r: any): Client => ({ id: r.id, name: titleCase(r.name), color: r.color, ghlLocationId: r.ghl_location_id ?? "", status: (r.status as Client["status"]) ?? "lead", type: (r.type as Client["type"]) ?? "client", assignedTo: r.assigned_to ?? [], canMessage: r.can_message ?? [], linkedContactId: r.linked_contact_id ?? null, aiSummary: r.ai_summary ?? null, aiSummaryAt: r.ai_summary_at ?? null, followUpAt: r.follow_up_at ?? null, reviewedAt: r.reviewed_at ?? null });
+const clientToRow = (c: Client) => ({ id: c.id, name: c.name, color: c.color, ghl_location_id: c.ghlLocationId, status: c.status ?? "lead", type: c.type ?? "client", assigned_to: c.assignedTo ?? [], can_message: c.canMessage ?? [], linked_contact_id: c.linkedContactId ?? null, linked_contact_ids: c.linkedContactIds ?? [], follow_up_at: c.followUpAt ?? null, reviewed_at: c.reviewedAt ?? null });
+export const rowToClient = (r: any): Client => ({ id: r.id, name: titleCase(r.name), color: r.color, ghlLocationId: r.ghl_location_id ?? "", status: (r.status as Client["status"]) ?? "lead", type: (r.type as Client["type"]) ?? "client", assignedTo: r.assigned_to ?? [], canMessage: r.can_message ?? [], linkedContactId: r.linked_contact_id ?? null, linkedContactIds: r.linked_contact_ids ?? [], aiSummary: r.ai_summary ?? null, aiSummaryAt: r.ai_summary_at ?? null, followUpAt: r.follow_up_at ?? null, reviewedAt: r.reviewed_at ?? null });
 
 const contactToRow = (c: Contact) => ({ id: c.id, client_id: c.clientId, name: c.name, email: c.email, phone: c.phone ?? null, ghl_contact_id: c.ghlContactId, company_name: c.company ?? null, city: c.city ?? null, state: c.state ?? null });
 export const rowToContact = (r: any): Contact => ({ id: r.id, clientId: r.client_id, name: titleCase(r.name), email: r.email ?? "", phone: r.phone ?? "", ghlContactId: r.ghl_contact_id ?? "", company: r.company_name ?? "", city: r.city ?? "", state: r.state ?? "" });
@@ -250,6 +250,11 @@ export const bulkUpsertClients = (cs: Client[]) => (cs.length ? supabase.from("c
 export const upsertProject = (p: Project) => supabase.from("projects").upsert(projectToRow(p)).then(logErr);
 export const deleteProjectDb = (id: string) => supabase.from("projects").delete().eq("id", id).then(logErr);
 export const deleteClientDb = (id: string) => supabase.from("clients").delete().eq("id", id).then(logErr);
+// Atomic client merge (see supabase/client-merge.sql) — repoints every table
+// off the source client, absorbs its contact-routing identity, deletes the
+// source. Awaited (not fire-and-forget) so the caller can refetch on success.
+export const mergeClientsDb = (sourceId: string, targetId: string) =>
+  supabase.rpc("merge_clients", { source_id: sourceId, target_id: targetId });
 export const insertNotif = (n: Notification) => supabase.from("notifications").insert(notifToRow(n)).then(logErr);
 export const markNotifsReadDb = (recipientId: string) => supabase.from("notifications").update({ read: true }).eq("recipient_id", recipientId).then(logErr);
 export const markNotifReadDb = (id: string) => supabase.from("notifications").update({ read: true }).eq("id", id).then(logErr);

@@ -4,12 +4,18 @@ import { supabaseAdmin } from "./supabaseAdmin";
 import { titleCase } from "./data";
 
 // Map a contact to the tracked client that represents it — the client whose
-// id is cl_<contactId>, or one manually linked via linked_contact_id — falling
-// back to the passed value (the sub-account) when the contact isn't a tracked
+// id is cl_<contactId>, one manually linked via linked_contact_id, or one that
+// absorbed this contact in a client merge (linked_contact_ids) — falling back
+// to the passed value (the sub-account) when the contact isn't a tracked
 // client. Contact ids are alphanumeric + underscore, safe to interpolate.
 export async function resolveTrackedClientId(contactId: string, fallback: string): Promise<string> {
   const { data } = await supabaseAdmin.from("clients").select("id").or(`id.eq.cl_${contactId},linked_contact_id.eq.${contactId}`).limit(1);
-  return data?.[0]?.id ?? fallback;
+  if (data?.[0]) return data[0].id;
+  // Absorbed-by-merge fallback (jsonb array containment) — kept as a second
+  // query so the .or() above stays simple and the containment encoding is
+  // handled by supabase-js rather than hand-built into an .or() string.
+  const { data: merged } = await supabaseAdmin.from("clients").select("id").contains("linked_contact_ids", [contactId]).limit(1);
+  return merged?.[0]?.id ?? fallback;
 }
 
 // "Today" for a Conversation task's due date, in the team's operating

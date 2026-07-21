@@ -61,7 +61,7 @@ import {
   PERSONAL_PROJECT_ID,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, markMessagesReadDb, reassignMessagesTaskDb, insertMessage, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, markMessagesReadDb, reassignMessagesTaskDb, insertMessage, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import { Inbox } from "./cockpit/Inbox";
 import SettingsHub from "./SettingsHub";
@@ -71,7 +71,7 @@ import TerritoryPanel from "./TerritoryPanel";
 
 
 import { I, Avatar, SideItem, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFromName, LIST_COLUMNS, type FilterState, type SortBy, type Toast } from "./cockpit/ui";
-import { ConfirmModal, PromptModal, LinkFormModal, MergeTaskModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
+import { ConfirmModal, PromptModal, LinkFormModal, MergeTaskModal, MergeClientModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
 import { CommandK } from "./cockpit/CommandK";
 import { GroupedList, InlineDue } from "./cockpit/GroupedList";
 import StageBoard from "./cockpit/StageBoard";
@@ -262,6 +262,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Id of the Conversation task currently being merged elsewhere — drives
   // the target-task picker modal (see requestMerge/mergeTasks).
   const [mergeSourceId, setMergeSourceId] = useState<string | null>(null);
+  // Client-merge modal: the client it was launched from (a), and optionally a
+  // pre-chosen second side (b) when opened from a "possible duplicate" hint.
+  const [mergeClientState, setMergeClientState] = useState<{ a: Client; b?: Client } | null>(null);
 
   // Client ordering: star to pin, sort mode (used by the Clients directory).
   // Personal preferences → persisted per-browser (localStorage), not the DB.
@@ -1961,6 +1964,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const addClientContact = async (contact: Contact, type: ClientType = "client") => {
     const id = "cl_" + contact.id;
     if (clients.some((c) => c.id === id)) { setActiveClient(id); setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setAddClientOpen(false); return; }
+    // Prevent a duplicate: if this contact matches a client we already track
+    // (same email/phone/name, e.g. the same business in the other GHL
+    // account), link it to that one and open it instead of making a second.
+    const dupe = findDuplicateTrackedClient(contact);
+    if (dupe) {
+      linkContactToClient(dupe, contact.id);
+      setActiveClient(dupe); setMyWork(false); setPersonalView(false); setInboxView(false); setDirView(null); setTerritoryView(null); setAddClientOpen(false);
+      pushToast(`${contact.name} is already tracked as “${clientById(dupe)?.name}” — linked to it.`);
+      return;
+    }
     const sub = subAccounts.find((s) => s.id === contact.clientId);
     const c: Client = { id, name: contact.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "lead", type, assignedTo: [] };
     setClients((cs) => [...cs, c]);
@@ -2000,7 +2013,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // this can fire for dozens/hundreds of contacts at once as a territory
   // page loads.
   const syncTerritoryClients = (matched: Contact[]) => {
-    const missing = matched.filter((c) => !clients.some((cl) => cl.id === "cl_" + c.id));
+    // Skip contacts already tracked under a different id (same email/phone/
+    // name in the other GHL account) — auto-creating cl_<id> for them is
+    // exactly how duplicate client records were getting made.
+    const missing = matched.filter((c) => !clients.some((cl) => cl.id === "cl_" + c.id) && !findDuplicateTrackedClient(c));
     if (!missing.length) return;
     const newClients: Client[] = missing.map((c) => {
       const sub = subAccounts.find((s) => s.id === c.clientId);
@@ -2094,6 +2110,95 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         if (activeClient === id) setActiveClient("all");
       },
     });
+  };
+  // --- client dedup + merge ------------------------------------------------
+  // The same real business can be a contact in more than one GHL sub-account
+  // (agency + directory); if each got promoted, you'd get two client records
+  // for one entity. These find likely duplicates (by email / phone / name)
+  // and fold one into the other.
+  const dedupName = (s: string | undefined) => (s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  const dedupPhone = (s: string | undefined) => { const d = (s ?? "").replace(/\D/g, ""); return d.length >= 10 ? d.slice(-10) : d; };
+  // Every contact id a tracked client "is" — its own (from the cl_ id) plus
+  // anything it absorbed via a prior merge / manual GHL link.
+  const clientContactIds = (cl: Client): string[] => [
+    ...(cl.id.startsWith("cl_") ? [cl.id.slice(3)] : []),
+    ...(cl.linkedContactId ? [cl.linkedContactId] : []),
+    ...(cl.linkedContactIds ?? []),
+  ];
+  // Returns an existing tracked client that already represents this contact
+  // (same email / phone / name), or null. Used to stop promotion from making
+  // a second record for someone already tracked.
+  const findDuplicateTrackedClient = (contact: Contact): string | null => {
+    const email = (contact.email ?? "").trim().toLowerCase();
+    const phone = dedupPhone(contact.phone);
+    const name = dedupName(contact.name);
+    for (const cl of clients) {
+      if (!cl.id.startsWith("cl_")) continue;
+      if (cl.id === "cl_" + contact.id) continue; // itself
+      for (const cid of clientContactIds(cl)) {
+        const other = contactById(cid);
+        if (!other) continue;
+        if (email && (other.email ?? "").trim().toLowerCase() === email) return cl.id;
+        if (phone && dedupPhone(other.phone) === phone) return cl.id;
+        if (name.length > 3 && dedupName(other.name) === name) return cl.id;
+      }
+    }
+    return null;
+  };
+  // Associate an extra contact's future inbound with an existing client
+  // (append to linked_contact_ids) without creating a new client record.
+  const linkContactToClient = (clientId: string, contactId: string) => {
+    const cl = clientById(clientId);
+    if (!cl) return;
+    if (clientContactIds(cl).includes(contactId)) return;
+    const up: Client = { ...cl, linkedContactIds: [...(cl.linkedContactIds ?? []), contactId] };
+    setClients((cs) => cs.map((x) => (x.id === clientId ? up : x)));
+    markOwnClientWrite(clientId);
+    upsertClient(up);
+  };
+  // Fold source client into target: repoint everything (via the atomic
+  // merge_clients RPC), apply the chosen winning field values to the
+  // survivor, and reflect it all optimistically. Irreversible — callers
+  // gate it behind a confirm (see MergeClientModal).
+  const mergeClients = async (sourceId: string, targetId: string, survivorPatch: Partial<Client>) => {
+    const source = clientById(sourceId);
+    const target = clientById(targetId);
+    if (!source || !target || sourceId === targetId) return;
+    const absorbed = Array.from(new Set([
+      ...(target.linkedContactIds ?? []),
+      ...(source.linkedContactIds ?? []),
+      ...(source.linkedContactId ? [source.linkedContactId] : []),
+      ...(sourceId.startsWith("cl_") ? [sourceId.slice(3)] : []),
+    ].filter(Boolean)));
+    const survivor: Client = { ...target, ...survivorPatch, linkedContactIds: absorbed };
+    // Optimistic repoint of every client-scoped array (contacts intentionally
+    // NOT repointed — a contact's client_id is its GHL sub-account; see RPC).
+    setTasks((ts) => ts.map((t) => (t.clientId === sourceId ? { ...t, clientId: targetId } : t)));
+    setProjects((ps) => ps.map((p) => (p.clientId === sourceId ? { ...p, clientId: targetId } : p)));
+    setMessages((ms) => ms.map((m) => (m.clientId === sourceId ? { ...m, clientId: targetId } : m)));
+    setClientLinks((ls) => ls.map((l) => (l.clientId === sourceId ? { ...l, clientId: targetId } : l)));
+    setClientNotes((ns) => ns.map((n) => (n.clientId === sourceId ? { ...n, clientId: targetId } : n)));
+    setFolders((fs) => fs.map((f) => (f.clientId === sourceId ? { ...f, clientId: targetId } : f)));
+    setVaultFolders((vs) => vs.map((v) => (v.clientId === sourceId ? { ...v, clientId: targetId } : v)));
+    setNotifications((ns) => ns.map((n) => (n.clientId === sourceId ? { ...n, clientId: targetId } : n)));
+    setClients((cs) => cs.filter((c) => c.id !== sourceId).map((c) => (c.id === targetId ? survivor : c)));
+    if (activeClient === sourceId) setActiveClient(targetId);
+    markOwnClientWrite(targetId);
+    const { error } = await mergeClientsDb(sourceId, targetId);
+    if (error) {
+      pushToast(`Merge failed: ${error.message}. Reloading…`);
+      try {
+        const d = await fetchAll();
+        setClients(d.clients); setProjects(d.projects); setContacts(d.contacts); setTasks(d.tasks);
+        setMessages(d.messages); setClientLinks(d.clientLinks); setClientNotes(d.clientNotes);
+        setFolders(d.folders); setVaultFolders(d.vaultFolders); setNotifications(d.notifications);
+      } catch { /* leave optimistic state; a reload will reconcile */ }
+      return;
+    }
+    // The RPC only set linked_contact_ids on the survivor — write the chosen
+    // display fields (name/status/color/etc.) too.
+    upsertClient(survivor);
+    pushToast(`Merged “${source.name}” into “${target.name}”.`);
   };
   const addProject = (clientId: string, folderId: string | null = null) => {
     setPromptDialog({ title: folderId ? "New list" : "New list / project", placeholder: "Name", confirmLabel: "Create", onSubmit: (name) => {
@@ -2570,6 +2675,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <button onClick={() => { setHeaderMoreOpen(false); setLinkModal({}); }}
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.plus /> Add quick link</button>
           )}
+          {canAdmin && !activeProject && activeClient.startsWith("cl_") && clientById(activeClient) && (
+            <button onClick={() => { setHeaderMoreOpen(false); setMergeClientState({ a: clientById(activeClient)! }); }}
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.repeat /> Merge with another client…</button>
+          )}
           {ghlContactUrlFor(activeClient) && (
             <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" onClick={() => setHeaderMoreOpen(false)}
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-accent hover:bg-background"><I.bolt /> Open in GoHighLevel</a>
@@ -2963,6 +3072,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                       <button onClick={() => { setHeaderMoreOpen(false); setLinkModal({}); }}
                         className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.plus /> Add quick link</button>
                     )}
+                    {canAdmin && !activeProject && activeClient.startsWith("cl_") && clientById(activeClient) && (
+                      <button onClick={() => { setHeaderMoreOpen(false); setMergeClientState({ a: clientById(activeClient)! }); }}
+                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.repeat /> Merge with another client…</button>
+                    )}
                     {ghlContactUrlFor(activeClient) && (
                       <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" onClick={() => setHeaderMoreOpen(false)}
                         className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-accent hover:bg-background"><I.bolt /> Open in GoHighLevel</a>
@@ -3270,6 +3383,25 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onCancel={() => setMergeSourceId(null)} />
         );
       })()}
+      {mergeClientState && (
+        <MergeClientModal
+          a={mergeClientState.a}
+          initialB={mergeClientState.b}
+          candidates={clients.filter((c) => c.id !== mergeClientState.a.id && c.id !== WORKSPACE_CLIENT_ID && c.id !== PERSONAL_CLIENT_ID).sort((x, y) => x.name.localeCompare(y.name))}
+          contactFor={(c) => contactForClient(c.id)}
+          taskCount={(id) => tasks.filter((t) => t.clientId === id).length}
+          onSubmit={(sourceId, targetId, patch) => {
+            setMergeClientState(null);
+            const s = clientById(sourceId), t = clientById(targetId);
+            setConfirmDialog({
+              title: `Merge “${s?.name}” into “${t?.name}”?`,
+              message: "Everything from both records will live on the one you're keeping, and the other client is removed. This can't be undone.",
+              confirmLabel: "Merge", danger: true,
+              onConfirm: () => { setConfirmDialog(null); mergeClients(sourceId, targetId, patch); },
+            });
+          }}
+          onCancel={() => setMergeClientState(null)} />
+      )}
       {linkModal && activeClient !== "all" && (
         <LinkFormModal
           initial={linkModal.initial ? { label: linkModal.initial.label, url: linkModal.initial.url, groupLabel: linkModal.initial.groupLabel, color: linkModal.initial.color } : undefined}

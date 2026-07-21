@@ -163,6 +163,11 @@ export interface Client {
    * itself "cl_" + a contact id (e.g. ClickUp-origin imports). When set, it
    * overrides the id-derived contact for Open-in-GHL and task import. */
   linkedContactId?: string | null;
+  /** Every OTHER contact whose future inbound should route to this client —
+   * accumulated when duplicate clients are merged in (a business that lived in
+   * both the agency and directory GHL sub-accounts). Also the "this client is
+   * in more than one account" marker. Optional/`?? []` everywhere it's read. */
+  linkedContactIds?: string[];
   /** Cached AI relationship summary (Gemini) — regenerated on demand from
    * the AI tab, never automatically, so opening a task never spends money. */
   aiSummary?: string | null;

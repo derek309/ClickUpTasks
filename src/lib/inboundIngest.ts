@@ -21,7 +21,11 @@ function todayPacific(): string {
 // the GHL sub-account it was imported from, not the client's page.
 async function resolveTrackedClientId(contactId: string, fallback: string): Promise<string> {
   const { data } = await supabaseAdmin.from("clients").select("id").or(`id.eq.cl_${contactId},linked_contact_id.eq.${contactId}`).limit(1);
-  return data?.[0]?.id ?? fallback;
+  if (data?.[0]) return data[0].id;
+  // Absorbed-by-merge fallback (jsonb array containment) — see the twin of
+  // this function in ghlConversationTask.ts for why it's a separate query.
+  const { data: merged } = await supabaseAdmin.from("clients").select("id").contains("linked_contact_ids", [contactId]).limit(1);
+  return merged?.[0]?.id ?? fallback;
 }
 
 // One open Conversation-priority task per contact — bump due if one exists,
