@@ -2018,7 +2018,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // exactly how duplicate client records were getting made.
     const missing = matched.filter((c) => !clients.some((cl) => cl.id === "cl_" + c.id) && !findDuplicateTrackedClient(c));
     if (!missing.length) return;
-    const newClients: Client[] = missing.map((c) => {
+    // Dedupe by contact id before building the batch. Two directory listings
+    // can resolve to the SAME GHL contact (shared phone/name — franchise
+    // locations, duplicate listings), and the caller maps over listings, so
+    // the same cl_<id> can appear twice. Postgres rejects an upsert whose
+    // statement touches one row twice ("ON CONFLICT DO UPDATE command cannot
+    // affect row a second time"), which failed the whole batch — and since
+    // nothing persisted, every refresh retried the identical failing write.
+    const unique = [...new Map(missing.map((c) => [c.id, c])).values()];
+    const newClients: Client[] = unique.map((c) => {
       const sub = subAccounts.find((s) => s.id === c.clientId);
       return { id: "cl_" + c.id, name: c.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "lead", type: "client", assignedTo: [] };
     });
