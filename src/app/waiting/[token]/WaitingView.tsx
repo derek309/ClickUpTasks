@@ -178,7 +178,7 @@ export default function WaitingView({ token }: { token: string }) {
 
   return (
     <div className="flex min-h-screen items-start justify-center bg-background px-4 py-10">
-      <div className="w-full max-w-7xl rounded-2xl border bg-surface p-7 shadow-sm">
+      <div className="w-full max-w-7xl">
         <div className="mb-5 flex items-center gap-2.5">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent text-[15px] font-bold text-white">CT</span>
           <div className="leading-tight">
