@@ -2730,16 +2730,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       <aside className={`sidebar-dark fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col overflow-y-auto border-r bg-surface transition-transform ${sidebarHidden ? "md:hidden" : "md:static md:translate-x-0"} ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
         {/* Account block, promoted from the sidebar footer to the top in place
             of the old app-branding header (Derek's call). */}
-        <div className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
+        {/* Account block. Three borderless icon buttons, not four bordered
+            ones: the old Team Chat button was pure duplication once Team Chat
+            became the first nav item right below (which carries the unread dot
+            itself), and four bordered boxes crowded the name down to "De…".
+            Dropping the borders + tightening the gap gives the name its row
+            back while keeping every action one click away. */}
+        <div className="flex shrink-0 items-center gap-1 border-b px-3 py-3">
           <span className="inline-flex shrink-0 items-center justify-center rounded-full text-[15px] font-semibold text-white" style={{ width: 30, height: 30, background: me.color }}>{me.initials}</span>
-          <div className="min-w-0 flex-1 leading-tight"><div className="truncate text-[15px] font-medium">{me.name}</div><div className="text-[13px] capitalize text-muted">{me.role}</div></div>
-          <button onClick={openTeamChat} title="Team Chat" className="relative rounded-lg border p-1.5 text-muted hover:text-foreground">
-            <I.comment />
-            {teamChatUnread && <span className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-accent" />}
-          </button>
-          <button onClick={() => { setSettingsHubOpen(true); setSidebarOpen(false); }} title="Settings" className="rounded-lg border p-1.5 text-muted hover:text-foreground"><I.gear /></button>
-          <button onClick={toggleTheme} title="Toggle theme" className="rounded-lg border p-1.5 text-muted hover:text-foreground">{theme === "light" ? <I.moon /> : <I.sun />}</button>
-          <button onClick={onSignOut} title="Sign out" className="rounded-lg border p-1.5 text-muted hover:text-red-500"><I.logout /></button>
+          <div className="ml-1 min-w-0 flex-1 leading-tight"><div className="truncate text-[15px] font-medium">{me.name}</div><div className="text-[13px] capitalize text-muted">{me.role}</div></div>
+          <button onClick={() => { setSettingsHubOpen(true); setSidebarOpen(false); }} title="Settings" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>
+          <button onClick={toggleTheme} title="Toggle theme" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-foreground">{theme === "light" ? <I.moon /> : <I.sun />}</button>
+          <button onClick={onSignOut} title="Sign out" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-red-500"><I.logout /></button>
         </div>
 
         <nav className="shrink-0 space-y-0.5 px-2">
