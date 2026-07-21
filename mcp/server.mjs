@@ -170,8 +170,9 @@ server.tool("create_task",
     due: z.string().optional().describe("yyyy-mm-dd; defaults to tomorrow"),
     priority: z.enum(["none", "normal", "urgent"]).optional().describe("defaults to \"normal\"; \"conversation\" is reserved/auto-created only"),
     assignee_id: z.string().optional().describe("roster member id (get one from list_members), or \"me\" for yourself; defaults to unassigned"),
+    waiting_on_client: z.boolean().optional().describe("mark this task as waiting on the client instead of assigned to a teammate; mutually exclusive with assignee_id (forces it unassigned)"),
   },
-  async ({ client_id, project_id, title, description, due, priority, assignee_id }) => {
+  async ({ client_id, project_id, title, description, due, priority, assignee_id, waiting_on_client }) => {
     await names();
     if (!clientNames[client_id]) return { content: [{ type: "text", text: `No client ${client_id}.` }] };
     let pid = project_id;
@@ -185,17 +186,24 @@ server.tool("create_task",
         projectNames[pid] = "Tasks";
       }
     }
-    const resolved = await resolveAssignee(assignee_id);
-    if (resolved.error) return { content: [{ type: "text", text: resolved.error }] };
+    let assigneeIdResolved = null;
+    if (waiting_on_client) {
+      assigneeIdResolved = null;
+    } else {
+      const resolved = await resolveAssignee(assignee_id);
+      if (resolved.error) return { content: [{ type: "text", text: resolved.error }] };
+      assigneeIdResolved = resolved.id;
+    }
     const t = {
       id: rid("t_"), project_id: pid, client_id, title: title.trim(), description: description || "",
-      status: "todo", priority: priority || "normal", assignee_id: resolved.id,
+      status: "todo", priority: priority || "normal", assignee_id: assigneeIdResolved,
+      waiting_on_client: Boolean(waiting_on_client),
       contact_id: client_id.startsWith("cl_") ? client_id.slice(3) : null,
       due: due || addDaysIso(todayIso(), 1),
     };
     await sb("tasks", "POST", t);
     await members();
-    const assigneeLabel = t.assignee_id ? (memberNames[t.assignee_id] || t.assignee_id) : "unassigned";
+    const assigneeLabel = t.waiting_on_client ? "waiting on client" : (t.assignee_id ? (memberNames[t.assignee_id] || t.assignee_id) : "unassigned");
     return { content: [{ type: "text", text: `Created ${t.id}: "${t.title}" in ${clientNames[client_id]} · due ${t.due} · priority ${t.priority} · assignee: ${assigneeLabel}.` }] };
   });
 
@@ -208,8 +216,9 @@ server.tool("update_task",
     priority: z.enum(["none", "normal", "urgent"]).optional().describe("\"conversation\" is reserved/auto-created only, can't be set manually"),
     due: z.string().nullable().optional().describe("yyyy-mm-dd, or null to clear the due date"),
     assignee_id: z.string().nullable().optional().describe("roster member id (get one from list_members), \"me\" for yourself, or null to unassign"),
+    waiting_on_client: z.boolean().optional().describe("mark this task as waiting on the client instead of assigned to a teammate; mutually exclusive with assignee_id (forces it unassigned). Passing assignee_id instead clears this back to false."),
   },
-  async ({ id, title, description, priority, due, assignee_id }) => {
+  async ({ id, title, description, priority, due, assignee_id, waiting_on_client }) => {
     const patch = {};
     if (title !== undefined) patch.title = title.trim();
     if (description !== undefined) patch.description = description;
@@ -219,6 +228,11 @@ server.tool("update_task",
       const resolved = await resolveAssignee(assignee_id);
       if (resolved.error) return { content: [{ type: "text", text: resolved.error }] };
       patch.assignee_id = resolved.id;
+      patch.waiting_on_client = false;
+    }
+    if (waiting_on_client) {
+      patch.waiting_on_client = true;
+      patch.assignee_id = null;
     }
     if (!Object.keys(patch).length) return { content: [{ type: "text", text: "Nothing to update — provide at least one field." }] };
     const [t] = await sb(`tasks?id=eq.${enc(id)}`, "PATCH", patch);
@@ -227,7 +241,8 @@ server.tool("update_task",
     if (t.ghl_task_id) { try { const ok = await pushGhlStatus(t); ghl = ok ? " (synced to GoHighLevel)" : " (GoHighLevel push failed)"; } catch { ghl = " (GoHighLevel push errored)"; } }
     await members();
     const changed = Object.keys(patch)
-      .map((k) => k === "assignee_id" ? `assignee: ${patch.assignee_id ? (memberNames[patch.assignee_id] || patch.assignee_id) : "unassigned"}` : `${k}: ${JSON.stringify(patch[k])}`)
+      .filter((k) => k !== "waiting_on_client" || patch.assignee_id === undefined)
+      .map((k) => k === "assignee_id" ? `assignee: ${patch.waiting_on_client ? "waiting on client" : (patch.assignee_id ? (memberNames[patch.assignee_id] || patch.assignee_id) : "unassigned")}` : `${k}: ${JSON.stringify(patch[k])}`)
       .join(", ");
     return { content: [{ type: "text", text: `Updated ${id} — ${changed}.${ghl}` }] };
   });
