@@ -2089,8 +2089,23 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // write an article about your business") — cold calling is the low-yield
   // path. Day 0 is the day you click, because that's when the invite goes
   // out; the newsletter itself ships the following Wednesday.
-  const featureBusiness = (opts: { clientId: string; name: string; city: string; state: string }) => {
-    const { clientId, name, city, state } = opts;
+  const featureBusiness = (opts: { clientId: string | null; contact: Contact | null; name: string; city: string; state: string }) => {
+    const { name, city, state } = opts;
+    // A directory business you haven't touched yet has no client record — the
+    // bulk sync only creates one once it's matched to a GHL contact. Featuring
+    // it is a decision to start working it, so promote it here rather than
+    // making the button quietly do nothing (which is exactly what it did).
+    let clientId = opts.clientId;
+    if (!clientId) {
+      if (!opts.contact) { pushToast(`No GoHighLevel contact matched to ${name} yet — can't start the sequence.`); return; }
+      const c = opts.contact;
+      const sub = subAccounts.find((s) => s.id === c.clientId);
+      const nc: Client = { id: "cl_" + c.id, name: c.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "lead", type: "client", assignedTo: [] };
+      setClients((cs) => (cs.some((x) => x.id === nc.id) ? cs : [...cs, nc]));
+      markOwnClientWrite(nc.id);
+      bulkUpsertClients([nc]);
+      clientId = nc.id;
+    }
     let projectId = projects.find((p) => p.clientId === clientId && p.name === FEATURE_LIST)?.id;
     if (!projectId) {
       const p: Project = { id: newId("p_"), clientId, name: FEATURE_LIST, description: "" };

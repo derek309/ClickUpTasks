@@ -132,7 +132,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // multi-city overview, which has no ambassador context, degrades to a
   // read-only list.
   featuredClientIds?: Set<string>;
-  onFeature?: (opts: { clientId: string; name: string; city: string; state: string }) => void;
+  onFeature?: (opts: { clientId: string | null; contact: Contact | null; name: string; city: string; state: string }) => void;
   // Owned by the caller (TerritoryPanel) so the sort control can sit on the
   // same header line as the client/contact counts instead of its own row.
   sort: SortKey;
@@ -305,7 +305,8 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                 {isOpen && (g.key === "unclaimed" ? unclaimed : claimed).map((r) => (
                   <ListingRow key={r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} onPatch={patchListing} onSetStatus={onSetStatus}
                     featured={!!r.client && !!featuredClientIds?.has(r.client.id)}
-                    onFeature={onFeature && ((rr) => { if (rr.client) onFeature({ clientId: rr.client.id, name: rr.listing.name, city, state }); })} />
+                    canFeature={!!(r.client || r.contact)}
+                    onFeature={onFeature && ((rr) => onFeature({ clientId: rr.client?.id ?? null, contact: rr.contact, name: rr.listing.name, city, state }))} />
                 ))}
               </div>
             );
@@ -328,7 +329,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, onPatch, onSetStatus, featured, onFeature }: {
+function ListingRow({ row, onAddContact, onOpenClient, onPatch, onSetStatus, featured, canFeature, onFeature }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
   onOpenClient: (id: string) => void;
@@ -337,6 +338,10 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, onSetStatus, fea
   // Newsletter feature motion: whether this business has already been run
   // through it, and the trigger that starts the Stage-3 touch sequence.
   featured: boolean;
+  // False when nothing links this listing to GoHighLevel yet, so there's no
+  // contact to hang a client (and therefore the tasks) off. Renders disabled
+  // with a reason instead of a button that looks fine and does nothing.
+  canFeature: boolean;
   onFeature?: (row: { listing: DirectoryListing; contact: Contact | null; client: Client | null }) => void;
 }) {
   const { listing, contact, client } = row;
@@ -467,7 +472,9 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, onSetStatus, fea
               touch sequence rather than just tagging a row. */}
           {onFeature && (featured
             ? <span title="Already run through the newsletter feature motion" className="shrink-0 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[12px] font-medium text-emerald-600">★ Featured</span>
-            : <button onClick={() => onFeature(row)} title="Feature in the newsletter — creates the Stage-3 outreach sequence" className="shrink-0 rounded-md border border-dashed px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">★ Feature</button>)}
+            : <button onClick={() => onFeature(row)} disabled={!canFeature}
+                title={canFeature ? "Feature in the newsletter — creates the Stage-3 outreach sequence" : "No GoHighLevel contact matched to this listing yet, so there's nothing to attach the sequence to"}
+                className="shrink-0 rounded-md border border-dashed px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted">★ Feature</button>)}
         </div>
 
         {/* Client */}

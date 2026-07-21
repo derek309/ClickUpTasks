@@ -25,7 +25,7 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
   onOpenClient: (clientId: string) => void;
   // Newsletter feature motion, threaded straight through to the city view.
   featuredClientIds?: Set<string>;
-  onFeature?: (opts: { clientId: string; name: string; city: string; state: string }) => void;
+  onFeature?: (opts: { clientId: string | null; contact: Contact | null; name: string; city: string; state: string }) => void;
   focusId?: string; // when set, render only this one city, auto-expanded (the sidebar city page)
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(() => (focusId ? new Set([focusId]) : new Set()));
