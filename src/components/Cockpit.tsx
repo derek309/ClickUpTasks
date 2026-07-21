@@ -1380,6 +1380,30 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setClientTab("tasks");
     setOpenTaskId(null);
   };
+  // Derek: "I'm on my dashboard, I don't want to work on this one right now,
+  // I just want to go next" — step through every client/project on the
+  // Dashboard, in the exact tier order it's laid out in, without bouncing
+  // back to the Dashboard between each one.
+  const dashboardOrder: { kind: "client" | "project"; id: string }[] = myWorkGroups.flatMap((g) =>
+    g.items.map((item) => (item.kind === "client" ? { kind: "client" as const, id: item.client.id } : { kind: "project" as const, id: item.project.id }))
+  );
+  // Snapshotted at the moment you leave the Dashboard, not recomputed live —
+  // same reasoning as the task drawer's Prev/Next fix: without freezing it,
+  // completing/reassigning a client mid-browse could reshuffle the order out
+  // from under you and strand navigation, exactly like the task-nav bug.
+  const [dashboardSnapshot, setDashboardSnapshot] = useState<{ kind: "client" | "project"; id: string }[]>([]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
+  useEffect(() => { if (!myWork) setDashboardSnapshot(dashboardOrder); }, [myWork]);
+  const dashboardIdx = dashboardSnapshot.findIndex((d) => (activeProject ? d.kind === "project" && d.id === activeProject : d.kind === "client" && d.id === activeClient));
+  const goDashboard = (delta: number) => {
+    if (dashboardIdx < 0) return;
+    const next = dashboardSnapshot[dashboardIdx + delta];
+    if (!next) return;
+    if (next.kind === "project") { const pr = projectById(next.id); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(pr?.clientId ?? "all"); setActiveProject(next.id); }
+    else { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(next.id); setActiveProject(null); }
+    setClientTab("tasks");
+    setOpenTaskId(null);
+  };
   // Resolves the GHL contact backing a client: an explicit link (set via
   // "Link to GHL" for clients whose id isn't itself a contact id) wins;
   // otherwise fall back to the id-derived contact ("cl_" + contact id).
@@ -3340,6 +3364,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
           {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && clientById(activeClient) && (
             <div className="flex items-center gap-1.5">
+              {/* Only shown when this client/project is actually on your
+                  Dashboard — arriving here some other way (search, a link,
+                  the Clients directory) has no "position" to step through. */}
+              {dashboardIdx >= 0 && (
+                <span className="inline-flex items-center gap-0.5 rounded-md border bg-background px-1 py-1" title="Step through your Dashboard, in the order it's laid out">
+                  <button onClick={() => goDashboard(-1)} disabled={dashboardIdx <= 0} title="Previous on Dashboard"
+                    className="rounded p-1 text-muted hover:bg-surface hover:text-foreground disabled:opacity-30"><I.chevron className="rotate-90" /></button>
+                  <span className="min-w-[46px] text-center text-[13px] tabular-nums text-muted">{dashboardIdx + 1} of {dashboardSnapshot.length}</span>
+                  <button onClick={() => goDashboard(1)} disabled={dashboardIdx >= dashboardSnapshot.length - 1} title="Next on Dashboard"
+                    className="rounded p-1 text-muted hover:bg-surface hover:text-foreground disabled:opacity-30"><I.chevron className="-rotate-90" /></button>
+                </span>
+              )}
               {(() => {
                 // One contextual Follow toggle, not two — it tracks whatever
                 // scope is currently open (the project, if one's selected;
