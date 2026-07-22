@@ -12,8 +12,9 @@ import { useEffect, useMemo, useState } from "react";
 import { formatDue, isOverdue, type Attachment } from "@/lib/data";
 
 type WaitingAttachment = { id: string; name: string; kind: Attachment["kind"]; size: string; path: string | null; url: string | null };
+type WaitingProject = { id: string; name: string };
 type WaitingTask = {
-  id: string; title: string; due: string | null; description: string; status: string; needsResponse: boolean;
+  id: string; projectId: string | null; title: string; due: string | null; description: string; status: string; needsResponse: boolean;
   attachments: WaitingAttachment[];
   response: { body: string; submittedAt: string; attachments: WaitingAttachment[] } | null;
 };
@@ -69,6 +70,16 @@ function AttachmentGallery({ items }: { items: WaitingAttachment[] }) {
 
 export default function WaitingView({ token }: { token: string }) {
   const [clientName, setClientName] = useState<string | null>(null);
+  const [projects, setProjects] = useState<WaitingProject[]>([]);
+  // Which list the switcher is showing — null = "All". Seeded from
+  // ?project=<id> so a link copied from a specific project's "Copy list
+  // link" (Cockpit.tsx) opens straight into that list, without this being a
+  // second kind of link — it's the same client token, just a starting
+  // filter. Read once via the raw querystring (no next/navigation import
+  // elsewhere in this deliberately self-contained page) rather than a
+  // useEffect, so the switcher doesn't visibly flash "All" first.
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("project"));
   const [tasks, setTasks] = useState<WaitingTask[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
@@ -81,6 +92,12 @@ export default function WaitingView({ token }: { token: string }) {
   // A separate "need something else?" composer — raises a brand-new task
   // rather than replying to one already waiting on the client.
   const [newBody, setNewBody] = useState("");
+  // Which list a new request goes to — only shown/asked when there's more
+  // than one project; undefined = "let the picker default itself" (to
+  // whichever list is currently being viewed, or the first one) the next
+  // time projects loads, rather than fighting that default forever once
+  // the client has touched the dropdown themselves.
+  const [newProjectId, setNewProjectId] = useState<string | undefined>(undefined);
   const [newAttachments, setNewAttachments] = useState<DraftAttachment[]>([]);
   const [newUploading, setNewUploading] = useState(false);
   const [newSaving, setNewSaving] = useState(false);
@@ -93,6 +110,7 @@ export default function WaitingView({ token }: { token: string }) {
       const j = await res.json().catch(() => ({}));
       if (!res.ok) { setError(j.error || "This link isn't valid."); return; }
       setClientName(j.clientName ?? null);
+      setProjects(Array.isArray(j.projects) ? j.projects : []);
       const list: WaitingTask[] = Array.isArray(j.tasks) ? j.tasks : [];
       setTasks(list);
       // Seed a draft per task from its existing response (so "Edit" opens
@@ -119,8 +137,14 @@ export default function WaitingView({ token }: { token: string }) {
   const sorted = useMemo(() => {
     if (!tasks) return [];
     const rank = (t: WaitingTask) => (t.status === "done" ? 2 : t.needsResponse ? 0 : 1);
-    return [...tasks].sort((a, b) => rank(a) - rank(b) || (a.due ?? "9999").localeCompare(b.due ?? "9999"));
-  }, [tasks]);
+    const scoped = activeProjectId ? tasks.filter((t) => t.projectId === activeProjectId) : tasks;
+    return [...scoped].sort((a, b) => rank(a) - rank(b) || (a.due ?? "9999").localeCompare(b.due ?? "9999"));
+  }, [tasks, activeProjectId]);
+  const projectName = (id: string | null) => (id ? projects.find((p) => p.id === id)?.name ?? null : null);
+  // Which list a new request will actually go to: the client's own pick
+  // once they've touched the dropdown, else whatever list they're currently
+  // viewing, else the first one — never asked at all when there's only one.
+  const effectiveNewProjectId = newProjectId ?? activeProjectId ?? projects[0]?.id ?? null;
 
   const updateBody = (taskId: string, body: string) =>
     setDrafts((prev) => ({ ...prev, [taskId]: { ...(prev[taskId] ?? { attachments: [] }), body } }));
@@ -191,7 +215,7 @@ export default function WaitingView({ token }: { token: string }) {
     try {
       const res = await fetch(`/api/waiting/${token}/request`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: newBody, attachments: newAttachments }),
+        body: JSON.stringify({ body: newBody, attachments: newAttachments, projectId: effectiveNewProjectId }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) { setNewError(j.error || "Couldn't send — try again."); return; }
@@ -223,9 +247,24 @@ export default function WaitingView({ token }: { token: string }) {
           <div className="py-8 text-center text-[13px] text-muted">Loading…</div>
         ) : (
           <>
-            {clientName && <h1 className="mb-4 text-[20px] font-semibold">{clientName}</h1>}
+            {clientName && <h1 className="mb-1 text-[20px] font-semibold">{clientName}</h1>}
+            {/* Only shown once there's something to switch between — a
+                client with one list never sees this, same as the "which
+                list?" picker in the composer below. */}
+            {projects.length > 1 && (
+              <div className="mb-4 flex flex-wrap gap-1.5">
+                <button onClick={() => setActiveProjectId(null)}
+                  className={`rounded-full px-3 py-1 text-[13px] font-medium ${activeProjectId === null ? "bg-accent text-white" : "border text-muted hover:bg-background"}`}>All</button>
+                {projects.map((p) => (
+                  <button key={p.id} onClick={() => setActiveProjectId(p.id)}
+                    className={`rounded-full px-3 py-1 text-[13px] font-medium ${activeProjectId === p.id ? "bg-accent text-white" : "border text-muted hover:bg-background"}`}>{p.name}</button>
+                ))}
+              </div>
+            )}
             {tasks.length === 0 ? (
               <div className="py-8 text-center text-[15px] text-muted">Nothing needed from you right now — you&apos;re all caught up. 🎉</div>
+            ) : sorted.length === 0 ? (
+              <div className="py-8 text-center text-[15px] text-muted">Nothing needed from you in {projectName(activeProjectId)} right now.</div>
             ) : (
               <div className="space-y-4">
                 {sorted.map((t) => {
@@ -247,9 +286,17 @@ export default function WaitingView({ token }: { token: string }) {
                       style={{ borderColor: isDone ? "#bbf7d0" : undefined, borderLeftColor: isDone ? "#22c55e" : "var(--accent)" }}
                     >
                       <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-2 text-[17px] font-medium">
-                          {isDone && <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-500 text-[11px] text-white">✓</span>}
-                          <span className={isDone ? "text-green-800" : ""}>{t.title}</span>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 text-[17px] font-medium">
+                            {isDone && <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-500 text-[11px] text-white">✓</span>}
+                            <span className={isDone ? "text-green-800" : ""}>{t.title}</span>
+                          </div>
+                          {/* Which list this is — only worth saying while
+                              viewing the merged "All" tab; redundant once
+                              you're already inside that list's own tab. */}
+                          {!activeProjectId && projects.length > 1 && projectName(t.projectId) && (
+                            <div className="text-[12px] text-muted">{projectName(t.projectId)}</div>
+                          )}
                         </div>
                         {t.due && !isDone && (
                           <span className={`shrink-0 rounded-full px-2 py-0.5 text-[12px] font-medium ${isOverdue(t.due) ? "bg-red-50 text-red-600" : "bg-accent-soft text-accent"}`}>
@@ -320,8 +367,18 @@ export default function WaitingView({ token }: { token: string }) {
             )}
 
             <div className="mt-4 rounded-xl border border-dashed p-3.5">
-              <div className="text-[15px] font-medium">Need something else?</div>
-              <div className="mt-0.5 text-[13px] text-muted">Tell us what you need and we&apos;ll take a look.</div>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-[15px] font-medium">Need something else?</div>
+                  <div className="mt-0.5 text-[13px] text-muted">Tell us what you need and we&apos;ll take a look.</div>
+                </div>
+                {projects.length > 1 && (
+                  <select value={effectiveNewProjectId ?? ""} onChange={(e) => setNewProjectId(e.target.value)} title="Which list this goes on"
+                    className="rounded-md border bg-background px-2 py-1 text-[13px] outline-none focus:border-accent">
+                    {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                )}
+              </div>
               <textarea
                 value={newBody}
                 onChange={(e) => setNewBody(e.target.value)}

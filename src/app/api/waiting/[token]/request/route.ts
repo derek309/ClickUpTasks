@@ -23,24 +23,35 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   const { data: client } = await supabaseAdmin.from("clients").select("id, name, assigned_to").eq("share_token", token).maybeSingle();
   if (!client) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const payload = await req.json().catch(() => null) as { body?: string; attachments?: Attachment[] } | null;
+  const payload = await req.json().catch(() => null) as { body?: string; attachments?: Attachment[]; projectId?: string } | null;
   const text = (payload?.body ?? "").slice(0, 10000).trim();
   // Never trust the caller's attachment objects — rebuild each from a storage
   // path we can prove belongs to this client (see sanitizeWaitingAttachments).
   const attachments = sanitizeWaitingAttachments(payload?.attachments, client.id);
   if (!text && attachments.length === 0) return NextResponse.json({ error: "Add a note or attachment before sending." }, { status: 400 });
 
-  // Reuse (or create) the client's default "Tasks" list — same
-  // find-or-create idiom mcp/server.mjs's create_task and the GHL webhook
-  // already use.
-  let projectId: string;
-  const { data: existingProjects } = await supabaseAdmin.from("projects").select("id").eq("client_id", client.id).limit(1);
-  if (existingProjects?.length) {
-    projectId = existingProjects[0].id;
-  } else {
-    projectId = "p_" + randomUUID();
-    const { error: projErr } = await supabaseAdmin.from("projects").insert({ id: projectId, client_id: client.id, name: "Tasks", description: "" });
-    if (projErr) return NextResponse.json({ error: projErr.message }, { status: 400 });
+  // The client can name which of their own lists this is for (the page
+  // offers a picker once there's more than one) — but never trust the id
+  // outright, same reasoning as attachments above: confirm it's actually
+  // one of THIS client's projects before writing into it, so a crafted
+  // request can't land a task under a different client's list.
+  let projectId: string | null = null;
+  if (payload?.projectId) {
+    const { data: owned } = await supabaseAdmin.from("projects").select("id").eq("id", payload.projectId).eq("client_id", client.id).maybeSingle();
+    if (owned) projectId = owned.id;
+  }
+  // No (valid) project named — reuse (or create) the client's default
+  // "Tasks" list, same find-or-create idiom mcp/server.mjs's create_task
+  // and the GHL webhook already use.
+  if (!projectId) {
+    const { data: existingProjects } = await supabaseAdmin.from("projects").select("id").eq("client_id", client.id).limit(1);
+    if (existingProjects?.length) {
+      projectId = existingProjects[0].id;
+    } else {
+      projectId = "p_" + randomUUID();
+      const { error: projErr } = await supabaseAdmin.from("projects").insert({ id: projectId, client_id: client.id, name: "Tasks", description: "" });
+      if (projErr) return NextResponse.json({ error: projErr.message }, { status: 400 });
+    }
   }
 
   const followers: string[] = Array.isArray(client.assigned_to) ? client.assigned_to : [];

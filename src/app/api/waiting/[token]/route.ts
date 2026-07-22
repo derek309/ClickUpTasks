@@ -23,12 +23,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   const { data: client } = await supabaseAdmin.from("clients").select("id, name").eq("share_token", token).maybeSingle();
   if (!client) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+  // The client's own project list — lets the page group tasks by list and
+  // offer a switcher when there's more than one, instead of one flat pile.
+  // Only id/name leave this route; nothing else about a project is public.
+  const { data: projectRows } = await supabaseAdmin.from("projects").select("id, name").eq("client_id", client.id).order("position", { ascending: true });
+  const projects = (projectRows ?? []).map((p) => ({ id: p.id as string, name: p.name as string }));
+
   type Row = {
-    id: string; title: string; due: string | null; description: string | null; status: string;
+    id: string; project_id: string | null; title: string; due: string | null; description: string | null; status: string;
     waiting_on_client: boolean | null; client_response: { body: string; attachments: Attachment[]; submittedAt: string } | null;
     attachments: Attachment[] | null;
   };
-  const cols = "id, title, due, description, status, waiting_on_client, client_response, attachments";
+  const cols = "id, project_id, title, due, description, status, waiting_on_client, client_response, attachments";
   const [{ data: waiting }, { data: responded }] = await Promise.all([
     supabaseAdmin.from("tasks").select(cols).eq("client_id", client.id).eq("waiting_on_client", true),
     supabaseAdmin.from("tasks").select(cols).eq("client_id", client.id).not("client_response", "is", null),
@@ -53,7 +59,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
       cr ? resolveAttachments(cr.attachments) : Promise.resolve([]),
     ]);
     return {
-      id: t.id, title: t.title, due: t.due ?? null,
+      id: t.id, projectId: t.project_id ?? null, title: t.title, due: t.due ?? null,
       // Stripped to plain text server-side — no HTML ever reaches this public
       // response, and the page never needs the TipTap editor bundle to render it.
       description: htmlToText(t.description ?? ""),
@@ -66,5 +72,5 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     };
   }));
 
-  return NextResponse.json({ clientName: client.name, tasks });
+  return NextResponse.json({ clientName: client.name, projects, tasks });
 }

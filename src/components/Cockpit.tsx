@@ -794,7 +794,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // reused, not regenerated per click. crypto.randomUUID() is fine here —
   // this only needs to be unguessable, not secret from the browser that's
   // about to hand it to the client.
-  const copyClientShareLink = (clientId: string) => {
+  // projectId is optional — when given, the copied link opens pre-switched
+  // to that one list (the public page's own project switcher) instead of
+  // the client's merged view. Still the exact same token underneath: a
+  // client with several projects gets ONE link to hand out (or bookmark),
+  // not a separate one to track per list — the ?project= param is just a
+  // convenience starting point, copyable from any project's own menu.
+  const copyClientShareLink = (clientId: string, projectId?: string) => {
     const c = clientById(clientId);
     if (!c) return;
     // Minting a token is an admin-only write (clients_write RLS). If a VA hits
@@ -808,9 +814,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       markOwnClientWrite(nc.id);
       upsertClient(nc);
     }
-    const url = `${window.location.origin}/waiting/${token}`;
+    const url = `${window.location.origin}/waiting/${token}${projectId ? `?project=${projectId}` : ""}`;
     navigator.clipboard?.writeText(url).then(
-      () => pushToast("🔗 Client link copied — shows what we're waiting on them for"),
+      () => pushToast(projectId ? "🔗 List link copied — opens straight to this list" : "🔗 Client link copied — shows what we're waiting on them for"),
       () => pushToast("⚠️ Couldn't copy link"),
     );
   };
@@ -3240,6 +3246,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           {activeClient !== "all" && !activeProject && clientById(activeClient) && (
             <button onClick={() => { setHeaderMoreOpen(false); copyClientShareLink(activeClient); }} title="A public, no-login link showing this client what we're waiting on them for"
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy client link</button>
+          )}
+          {activeClient !== "all" && activeProject && projectById(activeProject) && (
+            <button onClick={() => { setHeaderMoreOpen(false); copyClientShareLink(activeClient, activeProject); }} title="Same public link, opened straight to this list — a client with more than one list still only has the one link to keep"
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy list link</button>
           )}
           <button onClick={() => { setHeaderMoreOpen(false); copyClientForClaude(); }}
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>✳</span> Copy for Claude</button>
