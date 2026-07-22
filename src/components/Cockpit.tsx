@@ -3572,6 +3572,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <span className="px-2.5 py-1.5 text-[13px] font-medium bg-accent-soft text-accent">City work</span>
             </div>
           )}
+          {/* Same control, other side: browsing a city's businesses page.
+              Lives in the header now (not inside TerritoryPanel's own body)
+              so it sits in the exact same spot as its reverse above —
+              one consistent place for this switch regardless of which half
+              of the territory you're looking at. */}
+          {territoryView && territoryView !== "all" && (
+            <div className="inline-flex overflow-hidden rounded-md border" title="Switch to this city's own work">
+              <span className="px-2.5 py-1.5 text-[13px] font-medium bg-accent-soft text-accent">Businesses</span>
+              <button onClick={() => openTerritoryWork(territoryView)} className="flex items-center gap-1.5 px-2.5 py-1.5 text-[13px] font-medium bg-background text-muted hover:text-foreground">
+                City work
+                {territoryOpenWorkCount(territoryView) > 0 && <span className="rounded-full bg-accent px-1.5 text-[12px] font-semibold text-white">{territoryOpenWorkCount(territoryView)}</span>}
+              </button>
+            </div>
+          )}
           {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && (
             <div className="inline-flex overflow-hidden rounded-md border">
               <button onClick={() => setClientTab("tasks")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "tasks" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Tasks</button>
@@ -3895,8 +3909,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               featuredClientIds={featuredClientIds}
               onFeature={featureBusiness}
               onOpenClient={(id) => { setTerritoryView(null); setActiveClient(id); setActiveProject(null); setClientTab("tasks"); }}
-              onOpenWork={openTerritoryWork}
-              workOpenCount={territoryOpenWorkCount}
               tasksByClient={territoryTasksByClient}
               onAddTask={addTerritoryBusinessTask}
               onOpenTask={setOpenTaskId}
