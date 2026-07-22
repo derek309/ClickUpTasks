@@ -889,7 +889,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               <span aria-hidden>{isQueued ? "★" : "☆"}</span><span className="hidden sm:inline">{isQueued ? "Queued" : "Queue for Claude"}</span>
             </button>
             <button onClick={() => {
-                // Claude Desktop has no title/name param for claude-cli://open —
+                // Claude Desktop has no title/name param for claude://code/new —
                 // it auto-titles the session from the first message, so lead
                 // with "Client — Task" to give that auto-title something
                 // readable to pick up instead of a bare task id.
