@@ -1527,21 +1527,29 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // reordering can't just splice one array the way a task's own attachment
   // grid can; each item carries its own bound setter (see vaultItems below)
   // and VaultView renumbers a whole kind-group after a drop.
-  const setTaskAttachmentPosition = (taskId: string, attId: string, position: number) => {
-    const t = tasks.find((x) => x.id === taskId);
-    if (!t) return;
-    update(taskId, { attachments: t.attachments.map((a) => (a.id === attId ? { ...a, position } : a)) });
-  };
-  const setCommentAttachmentPosition = (taskId: string, commentId: string, attId: string, position: number) => {
-    const t = tasks.find((x) => x.id === taskId);
-    if (!t) return;
-    const comments = t.comments.map((c) => (c.id !== commentId ? c : { ...c, attachments: (c.attachments ?? []).map((a) => (a.id === attId ? { ...a, position } : a)) }));
-    update(taskId, { comments });
-  };
-  const setNoteAttachmentPosition = (note: ClientNote, attId: string, position: number) => {
-    const updated: ClientNote = { ...note, attachments: (note.attachments ?? []).map((a) => (a.id === attId ? { ...a, position } : a)) };
-    setClientNotes((ns) => ns.map((n) => (n.id === note.id ? updated : n)));
-    upsertClientNote(updated);
+  // Persist a whole Vault kind-group's new order at once. A group mixes
+  // attachments from many owning rows (several tasks, their comments, notes),
+  // and multiple attachments can share ONE owner — so we group the new
+  // positions by owner and issue a SINGLE write per owner with its complete
+  // attachments array. (Writing per-attachment, or twice to the same task for
+  // its attachments + its comments, would each read the pre-write state and
+  // clobber the earlier change — every task write is a full-row upsert.)
+  const reorderVaultGroup = (orderedIds: string[]) => {
+    const posOf = new Map(orderedIds.map((id, i) => [id, i] as const));
+    baseTasks.forEach((t) => {
+      const patch: Partial<Task> = {};
+      if (t.attachments.some((a) => posOf.has(a.id)))
+        patch.attachments = t.attachments.map((a) => (posOf.has(a.id) ? { ...a, position: posOf.get(a.id) } : a));
+      if (t.comments.some((c) => (c.attachments ?? []).some((a) => posOf.has(a.id))))
+        patch.comments = t.comments.map((c) => ({ ...c, attachments: (c.attachments ?? []).map((a) => (posOf.has(a.id) ? { ...a, position: posOf.get(a.id) } : a)) }));
+      if (Object.keys(patch).length) update(t.id, patch);
+    });
+    clientNotes.forEach((n) => {
+      if (!(n.attachments ?? []).some((a) => posOf.has(a.id))) return;
+      const updated: ClientNote = { ...n, attachments: (n.attachments ?? []).map((a) => (posOf.has(a.id) ? { ...a, position: posOf.get(a.id) } : a)) };
+      setClientNotes((ns) => ns.map((x) => (x.id === n.id ? updated : x)));
+      upsertClientNote(updated);
+    });
   };
   // Drop files directly onto the Vault (no owning task/note yet) — reuses
   // the same no-owning-row upload path as Chat/Journal paste-attach, then
@@ -1575,10 +1583,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // is reachable at all (a real client, not "All tasks"/My Work/etc.).
   const activeVaultFolders = activeClient === "all" ? [] : vaultFolders.filter((f) => f.clientId === activeClient);
   const vaultItems: VaultItem[] = activeClient === "all" ? [] : [
-    ...baseTasks.flatMap((t) => t.attachments.map((a) => ({ ...a, sourceLabel: t.title, onOpenSource: () => { setClientTab("tasks"); setOpenTaskId(t.id); }, onSetFolder: (folderId: string | null) => setTaskAttachmentFolder(t.id, a.id, folderId), onSetPosition: (position: number) => setTaskAttachmentPosition(t.id, a.id, position) }))),
-    ...baseTasks.flatMap((t) => t.comments.flatMap((c) => (c.attachments ?? []).map((a) => ({ ...a, sourceLabel: t.title, onOpenSource: () => { setClientTab("tasks"); setOpenTaskId(t.id); }, onSetFolder: (folderId: string | null) => setCommentAttachmentFolder(t.id, c.id, a.id, folderId), onSetPosition: (position: number) => setCommentAttachmentPosition(t.id, c.id, a.id, position) })))),
+    ...baseTasks.flatMap((t) => t.attachments.map((a) => ({ ...a, sourceLabel: t.title, onOpenSource: () => { setClientTab("tasks"); setOpenTaskId(t.id); }, onSetFolder: (folderId: string | null) => setTaskAttachmentFolder(t.id, a.id, folderId) }))),
+    ...baseTasks.flatMap((t) => t.comments.flatMap((c) => (c.attachments ?? []).map((a) => ({ ...a, sourceLabel: t.title, onOpenSource: () => { setClientTab("tasks"); setOpenTaskId(t.id); }, onSetFolder: (folderId: string | null) => setCommentAttachmentFolder(t.id, c.id, a.id, folderId) })))),
     ...clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId))
-      .flatMap((n) => (n.attachments ?? []).map((a) => ({ ...a, sourceLabel: "Journal", onOpenSource: () => setClientTab("chat"), onSetFolder: (folderId: string | null) => setNoteAttachmentFolder(n, a.id, folderId), onSetPosition: (position: number) => setNoteAttachmentPosition(n, a.id, position) }))),
+      .flatMap((n) => (n.attachments ?? []).map((a) => ({ ...a, sourceLabel: "Journal", onOpenSource: () => setClientTab("chat"), onSetFolder: (folderId: string | null) => setNoteAttachmentFolder(n, a.id, folderId) }))),
   ];
   const projectsForClient = (clientId: string) => projects.filter((p) => p.clientId === clientId);
   const foldersForClient = (clientId: string) => folders.filter((f) => f.clientId === clientId).sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt));
@@ -3724,7 +3732,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           // A DM thread has no "Activity" sub-view (that's a Team Chat-page
           // concept — task comments/mentions addressed to you, not private
           // messages), so it skips the Chat/Activity tab bar entirely.
-          <TeamChat me={me} scope={{ type: "dm", other: userById(dmUserId)! }}
+          <TeamChat key={dmUserId} me={me} scope={{ type: "dm", other: userById(dmUserId)! }}
             messages={dmMessages.filter((m) => m.conversationId === dmConversationId(me.id, dmUserId))}
             onSend={(body, attachments, replyToId) => sendDmMessage(dmUserId, body, attachments, replyToId)} onDelete={deleteDmMessage}
             onPin={pinDmMessage} onUploadFile={(file) => uploadOneImage(`dm/${dmConversationId(me.id, dmUserId)}`, file)} onOpenFile={downloadFile} />
@@ -3813,6 +3821,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onRenameFolder={(id, name) => { const f = vaultFolders.find((x) => x.id === id); if (f) renameVaultFolder(f, name); }}
             onDeleteFolder={deleteVaultFolder}
             onAddFiles={(files) => addVaultFiles(activeClient, activeProject, files)}
+            onReorder={reorderVaultGroup}
             initialFolderId={initialVaultFolder} />
         ) : (
           <>
@@ -3849,7 +3858,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       {selectedTaskIds.size > 0 && (
         <div className="fixed bottom-4 left-1/2 z-30 flex -translate-x-1/2 flex-wrap items-center gap-2 rounded-xl border bg-surface px-3 py-2 shadow-xl">
           <span className="text-[15px] font-medium">{selectedTaskIds.size} selected</span>
-          <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ assigneeId: e.target.value === "unassigned" ? null : e.target.value }, e.target.value === "unassigned" ? "Unassign" : `Assign to ${users.find((u) => u.id === e.target.value)?.name ?? "user"}`); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Assignee…</option><option value="unassigned">Unassigned</option><option value="waiting">⏳ Waiting on client</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
+          <select defaultValue="" onChange={(e) => {
+            const v = e.target.value;
+            // "waiting" is a task flag, not a real member id — mirror the
+            // single-task pickers (InlineAssignee/TaskDrawer): set the flag and
+            // clear the assignee. And any real assignment must clear the flag,
+            // else the row keeps rendering the client "waiting" badge.
+            if (v === "waiting") bulkPatch({ waitingOnClient: true, assigneeId: null }, "Set waiting on client");
+            else if (v === "unassigned") bulkPatch({ assigneeId: null, waitingOnClient: false }, "Unassign");
+            else if (v) bulkPatch({ assigneeId: v, waitingOnClient: false }, `Assign to ${users.find((u) => u.id === v)?.name ?? "user"}`);
+            e.target.value = "";
+          }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Assignee…</option><option value="unassigned">Unassigned</option><option value="waiting">⏳ Waiting on client</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
           <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ status: e.target.value as TaskStatus }, `Set status to ${STATUS_META[e.target.value as TaskStatus]?.label ?? e.target.value}`); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Status…</option>{STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}</select>
           <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ priority: e.target.value as Priority }, `Set priority to ${PRIORITY_META[e.target.value as Priority]?.label ?? e.target.value}`); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Priority…</option>{PRIORITY_ORDER.filter(isManuallyAssignable).map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}</select>
           <input type="date" onChange={(e) => { if (e.target.value) { bulkPatch({ due: e.target.value }, `Set due date to ${e.target.value}`); e.target.value = ""; } }} title="Due date" className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none" />

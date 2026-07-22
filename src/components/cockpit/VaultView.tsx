@@ -15,7 +15,7 @@ import { type Attachment, type VaultFolder } from "@/lib/data";
 import { I } from "./ui";
 import { AttachmentTile } from "./AttachmentTile";
 
-export type VaultItem = Attachment & { sourceLabel: string; onOpenSource: () => void; onSetFolder: (folderId: string | null) => void; onSetPosition: (position: number) => void };
+export type VaultItem = Attachment & { sourceLabel: string; onOpenSource: () => void; onSetFolder: (folderId: string | null) => void };
 
 const OTHER_KIND_ORDER: Attachment["kind"][] = ["pdf", "doc", "sheet", "link"];
 const KIND_LABEL: Record<Attachment["kind"], string> = { image: "Images", pdf: "PDFs", doc: "Docs", sheet: "Sheets", link: "Links" };
@@ -30,7 +30,7 @@ const SCREENSHOT_RE = /^(screenshot|screen shot|cleanshot|snip)/i;
 // else drag-sort exists in this app (folders/lists).
 const sortByPosition = (list: VaultItem[]) => [...list].sort((a, b) => (a.position ?? Infinity) - (b.position ?? Infinity));
 
-export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCopyLink, onCopyFolderLink, onCreateFolder, onRenameFolder, onDeleteFolder, onAddFiles, initialFolderId }: {
+export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCopyLink, onCopyFolderLink, onCreateFolder, onRenameFolder, onDeleteFolder, onAddFiles, onReorder, initialFolderId }: {
   items: VaultItem[];
   folders: VaultFolder[];
   onDownloadFile: (path: string) => void;
@@ -43,6 +43,10 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
   /** Drop files anywhere on the Vault (or click "+ Add files") to upload —
    * no owning task, filed as a bodyless Journal note under the hood. */
   onAddFiles: (files: FileList) => void;
+  /** Persist a full kind-group's new order in one shot: the caller batches the
+   * writes per owning row (task/comment/note), so attachments that share an
+   * owner don't clobber each other's position. */
+  onReorder: (orderedIds: string[]) => void;
   /** From a deep link's ?folder= param — read once as the initial selection
    * only, not a live-controlled prop (this component owns folder browsing
    * after that). */
@@ -58,15 +62,19 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
 
   // Drag-to-reorder within one kind-group — same splice-before-target idiom
   // as FolderRail/ClientLinks. Vault items are a merge of three
-  // independently-ordered owning rows (task/comment/note), so a drop
-  // renumbers every item in just the affected group via each item's own
-  // bound onSetPosition rather than one shared array mutation.
+  // independently-ordered owning rows (task/comment/note); we hand the whole
+  // new group order to onReorder, which batches the position writes per owner
+  // so two attachments on the same task can't overwrite each other's index.
   const [dragItemId, setDragItemId] = useState<string | null>(null);
   const reorderGroup = (groupItems: VaultItem[], targetId: string) => {
     if (!dragItemId || dragItemId === targetId) { setDragItemId(null); return; }
     const ids = groupItems.map((a) => a.id).filter((id) => id !== dragItemId);
-    ids.splice(ids.indexOf(targetId), 0, dragItemId);
-    ids.forEach((id, i) => groupItems.find((a) => a.id === id)?.onSetPosition(i));
+    const at = ids.indexOf(targetId);
+    // The dragged tile isn't in this group (a cross-group drop) — ignore it
+    // rather than splicing a foreign id in and renumbering around a phantom.
+    if (at < 0 || !groupItems.some((a) => a.id === dragItemId)) { setDragItemId(null); return; }
+    ids.splice(at, 0, dragItemId);
+    onReorder(ids);
     setDragItemId(null);
   };
 
