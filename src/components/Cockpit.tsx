@@ -3527,7 +3527,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </div>
 
           <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
-          {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient === "all" && canAdmin && (
+          {/* This is the "All Tasks" scope toggle — it belongs there only.
+              openTerritory() also sets activeClient to "all" (there's no
+              real client selected while browsing a city), so without
+              !territoryView here this leaked onto the territory Businesses
+              page too, where it does nothing relevant. */}
+          {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient === "all" && canAdmin && (
             <div className="inline-flex overflow-hidden rounded-md border" title="VAs only ever see their own tasks here regardless of this toggle">
               <button onClick={() => setAllTasksScope("mine")} className={`px-2.5 py-1.5 text-[13px] font-medium ${allTasksScope === "mine" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Mine</button>
               <button onClick={() => setAllTasksScope("all")} className={`px-2.5 py-1.5 text-[13px] font-medium ${allTasksScope === "all" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>All</button>
