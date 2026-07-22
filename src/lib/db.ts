@@ -341,6 +341,18 @@ export async function signedUrlForFile(path: string, expirySeconds = 60 * 10): P
   return data?.signedUrl ?? null;
 }
 
+// Same signed URL, but with Storage's own `download` option — the response
+// comes back with Content-Disposition: attachment, so opening it actually
+// saves the file instead of rendering it inline (what happens to any image
+// today, and to a PDF in most browsers). Doing this server-side, not with an
+// HTML `download` attribute, because that attribute is silently ignored on a
+// cross-origin URL like a Supabase signed URL — the browser just navigates
+// to it instead.
+export async function downloadUrlForFile(path: string, filename: string, expirySeconds = 60 * 10): Promise<string | null> {
+  const { data } = await supabase.storage.from(TASK_FILES_BUCKET).createSignedUrl(path, expirySeconds, { download: filename });
+  return data?.signedUrl ?? null;
+}
+
 export async function deleteTaskFile(path: string): Promise<void> {
   await supabase.storage.from(TASK_FILES_BUCKET).remove([path]).then(logErr);
 }

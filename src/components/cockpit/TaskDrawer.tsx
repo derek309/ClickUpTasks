@@ -70,11 +70,11 @@ export function RecipientField({ label, value, onChange, contacts }: { label: st
   );
 }
 
-export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, isQueued, onToggleQueue, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onRegenerateAiSummary, aiSummaryBusy }: {
+export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, isQueued, onToggleQueue, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onRegenerateAiSummary, aiSummaryBusy }: {
   task: Task; comment: string; setComment: (v: string) => void;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; navTasks: Task[]; onOpenTask: (id: string) => void; onAddSibling: (title: string) => void; onPrev: () => void; onNext: () => void;
-  onClose: () => void; onPatch: (patch: Partial<Task>) => void; onDelete: () => void; onAddComment: (attachments?: Attachment[]) => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; onPushGhl: () => void; ghlBusy: boolean; ghlLinkable: boolean; onUnlinkGhl: () => void; allClients: Client[]; onMoveClient: (clientId: string) => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onRenameProject: () => void; onToggleSub: (sid: string) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onDeleteSub: (sid: string) => void; onPatchSub: (sid: string, patch: Partial<Subtask>) => void; onToggleLabel: (lid: string) => void; isQueued: boolean; onToggleQueue: () => void; onCopyLink: () => void; onOpenMerge: () => void; onOpenClientList: () => void;
+  onClose: () => void; onPatch: (patch: Partial<Task>) => void; onDelete: () => void; onAddComment: (attachments?: Attachment[]) => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onDownloadFileAs: (path: string, filename: string) => void; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; onPushGhl: () => void; ghlBusy: boolean; ghlLinkable: boolean; onUnlinkGhl: () => void; allClients: Client[]; onMoveClient: (clientId: string) => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onRenameProject: () => void; onToggleSub: (sid: string) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onDeleteSub: (sid: string) => void; onPatchSub: (sid: string, patch: Partial<Subtask>) => void; onToggleLabel: (lid: string) => void; isQueued: boolean; onToggleQueue: () => void; onCopyLink: () => void; onOpenMerge: () => void; onOpenClientList: () => void;
   templates: TaskTemplate[]; onApplyTemplate: (templateId: string) => void;
   onUploadCommentImage: (file: File) => Promise<Attachment | null>;
   onCopyAttachmentLink: (path: string) => void;
@@ -449,7 +449,10 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                   href={isLink ? a.url : undefined}
                   onOpen={a.kind === "image" && a.path ? () => openPreview(a) : !isLink && a.path ? () => onDownloadFile(a.path!) : undefined}
                   actions={a.path ? (
-                    <button onClick={() => onCopyAttachmentLink(a.path!)} title="Copy direct link" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-3.5 w-3.5" /></button>
+                    <>
+                      <button onClick={() => onDownloadFileAs(a.path!, a.name)} title="Download" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.download className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => onCopyAttachmentLink(a.path!)} title="Copy direct link" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-3.5 w-3.5" /></button>
+                    </>
                   ) : undefined}
                 />
                 <div className="truncate text-center text-[11px]" title={a.name}>{a.name}</div>
@@ -680,7 +683,10 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                 actions={
                   <>
                     {a.path && (
-                      <button onClick={() => onCopyAttachmentLink(a.path!)} title="Copy direct link" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-3.5 w-3.5" /></button>
+                      <>
+                        <button onClick={() => onDownloadFileAs(a.path!, a.name)} title="Download" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.download className="h-3.5 w-3.5" /></button>
+                        <button onClick={() => onCopyAttachmentLink(a.path!)} title="Copy direct link" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-3.5 w-3.5" /></button>
+                      </>
                     )}
                     <button onClick={() => onRemoveFile(a)} title="Remove" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-red-500"><I.trash className="h-3.5 w-3.5" /></button>
                   </>
@@ -702,7 +708,12 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
             ) : (
               <span className="h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent" />
             )}
-            <button onClick={() => setPreviewAtt(null)} className="rounded-md bg-white/10 px-3 py-1.5 text-[14px] font-medium text-white hover:bg-white/20">Close</button>
+            <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+              {previewAtt.path && (
+                <button onClick={() => onDownloadFileAs(previewAtt.path!, previewAtt.name)} className="flex items-center gap-1.5 rounded-md bg-white/10 px-3 py-1.5 text-[14px] font-medium text-white hover:bg-white/20"><I.download />Download</button>
+              )}
+              <button onClick={() => setPreviewAtt(null)} className="rounded-md bg-white/10 px-3 py-1.5 text-[14px] font-medium text-white hover:bg-white/20">Close</button>
+            </div>
           </div>
         </>
       )}
