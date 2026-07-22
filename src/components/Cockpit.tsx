@@ -62,6 +62,8 @@ import {
   dmConversationId,
   PERSONAL_CLIENT_ID,
   WORKSPACE_CLIENT_ID,
+  TERRITORY_CLIENT_PREFIX,
+  territoryClientId,
   PERSONAL_PROJECT_ID,
   normalizeState,
 } from "@/lib/data";
@@ -395,11 +397,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const setClientStatus = (id: string, status: ClientStatus) => {
     const c = clientById(id);
     if (!c || c.status === status) return;
-    const nc = { ...c, status };
+    // Conversion moment: a territory prospect that reaches onboarding (or
+    // straight to active) has stopped being a prospect, so it joins the real
+    // client roster here. One-way on purpose — moving a client back to an
+    // earlier stage is a lifecycle correction, not a reason to hide it from
+    // the sidebar again.
+    const promoted = c.type === "prospect" && (status === "onboarding" || status === "active_client");
+    const nc: Client = { ...c, status, ...(promoted ? { type: "client" as const } : {}) };
     setClients((cs) => cs.map((x) => (x.id === id ? nc : x)));
     markOwnClientWrite(nc.id);
     upsertClient(nc);
-    pushToast(`${c.name} → ${CLIENT_STATUS_META[status].label}`);
+    pushToast(promoted ? `${c.name} → ${CLIENT_STATUS_META[status].label} · now a client` : `${c.name} → ${CLIENT_STATUS_META[status].label}`);
   };
   // "Follow" a client: adds/removes a team member from assigned_to, which
   // supabase/client-assignment.sql's RLS lets that person see the client
@@ -1160,7 +1168,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // WORKSPACE_CLIENT_ID is a contact-less container for internal/agency work
   // (its projects behave like standalone lists that never sync). Kept out of
   // the real client list and shown as its own top-of-sidebar section.
-  const clientList = clients.filter((c) => c.id.startsWith("cl_") && c.type === "client" && c.id !== WORKSPACE_CLIENT_ID);
+  // TERRITORY_CLIENT_PREFIX containers are per-city work buckets, excluded the
+  // same way WORKSPACE_CLIENT_ID is — reached from the city's Work tab, not
+  // from the client roster.
+  const clientList = clients.filter((c) => c.id.startsWith("cl_") && c.type === "client" && c.id !== WORKSPACE_CLIENT_ID && !c.id.startsWith(TERRITORY_CLIENT_PREFIX));
+  // Everything you can hang work on: real clients PLUS territory prospects
+  // (directory businesses the territory auto-tracks, which are deliberately
+  // kept out of clientList above so a city's few hundred businesses don't
+  // bury the real roster). A prospect still has a full record — tasks,
+  // projects, journal — so anywhere that reasons about *work* rather than
+  // *the roster* has to look here instead, or a task on a prospect silently
+  // falls out of My Work / ⌘K / the move-task pickers.
+  // Territory containers ARE included here — city work is work: you can
+  // ⌘K to a city, quick-add against it, and move a task into it.
+  const workableClients = clients.filter((c) => c.id.startsWith("cl_") && c.id !== WORKSPACE_CLIENT_ID && (c.type === "client" || c.type === "prospect"));
   const workspaceProjects = clients.some((c) => c.id === WORKSPACE_CLIENT_ID) ? projects.filter((p) => p.clientId === WORKSPACE_CLIENT_ID) : [];
   // Mirrors the RLS rule in supabase/client-assignment.sql: a VA sees a
   // client if they have a task on it OR they're explicitly following it —
@@ -1174,7 +1195,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // rather than lingering in "No open tasks" forever. Parametrized by
   // userId (not just `me`) so the admin-only "viewing work for" selector
   // can point this at a teammate instead of yourself.
-  const assignedClientsFor = (userId: string) => clientList.filter((c) => scopedTasks.some((t) => t.clientId === c.id && t.status !== "done" && (t.assigneeId === userId || t.subtasks.some((s) => s.assigneeId === userId))) || (c.assignedTo ?? []).includes(userId));
+  // Reads workableClients, not clientList: a territory prospect you've been
+  // assigned a task on is real work and belongs on your board.
+  const assignedClientsFor = (userId: string) => workableClients.filter((c) => scopedTasks.some((t) => t.clientId === c.id && t.status !== "done" && (t.assigneeId === userId || t.subtasks.some((s) => s.assigneeId === userId))) || (c.assignedTo ?? []).includes(userId));
   // Same rule, applied to projects — but only "Projects" in Derek's sense
   // (the sidebar's Administration/Idea board/etc. list, i.e. workspaceProjects
   // above — not tied to a real GHL client). A client's own internal
@@ -1204,14 +1227,39 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setActiveClient("all"); setActiveProject(null); setOpenTaskId(null); setSidebarOpen(false);
     setTerritoryView(id);
   };
+  // The city's own work bucket, opened as an ordinary client page — that's
+  // what gives it the full task list, quick-add, Journal, Links and Vault
+  // without rebuilding any of it inside the territory panel. The container is
+  // created on demand here for territories that predate the feature.
+  const openTerritoryWork = async (id: string) => {
+    const t = territoryById(id);
+    if (!t) return;
+    const { id: cid, ready } = ensureTerritoryClient(t);
+    // Wait for the container row to commit before showing the page — the
+    // first list/task added there has a foreign key onto it.
+    await ready;
+    setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null);
+    setTerritoryView(null); setActiveProject(null); setOpenTaskId(null); setSidebarOpen(false);
+    setActiveClient(cid); setClientTab("tasks");
+  };
+  // Reverse of territoryClientId — lets the client page know it's showing a
+  // city's work and offer a way back to that city's businesses.
+  const territoryForClientId = (cid: string) => territories.find((t) => territoryClientId(t.id) === cid) ?? null;
   // ⌘K's "Not imported" search — any type counts as "already added" here,
   // not just type 'client', so a contact never shows as addable twice.
   const addedContactIds = new Set(clients.filter((c) => c.id.startsWith("cl_")).map((c) => c.id.slice(3)));
+  // The sidebar stays a *roster* view in both scopes: territory prospects are
+  // filtered back out here even though myAssignedClients now includes them.
+  // A prospect you have a task on shows up on the My Work board and in ⌘K,
+  // but a city's businesses never enter the client sidebar — that flood is
+  // exactly what typing them as prospects is meant to prevent, and it would
+  // otherwise leak back in through the "Mine" scope.
+  const rosterOnly = (list: Client[]) => list.filter((c) => c.type === "client" && !c.id.startsWith(TERRITORY_CLIENT_PREFIX));
   // The sidebar's actual source list — scoped down to "mine" by default
   // (reuses myAssignedClients, the exact same set My Work uses) so a long
   // client roster doesn't bury what actually needs attention. Toggled to
   // visibleClients (everyone you can see) via the header's Mine/All control.
-  const clientListBase = clientListScope === "mine" ? myAssignedClients : visibleClients;
+  const clientListBase = rosterOnly(clientListScope === "mine" ? myAssignedClients : visibleClients);
   // Apply the user's sort preference; starred clients always float to the top.
   const sortedClients = (() => {
     const base = [...clientListBase];
@@ -1619,6 +1667,27 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // with "Hide done" on by default, so the sidebar/board badge and the list
   // never disagree about how many tasks "need attention".
   const clientTaskCount = (clientId: string) => scopedTasks.filter((t) => t.clientId === clientId && t.status !== "done").length;
+  // Open tasks bucketed by client, for the territory's per-business Tasks
+  // column. One pass instead of a filter per row — a city renders a couple
+  // hundred rows, and a per-row scan of every task is quadratic.
+  // Not memoized: useMemo over a bucketing loop trips
+  // react-hooks/preserve-manual-memoization (it can't see that the arrays
+  // being pushed into are freshly built here, not scopedTasks itself), and a
+  // single pass over a few thousand tasks per render is not worth the fight.
+  const territoryTasksByClient = (() => {
+    const m = new Map<string, Task[]>();
+    for (const t of scopedTasks) {
+      if (t.status === "done") continue;
+      const list = m.get(t.clientId);
+      if (list) list.push(t); else m.set(t.clientId, [t]);
+    }
+    return m;
+  })();
+  const territoryOpenWorkCount = (territoryId: string) => clientTaskCount(territoryClientId(territoryId));
+  // Quick-add straight from a business row in the city view. Reuses the same
+  // creation path as the ⌘-quick-add dialog (default project resolution
+  // included) so a task added here is identical to one added anywhere else.
+  const addTerritoryBusinessTask = (clientId: string, title: string) => createQuickTask(clientId, null, title, null, "normal");
   // Not gated by myWorkUser (the admin-only "viewing work for" selector) —
   // RLS never even returns another person's private tasks in `tasks`, so
   // filtering by `me.id` here is correct regardless of who's being viewed.
@@ -1709,6 +1778,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const quickAdd = (groupKey: string, title: string) => {
     if (!title.trim() || !activeClient.startsWith("cl_")) return;
     let projectId: string;
+    // tasks.project_id is a foreign key, so a task inserted in the same tick as
+    // the project it belongs to can reach Postgres first and fail the
+    // constraint ("Couldn't save"). When we create the list here, hold its
+    // write and chain the task's insert behind it. Null when the project
+    // already exists — nothing to wait for.
+    let projectWrite: PromiseLike<unknown> | null = null;
     if (groupBy === "project") projectId = groupKey;
     // Scoped to one project? Add straight into it — otherwise the task lands in
     // some other project of this client and vanishes from the filtered view.
@@ -1716,7 +1791,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     else {
       const existing = projects.find((p) => p.clientId === activeClient);
       if (existing) projectId = existing.id;
-      else { const p: Project = { id: newId("p_"), clientId: activeClient, name: "Tasks", description: "" }; setProjects((ps) => [...ps, p]); upsertProject(p); projectId = p.id; }
+      else { const p: Project = { id: newId("p_"), clientId: activeClient, name: "Tasks", description: "" }; setProjects((ps) => [...ps, p]); projectWrite = upsertProject(p); projectId = p.id; }
     }
     const t: Task = {
       id: newId("t_"), projectId, clientId: activeClient, title: title.trim(), description: "",
@@ -1731,7 +1806,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       recurrence: "none", labelIds: [], ghlTaskId: null, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
     };
     setTasks((ts) => [...ts, t]);
-    upsertTask(t, me.id);
+    if (projectWrite) projectWrite.then(() => upsertTask(t, me.id));
+    else upsertTask(t, me.id);
   };
 
   // Quick-add-task FAB: create a task for an explicitly-chosen client/list
@@ -1740,10 +1816,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const createQuickTask = (clientId: string, projectId: string | null, title: string, due: string | null, priority: Priority) => {
     if (!title.trim() || !clientId.startsWith("cl_")) return;
     let pid = projectId ?? "";
+    // Same foreign-key ordering as quickAdd above — see the comment there.
+    let projectWrite: PromiseLike<unknown> | null = null;
     if (!pid) {
       const existing = projects.find((p) => p.clientId === clientId);
       if (existing) pid = existing.id;
-      else { const p: Project = { id: newId("p_"), clientId, name: "Tasks", description: "" }; setProjects((ps) => [...ps, p]); upsertProject(p); pid = p.id; }
+      else { const p: Project = { id: newId("p_"), clientId, name: "Tasks", description: "" }; setProjects((ps) => [...ps, p]); projectWrite = upsertProject(p); pid = p.id; }
     }
     const t: Task = {
       id: newId("t_"), projectId: pid, clientId, title: title.trim(), description: "",
@@ -1752,7 +1830,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       recurrence: "none", labelIds: [], ghlTaskId: null, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
     };
     setTasks((ts) => [...ts, t]);
-    upsertTask(t, me.id);
+    if (projectWrite) projectWrite.then(() => upsertTask(t, me.id));
+    else upsertTask(t, me.id);
     pushToast(`Task added to ${clientById(clientId)?.name ?? "client"}.`);
   };
 
@@ -2306,7 +2385,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     });
     const newClients: Client[] = unique.map((c) => {
       const sub = subAccounts.find((s) => s.id === c.clientId);
-      return { id: "cl_" + c.id, name: c.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "lead", type: "client", assignedTo: [] };
+      // 'prospect', not 'client': a city can hold hundreds of directory
+      // businesses, and auto-adding every one of them to the client roster
+      // buried the real clients. A prospect keeps its full record (tasks,
+      // projects, journal) and is worked from the territory; setClientStatus
+      // promotes it to 'client' the moment it reaches onboarding.
+      return { id: "cl_" + c.id, name: c.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "lead", type: "prospect", assignedTo: [] };
     });
     setClients((cs) => [...cs, ...newClients]);
     newClients.forEach((c) => markOwnClientWrite(c.id));
@@ -2338,7 +2422,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       if (!opts.contact) { pushToast(`No GoHighLevel contact matched to ${name} yet — can't start the sequence.`); return; }
       const c = opts.contact;
       const sub = subAccounts.find((s) => s.id === c.clientId);
-      const nc: Client = { id: "cl_" + c.id, name: c.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "lead", type: "client", assignedTo: [] };
+      // Same reasoning as syncTerritoryClients: featuring a business is still
+      // prospecting (per the SOP the feature invite IS the opener), so it
+      // starts as a prospect rather than entering the client roster.
+      const nc: Client = { id: "cl_" + c.id, name: c.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "lead", type: "prospect", assignedTo: [] };
       setClients((cs) => (cs.some((x) => x.id === nc.id) ? cs : [...cs, nc]));
       markOwnClientWrite(nc.id);
       bulkUpsertClients([nc]);
@@ -2377,10 +2464,40 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     pushToast(`${name} featured — ${created.length} touches added to ${userById(owner)?.name ?? "you"}.`);
   };
 
+  // A city's own work (launch plan, newsletter, chamber event) has nowhere to
+  // live otherwise: every task needs a clientId, and a city isn't a client.
+  // The container is an ordinary `clients` row on a derived id — no schema of
+  // its own — kept out of the roster by its id prefix, exactly how
+  // WORKSPACE_CLIENT_ID is handled. It never syncs to GHL: ghlTargetFor()
+  // resolves through a contact, and there is no contact behind this id.
+  //
+  // assignedTo mirrors the territory's ambassadors, which is what actually
+  // grants them access — supabase/client-assignment.sql's RLS lets a VA see a
+  // client they're following even with no task on it yet. Re-runnable: called
+  // on create, on every assignee change, and lazily when the Work tab opens,
+  // so the four territories that predate this feature get one on first use.
+  const ensureTerritoryClient = (t: Territory) => {
+    const id = territoryClientId(t.id);
+    const want = (t.assignedTo ?? []).slice().sort();
+    const existing = clients.find((c) => c.id === id);
+    const sameAssignees = existing && (existing.assignedTo ?? []).slice().sort().join(",") === want.join(",");
+    if (existing && existing.name === t.name && sameAssignees) return { id, ready: Promise.resolve() };
+    const nc: Client = {
+      ...(existing ?? { color: "#0ea5e9", ghlLocationId: "", status: "active_client" as const, type: "client" as const }),
+      id, name: t.name, assignedTo: t.assignedTo ?? [],
+    };
+    setClients((cs) => (existing ? cs.map((c) => (c.id === id ? nc : c)) : [...cs, nc]));
+    markOwnClientWrite(id);
+    // `ready` resolves once the row is actually committed. projects.client_id
+    // and tasks.client_id are foreign keys, so the first list/task created in
+    // a brand-new city would otherwise race its own container row.
+    return { id, ready: upsertClient(nc) };
+  };
   const addTerritory = (spec: { name: string; city: string; state: string; assignedTo: string[] }) => {
     const t: Territory = { id: newId("terr_"), ...spec };
     setTerritories((ts) => [...ts, t]);
     upsertTerritory(t);
+    ensureTerritoryClient(t);
   };
   // Toggle a teammate on/off a city's ambassador list — a city can have several.
   const toggleTerritoryAssignee = (id: string, memberId: string) => {
@@ -2390,6 +2507,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const nt = { ...t, assignedTo: has ? t.assignedTo.filter((m) => m !== memberId) : [...(t.assignedTo ?? []), memberId] };
     setTerritories((ts) => ts.map((x) => (x.id === id ? nt : x)));
     upsertTerritory(nt);
+    // Keep the container's follow list in step, or a newly-added ambassador
+    // can open the city but not see its work (and a removed one still can).
+    ensureTerritoryClient(nt);
   };
   const deleteTerritory = (id: string) => {
     setTerritories((ts) => ts.filter((t) => t.id !== id));
@@ -3011,6 +3131,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const territoryTitle = territoryView ? (territoryView === "all" ? "Territories" : (territoryById(territoryView) ? `${territoryById(territoryView)!.city}, ${territoryById(territoryView)!.state}` : "Territory")) : null;
   const headerTitleText = territoryTitle ?? (settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Team Chat") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? "All Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? "")));
   const isClientDetail = !myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && !!clientById(activeClient);
+  // Non-null when the open "client" is actually a city's work container —
+  // drives the breadcrumb and subtitle so the page reads as city work rather
+  // than as a client that wandered out of the roster.
+  const activeTerritoryClient = territoryForClientId(activeClient);
   const showFilterControl = !territoryView && !inboxView && !dirView && !myWork && !settingsView && !(activeClient !== "all" && (clientTab === "chat" || clientTab === "vault"));
   const bellControl = (
     <div className="relative">
@@ -3389,10 +3513,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   {/* Breadcrumb back to the Clients directory — only meaningful
                       when a specific client is the thing being viewed. */}
                   {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && (<>
-                    <button onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
+                    {/* A territory container isn't in the Clients directory,
+                        so its crumb goes back to the city it belongs to. */}
+                    {activeTerritoryClient ? (
+                      <button onClick={() => openTerritory(activeTerritoryClient.id)} className="hover:text-foreground hover:underline">{activeTerritoryClient.city} businesses</button>
+                    ) : (
+                      <button onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
+                    )}
                     <span>›</span>
                   </>)}
-                  <span>{settingsView ? "Integrations, team, territories, templates, playbooks, and API tokens" : inboxView ? (dmUserId ? "Private — only the two of you can see this" : inboxTab === "chat" ? "Talk to the team — @mention someone to notify them" : "Everything that mentions or notifies you, in one place") : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "Every client and project you're on, grouped by what needs attention first" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</span>
+                  <span>{settingsView ? "Integrations, team, territories, templates, playbooks, and API tokens" : inboxView ? (dmUserId ? "Private — only the two of you can see this" : inboxTab === "chat" ? "Talk to the team — @mention someone to notify them" : "Everything that mentions or notifies you, in one place") : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "Every client and project you're on, grouped by what needs attention first" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : activeTerritoryClient ? `City work for ${activeTerritoryClient.city}, ${activeTerritoryClient.state} — not tied to any one business` : clientCompany(clientById(activeClient))}</span>
                 </p>
               )}
             </>)}
@@ -3756,6 +3886,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               featuredClientIds={featuredClientIds}
               onFeature={featureBusiness}
               onOpenClient={(id) => { setTerritoryView(null); setActiveClient(id); setActiveProject(null); setClientTab("tasks"); }}
+              onOpenWork={openTerritoryWork}
+              workOpenCount={territoryOpenWorkCount}
+              tasksByClient={territoryTasksByClient}
+              onAddTask={addTerritoryBusinessTask}
+              onOpenTask={setOpenTaskId}
               focusId={territoryView === "all" ? undefined : territoryView} />
           </div>
         ) : inboxView && dmUserId ? (
@@ -3902,7 +4037,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ status: e.target.value as TaskStatus }, `Set status to ${STATUS_META[e.target.value as TaskStatus]?.label ?? e.target.value}`); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Status…</option>{STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}</select>
           <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ priority: e.target.value as Priority }, `Set priority to ${PRIORITY_META[e.target.value as Priority]?.label ?? e.target.value}`); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Priority…</option>{PRIORITY_ORDER.filter(isManuallyAssignable).map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}</select>
           <input type="date" onChange={(e) => { if (e.target.value) { bulkPatch({ due: e.target.value }, `Set due date to ${e.target.value}`); e.target.value = ""; } }} title="Due date" className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none" />
-          <select defaultValue="" onChange={(e) => { if (e.target.value) bulkMoveToClient(e.target.value); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Move to…</option>{[...clientList].sort((a, b) => a.name.localeCompare(b.name)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+          <select defaultValue="" onChange={(e) => { if (e.target.value) bulkMoveToClient(e.target.value); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Move to…</option>{[...workableClients].sort((a, b) => a.name.localeCompare(b.name)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
           {selectedTaskIds.size === 2 && (() => {
             // The older task is the "keeper" (target); the newer one merges
             // into it — no separate picker needed for exactly-2 selected.
@@ -3923,7 +4058,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={navTaskIds.length} navTasks={navTaskIds.map((id) => tasks.find((t) => t.id === id)).filter((t): t is Task => !!t)} onOpenTask={setOpenTaskId} onAddSibling={(title) => addTaskToList(openTask.clientId, openTask.projectId, openTask.private, title)} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(attachments) => addComment(openTask.id, comment, attachments)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...clientList].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} isQueued={claudeQueue.has(openTask.id)} onToggleQueue={() => toggleClaudeQueue(openTask.id)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null })} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt)} draftingMessage={draftingMessage} onRegenerateAiSummary={() => regenerateAiSummary(openTask.clientId)} aiSummaryBusy={aiSummaryBusyId === openTask.clientId} />
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} isQueued={claudeQueue.has(openTask.id)} onToggleQueue={() => toggleClaudeQueue(openTask.id)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null })} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt)} draftingMessage={draftingMessage} onRegenerateAiSummary={() => regenerateAiSummary(openTask.clientId)} aiSummaryBusy={aiSummaryBusyId === openTask.clientId} />
       )}
 
       {addClientOpen && <AddClientModal subAccounts={subAccounts} contacts={contacts} existingIds={new Set(clients.map((c) => c.id))} onAdd={addClientContact} onClose={() => setAddClientOpen(false)} />}
@@ -3994,7 +4129,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </div>
         </div>
       </>)}
-      {cmdkOpen && <CommandK tasks={scopedTasks} clients={clientList} projects={projects} contacts={contacts} addedContactIds={addedContactIds} clientById={clientById}
+      {cmdkOpen && <CommandK tasks={scopedTasks} clients={workableClients} projects={projects} contacts={contacts} addedContactIds={addedContactIds} clientById={clientById}
         onOpenTask={(id) => { setOpenTaskId(id); setCmdkOpen(false); }}
         onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); setCmdkOpen(false); }}
         onOpenProject={(id) => {
@@ -4018,7 +4153,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       )}
       {quickAddOpen && (
         <QuickAddTask
-          clients={clientList}
+          clients={workableClients}
           projectsFor={projectsForClient}
           companyFor={(id) => contactForClient(id)?.company}
           defaultClientId={activeClient.startsWith("cl_") ? activeClient : ""}

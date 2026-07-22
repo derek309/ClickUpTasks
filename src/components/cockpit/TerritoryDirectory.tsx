@@ -20,8 +20,8 @@
 // "No listing" — exactly the pre-directory behavior, just relabeled.
 import { useEffect, useMemo, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
-import { clientStatusMeta, CLIENT_STATUS_ORDER, type Contact, type Client, type ClientStatus } from "@/lib/data";
-import { I } from "./ui";
+import { clientStatusMeta, CLIENT_STATUS_ORDER, formatDue, isOverdue, STATUS_META, type Contact, type Client, type ClientStatus, type Task } from "@/lib/data";
+import { I, Avatar } from "./ui";
 
 export type DirectoryListing = {
   id: number | string;
@@ -98,8 +98,8 @@ const BUCKET_META = {
   none: { label: "No listing", color: "#64748b", hint: "contacts in this city with no directory listing" },
 } as const;
 
-// Name | Score | Stage | Actions | Client
-const TEMPLATE = "minmax(0,1fr) 56px 180px 210px 150px";
+// Name | Score | Stage | Tasks | Actions | Client
+const TEMPLATE = "minmax(0,1fr) 56px 180px 104px 210px 150px";
 
 // Module-scope cache so leaving a city and coming back (or switching tabs)
 // shows the last-known data instantly instead of a loading flash — a lazy
@@ -111,7 +111,7 @@ const REFRESH_INTERVAL = 60_000;
 type ListingsCacheEntry = { data: DirectoryListing[]; notConfigured: boolean; at: number };
 const listingsCache = new Map<string, ListingsCacheEntry>();
 
-export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onSetStatus, onOpenClient, featuredClientIds, onFeature, sort, onSetSort }: {
+export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onSetStatus, onOpenClient, featuredClientIds, onFeature, sort, onSetSort, tasksByClient, onAddTask, onOpenTask }: {
   city: string;
   state: string;
   contacts: Contact[];   // already scoped to this city/state by the caller
@@ -137,6 +137,13 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // same header line as the client/contact counts instead of its own row.
   sort: SortKey;
   onSetSort: (k: SortKey) => void;
+  // Open tasks per business, keyed by client id. A city's businesses are all
+  // clients already (see the bulk sync below), so their work exists — it just
+  // wasn't visible from here without opening each one. Optional so the admin
+  // multi-city overview degrades to the read-only list it is today.
+  tasksByClient?: Map<string, Task[]>;
+  onAddTask?: (clientId: string, title: string) => void;
+  onOpenTask?: (taskId: string) => void;
 }) {
   const cacheKey = `${city}|${state}`;
   const warm = () => listingsCache.get(cacheKey);
@@ -296,6 +303,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
           <span>Name</span>
           <span className="text-center">Score</span>
           <span>Stage</span>
+          <span>Tasks</span>
           <span>Actions</span>
           <span>Client</span>
         </div>
@@ -316,7 +324,8 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                   <ListingRow key={r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} onPatch={patchListing} onSetStatus={onSetStatus}
                     featured={!!r.client && !!featuredClientIds?.has(r.client.id)}
                     canFeature={!!(r.client || r.contact)}
-                    onFeature={onFeature && ((rr) => onFeature({ clientId: rr.client?.id ?? null, contact: rr.contact, name: rr.listing.name, city, state }))} />
+                    onFeature={onFeature && ((rr) => onFeature({ clientId: rr.client?.id ?? null, contact: rr.contact, name: rr.listing.name, city, state }))}
+                    tasks={(r.client && tasksByClient?.get(r.client.id)) || []} onAddTask={onAddTask} onOpenTask={onOpenTask} />
                 ))}
               </div>
             );
@@ -339,7 +348,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, onPatch, onSetStatus, featured, canFeature, onFeature }: {
+function ListingRow({ row, onAddContact, onOpenClient, onPatch, onSetStatus, featured, canFeature, onFeature, tasks, onAddTask, onOpenTask }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
   onOpenClient: (id: string) => void;
@@ -353,6 +362,10 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, onSetStatus, fea
   // with a reason instead of a button that looks fine and does nothing.
   canFeature: boolean;
   onFeature?: (row: { listing: DirectoryListing; contact: Contact | null; client: Client | null }) => void;
+  // This business's own open tasks (empty when it has no client row yet).
+  tasks: Task[];
+  onAddTask?: (clientId: string, title: string) => void;
+  onOpenTask?: (taskId: string) => void;
 }) {
   const { listing, contact, client } = row;
   const meta = client ? clientStatusMeta(client.status) : null;
@@ -367,10 +380,25 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, onSetStatus, fea
   const [callMsg, setCallMsg] = useState<string | null>(null);
   const [histOpen, setHistOpen] = useState(false);
   const [histLoading, setHistLoading] = useState(false);
+  const [tasksOpen, setTasksOpen] = useState(false);
+  const [newTask, setNewTask] = useState("");
 
   const due = fmtDue(listing.followupDue);
   const log = listing.activityLog;
-  const expanded = logOpen || histOpen;
+  const expanded = logOpen || histOpen || tasksOpen;
+
+  // Soonest due date across this business's open tasks — the one number worth
+  // showing in a dense row, since "3 open" alone doesn't say whether anything
+  // is late. Tasks with no due date never win the comparison.
+  const openTasks = tasks.filter((t) => t.status !== "done");
+  const nextDue = openTasks.reduce<string | null>((soonest, t) => (t.due && (!soonest || t.due < soonest) ? t.due : soonest), null);
+
+  const addTask = () => {
+    const title = newTask.trim();
+    if (!title || !client || !onAddTask) return;
+    onAddTask(client.id, title);
+    setNewTask("");
+  };
 
   const call = async () => {
     if (!listing.phone) { setCallMsg("No phone on file"); return; }
@@ -472,6 +500,19 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, onSetStatus, fea
           )}
         </div>
 
+        {/* Tasks — this business's own open work. Every matched business is
+            already a client behind the scenes, so the tasks exist; this is
+            what makes them visible without opening each business in turn. */}
+        <div className="pl-5 sm:pl-0">
+          {client && onAddTask ? (
+            <button onClick={() => setTasksOpen((o) => !o)} title={openTasks.length ? `${openTasks.length} open task${openTasks.length === 1 ? "" : "s"}` : "No open tasks — click to add one"}
+              className={`w-full rounded-md border px-2 py-1 text-left text-[12px] font-medium ${tasksOpen ? "bg-accent-soft text-accent" : openTasks.length ? "text-foreground hover:bg-surface" : "border-dashed text-muted hover:bg-surface hover:text-foreground"}`}>
+              {openTasks.length ? `${openTasks.length} open` : "+ Task"}
+              {nextDue && <span className={`ml-1 font-normal ${isOverdue(nextDue) ? "text-danger" : "text-muted"}`}>{formatDue(nextDue)}</span>}
+            </button>
+          ) : null}
+        </div>
+
         {/* Actions */}
         <div className="flex flex-wrap items-center gap-1.5 pl-5 sm:pl-0">
           {listing.phone && <button onClick={call} disabled={calling} title={`Bridge-call ${listing.phone}`} className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground disabled:opacity-40">{calling ? "…" : "Call"}</button>}
@@ -496,6 +537,29 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, onSetStatus, fea
               : <span className="text-[11px] text-muted/60">no contact</span>}
         </div>
       </div>
+
+      {/* This business's open tasks + one-line quick-add. Deliberately a
+          read-and-add surface only — editing (assignee, due, checklist,
+          comments) happens in the task itself, one click away, rather than
+          rebuilding the task drawer inside a directory row. */}
+      {tasksOpen && client && (
+        <div className="space-y-1 border-t bg-background/40 px-4 py-2 pl-9 text-[13px]">
+          {openTasks.length === 0 && <div className="text-[12px] text-muted">No open tasks for {listing.name} yet.</div>}
+          {openTasks.map((t) => (
+            <button key={t.id} onClick={() => onOpenTask?.(t.id)} className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-surface">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: STATUS_META[t.status].dot }} />
+              <span className="min-w-0 flex-1 truncate">{t.title}</span>
+              {t.due && <span className={`shrink-0 text-[12px] ${isOverdue(t.due) ? "font-medium text-danger" : "text-muted"}`}>{formatDue(t.due)}</span>}
+              {t.assigneeId && <Avatar id={t.assigneeId} size={18} />}
+            </button>
+          ))}
+          {/* Enter commits; deliberately NOT onBlur — these rows sit in a
+              dense list where clicking away is the normal way to abandon a
+              half-typed thought, and committing there creates junk tasks. */}
+          <input value={newTask} onChange={(e) => setNewTask(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addTask(); }}
+            placeholder="Add a task…  ↵" className="mt-1 w-full rounded-md border bg-surface px-2 py-1 text-[13px] outline-none focus:border-accent" />
+        </div>
+      )}
 
       {/* Outreach history */}
       {histOpen && (

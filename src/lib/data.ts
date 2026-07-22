@@ -566,6 +566,17 @@ export const PERSONAL_PROJECT_ID = "personal_project";
 // standalone "lists" with no GHL contact, so they never sync. Shown as its
 // own sidebar section above Clients, not in the client list.
 export const WORKSPACE_CLIENT_ID = "cl_workspace";
+// Same idea, one per territory: a contact-less container holding a city's own
+// work (launch plan, newsletter, events) as opposed to the work on any one
+// business in it. Id is derived from the territory id so it needs no schema
+// of its own — `cl_terr_` + territory.id — and the shared prefix is what
+// keeps these out of the client roster (see clientList in Cockpit).
+// Territory ids are themselves newId("terr_")-generated, so the leading
+// "terr_" is stripped rather than doubled up ("cl_terr_terr_ab12"). Every
+// territory id carries that prefix, which makes the strip a bijection — no
+// two territories can collide on the container id.
+export const TERRITORY_CLIENT_PREFIX = "cl_terr_";
+export const territoryClientId = (territoryId: string) => TERRITORY_CLIENT_PREFIX + territoryId.replace(/^terr_/, "");
 
 export const STATUS_META: Record<TaskStatus, { label: string; dot: string; chip: string }> = {
   todo: { label: "To do", dot: "#94a3b8", chip: "#f1f5f9" },

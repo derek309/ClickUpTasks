@@ -63,12 +63,19 @@ function addDaysIso(iso, days) {
   return dt.toISOString().slice(0, 10);
 }
 
-// small caches so we can show client/project names
-let clientNames = {}, projectNames = {};
-async function names() {
-  if (Object.keys(clientNames).length) return;
-  for (const c of await sb("clients?select=id,name")) clientNames[c.id] = c.name;
-  for (const p of await sb("projects?select=id,name")) projectNames[p.id] = p.name;
+// Small caches so we can show client/project names. Time-boxed rather than
+// loaded once for the life of the process: several tools *gate* on these maps
+// ("No client X."), so a permanently-cached list makes anything created since
+// the server started look nonexistent — which reads as data loss rather than
+// as a stale cache, and sends you hunting for a deleter that isn't there.
+let clientNames = {}, projectNames = {}, namesAt = 0;
+const NAMES_TTL_MS = 30_000;
+async function names(force = false) {
+  if (!force && namesAt && Date.now() - namesAt < NAMES_TTL_MS) return;
+  const fresh = {}, freshProjects = {};
+  for (const c of await sb("clients?select=id,name")) fresh[c.id] = c.name;
+  for (const p of await sb("projects?select=id,name")) freshProjects[p.id] = p.name;
+  clientNames = fresh; projectNames = freshProjects; namesAt = Date.now();
 }
 
 // Roster cache — profiles.member_id is the id actually stored in
@@ -129,7 +136,9 @@ server.tool("list_client_tasks",
   },
   async ({ client_id, project_id, include_done, limit }) => {
     await names();
+    if (!clientNames[client_id]) await names(true);
     if (!clientNames[client_id]) return { content: [{ type: "text", text: `No client ${client_id}.` }] };
+    if (project_id && !projectNames[project_id]) await names(true);
     if (project_id && !projectNames[project_id]) return { content: [{ type: "text", text: `No project ${project_id}.` }] };
     let q = `tasks?select=*&client_id=eq.${enc(client_id)}&order=due.asc.nullslast`;
     if (project_id) q += `&project_id=eq.${enc(project_id)}`;
@@ -174,8 +183,10 @@ server.tool("create_task",
   },
   async ({ client_id, project_id, title, description, due, priority, assignee_id, waiting_on_client }) => {
     await names();
+    if (!clientNames[client_id]) await names(true);
     if (!clientNames[client_id]) return { content: [{ type: "text", text: `No client ${client_id}.` }] };
     let pid = project_id;
+    if (pid && !projectNames[pid]) await names(true);
     if (pid && !projectNames[pid]) return { content: [{ type: "text", text: `No project ${pid}.` }] };
     if (!pid) {
       const existing = await sb(`projects?select=id&client_id=eq.${enc(client_id)}&limit=1`);
@@ -381,6 +392,7 @@ server.tool("list_links",
   { client_id: z.string() },
   async ({ client_id }) => {
     await names();
+    if (!clientNames[client_id]) await names(true);
     if (!clientNames[client_id]) return { content: [{ type: "text", text: `No client ${client_id}.` }] };
     const rows = await sb(`client_links?select=label,url,group_label&client_id=eq.${enc(client_id)}&order=position.asc`);
     if (!rows.length) return { content: [{ type: "text", text: "No links yet." }] };

@@ -6,11 +6,11 @@
 // vs "unclaimed" (still just a raw synced contact). Reuses the existing client
 // status funnel for pipeline stage instead of a second, parallel state.
 import { useState } from "react";
-import { users, clientStatusMeta, normalizeState, type Me, type Territory, type Contact, type Client, type ClientStatus } from "@/lib/data";
+import { users, clientStatusMeta, normalizeState, type Me, type Territory, type Contact, type Client, type ClientStatus, type Task } from "@/lib/data";
 import { I, Avatar } from "./cockpit/ui";
 import TerritoryDirectory from "./cockpit/TerritoryDirectory";
 
-export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onDeleteTerritory, onAddContact, onSyncClients, onSetStatus, onOpenClient, featuredClientIds, onFeature, focusId }: {
+export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onDeleteTerritory, onAddContact, onSyncClients, onSetStatus, onOpenClient, featuredClientIds, onFeature, onOpenWork, workOpenCount, tasksByClient, onAddTask, onOpenTask, focusId }: {
   me: Me; canAdmin: boolean;
   territories: Territory[]; contacts: Contact[]; clients: Client[];
   onAddTerritory: (t: { name: string; city: string; state: string; assignedTo: string[] }) => void;
@@ -26,6 +26,15 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
   // Newsletter feature motion, threaded straight through to the city view.
   featuredClientIds?: Set<string>;
   onFeature?: (opts: { clientId: string | null; contact: Contact | null; name: string; city: string; state: string }) => void;
+  // City work (the territory's own container client) — focused page only,
+  // same reason as onSyncClients/onSetStatus above.
+  onOpenWork?: (territoryId: string) => void;
+  workOpenCount?: (territoryId: string) => number;
+  // Per-business work, surfaced inline on each listing row so you can see
+  // what's open across a city without opening every business in turn.
+  tasksByClient?: Map<string, Task[]>;
+  onAddTask?: (clientId: string, title: string) => void;
+  onOpenTask?: (taskId: string) => void;
   focusId?: string; // when set, render only this one city, auto-expanded (the sidebar city page)
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(() => (focusId ? new Set([focusId]) : new Set()));
@@ -178,11 +187,27 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                     <span onClick={(e) => { e.stopPropagation(); onDeleteTerritory(t.id); }} title="Delete territory" className="shrink-0 rounded p-1 text-muted hover:bg-background hover:text-danger"><I.trash /></span>
                   )}
                 </HeaderTag>
-                {open && focusId && (
+                {open && focusId && (<>
+                  {/* Two halves of a territory: the businesses in it, and the
+                      city's own work (launch plan, newsletter, events). Work
+                      isn't a local tab — it routes to the city's container
+                      client so it gets the real task list, quick-add,
+                      Journal and Vault rather than a second, thinner copy of
+                      all of that living here. */}
+                  {onOpenWork && (
+                    <div className="mb-2 inline-flex rounded-lg bg-background p-0.5">
+                      <span className="rounded-md bg-surface px-3 py-1.5 text-[14px] font-medium shadow-soft">Businesses</span>
+                      <button onClick={() => onOpenWork(t.id)} className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[14px] font-medium text-muted hover:text-foreground">
+                        City work
+                        {!!workOpenCount?.(t.id) && <span className="rounded-full bg-accent px-1.5 text-[12px] font-semibold text-white">{workOpenCount(t.id)}</span>}
+                      </button>
+                    </div>
+                  )}
                   <TerritoryDirectory city={t.city} state={t.state} contacts={matched} clients={clients} onAddContact={onAddContact}
                     onSyncClients={onSyncClients} onSetStatus={onSetStatus} onOpenClient={onOpenClient}
-                    featuredClientIds={featuredClientIds} onFeature={onFeature} sort={sort} onSetSort={setSort} />
-                )}
+                    featuredClientIds={featuredClientIds} onFeature={onFeature} sort={sort} onSetSort={setSort}
+                    tasksByClient={tasksByClient} onAddTask={onAddTask} onOpenTask={onOpenTask} />
+                </>)}
                 {open && !focusId && (
                   <div className="space-y-1 border-t px-3 py-2">
                     {matched.length === 0 && <div className="py-3 text-center text-[13px] text-muted">No synced GoHighLevel contacts match {t.city}, {t.state} yet.</div>}
