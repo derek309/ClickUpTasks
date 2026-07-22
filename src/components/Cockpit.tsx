@@ -2016,7 +2016,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // admin-only — tasks_update RLS rejects a non-admin writing a teammate's
   // task, which would silently fail per task while the toast claimed success.
   const alignOverdueTasksTo = (clientId: string, projectId: string | null, newDate: string) => {
-    const blocking = tasks.filter((t) => t.status !== "done" && !!t.due && t.due <= TODAY && (projectId ? t.projectId === projectId : t.clientId === clientId));
+    // Conversation-priority tasks ("Reply to X") are excluded: they re-pin
+    // their own due date to today on every inbound message
+    // (inboundIngest.ts/ghlConversationTask.ts), on purpose — an unanswered
+    // message isn't something to snooze. Moving one here is either wrong
+    // (implies "we'll wait" on it) or pointless (the next message just
+    // bounces it right back to today), which is exactly the loop this was
+    // built to prevent, not cause.
+    const blocking = tasks.filter((t) => t.status !== "done" && t.priority !== "conversation" && !!t.due && t.due <= TODAY && (projectId ? t.projectId === projectId : t.clientId === clientId));
     if (!blocking.length) return;
     blocking.forEach((t) => patchTask(t.id, { due: newDate }));
     pushToast(`Moved ${blocking.length} overdue task${blocking.length === 1 ? "" : "s"} to ${formatDue(newDate)}.`);
