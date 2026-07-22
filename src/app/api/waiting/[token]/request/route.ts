@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { todayIso, type Attachment } from "@/lib/data";
+import { sanitizeWaitingAttachments } from "@/lib/waitingAttachments";
 
 // Public, token-gated — lets the client raise a brand-new task themselves
 // ("need something else?"), not just reply to something we're already
@@ -23,8 +24,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   if (!client) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const payload = await req.json().catch(() => null) as { body?: string; attachments?: Attachment[] } | null;
-  const text = (payload?.body ?? "").trim();
-  const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
+  const text = (payload?.body ?? "").slice(0, 10000).trim();
+  // Never trust the caller's attachment objects — rebuild each from a storage
+  // path we can prove belongs to this client (see sanitizeWaitingAttachments).
+  const attachments = sanitizeWaitingAttachments(payload?.attachments, client.id);
   if (!text && attachments.length === 0) return NextResponse.json({ error: "Add a note or attachment before sending." }, { status: 400 });
 
   // Reuse (or create) the client's default "Tasks" list — same

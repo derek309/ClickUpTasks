@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { todayIso, type Attachment } from "@/lib/data";
+import { sanitizeWaitingAttachments } from "@/lib/waitingAttachments";
 
 // Public, token-gated — the client submits (or edits) their reply to a
 // waiting-on-them task. Reassignment/due-date/notification only fire when
@@ -19,8 +20,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
 
   const payload = await req.json().catch(() => null) as { taskId?: string; body?: string; attachments?: Attachment[] } | null;
   const taskId = payload?.taskId;
-  const text = (payload?.body ?? "").trim();
-  const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
+  const text = (payload?.body ?? "").slice(0, 10000).trim();
+  // Never trust the caller's attachment objects — rebuild each from a storage
+  // path we can prove belongs to this client (see sanitizeWaitingAttachments).
+  const attachments = sanitizeWaitingAttachments(payload?.attachments, client.id);
   if (!taskId) return NextResponse.json({ error: "Missing taskId." }, { status: 400 });
   if (!text && attachments.length === 0) return NextResponse.json({ error: "Add a note or attachment before saving." }, { status: 400 });
 
