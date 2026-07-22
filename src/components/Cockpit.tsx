@@ -2004,6 +2004,23 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     dated.forEach((t) => update(t.id, { due: addDaysIso(t.due!, delta) }));
     pushToast(`Moved ${dated.length} due date${dated.length === 1 ? "" : "s"} ${delta > 0 ? "forward" : "back"} ${Math.abs(delta)} day${Math.abs(delta) === 1 ? "" : "s"}.`);
   };
+  // Backs the follow-up pill's own edit, not the overflow-menu "Move all due
+  // dates" above — different problem. That one shifts every dated task by
+  // the same delta to preserve spacing; this one is "we're waiting longer
+  // than planned, snooze whatever's actually blocking it" — only tasks due
+  // today or already overdue jump to the new date (anything due later is
+  // untouched, since it was never what pushed the follow-up date out).
+  // Unscoped by assignee on purpose, same as the pill's own autoTracked
+  // check below: the goal is nothing under this client/project reads
+  // overdue, not just the viewer's own tasks. That's also why this is
+  // admin-only — tasks_update RLS rejects a non-admin writing a teammate's
+  // task, which would silently fail per task while the toast claimed success.
+  const alignOverdueTasksTo = (clientId: string, projectId: string | null, newDate: string) => {
+    const blocking = tasks.filter((t) => t.status !== "done" && !!t.due && t.due <= TODAY && (projectId ? t.projectId === projectId : t.clientId === clientId));
+    if (!blocking.length) return;
+    blocking.forEach((t) => patchTask(t.id, { due: newDate }));
+    pushToast(`Moved ${blocking.length} overdue task${blocking.length === 1 ? "" : "s"} to ${formatDue(newDate)}.`);
+  };
   const deleteTask = (id: string) => {
     setConfirmDialog({
       title: "Delete this task?", message: "This can't be undone.", confirmLabel: "Delete",
@@ -3560,18 +3577,27 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             const overdue = isOverdue(fu);
             const setFollowUp = (d: string | null) => (scopedProject ? setProjectFollowUp(scopedProject.id, d) : setClientFollowUp(activeClient, d));
             // Auto-tracked when this entity has an open dated task — the
-            // recompute effect keeps followUpAt pinned to the soonest one, so
-            // the header shows it read-only (editing would just be overwritten).
-            // With no dated task, it's a free manual reminder you can set.
+            // recompute effect keeps followUpAt pinned to the soonest one.
+            // Admins can still move it (see alignOverdueTasksTo above): doing
+            // so drags any task due today or earlier up to the new date, so
+            // that's what the effect settles back onto next render — moving
+            // the ONE follow-up date is what actually clears "overdue"
+            // instead of hunting down every task blocking it by hand. VAs
+            // keep the old read-only display — tasks_update RLS would
+            // reject them writing a teammate's task anyway.
             const autoTracked = tasks.some((t) => t.status !== "done" && !!t.due && (scopedProject ? t.projectId === scopedProject.id : t.clientId === activeClient));
+            const editable = !autoTracked || canAdmin;
             return (
-              <div title={autoTracked ? "Follow-up date — auto-tracked to the next task due date" : "Follow-up date — when to next check in on this"}
+              <div title={autoTracked ? (canAdmin ? "Follow-up date — click to move it, and it'll pull anything due today or overdue up to match" : "Follow-up date — auto-tracked to the next task due date") : "Follow-up date — when to next check in on this"}
                 className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 ${overdue ? "border-danger/40 bg-danger-soft" : fu ? "border-accent/40 bg-accent-soft" : "border-dashed"}`}>
                 <I.calendar className={overdue ? "text-danger" : fu ? "text-accent" : "text-muted"} />
-                {autoTracked ? (
-                  <span className={`text-[13px] font-semibold ${overdue ? "text-danger" : "text-accent"}`}>{fu ? formatDue(fu) : "—"}<span className="ml-1 font-normal text-muted">· auto</span></span>
+                {editable ? (
+                  <InlineDue value={fu} overdue={overdue} onChange={(d) => {
+                    if (d && autoTracked) alignOverdueTasksTo(activeClient, scopedProject?.id ?? null, d);
+                    setFollowUp(d);
+                  }} emptyLabel="Follow-up" strong />
                 ) : (
-                  <InlineDue value={fu} overdue={overdue} onChange={setFollowUp} emptyLabel="Follow-up" strong />
+                  <span className={`text-[13px] font-semibold ${overdue ? "text-danger" : "text-accent"}`}>{fu ? formatDue(fu) : "—"}<span className="ml-1 font-normal text-muted">· auto</span></span>
                 )}
               </div>
             );
