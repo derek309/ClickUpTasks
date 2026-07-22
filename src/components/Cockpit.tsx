@@ -262,6 +262,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       return next;
     });
   };
+  // Opening a teammate's thread clears the bell notifications they generated —
+  // otherwise each "X sent you a message" lingers unread until you open the
+  // notification bell, inflating the badge even though you've read the thread.
+  const markDmNotifsRead = (partnerId: string) => {
+    const ids = notifications.filter((n) => n.recipientId === me.id && n.kind === "dm" && n.actorId === partnerId && !n.read).map((n) => n.id);
+    if (!ids.length) return;
+    setNotifications((ns) => ns.map((n) => (ids.includes(n.id) ? { ...n, read: true } : n)));
+    ids.forEach((id) => markNotifReadDb(id));
+  };
   const dmUnread = (otherUserId: string) => {
     const cid = dmConversationId(me.id, otherUserId);
     return dmMessages.some((m) => m.conversationId === cid && m.authorId !== me.id && m.at > (dmLastRead[cid] ?? ""));
@@ -273,6 +282,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setMyWork(false); setPersonalView(false); setDirView(null); setTerritoryView(null); setSettingsView(false);
     setOpenTaskId(null); setSidebarOpen(false);
     markDmRead(dmConversationId(me.id, userId));
+    markDmNotifsRead(userId);
   };
   // Same reasoning as the Team Chat effect above: a DM message arriving
   // while its thread is already open is already read.
@@ -771,6 +781,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const copyClientShareLink = (clientId: string) => {
     const c = clientById(clientId);
     if (!c) return;
+    // Minting a token is an admin-only write (clients_write RLS). If a VA hits
+    // this on a client with no token yet, the upsert would be silently rejected
+    // and they'd copy a URL that 404s forever — so refuse up front instead.
+    if (!c.shareToken && !canAdmin) { pushToast("Ask an admin to create this client's share link first."); return; }
     const token = c.shareToken ?? crypto.randomUUID().replace(/-/g, "");
     if (!c.shareToken) {
       const nc = { ...c, shareToken: token };
@@ -2926,10 +2940,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // there's no @mention scan: every send notifies the recipient directly.
   const sendDmMessage = (otherUserId: string, body: string, attachments?: Attachment[], replyToId?: string | null) => {
     if (!body.trim() && !attachments?.length) return;
-    const m: DmMessage = { id: newId("dm_"), conversationId: dmConversationId(me.id, otherUserId), authorId: me.id, recipientId: otherUserId, body: body.trim(), at: new Date().toISOString(), replyToId: replyToId ?? null, attachments: attachments ?? [] };
+    const cid = dmConversationId(me.id, otherUserId);
+    // Only email the FIRST message of a burst — if the newest message in this
+    // thread so far is already mine, the recipient's inbox has been pinged and
+    // a rapid-fire follow-up shouldn't add another email. The in-app bell still
+    // fires every time; a reply from them resets "first of burst".
+    const prior = dmMessages.filter((mm) => mm.conversationId === cid);
+    const newest = prior.length ? prior.reduce((a, b) => (b.at > a.at ? b : a)) : null;
+    const firstOfBurst = !newest || newest.authorId !== me.id;
+    const m: DmMessage = { id: newId("dm_"), conversationId: cid, authorId: me.id, recipientId: otherUserId, body: body.trim(), at: new Date().toISOString(), replyToId: replyToId ?? null, attachments: attachments ?? [] };
     setDmMessages((ms) => [...ms, m]);
     insertDmMessage(m);
-    notify(otherUserId, `${me.name} sent you a message`, null, { kind: "dm" });
+    notify(otherUserId, `${me.name} sent you a message`, null, { kind: "dm", skipEmail: !firstOfBurst });
   };
   const deleteDmMessage = (id: string) => {
     setDmMessages((ms) => ms.filter((m) => m.id !== id));
@@ -2981,7 +3003,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const territoryTitle = territoryView ? (territoryView === "all" ? "Territories" : (territoryById(territoryView) ? `${territoryById(territoryView)!.city}, ${territoryById(territoryView)!.state}` : "Territory")) : null;
   const headerTitleText = territoryTitle ?? (settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Team Chat") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? "All Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? "")));
   const isClientDetail = !myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && !!clientById(activeClient);
-  const showFilterControl = !territoryView && !inboxView && !dirView && !myWork && !(activeClient !== "all" && (clientTab === "chat" || clientTab === "vault"));
+  const showFilterControl = !territoryView && !inboxView && !dirView && !myWork && !settingsView && !(activeClient !== "all" && (clientTab === "chat" || clientTab === "vault"));
   const bellControl = (
     <div className="relative">
       <button onClick={() => { const opening = !bellOpen; setBellOpen(opening); if (opening) { setNotifications((ns) => ns.map((n) => (n.recipientId === me.id ? { ...n, read: true } : n))); markNotifsReadDb(me.id); } }} aria-label="Notifications" className="relative rounded-lg border bg-background p-2 text-muted hover:text-foreground">

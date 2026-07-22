@@ -65,9 +65,15 @@ export function toPacificDate(iso: string): string {
 // is safe to replace wholesale: find-by-name, swap it out, leave everything
 // else (including any manually attached files) untouched.
 const MEETING_LOCATION_ATTACHMENT_NAME = "Meeting location";
+// Returns null when nothing would change — so the caller can skip a needless
+// write. When the location is unchanged we return the SAME attachment object
+// (not a fresh one), preserving any Vault folderId/position a user filed it
+// under; only a genuinely new/removed/changed URL mints a replacement.
 function withMeetingLocation(existing: { id: string; name: string; kind: string; size: string; url?: string }[], location: string | null | undefined) {
+  const current = existing.find((a) => a.name === MEETING_LOCATION_ATTACHMENT_NAME);
   const rest = existing.filter((a) => a.name !== MEETING_LOCATION_ATTACHMENT_NAME);
-  if (!location) return rest;
+  if (!location) return current ? rest : null; // clearing: only a change if one existed
+  if (current && current.url === location) return null; // same link already present
   return [...rest, { id: "at_" + crypto.randomUUID(), name: MEETING_LOCATION_ATTACHMENT_NAME, kind: "link", size: "", url: location }];
 }
 
@@ -93,7 +99,10 @@ export async function upsertConversationTask(
     // relocated meeting's join link updates here without creating a
     // duplicate task or touching anything else on it.
     const patch: Record<string, unknown> = { due };
-    if (opts?.location !== undefined) patch.attachments = withMeetingLocation(openTasks[0].attachments ?? [], opts.location);
+    if (opts?.location !== undefined) {
+      const next = withMeetingLocation(openTasks[0].attachments ?? [], opts.location);
+      if (next !== null) patch.attachments = next; // null = location unchanged, don't churn the attachment
+    }
     await supabaseAdmin.from("tasks").update(patch).eq("id", openTasks[0].id);
     return openTasks[0].id;
   }
@@ -121,7 +130,9 @@ export async function upsertConversationTask(
     priority: "conversation",
     contact_id: contact.id,
     due,
-    attachments: withMeetingLocation(ghlUrl ? [{ id: "at_" + crypto.randomUUID(), name: "GHL conversation", kind: "link", size: "", url: ghlUrl }] : [], opts?.location),
+    // On a brand-new task there's nothing to preserve, so a null "no change"
+    // result just means "no meeting location" — fall back to the base array.
+    attachments: (() => { const base = ghlUrl ? [{ id: "at_" + crypto.randomUUID(), name: "GHL conversation", kind: "link", size: "", url: ghlUrl }] : []; return withMeetingLocation(base, opts?.location) ?? base; })(),
   });
   // A concurrent delivery for the same contact can lose the race to the
   // partial unique index in conversation-task-unique.sql — that's the other

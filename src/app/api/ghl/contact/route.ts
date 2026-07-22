@@ -6,6 +6,11 @@ import { rowToContact } from "@/lib/db";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+// This route can fan a single lookup across several sub-account tokens
+// sequentially; give it headroom beyond the default so a couple of slow GHL
+// responses don't trip the platform's function limit with an opaque 504.
+export const maxDuration = 30;
+
 // Re-pulls one contact's name/email/phone/company/city/state from
 // GoHighLevel on demand — the bulk sync (../sync/route.ts) re-syncs an
 // entire sub-account (a big Directory location is ~30 sequential GHL API
@@ -25,13 +30,29 @@ import { rowToContact } from "@/lib/db";
 // outbound actions like pushing a task or sending an SMS, which stay
 // strictly gated on a known-correct location — guessing wrong there could
 // send something from the wrong business).
-async function fetchContactWithToken(token: string, ghlContactId: string): Promise<any | null> {
-  const res = await fetch(`https://services.leadconnectorhq.com/contacts/${encodeURIComponent(ghlContactId)}`, {
-    headers: { Authorization: `Bearer ${token}`, Version: "2021-07-28", Accept: "application/json" },
-  });
-  if (!res.ok) return null;
+// Runs one GET /contacts/{id} against one sub-account's token. Three outcomes:
+//   { contact }   — found it here
+//   "miss"        — this token's location genuinely doesn't have the contact
+//                   (a real 404), so keep trying other tokens
+//   "transient"   — rate-limit / auth / 5xx / network / timeout: we CAN'T
+//                   conclude the contact is absent, so if no other token finds
+//                   it we must report an error, not "doesn't exist"
+type FetchResult = { contact: any } | "miss" | "transient";
+
+async function fetchContactWithToken(token: string, ghlContactId: string): Promise<FetchResult> {
+  let res: Response;
+  try {
+    res = await fetch(`https://services.leadconnectorhq.com/contacts/${encodeURIComponent(ghlContactId)}`, {
+      headers: { Authorization: `Bearer ${token}`, Version: "2021-07-28", Accept: "application/json" },
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch {
+    return "transient"; // network error or the 8s timeout fired
+  }
+  if (res.status === 404) return "miss";
+  if (!res.ok) return "transient"; // 401 (revoked), 429 (rate-limited), 5xx
   const json = await res.json().catch(() => null);
-  return json?.contact ?? null;
+  return json?.contact ? { contact: json.contact } : "miss";
 }
 
 export async function POST(req: NextRequest) {
@@ -41,22 +62,37 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Missing contactId or ghlContactId." }, { status: 400 });
 
   let c: any = null;
+  let sawTransient = false; // any token returned a rate-limit / auth / 5xx / timeout
+  const tried = new Set<string>();
+  const attempt = async (token: string) => {
+    const r = await fetchContactWithToken(token, ghlContactId);
+    if (r === "transient") { sawTransient = true; return false; }
+    if (r === "miss") return false;
+    c = r.contact;
+    return true;
+  };
+
   if (locationId) {
     const token = await tokenForLocation(locationId);
-    if (token) c = await fetchContactWithToken(token, ghlContactId);
+    if (token) { tried.add(token); await attempt(token); }
   }
   if (!c) {
     const locations = await configuredLocations();
     for (const loc of locations) {
-      if (loc === locationId) continue; // already tried above
       const token = await tokenForLocation(loc);
-      if (!token) continue;
-      c = await fetchContactWithToken(token, ghlContactId);
-      if (c) break;
+      if (!token || tried.has(token)) continue; // dedupe: same token can back two location ids
+      tried.add(token);
+      if (await attempt(token)) break;
     }
   }
-  if (!c && process.env.GHL_TOKEN) c = await fetchContactWithToken(process.env.GHL_TOKEN, ghlContactId);
-  if (!c) return NextResponse.json({ error: "Couldn't find this contact in any connected GoHighLevel sub-account." }, { status: 404 });
+  if (!c && process.env.GHL_TOKEN && !tried.has(process.env.GHL_TOKEN)) await attempt(process.env.GHL_TOKEN);
+  if (!c) {
+    // Only claim "doesn't exist anywhere" when every token gave a clean 404.
+    // If any lookup hit a rate-limit/timeout/5xx, the contact may well be
+    // reachable — say so, so the UI doesn't tell the user a live contact is gone.
+    if (sawTransient) return NextResponse.json({ error: "GoHighLevel is temporarily unavailable (rate-limited or timed out). Try again in a moment." }, { status: 502 });
+    return NextResponse.json({ error: "Couldn't find this contact in any connected GoHighLevel sub-account." }, { status: 404 });
+  }
 
   const row = {
     name: [c.firstName, c.lastName].filter(Boolean).join(" ") || c.name || c.email || "Unnamed contact",

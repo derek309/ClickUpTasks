@@ -230,9 +230,11 @@ server.tool("update_task",
       patch.assignee_id = resolved.id;
       patch.waiting_on_client = false;
     }
-    if (waiting_on_client) {
-      patch.waiting_on_client = true;
-      patch.assignee_id = null;
+    if (waiting_on_client !== undefined) {
+      patch.waiting_on_client = waiting_on_client;
+      // Setting the flag clears the assignee (mirrors the app); clearing it
+      // just drops the flag and leaves assignment to an explicit assignee_id.
+      if (waiting_on_client) patch.assignee_id = null;
     }
     if (!Object.keys(patch).length) return { content: [{ type: "text", text: "Nothing to update — provide at least one field." }] };
     const [t] = await sb(`tasks?id=eq.${enc(id)}`, "PATCH", patch);
@@ -258,7 +260,7 @@ server.tool("delete_task",
   });
 
 server.tool("set_task_status",
-  "Set a task's status (todo | in_progress | review | done). Use to start or complete work. Completing (done) removes the task from your Claude queue.",
+  "Set a task's status (todo | in_progress | review | changes_requested | done). Use to start or complete work. Completing (done) removes the task from your Claude queue.",
   { id: z.string(), status: z.enum(STATUSES) },
   async ({ id, status }) => {
     const [t] = await sb(`tasks?id=eq.${enc(id)}`, "PATCH", { status });
