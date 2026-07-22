@@ -397,7 +397,11 @@ export function InlineDue({ value, overdue, recurrence = "none", onChange, onRec
       // picker can't run off the right edge of a phone.
       const width = Math.min(440, window.innerWidth - 16);
       const left = Math.max(8, Math.min(r.right - width, window.innerWidth - width - 8));
-      const top = r.bottom + 300 > window.innerHeight ? r.top - 304 : r.bottom + 4;
+      // Prefer opening below the trigger; flip above it if there's no room
+      // below, but clamp so a trigger near the top of a short window (a
+      // header control, a split/docked browser) never pushes the panel's
+      // top above y=0 and off-screen.
+      const top = r.bottom + 300 > window.innerHeight ? Math.max(8, r.top - 304) : r.bottom + 4;
       setPos({ top, left, width });
     }
     setOpen(true);
