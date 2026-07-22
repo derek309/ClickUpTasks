@@ -132,6 +132,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [projects, setProjects] = useState<Project[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  // Always-current mirror of `tasks`. Full-row task writes (patchTask/update)
+  // build the outgoing row from "before", so a handler that captured `tasks`
+  // in a closure and runs later — a bulk confirm dialog, an Undo toast up to
+  // ~11s after — would otherwise upsert a stale row and silently clobber a
+  // teammate's edit that landed via realtime in the meantime. Reading the ref
+  // instead means the merge is always against the latest committed state.
+  const tasksRef = useRef<Task[]>(tasks);
+  useEffect(() => { tasksRef.current = tasks; }, [tasks]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [clientLinks, setClientLinks] = useState<ClientLink[]>([]);
   const [clientNotes, setClientNotes] = useState<ClientNote[]>([]);
@@ -1793,7 +1801,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   const update = (id: string, patch: Partial<Task>) => {
     setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, ...patch } : t)));
-    const cur = tasks.find((t) => t.id === id);
+    const cur = tasksRef.current.find((t) => t.id === id);
     if (cur) { const merged = { ...cur, ...patch }; upsertTask(merged, me.id); syncGhlIfLinked(merged, patch); }
   };
 
@@ -1818,7 +1826,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   };
 
   const patchTask = (id: string, patch: Partial<Task>) => {
-    const before = tasks.find((x) => x.id === id);
+    const before = tasksRef.current.find((x) => x.id === id);
     if (!before) return;
     const events = describeFieldChange(before, patch).map((body) => ({ id: newId("cm_"), authorId: me.id, body, at: new Date().toISOString(), kind: "event" as const }));
     const updated: Task = { ...before, ...patch, comments: events.length ? [...before.comments, ...events] : before.comments };
@@ -1875,7 +1883,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         const keys = Object.keys(patch) as (keyof Task)[];
         const before = ids
           .map((id) => {
-            const t = tasks.find((x) => x.id === id);
+            const t = tasksRef.current.find((x) => x.id === id);
             if (!t) return null;
             const prev: Partial<Task> = {};
             keys.forEach((k) => { (prev as Record<string, unknown>)[k] = t[k]; });
@@ -1916,7 +1924,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       title: "Delete this task?", message: "This can't be undone.", confirmLabel: "Delete",
       onConfirm: () => {
         setConfirmDialog(null);
-        const t = tasks.find((x) => x.id === id);
+        const t = tasksRef.current.find((x) => x.id === id);
         if (t?.ghlTaskId) ghlCall("delete", t); // also remove it from GoHighLevel
         setTasks((ts) => ts.filter((t) => t.id !== id));
         setOpenTaskId(null);
@@ -2742,7 +2750,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // points at the wrong contact once moved, but the task on GHL's side is
   // still real work someone may be tracking there — not ours to delete.
   const moveTaskToClient = (taskId: string, newClientId: string, silent?: boolean) => {
-    const t = tasks.find((x) => x.id === taskId);
+    const t = tasksRef.current.find((x) => x.id === taskId);
     if (!t || t.clientId === newClientId) return;
     let projectId = projects.find((p) => p.clientId === newClientId)?.id;
     if (!projectId) {
@@ -2780,7 +2788,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       onConfirm: () => {
         const before = movable
           .map((id) => {
-            const t = tasks.find((x) => x.id === id);
+            const t = tasksRef.current.find((x) => x.id === id);
             return t ? { id, prev: { clientId: t.clientId, projectId: t.projectId, contactId: t.contactId, ghlTaskId: t.ghlTaskId } as Partial<Task> } : null;
           })
           .filter((x): x is { id: string; prev: Partial<Task> } => !!x);
