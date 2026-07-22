@@ -187,4 +187,7 @@ export const LIST_COLUMNS: { key: string; label: string; sortable: boolean }[] =
   { key: "labels", label: "Labels", sortable: false },
 ];
 export const COL_WIDTHS: Record<string, string> = { status: "128px", due: "96px", priority: "104px", comments: "84px", assignee: "72px", contact: "160px", labels: "150px" };
-export type Toast = { id: string; text: string };
+// `action` powers undo: a bulk edit hands back a one-click revert instead of
+// leaving someone to re-set every task by hand. Toasts carrying an action
+// stay on screen longer (see pushToast) so there's time to actually hit it.
+export type Toast = { id: string; text: string; action?: { label: string; run: () => void } };
