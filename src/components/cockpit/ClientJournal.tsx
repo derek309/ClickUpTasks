@@ -76,7 +76,7 @@ function buildFeedRows(items: JournalItem[]): FeedRow[] {
   return rows;
 }
 
-export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, toContact, ccContacts, sendingMessage, onUploadImage, onOpenFile, canAdmin, canMessage, onToggleCanMessage, onDraftMessage, draftingMessage, onRefreshContact, refreshingContact, onRefreshMessages, refreshingMessages, composeIntent }: {
+export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, toContact, ccContacts, sendingMessage, onUploadImage, onOpenFile, canAdmin, canMessage, onToggleCanMessage, onDraftMessage, draftingMessage, onRefreshContact, refreshingContact, onRefreshMessages, refreshingMessages, onWhatsNext, whatsNextBusy, composeIntent }: {
   notes: ClientNote[];
   tasks: Task[]; // already scoped by the caller to the current client/project
   messages?: Message[] | null; // null/undefined = no linked GHL contact at this scope, so no Email/SMS
@@ -101,6 +101,12 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   refreshingContact?: boolean;
   onRefreshMessages?: () => void; // backfills any GHL messages the webhook missed
   refreshingMessages?: boolean;
+  // On-demand AI recap ("recently done / next up") — never runs on its own,
+  // matching the app's "AI never spends without a click" rule. Result lands
+  // as an ai_summary note, which the pinned-recap card above the feed picks
+  // up automatically.
+  onWhatsNext?: () => void;
+  whatsNextBusy?: boolean;
   // A header Email/SMS button sets this to jump the composer straight into that
   // mode. `nonce` bumps on every click so the effect re-fires even when the
   // Journal is already open (the component isn't remounted then).
@@ -327,6 +333,13 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
             <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search…"
               className="w-32 rounded-md border bg-background py-1.5 pl-7 pr-2 text-[13px] outline-none placeholder:text-muted focus:w-48 focus:border-accent sm:w-40 sm:focus:w-56" />
           </div>
+          {onWhatsNext && (
+            <button onClick={onWhatsNext} disabled={whatsNextBusy}
+              title="Generate an up-to-date 'recently done / next up' recap for this client"
+              className="inline-flex items-center gap-1 rounded-md border bg-background px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-accent-soft hover:text-accent disabled:opacity-50">
+              <span aria-hidden>✨</span> {whatsNextBusy ? "Thinking…" : "What's next"}
+            </button>
+          )}
           {onRefreshMessages && messages != null && (
             <button onClick={onRefreshMessages} disabled={refreshingMessages} title="Pull any GoHighLevel emails/texts our webhook missed"
               className="rounded-md border bg-background p-1.5 text-muted hover:text-foreground disabled:opacity-40">

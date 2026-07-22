@@ -3073,10 +3073,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <button onClick={() => { setHeaderMoreOpen(false); openCompose("sms"); }}
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background sm:hidden"><I.comment /> SMS</button>
           )}
-          {activeClient !== "all" && !activeProject && clientById(activeClient) && (
-            <button onClick={() => { setHeaderMoreOpen(false); setClientTab("chat"); regenerateAiSummary(activeClient); }} disabled={aiSummaryBusyId === activeClient}
-              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background disabled:opacity-50 sm:hidden"><span aria-hidden>✨</span> {aiSummaryBusyId === activeClient ? "Thinking…" : "What's next"}</button>
-          )}
           <button onClick={() => { setHeaderMoreOpen(false); copyLink({ view: null, client: activeClient, project: activeProject, task: null, clientTab, vaultFolder: null }); }}
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy link</button>
           {activeClient !== "all" && !activeProject && clientById(activeClient) && (
@@ -3424,19 +3420,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <button onClick={() => openCompose("sms")} title="Text this client" className="border-l bg-background px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-accent-soft hover:text-accent">SMS</button>
             </div>
           )}
-          {/* On-demand AI recap — "here's what we just did, here's what's next".
-              Client-scoped, never runs on its own (matches the app's "AI never
-              spends without a click" rule). Jumps to the Journal, where the
-              freshest recap is pinned at the top. */}
-          {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && !activeProject && clientById(activeClient) && (
-            <button onClick={async () => { setClientTab("chat"); await regenerateAiSummary(activeClient); }}
-              disabled={aiSummaryBusyId === activeClient}
-              title="Generate an up-to-date 'recently done / next up' recap for this client"
-              className="hidden items-center gap-1 rounded-md border px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-accent-soft hover:text-accent disabled:opacity-50 sm:inline-flex">
-              <span aria-hidden>✨</span> <span className="hidden sm:inline">{aiSummaryBusyId === activeClient ? "Thinking…" : "What's next"}</span>
-            </button>
-          )}
-
           {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && clientById(activeClient) && (
             <div className="flex items-center gap-1.5">
               {/* Only shown when this client/project is actually on your
@@ -3524,10 +3507,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     {activeClient !== "all" && !activeProject && canMessageClient(activeClient) && (
                       <button onClick={() => { setHeaderMoreOpen(false); openCompose("sms"); }}
                         className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background sm:hidden"><I.comment /> SMS</button>
-                    )}
-                    {activeClient !== "all" && !activeProject && clientById(activeClient) && (
-                      <button onClick={() => { setHeaderMoreOpen(false); setClientTab("chat"); regenerateAiSummary(activeClient); }} disabled={aiSummaryBusyId === activeClient}
-                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background disabled:opacity-50 sm:hidden"><span aria-hidden>✨</span> {aiSummaryBusyId === activeClient ? "Thinking…" : "What's next"}</button>
                     )}
                     <button onClick={() => { setHeaderMoreOpen(false); copyLink({ view: null, client: activeClient, project: activeProject, task: null, clientTab, vaultFolder: null }); }}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy link</button>
@@ -3824,6 +3803,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             refreshingContact={refreshingContact}
             onRefreshMessages={activeProject ? undefined : (() => { const ct = contactForClient(activeClient); return ct ? () => refreshMessages(activeClient, ct) : undefined; })()}
             refreshingMessages={refreshingMessages}
+            onWhatsNext={activeProject ? undefined : () => regenerateAiSummary(activeClient)}
+            whatsNextBusy={aiSummaryBusyId === activeClient}
           />
         ) : activeClient !== "all" && clientTab === "vault" ? (
           <VaultView items={vaultItems} folders={activeVaultFolders} onDownloadFile={downloadFile} onGetSignedUrl={signedUrlForFile} onCopyLink={copyAttachmentLink}
