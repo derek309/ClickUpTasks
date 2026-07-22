@@ -195,9 +195,15 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                       Journal and Vault rather than a second, thinner copy of
                       all of that living here. */}
                   {onOpenWork && (
-                    <div className="mb-2 inline-flex rounded-lg bg-background p-0.5">
-                      <span className="rounded-md bg-surface px-3 py-1.5 text-[14px] font-medium shadow-soft">Businesses</span>
-                      <button onClick={() => onOpenWork(t.id)} className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[14px] font-medium text-muted hover:text-foreground">
+                    // Same bordered-segment style as the client page's own
+                    // Tasks/Journal/Vault switcher (Cockpit.tsx), not a
+                    // bespoke pill — so this reads as the same kind of tab
+                    // control everywhere, and the reverse direction (added
+                    // on the client page below) looks like flipping the same
+                    // switch rather than a different, smaller "back" link.
+                    <div className="mb-2 inline-flex overflow-hidden rounded-md border text-[13px]">
+                      <span className="bg-accent-soft px-2.5 py-1.5 font-medium text-accent">Businesses</span>
+                      <button onClick={() => onOpenWork(t.id)} className="flex items-center gap-1.5 bg-background px-2.5 py-1.5 font-medium text-muted hover:text-foreground">
                         City work
                         {!!workOpenCount?.(t.id) && <span className="rounded-full bg-accent px-1.5 text-[12px] font-semibold text-white">{workOpenCount(t.id)}</span>}
                       </button>

@@ -3512,14 +3512,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 <p className="hidden items-center gap-1.5 text-[13px] text-muted sm:flex">
                   {/* Breadcrumb back to the Clients directory — only meaningful
                       when a specific client is the thing being viewed. */}
-                  {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && (<>
-                    {/* A territory container isn't in the Clients directory,
-                        so its crumb goes back to the city it belongs to. */}
-                    {activeTerritoryClient ? (
-                      <button onClick={() => openTerritory(activeTerritoryClient.id)} className="hover:text-foreground hover:underline">{activeTerritoryClient.city} businesses</button>
-                    ) : (
-                      <button onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
-                    )}
+                  {/* A territory container isn't in the Clients directory, so
+                      it skips this breadcrumb entirely — the Businesses/City
+                      work switcher in the action row (below) is its way back,
+                      not a second, redundant link doing the same thing. */}
+                  {!myWork && !personalView && !inboxView && !settingsView && !dirView && !activeTerritoryClient && activeClient !== "all" && (<>
+                    <button onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
                     <span>›</span>
                   </>)}
                   <span>{settingsView ? "Integrations, team, territories, templates, playbooks, and API tokens" : inboxView ? (dmUserId ? "Private — only the two of you can see this" : inboxTab === "chat" ? "Talk to the team — @mention someone to notify them" : "Everything that mentions or notifies you, in one place") : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "Every client and project you're on, grouped by what needs attention first" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : activeTerritoryClient ? `City work for ${activeTerritoryClient.city}, ${activeTerritoryClient.state} — not tied to any one business` : clientCompany(clientById(activeClient))}</span>
@@ -3563,6 +3561,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </div>
             );
           })()}
+          {/* Reverse direction of the Businesses/City work switcher on the
+              city page (TerritoryPanel) — same classNames, so flipping
+              between "this city's businesses" and "this city's own work" is
+              one click either way instead of a tab strip on one side and a
+              breadcrumb link on the other. */}
+          {activeTerritoryClient && (
+            <div className="inline-flex overflow-hidden rounded-md border" title="Switch to this city's businesses">
+              <button onClick={() => openTerritory(activeTerritoryClient.id)} className="px-2.5 py-1.5 text-[13px] font-medium bg-background text-muted hover:text-foreground">Businesses</button>
+              <span className="px-2.5 py-1.5 text-[13px] font-medium bg-accent-soft text-accent">City work</span>
+            </div>
+          )}
           {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && (
             <div className="inline-flex overflow-hidden rounded-md border">
               <button onClick={() => setClientTab("tasks")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "tasks" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Tasks</button>
