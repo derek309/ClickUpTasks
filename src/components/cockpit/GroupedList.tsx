@@ -314,7 +314,7 @@ export function InlineAssignee({ value, onChange, waiting, onSetWaiting, client,
         <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
         <div style={{ position: "fixed", top: pos.top, left: pos.left, width: 190 }} className="z-40 rounded-lg border bg-surface p-1 shadow-xl">
           {onSetWaiting && (
-            <button onClick={(e) => { e.stopPropagation(); onSetWaiting(true); setOpen(false); }} className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[13px] hover:bg-background ${waiting ? "font-medium text-amber-600" : "text-muted"}`}><I.user /> Waiting on client</button>
+            <button onClick={(e) => { e.stopPropagation(); onSetWaiting(true); setOpen(false); }} className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[13px] hover:bg-background ${waiting ? "font-medium text-amber-600" : "text-muted"}`}><I.user /> {client ? client.name : "Waiting on client"}</button>
           )}
           <button onClick={(e) => { e.stopPropagation(); onChange(null); setOpen(false); }} className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[13px] text-muted hover:bg-background">Unassigned</button>
           {users.map((u) => (
