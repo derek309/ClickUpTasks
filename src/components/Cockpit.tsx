@@ -219,7 +219,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Which half of the Team Chat page is showing. Chat leads — per Derek, the
   // inbox "is really what team chat was supposed to be": talk to the team
   // first, review the task comments/mentions addressed to you second.
-  const [inboxTab, setInboxTab] = useState<"chat" | "activity">("chat");
   // Per-user "last seen" timestamp for the unread dot — local-only, same
   // idiom as cut_starred/cut_sidebarHidden (no server-side read-state needed
   // for a lightweight badge).
@@ -243,17 +242,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // tab and clear the unread dot. Used by both the sidebar item and the
   // header shortcut so there's exactly one home for it.
   const openTeamChat = () => {
-    setInboxView(true); setInboxTab("chat"); setDmUserId(null);
+    setInboxView(true); setDmUserId(null);
     setMyWork(false); setPersonalView(false); setDirView(null); setTerritoryView(null); setSettingsView(false);
     setOpenTaskId(null); setSidebarOpen(false);
     markTeamChatRead();
   };
   const teamChatUnread = teamMessages.some((m) => m.authorId !== me.id && m.at > teamChatLastRead);
-  // Messages arriving while you're looking at the Chat tab are already read —
-  // without this the realtime insert lights an unread dot for a message
-  // that's on screen, and it only clears by navigating away and back.
+  // Chat is always on screen now (Team Chat page shows Chat + Activity
+  // side by side, not as tabs), so this fires any time you're on that page
+  // at all. Messages arriving while you're already there are already
+  // read — without this the realtime insert lights an unread dot for a
+  // message that's on screen, and it only clears by navigating away and back.
   // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { if (inboxView && dmUserId === null && inboxTab === "chat" && teamChatUnread) markTeamChatRead(); }, [inboxView, dmUserId, inboxTab, teamChatUnread]);
+  useEffect(() => { if (inboxView && dmUserId === null && teamChatUnread) markTeamChatRead(); }, [inboxView, dmUserId, teamChatUnread]);
 
   // DM read-state — same local-only "last seen" idiom as Team Chat above,
   // just one timestamp per conversation instead of one global timestamp.
@@ -1087,10 +1088,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       return;
     }
     // A direct message with no task and no client is a Team Chat mention —
-    // the only notification kind with nowhere else to point. Without this it
-    // was a dead click: "X mentioned you in Team Chat" marked itself read and
-    // did nothing, with the chat one tab away.
-    if (n.kind === "message") setInboxTab("chat");
+    // the only notification kind with nowhere else to point. Nothing left to
+    // do here now that Chat sits right next to Activity on the same page
+    // (used to switch a "which pane" tab to Chat; that tab no longer exists).
   };
 
   const passesFilters = (t: Task) =>
@@ -3563,7 +3563,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     <button onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
                     <span>›</span>
                   </>)}
-                  <span>{settingsView ? "Integrations, team, territories, templates, playbooks, and API tokens" : inboxView ? (dmUserId ? "Private — only the two of you can see this" : inboxTab === "chat" ? "Talk to the team — @mention someone to notify them" : "Everything that mentions or notifies you, in one place") : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "Every client and project you're on, grouped by what needs attention first" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : activeTerritoryClient ? `City work for ${activeTerritoryClient.city}, ${activeTerritoryClient.state} — not tied to any one business` : clientCompany(clientById(activeClient))}</span>
+                  <span>{settingsView ? "Integrations, team, territories, templates, playbooks, and API tokens" : inboxView ? (dmUserId ? "Private — only the two of you can see this" : "Talk to the team, and everything that mentions or notifies you — side by side") : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "Every client and project you're on, grouped by what needs attention first" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : activeTerritoryClient ? `City work for ${activeTerritoryClient.city}, ${activeTerritoryClient.state} — not tied to any one business` : clientCompany(clientById(activeClient))}</span>
                 </p>
               )}
             </>)}
@@ -3982,28 +3982,24 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         ) : inboxView ? (
           // Team Chat page — the two halves of "talk to the team" in one
           // place: the workspace chat, and the task comments/mentions
-          // addressed to you. Deliberately two tabs rather than one merged
-          // feed: chat is a conversation you write into, Activity is a list
-          // you triage and mark read — interleaving them would bury the
-          // composer and make "mark all read" ambiguous.
-          <div className="flex min-h-0 flex-1 flex-col">
-            <div className="flex shrink-0 items-center gap-1 border-b bg-surface px-4 py-2">
-              {([["chat", "Chat"], ["activity", "Activity"]] as const).map(([v, label]) => (
-                <button key={v} onClick={() => { setInboxTab(v); if (v === "chat") markTeamChatRead(); }}
-                  className={`relative rounded-md px-3 py-1.5 text-[13px] font-medium ${inboxTab === v ? "bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>
-                  {label}
-                  {v === "chat" && teamChatUnread && inboxTab !== "chat" && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-accent" />}
-                  {v === "activity" && unread > 0 && <span className="ml-1.5 rounded-full bg-accent px-1.5 text-[11px] font-semibold text-white">{unread}</span>}
-                </button>
-              ))}
-            </div>
-            {inboxTab === "chat" ? (
+          // addressed to you, side by side (~70/30) instead of a tab you
+          // switch between — see everything in one shot rather than
+          // clicking back and forth. Stacks to Chat-over-Activity on
+          // narrow/mobile widths, where a 30% column would be too cramped
+          // to read.
+          <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+            <div className="flex min-h-0 min-w-0 flex-[7] flex-col border-b sm:border-b-0 sm:border-r">
+              <div className="shrink-0 border-b bg-surface px-4 py-2 text-[13px] font-semibold text-muted">Chat</div>
               <TeamChat me={me} scope={{ type: "team" }} messages={teamMessages} onSend={sendTeamMessage} onDelete={deleteTeamMessage}
                 onPin={pinTeamMessage} onUploadFile={(file) => uploadOneImage("team-chat", file)} onOpenFile={downloadFile} />
-            ) : (
+            </div>
+            <div className="flex min-h-0 min-w-0 flex-[3] flex-col">
+              <div className="flex shrink-0 items-center gap-1.5 border-b bg-surface px-4 py-2 text-[13px] font-semibold text-muted">
+                Activity{unread > 0 && <span className="rounded-full bg-accent px-1.5 text-[11px] font-semibold text-white">{unread}</span>}
+              </div>
               <Inbox notifications={myNotifs} clientById={clientById} projectById={projectById} onOpen={openNotification} onMarkAllRead={markAllNotifsRead} onSyncEmail={canAdmin ? syncEmail : undefined} syncingEmail={syncingEmail} onSyncAppointments={canAdmin ? syncAppointments : undefined} syncingAppointments={syncingAppointments}
                 unmatchedEmails={canAdmin ? unmatchedEmails : []} onAddAsClient={addAsClientFromEmail} onDismissUnmatched={dismissUnmatched} />
-            )}
+            </div>
           </div>
         ) : dirView === "clients" ? (
           <ClientsDirectory clients={sortedClients} clientCompany={(c) => clientCompany(c)} taskCount={clientTaskCount} starred={starred} onToggleStar={toggleStar}
