@@ -7,7 +7,7 @@ import { useState } from "react";
 import { timeAgo, dayLabel, type Notification, type Client, type Project, type UnmatchedEmail } from "@/lib/data";
 import { I, Avatar } from "./ui";
 
-type InboxFilter = "all" | "message" | "activity";
+type InboxFilter = "unread" | "all" | "sms" | "email" | "activity";
 
 // Day dividers + collapsing a run of 2+ consecutive same-sender notifications
 // into one summary row (expandable) — same technique ClientJournal's own
@@ -38,7 +38,7 @@ function NotificationRow({ n, clientById, projectById, onOpen }: {
       <Avatar id={n.actorId ?? null} size={32} />
       <div className="min-w-0 flex-1">
         <div className="flex items-start gap-2">
-          <div className={`text-[15px] leading-snug ${n.read ? "" : "font-medium"}`}>{n.text}</div>
+          <div className={`min-w-0 break-words text-[15px] leading-snug ${n.read ? "" : "font-medium"}`}>{n.text}</div>
           {!n.read && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent" />}
         </div>
         <div className="mt-0.5 text-[13px] text-muted">{timeAgo(n.at)}{where && <> · {where}</>}</div>
@@ -50,6 +50,10 @@ function NotificationRow({ n, clientById, projectById, onOpen }: {
 function buildActivityRows(list: Notification[]): ActivityRow[] {
   const rows: ActivityRow[] = [];
   let lastDayKey = "";
+  // list is sorted unread-first, so "Today" (and other days) can appear
+  // twice — once per tier — but within a tier it must be in date order, or
+  // this loop starts a new divider every time the date happens to flip,
+  // instead of once per real day boundary.
   for (const n of list) {
     const dk = new Date(n.at).toDateString();
     if (dk !== lastDayKey) { rows.push({ kind: "divider", key: `d_${dk}`, label: dayLabel(n.at) }); lastDayKey = dk; }
@@ -81,20 +85,28 @@ export function Inbox({ notifications, clientById, projectById, onOpen, onMarkAl
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggle = (id: string) => setExpanded((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const unreadCount = notifications.filter((n) => !n.read).length;
-  const [filter, setFilter] = useState<InboxFilter>("all");
+  // Defaults to Unread — the thing you actually open this page to check —
+  // rather than "All", which buries anything new under everything already read.
+  const [filter, setFilter] = useState<InboxFilter>("unread");
   // Older rows predate `kind` (see notification-kind.sql) — treat missing as
   // "activity", the more common case, same fallback rowToNotif already uses.
-  // A DM notification (kind "dm") counts as a "Messages" notice too — it's a
-  // direct human communication, same bucket as an @mention/comment, just
-  // routed to a DM thread instead of Team Chat when opened.
-  // Unread first (each tier keeps the caller's own newest-first order,
-  // since sort() is stable) — otherwise a genuinely new message can sit
-  // buried under a run of already-read ones from earlier the same day.
-  // Day dividers/grouping (below) run on this order, so "Today" can appear
-  // more than once — once for the unread tier, again for the read tier —
-  // same trade-off any unread-first inbox makes.
-  const filtered = (filter === "all" ? notifications : notifications.filter((n) => (filter === "message" ? n.kind === "message" || n.kind === "dm" : (n.kind ?? "activity") === filter)))
-    .slice().sort((a, b) => Number(a.read) - Number(b.read));
+  // SMS/Email split the old combined "Messages" bucket by the fixed prefix
+  // the webhook/inboundIngest always stamps on inbound-message notification
+  // text ("sent a text:" / "sent an email:") — there's no separate channel
+  // field on Notification itself. DM notifications (kind "dm") aren't part
+  // of either split; they still show under Unread/All.
+  const filtered = (filter === "all" || filter === "unread" ? notifications
+    : notifications.filter((n) => {
+        if (filter === "sms") return n.kind === "message" && n.text.includes("sent a text:");
+        if (filter === "email") return n.kind === "message" && n.text.includes("sent an email:");
+        return (n.kind ?? "activity") === "activity";
+      }))
+    .filter((n) => filter !== "unread" || !n.read)
+    // Unread first (each tier further sorted newest-first by actual date —
+    // day dividers/grouping below rely on that, or a tier whose original
+    // order isn't already chronological produces a cascade of near-empty
+    // day headers as the date ping-pongs between entries).
+    .slice().sort((a, b) => Number(a.read) - Number(b.read) || new Date(b.at).getTime() - new Date(a.at).getTime());
 
   return (
     // min-h-0 matters now that this sits under the Team Chat tab bar in a
@@ -132,21 +144,20 @@ export function Inbox({ notifications, clientById, projectById, onOpen, onMarkAl
           </div>
         )}
         {(notifications.length > 0 || onSyncEmail || onSyncAppointments) && (
-          // Was one row (filter pills + 3 full-text buttons) fighting for
-          // space — fine at full-page width, but this pane now also lives
-          // in the narrower Team Chat split, where "Mark all as read"
-          // wrapped into four lines. Two independently-wrapping rows
-          // instead: filters (used constantly, keep readable text) on top,
-          // the three less-common admin actions as small icon buttons below.
-          <div className="mb-3 flex flex-col gap-2">
+          // One row: filters on the left (used constantly, keep readable
+          // text), the less-common admin actions as small icon buttons
+          // pinned to the right via ml-auto. flex-wrap so it still degrades
+          // to two lines rather than overlapping in the narrower Team Chat
+          // split, instead of a fixed second row always taking space.
+          <div className="mb-3 flex flex-wrap items-center gap-2">
             {notifications.length > 0 && (
               <div className="flex w-fit flex-wrap overflow-hidden rounded-lg border">
-                {([["all", "All"], ["message", "Messages"], ["activity", "Task notices"]] as const).map(([v, label]) => (
+                {([["unread", "Unread"], ["all", "All"], ["sms", "SMS"], ["email", "Email"], ["activity", "Notices"]] as const).map(([v, label]) => (
                   <button key={v} onClick={() => setFilter(v)} className={`px-2.5 py-1 text-[13px] font-medium ${filter === v ? "bg-accent-soft text-accent" : "bg-surface text-muted hover:text-foreground"}`}>{label}</button>
                 ))}
               </div>
             )}
-            <div className="flex flex-wrap items-center gap-1.5">
+            <div className="ml-auto flex flex-wrap items-center gap-1.5">
               {onSyncAppointments && (
                 <button onClick={onSyncAppointments} disabled={syncingAppointments} title="Sync appointments — pull upcoming appointments from GoHighLevel into the app"
                   className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-surface text-muted hover:bg-background hover:text-foreground disabled:opacity-50">{syncingAppointments ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" /> : <I.calendar />}</button>
