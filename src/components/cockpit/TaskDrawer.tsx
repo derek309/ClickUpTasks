@@ -3,7 +3,7 @@
 // The task detail window (sidebar or full-page "document" view).
 import { useEffect, useRef, useState } from "react";
 import {
-  users, labels, userById, labelById, timeAgo, isOverdue, formatDue, htmlToText, looksLikeHtml, clientStatusMeta,
+  users, labels, userById, labelById, timeAgo, isOverdue, formatDue, htmlToText, looksLikeHtml, plainTextToHtml, clientStatusMeta,
   STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseEventDiff, parseDaysOfMonth,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message,
 } from "@/lib/data";
@@ -140,12 +140,26 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   // channels. The channel is just whichever tab is active, not separate
   // state, so there's one source of truth for what Send will do.
   const [rightTab, setRightTab] = useState<"activity" | "sms" | "email" | "ai">("activity");
+  // Forces the email RichTextEditor to remount (see its `key` below), same
+  // reasoning as the Journal composer's identical nonce: TipTap needs a
+  // remount to pick up a programmatic content change or to refocus.
+  const [emailFocusNonce, setEmailFocusNonce] = useState(0);
+  // Switching sms<->email converts msgBody in whichever direction is
+  // needed — email's is real HTML, sms's is plain — so neither composer
+  // ever shows raw tags or a collapsed run-on line. Activity/AI aren't
+  // compose channels, so they pass through untouched.
+  const switchRightTab = (tab: "activity" | "sms" | "email" | "ai") => {
+    if (tab === "email" && !looksLikeHtml(msgBody)) { setMsgBody((b) => plainTextToHtml(b)); setEmailFocusNonce((n) => n + 1); }
+    else if (tab === "sms" && looksLikeHtml(msgBody)) setMsgBody((b) => htmlToText(b));
+    setRightTab(tab);
+  };
+  const hasComposedMessage = rightTab === "email" ? !!htmlToText(msgBody).trim() : !!msgBody.trim();
   const submitTaskMessage = () => {
-    if ((!msgBody.trim() && pendingMsgAtts.length === 0) || !onSendTaskMessage || rightTab === "activity" || rightTab === "ai") return;
+    if ((!hasComposedMessage && pendingMsgAtts.length === 0) || !onSendTaskMessage || rightTab === "activity" || rightTab === "ai") return;
     // Cc/Bcc ride along only on email; SMS ignores them (Cockpit also guards this).
     const cc = rightTab === "email" ? msgCc : undefined;
     const bcc = rightTab === "email" ? msgBcc : undefined;
-    onSendTaskMessage(rightTab, msgSubject, msgBody.trim(), pendingMsgAtts.length ? pendingMsgAtts : undefined, cc, bcc);
+    onSendTaskMessage(rightTab, msgSubject, rightTab === "email" ? msgBody : msgBody.trim(), pendingMsgAtts.length ? pendingMsgAtts : undefined, cc, bcc);
     setMsgSubject(""); setMsgBody(""); setPendingMsgAtts([]); setMsgCc([]); setMsgBcc([]); setShowCcBcc(false);
     setRightTab("activity"); // so the send is immediately visible in the feed
   };
@@ -155,6 +169,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const emailBodyRef = useRef<HTMLTextAreaElement>(null);
   const replyToEmail = (m: Message) => {
     setRightTab("email");
+    setEmailFocusNonce((n) => n + 1);
     const subj = m.subject ?? "";
     setMsgSubject(/^re:/i.test(subj) ? subj : `Re: ${subj}`.trim());
     setMsgBody("");
@@ -479,6 +494,35 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   // a proper subject-then-body layout. Sending flips back to the Activity
   // tab (see submitTaskMessage) so the send is visible immediately.
   const hasMessaging = !!(linkedContact && onSendTaskMessage);
+  // Claude (via the MCP server's draft_email tool) staged an outbound email
+  // on this task for a human to review — never sent automatically. "Review"
+  // loads it straight into the real Email composer (same rich-text editor,
+  // same Send button, same GHL/Gmail path as writing one by hand) rather
+  // than building a second send UI here; the stored draft is cleared the
+  // moment it's loaded in, since from then on the composer IS the draft.
+  const openDraftEmail = () => {
+    if (!task.draftEmail) return;
+    setMsgSubject(task.draftEmail.subject);
+    setMsgBody(task.draftEmail.body);
+    setEmailFocusNonce((n) => n + 1);
+    setRightTab("email");
+    onPatch({ draftEmail: null });
+  };
+  const draftEmailBlock = task.draftEmail ? (
+    <div className="mt-4 rounded-xl border border-accent/30 bg-accent-soft/20 p-4">
+      <div className="mb-1 flex items-center gap-1.5 text-[15px] font-semibold text-accent"><span aria-hidden>✉️</span> Draft email ready</div>
+      <div className="truncate text-[14px] font-medium">{task.draftEmail.subject || "(no subject)"}</div>
+      <div className="mt-0.5 line-clamp-2 text-[13px] text-muted">{htmlToText(task.draftEmail.body)}</div>
+      <div className="mt-2 flex items-center gap-2">
+        {hasMessaging ? (
+          <button onClick={openDraftEmail} className="rounded-md bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white">Review &amp; send</button>
+        ) : (
+          <span className="text-[12px] text-muted" title="No linked GoHighLevel contact to send to yet">Can&apos;t send — no linked contact for this client</span>
+        )}
+        <button onClick={() => onPatch({ draftEmail: null })} className="rounded-md px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">Discard</button>
+      </div>
+    </div>
+  ) : null;
   const msgAttBar = (pendingMsgAtts.length > 0 || uploadingMsgAtt) && (
     <div className="mb-2 flex shrink-0 flex-wrap items-center gap-1.5">
       <AttachmentThumbs items={pendingMsgAtts} onRemove={(id) => setPendingMsgAtts((a) => a.filter((x) => x.id !== id))} />
@@ -495,7 +539,13 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const runDraft = async (channel: "email" | "sms") => {
     if (!onDraftMessage || draftingMessage) return;
     const d = await onDraftMessage(channel, draftPrompt.trim() || undefined);
-    if (d) { if (channel === "email") setMsgSubject(d.subject ?? ""); setMsgBody(d.body); }
+    if (d) {
+      if (channel === "email") setMsgSubject(d.subject ?? "");
+      // The AI drafter only ever returns plain text — give the email editor
+      // real paragraphs instead of one run-on line with literal \n's in it.
+      setMsgBody(channel === "email" ? plainTextToHtml(d.body) : d.body);
+      if (channel === "email") setEmailFocusNonce((n) => n + 1);
+    }
   };
   const promptClaudeBlock = (channel: "email" | "sms") => onDraftMessage ? (
     <div className="mb-2 flex shrink-0 items-center gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
@@ -524,7 +574,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
         <span className="text-[13px] text-muted">{wordCount(msgBody)} word{wordCount(msgBody) === 1 ? "" : "s"} · {smsSeg.count} segment{smsSeg.count === 1 ? "" : "s"}{smsSeg.count > 0 ? ` (${smsSeg.encoding})` : ""}</span>
         <span className="flex items-center gap-1.5">
           {msgAttachButton}
-          <button onClick={submitTaskMessage} disabled={(!msgBody.trim() && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send text"}</button>
+          <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send text"}</button>
         </span>
       </div>
     </div>
@@ -544,15 +594,19 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       <input value={msgSubject} onChange={(e) => setMsgSubject(e.target.value)} placeholder="Subject"
         className="mb-2 w-full shrink-0 rounded-lg border bg-background px-3 py-2 text-[15px] font-medium outline-none placeholder:text-muted focus:border-accent" />
       {msgAttBar}
-      <textarea ref={emailBodyRef} value={msgBody} onChange={(e) => setMsgBody(e.target.value)} onPaste={handleMsgPaste}
-        placeholder="Write an email… (paste to attach an image)"
-        className="min-h-[220px] w-full flex-1 resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
+      {/* Same rich-text editor the Journal composer and task descriptions
+          use; the paste-to-attach-an-image handler still works wrapped
+          around it — a paste event on a contentEditable child bubbles like
+          any other DOM event, same as the ⌘↵-to-send capture below it. */}
+      <div className="min-h-[220px] flex-1 overflow-auto" onPaste={handleMsgPaste}>
+        <RichTextEditor key={`task-email-${emailFocusNonce}`} value={msgBody} onChange={setMsgBody} placeholder="Write an email…" autoFocus />
+      </div>
       <div className="mt-2">{promptClaudeBlock("email")}</div>
       <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
-        <span className="text-[13px] text-muted">{wordCount(msgBody)} word{wordCount(msgBody) === 1 ? "" : "s"}</span>
+        <span className="text-[13px] text-muted">{wordCount(htmlToText(msgBody))} word{wordCount(htmlToText(msgBody)) === 1 ? "" : "s"}</span>
         <span className="flex items-center gap-1.5">
           {msgAttachButton}
-          <button onClick={submitTaskMessage} disabled={(!msgBody.trim() && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send email"}</button>
+          <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send email"}</button>
         </span>
       </div>
     </div>
@@ -563,13 +617,13 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const activeRightTab = (rightTab === "sms" || rightTab === "email") && !hasMessaging ? "activity" : rightTab;
   const rightTabBar = (
     <div className="flex items-center gap-1">
-      <button onClick={() => setRightTab("activity")} className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium ${activeRightTab === "activity" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Activity · {commentCount}</button>
+      <button onClick={() => switchRightTab("activity")} className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium ${activeRightTab === "activity" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Activity · {commentCount}</button>
       {hasMessaging && (<>
-        <button onClick={() => setRightTab("sms")} className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium ${activeRightTab === "sms" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>SMS</button>
-        <button onClick={() => setRightTab("email")} className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium ${activeRightTab === "email" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Email</button>
+        <button onClick={() => switchRightTab("sms")} className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium ${activeRightTab === "sms" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>SMS</button>
+        <button onClick={() => switchRightTab("email")} className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium ${activeRightTab === "email" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Email</button>
       </>)}
       {onRegenerateAiSummary && (
-        <button onClick={() => setRightTab("ai")} className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium ${activeRightTab === "ai" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>AI</button>
+        <button onClick={() => switchRightTab("ai")} className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium ${activeRightTab === "ai" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>AI</button>
       )}
     </div>
   );
@@ -944,6 +998,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                 <div className="my-4 border-t" />
                 {propsBlock}
                 <div className="my-4 border-t" />
+                {draftEmailBlock}
                 {clientResponseBlock}
                 {descriptionBlock}
                 {subtasksBlock}
@@ -970,6 +1025,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                 <div className="my-4 border-t" />
                 {propsBlock}
                 <div className="my-4 border-t" />
+                {draftEmailBlock}
                 {clientResponseBlock}
                 {descriptionBlock}
                 {subtasksBlock}
@@ -997,8 +1053,8 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                     ) : (
                       <span title="No phone on file" className="flex-1 cursor-not-allowed rounded-md border px-2 py-1 text-center text-[13px] font-medium text-muted opacity-40">Call</span>
                     )}
-                    <button onClick={() => setRightTab("sms")} className={`flex-1 rounded-md border px-2 py-1 text-[13px] font-medium transition ${activeRightTab === "sms" ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>Text</button>
-                    <button onClick={() => setRightTab("email")} className={`flex-1 rounded-md border px-2 py-1 text-[13px] font-medium transition ${activeRightTab === "email" ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>Email</button>
+                    <button onClick={() => switchRightTab("sms")} className={`flex-1 rounded-md border px-2 py-1 text-[13px] font-medium transition ${activeRightTab === "sms" ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>Text</button>
+                    <button onClick={() => switchRightTab("email")} className={`flex-1 rounded-md border px-2 py-1 text-[13px] font-medium transition ${activeRightTab === "email" ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>Email</button>
                   </div>
                 </div>
               )}
@@ -1020,6 +1076,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               {statusBlock}
               {ghlWarningBanner}
               <div className="mt-5">{propsBlock}</div>
+              {draftEmailBlock}
               {clientResponseBlock}
               {descriptionBlock}
               {subtasksBlock}

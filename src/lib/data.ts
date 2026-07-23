@@ -513,6 +513,14 @@ export interface Task {
    * and bumps due to today (see /api/waiting/[token]/respond); editing an
    * already-submitted response afterward just updates this field in place. */
   clientResponse?: { body: string; attachments: Attachment[]; submittedAt: string } | null;
+  /** An outbound email Claude (via the MCP server's draft_email tool)
+   * prepared on this task for a human to review before it goes out — never
+   * sent automatically. Single overwritable field like clientResponse
+   * above: a second draft_email call just replaces the pending one rather
+   * than stacking drafts. Body is HTML (paragraph-wrapped plain text from
+   * Claude), so it loads straight into the same RichTextEditor the Journal
+   * composer uses. Cleared (set null) once sent or explicitly discarded. */
+  draftEmail?: { subject: string; body: string; createdAt: string } | null;
   contactId: string | null;
   due: string | null; // ISO yyyy-mm-dd
   recurrence: Recurrence;

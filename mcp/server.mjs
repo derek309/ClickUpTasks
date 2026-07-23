@@ -293,6 +293,26 @@ server.tool("add_comment",
     return { content: [{ type: "text", text: `Comment added to ${id}.` }] };
   });
 
+// Blank-line-separated paragraphs -> <p> tags, matching the web app's own
+// plainTextToHtml (src/lib/data.ts) so a draft opens correctly in the task
+// drawer's rich-text review panel — this script has no import access to
+// that app code, so it's a small standalone copy, not a shared function.
+const draftPlainTextToHtml = (text) => {
+  const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean).map((p) => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`).join("");
+};
+
+server.tool("draft_email",
+  "Prepare an email on a task for a human to review and send — never sends anything itself. The draft appears in the task's own review panel in the app (subject + body, editable), where a teammate edits if needed and hits Send. Calling this again on the same task replaces the pending draft rather than adding a second one. Body should be plain text (paragraphs separated by a blank line) — it's converted to formatted HTML for the review panel.",
+  { id: z.string(), subject: z.string(), body: z.string() },
+  async ({ id, subject, body }) => {
+    const [t] = await sb(`tasks?select=id&id=eq.${enc(id)}`);
+    if (!t) return { content: [{ type: "text", text: `No task ${id}.` }] };
+    const draft_email = { subject, body: draftPlainTextToHtml(body), createdAt: nowIso() };
+    await sb(`tasks?id=eq.${enc(id)}`, "PATCH", { draft_email });
+    return { content: [{ type: "text", text: `Draft email saved on ${id} — waiting for review in the app.` }] };
+  });
+
 server.tool("check_item",
   "Tick (or untick) a checklist item on a task by matching its title text.",
   { id: z.string(), item: z.string().describe("checklist item title (substring)"), done: z.boolean().optional() },
