@@ -1470,6 +1470,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const atSoonest = candidates.filter((c) => c.date === soonest);
     return { tier: tierForDate(soonest), due: soonest, priorityRank: Math.max(...atSoonest.map((c) => c.priorityRank)) };
   }
+  // A personal to-do's own tier — no Review/New-message concept (those are
+  // client/project-level), and it's always "open" if it's being shown at
+  // all, so this is just tierForDate off its own due date, falling back to
+  // tier 8 (no due date) same as clientUrgencyKey/projectUrgencyKey do.
+  function taskUrgencyKey(task: Task): { tier: number; due: string; priorityRank: number } {
+    if (!task.due) return { tier: 8, due: "", priorityRank: PRIORITY_META[task.priority].rank };
+    return { tier: tierForDate(task.due), due: task.due, priorityRank: PRIORITY_META[task.priority].rank };
+  }
   const projectTaskCount = (projectId: string) => scopedTasks.filter((t) => t.projectId === projectId && t.status !== "done").length;
   // Same "Overdue first" urgency ordering the Clients section gets when
   // clientSort === "urgent" — the sidebar's Projects section had no sort at
@@ -1502,8 +1510,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       [9, "No open tasks", "#cbd5e1"],
     ];
     const clientKeys = assignedClientsFor(myWorkUser).map((c) => ({ kind: "client" as const, item: { kind: "client" as const, client: c }, name: c.name, k: clientUrgencyKey(c.id, myWorkUser) }));
-    const projectKeys = assignedProjectsFor(myWorkUser).map((p) => ({ kind: "project" as const, item: { kind: "project" as const, project: p, clientName: clientById(p.clientId)?.name ?? "—" } as WorkItem, name: p.name, k: projectUrgencyKey(p.id, myWorkUser) }));
-    const withKey = [...clientKeys, ...projectKeys];
+    // Excludes the Personal pseudo-project — its tasks appear individually
+    // below instead of folded into one undifferentiated "Personal" tile.
+    const projectKeys = assignedProjectsFor(myWorkUser).filter((p) => p.id !== PERSONAL_PROJECT_ID).map((p) => ({ kind: "project" as const, item: { kind: "project" as const, project: p, clientName: clientById(p.clientId)?.name ?? "—" } as WorkItem, name: p.name, k: projectUrgencyKey(p.id, myWorkUser) }));
+    const taskKeys = tasks.filter((t) => t.assigneeId === myWorkUser && t.private && t.status !== "done")
+      .map((t) => ({ kind: "task" as const, item: { kind: "task" as const, task: t } as WorkItem, name: t.title, k: taskUrgencyKey(t) }));
+    const withKey = [...clientKeys, ...projectKeys, ...taskKeys];
     return defs
       .map(([tier, label, color]) => ({
         key: String(tier),
@@ -1539,8 +1551,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // I just want to go next" — step through every client/project on the
   // Dashboard, in the exact tier order it's laid out in, without bouncing
   // back to the Dashboard between each one.
+  // Personal tasks (kind "task") aren't part of this stepper — they open
+  // straight into the task drawer via onOpenTask, not a client/project
+  // detail page, so there's no "next" position for goDashboard to resume at.
   const dashboardOrder: { kind: "client" | "project"; id: string }[] = myWorkGroups.flatMap((g) =>
-    g.items.map((item) => (item.kind === "client" ? { kind: "client" as const, id: item.client.id } : { kind: "project" as const, id: item.project.id }))
+    g.items.flatMap((item): { kind: "client" | "project"; id: string }[] =>
+      item.kind === "client" ? [{ kind: "client", id: item.client.id }] : item.kind === "project" ? [{ kind: "project", id: item.project.id }] : [])
   );
   // Snapshotted at the moment you leave the Dashboard, not recomputed live —
   // same reasoning as the task drawer's Prev/Next fix: without freezing it,
@@ -4056,7 +4072,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         ) : personalView ? (
           <GroupedList groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} colOrder={colOrder} onReorderCols={reorderCols} />
         ) : myWork ? (
-          <ClientsBoard groups={myWorkGroups} clientTaskCount={clientTaskCount} projectTaskCount={projectTaskCount} hasUnreadMessage={hasUnreadMessage}
+          <ClientsBoard groups={myWorkGroups} clientTaskCount={clientTaskCount} projectTaskCount={projectTaskCount} hasUnreadMessage={hasUnreadMessage} onOpenTask={setOpenTaskId}
             onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }}
             onOpenProject={(id) => {
               if (id === PERSONAL_PROJECT_ID) { setMyWork(false); setPersonalView(true); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setOpenTaskId(null); return; }

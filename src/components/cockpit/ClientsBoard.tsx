@@ -7,10 +7,14 @@
 // then due today, and so on. Clients and projects are interleaved together
 // within each tier, not split into separate sections — a project qualifies
 // (and sorts) exactly the same way a client does.
-import { clientStatusMeta, type Client, type Project } from "@/lib/data";
+import { clientStatusMeta, formatDue, isOverdue, type Client, type Project, type Task } from "@/lib/data";
 import { I } from "./ui";
 
-export type WorkItem = { kind: "client"; client: Client } | { kind: "project"; project: Project; clientName: string };
+// A personal to-do isn't a client or project — it's its own thing, so it
+// gets its own row in the tier it earns rather than being folded into one
+// "Personal" project tile (which used to hide e.g. an overdue personal task
+// behind a single undifferentiated bucket).
+export type WorkItem = { kind: "client"; client: Client } | { kind: "project"; project: Project; clientName: string } | { kind: "task"; task: Task };
 
 export interface WorkBoardGroup {
   key: string;
@@ -19,13 +23,14 @@ export interface WorkBoardGroup {
   items: WorkItem[];
 }
 
-export function ClientsBoard({ groups, clientTaskCount, projectTaskCount, hasUnreadMessage, onOpenClient, onOpenProject }: {
+export function ClientsBoard({ groups, clientTaskCount, projectTaskCount, hasUnreadMessage, onOpenClient, onOpenProject, onOpenTask }: {
   groups: WorkBoardGroup[];
   clientTaskCount: (id: string) => number;
   projectTaskCount: (id: string) => number;
   hasUnreadMessage: (id: string) => boolean;
   onOpenClient: (id: string) => void;
   onOpenProject: (id: string) => void;
+  onOpenTask: (id: string) => void;
 }) {
   return (
     <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">
@@ -42,7 +47,9 @@ export function ClientsBoard({ groups, clientTaskCount, projectTaskCount, hasUnr
               <div>
                 {g.items.map((it) => it.kind === "client"
                   ? <ClientRow key={`c:${it.client.id}`} client={it.client} taskCount={clientTaskCount(it.client.id)} unread={hasUnreadMessage(it.client.id)} onOpen={() => onOpenClient(it.client.id)} />
-                  : <ProjectRow key={`p:${it.project.id}`} project={it.project} clientName={it.clientName} taskCount={projectTaskCount(it.project.id)} onOpen={() => onOpenProject(it.project.id)} />
+                  : it.kind === "project"
+                  ? <ProjectRow key={`p:${it.project.id}`} project={it.project} clientName={it.clientName} taskCount={projectTaskCount(it.project.id)} onOpen={() => onOpenProject(it.project.id)} />
+                  : <TaskRow key={`t:${it.task.id}`} task={it.task} onOpen={() => onOpenTask(it.task.id)} />
                 )}
               </div>
             </div>
@@ -73,6 +80,16 @@ function ClientRow({ client, taskCount, unread, onOpen }: {
         {business && <span className="truncate text-[14px] font-medium text-muted" title={business}>{business}</span>}
       </span>
       <span className="w-16 shrink-0 text-right text-[13px] text-muted">{taskCount} task{taskCount === 1 ? "" : "s"}</span>
+    </button>
+  );
+}
+
+function TaskRow({ task, onOpen }: { task: Task; onOpen: () => void }) {
+  return (
+    <button onClick={onOpen} className="flex w-full items-center gap-3 border-b px-4 py-3 text-left transition-colors last:border-0 hover:bg-accent-soft/50">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-background text-muted"><I.check /></span>
+      <span className="min-w-0 flex-1 truncate text-[17px] font-medium leading-snug">{task.title}</span>
+      {task.due && <span className={`shrink-0 text-[13px] ${isOverdue(task.due) ? "font-medium text-danger" : "text-muted"}`}>{formatDue(task.due)}</span>}
     </button>
   );
 }
