@@ -3406,7 +3406,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 {unread > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{unread}</span>}
               </span>
             )}</SideItem>
-            {users.filter((u) => u.id !== me.id && u.id !== "u_claude").map((u) => (
+            {users.filter((u) => u.id !== me.id).map((u) => (
               <SideItem key={u.id} active={inboxView && dmUserId === u.id} onClick={() => openDm(u.id)}>
                 <Avatar id={u.id} size={20} /> <span className="min-w-0 flex-1 truncate text-left">{u.name}</span>
                 {dmUnread(u.id) && <span title="Unread messages" className="ml-auto h-2 w-2 rounded-full bg-accent" />}
