@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { htmlToText, type Attachment } from "@/lib/data";
 import { TASK_FILES_BUCKET } from "@/lib/db";
+import { isRateLimited } from "@/lib/rateLimit";
 
 // Public, deliberately unauthenticated — the first route of its kind in this
 // app. Backs /waiting/[token], a client-facing page showing "here's what
@@ -19,6 +20,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   if (!adminConfigured) return NextResponse.json({ error: "Not configured" }, { status: 501 });
   const { token } = await params;
   if (!token || token.length < 16) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (await isRateLimited(req, token)) return NextResponse.json({ error: "Too many requests." }, { status: 429 });
 
   const { data: client } = await supabaseAdmin.from("clients").select("id, name").eq("share_token", token).maybeSingle();
   if (!client) return NextResponse.json({ error: "Not found" }, { status: 404 });
