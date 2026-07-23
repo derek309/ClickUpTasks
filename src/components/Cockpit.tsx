@@ -2224,7 +2224,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       if (channel === "email" && !!contact.email) {
         const gres = await authedFetch("/api/google/send", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ clientId, toEmail: contact.email, subject, body, cc: emailCc, bcc: emailBcc, fromEmail, attachments: attachments.filter((a) => a.path).map((a) => ({ path: a.path, name: a.name })) }),
+          body: JSON.stringify({ clientId, toEmail: contact.email, subject, body, isHtml: channel === "email", cc: emailCc, bcc: emailBcc, fromEmail, attachments: attachments.filter((a) => a.path).map((a) => ({ path: a.path, name: a.name })) }),
         });
         if (gres.status !== 501) {
           const gj = await gres.json().catch(() => ({}));
@@ -2247,7 +2247,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       const attachmentUrls = (await Promise.all(attachments.filter((a) => a.path).map((a) => signedUrlForFile(a.path!, 60 * 60)))).filter((u): u is string => !!u);
       const res = await authedFetch("/api/ghl/message", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, locationId: target.locationId, ghlContactId: target.ghlContactId, channel, subject: channel === "email" ? subject : undefined, body, attachments: attachmentUrls, cc: emailCc, bcc: emailBcc }),
+        body: JSON.stringify({ clientId, locationId: target.locationId, ghlContactId: target.ghlContactId, channel, subject: channel === "email" ? subject : undefined, body, isHtml: channel === "email", attachments: attachmentUrls, cc: emailCc, bcc: emailBcc }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) { pushToast(j.error || "Failed to send message."); return; }

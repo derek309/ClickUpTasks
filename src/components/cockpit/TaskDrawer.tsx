@@ -3,7 +3,7 @@
 // The task detail window (sidebar or full-page "document" view).
 import { useEffect, useRef, useState } from "react";
 import {
-  users, labels, userById, labelById, timeAgo, isOverdue, formatDue, htmlToText, clientStatusMeta,
+  users, labels, userById, labelById, timeAgo, isOverdue, formatDue, htmlToText, looksLikeHtml, clientStatusMeta,
   STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseEventDiff, parseDaysOfMonth,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message,
 } from "@/lib/data";
@@ -829,7 +829,12 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                     {m.bcc && m.bcc.length > 0 && <span>Bcc: {m.bcc.join(", ")}</span>}
                   </div>
                 )}
-                <CollapsibleText text={m.body} className="mt-1 text-[15px]" />
+                {/* Real HTML for anything sent through the Journal's rich-text
+                    email composer (always starts with a tag); plain text
+                    otherwise (SMS, or an email from before that composer). */}
+                {looksLikeHtml(m.body)
+                  ? <div className="rte-content mt-1 text-[15px]" dangerouslySetInnerHTML={{ __html: m.body }} />
+                  : <CollapsibleText text={m.body} className="mt-1 text-[15px]" />}
                 {m.attachments && m.attachments.length > 0 && <div className="mt-1.5"><AttachmentThumbs items={m.attachments} onOpen={onDownloadFile} /></div>}
               </div>
             </div>

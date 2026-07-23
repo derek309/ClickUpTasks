@@ -30,11 +30,12 @@ export async function POST(req: NextRequest) {
   if (!googleConfigured) return NextResponse.json({ error: "Google Workspace sending is not configured." }, { status: 501 });
 
   const b = await req.json().catch(() => ({} as any));
-  const { clientId, toEmail, subject, body, cc, bcc, fromEmail, attachments } = b as {
+  const { clientId, toEmail, subject, body, isHtml, cc, bcc, fromEmail, attachments } = b as {
     clientId?: string;
     toEmail?: string;
     subject?: string;
     body?: string;
+    isHtml?: boolean; // the Journal's rich-text composer sends real HTML, not plain text
     cc?: string[];
     bcc?: string[];
     fromEmail?: string; // admin-only: send AS another teammate (a Workspace user)
@@ -98,6 +99,7 @@ export async function POST(req: NextRequest) {
       bcc: bccList?.length ? bccList : undefined,
       subject: (subject || "").slice(0, 200),
       body,
+      isHtml,
       fromName,
       attachments: attParts.length ? attParts : undefined,
     });

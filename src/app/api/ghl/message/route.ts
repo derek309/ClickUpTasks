@@ -31,13 +31,14 @@ export async function POST(req: NextRequest) {
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const b = await req.json().catch(() => ({} as any));
-  const { clientId, locationId, ghlContactId, channel, subject, body, attachments, cc, bcc } = b as {
+  const { clientId, locationId, ghlContactId, channel, subject, body, isHtml, attachments, cc, bcc } = b as {
     clientId?: string;
     locationId?: string;
     ghlContactId?: string;
     channel?: string;
     subject?: string;
     body?: string;
+    isHtml?: boolean; // the Journal's rich-text composer sends real HTML, not plain text
     attachments?: string[]; // publicly-fetchable URLs — GHL fetches these itself, not a file upload
     cc?: string[]; // email addresses — email channel only; GHL fields emailCc/emailBcc
     bcc?: string[];
@@ -85,11 +86,13 @@ export async function POST(req: NextRequest) {
     if (e || uid) fromName = (prof?.name as string | null)?.trim() || undefined;
   }
 
-  // The composer/AI draft produce PLAIN TEXT with \n line breaks. GHL's email
-  // field is HTML, which collapses newlines/whitespace — so send it through
-  // escape-then-newline-to-<br> or every paragraph break is lost in the email.
-  // SMS is plain text, so it's left untouched.
-  const emailHtml = escapeHtml(body).replace(/\r\n|\r|\n/g, "<br>");
+  // Historically the composer/AI draft only ever produced PLAIN TEXT with \n
+  // line breaks, and GHL's email field is HTML (which collapses newlines/
+  // whitespace) — so a plain body still needs escape-then-newline-to-<br> or
+  // every paragraph break is lost. The Journal's email composer now sends
+  // real HTML directly (isHtml) and skips that conversion. SMS is plain text
+  // either way, left untouched.
+  const emailHtml = isHtml ? body : escapeHtml(body).replace(/\r\n|\r|\n/g, "<br>");
   const payload = channel === "sms"
     ? { type: "SMS", contactId: ghlContactId, message: body, ...(attachmentUrls ? { attachments: attachmentUrls } : {}) }
     : { type: "Email", contactId: ghlContactId, subject: (subject || "").slice(0, 200), html: emailHtml,

@@ -51,7 +51,11 @@ const formatFrom = (email: string, name?: string) => {
 
 export async function sendGmailAs(
   fromEmail: string,
-  msg: { to: string; cc?: string[]; bcc?: string[]; subject?: string; body: string; fromName?: string; attachments?: { filename: string; mimeType: string; contentBase64: string }[] },
+  // isHtml: the caller already has real HTML (the Journal's rich-text email
+  // composer) — send msg.body as-is instead of escaping+linebreak-converting
+  // it as plain text. Defaults false: the other callers here (password
+  // reset, mention/notification emails) still pass a plain string.
+  msg: { to: string; cc?: string[]; bcc?: string[]; subject?: string; body: string; isHtml?: boolean; fromName?: string; attachments?: { filename: string; mimeType: string; contentBase64: string }[] },
 ): Promise<{ id: string; threadId: string }> {
   if (!googleConfigured) throw new Error("Google Workspace sending is not configured.");
 
@@ -68,10 +72,11 @@ export async function sendGmailAs(
     "MIME-Version: 1.0",
   ];
 
+  const html = msg.isHtml ? msg.body : bodyToHtml(msg.body);
   let mime: string;
   const atts = msg.attachments ?? [];
   if (atts.length === 0) {
-    mime = [...commonHeaders, 'Content-Type: text/html; charset="UTF-8"', "Content-Transfer-Encoding: 8bit", "", bodyToHtml(msg.body)].join("\r\n");
+    mime = [...commonHeaders, 'Content-Type: text/html; charset="UTF-8"', "Content-Transfer-Encoding: 8bit", "", html].join("\r\n");
   } else {
     // multipart/mixed: the HTML body, then each attachment as a base64 part.
     const boundary = `b_${crypto.randomUUID().replace(/-/g, "")}`;
@@ -81,7 +86,7 @@ export async function sendGmailAs(
       'Content-Type: text/html; charset="UTF-8"',
       "Content-Transfer-Encoding: 8bit",
       "",
-      bodyToHtml(msg.body),
+      html,
       ...atts.flatMap((a) => [
         `--${boundary}`,
         `Content-Type: ${a.mimeType || "application/octet-stream"}; name="${a.filename.replace(/"/g, "")}"`,

@@ -13,12 +13,13 @@
 // "what kind of entry is this" decision rather than switching views first.
 import { useEffect, useRef, useState } from "react";
 import {
-  users, userById, timeAgo, isCompletionEvent, NOTE_TYPE_META, NOTE_TYPE_ORDER, MANUAL_NOTE_TYPES, noteTypeMeta,
+  users, userById, timeAgo, isCompletionEvent, NOTE_TYPE_META, NOTE_TYPE_ORDER, MANUAL_NOTE_TYPES, noteTypeMeta, htmlToText, looksLikeHtml, plainTextToHtml,
   type ClientNote, type NoteType, type Task, type Comment, type Message, type MessageChannel, type MessageDirection, type Me, type Attachment, type Contact,
 } from "@/lib/data";
 import { I, Avatar, CollapsibleText, newId } from "./ui";
 import { ConfirmModal, type ConfirmSpec } from "./modals";
 import { AttachmentThumbs } from "./AttachmentThumbs";
+import { RichTextEditor } from "./RichTextEditor";
 import { RecipientField } from "./TaskDrawer";
 
 type JournalFilter = "all" | NoteType | "message" | "activity" | "photos" | "links" | "files";
@@ -128,10 +129,16 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   const [msgCc, setMsgCc] = useState<string[]>([]);
   const [msgBcc, setMsgBcc] = useState<string[]>([]);
   const [showCcBcc, setShowCcBcc] = useState(false);
+  // Forces the email RichTextEditor to remount (see its `key` below) so it
+  // re-runs its boot-time autofocus — the msgBodyRef trick below only
+  // reaches the SMS textarea, since a TipTap editor isn't a ref-focusable
+  // form element.
+  const [composeFocusNonce, setComposeFocusNonce] = useState(0);
   // A header Email/SMS button flips the composer into that mode and focuses it.
   useEffect(() => {
     if (composeIntent && onSendMessage) {
       setComposeMode(composeIntent.mode);
+      setComposeFocusNonce((n) => n + 1);
       requestAnimationFrame(() => msgBodyRef.current?.focus());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -270,20 +277,39 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   // via the thread itself, so re-pasting it inline would just be clutter.
   // SMS has no equivalent (it's one continuous thread, no per-message reply
   // concept), so this is email-only.
+  // Email and SMS share one msgBody, but email's is real HTML and SMS's is
+  // plain — switching between them (via the mode buttons, not the
+  // header-triggered composeIntent effect, which always starts fresh)
+  // converts in whichever direction is needed so the target composer never
+  // shows raw tags (going to sms) or one unformatted line (going to email).
+  // Note has its own separate `draft` state, so switching to/from it never
+  // touches msgBody at all.
+  const switchComposeMode = (mode: "note" | "email" | "sms") => {
+    if (mode === "email" && !looksLikeHtml(msgBody)) { setMsgBody((b) => plainTextToHtml(b)); setComposeFocusNonce((n) => n + 1); }
+    else if (mode === "sms" && looksLikeHtml(msgBody)) setMsgBody((b) => htmlToText(b));
+    setComposeMode(mode);
+  };
   const replyToEmail = (m: Message) => {
     setComposeMode("email");
     const subj = m.subject ?? "";
     setMsgSubject(/^re:/i.test(subj) ? subj : `Re: ${subj}`.trim());
     setMsgBody("");
+    setComposeFocusNonce((n) => n + 1);
     requestAnimationFrame(() => msgBodyRef.current?.focus());
   };
+  // Email's msgBody is real HTML (RichTextEditor) — "is there anything to
+  // send" has to look past empty tags (TipTap's empty doc is "<p></p>",
+  // which .trim() alone doesn't catch), same reasoning behind htmlToText's
+  // other callers.
+  const hasComposedBody = composeMode === "email" ? !!htmlToText(msgBody).trim() : !!msgBody.trim();
   const submitMessage = () => {
-    if (!msgBody.trim() || !onSendMessage || (composeMode !== "email" && composeMode !== "sms")) return;
+    if (!hasComposedBody || !onSendMessage || (composeMode !== "email" && composeMode !== "sms")) return;
     // Cc/Bcc ride along only on email; SMS ignores them.
     const cc = composeMode === "email" ? msgCc : undefined;
     const bcc = composeMode === "email" ? msgBcc : undefined;
-    onSendMessage(composeMode, msgSubject, msgBody.trim(), cc, bcc);
+    onSendMessage(composeMode, msgSubject, composeMode === "email" ? msgBody : msgBody.trim(), cc, bcc);
     setMsgSubject(""); setMsgBody(""); setMsgCc([]); setMsgBcc([]); setShowCcBcc(false);
+    setComposeFocusNonce((n) => n + 1); // fresh empty editor, not the just-sent one lingering
   };
   // "Prompt Claude" draft. On success it fills the email/SMS and clears the
   // prompt box (also collapsing the auto-grown textarea back to one line).
@@ -292,7 +318,10 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
     const d = await onDraftMessage(composeMode, draftPrompt.trim() || undefined);
     if (d) {
       if (composeMode === "email") setMsgSubject(d.subject ?? "");
-      setMsgBody(d.body);
+      // The AI drafter only ever returns plain text — give the email editor
+      // real paragraphs instead of one run-on line with literal \n's in it.
+      setMsgBody(composeMode === "email" ? plainTextToHtml(d.body) : d.body);
+      setComposeFocusNonce((n) => n + 1); // remount so the new content actually shows (same editor instance won't re-read `value` after its own onUpdate loop)
       setDraftPrompt("");
       if (draftPromptRef.current) draftPromptRef.current.style.height = "auto";
     }
@@ -467,7 +496,13 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                         {row.messages.map((m) => (
                           <div key={m.id} className={row.messages.length > 1 ? "border-t pt-2 first:border-t-0 first:pt-0" : ""}>
                             {m.subject && <div className="text-[15px] font-medium">{m.subject}</div>}
-                            <CollapsibleText text={m.body} className="mt-0.5 whitespace-pre-wrap text-[15px]" />
+                            {/* Email sent through the rich-text composer stores real HTML
+                                (always starts with a tag — see looksLikeHtml); everything
+                                else (SMS, and any email predating that composer) is plain
+                                text through the usual collapsible/autolink treatment. */}
+                            {looksLikeHtml(m.body)
+                              ? <div className="rte-content mt-0.5 text-[15px]" dangerouslySetInnerHTML={{ __html: m.body }} />
+                              : <CollapsibleText text={m.body} className="mt-0.5 whitespace-pre-wrap text-[15px]" />}
                             {m.attachments && m.attachments.length > 0 && (
                               <div className="mt-1.5"><AttachmentThumbs items={m.attachments} onOpen={onOpenFile} /></div>
                             )}
@@ -545,9 +580,9 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
             <span className="text-[13px] font-semibold text-muted">Write</span>
             {onSendMessage && (
               <div className="inline-flex overflow-hidden rounded-md border">
-                <button onClick={() => setComposeMode("note")} className={`px-2 py-1 text-[12px] font-medium ${composeMode === "note" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Note</button>
-                <button onClick={() => setComposeMode("email")} className={`px-2 py-1 text-[12px] font-medium ${composeMode === "email" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Email</button>
-                <button onClick={() => setComposeMode("sms")} className={`px-2 py-1 text-[12px] font-medium ${composeMode === "sms" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>SMS</button>
+                <button onClick={() => switchComposeMode("note")} className={`px-2 py-1 text-[12px] font-medium ${composeMode === "note" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Note</button>
+                <button onClick={() => switchComposeMode("email")} className={`px-2 py-1 text-[12px] font-medium ${composeMode === "email" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Email</button>
+                <button onClick={() => switchComposeMode("sms")} className={`px-2 py-1 text-[12px] font-medium ${composeMode === "sms" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>SMS</button>
               </div>
             )}
           </div>
@@ -623,11 +658,21 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                   </div>
                 )}
               </>)}
-              <div className="relative min-h-0 flex-1">
-                <textarea ref={msgBodyRef} value={msgBody} onChange={(e) => setMsgBody(e.target.value)}
-                  onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitMessage(); } }}
-                  placeholder={composeMode === "email" ? "Write an email… (⌘↵ to send, Enter for a new line)" : "Write a text… (⌘↵ to send, Enter for a new line)"}
-                  className="h-full min-h-[160px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
+              {/* Email gets the same rich-text editor task descriptions use
+                  (RichTextEditor already supplies its own bordered chrome
+                  and toolbar) — SMS stays plain text, since a text message
+                  can't render formatting anyway. Both live under one ⌘↵-to-
+                  send capture: contentEditable keydowns bubble like any DOM
+                  event, so this needs no wiring inside RichTextEditor itself. */}
+              <div className="relative min-h-[160px] flex-1 overflow-auto"
+                onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitMessage(); } }}>
+                {composeMode === "email" ? (
+                  <RichTextEditor key={`email-compose-${composeFocusNonce}`} value={msgBody} onChange={setMsgBody} placeholder="Write an email… (⌘↵ to send)" autoFocus />
+                ) : (
+                  <textarea ref={msgBodyRef} value={msgBody} onChange={(e) => setMsgBody(e.target.value)}
+                    placeholder="Write a text… (⌘↵ to send, Enter for a new line)"
+                    className="h-full min-h-[160px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
+                )}
               </div>
               {onDraftMessage && (
                 <div className="mt-2 flex shrink-0 items-start gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
@@ -649,7 +694,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                 </div>
               )}
               <div className="mt-2 flex shrink-0 items-center gap-2">
-                <button onClick={submitMessage} disabled={!msgBody.trim() || sendingMessage}
+                <button onClick={submitMessage} disabled={!hasComposedBody || sendingMessage}
                   className="ml-auto shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send"}</button>
               </div>
             </div>

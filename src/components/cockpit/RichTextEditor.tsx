@@ -23,7 +23,7 @@ function ToolbarButton({ onClick, active, title, children }: { onClick: () => vo
   );
 }
 
-export function RichTextEditor({ value, onChange, placeholder }: { value: string; onChange: (html: string) => void; placeholder?: string }) {
+export function RichTextEditor({ value, onChange, placeholder, autoFocus }: { value: string; onChange: (html: string) => void; placeholder?: string; autoFocus?: boolean }) {
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [
@@ -35,6 +35,11 @@ export function RichTextEditor({ value, onChange, placeholder }: { value: string
       Placeholder.configure({ placeholder: placeholder ?? "Add a description…" }),
     ],
     content: value,
+    // Boot-time only — a caller that wants to refocus an already-mounted
+    // editor (e.g. clicking "Email" again to jump back to a composer
+    // that's already in email mode) should remount via a changing `key`
+    // instead, same as any other autofocus-on-mount input.
+    autofocus: autoFocus ? "end" : false,
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
     editorProps: { attributes: { class: "rte-content min-h-[80px] text-[15px] outline-none" } },
   });

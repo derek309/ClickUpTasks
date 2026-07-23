@@ -936,6 +936,28 @@ export function htmlToText(html: string): string {
   return (div.textContent || "").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+/** A sent email's `messages.body` is plain text for everything composed
+ *  before the Journal's email composer went rich-text, and real HTML
+ *  (RichTextEditor output, always starting with a tag) for everything after.
+ *  There's no stored flag distinguishing the two — this heuristic stands in
+ *  for one, same "don't migrate old data, degrade gracefully" approach as
+ *  noteTypeMeta's fallback above. A plain-text message starting with a
+ *  literal "<" is not a real-world case worth guarding against. */
+export function looksLikeHtml(body: string): boolean {
+  return /^\s*<[a-z][\s\S]*>/i.test(body);
+}
+
+/** Plain text (as returned by the AI drafter, or a legacy plain body) into
+ *  paragraph HTML a RichTextEditor can load — blank-line-separated blocks
+ *  become <p> tags, escaped so a stray "<" in the text can't be read as
+ *  markup. Inverse-ish of htmlToText above. */
+export function plainTextToHtml(text: string): string {
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const paras = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  if (!paras.length) return "";
+  return paras.map((p) => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`).join("");
+}
+
 export type ClientHealth = "danger" | "stale" | "calm";
 export const HEALTH_META: Record<ClientHealth, { label: string; dot: string }> = {
   danger: { label: "Overdue work", dot: "#ef4444" },
