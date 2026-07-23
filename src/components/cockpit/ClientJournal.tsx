@@ -631,6 +631,25 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                     : <span className="min-w-0 flex-1 truncate text-muted">{composeMode === "sms" ? "No phone number on file for this client" : "No linked contact email for this client"}</span>;
                 })()}
               </div>
+              {onDraftMessage && (
+                <div className="mb-2 flex shrink-0 items-start gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
+                  <span aria-hidden className="pt-1 pl-1 text-[13px]">✨</span>
+                  <textarea ref={draftPromptRef} value={draftPrompt} rows={1}
+                    onChange={(e) => { setDraftPrompt(e.target.value); e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`; }}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter" || e.shiftKey || draftingMessage || (composeMode !== "email" && composeMode !== "sms")) return;
+                      e.preventDefault();
+                      runDraft();
+                    }}
+                    placeholder="Tell Claude what to say… (Enter to write, Shift+Enter for a new line)"
+                    className="max-h-[200px] min-w-0 flex-1 resize-none self-center overflow-y-auto bg-transparent px-1 py-1 text-[13px] leading-snug outline-none placeholder:text-muted" />
+                  <button onClick={runDraft}
+                    disabled={draftingMessage} title={draftPrompt.trim() ? "Draft this with Claude" : "Draft a status update from recent activity — review before sending"}
+                    className="mt-0.5 shrink-0 rounded-md border border-accent/40 bg-surface px-2.5 py-1 text-[13px] font-medium text-accent disabled:opacity-40">
+                    {draftingMessage ? "Drafting…" : draftPrompt.trim() ? "Write it" : "Status update"}
+                  </button>
+                </div>
+              )}
               {composeMode === "email" && (<>
                 <div className="mb-2 flex shrink-0 items-center gap-2">
                   <input value={msgSubject} onChange={(e) => setMsgSubject(e.target.value)} placeholder="Subject"
@@ -660,25 +679,6 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                     className="h-full min-h-[160px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
                 )}
               </div>
-              {onDraftMessage && (
-                <div className="mt-2 flex shrink-0 items-start gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
-                  <span aria-hidden className="pt-1 pl-1 text-[13px]">✨</span>
-                  <textarea ref={draftPromptRef} value={draftPrompt} rows={1}
-                    onChange={(e) => { setDraftPrompt(e.target.value); e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`; }}
-                    onKeyDown={(e) => {
-                      if (e.key !== "Enter" || e.shiftKey || draftingMessage || (composeMode !== "email" && composeMode !== "sms")) return;
-                      e.preventDefault();
-                      runDraft();
-                    }}
-                    placeholder="Tell Claude what to say… (Enter to write, Shift+Enter for a new line)"
-                    className="max-h-[200px] min-w-0 flex-1 resize-none self-center overflow-y-auto bg-transparent px-1 py-1 text-[13px] leading-snug outline-none placeholder:text-muted" />
-                  <button onClick={runDraft}
-                    disabled={draftingMessage} title={draftPrompt.trim() ? "Draft this with Claude" : "Draft a status update from recent activity — review before sending"}
-                    className="mt-0.5 shrink-0 rounded-md border border-accent/40 bg-surface px-2.5 py-1 text-[13px] font-medium text-accent disabled:opacity-40">
-                    {draftingMessage ? "Drafting…" : draftPrompt.trim() ? "Write it" : "Status update"}
-                  </button>
-                </div>
-              )}
               <div className="mt-2 flex shrink-0 items-center gap-2">
                 <button onClick={submitMessage} disabled={!hasComposedBody || sendingMessage}
                   className="ml-auto shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send"}</button>

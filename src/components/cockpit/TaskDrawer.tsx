@@ -597,12 +597,12 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const smsComposerBlock = hasMessaging ? (
     <div className="max-h-[50vh] shrink-0 overflow-y-auto border-t-2 border-t-[#22c55e] bg-[#22c55e0d] p-3">
       <div className="mb-2 shrink-0 text-[13px] text-muted">Texting: <span className="font-medium text-foreground">{messageDest?.phone || "no phone on file"}</span></div>
+      <div className="mb-2">{promptClaudeBlock("sms")}</div>
       {msgAttBar}
       <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)} onPaste={handleMsgPaste}
         onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitTaskMessage(); } }}
         placeholder="Write a message… (⌘↵ to send, paste to attach an image)"
         className="min-h-[100px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
-      <div className="mt-2">{promptClaudeBlock("sms")}</div>
       <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
         <span className="text-[13px] text-muted">{wordCount(msgBody)} word{wordCount(msgBody) === 1 ? "" : "s"} · {smsSeg.count} segment{smsSeg.count === 1 ? "" : "s"}{smsSeg.count > 0 ? ` (${smsSeg.encoding})` : ""}</span>
         <span className="flex items-center gap-1.5">
@@ -619,6 +619,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
         <span className="min-w-0 truncate text-[13px] text-muted">To: <span className="font-medium text-foreground">{messageDest?.email || "no email on file"}</span></span>
         {!showCcBcc && <button onClick={() => setShowCcBcc(true)} className="shrink-0 text-[12px] font-medium text-accent hover:underline">Cc / Bcc</button>}
       </div>
+      <div className="mb-2">{promptClaudeBlock("email")}</div>
       {showCcBcc && (
         <div className="mb-2 flex shrink-0 flex-col gap-1.5">
           <RecipientField label="Cc" value={msgCc} onChange={setMsgCc} contacts={ccContacts ?? []} />
@@ -635,7 +636,6 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       <div className="min-h-[160px] overflow-auto" onPaste={handleMsgPaste}>
         <RichTextEditor key={`task-email-${emailFocusNonce}`} value={msgBody} onChange={setMsgBody} placeholder="Write an email…" autoFocus />
       </div>
-      <div className="mt-2">{promptClaudeBlock("email")}</div>
       <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
         <span className="text-[13px] text-muted">{wordCount(htmlToText(msgBody))} word{wordCount(htmlToText(msgBody)) === 1 ? "" : "s"}</span>
         <span className="flex items-center gap-1.5">

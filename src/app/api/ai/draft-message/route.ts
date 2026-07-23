@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "AI drafting isn't configured yet (missing GEMINI_API_KEY)." }, { status: 501 });
 
-  const { clientId, channel, prompt: userPrompt } = (await req.json().catch(() => ({}))) as { clientId?: string; channel?: "email" | "sms"; prompt?: string };
+  const { clientId, projectId, channel, prompt: userPrompt } = (await req.json().catch(() => ({}))) as { clientId?: string; projectId?: string; channel?: "email" | "sms"; prompt?: string };
   if (!clientId || !channel) return NextResponse.json({ error: "Missing clientId or channel." }, { status: 400 });
   const instruction = (userPrompt ?? "").trim();
 
@@ -47,13 +47,23 @@ export async function POST(req: NextRequest) {
     .slice(0, 15);
   const open = tasks.filter((t) => t.status !== "done").sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999")).slice(0, 15);
 
+  // Client-level notes (project_id null) plus, when this draft was started
+  // from a specific list, that list's own Journal notes too — previously
+  // only client-level notes ever reached the prompt, so anything discussed
+  // in a project's own Journal (the common case once a client has more than
+  // one list going) never informed the draft.
   const { data: notes } = await supabaseAdmin
     .from("client_notes").select("type, body, created_at").eq("client_id", clientId).is("project_id", null)
     .neq("type", "ai_summary").order("created_at", { ascending: false }).limit(5);
+  const { data: projectNotes } = projectId
+    ? await supabaseAdmin.from("client_notes").select("type, body, created_at").eq("client_id", clientId).eq("project_id", projectId)
+        .neq("type", "ai_summary").order("created_at", { ascending: false }).limit(5)
+    : { data: null };
 
   const completedLines = completed.map((t) => `- ${t.title}`).join("\n") || "(none)";
   const openLines = open.map((t) => `- ${t.title}${t.due ? ` (due ${t.due})` : ""}`).join("\n") || "(none)";
   const noteLines = (notes ?? []).map((n) => `- [${n.type}] ${(n.body || "").slice(0, 200)}`).join("\n") || "(none)";
+  const projectNoteLines = (projectNotes ?? []).map((n) => `- [${n.type}] ${(n.body || "").slice(0, 200)}`).join("\n") || "(none)";
 
   const prompt = [
     "You are drafting a client-facing message on behalf of an agency account manager.",
@@ -79,7 +89,10 @@ export async function POST(req: NextRequest) {
     "Recently completed tasks:", completedLines, "",
     "Currently open tasks:", openLines, "",
     "Recent internal notes for context (not client-facing, background only):", noteLines,
-  ].join("\n");
+    projectId ? "" : null,
+    projectId ? "Recent notes from this specific list's Journal (not client-facing, background only):" : null,
+    projectId ? projectNoteLines : null,
+  ].filter((l) => l !== null).join("\n");
 
   try {
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
