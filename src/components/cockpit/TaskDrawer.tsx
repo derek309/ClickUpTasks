@@ -70,7 +70,7 @@ export function RecipientField({ label, value, onChange, contacts }: { label: st
   );
 }
 
-export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onRegenerateAiSummary, aiSummaryBusy }: {
+export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onDraftDescription, draftingDescription, onRegenerateAiSummary, aiSummaryBusy }: {
   task: Task; comment: string; setComment: (v: string) => void;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; navTasks: Task[]; onOpenTask: (id: string) => void; onAddSibling: (title: string) => void; onPrev: () => void; onNext: () => void;
@@ -87,6 +87,8 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   sendingMessage?: boolean;
   onDraftMessage?: (channel: "email" | "sms", prompt?: string) => Promise<{ subject?: string; body: string } | null>; // Gemini draft, never sends
   draftingMessage?: boolean;
+  onDraftDescription?: (title: string, description: string, prompt?: string) => Promise<string | null>; // Gemini draft, never saves
+  draftingDescription?: boolean;
   onRegenerateAiSummary?: () => void; // AI tab's "Regenerate" — only ever called on click, never automatically
   aiSummaryBusy?: boolean;
 }) {
@@ -114,6 +116,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const [msgSubject, setMsgSubject] = useState("");
   const [msgBody, setMsgBody] = useState("");
   const [draftPrompt, setDraftPrompt] = useState("");
+  const [descDraftPrompt, setDescDraftPrompt] = useState("");
   const [msgCc, setMsgCc] = useState<string[]>([]);
   const [msgBcc, setMsgBcc] = useState<string[]>([]);
   const [showCcBcc, setShowCcBcc] = useState(false);
@@ -479,10 +482,34 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       <div className="mt-1.5 text-[12px] text-muted">Submitted {timeAgo(task.clientResponse.submittedAt)}</div>
     </div>
   ) : null;
+  // "Prompt Claude" for the description — same intent-in, Gemini-drafts-it
+  // pattern as the message composers below, just replacing the description
+  // instead of filling a subject/body. Never saves on its own; the drafted
+  // text lands in the editor exactly like typing it, so Save still works
+  // the normal way.
+  const runDraftDescription = async () => {
+    if (!onDraftDescription || draftingDescription) return;
+    const body = await onDraftDescription(task.title, task.description, descDraftPrompt.trim() || undefined);
+    if (body) onPatch({ description: plainTextToHtml(body) });
+  };
   const descriptionBlock = (
     <div className="mt-4 rounded-xl border bg-surface p-4">
       <div className="mb-2 text-[15px] font-semibold">Description</div>
       <RichTextEditor value={task.description} onChange={(html) => onPatch({ description: html })} placeholder="Add a description…" />
+      {onDraftDescription && (
+        <div className="mt-2 flex shrink-0 items-center gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
+          <span aria-hidden className="pl-1 text-[13px]">✨</span>
+          <input value={descDraftPrompt} onChange={(e) => setDescDraftPrompt(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); runDraftDescription(); } }}
+            placeholder="Tell Claude what to write… (e.g. “describe the redesign scope”)"
+            className="min-w-0 flex-1 bg-transparent px-1 text-[13px] outline-none placeholder:text-muted" />
+          <button onClick={runDraftDescription} disabled={draftingDescription}
+            title={descDraftPrompt.trim() ? "Draft this with Claude" : "Draft a description from the task title"}
+            className="shrink-0 rounded-md border border-accent/40 bg-surface px-2.5 py-1 text-[13px] font-medium text-accent disabled:opacity-40">
+            {draftingDescription ? "Drafting…" : descDraftPrompt.trim() ? "Write it" : "Draft it"}
+          </button>
+        </div>
+      )}
     </div>
   );
   // Message this task's linked GHL contact directly, without leaving the
