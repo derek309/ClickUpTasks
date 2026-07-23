@@ -4027,7 +4027,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             </div>
           </div>
         ) : dirView === "clients" ? (
-          <ClientsDirectory clients={sortedClients} clientCompany={(c) => clientCompany(c)} taskCount={clientTaskCount} starred={starred} onToggleStar={toggleStar}
+          <ClientsDirectory clients={sortedClients} clientCompany={(c) => clientCompany(c)} taskCount={clientTaskCount} tasksByClient={territoryTasksByClient} starred={starred} onToggleStar={toggleStar}
             needsReview={(id) => clientNeedsReview(id, me.id)}
             onOpen={(id) => { setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); setClientTab("tasks"); }}
             canAdmin={canAdmin} onAddClient={() => setAddClientOpen(true)} onRename={renameClient} onDelete={deleteClient} onSetStatus={setClientStatus}
