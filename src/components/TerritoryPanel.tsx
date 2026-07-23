@@ -6,11 +6,11 @@
 // vs "unclaimed" (still just a raw synced contact). Reuses the existing client
 // status funnel for pipeline stage instead of a second, parallel state.
 import { useState } from "react";
-import { users, clientStatusMeta, normalizeState, type Me, type Territory, type Contact, type Client, type ClientStatus, type Task } from "@/lib/data";
+import { users, clientStatusMeta, normalizeState, type Me, type Territory, type Contact, type Client, type Task } from "@/lib/data";
 import { I, Avatar } from "./cockpit/ui";
 import TerritoryDirectory from "./cockpit/TerritoryDirectory";
 
-export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onDeleteTerritory, onAddContact, onSyncClients, onSetStatus, onOpenClient, featuredClientIds, onFeature, tasksByClient, onAddTask, onOpenTask, focusId }: {
+export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onDeleteTerritory, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, onAddTask, onOpenTask, focusId }: {
   me: Me; canAdmin: boolean;
   territories: Territory[]; contacts: Contact[]; clients: Client[];
   onAddTerritory: (t: { name: string; city: string; state: string; assignedTo: string[] }) => void;
@@ -21,7 +21,6 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
   // single-city page (see TerritoryDirectory), so optional here: the admin
   // multi-city overview below never sets focusId and never needs them.
   onSyncClients?: (contacts: Contact[]) => void;
-  onSetStatus?: (clientId: string, status: ClientStatus) => void;
   onOpenClient: (clientId: string) => void;
   // Newsletter feature motion, threaded straight through to the city view.
   featuredClientIds?: Set<string>;
@@ -188,7 +187,7 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                     regardless of which half of the territory is showing. */}
                 {open && focusId && (
                   <TerritoryDirectory city={t.city} state={t.state} contacts={matched} clients={clients} onAddContact={onAddContact}
-                    onSyncClients={onSyncClients} onSetStatus={onSetStatus} onOpenClient={onOpenClient}
+                    onSyncClients={onSyncClients} onOpenClient={onOpenClient}
                     featuredClientIds={featuredClientIds} onFeature={onFeature} sort={sort} onSetSort={setSort}
                     tasksByClient={tasksByClient} onAddTask={onAddTask} onOpenTask={onOpenTask} />
                 )}
