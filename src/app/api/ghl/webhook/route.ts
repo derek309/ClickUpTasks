@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { titleCase } from "@/lib/data";
 import { resolveTrackedClientId, upsertConversationTask } from "@/lib/ghlConversationTask";
@@ -104,13 +105,28 @@ async function handleMessageReply(body: any, custom: any) {
   // + Conversation task land on the client's page, not off in a sub-account.
   contact.client_id = await resolveTrackedClientId(contact.id, contact.client_id);
 
-  const ghlMessageId: string | null = typeof custom?.messageId === "string" ? custom.messageId : null;
+  const channel = body?.message?.type === 2 ? "sms" : "email";
+  // GHL's own message id would be the ideal dedup key, but the wire-up notes
+  // above never configure a messageId Custom Data row (there's no confirmed
+  // merge field for it), so custom?.messageId is null on every real delivery
+  // — the partial unique index on ghl_message_id was never actually catching
+  // a retried webhook (GHL retries on a non-2xx, or a workflow can fire
+  // twice), so a retry silently duplicated the message + notification. Fall
+  // back to a synthetic key — contact + channel + text, bucketed to the
+  // hour — so a genuine retry within that window still collides on the same
+  // index instead of creating a second row. Bucketing (not an unbounded
+  // hash) is deliberate: two truly separate messages with identical text
+  // sent hours apart should NOT be treated as the same delivery.
+  const hourBucket = new Date().toISOString().slice(0, 13);
+  const ghlMessageId: string = typeof custom?.messageId === "string" && custom.messageId
+    ? custom.messageId
+    : `synthetic:${ghlContactId}:${channel}:${hourBucket}:${createHash("sha256").update(text).digest("hex").slice(0, 16)}`;
   const messageId = "msg_" + crypto.randomUUID();
   const { error } = await supabaseAdmin.from("messages").insert({
     id: messageId,
     contact_id: contact.id,
     client_id: contact.client_id,
-    channel: body?.message?.type === 2 ? "sms" : "email",
+    channel,
     direction: "inbound",
     subject: typeof custom?.subject === "string" && custom.subject.trim() ? custom.subject : null,
     body: text,
@@ -133,7 +149,6 @@ async function handleMessageReply(body: any, custom: any) {
   // part of the duplicate-delivery guard.
   const taskId = await upsertConversationTask(contact, ghlContactId);
   if (taskId) await supabaseAdmin.from("messages").update({ task_id: taskId }).eq("id", messageId);
-  const channel = body?.message?.type === 2 ? "sms" : "email";
   const snippet = text.replace(/\s+/g, " ").trim().slice(0, 80);
   const notifText = channel === "sms"
     ? `${titleCase(contact.name)} sent a text: ${snippet}`
