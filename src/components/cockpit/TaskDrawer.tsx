@@ -14,10 +14,25 @@ import { InlineAssignee, InlineDue } from "./GroupedList";
 import { RichTextEditor } from "./RichTextEditor";
 import { claudeCodeUrl } from "@/lib/claudeLink";
 
+// Status/priority reuse the field's own STATUS_META/PRIORITY_META token (the
+// diff's "to" value is already the rendered label, so match it back against
+// the meta table rather than re-deriving from the raw enum) — a status
+// change to Done reads green, to Change Requests reads red, same colors
+// those values already carry everywhere else in the app. Assignee/due date
+// have no natural per-value color, so they get one fixed neutral accent
+// each, just enough to tell field types apart at a glance.
+function eventAccentColor(diff: { field: string; to: string }): string {
+  if (diff.field === "status") return Object.values(STATUS_META).find((m) => m.label === diff.to)?.dot ?? "#94a3b8";
+  if (diff.field === "priority") return Object.values(PRIORITY_META).find((m) => m.label === diff.to)?.color ?? "#94a3b8";
+  if (diff.field === "assignee") return "#14b8a6";
+  if (diff.field === "due date") return "#f59e0b";
+  return "#94a3b8";
+}
 function EventDiffCard({ diff }: { diff: { field: string; from: string | null; to: string } }) {
+  const color = eventAccentColor(diff);
   return (
-    <div className="mt-1 inline-block rounded-lg border bg-background px-2.5 py-1.5">
-      <div className="mb-0.5 text-[11px] font-medium capitalize text-muted">{diff.field}</div>
+    <div className="mt-1 inline-block rounded-lg border-l-[3px] bg-background px-2.5 py-1.5" style={{ borderLeftColor: color, background: color + "0d" }}>
+      <div className="mb-0.5 text-[11px] font-medium capitalize" style={{ color }}>{diff.field}</div>
       <div className="flex items-center gap-1.5 text-[13px]">
         {diff.from && <span className="text-muted line-through">{diff.from}</span>}
         {diff.from && <span className="text-muted">→</span>}
@@ -879,7 +894,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
           const c = item.comment; const u = userById(c.authorId); const diff = parseEventDiff(c.body);
           return (
             <div key={c.id} className={`relative flex gap-3 ${gap}`}>
-              <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface bg-muted" /></div>
+              <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface" style={{ background: diff ? eventAccentColor(diff) : "var(--muted)" }} /></div>
               <div className="min-w-0 flex-1 pt-1.5 text-[13px] text-muted">
                 <span><span className="font-medium text-foreground">{u?.name}</span> {diff ? `updated ${diff.field}` : c.body} · {timeAgo(c.at)}</span>
                 {diff && <EventDiffCard diff={diff} />}
