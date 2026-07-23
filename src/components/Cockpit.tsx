@@ -676,7 +676,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return () => window.removeEventListener("keydown", onKey);
   }, []);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [theme, setTheme] = useState<"light" | "dark" | "auto">("light");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarHidden, setSidebarHidden] = useState(false);
   // Team Chat's Chat/Activity split — Chat's share as a percentage of the
@@ -705,6 +705,26 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     window.addEventListener("mouseup", onUp);
   };
   useEffect(() => { try { setSidebarHidden(localStorage.getItem("cut_sidebarHidden") === "1"); } catch {} }, []);
+  // Theme: light/dark/auto, persisted as cut_theme. Auto resolves off the
+  // clock (dark 19:00–6:59) rather than prefers-color-scheme — there's no
+  // OS-level dark-mode signal in play here, just "dim it in the evening".
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("cut_theme");
+      if (saved === "light" || saved === "dark" || saved === "auto") setTheme(saved);
+    } catch {}
+  }, []);
+  const resolveTheme = (t: "light" | "dark" | "auto"): "light" | "dark" => {
+    if (t !== "auto") return t;
+    const h = new Date().getHours();
+    return h >= 19 || h < 7 ? "dark" : "light";
+  };
+  useEffect(() => {
+    document.documentElement.dataset.theme = resolveTheme(theme);
+    if (theme !== "auto") return;
+    const id = setInterval(() => { document.documentElement.dataset.theme = resolveTheme(theme); }, 30 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [theme]);
   const toggleSidebar = () => {
     setSidebarHidden((h) => { const v = !h; try { localStorage.setItem("cut_sidebarHidden", v ? "1" : "0"); } catch {} return v; });
     setSidebarOpen((o) => !o); // mobile overlay uses the same button
@@ -782,9 +802,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const contactById = (id: string | null) => contacts.find((c) => c.id === id) ?? null;
 
   const toggleTheme = () => {
-    const next = theme === "light" ? "dark" : "light";
+    const next = theme === "light" ? "dark" : theme === "dark" ? "auto" : "light";
     setTheme(next);
-    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("cut_theme", next); } catch {}
   };
 
   // Toasts with an action (undo) linger ~4x longer — 2.8s is not enough time
@@ -3357,7 +3377,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <span className="inline-flex shrink-0 items-center justify-center rounded-full text-[15px] font-semibold text-white" style={{ width: 30, height: 30, background: me.color }}>{me.initials}</span>
           <div className="ml-1 min-w-0 flex-1 leading-tight"><div className="truncate text-[15px] font-medium">{me.name}</div><div className="text-[13px] capitalize text-muted">{me.role}</div></div>
           <button onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); setSettingsView(true); }} title="Settings" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>
-          <button onClick={toggleTheme} title="Toggle theme" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-foreground">{theme === "light" ? <I.moon /> : <I.sun />}</button>
+          <button onClick={toggleTheme} title={`Theme: ${theme === "auto" ? `Auto (${resolveTheme(theme)} now)` : theme[0].toUpperCase() + theme.slice(1)} — click to change`} className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-foreground">{resolveTheme(theme) === "light" ? <I.moon /> : <I.sun />}</button>
           <button onClick={onSignOut} title="Sign out" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-red-500"><I.logout /></button>
         </div>
 
