@@ -31,7 +31,7 @@ export function RichTextEditor({ value, onChange, placeholder, autoFocus }: { va
       Underline,
       TaskList,
       TaskItem.configure({ nested: true }),
-      Link.configure({ openOnClick: false, autolink: true }),
+      Link.configure({ openOnClick: false, autolink: true, HTMLAttributes: { title: "⌘-click to open" } }),
       Placeholder.configure({ placeholder: placeholder ?? "Add a description…" }),
     ],
     content: value,
@@ -41,7 +41,19 @@ export function RichTextEditor({ value, onChange, placeholder, autoFocus }: { va
     // instead, same as any other autofocus-on-mount input.
     autofocus: autoFocus ? "end" : false,
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
-    editorProps: { attributes: { class: "rte-content min-h-[80px] text-[15px] outline-none" } },
+    editorProps: {
+      attributes: { class: "rte-content min-h-[80px] text-[15px] outline-none" },
+      // Plain click still just positions the cursor (the surface is always
+      // editable, never a separate read mode) — Cmd/Ctrl-click follows the
+      // link instead, same convention as Notion/most rich editors.
+      handleClick: (_view, _pos, event) => {
+        if (!(event.metaKey || event.ctrlKey)) return false;
+        const link = (event.target as HTMLElement).closest("a");
+        if (!link?.href) return false;
+        window.open(link.href, "_blank", "noopener,noreferrer");
+        return true;
+      },
+    },
   });
 
   if (!editor) return null;

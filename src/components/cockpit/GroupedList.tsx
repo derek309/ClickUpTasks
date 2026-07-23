@@ -9,7 +9,7 @@ import {
   STATUS_META, STATUS_ORDER, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence,
   type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus,
 } from "@/lib/data";
-import { I, Avatar, LabelChips, COL_WIDTHS, LIST_COLUMNS } from "./ui";
+import { I, Avatar, LabelChips, CollapsibleText, COL_WIDTHS, LIST_COLUMNS } from "./ui";
 
 // --- grouped list view (ClickUp-style: group, quick-add, expandable subtasks) --
 
@@ -348,7 +348,7 @@ function InlineComments({ task, onAddComment }: { task: Task; onAddComment: (tas
                   <Avatar id={c.authorId} size={22} />
                   <div className="min-w-0">
                     <div className="text-[13px]"><span className="font-medium">{u?.name}</span> <span className="text-muted">· {timeAgo(c.at)}</span></div>
-                    <div className="text-[14px]">{c.body}</div>
+                    <CollapsibleText text={c.body} className="text-[14px]" />
                   </div>
                 </div>
               );
