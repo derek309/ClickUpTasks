@@ -4,10 +4,65 @@
 // comments on your tasks, assignments, delegations, status/due changes),
 // as a proper full-page reading list instead of the small bell popover.
 import { useState } from "react";
-import { timeAgo, type Notification, type Client, type Project, type UnmatchedEmail } from "@/lib/data";
+import { timeAgo, dayLabel, type Notification, type Client, type Project, type UnmatchedEmail } from "@/lib/data";
 import { I, Avatar } from "./ui";
 
 type InboxFilter = "all" | "message" | "activity";
+
+// Day dividers + collapsing a run of 2+ consecutive same-sender notifications
+// into one summary row (expandable) — same technique ClientJournal's own
+// feed already uses for a fast SMS back-and-forth, applied here to "Amanda
+// sent 4 texts in a row" reading as one line instead of 4 identical-looking
+// bordered cards. Only real, matching actorIds ever merge — two null-actor
+// (system) notifications never do, since they're not actually related just
+// because both lack an actor.
+type ActivityRow =
+  | { kind: "divider"; key: string; label: string }
+  | { kind: "single"; n: Notification }
+  | { kind: "group"; key: string; actorId: string; items: Notification[] };
+
+// The single-notification row — shared by a standalone row and by each item
+// inside an expanded group, so there's exactly one place that defines what
+// a notification looks like.
+function NotificationRow({ n, clientById, projectById, onOpen }: {
+  n: Notification;
+  clientById: (id: string) => Client | null;
+  projectById: (id: string) => Project | null;
+  onOpen: (n: Notification) => void;
+}) {
+  const where = n.projectId ? projectById(n.projectId)?.name : n.clientId ? clientById(n.clientId)?.name : null;
+  const canOpen = !!(n.taskId || n.clientId);
+  return (
+    <button onClick={() => onOpen(n)} disabled={!canOpen}
+      className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition ${n.read ? "bg-surface" : "border-accent/40 bg-accent-soft"} ${canOpen ? "hover:border-accent" : "cursor-default opacity-80"}`}>
+      <Avatar id={n.actorId ?? null} size={32} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-start gap-2">
+          <div className={`text-[15px] leading-snug ${n.read ? "" : "font-medium"}`}>{n.text}</div>
+          {!n.read && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent" />}
+        </div>
+        <div className="mt-0.5 text-[13px] text-muted">{timeAgo(n.at)}{where && <> · {where}</>}</div>
+      </div>
+    </button>
+  );
+}
+
+function buildActivityRows(list: Notification[]): ActivityRow[] {
+  const rows: ActivityRow[] = [];
+  let lastDayKey = "";
+  for (const n of list) {
+    const dk = new Date(n.at).toDateString();
+    if (dk !== lastDayKey) { rows.push({ kind: "divider", key: `d_${dk}`, label: dayLabel(n.at) }); lastDayKey = dk; }
+    const last = rows[rows.length - 1];
+    if (n.actorId && last?.kind === "group" && last.actorId === n.actorId) { last.items.push(n); continue; }
+    if (n.actorId && last?.kind === "single" && last.n.actorId === n.actorId) {
+      rows[rows.length - 1] = { kind: "group", key: `g_${last.n.id}`, actorId: n.actorId, items: [last.n, n] };
+      continue;
+    }
+    rows.push({ kind: "single", n });
+  }
+  return rows;
+}
 
 export function Inbox({ notifications, clientById, projectById, onOpen, onMarkAllRead, onSyncEmail, syncingEmail, onSyncAppointments, syncingAppointments, unmatchedEmails = [], onAddAsClient, onDismissUnmatched }: {
   notifications: Notification[]; // caller's, newest-first
@@ -107,21 +162,38 @@ export function Inbox({ notifications, clientById, projectById, onOpen, onMarkAl
               <span className="text-[13px]">Mentions, comments, and assignments show up here.</span>
             </div>
           )}
-          {filtered.map((n) => {
-            const where = n.projectId ? projectById(n.projectId)?.name : n.clientId ? clientById(n.clientId)?.name : null;
-            const canOpen = !!(n.taskId || n.clientId);
+          {buildActivityRows(filtered).map((row) => {
+            if (row.kind === "divider") {
+              return <div key={row.key} className="px-1 pb-0.5 pt-2.5 text-[12px] font-semibold uppercase tracking-wide text-muted first:pt-0">{row.label}</div>;
+            }
+            if (row.kind === "single") return <NotificationRow key={row.n.id} n={row.n} clientById={clientById} projectById={projectById} onOpen={onOpen} />;
+            // Collapsed by default — a burst of 2+ notifications from the
+            // same sender is the exact wall-of-identical-cards the day/
+            // grouping pass exists to prevent. Reuses the same expand Set
+            // the unsorted-email rows above already use.
+            const open = expanded.has(row.key);
+            const unread = row.items.filter((n) => !n.read).length;
+            const latest = row.items[row.items.length - 1];
             return (
-              <button key={n.id} onClick={() => onOpen(n)} disabled={!canOpen}
-                className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition ${n.read ? "bg-surface" : "border-accent/40 bg-accent-soft"} ${canOpen ? "hover:border-accent" : "cursor-default opacity-80"}`}>
-                <Avatar id={n.actorId ?? null} size={32} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-start gap-2">
-                    <div className={`text-[15px] leading-snug ${n.read ? "" : "font-medium"}`}>{n.text}</div>
-                    {!n.read && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent" />}
+              <div key={row.key}>
+                <button onClick={() => toggle(row.key)}
+                  className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition hover:border-accent ${unread > 0 ? "border-accent/40 bg-accent-soft" : "bg-surface"}`}>
+                  <Avatar id={row.actorId} size={32} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start gap-2">
+                      <div className={`truncate text-[15px] leading-snug ${unread > 0 ? "font-medium" : ""}`}>{row.items.length} updates{unread > 0 ? ` · ${unread} unread` : ""}</div>
+                      {unread > 0 && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent" />}
+                    </div>
+                    <div className="mt-0.5 truncate text-[13px] text-muted">{latest.text}</div>
                   </div>
-                  <div className="mt-0.5 text-[13px] text-muted">{timeAgo(n.at)}{where && <> · {where}</>}</div>
-                </div>
-              </button>
+                  <I.chevron className={`mt-1.5 shrink-0 text-muted transition ${open ? "rotate-90" : ""}`} />
+                </button>
+                {open && (
+                  <div className="ml-4 mt-1.5 space-y-1.5 border-l pl-3">
+                    {row.items.map((n) => <NotificationRow key={n.id} n={n} clientById={clientById} projectById={projectById} onOpen={onOpen} />)}
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>

@@ -13,7 +13,7 @@
 // "what kind of entry is this" decision rather than switching views first.
 import { useEffect, useRef, useState } from "react";
 import {
-  users, userById, timeAgo, isCompletionEvent, NOTE_TYPE_META, NOTE_TYPE_ORDER, MANUAL_NOTE_TYPES, noteTypeMeta, htmlToText, looksLikeHtml, plainTextToHtml,
+  users, userById, timeAgo, dayLabel, isCompletionEvent, NOTE_TYPE_META, NOTE_TYPE_ORDER, MANUAL_NOTE_TYPES, noteTypeMeta, htmlToText, looksLikeHtml, plainTextToHtml,
   type ClientNote, type NoteType, type Task, type Comment, type Message, type MessageChannel, type MessageDirection, type Me, type Attachment, type Contact,
 } from "@/lib/data";
 import { I, Avatar, CollapsibleText, newId } from "./ui";
@@ -29,20 +29,6 @@ type JournalItem =
   | { kind: "message"; at: string; message: Message }
   | { kind: "activity"; at: string; comment: Comment & { taskId: string; taskTitle: string } }
   | { kind: "completion"; at: string; comment: Comment & { taskId: string; taskTitle: string } };
-
-// Adjacent same-day items rendered as one flat list read a lot like a chat
-// log, but a client's real history spans months — day dividers give the eye
-// a place to land, same idea as any messaging app's "Today"/"Yesterday" rail.
-function dayLabel(iso: string): string {
-  const d = new Date(iso);
-  const now = new Date();
-  const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-  const diffDays = Math.round((startOfDay(now) - startOfDay(d)) / 86400000);
-  if (diffDays === 0) return "Today";
-  if (diffDays === 1) return "Yesterday";
-  if (diffDays > 1 && diffDays < 7) return d.toLocaleDateString(undefined, { weekday: "long" });
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: d.getFullYear() !== now.getFullYear() ? "numeric" : undefined });
-}
 
 // Display-only row shape built from the filtered JournalItems — inserts day
 // dividers and clusters adjacent same-channel/same-direction messages into

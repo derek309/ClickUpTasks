@@ -929,6 +929,22 @@ export function timeAgo(at: string): string {
   return new Date(t).toLocaleDateString();
 }
 
+/** "Today" / "Yesterday" / weekday / "Mon 3" (+ year once it's not this
+ *  one) — a reverse-chronological feed reads a lot like a chat log without
+ *  day dividers to give the eye somewhere to land. Shared home for this
+ *  (was duplicated inline in ClientJournal) since Inbox's Activity feed
+ *  needs the identical grouping. */
+export function dayLabel(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diffDays = Math.round((startOfDay(now) - startOfDay(d)) / 86400000);
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays > 1 && diffDays < 7) return d.toLocaleDateString(undefined, { weekday: "long" });
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: d.getFullYear() !== now.getFullYear() ? "numeric" : undefined });
+}
+
 /** Converts stored rich-text HTML (task.description) to a plain-text
  *  approximation for consumers that can't render markup — the GHL task
  *  sync body and the "Copy for Claude" brief. Browser-only (real DOM text
