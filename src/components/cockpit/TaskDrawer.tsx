@@ -588,26 +588,33 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       </button>
     </div>
   ) : null;
+  // SMS/Email replace the plain comment box at the bottom instead of taking
+  // over the whole panel — the activity feed (including the conversation
+  // history) stays visible above whichever composer is active. Color-coded
+  // to match the feed's own per-channel dot colors (dotColor in
+  // commentsFeed) so the border makes it obvious what you're about to send
+  // and through which channel, at a glance.
   const smsComposerBlock = hasMessaging ? (
-    <div className="flex flex-1 flex-col border-t bg-surface p-3">
-      <div className="mb-2 shrink-0 text-[13px] text-muted">Sending to: <span className="font-medium text-foreground">{messageDest?.phone || "no phone on file"}</span></div>
+    <div className="max-h-[50vh] shrink-0 overflow-y-auto border-t-2 border-t-[#22c55e] bg-[#22c55e0d] p-3">
+      <div className="mb-2 shrink-0 text-[13px] text-muted">Texting: <span className="font-medium text-foreground">{messageDest?.phone || "no phone on file"}</span></div>
       {msgAttBar}
       <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)} onPaste={handleMsgPaste}
         onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitTaskMessage(); } }}
         placeholder="Write a message… (⌘↵ to send, paste to attach an image)"
-        className="min-h-[140px] w-full flex-1 resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
+        className="min-h-[100px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
       <div className="mt-2">{promptClaudeBlock("sms")}</div>
       <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
         <span className="text-[13px] text-muted">{wordCount(msgBody)} word{wordCount(msgBody) === 1 ? "" : "s"} · {smsSeg.count} segment{smsSeg.count === 1 ? "" : "s"}{smsSeg.count > 0 ? ` (${smsSeg.encoding})` : ""}</span>
         <span className="flex items-center gap-1.5">
           {msgAttachButton}
-          <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send text"}</button>
+          <button onClick={() => switchRightTab("activity")} className="rounded-lg px-2.5 py-1.5 text-[15px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
+          <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg bg-[#22c55e] px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send text"}</button>
         </span>
       </div>
     </div>
   ) : null;
   const emailComposerBlock = hasMessaging ? (
-    <div className="flex flex-1 flex-col border-t bg-surface p-3">
+    <div className="max-h-[60vh] shrink-0 overflow-y-auto border-t-2 border-t-[#3b82f6] bg-[#3b82f60d] p-3">
       <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
         <span className="min-w-0 truncate text-[13px] text-muted">To: <span className="font-medium text-foreground">{messageDest?.email || "no email on file"}</span></span>
         {!showCcBcc && <button onClick={() => setShowCcBcc(true)} className="shrink-0 text-[12px] font-medium text-accent hover:underline">Cc / Bcc</button>}
@@ -625,7 +632,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
           use; the paste-to-attach-an-image handler still works wrapped
           around it — a paste event on a contentEditable child bubbles like
           any other DOM event, same as the ⌘↵-to-send capture below it. */}
-      <div className="min-h-[220px] flex-1 overflow-auto" onPaste={handleMsgPaste}>
+      <div className="min-h-[160px] overflow-auto" onPaste={handleMsgPaste}>
         <RichTextEditor key={`task-email-${emailFocusNonce}`} value={msgBody} onChange={setMsgBody} placeholder="Write an email…" autoFocus />
       </div>
       <div className="mt-2">{promptClaudeBlock("email")}</div>
@@ -633,7 +640,8 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
         <span className="text-[13px] text-muted">{wordCount(htmlToText(msgBody))} word{wordCount(htmlToText(msgBody)) === 1 ? "" : "s"}</span>
         <span className="flex items-center gap-1.5">
           {msgAttachButton}
-          <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send email"}</button>
+          <button onClick={() => switchRightTab("activity")} className="rounded-lg px-2.5 py-1.5 text-[15px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
+          <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg bg-[#3b82f6] px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send email"}</button>
         </span>
       </div>
     </div>
@@ -642,13 +650,13 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   // contact got unlinked out from under it. AI isn't gated on hasMessaging —
   // it summarizes tasks even without a linked contact, messages just add to it.
   const activeRightTab = (rightTab === "sms" || rightTab === "email") && !hasMessaging ? "activity" : rightTab;
+  // SMS/Email aren't separate tabs anymore — Text/Email above (or a
+  // message's Reply button) switch the composer directly, and the feed
+  // stays put underneath either way. This just toggles Activity vs AI,
+  // which are genuinely different content, not different compose channels.
   const rightTabBar = (
     <div className="flex items-center gap-1">
-      <button onClick={() => switchRightTab("activity")} className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium ${activeRightTab === "activity" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Activity · {commentCount}</button>
-      {hasMessaging && (<>
-        <button onClick={() => switchRightTab("sms")} className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium ${activeRightTab === "sms" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>SMS</button>
-        <button onClick={() => switchRightTab("email")} className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium ${activeRightTab === "email" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Email</button>
-      </>)}
+      <button onClick={() => switchRightTab("activity")} className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium ${activeRightTab !== "ai" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Activity · {commentCount}</button>
       {onRegenerateAiSummary && (
         <button onClick={() => switchRightTab("ai")} className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium ${activeRightTab === "ai" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>AI</button>
       )}
@@ -1085,10 +1093,12 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               <div className="flex items-center gap-1 border-b bg-surface px-3 py-2">
                 {rightTabBar}
               </div>
-              {activeRightTab === "activity" ? (<>
+              {activeRightTab === "ai" ? aiSummaryBlock : (<>
+                {/* Feed always stays visible — SMS/Email replace only the
+                    composer below it, not the conversation history above. */}
                 <div className="flex-1 overflow-y-auto px-5 py-4">{commentsFeed}</div>
-                {composer}
-              </>) : activeRightTab === "sms" ? smsComposerBlock : activeRightTab === "ai" ? aiSummaryBlock : emailComposerBlock}
+                {activeRightTab === "sms" ? smsComposerBlock : activeRightTab === "email" ? emailComposerBlock : composer}
+              </>)}
             </div>
           </div>
           )
@@ -1107,12 +1117,23 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               {attachmentsBlock}
               {siblingsBlock}
               <div className="mt-6">
+                {hasMessaging && (
+                  <div className="mb-2 flex items-center gap-1.5">
+                    {messageDest?.phone ? (
+                      <a href={`tel:${messageDest.phone}`} className="flex-1 rounded-md border px-2 py-1 text-center text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">Call</a>
+                    ) : (
+                      <span title="No phone on file" className="flex-1 cursor-not-allowed rounded-md border px-2 py-1 text-center text-[13px] font-medium text-muted opacity-40">Call</span>
+                    )}
+                    <button onClick={() => switchRightTab("sms")} className={`flex-1 rounded-md border px-2 py-1 text-[13px] font-medium transition ${activeRightTab === "sms" ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>Text</button>
+                    <button onClick={() => switchRightTab("email")} className={`flex-1 rounded-md border px-2 py-1 text-[13px] font-medium transition ${activeRightTab === "email" ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>Email</button>
+                  </div>
+                )}
                 {rightTabBar}
-                {activeRightTab === "activity" && <div className="mt-2">{commentsFeed}</div>}
+                {activeRightTab !== "ai" && <div className="mt-2">{commentsFeed}</div>}
                 {activeRightTab === "ai" && <div className="mt-2">{aiSummaryBlock}</div>}
               </div>
             </div>
-            {activeRightTab === "activity" ? composer : activeRightTab === "sms" ? smsComposerBlock : activeRightTab === "ai" ? null : emailComposerBlock}
+            {activeRightTab === "sms" ? smsComposerBlock : activeRightTab === "email" ? emailComposerBlock : activeRightTab === "ai" ? null : composer}
           </>
         )}
       </aside>
