@@ -219,7 +219,7 @@ server.tool("create_task",
   });
 
 server.tool("update_task",
-  "Edit an existing task's title, description, priority, due date, or assignee. Only the fields you pass are changed. Get the id from get_task/list_my_tasks/list_queue.",
+  "Edit an existing task's title, description, priority, due date, or assignee. Only the fields you pass are changed. Get the id from get_task/list_my_tasks.",
   {
     id: z.string(),
     title: z.string().min(1).optional(),
@@ -261,7 +261,7 @@ server.tool("update_task",
   });
 
 server.tool("delete_task",
-  "Permanently delete a task — cannot be undone, always confirm with the user first. Automatically removes it from any Claude queue. Does NOT delete its mirror in GoHighLevel if it has one.",
+  "Permanently delete a task — cannot be undone, always confirm with the user first. Does NOT delete its mirror in GoHighLevel if it has one.",
   { id: z.string() },
   async ({ id }) => {
     const [t] = await sb(`tasks?select=id,title&id=eq.${enc(id)}`);
@@ -271,15 +271,13 @@ server.tool("delete_task",
   });
 
 server.tool("set_task_status",
-  "Set a task's status (todo | in_progress | review | changes_requested | done). Use to start or complete work. Completing (done) removes the task from your Claude queue.",
+  "Set a task's status (todo | in_progress | review | changes_requested | done). Use to start or complete work.",
   { id: z.string(), status: z.enum(STATUSES) },
   async ({ id, status }) => {
     const [t] = await sb(`tasks?id=eq.${enc(id)}`, "PATCH", { status });
     let ghl = "";
     if (t?.ghl_task_id) { try { const ok = await pushGhlStatus(t); ghl = ok ? " (synced to GoHighLevel)" : " (GoHighLevel push failed)"; } catch { ghl = " (GoHighLevel push errored)"; } }
-    let dq = "";
-    if (status === "done") { try { await sb(`claude_queue?task_id=eq.${enc(id)}`, "DELETE"); dq = " (removed from queue)"; } catch { /* queue cleanup best-effort */ } }
-    return { content: [{ type: "text", text: `Set ${id} → ${status}.${ghl}${dq}` }] };
+    return { content: [{ type: "text", text: `Set ${id} → ${status}.${ghl}` }] };
   });
 
 server.tool("add_comment",
@@ -340,20 +338,6 @@ server.tool("add_checklist_items",
     await sb(`tasks?id=eq.${enc(id)}`, "PATCH", { subtasks });
     const summary = added.map((s) => ({ id: s.id, title: s.title }));
     return { content: [{ type: "text", text: `Added ${added.length} checklist item(s) to ${id}: ${JSON.stringify(summary)}` }] };
-  });
-
-server.tool("list_queue",
-  "List the tasks hand-picked into your Claude Code queue from the app (the “Queue for Claude” star). Start here when asked to “work my queue.”",
-  {},
-  async () => {
-    await names();
-    const q = await sb(`claude_queue?select=task_id&order=at.asc`);
-    const ids = (q || []).map((r) => r.task_id);
-    if (!ids.length) return { content: [{ type: "text", text: "Your Claude queue is empty. (Star a task “Queue for Claude” in the app to add one.)" }] };
-    const rows = await sb(`tasks?select=*&id=in.(${ids.map(enc).join(",")})`);
-    const order = new Map(ids.map((id, i) => [id, i]));
-    rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
-    return { content: [{ type: "text", text: `${rows.length} queued task(s):\n\n${rows.map(brief).join("\n\n")}` }] };
   });
 
 server.tool("list_members",

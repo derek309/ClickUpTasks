@@ -5,7 +5,6 @@ Supabase DB the web app uses), so you can work them from your terminal.
 
 ## Tools
 
-- `list_queue` — tasks you hand-picked in the app with the "Queue for Claude" star; start here for "work my queue"
 - `list_my_tasks` — your open/assigned (and delegated-to-you) tasks; filter by client, status, priority
 - `get_task(id)` — full detail: description, checklist, links, client/list context
 - `set_task_status(id, status)` — todo | in_progress | review | done

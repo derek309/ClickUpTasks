@@ -68,7 +68,7 @@ import {
   normalizeState,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, fetchClaudeQueue, queueTaskDb, unqueueTaskDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, markMessagesReadDb, reassignMessagesTaskDb, insertMessage, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, markMessagesReadDb, reassignMessagesTaskDb, insertMessage, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import { Inbox } from "./cockpit/Inbox";
 import SettingsHub from "./SettingsHub";
@@ -369,15 +369,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Per-user pinned lists (projects), mirroring `starred` for clients — a
   // starred list gets its own quick-access row in the sidebar's Pinned section.
   const [starredLists, setStarredLists] = useState<Set<string>>(new Set());
-  const [claudeQueue, setClaudeQueue] = useState<Set<string>>(new Set());
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
-  const toggleClaudeQueue = (taskId: string) => {
-    setClaudeQueue((s) => {
-      const n = new Set(s);
-      if (n.has(taskId)) { n.delete(taskId); unqueueTaskDb(taskId); } else { n.add(taskId); queueTaskDb(taskId, me.id); }
-      return n;
-    });
-  };
   const [manualOrder, setManualOrder] = useState<string[]>([]);
   const [headerMoreOpen, setHeaderMoreOpen] = useState(false);
 
@@ -777,7 +769,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setTeamMessages(d.teamMessages);
         setDmMessages(d.dmMessages);
         setUnmatchedEmails(d.unmatchedEmails);
-        fetchClaudeQueue().then((ids) => setClaudeQueue(new Set(ids)));
       } catch (e) {
         setDbError(e instanceof Error ? e.message : "Failed to load data.");
       } finally {
@@ -1556,10 +1547,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // restricted by scopedTasks; only changes anything for admins.
   const baseTasks = scopedTasks.filter((t) => t.clientId.startsWith("cl_") && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject) && (!activeFolder || projectById(t.projectId)?.folderId === activeFolder) && (activeClient !== "all" || allTasksScope === "all" || t.assigneeId === me.id));
 
-  // Client/project-wide equivalents of TaskDrawer's per-task copyForClaude /
-  // onToggleQueue — same clipboard+paste and queue-and-let-Claude-pull-it
-  // hand-off patterns, just widened from one task to every open task under
-  // the currently open client/project.
+  // Client/project-wide equivalent of TaskDrawer's per-task copyForClaude —
+  // same clipboard hand-off pattern, just widened from one task to every
+  // open task under the currently open client/project.
   const copyClientForClaude = async () => {
     const client = clientById(activeClient);
     if (!client) return;
@@ -1590,15 +1580,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       pushToast("Couldn't copy to clipboard.");
     }
   };
-  const queueClientForClaude = () => {
-    const openTasks = baseTasks.filter((t) => t.status !== "done");
-    const toQueue = openTasks.filter((t) => !claudeQueue.has(t.id));
-    if (!toQueue.length) { pushToast("All open tasks here are already queued for Claude."); return; }
-    setClaudeQueue((prev) => new Set([...prev, ...toQueue.map((t) => t.id)]));
-    toQueue.forEach((t) => queueTaskDb(t.id, me.id));
-    pushToast(`Queued ${toQueue.length} task${toQueue.length === 1 ? "" : "s"} for Claude.`);
-  };
-
   // Vault folder assignment — three different write-back paths since an
   // attachment can live on a task, nested inside one of that task's
   // comments, or on a Chat note, and none of those three has an existing
@@ -3311,8 +3292,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           )}
           <button onClick={() => { setHeaderMoreOpen(false); copyClientForClaude(); }}
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>✳</span> Copy for Claude</button>
-          <button onClick={() => { setHeaderMoreOpen(false); queueClientForClaude(); }}
-            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>★</span> Queue for Claude</button>
           <div title="Shifts every open dated task here by the same number of days, preserving their relative spacing"
             className="rounded-md px-2.5 py-1.5 hover:bg-background">
             <div className="mb-1 flex items-center gap-2 text-[13px]"><I.calendar className="shrink-0" /> Move all due dates to…</div>
@@ -3789,8 +3768,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     )}
                     <button onClick={() => { setHeaderMoreOpen(false); copyClientForClaude(); }}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>✳</span> Copy for Claude</button>
-                    <button onClick={() => { setHeaderMoreOpen(false); queueClientForClaude(); }}
-                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>★</span> Queue for Claude</button>
                     <div title="Shifts every open dated task here by the same number of days, preserving their relative spacing"
                       className="rounded-md px-2.5 py-1.5 hover:bg-background">
                       <div className="mb-1 flex items-center gap-2 text-[13px]"><I.calendar className="shrink-0" /> Move all due dates to…</div>
@@ -4042,7 +4019,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             canAdmin={canAdmin} onAddProject={() => addProject(WORKSPACE_CLIENT_ID)} onRename={renameProject} onDelete={deleteProject}
             starredLists={starredLists} onToggleStarList={toggleStarList} />
         ) : personalView ? (
-          <GroupedList groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} queuedIds={claudeQueue} colOrder={colOrder} onReorderCols={reorderCols} />
+          <GroupedList groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} colOrder={colOrder} onReorderCols={reorderCols} />
         ) : myWork ? (
           <ClientsBoard groups={myWorkGroups} clientTaskCount={clientTaskCount} projectTaskCount={projectTaskCount} hasUnreadMessage={hasUnreadMessage}
             onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }}
@@ -4117,7 +4094,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               onCreateStage={() => createStage(activeProject)} onRenameStage={renameStage} onToggleStageIsDone={toggleStageIsDone} onDeleteStage={deleteStage}
               onReorderStages={(ids) => reorderStages(activeProject, ids)} />
           ) : (
-            <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} queuedIds={claudeQueue} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
+            <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
           )}
           </>
         )}
@@ -4161,7 +4138,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={navTaskIds.length} navTasks={navTaskIds.map((id) => tasks.find((t) => t.id === id)).filter((t): t is Task => !!t)} onOpenTask={setOpenTaskId} onAddSibling={(title) => addTaskToList(openTask.clientId, openTask.projectId, openTask.private, title)} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(attachments) => addComment(openTask.id, comment, attachments)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} isQueued={claudeQueue.has(openTask.id)} onToggleQueue={() => toggleClaudeQueue(openTask.id)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null })} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt)} draftingMessage={draftingMessage} onRegenerateAiSummary={() => regenerateAiSummary(openTask.clientId)} aiSummaryBusy={aiSummaryBusyId === openTask.clientId} />
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null })} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt)} draftingMessage={draftingMessage} onRegenerateAiSummary={() => regenerateAiSummary(openTask.clientId)} aiSummaryBusy={aiSummaryBusyId === openTask.clientId} />
       )}
 
       {addClientOpen && <AddClientModal subAccounts={subAccounts} contacts={contacts} existingIds={new Set(clients.map((c) => c.id))} onAdd={addClientContact} onClose={() => setAddClientOpen(false)} />}

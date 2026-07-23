@@ -13,13 +13,12 @@ import { I, Avatar, LabelChips, COL_WIDTHS, LIST_COLUMNS } from "./ui";
 
 // --- grouped list view (ClickUp-style: group, quick-add, expandable subtasks) --
 
-export function GroupedList({ groups, showClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onDeleteSub, onAddComment, hideEmpty, highlightDelegateFor, queuedIds, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect }: {
+export function GroupedList({ groups, showClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onDeleteSub, onAddComment, hideEmpty, highlightDelegateFor, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect }: {
   groups: { key: string; label: string; color: string; tasks: Task[] }[];
   showClient: boolean; clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null;
   visibleCols: string[]; sortKey: string; sortDir: "asc" | "desc"; onSort: (key: string) => void;
   onOpen: (id: string) => void; onPatch: (taskId: string, patch: Partial<Task>) => void; canQuickAdd: boolean; quickAddHint: string; onQuickAdd: (groupKey: string, title: string) => void;
   onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void; onDeleteSub: (taskId: string, subId: string) => void; onAddComment: (taskId: string, body: string) => void; hideEmpty?: boolean; highlightDelegateFor?: string;
-  queuedIds?: Set<string>;
   // When set, task rows can be dragged onto a group header to move them into
   // that group (e.g. drag a row onto "Urgent" to reprioritize it) — only
   // meaningful for groupBy dimensions the caller knows how to translate back
@@ -113,7 +112,7 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
               {!collapsedG.has(g.key) && (
                 <div>
                   {g.tasks.map((t) => (
-                    <TaskRow key={t.id} task={t} template={template} cols={cols} showClient={showClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} onAddComment={onAddComment} delegated={!!highlightDelegateFor && t.assigneeId !== highlightDelegateFor && t.subtasks.some((s) => s.assigneeId === highlightDelegateFor)} queued={!!queuedIds?.has(t.id)}
+                    <TaskRow key={t.id} task={t} template={template} cols={cols} showClient={showClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} onAddComment={onAddComment} delegated={!!highlightDelegateFor && t.assigneeId !== highlightDelegateFor && t.subtasks.some((s) => s.assigneeId === highlightDelegateFor)}
                       selected={!!selectedIds?.has(t.id)} onToggleSelect={onToggleSelect ? () => onToggleSelect(t.id) : undefined}
                       draggable={!!onDropInGroup || !!onMergeTasks} onDragStart={() => setDragTaskId(t.id)} onDragEnd={() => { setDragTaskId(null); setDragOverKey(null); setDragOverTaskId(null); }}
                       isMergeDropTarget={dragOverTaskId === t.id}
@@ -143,9 +142,9 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   );
 }
 
-function TaskRow({ task, template, cols, showClient, clientById, projectById, contactById, onOpen, onPatch, onAddComment, delegated, queued, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
+function TaskRow({ task, template, cols, showClient, clientById, projectById, contactById, onOpen, onPatch, onAddComment, delegated, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
   task: Task; template: string; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean;
-  clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void; onAddComment: (taskId: string, body: string) => void; delegated?: boolean; queued?: boolean;
+  clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void; onAddComment: (taskId: string, body: string) => void; delegated?: boolean;
   selected?: boolean; onToggleSelect?: () => void;
   draggable?: boolean; onDragStart?: () => void; onDragEnd?: () => void;
   // Drop-onto-this-row-to-merge — independent of the drag-to-reorder-groups
@@ -192,7 +191,6 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
             {!showClient && crumb && <span className="truncate text-[13px] leading-tight text-muted">{crumb}</span>}
             <span className="flex min-w-0 items-center gap-1.5">
               {delegated && <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">Delegated</span>}
-              {queued && <span title="Queued for Claude Code" className="shrink-0 text-amber-500">★</span>}
               <span className="line-clamp-none min-w-0 flex-1 break-words text-[17px] font-medium leading-snug sm:line-clamp-2" title={task.title}>{task.title}</span>
               {task.recurrence !== "none" && <span title={describeRecurrence(task.recurrence, task.recurrenceInterval, task.recurrenceUnit, task.recurrenceDaysOfMonth)}><I.repeat className="shrink-0 text-muted" /></span>}
               {task.attachments.length > 0 && <I.clip className="shrink-0 text-muted" />}
