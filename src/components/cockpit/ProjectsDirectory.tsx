@@ -11,7 +11,7 @@ import { I } from "./ui";
 export function ProjectsDirectory({
   projects, openCount, onOpen, canAdmin, onAddProject, onRename, onDelete, starredLists, onToggleStarList,
 }: {
-  projects: Project[]; // workspace projects, in the caller's chosen order
+  projects: Project[]; // workspace projects — sorted A-Z below regardless of caller order
   openCount: (id: string) => number;
   onOpen: (id: string) => void;
   canAdmin: boolean;
@@ -23,7 +23,8 @@ export function ProjectsDirectory({
 }) {
   const [q, setQ] = useState("");
   const query = q.trim().toLowerCase();
-  const shown = query ? projects.filter((p) => p.name.toLowerCase().includes(query)) : projects;
+  const sorted = [...projects].sort((a, b) => a.name.localeCompare(b.name));
+  const shown = query ? sorted.filter((p) => p.name.toLowerCase().includes(query)) : sorted;
 
   return (
     <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">

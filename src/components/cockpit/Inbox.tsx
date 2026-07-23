@@ -87,7 +87,14 @@ export function Inbox({ notifications, clientById, projectById, onOpen, onMarkAl
   // A DM notification (kind "dm") counts as a "Messages" notice too — it's a
   // direct human communication, same bucket as an @mention/comment, just
   // routed to a DM thread instead of Team Chat when opened.
-  const filtered = filter === "all" ? notifications : notifications.filter((n) => (filter === "message" ? n.kind === "message" || n.kind === "dm" : (n.kind ?? "activity") === filter));
+  // Unread first (each tier keeps the caller's own newest-first order,
+  // since sort() is stable) — otherwise a genuinely new message can sit
+  // buried under a run of already-read ones from earlier the same day.
+  // Day dividers/grouping (below) run on this order, so "Today" can appear
+  // more than once — once for the unread tier, again for the read tier —
+  // same trade-off any unread-first inbox makes.
+  const filtered = (filter === "all" ? notifications : notifications.filter((n) => (filter === "message" ? n.kind === "message" || n.kind === "dm" : (n.kind ?? "activity") === filter)))
+    .slice().sort((a, b) => Number(a.read) - Number(b.read));
 
   return (
     // min-h-0 matters now that this sits under the Team Chat tab bar in a
@@ -125,25 +132,32 @@ export function Inbox({ notifications, clientById, projectById, onOpen, onMarkAl
           </div>
         )}
         {(notifications.length > 0 || onSyncEmail || onSyncAppointments) && (
-          <div className="mb-3 flex items-center justify-between gap-2">
-            {notifications.length > 0 ? (
-              <div className="flex overflow-hidden rounded-lg border">
+          // Was one row (filter pills + 3 full-text buttons) fighting for
+          // space — fine at full-page width, but this pane now also lives
+          // in the narrower Team Chat split, where "Mark all as read"
+          // wrapped into four lines. Two independently-wrapping rows
+          // instead: filters (used constantly, keep readable text) on top,
+          // the three less-common admin actions as small icon buttons below.
+          <div className="mb-3 flex flex-col gap-2">
+            {notifications.length > 0 && (
+              <div className="flex w-fit flex-wrap overflow-hidden rounded-lg border">
                 {([["all", "All"], ["message", "Messages"], ["activity", "Task notices"]] as const).map(([v, label]) => (
                   <button key={v} onClick={() => setFilter(v)} className={`px-2.5 py-1 text-[13px] font-medium ${filter === v ? "bg-accent-soft text-accent" : "bg-surface text-muted hover:text-foreground"}`}>{label}</button>
                 ))}
               </div>
-            ) : <span />}
-            <div className="flex items-center gap-2">
+            )}
+            <div className="flex flex-wrap items-center gap-1.5">
               {onSyncAppointments && (
-                <button onClick={onSyncAppointments} disabled={syncingAppointments} title="Pull upcoming appointments from GoHighLevel into the app"
-                  className="inline-flex items-center gap-1 rounded-md border bg-surface px-2.5 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-50"><I.calendar /> {syncingAppointments ? "Syncing…" : "Sync appointments"}</button>
+                <button onClick={onSyncAppointments} disabled={syncingAppointments} title="Sync appointments — pull upcoming appointments from GoHighLevel into the app"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-surface text-muted hover:bg-background hover:text-foreground disabled:opacity-50">{syncingAppointments ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" /> : <I.calendar />}</button>
               )}
               {onSyncEmail && (
-                <button onClick={onSyncEmail} disabled={syncingEmail} title="Pull recent client email replies from Gmail into the app"
-                  className="inline-flex items-center gap-1 rounded-md border bg-surface px-2.5 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-50"><I.repeat /> {syncingEmail ? "Syncing…" : "Sync email"}</button>
+                <button onClick={onSyncEmail} disabled={syncingEmail} title="Sync email — pull recent client email replies from Gmail into the app"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-surface text-muted hover:bg-background hover:text-foreground disabled:opacity-50">{syncingEmail ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" /> : <I.repeat />}</button>
               )}
               {notifications.length > 0 && (
-                <button onClick={onMarkAllRead} disabled={unreadCount === 0} className="rounded-md border bg-surface px-2.5 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-40">Mark all as read</button>
+                <button onClick={onMarkAllRead} disabled={unreadCount === 0} title="Mark all as read"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-surface text-muted hover:bg-background hover:text-foreground disabled:opacity-40"><I.check /></button>
               )}
             </div>
           </div>

@@ -687,6 +687,31 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarHidden, setSidebarHidden] = useState(false);
+  // Team Chat's Chat/Activity split — Chat's share as a percentage of the
+  // row, Activity gets the rest. Percentage (not a fixed px width like the
+  // task drawer's Activity column) since both sides here are primary
+  // content that should scale with the window, not one fixed-feeling
+  // sidebar next to a flexible main area.
+  const [chatSplit, setChatSplit] = useState(60);
+  useEffect(() => { try { const w = parseInt(localStorage.getItem("cut_chatSplit") ?? "", 10); if (w >= 30 && w <= 80) setChatSplit(w); } catch {} }, []);
+  const chatSplitRef = useRef<HTMLDivElement>(null);
+  const startChatSplitResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const container = chatSplitRef.current;
+    if (!container) return;
+    const onMove = (ev: MouseEvent) => {
+      const rect = container.getBoundingClientRect();
+      const pct = Math.round(((ev.clientX - rect.left) / rect.width) * 100);
+      setChatSplit(Math.min(80, Math.max(30, pct)));
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      setChatSplit((w) => { try { localStorage.setItem("cut_chatSplit", String(w)); } catch {} return w; });
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
   useEffect(() => { try { setSidebarHidden(localStorage.getItem("cut_sidebarHidden") === "1"); } catch {} }, []);
   const toggleSidebar = () => {
     setSidebarHidden((h) => { const v = !h; try { localStorage.setItem("cut_sidebarHidden", v ? "1" : "0"); } catch {} return v; });
@@ -3982,18 +4007,22 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         ) : inboxView ? (
           // Team Chat page — the two halves of "talk to the team" in one
           // place: the workspace chat, and the task comments/mentions
-          // addressed to you, side by side (~70/30) instead of a tab you
-          // switch between — see everything in one shot rather than
-          // clicking back and forth. Stacks to Chat-over-Activity on
-          // narrow/mobile widths, where a 30% column would be too cramped
-          // to read.
-          <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
-            <div className="flex min-h-0 min-w-0 flex-[7] flex-col border-b sm:border-b-0 sm:border-r">
+          // addressed to you, side by side (default 60/40, drag to resize)
+          // instead of a tab you switch between — see everything in one
+          // shot rather than clicking back and forth. Stacks to
+          // Chat-over-Activity on narrow/mobile widths, where a resizable
+          // column doesn't make sense (also why the drag handle is
+          // sm:block — dragging a horizontal split on a vertical stack has
+          // nothing to resize).
+          <div ref={chatSplitRef} className="flex min-h-0 flex-1 flex-col sm:flex-row">
+            <div className="relative flex min-h-0 min-w-0 flex-col border-b sm:border-b-0 sm:border-r" style={{ flexBasis: `${chatSplit}%` }}>
+              <div onMouseDown={startChatSplitResize} title="Drag to resize"
+                className="absolute inset-y-0 -right-1 z-10 hidden w-2 cursor-col-resize hover:bg-accent/30 active:bg-accent/40 sm:block" />
               <div className="shrink-0 border-b bg-surface px-4 py-2 text-[13px] font-semibold text-muted">Chat</div>
               <TeamChat me={me} scope={{ type: "team" }} messages={teamMessages} onSend={sendTeamMessage} onDelete={deleteTeamMessage}
                 onPin={pinTeamMessage} onUploadFile={(file) => uploadOneImage("team-chat", file)} onOpenFile={downloadFile} />
             </div>
-            <div className="flex min-h-0 min-w-0 flex-[3] flex-col">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
               <div className="flex shrink-0 items-center gap-1.5 border-b bg-surface px-4 py-2 text-[13px] font-semibold text-muted">
                 Activity{unread > 0 && <span className="rounded-full bg-accent px-1.5 text-[11px] font-semibold text-white">{unread}</span>}
               </div>
