@@ -1129,8 +1129,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     await addClientContact(ct); // creates cl_<ct.id>, opens it, brings any conversation over
     dismissUnmatched(u.id);
   };
+  // Standalone mark-read — shared with openNotification below, but also
+  // exposed on its own so a notification can be dismissed off the unread
+  // count without actually opening/navigating to it.
+  const markNotifRead = (n: Notification) => {
+    setNotifications((ns) => ns.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
+    markNotifReadDb(n.id);
+  };
   const openNotification = (n: Notification) => {
-    if (!n.read) { setNotifications((ns) => ns.map((x) => (x.id === n.id ? { ...x, read: true } : x))); markNotifReadDb(n.id); }
+    if (!n.read) markNotifRead(n);
     // A DM notification's actorId is exactly who sent it — that's the thread to open.
     if (n.kind === "dm" && n.actorId) { openDm(n.actorId); return; }
     if (n.taskId) { setOpenTaskId(n.taskId); return; }
@@ -3438,7 +3445,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 {unread > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{unread}</span>}
               </span>
             )}</SideItem>
-            {users.filter((u) => u.id !== me.id).map((u) => (
+            {users.filter((u) => u.id !== me.id && u.id !== "u_claude").map((u) => (
               <SideItem key={u.id} active={inboxView && dmUserId === u.id} onClick={() => openDm(u.id)}>
                 <Avatar id={u.id} size={20} /> <span className="min-w-0 flex-1 truncate text-left">{u.name}</span>
                 {dmUnread(u.id) && <span title="Unread messages" className="ml-auto h-2 w-2 rounded-full bg-accent" />}
@@ -4054,7 +4061,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <div className="flex shrink-0 items-center gap-1.5 border-b bg-surface px-4 py-2 text-[13px] font-semibold text-muted">
                 Activity{unread > 0 && <span className="rounded-full bg-accent px-1.5 text-[11px] font-semibold text-white">{unread}</span>}
               </div>
-              <Inbox notifications={myNotifs} clientById={clientById} projectById={projectById} onOpen={openNotification} onMarkAllRead={markAllNotifsRead} onSyncEmail={canAdmin ? syncEmail : undefined} syncingEmail={syncingEmail} onSyncAppointments={canAdmin ? syncAppointments : undefined} syncingAppointments={syncingAppointments}
+              <Inbox notifications={myNotifs} clientById={clientById} projectById={projectById} onOpen={openNotification} onMarkRead={markNotifRead} onMarkAllRead={markAllNotifsRead} onSyncEmail={canAdmin ? syncEmail : undefined} syncingEmail={syncingEmail} onSyncAppointments={canAdmin ? syncAppointments : undefined} syncingAppointments={syncingAppointments}
                 unmatchedEmails={canAdmin ? unmatchedEmails : []} onAddAsClient={addAsClientFromEmail} onDismissUnmatched={dismissUnmatched} />
             </div>
           </div>

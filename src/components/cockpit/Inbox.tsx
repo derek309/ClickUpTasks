@@ -23,27 +23,36 @@ type ActivityRow =
 
 // The single-notification row — shared by a standalone row and by each item
 // inside an expanded group, so there's exactly one place that defines what
-// a notification looks like.
-function NotificationRow({ n, clientById, projectById, onOpen }: {
+// a notification looks like. A separate mark-read button (unread only) sits
+// beside the main open-button rather than nested inside it — sometimes you
+// just want it off your unread count without actually opening it.
+function NotificationRow({ n, clientById, projectById, onOpen, onMarkRead }: {
   n: Notification;
   clientById: (id: string) => Client | null;
   projectById: (id: string) => Project | null;
   onOpen: (n: Notification) => void;
+  onMarkRead?: (n: Notification) => void;
 }) {
   const where = n.projectId ? projectById(n.projectId)?.name : n.clientId ? clientById(n.clientId)?.name : null;
   const canOpen = !!(n.taskId || n.clientId);
   return (
-    <button onClick={() => onOpen(n)} disabled={!canOpen}
-      className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition ${n.read ? "bg-surface" : "border-accent/40 bg-accent-soft"} ${canOpen ? "hover:border-accent" : "cursor-default opacity-80"}`}>
-      <Avatar id={n.actorId ?? null} size={32} />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-start gap-2">
-          <div className={`min-w-0 break-words text-[15px] leading-snug ${n.read ? "" : "font-medium"}`}>{n.text}</div>
-          {!n.read && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent" />}
+    <div className={`group/notif flex w-full items-start gap-1 rounded-xl border p-1 transition ${n.read ? "bg-surface" : "border-accent/40 bg-accent-soft"}`}>
+      <button onClick={() => onOpen(n)} disabled={!canOpen}
+        className={`flex min-w-0 flex-1 items-start gap-3 rounded-lg p-2 text-left ${canOpen ? "hover:bg-black/[0.03] dark:hover:bg-white/[0.04]" : "cursor-default opacity-80"}`}>
+        <Avatar id={n.actorId ?? null} size={32} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start gap-2">
+            <div className={`min-w-0 break-words text-[15px] leading-snug ${n.read ? "" : "font-medium"}`}>{n.text}</div>
+            {!n.read && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent" />}
+          </div>
+          <div className="mt-0.5 text-[13px] text-muted">{timeAgo(n.at)}{where && <> · {where}</>}</div>
         </div>
-        <div className="mt-0.5 text-[13px] text-muted">{timeAgo(n.at)}{where && <> · {where}</>}</div>
-      </div>
-    </button>
+      </button>
+      {!n.read && onMarkRead && (
+        <button onClick={() => onMarkRead(n)} title="Mark as read"
+          className="mt-2 shrink-0 rounded-md p-1.5 text-muted opacity-0 hover:bg-background hover:text-foreground group-hover/notif:opacity-100"><I.check /></button>
+      )}
+    </div>
   );
 }
 
@@ -68,11 +77,12 @@ function buildActivityRows(list: Notification[]): ActivityRow[] {
   return rows;
 }
 
-export function Inbox({ notifications, clientById, projectById, onOpen, onMarkAllRead, onSyncEmail, syncingEmail, onSyncAppointments, syncingAppointments, unmatchedEmails = [], onAddAsClient, onDismissUnmatched }: {
+export function Inbox({ notifications, clientById, projectById, onOpen, onMarkRead, onMarkAllRead, onSyncEmail, syncingEmail, onSyncAppointments, syncingAppointments, unmatchedEmails = [], onAddAsClient, onDismissUnmatched }: {
   notifications: Notification[]; // caller's, newest-first
   clientById: (id: string) => Client | null;
   projectById: (id: string) => Project | null;
   onOpen: (n: Notification) => void;
+  onMarkRead?: (n: Notification) => void; // mark read without opening/navigating
   onMarkAllRead: () => void;
   onSyncEmail?: () => void; // admin-only: pull Gmail replies on demand
   syncingEmail?: boolean;
@@ -191,7 +201,7 @@ export function Inbox({ notifications, clientById, projectById, onOpen, onMarkAl
             if (row.kind === "divider") {
               return <div key={row.key} className="px-1 pb-0.5 pt-2.5 text-[12px] font-semibold uppercase tracking-wide text-muted first:pt-0">{row.label}</div>;
             }
-            if (row.kind === "single") return <NotificationRow key={row.n.id} n={row.n} clientById={clientById} projectById={projectById} onOpen={onOpen} />;
+            if (row.kind === "single") return <NotificationRow key={row.n.id} n={row.n} clientById={clientById} projectById={projectById} onOpen={onOpen} onMarkRead={onMarkRead} />;
             // Collapsed by default — a burst of 2+ notifications from the
             // same sender is the exact wall-of-identical-cards the day/
             // grouping pass exists to prevent. Reuses the same expand Set
@@ -215,7 +225,7 @@ export function Inbox({ notifications, clientById, projectById, onOpen, onMarkAl
                 </button>
                 {open && (
                   <div className="ml-4 mt-1.5 space-y-1.5 border-l pl-3">
-                    {row.items.map((n) => <NotificationRow key={n.id} n={n} clientById={clientById} projectById={projectById} onOpen={onOpen} />)}
+                    {row.items.map((n) => <NotificationRow key={n.id} n={n} clientById={clientById} projectById={projectById} onOpen={onOpen} onMarkRead={onMarkRead} />)}
                   </div>
                 )}
               </div>
