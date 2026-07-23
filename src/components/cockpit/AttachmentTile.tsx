@@ -45,8 +45,8 @@ export function AttachmentTile({ item, url, href, onOpen, small, overlayCaption,
       className={`group relative aspect-square overflow-hidden rounded-lg border bg-surface ${small ? "opacity-80 hover:opacity-100" : ""} ${drag?.dragging ? "opacity-40" : ""}`}
       draggable={!!drag}
       onDragStart={drag?.onDragStart}
-      onDragOver={drag ? (e) => { e.preventDefault(); e.stopPropagation(); } : undefined}
-      onDrop={drag ? (e) => { e.preventDefault(); e.stopPropagation(); drag.onDrop(); } : undefined}
+      onDragOver={drag ? (e) => { if (e.dataTransfer.types.includes("Files")) return; e.preventDefault(); e.stopPropagation(); } : undefined}
+      onDrop={drag ? (e) => { if (e.dataTransfer.types.includes("Files")) return; e.preventDefault(); e.stopPropagation(); drag.onDrop(); } : undefined}
     >
       {href ? (
         <a href={href} target="_blank" rel="noopener noreferrer" title={item.name} className="block h-full w-full">{body}</a>
