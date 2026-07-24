@@ -76,6 +76,7 @@ import SettingsHub from "./SettingsHub";
 import TeamChat from "./TeamChat";
 import AddClientModal from "./AddClientModal";
 import TerritoryPanel from "./TerritoryPanel";
+import { PlannerPanel } from "./cockpit/PlannerPanel";
 
 
 import { I, Avatar, SideItem, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFromName, LIST_COLUMNS, type FilterState, type SortBy, type Toast } from "./cockpit/ui";
@@ -151,6 +152,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Territory (city) view — a value is a territory id, or "all" for the manage-
   // all overview. Its own top-level view alongside inbox/dashboard/etc.
   const [territoryView, setTerritoryView] = useState<string | null>(null);
+  // Content Planner mode, layered on top of territoryView rather than a
+  // parallel top-level state — meaningful only while territoryView is set
+  // (a third "which half of the territory" mode alongside Businesses/City
+  // work), so every existing !territoryView-gated header guard stays
+  // correct for free instead of needing a matching !plannerOpen everywhere.
+  const [plannerOpen, setPlannerOpen] = useState(false);
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
   const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
   const [vaultFolders, setVaultFolders] = useState<VaultFolder[]>([]);
@@ -1291,7 +1298,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const openTerritory = (id: string) => {
     setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null);
     setActiveClient("all"); setActiveProject(null); setOpenTaskId(null); setSidebarOpen(false);
+    setPlannerOpen(false);
     setTerritoryView(id);
+  };
+  // Same city, Content Planner mode instead of the Businesses list.
+  const openTerritoryPlanner = (id: string) => {
+    setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null);
+    setActiveClient("all"); setActiveProject(null); setOpenTaskId(null); setSidebarOpen(false);
+    setTerritoryView(id);
+    setPlannerOpen(true);
   };
   // The city's own work bucket, opened as an ordinary client page — that's
   // what gives it the full task list, quick-add, Journal, Links and Vault
@@ -1305,7 +1320,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // first list/task added there has a foreign key onto it.
     await ready;
     setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null);
-    setTerritoryView(null); setActiveProject(null); setOpenTaskId(null); setSidebarOpen(false);
+    setTerritoryView(null); setPlannerOpen(false); setActiveProject(null); setOpenTaskId(null); setSidebarOpen(false);
     setActiveClient(cid); setClientTab("tasks");
   };
   // Reverse of territoryClientId — lets the client page know it's showing a
@@ -3691,23 +3706,29 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               one click either way instead of a tab strip on one side and a
               breadcrumb link on the other. */}
           {activeTerritoryClient && (
-            <div className="inline-flex overflow-hidden rounded-md border" title="Switch to this city's businesses">
+            <div className="inline-flex overflow-hidden rounded-md border" title="Switch to this city's businesses or newsletter planner">
               <button onClick={() => openTerritory(activeTerritoryClient.id)} className="px-2.5 py-1.5 text-[13px] font-medium bg-background text-muted hover:text-foreground">Businesses</button>
               <span className="px-2.5 py-1.5 text-[13px] font-medium bg-accent-soft text-accent">City work</span>
+              <button onClick={() => openTerritoryPlanner(activeTerritoryClient.id)} className="px-2.5 py-1.5 text-[13px] font-medium bg-background text-muted hover:text-foreground">Planner</button>
             </div>
           )}
-          {/* Same control, other side: browsing a city's businesses page.
-              Lives in the header now (not inside TerritoryPanel's own body)
-              so it sits in the exact same spot as its reverse above —
-              one consistent place for this switch regardless of which half
-              of the territory you're looking at. */}
+          {/* Same control, other side: browsing a city's businesses or
+              planner page. Lives in the header now (not inside
+              TerritoryPanel's own body) so it sits in the exact same spot
+              as its reverse above — one consistent place for this switch
+              regardless of which third of the territory you're looking at. */}
           {territoryView && territoryView !== "all" && (
-            <div className="inline-flex overflow-hidden rounded-md border" title="Switch to this city's own work">
-              <span className="px-2.5 py-1.5 text-[13px] font-medium bg-accent-soft text-accent">Businesses</span>
+            <div className="inline-flex overflow-hidden rounded-md border" title="Switch between this city's businesses, its own work, and the newsletter planner">
+              {plannerOpen
+                ? <button onClick={() => setPlannerOpen(false)} className="px-2.5 py-1.5 text-[13px] font-medium bg-background text-muted hover:text-foreground">Businesses</button>
+                : <span className="px-2.5 py-1.5 text-[13px] font-medium bg-accent-soft text-accent">Businesses</span>}
               <button onClick={() => openTerritoryWork(territoryView)} className="flex items-center gap-1.5 px-2.5 py-1.5 text-[13px] font-medium bg-background text-muted hover:text-foreground">
                 City work
                 {territoryOpenWorkCount(territoryView) > 0 && <span className="rounded-full bg-accent px-1.5 text-[12px] font-semibold text-white">{territoryOpenWorkCount(territoryView)}</span>}
               </button>
+              {plannerOpen
+                ? <span className="px-2.5 py-1.5 text-[13px] font-medium bg-accent-soft text-accent">Planner</span>
+                : <button onClick={() => setPlannerOpen(true)} className="px-2.5 py-1.5 text-[13px] font-medium bg-background text-muted hover:text-foreground">Planner</button>}
             </div>
           )}
           {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && (
@@ -4017,6 +4038,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onSaveTemplate={saveTemplate} onDeleteTemplate={deleteTemplate} onUseTemplateAsTask={useTemplateAsTask}
             playbooks={playbooks} onSavePlaybook={savePlaybook} onDeletePlaybook={deletePlaybook} onLoadPlaybook={loadPlaybook}
           />
+        ) : territoryView && territoryView !== "all" && plannerOpen ? (
+          <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">
+            <PlannerPanel territoryId={territoryView} city={territoryById(territoryView)?.city ?? ""} state={territoryById(territoryView)?.state ?? ""} />
+          </div>
         ) : territoryView ? (
           <div className="flex-1 overflow-auto bg-background py-2">
             <TerritoryPanel me={me} canAdmin={canAdmin} territories={territories} contacts={contacts} clients={clients}

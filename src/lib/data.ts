@@ -298,6 +298,121 @@ export interface Territory {
   assignedTo: string[]; // roster ids of the assigned ambassadors (one or more; [] = unassigned)
 }
 
+// --- Content Planner (the per-city weekly newsletter workflow) -------------
+// Moved in from WordPress's /sales Content Planner; ClickUpTasks is now the
+// source of truth (see supabase/planner.sql), pushing finalized picks out to
+// WordPress on save so the public "{City} Weekly" archive page keeps working
+// unchanged. See /Users/derekfox/.claude/plans/twinkly-puzzling-prism.md for
+// the full migration plan.
+
+// A business reference attached to a slot/section/event. clientId links a
+// ClickUpTasks prospect/client when one exists; gdPlaceId is the WordPress
+// GeoDirectory listing id (captured from /api/directory/listings at pick
+// time) so push-sync can build the public listing link. Free-text-only
+// (both null) is legal — matches what WordPress already allowed.
+export interface PlannerBiz {
+  clientId: string | null;
+  gdPlaceId: number | null;
+  name: string;
+  url: string;
+  cat: string;
+  note: string;
+}
+
+export type PlannerSlot = "spotlight" | "gem" | "gem2" | "gem3" | "story";
+// Business Spotlight + up to 3 Hidden Gems — new businesses claimed to be
+// featured. "story" (local news) is content-only, not a business slot.
+export const PLANNER_BUSINESS_SLOTS: PlannerSlot[] = ["spotlight", "gem", "gem2", "gem3"];
+export const PLANNER_CONTENT_SLOTS: PlannerSlot[] = [...PLANNER_BUSINESS_SLOTS, "story"];
+
+export interface PlannerWeek {
+  id: string;
+  territoryId: string;
+  week: string; // yyyy-mm-dd — the issue's Wednesday ship date, same key WordPress used
+  themeOverride: string;
+  notes: string;
+  picks: Partial<Record<PlannerSlot, PlannerBiz>>;
+  dismissed: number[]; // gd_place_ids dismissed from this week's suggestion pools
+  archived: boolean;
+  sentDate: string | null;
+  wpPushedAt: string | null;
+  createdAt: string;
+}
+
+export interface PlannerSection {
+  id: string;
+  weekId: string;
+  position: number;
+  type: string; // "The Story" | "New In Town" | "Ask Your Concierge" | "Last Call" | a custom title
+  text: string;
+  biz: PlannerBiz | null;
+}
+
+export interface PlannerEvent {
+  id: string;
+  weekId: string;
+  position: number;
+  text: string;
+  biz: PlannerBiz | null;
+}
+
+export type NewsletterItemType = "business" | "video" | "event" | "offer" | "news" | "social" | "blog";
+export type NewsletterItemStatus = "pending" | "done";
+
+// A queued item in the newsletter backlog — added from a business's own
+// page or the planner sidebar, optionally assigned to a week (null = "who
+// to go after" backlog, not yet scheduled).
+export interface NewsletterItem {
+  id: string;
+  territoryId: string;
+  type: NewsletterItemType;
+  clientId: string | null;
+  gdPlaceId: number | null;
+  weekId: string | null;
+  title: string;
+  note: string;
+  url: string | null;
+  status: NewsletterItemStatus;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+export interface ThemeCalendarEntry {
+  id: number;
+  month: number; // 1-12
+  weekOfMonth: number; // 1-5
+  title: string;
+  categories: string[];
+}
+
+// The Wednesday (yyyy-mm-dd) of the ISO week containing `iso` — the same
+// anchor WordPress's planner uses (cul_planner_current_week_iso), so a
+// ClickUpTasks week id maps 1:1 onto the WP push-sync option key with no
+// date translation needed.
+export function plannerWeekOf(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const isoDow = dt.getUTCDay() === 0 ? 7 : dt.getUTCDay(); // 1=Mon…7=Sun
+  dt.setUTCDate(dt.getUTCDate() + (3 - isoDow));
+  return dt.toISOString().slice(0, 10);
+}
+export const PLANNER_CURRENT_WEEK = plannerWeekOf(TODAY);
+
+// Human label for a planner week as its Sunday–Saturday span, e.g.
+// "Jun 14 – 20, 2026" (or "Jun 28 – Jul 4, 2026" across months) — matches
+// WordPress's cul_planner_week_label. The week is keyed by its Wednesday
+// ship date; Sunday = Wed − 3 days, Saturday = Wed + 3 days.
+export function plannerWeekLabel(week: string): string {
+  const sun = addDaysIso(week, -3);
+  const sat = addDaysIso(week, 3);
+  const parts = (iso: string) => { const [y, m, d] = iso.split("-").map(Number); return { y, m, d }; };
+  const s = parts(sun), e = parts(sat);
+  const monthName = (m: number) => new Date(Date.UTC(2000, m - 1, 1)).toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
+  if (s.y !== e.y) return `${monthName(s.m)} ${s.d}, ${s.y} – ${monthName(e.m)} ${e.d}, ${e.y}`;
+  if (s.m !== e.m) return `${monthName(s.m)} ${s.d} – ${monthName(e.m)} ${e.d}, ${e.y}`;
+  return `${monthName(s.m)} ${s.d} – ${e.d}, ${e.y}`;
+}
+
 // A reusable checklist, applied either to quick-populate a new task (title
 // defaults to the template name) or to append the checklist onto an
 // existing task's subtasks.

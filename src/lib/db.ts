@@ -30,6 +30,12 @@ import {
   type Priority,
   type TeamMessage,
   type DmMessage,
+  type PlannerWeek,
+  type PlannerSection,
+  type PlannerEvent,
+  type PlannerBiz,
+  type NewsletterItem,
+  type ThemeCalendarEntry,
   titleCase,
   PRIORITY_META,
 } from "./data";
@@ -348,4 +354,85 @@ export async function downloadUrlForFile(path: string, filename: string, expiryS
 
 export async function deleteTaskFile(path: string): Promise<void> {
   await supabase.storage.from(TASK_FILES_BUCKET).remove([path]).then(logErr);
+}
+
+// --- Content Planner ---------------------------------------------------------
+// Fetched on demand (per territory, when the Planner view opens) rather than
+// bundled into fetchAll — most sessions never touch it, and a city can
+// accumulate a full rolling year of weeks.
+
+const bizToJson = (b: PlannerBiz | null) => b ? { client_id: b.clientId, gd_place_id: b.gdPlaceId, name: b.name, url: b.url, cat: b.cat, note: b.note } : null;
+const jsonToBiz = (v: any): PlannerBiz | null => (v && typeof v === "object" && v.name) ? { clientId: v.client_id ?? null, gdPlaceId: v.gd_place_id ?? null, name: v.name ?? "", url: v.url ?? "", cat: v.cat ?? "", note: v.note ?? "" } : null;
+
+// planner_weeks.picks is one jsonb column holding both the slot picks and
+// the per-week __dismissed list (mirrors the WordPress blob shape) — split
+// apart here so PlannerWeek keeps them as separate, typed fields.
+const plannerWeekToRow = (w: PlannerWeek) => ({
+  id: w.id, territory_id: w.territoryId, week: w.week,
+  theme_override: w.themeOverride ?? "", notes: w.notes ?? "",
+  picks: { ...Object.fromEntries(Object.entries(w.picks).map(([k, v]) => [k, bizToJson(v as PlannerBiz)])), __dismissed: w.dismissed ?? [] },
+  archived: w.archived ?? false, sent_date: w.sentDate ?? null, wp_pushed_at: w.wpPushedAt ?? null,
+});
+export const rowToPlannerWeek = (r: any): PlannerWeek => {
+  const raw = (r.picks && typeof r.picks === "object") ? r.picks : {};
+  const { __dismissed, ...slots } = raw;
+  const picks: PlannerWeek["picks"] = {};
+  for (const [k, v] of Object.entries(slots)) { const b = jsonToBiz(v); if (b) (picks as any)[k] = b; }
+  return {
+    id: r.id, territoryId: r.territory_id, week: r.week,
+    themeOverride: r.theme_override ?? "", notes: r.notes ?? "",
+    picks, dismissed: Array.isArray(__dismissed) ? __dismissed : [],
+    archived: !!r.archived, sentDate: r.sent_date ?? null, wpPushedAt: r.wp_pushed_at ?? null,
+    createdAt: r.created_at,
+  };
+};
+export async function fetchPlannerWeeks(territoryId: string): Promise<PlannerWeek[]> {
+  const { data, error } = await supabase.from("planner_weeks").select("*").eq("territory_id", territoryId).order("week", { ascending: false });
+  if (error) { logErr({ error }); return []; }
+  return (data ?? []).map(rowToPlannerWeek);
+}
+export const upsertPlannerWeek = (w: PlannerWeek) => supabase.from("planner_weeks").upsert(plannerWeekToRow(w)).then(logErr);
+export const deletePlannerWeekDb = (id: string) => supabase.from("planner_weeks").delete().eq("id", id).then(logErr);
+
+const bizCols = (b: PlannerBiz | null) => ({
+  biz_client_id: b?.clientId ?? null, biz_gd_place_id: b?.gdPlaceId ?? null,
+  biz_name: b?.name ?? null, biz_url: b?.url ?? null, biz_cat: b?.cat ?? null,
+});
+const bizFromCols = (r: any): PlannerBiz | null => r.biz_name ? { clientId: r.biz_client_id ?? null, gdPlaceId: r.biz_gd_place_id ?? null, name: r.biz_name, url: r.biz_url ?? "", cat: r.biz_cat ?? "", note: "" } : null;
+
+const plannerSectionToRow = (s: PlannerSection) => ({ id: s.id, week_id: s.weekId, position: s.position, type: s.type, text: s.text, ...bizCols(s.biz) });
+export const rowToPlannerSection = (r: any): PlannerSection => ({ id: r.id, weekId: r.week_id, position: r.position, type: r.type ?? "", text: r.text ?? "", biz: bizFromCols(r) });
+export async function fetchPlannerSections(weekId: string): Promise<PlannerSection[]> {
+  const { data, error } = await supabase.from("planner_sections").select("*").eq("week_id", weekId).order("position", { ascending: true });
+  if (error) { logErr({ error }); return []; }
+  return (data ?? []).map(rowToPlannerSection);
+}
+export const upsertPlannerSection = (s: PlannerSection) => supabase.from("planner_sections").upsert(plannerSectionToRow(s)).then(logErr);
+export const deletePlannerSectionDb = (id: string) => supabase.from("planner_sections").delete().eq("id", id).then(logErr);
+
+const plannerEventToRow = (e: PlannerEvent) => ({ id: e.id, week_id: e.weekId, position: e.position, text: e.text, ...bizCols(e.biz) });
+export const rowToPlannerEvent = (r: any): PlannerEvent => ({ id: r.id, weekId: r.week_id, position: r.position, text: r.text ?? "", biz: bizFromCols(r) });
+export async function fetchPlannerEvents(weekId: string): Promise<PlannerEvent[]> {
+  const { data, error } = await supabase.from("planner_events").select("*").eq("week_id", weekId).order("position", { ascending: true });
+  if (error) { logErr({ error }); return []; }
+  return (data ?? []).map(rowToPlannerEvent);
+}
+export const upsertPlannerEvent = (e: PlannerEvent) => supabase.from("planner_events").upsert(plannerEventToRow(e)).then(logErr);
+export const deletePlannerEventDb = (id: string) => supabase.from("planner_events").delete().eq("id", id).then(logErr);
+
+const newsletterItemToRow = (n: NewsletterItem) => ({ id: n.id, territory_id: n.territoryId, type: n.type, client_id: n.clientId, gd_place_id: n.gdPlaceId, week_id: n.weekId, title: n.title, note: n.note, url: n.url, status: n.status, created_by: n.createdBy });
+export const rowToNewsletterItem = (r: any): NewsletterItem => ({ id: r.id, territoryId: r.territory_id, type: r.type ?? "business", clientId: r.client_id ?? null, gdPlaceId: r.gd_place_id ?? null, weekId: r.week_id ?? null, title: r.title ?? "", note: r.note ?? "", url: r.url ?? null, status: r.status ?? "pending", createdBy: r.created_by ?? null, createdAt: r.created_at });
+export async function fetchNewsletterItems(territoryId: string): Promise<NewsletterItem[]> {
+  const { data, error } = await supabase.from("newsletter_items").select("*").eq("territory_id", territoryId).order("created_at", { ascending: false });
+  if (error) { logErr({ error }); return []; }
+  return (data ?? []).map(rowToNewsletterItem);
+}
+export const upsertNewsletterItem = (n: NewsletterItem) => supabase.from("newsletter_items").upsert(newsletterItemToRow(n)).then(logErr);
+export const deleteNewsletterItemDb = (id: string) => supabase.from("newsletter_items").delete().eq("id", id).then(logErr);
+
+const rowToThemeCalendarEntry = (r: any): ThemeCalendarEntry => ({ id: r.id, month: r.month, weekOfMonth: r.week_of_month, title: r.title, categories: Array.isArray(r.categories) ? r.categories : [] });
+export async function fetchThemeCalendar(): Promise<ThemeCalendarEntry[]> {
+  const { data, error } = await supabase.from("planner_theme_calendar").select("*").order("month", { ascending: true }).order("week_of_month", { ascending: true });
+  if (error) { logErr({ error }); return []; }
+  return (data ?? []).map(rowToThemeCalendarEntry);
 }
