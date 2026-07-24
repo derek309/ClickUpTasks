@@ -370,17 +370,17 @@ const jsonToBiz = (v: any): PlannerBiz | null => (v && typeof v === "object" && 
 const plannerWeekToRow = (w: PlannerWeek) => ({
   id: w.id, territory_id: w.territoryId, week: w.week,
   theme_override: w.themeOverride ?? "", notes: w.notes ?? "",
-  picks: { ...Object.fromEntries(Object.entries(w.picks).map(([k, v]) => [k, bizToJson(v as PlannerBiz)])), __dismissed: w.dismissed ?? [] },
+  picks: { ...Object.fromEntries(Object.entries(w.picks).map(([k, v]) => [k, bizToJson(v as PlannerBiz)])), __dismissed: w.dismissed ?? [], __cats: w.categories ?? [] },
   archived: w.archived ?? false, sent_date: w.sentDate ?? null, wp_pushed_at: w.wpPushedAt ?? null,
 });
 export const rowToPlannerWeek = (r: any): PlannerWeek => {
   const raw = (r.picks && typeof r.picks === "object") ? r.picks : {};
-  const { __dismissed, ...slots } = raw;
+  const { __dismissed, __cats, ...slots } = raw;
   const picks: PlannerWeek["picks"] = {};
   for (const [k, v] of Object.entries(slots)) { const b = jsonToBiz(v); if (b) (picks as any)[k] = b; }
   return {
     id: r.id, territoryId: r.territory_id, week: r.week,
-    themeOverride: r.theme_override ?? "", notes: r.notes ?? "",
+    themeOverride: r.theme_override ?? "", categories: Array.isArray(__cats) ? __cats : [], notes: r.notes ?? "",
     picks, dismissed: Array.isArray(__dismissed) ? __dismissed : [],
     archived: !!r.archived, sentDate: r.sent_date ?? null, wpPushedAt: r.wp_pushed_at ?? null,
     createdAt: r.created_at,

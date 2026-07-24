@@ -330,6 +330,7 @@ export interface PlannerWeek {
   territoryId: string;
   week: string; // yyyy-mm-dd — the issue's Wednesday ship date, same key WordPress used
   themeOverride: string;
+  categories: string[]; // per-week override of the theme calendar's target categories — drives "who to go after" pools and the brief's Support Local section
   notes: string;
   picks: Partial<Record<PlannerSlot, PlannerBiz>>;
   dismissed: number[]; // gd_place_ids dismissed from this week's suggestion pools

@@ -3,16 +3,22 @@
 // Content Planner — the per-city weekly newsletter workflow, moved in from
 // WordPress's /sales Content Planner tab. ClickUpTasks is now the source of
 // truth (see supabase/planner.sql); WordPress becomes a push-target for the
-// public "{City} Weekly" archive page only (Phase 4). Phase 2: week index +
-// the core spotlight/gem/story picks editor. Sections/events (Phase 3) and
-// the AI Workshop/candidate pools (Phase 5) aren't built yet.
+// public "{City} Weekly" archive page only (Phase 4). Phase 3: sections/
+// events editors + brief generation + the newsletter backlog. The AI
+// Workshop/candidate pools (Phase 5) aren't built yet.
 import { useEffect, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
-import { fetchPlannerWeeks, upsertPlannerWeek, deletePlannerWeekDb } from "@/lib/db";
+import {
+  fetchPlannerWeeks, upsertPlannerWeek, deletePlannerWeekDb,
+  fetchPlannerSections, upsertPlannerSection, deletePlannerSectionDb,
+  fetchPlannerEvents, upsertPlannerEvent, deletePlannerEventDb,
+  fetchNewsletterItems, upsertNewsletterItem, deleteNewsletterItemDb,
+} from "@/lib/db";
 import {
   PLANNER_CURRENT_WEEK, plannerWeekLabel, addDaysIso, PLANNER_CONTENT_SLOTS,
-  type PlannerWeek, type PlannerSlot, type PlannerBiz,
+  type PlannerWeek, type PlannerSlot, type PlannerBiz, type PlannerSection, type PlannerEvent, type NewsletterItem,
 } from "@/lib/data";
+import { generatePlannerBrief } from "@/lib/plannerBrief";
 import { I, newId } from "./ui";
 import { type DirectoryListing } from "./TerritoryDirectory";
 
@@ -23,6 +29,7 @@ const SLOT_LABELS: Record<PlannerSlot, string> = {
   gem3: "Hidden Gem 3",
   story: "The Story (local news)",
 };
+const SECTION_PRESETS = ["The Story", "New In Town", "Ask Your Concierge", "Last Call"];
 
 export function PlannerPanel({ territoryId, city, state }: {
   territoryId: string; city: string; state: string;
@@ -30,9 +37,9 @@ export function PlannerPanel({ territoryId, city, state }: {
   const [weeks, setWeeks] = useState<PlannerWeek[]>([]);
   const [loading, setLoading] = useState(true);
   const [openWeekId, setOpenWeekId] = useState<string | null>(null);
-  // Business typeahead source for slot picks — the same city fetch
-  // TerritoryDirectory already uses, cached here independently since this
-  // view can be open without the Businesses tab ever having loaded it.
+  // Business typeahead source for slot/section/event picks — the same city
+  // fetch TerritoryDirectory already uses, cached here independently since
+  // this view can be open without the Businesses tab ever having loaded it.
   const [listings, setListings] = useState<DirectoryListing[]>([]);
 
   useEffect(() => {
@@ -57,7 +64,7 @@ export function PlannerPanel({ territoryId, city, state }: {
 
   const createWeek = async (week: string) => {
     const w: PlannerWeek = {
-      id: newId("pw_"), territoryId, week, themeOverride: "", notes: "",
+      id: newId("pw_"), territoryId, week, themeOverride: "", categories: [], notes: "",
       picks: {}, dismissed: [], archived: false, sentDate: null, wpPushedAt: null, createdAt: new Date().toISOString(),
     };
     setWeeks((ws) => [w, ...ws]);
@@ -83,7 +90,7 @@ export function PlannerPanel({ territoryId, city, state }: {
 
   if (openWeek) {
     return (
-      <WeekWorkspace week={openWeek} listings={listings} onBack={() => setOpenWeekId(null)}
+      <WeekWorkspace week={openWeek} listings={listings} cityName={city} onBack={() => setOpenWeekId(null)}
         onPatch={(patch) => patchWeek(openWeek.id, patch)} onDelete={() => deleteWeek(openWeek.id)} />
     );
   }
@@ -125,30 +132,141 @@ export function PlannerPanel({ territoryId, city, state }: {
   );
 }
 
-function WeekWorkspace({ week, listings, onBack, onPatch, onDelete }: {
+// Shared search-or-free-text business picker — used by slots, sections, and
+// events alike, so there's exactly one place defining how a business gets
+// attached to something in the planner.
+function BusinessPicker({ listings, onPick, onCancel }: {
+  listings: DirectoryListing[];
+  onPick: (biz: PlannerBiz) => void;
+  onCancel: () => void;
+}) {
+  const [q, setQ] = useState("");
+  const ql = q.trim().toLowerCase();
+  const matches = ql ? listings.filter((l) => l.name.toLowerCase().includes(ql)).slice(0, 8) : [];
+  const pickFromListing = (l: DirectoryListing) => {
+    const gdPlaceId = typeof l.id === "number" ? l.id : parseInt(String(l.id), 10);
+    onPick({ clientId: null, gdPlaceId: Number.isFinite(gdPlaceId) ? gdPlaceId : null, name: l.name, url: "", cat: l.category ?? "", note: "" });
+  };
+  return (
+    <div className="relative">
+      <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}
+        placeholder="Search businesses…" className="w-full rounded-lg border bg-background px-3 py-1.5 text-[14px] outline-none focus:border-accent" />
+      {matches.length > 0 && (
+        <div className="mt-1 overflow-hidden rounded-lg border bg-surface shadow-soft-md">
+          {matches.map((l) => (
+            <button key={l.id} onClick={() => pickFromListing(l)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] hover:bg-background">
+              <span className="min-w-0 flex-1 truncate">{l.name}</span>
+              {l.category && <span className="shrink-0 text-[12px] text-muted">{l.category}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="mt-1 flex items-center gap-2">
+        <button onClick={() => q.trim() && onPick({ clientId: null, gdPlaceId: null, name: q.trim(), url: "", cat: "", note: "" })} disabled={!q.trim()}
+          className="text-[12px] font-medium text-accent hover:underline disabled:opacity-40 disabled:hover:no-underline">Use “{q.trim() || "…"}” as free text</button>
+        <button onClick={onCancel} className="text-[12px] font-medium text-muted hover:text-foreground">Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+function WeekWorkspace({ week, listings, cityName, onBack, onPatch, onDelete }: {
   week: PlannerWeek;
   listings: DirectoryListing[];
+  cityName: string;
   onBack: () => void;
   onPatch: (patch: Partial<PlannerWeek>) => void;
   onDelete: () => void;
 }) {
   const [pickerSlot, setPickerSlot] = useState<PlannerSlot | null>(null);
-  const [q, setQ] = useState("");
+  const [catInput, setCatInput] = useState("");
+  const [sections, setSections] = useState<PlannerSection[]>([]);
+  const [events, setEvents] = useState<PlannerEvent[]>([]);
+  const [items, setItems] = useState<NewsletterItem[]>([]);
+  const [pickerSectionId, setPickerSectionId] = useState<string | null>(null);
+  const [pickerEventId, setPickerEventId] = useState<string | null>(null);
+  const [newItemTitle, setNewItemTitle] = useState("");
+  const [brief, setBrief] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    Promise.all([fetchPlannerSections(week.id), fetchPlannerEvents(week.id), fetchNewsletterItems(week.territoryId)]).then(([s, e, allItems]) => {
+      if (!alive) return;
+      setSections(s); setEvents(e);
+      setItems(allItems.filter((it) => it.weekId === week.id || it.weekId === null));
+    });
+    setBrief(null);
+    return () => { alive = false; };
+  }, [week.id, week.territoryId]);
 
   const setSlot = (slot: PlannerSlot, biz: PlannerBiz | null) => {
     const picks = { ...week.picks };
     if (biz) picks[slot] = biz; else delete picks[slot];
     onPatch({ picks });
-    setPickerSlot(null); setQ("");
+    setPickerSlot(null);
   };
 
-  const pickFromListing = (slot: PlannerSlot, l: DirectoryListing) => {
-    const gdPlaceId = typeof l.id === "number" ? l.id : parseInt(String(l.id), 10);
-    setSlot(slot, { clientId: null, gdPlaceId: Number.isFinite(gdPlaceId) ? gdPlaceId : null, name: l.name, url: "", cat: l.category ?? "", note: "" });
+  const addCategory = () => {
+    const c = catInput.trim();
+    if (!c || week.categories.includes(c)) { setCatInput(""); return; }
+    onPatch({ categories: [...week.categories, c] });
+    setCatInput("");
+  };
+  const removeCategory = (c: string) => onPatch({ categories: week.categories.filter((x) => x !== c) });
+
+  const addSection = (type: string) => {
+    const s: PlannerSection = { id: newId("psec_"), weekId: week.id, position: sections.length, type, text: "", biz: null };
+    setSections((ss) => [...ss, s]);
+    upsertPlannerSection(s);
+  };
+  const patchSection = (id: string, patch: Partial<PlannerSection>) => {
+    setSections((ss) => ss.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+    const s = sections.find((x) => x.id === id);
+    if (s) upsertPlannerSection({ ...s, ...patch });
+  };
+  const removeSection = (id: string) => { setSections((ss) => ss.filter((s) => s.id !== id)); deletePlannerSectionDb(id); };
+
+  const addEvent = () => {
+    const e: PlannerEvent = { id: newId("pev_"), weekId: week.id, position: events.length, text: "", biz: null };
+    setEvents((es) => [...es, e]);
+    upsertPlannerEvent(e);
+  };
+  const patchEvent = (id: string, patch: Partial<PlannerEvent>) => {
+    setEvents((es) => es.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+    const e = events.find((x) => x.id === id);
+    if (e) upsertPlannerEvent({ ...e, ...patch });
+  };
+  const removeEvent = (id: string) => { setEvents((es) => es.filter((e) => e.id !== id)); deletePlannerEventDb(id); };
+
+  const addBacklogItem = () => {
+    const title = newItemTitle.trim();
+    if (!title) return;
+    const item: NewsletterItem = {
+      id: newId("ni_"), territoryId: week.territoryId, type: "business", clientId: null, gdPlaceId: null,
+      weekId: week.id, title, note: "", url: null, status: "pending", createdBy: null, createdAt: new Date().toISOString(),
+    };
+    setItems((its) => [item, ...its]);
+    upsertNewsletterItem(item);
+    setNewItemTitle("");
+  };
+  const removeBacklogItem = (id: string) => { setItems((its) => its.filter((it) => it.id !== id)); deleteNewsletterItemDb(id); };
+
+  const generateBrief = () => {
+    const briefListings = listings.map((l) => ({ name: l.name, category: l.category ?? "", claimed: l.claimed, hasOffer: l.hasOffer, offerTitle: undefined as string | undefined }));
+    setBrief(generatePlannerBrief({ cityName, week, sections, events, listings: briefListings }));
+  };
+  const downloadBrief = () => {
+    if (!brief) return;
+    const blob = new Blob([brief], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `brief-${cityName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${week.week}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
-  const ql = q.trim().toLowerCase();
-  const matches = ql ? listings.filter((l) => l.name.toLowerCase().includes(ql)).slice(0, 8) : [];
+  const weekItems = items.filter((it) => it.weekId === week.id);
+  const backlogItems = items.filter((it) => it.weekId === null);
 
   return (
     <div className="pt-1">
@@ -159,14 +277,40 @@ function WeekWorkspace({ week, listings, onBack, onPatch, onDelete }: {
             <span className="text-[15px] font-semibold">{plannerWeekLabel(week.week)}</span>
             <div className="flex items-center gap-1.5">
               {week.sentDate && <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[12px] font-semibold text-emerald-600">Sent {week.sentDate}</span>}
+              <button onClick={generateBrief} className="rounded-md border border-accent px-2.5 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft">Generate brief</button>
               <button onClick={onDelete} title="Delete this week" className="rounded-md p-1.5 text-muted hover:bg-background hover:text-danger"><I.trash /></button>
             </div>
           </div>
           <input value={week.themeOverride} onChange={(e) => onPatch({ themeOverride: e.target.value })} placeholder="Theme (e.g. “Foodie favorites”)"
             className="mb-2 w-full rounded-lg border bg-surface px-3 py-1.5 text-[14px] font-medium outline-none placeholder:text-muted focus:border-accent" />
+          <div className="mb-2 flex flex-wrap items-center gap-1.5">
+            {week.categories.map((c) => (
+              <span key={c} className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-[12px] font-medium text-accent">
+                {c}
+                <button onClick={() => removeCategory(c)} className="hover:text-danger"><I.close className="h-3 w-3" /></button>
+              </span>
+            ))}
+            <input value={catInput} onChange={(e) => setCatInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCategory(); } }}
+              placeholder="+ Theme category" className="min-w-[120px] flex-1 rounded-md border-transparent bg-transparent px-1.5 py-0.5 text-[12px] outline-none placeholder:text-muted focus:border-accent focus:bg-surface" />
+          </div>
           <textarea value={week.notes} onChange={(e) => onPatch({ notes: e.target.value })} placeholder="Notes for this week…" rows={2}
             className="w-full resize-y rounded-lg border bg-surface px-3 py-1.5 text-[13px] outline-none placeholder:text-muted focus:border-accent" />
         </div>
+
+        {brief && (
+          <div className="border-b bg-background/40 px-4 py-3">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Brief preview</span>
+              <div className="flex items-center gap-2">
+                <button onClick={() => navigator.clipboard.writeText(brief).catch(() => {})} className="text-[12px] font-medium text-accent hover:underline">Copy</button>
+                <button onClick={downloadBrief} className="text-[12px] font-medium text-accent hover:underline">Download .md</button>
+                <button onClick={() => setBrief(null)} className="text-[12px] font-medium text-muted hover:text-foreground">Close</button>
+              </div>
+            </div>
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border bg-surface p-3 text-[12px] leading-relaxed text-foreground">{brief}</pre>
+          </div>
+        )}
+
         <div className="divide-y">
           {PLANNER_CONTENT_SLOTS.map((slot) => {
             const biz = week.picks[slot];
@@ -184,28 +328,119 @@ function WeekWorkspace({ week, listings, onBack, onPatch, onDelete }: {
                     <button onClick={() => setSlot(slot, null)} title="Clear" className="shrink-0 rounded-md p-1 text-muted hover:bg-surface hover:text-danger"><I.close /></button>
                   </div>
                 ) : pickerSlot === slot ? (
-                  <div className="relative">
-                    <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { setPickerSlot(null); setQ(""); } }}
-                      placeholder="Search businesses…" className="w-full rounded-lg border bg-background px-3 py-1.5 text-[14px] outline-none focus:border-accent" />
-                    {matches.length > 0 && (
-                      <div className="mt-1 overflow-hidden rounded-lg border bg-surface shadow-soft-md">
-                        {matches.map((l) => (
-                          <button key={l.id} onClick={() => pickFromListing(slot, l)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] hover:bg-background">
-                            <span className="min-w-0 flex-1 truncate">{l.name}</span>
-                            {l.category && <span className="shrink-0 text-[12px] text-muted">{l.category}</span>}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    <button onClick={() => setSlot(slot, { clientId: null, gdPlaceId: null, name: q.trim(), url: "", cat: "", note: "" })} disabled={!q.trim()}
-                      className="mt-1 text-[12px] font-medium text-accent hover:underline disabled:opacity-40 disabled:hover:no-underline">Use “{q.trim() || "…"}” as free text</button>
-                  </div>
+                  <BusinessPicker listings={listings} onPick={(biz2) => setSlot(slot, biz2)} onCancel={() => setPickerSlot(null)} />
                 ) : (
                   <button onClick={() => setPickerSlot(slot)} className="rounded-lg border border-dashed px-3 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">+ Pick a business</button>
                 )}
               </div>
             );
           })}
+        </div>
+
+        {/* Custom sections — repeatable typed write-ups (preset types or a
+            custom title), each with an optional attached business. */}
+        <div className="border-t p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Sections</span>
+            <span className="relative">
+              <select onChange={(e) => { if (e.target.value) { addSection(e.target.value === "__custom" ? "" : e.target.value); e.target.value = ""; } }} defaultValue=""
+                className="rounded-md border bg-background px-2 py-1 text-[12px] font-medium text-accent outline-none">
+                <option value="" disabled>+ Add section</option>
+                {SECTION_PRESETS.map((p) => <option key={p} value={p}>{p}</option>)}
+                <option value="__custom">Custom…</option>
+              </select>
+            </span>
+          </div>
+          <div className="space-y-3">
+            {sections.map((sec) => (
+              <div key={sec.id} className="rounded-lg border bg-background p-3">
+                <div className="mb-1.5 flex items-center gap-2">
+                  <input value={sec.type} onChange={(e) => patchSection(sec.id, { type: e.target.value })} placeholder="Section title"
+                    className="min-w-0 flex-1 rounded-md border-transparent bg-transparent px-1 py-0.5 text-[13px] font-medium outline-none placeholder:text-muted focus:border-accent focus:bg-surface" />
+                  <button onClick={() => removeSection(sec.id)} title="Remove section" className="shrink-0 rounded-md p-1 text-muted hover:text-danger"><I.trash /></button>
+                </div>
+                <textarea value={sec.text} onChange={(e) => patchSection(sec.id, { text: e.target.value })} placeholder="Write-up…" rows={2}
+                  className="mb-1.5 w-full resize-y rounded-md border bg-surface px-2 py-1.5 text-[13px] outline-none placeholder:text-muted focus:border-accent" />
+                {sec.biz ? (
+                  <div className="flex items-center gap-2 rounded-md border bg-surface px-2 py-1">
+                    <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{sec.biz.name}</span>
+                    <button onClick={() => patchSection(sec.id, { biz: null })} title="Clear" className="shrink-0 text-muted hover:text-danger"><I.close className="h-3 w-3" /></button>
+                  </div>
+                ) : pickerSectionId === sec.id ? (
+                  <BusinessPicker listings={listings} onPick={(biz) => { patchSection(sec.id, { biz }); setPickerSectionId(null); }} onCancel={() => setPickerSectionId(null)} />
+                ) : (
+                  <button onClick={() => setPickerSectionId(sec.id)} className="text-[12px] font-medium text-accent hover:underline">+ Attach a business</button>
+                )}
+              </div>
+            ))}
+            {sections.length === 0 && <div className="text-[13px] text-muted">No sections yet.</div>}
+          </div>
+        </div>
+
+        {/* Events — write-ups, each optionally tied to a business. */}
+        <div className="border-t p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Events</span>
+            <button onClick={addEvent} className="text-[12px] font-medium text-accent hover:underline">+ Add event</button>
+          </div>
+          <div className="space-y-3">
+            {events.map((ev) => (
+              <div key={ev.id} className="rounded-lg border bg-background p-3">
+                <div className="mb-1.5 flex items-start gap-2">
+                  <textarea value={ev.text} onChange={(e) => patchEvent(ev.id, { text: e.target.value })} placeholder="Event write-up…" rows={2}
+                    className="min-w-0 flex-1 resize-y rounded-md border bg-surface px-2 py-1.5 text-[13px] outline-none placeholder:text-muted focus:border-accent" />
+                  <button onClick={() => removeEvent(ev.id)} title="Remove event" className="shrink-0 rounded-md p-1 text-muted hover:text-danger"><I.trash /></button>
+                </div>
+                {ev.biz ? (
+                  <div className="flex items-center gap-2 rounded-md border bg-surface px-2 py-1">
+                    <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{ev.biz.name}</span>
+                    <button onClick={() => patchEvent(ev.id, { biz: null })} title="Clear" className="shrink-0 text-muted hover:text-danger"><I.close className="h-3 w-3" /></button>
+                  </div>
+                ) : pickerEventId === ev.id ? (
+                  <BusinessPicker listings={listings} onPick={(biz) => { patchEvent(ev.id, { biz }); setPickerEventId(null); }} onCancel={() => setPickerEventId(null)} />
+                ) : (
+                  <button onClick={() => setPickerEventId(ev.id)} className="text-[12px] font-medium text-accent hover:underline">+ Attach a business</button>
+                )}
+              </div>
+            ))}
+            {events.length === 0 && <div className="text-[13px] text-muted">No events yet.</div>}
+          </div>
+        </div>
+
+        {/* Newsletter backlog — items queued for this week, plus the
+            unassigned "who to go after" backlog for visibility. Full queue
+            management (adding from a business's own page) lands in a later
+            phase; this is a minimal quick-add so the loop works end to end. */}
+        <div className="border-t p-4">
+          <div className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-muted">Queued for this week</div>
+          <div className="mb-2 space-y-1.5">
+            {weekItems.map((it) => (
+              <div key={it.id} className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5">
+                <span className="min-w-0 flex-1 truncate text-[13px]">{it.title}</span>
+                <button onClick={() => removeBacklogItem(it.id)} title="Remove" className="shrink-0 text-muted hover:text-danger"><I.close className="h-3 w-3" /></button>
+              </div>
+            ))}
+            {weekItems.length === 0 && <div className="text-[13px] text-muted">Nothing queued for this week yet.</div>}
+          </div>
+          <div className="flex items-center gap-2">
+            <input value={newItemTitle} onChange={(e) => setNewItemTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addBacklogItem(); }}
+              placeholder="Queue a business/item for this week…" className="min-w-0 flex-1 rounded-md border bg-surface px-2 py-1.5 text-[13px] outline-none placeholder:text-muted focus:border-accent" />
+            <button onClick={addBacklogItem} disabled={!newItemTitle.trim()} className="shrink-0 rounded-md border border-accent px-2.5 py-1.5 text-[13px] font-medium text-accent disabled:opacity-40">Add</button>
+          </div>
+          {backlogItems.length > 0 && (
+            <div className="mt-3 border-t pt-3">
+              <div className="mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-muted">Backlog (not yet scheduled) · {backlogItems.length}</div>
+              <div className="space-y-1.5">
+                {backlogItems.slice(0, 10).map((it) => (
+                  <div key={it.id} className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5">
+                    <span className="min-w-0 flex-1 truncate text-[13px] text-muted">{it.title}</span>
+                    <button onClick={() => upsertNewsletterItem({ ...it, weekId: week.id }).then(() => setItems((its) => its.map((x) => (x.id === it.id ? { ...x, weekId: week.id } : x))))}
+                      className="shrink-0 text-[12px] font-medium text-accent hover:underline">Add to this week</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
