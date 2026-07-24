@@ -42,6 +42,9 @@ export const THIS_WEEK_END = (() => {
   const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0=Sun … 6=Sat
   return addDaysIso(TODAY, 6 - dow);
 })();
+/** yyyy-mm-dd of the Saturday ending next calendar week — one week past
+ * THIS_WEEK_END — the boundary for the "Due next week" urgency tier. */
+export const NEXT_WEEK_END = addDaysIso(THIS_WEEK_END, 7);
 /** yyyy-mm-dd of the last day of the current month — the boundary for the
  * "Due this month" urgency tier (day 0 of next month = last day of this one). */
 export const THIS_MONTH_END = (() => {

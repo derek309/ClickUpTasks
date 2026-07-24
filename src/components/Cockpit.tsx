@@ -17,6 +17,7 @@ import {
   daysBetween,
   THIS_MONDAY,
   THIS_WEEK_END,
+  NEXT_WEEK_END,
   THIS_MONTH_END,
   NURTURE_CHECK_IN_DAYS,
   STATUS_META,
@@ -1403,14 +1404,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   }
   // Tier scheme (lower = more urgent, sorts first):
   //   0 Review · 1 New message · 2 Overdue · 3 Due today · 4 Due tomorrow ·
-  //   5 Due this week · 6 Due this month · 7 Upcoming · 8 No due date · 9 No open tasks
+  //   5 Due this week · 6 Due next week · 7 Due this month · 8 Upcoming ·
+  //   9 No due date · 10 No open tasks
   function tierForDate(soonest: string): number {
     if (soonest < TODAY) return 2;
     if (soonest === TODAY) return 3;
     if (soonest === TOMORROW) return 4;
     if (soonest <= THIS_WEEK_END) return 5;
-    if (soonest <= THIS_MONTH_END) return 6;
-    return 7;
+    if (soonest <= NEXT_WEEK_END) return 6;
+    if (soonest <= THIS_MONTH_END) return 7;
+    return 8;
   }
   // forAssignee narrows "open tasks" to just that person's — used by the
   // personal My Work board, where a client's tier should reflect *my* tasks
@@ -1447,8 +1450,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       ...(followUp && includeFollowUp ? [{ date: followUp, priorityRank: 0 }] : []),
     ];
     if (candidates.length === 0) {
-      if (open.length === 0) return { tier: 9, due: "", priorityRank: 0 };
-      return { tier: 8, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
+      if (open.length === 0) return { tier: 10, due: "", priorityRank: 0 };
+      return { tier: 9, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
     }
     const soonest = candidates.reduce((a, b) => (b.date < a.date ? b : a)).date;
     const atSoonest = candidates.filter((c) => c.date === soonest);
@@ -1470,8 +1473,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       ...(followUp && includeFollowUp ? [{ date: followUp, priorityRank: 0 }] : []),
     ];
     if (candidates.length === 0) {
-      if (open.length === 0) return { tier: 9, due: "", priorityRank: 0 };
-      return { tier: 8, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
+      if (open.length === 0) return { tier: 10, due: "", priorityRank: 0 };
+      return { tier: 9, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
     }
     const soonest = candidates.reduce((a, b) => (b.date < a.date ? b : a)).date;
     const atSoonest = candidates.filter((c) => c.date === soonest);
@@ -1480,9 +1483,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // A personal to-do's own tier — no Review/New-message concept (those are
   // client/project-level), and it's always "open" if it's being shown at
   // all, so this is just tierForDate off its own due date, falling back to
-  // tier 8 (no due date) same as clientUrgencyKey/projectUrgencyKey do.
+  // tier 9 (no due date) same as clientUrgencyKey/projectUrgencyKey do.
   function taskUrgencyKey(task: Task): { tier: number; due: string; priorityRank: number } {
-    if (!task.due) return { tier: 8, due: "", priorityRank: PRIORITY_META[task.priority].rank };
+    if (!task.due) return { tier: 9, due: "", priorityRank: PRIORITY_META[task.priority].rank };
     return { tier: tierForDate(task.due), due: task.due, priorityRank: PRIORITY_META[task.priority].rank };
   }
   const projectTaskCount = (projectId: string) => scopedTasks.filter((t) => t.projectId === projectId && t.status !== "done").length;
@@ -1511,10 +1514,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       [3, "Due today", "#f59e0b"],
       [4, "Due tomorrow", "#eab308"],
       [5, "Due this week", "#3b82f6"],
-      [6, "Due this month", "#6366f1"],
-      [7, "Upcoming", "#0ea5e9"],
-      [8, "No due date", "#94a3b8"],
-      [9, "No open tasks", "#cbd5e1"],
+      [6, "Due next week", "#06b6d4"],
+      [7, "Due this month", "#6366f1"],
+      [8, "Upcoming", "#0ea5e9"],
+      [9, "No due date", "#94a3b8"],
+      [10, "No open tasks", "#cbd5e1"],
     ];
     const clientKeys = assignedClientsFor(myWorkUser).map((c) => ({ kind: "client" as const, item: { kind: "client" as const, client: c }, name: c.name, k: clientUrgencyKey(c.id, myWorkUser) }));
     // Excludes the Personal pseudo-project — its tasks appear individually
