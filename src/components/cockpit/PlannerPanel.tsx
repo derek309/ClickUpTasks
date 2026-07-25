@@ -809,6 +809,10 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
                       {biz.cat && <div className="text-[12px] text-muted">{biz.cat}</div>}
                       <textarea value={biz.note} onChange={(e) => setSlot(slot, { ...biz, note: e.target.value })} placeholder="Note for this pick…" rows={1}
                         className="mt-1 w-full resize-y rounded-md border bg-surface px-2 py-1 text-[13px] outline-none placeholder:text-muted focus:border-accent" />
+                      {/* Picking them for the issue and letting them know are two
+                          separate things — a rep may want to invite/notify a
+                          business even after already slotting them in. */}
+                      {PLANNER_BUSINESS_SLOTS.includes(slot) && <div className="mt-1.5">{renderInvite(biz.gdPlaceId)}</div>}
                     </div>
                     <button onClick={() => setSlot(slot, null)} title="Clear" className="shrink-0 rounded-md p-1 text-muted hover:bg-surface hover:text-danger"><I.close /></button>
                   </div>
