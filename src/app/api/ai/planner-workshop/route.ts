@@ -13,12 +13,12 @@ import { requireUser } from "@/lib/serverAuth";
 const GEMINI_MODEL = "gemini-flash-latest";
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const TEXT_MODES = new Set(["angles", "draft", "feature", "ask"]);
-const STRUCTURED_MODES = new Set(["suggest_theme", "suggest_categories", "suggest_slot", "suggest_story", "suggest_events"]);
-// suggest_story/suggest_events need live web search — Gemini's google_search
-// tool, the exact grounding pattern already proven in production by
-// WordPress's events-online-finder.php (site: query fan-out + strict JSON
-// out) and sales-tool.php's business-health-audit call.
-const GROUNDED_MODES = new Set(["suggest_story", "suggest_events"]);
+const STRUCTURED_MODES = new Set(["suggest_theme", "suggest_categories", "suggest_slot", "suggest_story", "suggest_events", "suggest_weather"]);
+// suggest_story/suggest_events/suggest_weather need live web search —
+// Gemini's google_search tool, the exact grounding pattern already proven in
+// production by WordPress's events-online-finder.php (site: query fan-out +
+// strict JSON out) and sales-tool.php's business-health-audit call.
+const GROUNDED_MODES = new Set(["suggest_theme", "suggest_story", "suggest_events", "suggest_weather"]);
 const SLOT_LABELS: Record<string, string> = { spotlight: "Business Spotlight", gem: "Hidden Gem", gem2: "Hidden Gem 2", gem3: "Hidden Gem 3" };
 const MODES = new Set([...TEXT_MODES, ...STRUCTURED_MODES]);
 // Grounded, multi-step search runs 20-60s+ in WordPress's own real-world
@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
     filledSlots?: string[]; candidateNames?: string[]; prompt?: string;
     month?: number; weekIndex?: number; assignedTitle?: string; assignedCategories?: string[]; themeDescription?: string;
     slot?: string; candidates?: { name: string; cat: string; due: boolean; lastFeatured: string | null }[];
-    dateFrom?: string; dateTo?: string;
+    dateFrom?: string; dateTo?: string; excludeTitles?: string[];
   };
   const mode = String(body.mode ?? "");
   if (!MODES.has(mode)) return NextResponse.json({ error: "Missing or unknown mode." }, { status: 400 });
@@ -67,11 +67,14 @@ export async function POST(req: NextRequest) {
 
   if (mode === "suggest_theme") {
     const monthName = MONTH_NAMES[(body.month ?? 1) - 1] ?? "this month";
+    const location = `${body.cityName || "this city"}${body.state ? `, ${body.state}` : ""}`;
     prompt = [
       "You're a co-pilot helping an editor plan a local weekly newsletter issue.",
-      `City: ${body.cityName || "this city"}. Month: ${monthName}, week ${body.weekIndex ?? 1} of that month.`,
+      `City: ${location}. Month: ${monthName}, week ${body.weekIndex ?? 1} of that month.`,
       body.assignedTitle ? `The seasonal theme calendar already assigns this slot: "${body.assignedTitle}"${body.assignedCategories?.length ? ` (categories: ${body.assignedCategories.join(", ")})` : ""}. Use it as a starting point, but offer real alternatives too — don't just restate it 4 times.` : "No calendar theme is assigned yet — invent options from scratch for this month/week.",
-      "Stay seasonally grounded — real anchors for this time of year (e.g. Father's Day, Mother's Day, back-to-school, a local holiday), not generic filler.",
+      `Search Google for anything genuinely specific to ${location} happening around this time of year — an annual local festival, fair, parade, harvest event, or well-known seasonal tradition. Try queries like "${location} ${monthName} festival", "${location} annual events", "${location} chamber of commerce ${monthName}".`,
+      "Stay anchored to mainstream, widely-observed American calendar holidays and seasons (e.g. Christmas, Thanksgiving, Easter, July 4th, Halloween, Valentine's Day, Mother's/Father's Day, back-to-school, New Year) plus anything real and city-specific you actually found via search. Do not use identity-, ethnic-, or race-specific observances.",
+      "Do NOT invent a local event you didn't actually find via search — if nothing city-specific turns up, that's fine, just lean on the seasonal/holiday anchor instead.",
       "Return ONLY a fenced ```json code block with this exact shape, no other text:",
       '{"options": [{"title": "short theme title", "description": "one sentence on the angle"}]}',
       "Provide 3-4 options.",
@@ -102,25 +105,44 @@ export async function POST(req: NextRequest) {
       `  - "site:facebook.com/events ${location}"`,
       `  - "site:clickuplocal.com ${location} events"`,
       "Also check city government and venue websites.",
-      "For each event, confirm the exact date, venue, and write a one-sentence description.",
-      "Do NOT invent or guess values — only use information you actually found via search. Return up to 6 events; fewer well-confirmed events is better than many guessed ones.",
+      "For each event, confirm the exact date/time, venue name, and full street address (search specifically for the address if you don't already have it), and write a 2-3 sentence description with real specifics — not a generic one-liner.",
+      "sourceUrl must be the actual page you found this event on (the event listing, venue page, or ticket page) — never a search results page, never invented.",
+      "Find EVERY real, well-confirmed event you can — there's no limit on how many, more is better. Never guess or invent one just to pad the list; it's fine to return few (or none) if that's all that's real.",
+      body.excludeTitles?.length ? `Already found (do NOT repeat these — search for additional/different events beyond this list): ${body.excludeTitles.join(", ")}` : null,
       "Return ONLY a fenced ```json code block with this exact shape, no other text:",
-      '{"suggestions": [{"title": "event name", "summary": "one sentence", "startDate": "YYYY-MM-DD or YYYY-MM-DD HH:MM", "venue": "venue name", "sourceUrl": "https://..."}]}',
+      '{"suggestions": [{"title": "event name", "summary": "2-3 sentence description", "startDate": "YYYY-MM-DD or YYYY-MM-DD HH:MM", "venue": "venue name", "address": "full street address, or empty string if not found", "sourceUrl": "https://..."}]}',
+    ].filter(Boolean).join("\n");
+  } else if (mode === "suggest_weather") {
+    const location = `${body.cityName || "this city"}${body.state ? `, ${body.state}` : ""}`;
+    prompt = [
+      `You are a research assistant. Find the real weather forecast for ${location} for the week of ${body.dateFrom ?? "this week"} through ${body.dateTo ?? "next week"}.`,
+      "Search Google for the actual forecast, for example:",
+      `  - "${location} weather forecast"`,
+      `  - "${location} 7 day forecast"`,
+      "Write a short (2-3 sentence) local weather outlook suitable for a newsletter blurb — general conditions and temperature range, not an hour-by-hour breakdown.",
+      "sourceUrl must be the actual forecast page you found this on — never a search results page, never invented.",
+      "Do NOT invent or guess values — only use information you actually found via search.",
+      "Return ONLY a fenced ```json code block with this exact shape, no other text:",
+      '{"suggestions": [{"summary": "2-3 sentence outlook", "sourceUrl": "https://..."}]}',
     ].join("\n");
   } else if (mode === "suggest_story") {
     const location = `${body.cityName || "this city"}${body.state ? `, ${body.state}` : ""}`;
     prompt = [
-      `You are a research assistant. Find real, current local news or community happenings in ${location} from the past two weeks.`,
+      `You are a research assistant for a local business newsletter. Find real, current, upbeat local news in ${location} from the past two weeks — the kind that's genuinely good for local businesses to see: new businesses opening, store/restaurant openings or expansions, road and infrastructure projects (new interchanges, repaving, construction updates), city development and growth, a fair or festival coming to town, downtown revitalization, new city amenities.`,
       "Search Google using many different queries, for example:",
-      `  - "${location} local news"`,
-      `  - "${body.cityName || "this city"} news this week"`,
-      `  - "${body.cityName || "this city"} community"`,
+      `  - "${location} new business opening"`,
+      `  - "${location} downtown development"`,
+      `  - "${location} road construction project"`,
+      `  - "${location} city council approves"`,
+      `  - "${body.cityName || "this city"} community news"`,
       `  - "site:clickuplocal.com ${location}"`,
       "Also check local news outlets and the city's own government site.",
-      "For each story, write a one-sentence summary suitable for a local newsletter blurb and note the source.",
+      "STRICT EXCLUSION: never include crime, arrests, accidents, crashes, deaths, fires, lawsuits, or any negative/tragic story — even if it's the most prominent local news right now. If you can't find enough upbeat business/development stories, return fewer results rather than filling in with excluded topics.",
+      "For each story, write a 2-3 sentence summary with real specifics (who/what/where) suitable for a local newsletter blurb, and note the source.",
+      "sourceUrl must be the actual article/page you found this on — never a search results page, never invented.",
       "Do NOT invent or guess values — only use information you actually found via search. Return up to 5 stories, real ones only.",
       "Return ONLY a fenced ```json code block with this exact shape, no other text:",
-      '{"suggestions": [{"headline": "story headline", "summary": "one sentence", "sourceUrl": "https://...", "sourceName": "publication or site name"}]}',
+      '{"suggestions": [{"headline": "story headline", "summary": "2-3 sentence description", "sourceUrl": "https://...", "sourceName": "publication or site name"}]}',
     ].join("\n");
   } else if (mode === "suggest_categories") {
     prompt = [
@@ -176,8 +198,8 @@ export async function POST(req: NextRequest) {
         if (!options) return NextResponse.json({ error: "Gemini returned an unexpected format." }, { status: 502 });
         return NextResponse.json({ options });
       }
-      if (mode === "suggest_slot" || mode === "suggest_events" || mode === "suggest_story") {
-        const requiredKey = mode === "suggest_slot" ? "name" : mode === "suggest_events" ? "title" : "headline";
+      if (mode === "suggest_slot" || mode === "suggest_events" || mode === "suggest_story" || mode === "suggest_weather") {
+        const requiredKey = mode === "suggest_slot" ? "name" : mode === "suggest_events" ? "title" : mode === "suggest_story" ? "headline" : "summary";
         const suggestions = Array.isArray(parsed?.suggestions) ? parsed.suggestions.filter((s) => s?.[requiredKey]) : null;
         if (!suggestions) return NextResponse.json({ error: "Gemini returned an unexpected format." }, { status: 502 });
         return NextResponse.json({ suggestions });

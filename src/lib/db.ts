@@ -364,23 +364,30 @@ export async function deleteTaskFile(path: string): Promise<void> {
 const bizToJson = (b: PlannerBiz | null) => b ? { client_id: b.clientId, gd_place_id: b.gdPlaceId, name: b.name, url: b.url, cat: b.cat, note: b.note } : null;
 const jsonToBiz = (v: any): PlannerBiz | null => (v && typeof v === "object" && v.name) ? { clientId: v.client_id ?? null, gdPlaceId: v.gd_place_id ?? null, name: v.name ?? "", url: v.url ?? "", cat: v.cat ?? "", note: v.note ?? "" } : null;
 
-// planner_weeks.picks is one jsonb column holding both the slot picks and
-// the per-week __dismissed list (mirrors the WordPress blob shape) — split
-// apart here so PlannerWeek keeps them as separate, typed fields.
+// planner_weeks.picks is one jsonb column holding the slot picks plus a
+// handful of reserved metadata keys (mirrors the WordPress blob shape) —
+// split apart here so PlannerWeek keeps them as separate, typed fields.
+// __themeDesc/__weather (added alongside __dismissed/__cats) are the same
+// trick: new week-level fields with no migration, just another reserved key.
 const plannerWeekToRow = (w: PlannerWeek) => ({
   id: w.id, territory_id: w.territoryId, week: w.week,
   theme_override: w.themeOverride ?? "", notes: w.notes ?? "",
-  picks: { ...Object.fromEntries(Object.entries(w.picks).map(([k, v]) => [k, bizToJson(v as PlannerBiz)])), __dismissed: w.dismissed ?? [], __cats: w.categories ?? [] },
+  picks: {
+    ...Object.fromEntries(Object.entries(w.picks).map(([k, v]) => [k, bizToJson(v as PlannerBiz)])),
+    __dismissed: w.dismissed ?? [], __cats: w.categories ?? [], __themeDesc: w.themeDescription ?? "", __weather: w.weatherNote ?? "",
+  },
   archived: w.archived ?? false, sent_date: w.sentDate ?? null, wp_pushed_at: w.wpPushedAt ?? null,
 });
 export const rowToPlannerWeek = (r: any): PlannerWeek => {
   const raw = (r.picks && typeof r.picks === "object") ? r.picks : {};
-  const { __dismissed, __cats, ...slots } = raw;
+  const { __dismissed, __cats, __themeDesc, __weather, ...slots } = raw;
   const picks: PlannerWeek["picks"] = {};
   for (const [k, v] of Object.entries(slots)) { const b = jsonToBiz(v); if (b) (picks as any)[k] = b; }
   return {
     id: r.id, territoryId: r.territory_id, week: r.week,
-    themeOverride: r.theme_override ?? "", categories: Array.isArray(__cats) ? __cats : [], notes: r.notes ?? "",
+    themeOverride: r.theme_override ?? "", themeDescription: typeof __themeDesc === "string" ? __themeDesc : "",
+    categories: Array.isArray(__cats) ? __cats : [], notes: r.notes ?? "",
+    weatherNote: typeof __weather === "string" ? __weather : "",
     picks, dismissed: Array.isArray(__dismissed) ? __dismissed : [],
     archived: !!r.archived, sentDate: r.sent_date ?? null, wpPushedAt: r.wp_pushed_at ?? null,
     createdAt: r.created_at,

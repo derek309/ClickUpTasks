@@ -87,7 +87,7 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
     // implies the calendar entry isn't the final word.
     const assigned = themeForWeek(week, themeCalendar);
     const w: PlannerWeek = {
-      id: newId("pw_"), territoryId, week, themeOverride: assigned?.title ?? "", categories: assigned?.categories ?? [], notes: "",
+      id: newId("pw_"), territoryId, week, themeOverride: assigned?.title ?? "", themeDescription: "", categories: assigned?.categories ?? [], notes: "", weatherNote: "",
       picks: {}, dismissed: [], archived: false, sentDate: null, wpPushedAt: null, createdAt: new Date().toISOString(),
     };
     setWeeks((ws) => [w, ...ws]);
@@ -249,6 +249,9 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
   const [sections, setSections] = useState<PlannerSection[]>([]);
   const [events, setEvents] = useState<PlannerEvent[]>([]);
   const [items, setItems] = useState<NewsletterItem[]>([]);
+  // Collapsed by default; opened automatically once the fetch resolves if
+  // this week (or the unscheduled backlog) actually has something queued.
+  const [queueOpen, setQueueOpen] = useState(false);
   const [pickerSectionId, setPickerSectionId] = useState<string | null>(null);
   const [pickerEventId, setPickerEventId] = useState<string | null>(null);
   const [newItemTitle, setNewItemTitle] = useState("");
@@ -269,7 +272,9 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     Promise.all([fetchPlannerSections(week.id), fetchPlannerEvents(week.id), fetchNewsletterItems(week.territoryId)]).then(([s, e, allItems]) => {
       if (!alive) return;
       setSections(s); setEvents(e);
-      setItems(allItems.filter((it) => it.weekId === week.id || it.weekId === null));
+      const relevant = allItems.filter((it) => it.weekId === week.id || it.weekId === null);
+      setItems(relevant);
+      setQueueOpen(relevant.length > 0);
     });
     setBrief(null);
     setPushStatus("idle");
@@ -367,33 +372,33 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     weeks, dismissedIds: week.dismissed, excludeNames: filledSlotNames, todayIso: todayIso(),
   }), [listings, weeks, week.dismissed, filledSlotNames]);
 
-  // Fills the first open business slot (spotlight, then gems in order) with
-  // a suggested candidate — the same "Pick" shortcut the WordPress planner
-  // offered from its own pool sidebar.
-  const pickCandidate = (c: PoolCandidate) => {
-    const target = (["spotlight", "gem", "gem2", "gem3"] as const).find((s) => !week.picks[s]);
-    if (!target) return;
-    setSlot(target, { clientId: null, gdPlaceId: c.gdPlaceId, name: c.name, url: "", cat: c.cat, note: "" });
-  };
   const dismissCandidate = (c: PoolCandidate) => {
     if (c.gdPlaceId == null || week.dismissed.includes(c.gdPlaceId)) return;
     onPatch({ dismissed: [...week.dismissed, c.gdPlaceId] });
   };
+  const pickPoolCandidate = (slot: PlannerSlot, c: PoolCandidate) => {
+    setSlot(slot, { clientId: null, gdPlaceId: c.gdPlaceId, name: c.name, url: "", cat: c.cat, note: "" });
+    setBrowseSlot(null);
+  };
 
-  // Inline per-slot AI suggest — a curated top 1-2 from the SAME deterministic
-  // pool "Who to feature" already computes (spotlight pool for the spotlight
-  // slot, the shared hidden-gem pool for gem/gem2/gem3), not a new candidate
-  // source. Never persisted: Accept writes through setSlot/dismissCandidate
-  // exactly like the bottom pool card does; Decline just drops the card.
+  // Inline per-slot AI suggest — a curated pick from the SAME deterministic
+  // pool "Browse candidates" shows (spotlight pool for the spotlight slot —
+  // claimed businesses, shown green; the shared hidden-gem pool for
+  // gem/gem2/gem3 — unclaimed, shown with the same neutral dot Businesses
+  // uses), not a new candidate source. Never persisted: Accept writes
+  // through setSlot exactly like picking from the browse list does.
+  // Suggest more (re-click) APPENDS rather than replacing — excludeNames
+  // tells the route not to repeat what's already on screen.
   const poolForSlot = (slot: PlannerSlot) => (slot === "spotlight" ? pools.spotlight : pools.hiddenGem);
   const [slotSuggestLoading, setSlotSuggestLoading] = useState<Partial<Record<PlannerSlot, boolean>>>({});
   const [slotSuggestions, setSlotSuggestions] = useState<Partial<Record<PlannerSlot, { name: string; rationale: string }[]>>>({});
   const [slotSuggestError, setSlotSuggestError] = useState<Partial<Record<PlannerSlot, string>>>({});
+  const [browseSlot, setBrowseSlot] = useState<PlannerSlot | null>(null);
 
   const suggestForSlot = async (slot: PlannerSlot) => {
-    const candidates = poolForSlot(slot);
+    const already = slotSuggestions[slot] ?? [];
+    const candidates = poolForSlot(slot).filter((c) => !already.some((s) => s.name === c.name));
     setSlotSuggestLoading((m) => ({ ...m, [slot]: true }));
-    setSlotSuggestions((m) => ({ ...m, [slot]: undefined }));
     setSlotSuggestError((m) => ({ ...m, [slot]: undefined }));
     try {
       const res = await authedFetch("/api/ai/planner-workshop", {
@@ -404,7 +409,7 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
         }),
       });
       const j = await res.json().catch(() => ({}));
-      if (res.ok && Array.isArray(j.suggestions)) setSlotSuggestions((m) => ({ ...m, [slot]: j.suggestions }));
+      if (res.ok && Array.isArray(j.suggestions)) setSlotSuggestions((m) => ({ ...m, [slot]: [...already, ...j.suggestions] }));
       else setSlotSuggestError((m) => ({ ...m, [slot]: j.error || "Suggest failed." }));
     } catch (e) {
       setSlotSuggestError((m) => ({ ...m, [slot]: e instanceof Error ? e.message : "Suggest failed." }));
@@ -417,20 +422,27 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     setSlot(slot, candidate
       ? { clientId: null, gdPlaceId: candidate.gdPlaceId, name: candidate.name, url: "", cat: candidate.cat, note: "" }
       : { clientId: null, gdPlaceId: null, name: s.name, url: "", cat: "", note: "" });
-    setSlotSuggestions((m) => ({ ...m, [slot]: undefined }));
+    setSlotSuggestions((m) => ({ ...m, [slot]: (m[slot] ?? []).filter((x) => x.name !== s.name) }));
   };
   const declineSlotSuggestion = (slot: PlannerSlot, s: { name: string; rationale: string }) => {
     const candidate = poolForSlot(slot).find((c) => c.name === s.name);
     if (candidate) dismissCandidate(candidate);
     setSlotSuggestions((m) => ({ ...m, [slot]: (m[slot] ?? []).filter((x) => x.name !== s.name) }));
   };
+  // Claimed (Spotlight pool) vs unclaimed (Hidden Gem pool) badge — same
+  // green-check / neutral-dot convention as the Businesses tab
+  // (TerritoryDirectory.tsx), inferred from which pool the slot draws from
+  // rather than a stored field, since spotlight is claimed-only by construction.
+  const ClaimBadge = ({ slot }: { slot: PlannerSlot }) => slot === "spotlight"
+    ? <span title="Claimed listing" className="shrink-0 text-emerald-500"><I.check className="h-3.5 w-3.5" /></span>
+    : <span title="Unclaimed listing" className="h-2 w-2 shrink-0 rounded-full border border-muted/50" />;
 
   // Story + Events: real, live web search (Gemini google_search grounding),
   // not the deterministic pool above — genuinely new content this territory
   // has no data of its own for. Same suggest → accept/decline shape either
   // way; accept writes through the existing setSlot/upsertPlannerEvent paths.
   type StorySuggestion = { headline: string; summary: string; sourceUrl?: string; sourceName?: string };
-  type EventSuggestion = { title: string; summary: string; startDate?: string; venue?: string; sourceUrl?: string };
+  type EventSuggestion = { title: string; summary: string; startDate?: string; venue?: string; address?: string; sourceUrl?: string };
   const [storySuggestLoading, setStorySuggestLoading] = useState(false);
   const [storySuggestions, setStorySuggestions] = useState<StorySuggestion[] | null>(null);
   const [storySuggestError, setStorySuggestError] = useState<string | null>(null);
@@ -460,15 +472,21 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
   };
   const declineStorySuggestion = (s: StorySuggestion) => setStorySuggestions((list) => (list ?? []).filter((x) => x !== s));
 
-  const suggestEvents = async () => {
-    setEventsSuggestLoading(true); setEventsSuggestions(null); setEventsSuggestError(null);
+  // append=true (the "Find more" link) keeps whatever's already on screen and
+  // asks Gemini to search for additional events beyond that list; the top
+  // "Find events" button always starts fresh — useful to re-check throughout
+  // the week as new events get posted online.
+  const suggestEvents = async (append = false) => {
+    const already = append ? (eventsSuggestions ?? []) : [];
+    setEventsSuggestLoading(true); setEventsSuggestError(null);
+    if (!append) setEventsSuggestions(null);
     try {
       const res = await authedFetch("/api/ai/planner-workshop", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "suggest_events", cityName, state, dateFrom: addDaysIso(week.week, -3), dateTo: addDaysIso(week.week, 3) }),
+        body: JSON.stringify({ mode: "suggest_events", cityName, state, dateFrom: addDaysIso(week.week, -3), dateTo: addDaysIso(week.week, 3), excludeTitles: already.map((s) => s.title) }),
       });
       const j = await res.json().catch(() => ({}));
-      if (res.ok && Array.isArray(j.suggestions)) setEventsSuggestions(j.suggestions);
+      if (res.ok && Array.isArray(j.suggestions)) setEventsSuggestions([...already, ...j.suggestions]);
       else setEventsSuggestError(j.error || "Search failed.");
     } catch (e) {
       setEventsSuggestError(e instanceof Error ? e.message : "Search failed.");
@@ -477,13 +495,44 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     }
   };
   const acceptEventSuggestion = (s: EventSuggestion) => {
-    const text = [s.title, [s.startDate, s.venue].filter(Boolean).join(" — ")].filter(Boolean).join("\n") + (s.summary ? `\n${s.summary}` : "");
+    const text = [
+      s.title,
+      [s.startDate, [s.venue, s.address].filter(Boolean).join(", ")].filter(Boolean).join(" — "),
+      s.summary,
+      s.sourceUrl,
+    ].filter(Boolean).join("\n");
     const e: PlannerEvent = { id: newId("pev_"), weekId: week.id, position: events.length, text, biz: null };
     setEvents((es) => [...es, e]);
     upsertPlannerEvent(e);
     setEventsSuggestions((list) => (list ?? []).filter((x) => x !== s));
   };
   const declineEventSuggestion = (s: EventSuggestion) => setEventsSuggestions((list) => (list ?? []).filter((x) => x !== s));
+
+  // Weather — same live-search suggest/accept/decline shape as Story/Events;
+  // replaces plannerBrief's old hardcoded "(fill in at build time)" stub
+  // once accepted. Single result, not a list, so no append/decline-one-of-many.
+  type WeatherSuggestion = { summary: string; sourceUrl?: string };
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  const [weatherSuggestion, setWeatherSuggestion] = useState<WeatherSuggestion | null>(null);
+  const [weatherError, setWeatherError] = useState<string | null>(null);
+  const suggestWeather = async () => {
+    setWeatherLoading(true); setWeatherSuggestion(null); setWeatherError(null);
+    try {
+      const res = await authedFetch("/api/ai/planner-workshop", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "suggest_weather", cityName, state, dateFrom: addDaysIso(week.week, -3), dateTo: addDaysIso(week.week, 3) }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(j.suggestions) && j.suggestions[0]) setWeatherSuggestion(j.suggestions[0]);
+      else setWeatherError(j.error || "Search failed.");
+    } catch (e) {
+      setWeatherError(e instanceof Error ? e.message : "Search failed.");
+    } finally {
+      setWeatherLoading(false);
+    }
+  };
+  const acceptWeather = () => { if (weatherSuggestion) onPatch({ weatherNote: weatherSuggestion.summary }); setWeatherSuggestion(null); };
+  const declineWeather = () => setWeatherSuggestion(null);
 
   const runWorkshop = async (mode: "angles" | "draft" | "feature" | "ask") => {
     if (mode === "ask" && !workshopPrompt.trim()) return;
@@ -517,7 +566,7 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
       const weekIndex = Math.min(5, Math.max(1, Math.ceil(d / 7)));
       const res = await authedFetch("/api/ai/planner-workshop", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "suggest_theme", cityName, month: m, weekIndex, assignedTitle: assignedTheme?.title, assignedCategories: assignedTheme?.categories }),
+        body: JSON.stringify({ mode: "suggest_theme", cityName, state, month: m, weekIndex, assignedTitle: assignedTheme?.title, assignedCategories: assignedTheme?.categories }),
       });
       const j = await res.json().catch(() => ({}));
       if (res.ok && Array.isArray(j.options)) setThemeOptions(j.options);
@@ -530,7 +579,7 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
   };
 
   const chooseTheme = (opt: { title: string; description: string }) => {
-    onPatch({ themeOverride: opt.title });
+    onPatch({ themeOverride: opt.title, themeDescription: opt.description });
     setThemeOptions(null);
     suggestCategoriesFor(opt.title, opt.description);
   };
@@ -590,6 +639,9 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
               className="min-w-0 flex-1 rounded-lg border bg-surface px-3 py-1.5 text-[14px] font-medium outline-none placeholder:text-muted focus:border-accent" />
             <button onClick={suggestThemes} disabled={themeLoading} title="Suggest themes for this week" className="shrink-0 rounded-lg border px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-40">{themeLoading ? "Thinking…" : "✨ Suggest themes"}</button>
           </div>
+          <textarea value={week.themeDescription} onChange={(e) => onPatch({ themeDescription: e.target.value })} rows={2}
+            placeholder="What this week's theme is about — the goal, who to feature, what kind of stories/events to look for…"
+            className="mb-2 w-full resize-y rounded-lg border bg-surface px-3 py-1.5 text-[13px] outline-none placeholder:text-muted focus:border-accent" />
           {themeError && <div className="mb-2 text-[12px] text-danger">{themeError}</div>}
           {themeOptions && (
             <div className="mb-2 space-y-1">
@@ -704,7 +756,14 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
                     <div className="flex flex-wrap gap-2">
                       <button onClick={() => setPickerSlot(slot)} className="rounded-lg border border-dashed px-3 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">+ Pick a business</button>
                       {PLANNER_BUSINESS_SLOTS.includes(slot) && (
-                        <button onClick={() => suggestForSlot(slot)} disabled={!!slotSuggestLoading[slot]} className="rounded-lg border px-3 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-40">{slotSuggestLoading[slot] ? "Thinking…" : "✨ Suggest"}</button>
+                        <>
+                          <button onClick={() => suggestForSlot(slot)} disabled={!!slotSuggestLoading[slot]} className="rounded-lg border px-3 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-40">
+                            {slotSuggestLoading[slot] ? "Thinking…" : slotSuggestions[slot]?.length ? "✨ Suggest more" : "✨ Suggest"}
+                          </button>
+                          <button onClick={() => setBrowseSlot((b) => (b === slot ? null : slot))} className="rounded-lg border px-3 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
+                            {browseSlot === slot ? "Hide candidates" : `Browse candidates (${poolForSlot(slot).length})`}
+                          </button>
+                        </>
                       )}
                       {slot === "story" && (
                         <button onClick={suggestStory} disabled={storySuggestLoading} className="rounded-lg border px-3 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-40">{storySuggestLoading ? "Searching…" : "✨ Find local news"}</button>
@@ -716,12 +775,28 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
                         {(slotSuggestions[slot] ?? []).length === 0 && <div className="text-[13px] text-muted">No good fits found in the current candidate pool.</div>}
                         {(slotSuggestions[slot] ?? []).map((s) => (
                           <div key={s.name} className="rounded-lg border bg-background px-3 py-2">
-                            <div className="text-[13px] font-medium">{s.name}</div>
+                            <div className="flex items-center gap-1.5"><ClaimBadge slot={slot} /><div className="text-[13px] font-medium">{s.name}</div></div>
                             <div className="mb-1.5 text-[12px] text-muted">{s.rationale}</div>
                             <div className="flex items-center gap-2">
                               <button onClick={() => acceptSlotSuggestion(slot, s)} className="text-[12px] font-medium text-accent hover:underline">Accept</button>
                               <button onClick={() => declineSlotSuggestion(slot, s)} className="text-[12px] font-medium text-muted hover:text-foreground">Decline</button>
                             </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {browseSlot === slot && (
+                      <div className="mt-1.5 space-y-1">
+                        {poolForSlot(slot).length === 0 && <div className="text-[13px] text-muted">No candidates found yet.</div>}
+                        {poolForSlot(slot).map((c) => (
+                          <div key={c.gdPlaceId ?? c.name} className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5">
+                            <ClaimBadge slot={slot} />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-[13px] font-medium">{c.name}</span>
+                              <span className="block truncate text-[11px] text-muted">{c.cat}{c.due ? " · due" : c.lastFeatured ? ` · featured ${c.lastFeatured}` : ""}</span>
+                            </span>
+                            <button onClick={() => pickPoolCandidate(slot, c)} className="shrink-0 text-[12px] font-medium text-accent hover:underline">+ Pick</button>
+                            <button onClick={() => dismissCandidate(c)} title="Not this week" className="shrink-0 text-muted hover:text-danger"><I.close className="h-3 w-3" /></button>
                           </div>
                         ))}
                       </div>
@@ -733,8 +808,13 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
                         {storySuggestions.map((s) => (
                           <div key={s.headline} className="rounded-lg border bg-background px-3 py-2">
                             <div className="text-[13px] font-medium">{s.headline}</div>
-                            <div className="text-[12px] text-muted">{s.summary}</div>
-                            {s.sourceName && <div className="mb-1.5 text-[11px] text-muted">Source: {s.sourceName}</div>}
+                            <div className="mb-1 text-[12px] text-muted">{s.summary}</div>
+                            {s.sourceUrl && (
+                              <div className="mb-1.5 text-[11px]">
+                                <span className="text-muted">Source: {s.sourceName || "Link"} — </span>
+                                <a href={s.sourceUrl} target="_blank" rel="noopener noreferrer" className="font-medium text-accent hover:underline">View source ↗</a>
+                              </div>
+                            )}
                             <div className="flex items-center gap-2">
                               <button onClick={() => acceptStorySuggestion(s)} className="text-[12px] font-medium text-accent hover:underline">Accept</button>
                               <button onClick={() => declineStorySuggestion(s)} className="text-[12px] font-medium text-muted hover:text-foreground">Decline</button>
@@ -795,7 +875,7 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
           <div className="mb-2 flex items-center justify-between">
             <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Events</span>
             <span className="flex items-center gap-2">
-              <button onClick={suggestEvents} disabled={eventsSuggestLoading} className="text-[12px] font-medium text-accent hover:underline disabled:opacity-40 disabled:hover:no-underline">{eventsSuggestLoading ? "Searching…" : "✨ Find events"}</button>
+              <button onClick={() => suggestEvents(false)} disabled={eventsSuggestLoading} title="Fresh search — replaces the list below" className="text-[12px] font-medium text-accent hover:underline disabled:opacity-40 disabled:hover:no-underline">{eventsSuggestLoading ? "Searching…" : "✨ Find events"}</button>
               <button onClick={addEvent} className="text-[12px] font-medium text-accent hover:underline">+ Add event</button>
             </span>
           </div>
@@ -806,14 +886,20 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
               {eventsSuggestions.map((s) => (
                 <div key={s.title} className="rounded-lg border bg-background p-3">
                   <div className="text-[13px] font-medium">{s.title}</div>
-                  <div className="text-[12px] text-muted">{[s.startDate, s.venue].filter(Boolean).join(" · ")}</div>
-                  <div className="mb-1.5 text-[12px] text-muted">{s.summary}</div>
+                  <div className="text-[12px] text-muted">{[s.startDate, [s.venue, s.address].filter(Boolean).join(", ")].filter(Boolean).join(" · ")}</div>
+                  <div className="mb-1 text-[12px] text-muted">{s.summary}</div>
+                  {s.sourceUrl && (
+                    <div className="mb-1.5 text-[11px]">
+                      <a href={s.sourceUrl} target="_blank" rel="noopener noreferrer" className="font-medium text-accent hover:underline">View source ↗</a>
+                    </div>
+                  )}
                   <div className="flex items-center gap-2">
                     <button onClick={() => acceptEventSuggestion(s)} className="text-[12px] font-medium text-accent hover:underline">Accept</button>
                     <button onClick={() => declineEventSuggestion(s)} className="text-[12px] font-medium text-muted hover:text-foreground">Decline</button>
                   </div>
                 </div>
               ))}
+              <button onClick={() => suggestEvents(true)} disabled={eventsSuggestLoading} className="text-[12px] font-medium text-accent hover:underline disabled:opacity-40 disabled:hover:no-underline">{eventsSuggestLoading ? "Searching…" : "Find more"}</button>
             </div>
           )}
           <div className="space-y-3">
@@ -840,71 +926,75 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
           </div>
         </div>
 
-        {/* Newsletter backlog — items queued for this week, plus the
-            unassigned "who to go after" backlog for visibility. Full queue
-            management (adding from a business's own page) lands in a later
-            phase; this is a minimal quick-add so the loop works end to end. */}
+        {/* Weather — replaces plannerBrief's old hardcoded stub once accepted. */}
         <div className="border-t p-4">
-          <div className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-muted">Queued for this week</div>
-          <div className="mb-2 space-y-1.5">
-            {weekItems.map((it) => (
-              <div key={it.id} className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5">
-                <span className="min-w-0 flex-1 truncate text-[13px]">{it.title}</span>
-                <button onClick={() => removeBacklogItem(it.id)} title="Remove" className="shrink-0 text-muted hover:text-danger"><I.close className="h-3 w-3" /></button>
-              </div>
-            ))}
-            {weekItems.length === 0 && <div className="text-[13px] text-muted">Nothing queued for this week yet.</div>}
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Weather</span>
+            <button onClick={suggestWeather} disabled={weatherLoading} className="text-[12px] font-medium text-accent hover:underline disabled:opacity-40 disabled:hover:no-underline">{weatherLoading ? "Searching…" : "✨ Get weather"}</button>
           </div>
-          <div className="flex items-center gap-2">
-            <input value={newItemTitle} onChange={(e) => setNewItemTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addBacklogItem(); }}
-              placeholder="Queue a business/item for this week…" className="min-w-0 flex-1 rounded-md border bg-surface px-2 py-1.5 text-[13px] outline-none placeholder:text-muted focus:border-accent" />
-            <button onClick={addBacklogItem} disabled={!newItemTitle.trim()} className="shrink-0 rounded-md border border-accent px-2.5 py-1.5 text-[13px] font-medium text-accent disabled:opacity-40">Add</button>
-          </div>
-          {backlogItems.length > 0 && (
-            <div className="mt-3 border-t pt-3">
-              <div className="mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-muted">Backlog (not yet scheduled) · {backlogItems.length}</div>
-              <div className="space-y-1.5">
-                {backlogItems.slice(0, 10).map((it) => (
-                  <div key={it.id} className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5">
-                    <span className="min-w-0 flex-1 truncate text-[13px] text-muted">{it.title}</span>
-                    <button onClick={() => upsertNewsletterItem({ ...it, weekId: week.id }).then(() => setItems((its) => its.map((x) => (x.id === it.id ? { ...x, weekId: week.id } : x))))}
-                      className="shrink-0 text-[12px] font-medium text-accent hover:underline">Add to this week</button>
-                  </div>
-                ))}
+          {weatherError && <div className="mb-2 text-[12px] text-danger">{weatherError}</div>}
+          {weatherSuggestion && (
+            <div className="mb-2 rounded-lg border bg-background p-3">
+              <div className="mb-1 text-[13px]">{weatherSuggestion.summary}</div>
+              {weatherSuggestion.sourceUrl && (
+                <div className="mb-1.5 text-[11px]">
+                  <a href={weatherSuggestion.sourceUrl} target="_blank" rel="noopener noreferrer" className="font-medium text-accent hover:underline">View source ↗</a>
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <button onClick={acceptWeather} className="text-[12px] font-medium text-accent hover:underline">Accept</button>
+                <button onClick={declineWeather} className="text-[12px] font-medium text-muted hover:text-foreground">Decline</button>
               </div>
             </div>
           )}
+          {week.weatherNote ? (
+            <div className="text-[13px] text-foreground">{week.weatherNote}</div>
+          ) : !weatherSuggestion && <div className="text-[13px] text-muted">No forecast added yet.</div>}
         </div>
 
-        {/* Who to feature — computed live from the directory (claimed+offer
-            for Spotlight, unclaimed-by-score for Hidden Gem) plus this
-            territory's own feature-rotation history, instead of stored
-            data. "Due" businesses (never featured, or not in 90+ days)
-            sort first for Spotlight. */}
+        {/* Newsletter backlog — items queued for this week, plus the
+            unassigned "who to go after" backlog for visibility. Full queue
+            management (adding from a business's own page) lands in a later
+            phase; this is a minimal quick-add so the loop works end to end.
+            Collapsed by default when there's nothing in it — it's easy to
+            mistake for empty dead space otherwise. */}
         <div className="border-t p-4">
-          <div className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-muted">Who to feature</div>
-          {(["spotlight", "hiddenGem"] as const).map((key) => {
-            const list = pools[key];
-            if (!list.length) return null;
-            return (
-              <div key={key} className="mb-3 last:mb-0">
-                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted/70">{key === "spotlight" ? "Spotlight candidates (claimed, active offer)" : "Hidden Gem candidates (unclaimed, top-scored)"}</div>
-                <div className="space-y-1">
-                  {list.map((c) => (
-                    <div key={`${key}-${c.gdPlaceId ?? c.name}`} className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5">
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px] font-medium">{c.name}</span>
-                        <span className="block truncate text-[11px] text-muted">{c.cat}{c.due ? " · due" : c.lastFeatured ? ` · featured ${c.lastFeatured}` : ""}</span>
-                      </span>
-                      <button onClick={() => pickCandidate(c)} className="shrink-0 text-[12px] font-medium text-accent hover:underline">+ Pick</button>
-                      <button onClick={() => dismissCandidate(c)} title="Not this week" className="shrink-0 text-muted hover:text-danger"><I.close className="h-3 w-3" /></button>
-                    </div>
-                  ))}
-                </div>
+          <button onClick={() => setQueueOpen((o) => !o)} className="flex w-full items-center justify-between text-left">
+            <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Queued for this week{weekItems.length > 0 ? ` (${weekItems.length})` : ""}</span>
+            <I.chevron className={`text-muted transition-transform ${queueOpen ? "" : "-rotate-90"}`} />
+          </button>
+          {queueOpen && (
+            <div className="mt-2">
+              <div className="mb-2 space-y-1.5">
+                {weekItems.map((it) => (
+                  <div key={it.id} className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5">
+                    <span className="min-w-0 flex-1 truncate text-[13px]">{it.title}</span>
+                    <button onClick={() => removeBacklogItem(it.id)} title="Remove" className="shrink-0 text-muted hover:text-danger"><I.close className="h-3 w-3" /></button>
+                  </div>
+                ))}
+                {weekItems.length === 0 && <div className="text-[13px] text-muted">Nothing queued for this week yet — a general-purpose catch-all for anything to include that isn’t a slot pick or event (a video, offer, or one-off mention).</div>}
               </div>
-            );
-          })}
-          {pools.spotlight.length === 0 && pools.hiddenGem.length === 0 && <div className="text-[13px] text-muted">No candidates found yet.</div>}
+              <div className="flex items-center gap-2">
+                <input value={newItemTitle} onChange={(e) => setNewItemTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addBacklogItem(); }}
+                  placeholder="Queue a business/item for this week…" className="min-w-0 flex-1 rounded-md border bg-surface px-2 py-1.5 text-[13px] outline-none placeholder:text-muted focus:border-accent" />
+                <button onClick={addBacklogItem} disabled={!newItemTitle.trim()} className="shrink-0 rounded-md border border-accent px-2.5 py-1.5 text-[13px] font-medium text-accent disabled:opacity-40">Add</button>
+              </div>
+              {backlogItems.length > 0 && (
+                <div className="mt-3 border-t pt-3">
+                  <div className="mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-muted">Backlog (not yet scheduled) · {backlogItems.length}</div>
+                  <div className="space-y-1.5">
+                    {backlogItems.slice(0, 10).map((it) => (
+                      <div key={it.id} className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5">
+                        <span className="min-w-0 flex-1 truncate text-[13px] text-muted">{it.title}</span>
+                        <button onClick={() => upsertNewsletterItem({ ...it, weekId: week.id }).then(() => setItems((its) => its.map((x) => (x.id === it.id ? { ...x, weekId: week.id } : x))))}
+                          className="shrink-0 text-[12px] font-medium text-accent hover:underline">Add to this week</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

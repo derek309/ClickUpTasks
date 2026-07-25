@@ -86,7 +86,7 @@ export function generatePlannerBrief(opts: {
     lines.push("_(no other claimed offers in these categories yet)_", "");
   }
 
-  lines.push("## Weather", `A short local 7-day outlook for ${cityName || "Lincoln"}, CA (fill in at build time).`, "");
+  lines.push("## Weather", week.weatherNote || `A short local outlook for ${cityName || "this city"} (not fetched yet — use the Weather section's Get weather button).`, "");
   lines.push("## Blog + Social", "Generated downstream from the picks above (the spotlight gets a dedicated blog post; social posts are derived from the week's picks distributed across 7 days).", "");
   lines.push("---", `Generated from the Content Planner. Drop in \`Newsletter/${(cityName || "lincoln").toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${week.week}/brief.md\` and tell Claude Code to build.`);
 
