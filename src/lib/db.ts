@@ -375,12 +375,13 @@ const plannerWeekToRow = (w: PlannerWeek) => ({
   picks: {
     ...Object.fromEntries(Object.entries(w.picks).map(([k, v]) => [k, bizToJson(v as PlannerBiz)])),
     __dismissed: w.dismissed ?? [], __cats: w.categories ?? [], __themeDesc: w.themeDescription ?? "", __weather: w.weatherNote ?? "",
+    __invited: w.invited ?? [],
   },
   archived: w.archived ?? false, sent_date: w.sentDate ?? null, wp_pushed_at: w.wpPushedAt ?? null,
 });
 export const rowToPlannerWeek = (r: any): PlannerWeek => {
   const raw = (r.picks && typeof r.picks === "object") ? r.picks : {};
-  const { __dismissed, __cats, __themeDesc, __weather, ...slots } = raw;
+  const { __dismissed, __cats, __themeDesc, __weather, __invited, ...slots } = raw;
   const picks: PlannerWeek["picks"] = {};
   for (const [k, v] of Object.entries(slots)) { const b = jsonToBiz(v); if (b) (picks as any)[k] = b; }
   return {
@@ -388,6 +389,7 @@ export const rowToPlannerWeek = (r: any): PlannerWeek => {
     themeOverride: r.theme_override ?? "", themeDescription: typeof __themeDesc === "string" ? __themeDesc : "",
     categories: Array.isArray(__cats) ? __cats : [], notes: r.notes ?? "",
     weatherNote: typeof __weather === "string" ? __weather : "",
+    invited: Array.isArray(__invited) ? __invited : [],
     picks, dismissed: Array.isArray(__dismissed) ? __dismissed : [],
     archived: !!r.archived, sentDate: r.sent_date ?? null, wpPushedAt: r.wp_pushed_at ?? null,
     createdAt: r.created_at,
@@ -426,6 +428,16 @@ export async function fetchPlannerEvents(weekId: string): Promise<PlannerEvent[]
 }
 export const upsertPlannerEvent = (e: PlannerEvent) => supabase.from("planner_events").upsert(plannerEventToRow(e)).then(logErr);
 export const deletePlannerEventDb = (id: string) => supabase.from("planner_events").delete().eq("id", id).then(logErr);
+
+// Events across several weeks at once (not just the open one) — used to keep
+// a recurring event (a weekly farmers market, say) from getting suggested
+// and re-added every single week.
+export async function fetchRecentPlannerEvents(weekIds: string[]): Promise<PlannerEvent[]> {
+  if (!weekIds.length) return [];
+  const { data, error } = await supabase.from("planner_events").select("*").in("week_id", weekIds);
+  if (error) { logErr({ error }); return []; }
+  return (data ?? []).map(rowToPlannerEvent);
+}
 
 const newsletterItemToRow = (n: NewsletterItem) => ({ id: n.id, territory_id: n.territoryId, type: n.type, client_id: n.clientId, gd_place_id: n.gdPlaceId, week_id: n.weekId, title: n.title, note: n.note, url: n.url, status: n.status, created_by: n.createdBy });
 export const rowToNewsletterItem = (r: any): NewsletterItem => ({ id: r.id, territoryId: r.territory_id, type: r.type ?? "business", clientId: r.client_id ?? null, gdPlaceId: r.gd_place_id ?? null, weekId: r.week_id ?? null, title: r.title ?? "", note: r.note ?? "", url: r.url ?? null, status: r.status ?? "pending", createdBy: r.created_by ?? null, createdAt: r.created_at });

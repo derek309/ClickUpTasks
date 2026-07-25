@@ -138,12 +138,13 @@ export async function POST(req: NextRequest) {
       `  - "site:clickuplocal.com ${location}"`,
       "Also check local news outlets and the city's own government site.",
       "STRICT EXCLUSION: never include crime, arrests, accidents, crashes, deaths, fires, lawsuits, or any negative/tragic story — even if it's the most prominent local news right now. If you can't find enough upbeat business/development stories, return fewer results rather than filling in with excluded topics.",
+      body.excludeTitles?.length ? `Already covered in recent issues (do NOT repeat these — find different stories): ${body.excludeTitles.join(", ")}` : null,
       "For each story, write a 2-3 sentence summary with real specifics (who/what/where) suitable for a local newsletter blurb, and note the source.",
       "sourceUrl must be the actual article/page you found this on — never a search results page, never invented.",
       "Do NOT invent or guess values — only use information you actually found via search. Return up to 5 stories, real ones only.",
       "Return ONLY a fenced ```json code block with this exact shape, no other text:",
       '{"suggestions": [{"headline": "story headline", "summary": "2-3 sentence description", "sourceUrl": "https://...", "sourceName": "publication or site name"}]}',
-    ].join("\n");
+    ].filter(Boolean).join("\n");
   } else if (mode === "suggest_categories") {
     prompt = [
       "You're a co-pilot helping an editor plan a local weekly newsletter issue.",

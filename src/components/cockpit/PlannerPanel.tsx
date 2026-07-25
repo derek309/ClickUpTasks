@@ -11,7 +11,7 @@ import { authedFetch } from "@/lib/supabase";
 import {
   fetchPlannerWeeks, upsertPlannerWeek, deletePlannerWeekDb,
   fetchPlannerSections, upsertPlannerSection, deletePlannerSectionDb,
-  fetchPlannerEvents, upsertPlannerEvent, deletePlannerEventDb,
+  fetchPlannerEvents, upsertPlannerEvent, deletePlannerEventDb, fetchRecentPlannerEvents,
   fetchNewsletterItems, upsertNewsletterItem, deleteNewsletterItemDb,
   fetchThemeCalendar,
 } from "@/lib/db";
@@ -34,6 +34,12 @@ const SLOT_LABELS: Record<PlannerSlot, string> = {
 };
 const SECTION_PRESETS = ["The Story", "New In Town", "Ask Your Concierge", "Last Call"];
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+// A batch of live-search suggestions is a paid, ~10-60s Gemini call — losing
+// it to an accidental refresh mid-review means paying for it again. Cached
+// per week in localStorage (same cut_-prefixed, try/catch convention used
+// elsewhere in this app), not the database — it's a disposable draft, not
+// data worth syncing across devices.
+const DRAFT_CACHE_PREFIX = "cut_plannerDraft_";
 
 export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekChange }: {
   territoryId: string; city: string; state: string;
@@ -88,7 +94,7 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
     const assigned = themeForWeek(week, themeCalendar);
     const w: PlannerWeek = {
       id: newId("pw_"), territoryId, week, themeOverride: assigned?.title ?? "", themeDescription: "", categories: assigned?.categories ?? [], notes: "", weatherNote: "",
-      picks: {}, dismissed: [], archived: false, sentDate: null, wpPushedAt: null, createdAt: new Date().toISOString(),
+      picks: {}, dismissed: [], invited: [], archived: false, sentDate: null, wpPushedAt: null, createdAt: new Date().toISOString(),
     };
     setWeeks((ws) => [w, ...ws]);
     await upsertPlannerWeek(w);
@@ -386,6 +392,21 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     weeks, dismissedIds: week.dismissed, excludeNames: filledSlotNames, todayIso: todayIso(),
   }), [listings, weeks, week.dismissed, filledSlotNames]);
 
+  // Cross-week dedupe for Story/Events suggestions — a recurring event (a
+  // weekly farmers market, say) has no "due" rotation logic like the
+  // business pools do, so without this it'd get suggested and re-added
+  // every week. Story headlines are already on `weeks` (picks.story); events
+  // live in their own table, so the last ~8 weeks' worth get fetched here.
+  const [recentEvents, setRecentEvents] = useState<PlannerEvent[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const recentWeekIds = [...weeks].sort((a, b) => b.week.localeCompare(a.week)).slice(0, 8).map((w) => w.id);
+    fetchRecentPlannerEvents(recentWeekIds).then((es) => { if (alive) setRecentEvents(es); });
+    return () => { alive = false; };
+  }, [weeks]);
+  const recentEventTitles = useMemo(() => [...new Set(recentEvents.map((e) => e.text.split("\n")[0]?.trim()).filter(Boolean))], [recentEvents]);
+  const recentStoryHeadlines = useMemo(() => [...new Set(weeks.map((w) => w.picks.story?.name).filter((n): n is string => !!n))], [weeks]);
+
   const dismissCandidate = (c: PoolCandidate) => {
     if (c.gdPlaceId == null || week.dismissed.includes(c.gdPlaceId)) return;
     onPatch({ dismissed: [...week.dismissed, c.gdPlaceId] });
@@ -472,19 +493,23 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
         body: JSON.stringify({ territoryId: week.territoryId, week: week.week, gdPlaceId }),
       });
       const j = await res.json().catch(() => ({}));
-      if (res.ok && j.ok) setInviteState((m) => ({ ...m, [gdPlaceId]: "sent" }));
-      else setInviteState((m) => ({ ...m, [gdPlaceId]: humanizeInviteError(j.error) }));
+      if (res.ok && j.ok) {
+        setInviteState((m) => ({ ...m, [gdPlaceId]: "sent" }));
+        if (!week.invited.some((x) => x.gdPlaceId === gdPlaceId)) onPatch({ invited: [...week.invited, { gdPlaceId, at: new Date().toISOString() }] });
+      } else setInviteState((m) => ({ ...m, [gdPlaceId]: humanizeInviteError(j.error) }));
     } catch (e) {
       setInviteState((m) => ({ ...m, [gdPlaceId]: e instanceof Error ? e.message : "Invite failed." }));
     }
   };
   // Two-click arm/confirm — mirrors WP's own caution around a button that
-  // sends a real email, not just an in-app action.
+  // sends a real email, not just an in-app action. week.invited persists
+  // past a refresh; inviteState only tracks this session's in-flight/error
+  // states, so a persisted "sent" still shows even if inviteState is empty.
   const renderInvite = (gdPlaceId: number | null) => {
     if (gdPlaceId == null) return null;
     const state = inviteState[gdPlaceId];
     if (state === "sending") return <span className="shrink-0 text-[12px] text-muted">Sending…</span>;
-    if (state === "sent") return <span className="shrink-0 text-[12px] font-medium text-emerald-600">Invited ✓</span>;
+    if (state === "sent" || week.invited.some((x) => x.gdPlaceId === gdPlaceId)) return <span className="shrink-0 text-[12px] font-medium text-emerald-600">Invited ✓</span>;
     if (state) return (
       <span className="flex shrink-0 items-center gap-1.5">
         <span className="text-[11px] text-danger">{state}</span>
@@ -513,7 +538,7 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     try {
       const res = await authedFetch("/api/ai/planner-workshop", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "suggest_story", cityName, state }),
+        body: JSON.stringify({ mode: "suggest_story", cityName, state, excludeTitles: recentStoryHeadlines }),
       });
       const j = await res.json().catch(() => ({}));
       if (res.ok && Array.isArray(j.suggestions)) setStorySuggestions(j.suggestions);
@@ -541,7 +566,7 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     try {
       const res = await authedFetch("/api/ai/planner-workshop", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "suggest_events", cityName, state, dateFrom: addDaysIso(week.week, -3), dateTo: addDaysIso(week.week, 3), excludeTitles: already.map((s) => s.title) }),
+        body: JSON.stringify({ mode: "suggest_events", cityName, state, dateFrom: addDaysIso(week.week, -3), dateTo: addDaysIso(week.week, 3), excludeTitles: [...recentEventTitles, ...already.map((s) => s.title)] }),
       });
       const j = await res.json().catch(() => ({}));
       if (res.ok && Array.isArray(j.suggestions)) setEventsSuggestions([...already, ...j.suggestions]);
@@ -591,6 +616,58 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
   };
   const acceptWeather = () => { if (weatherSuggestion) onPatch({ weatherNote: weatherSuggestion.summary }); setWeatherSuggestion(null); };
   const declineWeather = () => setWeatherSuggestion(null);
+
+  // Restore whatever suggestion batches were showing before a refresh —
+  // skipNextDraftPersist mirrors skipNextAutoPush above: without it, the
+  // persist effect's very first fire (this same commit, before hydrate's
+  // setState calls have flushed) would see the still-empty initial state and
+  // immediately wipe the cache this effect just read from.
+  const skipNextDraftPersist = useRef(true);
+  useEffect(() => {
+    skipNextDraftPersist.current = true;
+    try {
+      const raw = localStorage.getItem(DRAFT_CACHE_PREFIX + week.id);
+      if (!raw) return;
+      const d = JSON.parse(raw);
+      if (d.themeOptions) setThemeOptions(d.themeOptions);
+      if (d.categorySuggestions) setCategorySuggestions(d.categorySuggestions);
+      if (d.slotSuggestions) setSlotSuggestions(d.slotSuggestions);
+      if (d.storySuggestions) setStorySuggestions(d.storySuggestions);
+      if (d.eventsSuggestions) setEventsSuggestions(d.eventsSuggestions);
+      if (d.weatherSuggestion) setWeatherSuggestion(d.weatherSuggestion);
+    } catch {}
+  }, [week.id]);
+  useEffect(() => {
+    if (skipNextDraftPersist.current) { skipNextDraftPersist.current = false; return; }
+    try {
+      const key = DRAFT_CACHE_PREFIX + week.id;
+      const hasSlotSuggestions = Object.values(slotSuggestions).some((v) => v && v.length > 0);
+      const isEmpty = !themeOptions && !categorySuggestions && !hasSlotSuggestions && !storySuggestions && !eventsSuggestions && !weatherSuggestion;
+      if (isEmpty) localStorage.removeItem(key);
+      else localStorage.setItem(key, JSON.stringify({ themeOptions, categorySuggestions, slotSuggestions, storySuggestions, eventsSuggestions, weatherSuggestion }));
+    } catch {}
+  }, [week.id, themeOptions, categorySuggestions, slotSuggestions, storySuggestions, eventsSuggestions, weatherSuggestion]);
+
+  // "Draft this week" — fires every applicable suggest_* call in parallel for
+  // whatever's still empty, so a rep reviews one batch of suggestions
+  // instead of clicking each Suggest button in turn. Never auto-accepts
+  // anything — same guiding/reviewing shape as every other suggest here,
+  // just kicked off together. Respects whatever's already set (a pre-filled
+  // calendar theme, a manually-typed note) rather than overwriting it.
+  const [draftLoading, setDraftLoading] = useState(false);
+  const draftWeek = async () => {
+    setDraftLoading(true);
+    const tasks: Promise<unknown>[] = [];
+    if (!week.themeOverride.trim()) tasks.push(suggestThemes());
+    else if (!categorySuggestions) tasks.push(suggestCategoriesFor(week.themeOverride, week.themeDescription || undefined));
+    if (!week.picks.spotlight) tasks.push(suggestForSlot("spotlight"));
+    if (!week.picks.gem) tasks.push(suggestForSlot("gem"));
+    if (!week.picks.story) tasks.push(suggestStory());
+    tasks.push(suggestEvents(false));
+    if (!week.weatherNote) tasks.push(suggestWeather());
+    await Promise.allSettled(tasks);
+    setDraftLoading(false);
+  };
 
   const runWorkshop = async (mode: "angles" | "draft" | "feature" | "ask") => {
     if (mode === "ask" && !workshopPrompt.trim()) return;
@@ -677,7 +754,8 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
               <span className="text-[15px] font-semibold">{plannerWeekLabel(week.week)}</span>
               {week.archived && <span className="rounded-full bg-background px-1.5 py-0.5 text-[11px] font-semibold text-muted">Archived</span>}
             </span>
-            <div className="flex items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button onClick={draftWeek} disabled={draftLoading} title="Runs Suggest on everything still empty — theme, spotlight, gem, local news, events, weather — for you to review" className="rounded-md border border-accent px-2.5 py-1 text-[12px] font-semibold text-accent hover:bg-accent-soft disabled:opacity-40">{draftLoading ? "Drafting…" : "✨ Draft this week"}</button>
               <span title={pushError ?? undefined} className="text-[12px] text-muted">
                 {pushStatus === "pushing" ? "Pushing to site…" : pushStatus === "pushed" ? "Pushed ✓" : pushStatus === "error" ? "Push failed" : week.wpPushedAt ? `Pushed ${new Date(week.wpPushedAt).toLocaleTimeString()}` : "Not pushed yet"}
               </span>

@@ -345,6 +345,10 @@ export interface PlannerWeek {
   weatherNote: string;
   picks: Partial<Record<PlannerSlot, PlannerBiz>>;
   dismissed: number[]; // gd_place_ids dismissed from this week's suggestion pools
+  // gd_place_ids invited to be featured this week (via the WordPress outreach
+  // proxy), with when — lets the "Invited ✓" mark survive a refresh instead
+  // of being session-only.
+  invited: { gdPlaceId: number; at: string }[];
   archived: boolean;
   sentDate: string | null;
   wpPushedAt: string | null;
