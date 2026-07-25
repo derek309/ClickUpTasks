@@ -401,44 +401,11 @@ function WeekWorkspace({ week, weeks, listings, cityName, onBack, onPatch, onDel
           </div>
         )}
 
-        {/* Who to feature + AI Workshop sit here, above the slots — decide
-            who/what to feature first, then fill the slots informed by that,
-            rather than burying the decision-support tools below the manual
-            editing (same "decide before you write" reasoning applied to
-            Prompt Claude elsewhere in the app). Who to feature's own "+
-            Pick" buttons fill the slots directly, so this ordering also
-            matches the actual usage flow. */}
-        {/* Who to feature — computed live from the directory (claimed+offer
-            for Spotlight, unclaimed-by-score for Hidden Gem) plus this
-            territory's own feature-rotation history, instead of stored
-            data. "Due" businesses (never featured, or not in 90+ days)
-            sort first for Spotlight. */}
-        <div className="border-b bg-background/40 p-4">
-          <div className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-muted">Who to feature</div>
-          {(["spotlight", "hiddenGem"] as const).map((key) => {
-            const list = pools[key];
-            if (!list.length) return null;
-            return (
-              <div key={key} className="mb-3 last:mb-0">
-                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted/70">{key === "spotlight" ? "Spotlight candidates (claimed, active offer)" : "Hidden Gem candidates (unclaimed, top-scored)"}</div>
-                <div className="space-y-1">
-                  {list.map((c) => (
-                    <div key={`${key}-${c.gdPlaceId ?? c.name}`} className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5">
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px] font-medium">{c.name}</span>
-                        <span className="block truncate text-[11px] text-muted">{c.cat}{c.due ? " · due" : c.lastFeatured ? ` · featured ${c.lastFeatured}` : ""}</span>
-                      </span>
-                      <button onClick={() => pickCandidate(c)} className="shrink-0 text-[12px] font-medium text-accent hover:underline">+ Pick</button>
-                      <button onClick={() => dismissCandidate(c)} title="Not this week" className="shrink-0 text-muted hover:text-danger"><I.close className="h-3 w-3" /></button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-          {pools.spotlight.length === 0 && pools.hiddenGem.length === 0 && <div className="text-[13px] text-muted">No candidates found yet.</div>}
-        </div>
-
+        {/* AI Workshop sits here, right below the theme/notes header — decide
+            what this week is about first, then use it to help think through
+            picks, before touching the manual slots below (same "decide
+            before you write" reasoning applied to Prompt Claude elsewhere in
+            the app). "Who to feature" stays down by the slots it feeds. */}
         {/* AI Workshop — a co-pilot scoped to this week's context (theme,
             categories, notes, current picks, candidate pool). Never writes
             anything on its own; results are Copy/Append-only. */}
@@ -602,6 +569,37 @@ function WeekWorkspace({ week, weeks, listings, cityName, onBack, onPatch, onDel
               </div>
             </div>
           )}
+        </div>
+
+        {/* Who to feature — computed live from the directory (claimed+offer
+            for Spotlight, unclaimed-by-score for Hidden Gem) plus this
+            territory's own feature-rotation history, instead of stored
+            data. "Due" businesses (never featured, or not in 90+ days)
+            sort first for Spotlight. */}
+        <div className="border-t p-4">
+          <div className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-muted">Who to feature</div>
+          {(["spotlight", "hiddenGem"] as const).map((key) => {
+            const list = pools[key];
+            if (!list.length) return null;
+            return (
+              <div key={key} className="mb-3 last:mb-0">
+                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted/70">{key === "spotlight" ? "Spotlight candidates (claimed, active offer)" : "Hidden Gem candidates (unclaimed, top-scored)"}</div>
+                <div className="space-y-1">
+                  {list.map((c) => (
+                    <div key={`${key}-${c.gdPlaceId ?? c.name}`} className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5">
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[13px] font-medium">{c.name}</span>
+                        <span className="block truncate text-[11px] text-muted">{c.cat}{c.due ? " · due" : c.lastFeatured ? ` · featured ${c.lastFeatured}` : ""}</span>
+                      </span>
+                      <button onClick={() => pickCandidate(c)} className="shrink-0 text-[12px] font-medium text-accent hover:underline">+ Pick</button>
+                      <button onClick={() => dismissCandidate(c)} title="Not this week" className="shrink-0 text-muted hover:text-danger"><I.close className="h-3 w-3" /></button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+          {pools.spotlight.length === 0 && pools.hiddenGem.length === 0 && <div className="text-[13px] text-muted">No candidates found yet.</div>}
         </div>
       </div>
     </div>
