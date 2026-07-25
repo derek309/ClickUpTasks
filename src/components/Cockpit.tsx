@@ -98,14 +98,21 @@ import { claudeCodeUrl } from "@/lib/claudeLink";
 // --- Deep-link URL state ----------------------------------------------------
 // The whole app lives on "/", so we encode what you're looking at into the
 // query string: shareable links, refresh-safe, and back/forward navigation.
-//   ?view=work|clients|personal   the special boards
+//   ?view=work|clients|personal|settings   the special boards
+//   ?view=inbox[&dm=<userId>]              team chat, optionally a DM thread
 //   ?client=<id>[&project=<id>]   a client (optionally scoped to one project)
+//   ?territory=<id>[&mode=planner[&week=<id>]]   a city, or its Content Planner
 //   ?task=<id>                    the task drawer (layers over any of the above)
-type NavState = { view: "work" | "personal" | "inbox" | "clients" | "projects" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | "vault" | null; vaultFolder: string | null };
+type NavState = { view: "work" | "personal" | "inbox" | "clients" | "projects" | "settings" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | "vault" | null; vaultFolder: string | null; dm: string | null; territory: string | null; plannerMode: boolean; plannerWeek: string | null };
 function buildSearch(s: NavState): string {
   const p = new URLSearchParams();
-  if (s.view) p.set("view", s.view);
-  else if (s.client !== "all") {
+  if (s.territory) {
+    p.set("territory", s.territory);
+    if (s.plannerMode) { p.set("mode", "planner"); if (s.plannerWeek) p.set("week", s.plannerWeek); }
+  } else if (s.view) {
+    p.set("view", s.view);
+    if (s.view === "inbox" && s.dm) p.set("dm", s.dm);
+  } else if (s.client !== "all") {
     p.set("client", s.client);
     if (s.project) p.set("project", s.project);
     // "tasks" is the default sub-tab — only encode it when it differs, so
@@ -122,12 +129,16 @@ function parseSearch(search: string): NavState {
   const v = p.get("view");
   const tab = p.get("tab");
   return {
-    view: v === "work" || v === "personal" || v === "inbox" || v === "clients" || v === "projects" ? v : null,
+    view: v === "work" || v === "personal" || v === "inbox" || v === "clients" || v === "projects" || v === "settings" ? v : null,
     client: p.get("client") ?? "all",
     project: p.get("project"),
     task: p.get("task"),
     clientTab: tab === "chat" || tab === "vault" ? tab : null,
     vaultFolder: p.get("folder"),
+    dm: p.get("dm"),
+    territory: p.get("territory"),
+    plannerMode: p.get("mode") === "planner",
+    plannerWeek: p.get("week"),
   };
 }
 
@@ -158,6 +169,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // work), so every existing !territoryView-gated header guard stays
   // correct for free instead of needing a matching !plannerOpen everywhere.
   const [plannerOpen, setPlannerOpen] = useState(false);
+  // Which week is open inside the Planner, mirrored down as PlannerPanel's
+  // initialWeekId and back up via onWeekChange — lets the deep-link URL
+  // (currentNav below) reflect it without lifting the rest of Planner's state.
+  const [plannerWeekId, setPlannerWeekId] = useState<string | null>(null);
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
   const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
   const [vaultFolders, setVaultFolders] = useState<VaultFolder[]>([]);
@@ -656,14 +671,26 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   // --- Deep-link URL sync ---------------------------------------------------
   const currentNav = (): NavState => ({
-    view: dirView ?? (myWork ? "work" : personalView ? "personal" : inboxView ? "inbox" : null),
+    view: settingsView ? "settings" : dirView ?? (myWork ? "work" : personalView ? "personal" : inboxView ? "inbox" : null),
     client: activeClient, project: activeProject, task: openTaskId,
     clientTab, vaultFolder: null, // vaultFolder is write-only (via copyFolderLink) — not mirrored into the live URL as you browse
+    dm: inboxView ? dmUserId : null,
+    territory: territoryView, plannerMode: plannerOpen, plannerWeek: plannerOpen ? plannerWeekId : null,
   });
   const applyNav = (s: NavState) => {
-    setMyWork(s.view === "work"); setPersonalView(s.view === "personal"); setInboxView(s.view === "inbox");
-    setDirView(s.view === "clients" || s.view === "projects" ? s.view : null);
-    setActiveClient(s.view ? "all" : s.client); setActiveProject(s.view ? null : s.project); setOpenTaskId(s.task);
+    if (s.territory) {
+      setSettingsView(false); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setDirView(null);
+      setActiveClient("all"); setActiveProject(null);
+      setTerritoryView(s.territory); setPlannerOpen(s.plannerMode); setPlannerWeekId(s.plannerMode ? s.plannerWeek : null);
+    } else {
+      setTerritoryView(null); setPlannerOpen(false); setPlannerWeekId(null);
+      setSettingsView(s.view === "settings");
+      setMyWork(s.view === "work"); setPersonalView(s.view === "personal"); setInboxView(s.view === "inbox");
+      setDmUserId(s.view === "inbox" ? s.dm : null);
+      setDirView(s.view === "clients" || s.view === "projects" ? s.view : null);
+      setActiveClient(s.view ? "all" : s.client); setActiveProject(s.view ? null : s.project);
+    }
+    setOpenTaskId(s.task);
     if (s.clientTab) setClientTab(s.clientTab);
     setInitialVaultFolder(s.vaultFolder);
   };
@@ -1298,15 +1325,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const openTerritory = (id: string) => {
     setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null);
     setActiveClient("all"); setActiveProject(null); setOpenTaskId(null); setSidebarOpen(false);
-    setPlannerOpen(false);
+    setPlannerOpen(false); setPlannerWeekId(null);
     setTerritoryView(id);
   };
-  // Same city, Content Planner mode instead of the Businesses list.
+  // Same city, Content Planner mode instead of the Businesses list. Always
+  // starts at the week index — setPlannerWeekId(null) so re-opening the
+  // Planner doesn't jump back into whatever week was last open.
   const openTerritoryPlanner = (id: string) => {
     setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null);
     setActiveClient("all"); setActiveProject(null); setOpenTaskId(null); setSidebarOpen(false);
     setTerritoryView(id);
-    setPlannerOpen(true);
+    setPlannerOpen(true); setPlannerWeekId(null);
   };
   // The city's own work bucket, opened as an ordinary client page — that's
   // what gives it the full task list, quick-add, Journal, Links and Vault
@@ -3358,7 +3387,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <button onClick={() => { setHeaderMoreOpen(false); openCompose("sms"); }}
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background sm:hidden"><I.comment /> SMS</button>
           )}
-          <button onClick={() => { setHeaderMoreOpen(false); copyLink({ view: null, client: activeClient, project: activeProject, task: null, clientTab, vaultFolder: null }); }}
+          <button onClick={() => { setHeaderMoreOpen(false); copyLink({ view: null, client: activeClient, project: activeProject, task: null, clientTab, vaultFolder: null, dm: null, territory: null, plannerMode: false, plannerWeek: null }); }}
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy link</button>
           {activeClient !== "all" && !activeProject && clientById(activeClient) && (
             <button onClick={() => { setHeaderMoreOpen(false); copyClientShareLink(activeClient); }} title="A public, no-login link showing this client what we're waiting on them for"
@@ -3844,7 +3873,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                       <button onClick={() => { setHeaderMoreOpen(false); openCompose("sms"); }}
                         className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background sm:hidden"><I.comment /> SMS</button>
                     )}
-                    <button onClick={() => { setHeaderMoreOpen(false); copyLink({ view: null, client: activeClient, project: activeProject, task: null, clientTab, vaultFolder: null }); }}
+                    <button onClick={() => { setHeaderMoreOpen(false); copyLink({ view: null, client: activeClient, project: activeProject, task: null, clientTab, vaultFolder: null, dm: null, territory: null, plannerMode: false, plannerWeek: null }); }}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy link</button>
                     {activeClient !== "all" && !activeProject && clientById(activeClient) && (
                       <button onClick={() => { setHeaderMoreOpen(false); copyClientShareLink(activeClient); }} title="A public, no-login link showing this client what we're waiting on them for"
@@ -4040,7 +4069,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           />
         ) : territoryView && territoryView !== "all" && plannerOpen ? (
           <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">
-            <PlannerPanel territoryId={territoryView} city={territoryById(territoryView)?.city ?? ""} state={territoryById(territoryView)?.state ?? ""} />
+            <PlannerPanel territoryId={territoryView} city={territoryById(territoryView)?.city ?? ""} state={territoryById(territoryView)?.state ?? ""}
+              initialWeekId={plannerWeekId} onWeekChange={setPlannerWeekId} />
           </div>
         ) : territoryView ? (
           <div className="flex-1 overflow-auto bg-background py-2">
@@ -4225,7 +4255,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={navTaskIds.length} navTasks={navTaskIds.map((id) => tasks.find((t) => t.id === id)).filter((t): t is Task => !!t)} onOpenTask={setOpenTaskId} onAddSibling={(title) => addTaskToList(openTask.clientId, openTask.projectId, openTask.private, title)} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(attachments) => addComment(openTask.id, comment, attachments)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null })} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId)} draftingMessage={draftingMessage} onDraftDescription={draftDescription} draftingDescription={draftingDescription} onRegenerateAiSummary={() => regenerateAiSummary(openTask.clientId)} aiSummaryBusy={aiSummaryBusyId === openTask.clientId} />
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => patchTask(openTask.id, { projectId: pid })} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, territory: null, plannerMode: false, plannerWeek: null })} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId)} draftingMessage={draftingMessage} onDraftDescription={draftDescription} draftingDescription={draftingDescription} onRegenerateAiSummary={() => regenerateAiSummary(openTask.clientId)} aiSummaryBusy={aiSummaryBusyId === openTask.clientId} />
       )}
 
       {addClientOpen && <AddClientModal subAccounts={subAccounts} contacts={contacts} existingIds={new Set(clients.map((c) => c.id))} onAdd={addClientContact} onClose={() => setAddClientOpen(false)} />}

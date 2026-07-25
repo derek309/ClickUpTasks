@@ -33,12 +33,17 @@ const SLOT_LABELS: Record<PlannerSlot, string> = {
 };
 const SECTION_PRESETS = ["The Story", "New In Town", "Ask Your Concierge", "Last Call"];
 
-export function PlannerPanel({ territoryId, city, state }: {
+export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekChange }: {
   territoryId: string; city: string; state: string;
+  // Deep-link support (Cockpit's URL sync) — initialWeekId seeds which week
+  // opens on mount, onWeekChange mirrors every change back up so the URL
+  // stays in sync. Both optional so this component still works standalone.
+  initialWeekId?: string | null; onWeekChange?: (id: string | null) => void;
 }) {
   const [weeks, setWeeks] = useState<PlannerWeek[]>([]);
   const [loading, setLoading] = useState(true);
-  const [openWeekId, setOpenWeekId] = useState<string | null>(null);
+  const [openWeekId, setOpenWeekId] = useState<string | null>(initialWeekId ?? null);
+  useEffect(() => { onWeekChange?.(openWeekId); }, [openWeekId, onWeekChange]);
   // Business typeahead source for slot/section/event picks — the same city
   // fetch TerritoryDirectory already uses, cached here independently since
   // this view can be open without the Businesses tab ever having loaded it.
