@@ -227,6 +227,20 @@ function BusinessPicker({ listings, onPick, onCancel }: {
   );
 }
 
+// Every field here already saves on change (each patch/onPatch call fires
+// its upsert immediately) — this button doesn't change that, it just gives
+// a deliberate click to confirm it, since "it just saves as you type" isn't
+// always reassuring on its own.
+function SaveConfirmButton() {
+  const [saved, setSaved] = useState(false);
+  return (
+    <button onClick={() => { setSaved(true); setTimeout(() => setSaved(false), 1500); }}
+      className="mt-2 rounded-md border border-accent px-3 py-1.5 text-[13px] font-medium text-accent hover:bg-accent-soft">
+      {saved ? "Saved ✓" : "Save"}
+    </button>
+  );
+}
+
 function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, onBack, onPatch, onDelete }: {
   week: PlannerWeek;
   weeks: PlannerWeek[]; // the territory's full week history, for rotation "due" status
@@ -734,7 +748,12 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
         </div>
 
         <div className="divide-y">
-          {PLANNER_CONTENT_SLOTS.map((slot) => {
+          {/* Only one Hidden Gem slot is offered by default now — gem2/gem3
+              stay hidden unless a week already has one filled (older weeks),
+              so nothing existing disappears. Need more than one gem for a
+              week? Use Sections instead — it already supports an arbitrary
+              number of business-attached write-ups. */}
+          {PLANNER_CONTENT_SLOTS.filter((slot) => (slot !== "gem2" && slot !== "gem3") || week.picks[slot]).map((slot) => {
             const biz = week.picks[slot];
             return (
               <div key={slot} className="p-4">
@@ -835,14 +854,12 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
         <div className="border-t p-4">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Sections</span>
-            <span className="relative">
-              <select onChange={(e) => { if (e.target.value) { addSection(e.target.value === "__custom" ? "" : e.target.value); e.target.value = ""; } }} defaultValue=""
-                className="rounded-md border bg-background px-2 py-1 text-[12px] font-medium text-accent outline-none">
-                <option value="" disabled>+ Add section</option>
-                {SECTION_PRESETS.map((p) => <option key={p} value={p}>{p}</option>)}
-                <option value="__custom">Custom…</option>
-              </select>
-            </span>
+            <select onChange={(e) => { if (e.target.value) { addSection(e.target.value === "__custom" ? "" : e.target.value); e.target.value = ""; } }} defaultValue=""
+              className="rounded-lg border border-dashed bg-background px-3 py-1.5 text-[13px] font-medium text-muted outline-none hover:bg-surface hover:text-foreground">
+              <option value="" disabled>+ Add section</option>
+              {SECTION_PRESETS.map((p) => <option key={p} value={p}>{p}</option>)}
+              <option value="__custom">Custom…</option>
+            </select>
           </div>
           <div className="space-y-3">
             {sections.map((sec) => (
@@ -868,6 +885,7 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
             ))}
             {sections.length === 0 && <div className="text-[13px] text-muted">No sections yet.</div>}
           </div>
+          <SaveConfirmButton />
         </div>
 
         {/* Events — write-ups, each optionally tied to a business. */}
@@ -924,6 +942,7 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
             ))}
             {events.length === 0 && <div className="text-[13px] text-muted">No events yet.</div>}
           </div>
+          <SaveConfirmButton />
         </div>
 
         {/* Weather — replaces plannerBrief's old hardcoded stub once accepted. */}
