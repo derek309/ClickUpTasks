@@ -396,6 +396,77 @@ function WeekWorkspace({ week, weeks, listings, cityName, onBack, onPatch, onDel
           </div>
         )}
 
+        {/* Who to feature + AI Workshop sit here, above the slots — decide
+            who/what to feature first, then fill the slots informed by that,
+            rather than burying the decision-support tools below the manual
+            editing (same "decide before you write" reasoning applied to
+            Prompt Claude elsewhere in the app). Who to feature's own "+
+            Pick" buttons fill the slots directly, so this ordering also
+            matches the actual usage flow. */}
+        {/* Who to feature — computed live from the directory (claimed+offer
+            for Spotlight, unclaimed-by-score for Hidden Gem) plus this
+            territory's own feature-rotation history, instead of stored
+            data. "Due" businesses (never featured, or not in 90+ days)
+            sort first for Spotlight. */}
+        <div className="border-b bg-background/40 p-4">
+          <div className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-muted">Who to feature</div>
+          {(["spotlight", "hiddenGem"] as const).map((key) => {
+            const list = pools[key];
+            if (!list.length) return null;
+            return (
+              <div key={key} className="mb-3 last:mb-0">
+                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted/70">{key === "spotlight" ? "Spotlight candidates (claimed, active offer)" : "Hidden Gem candidates (unclaimed, top-scored)"}</div>
+                <div className="space-y-1">
+                  {list.map((c) => (
+                    <div key={`${key}-${c.gdPlaceId ?? c.name}`} className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5">
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[13px] font-medium">{c.name}</span>
+                        <span className="block truncate text-[11px] text-muted">{c.cat}{c.due ? " · due" : c.lastFeatured ? ` · featured ${c.lastFeatured}` : ""}</span>
+                      </span>
+                      <button onClick={() => pickCandidate(c)} className="shrink-0 text-[12px] font-medium text-accent hover:underline">+ Pick</button>
+                      <button onClick={() => dismissCandidate(c)} title="Not this week" className="shrink-0 text-muted hover:text-danger"><I.close className="h-3 w-3" /></button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+          {pools.spotlight.length === 0 && pools.hiddenGem.length === 0 && <div className="text-[13px] text-muted">No candidates found yet.</div>}
+        </div>
+
+        {/* AI Workshop — a co-pilot scoped to this week's context (theme,
+            categories, notes, current picks, candidate pool). Never writes
+            anything on its own; results are Copy/Append-only. */}
+        <div className="border-b bg-background/40 p-4">
+          <div className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-muted">AI Workshop</div>
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            <button onClick={() => runWorkshop("angles")} disabled={workshopLoading} className="rounded-md border px-2.5 py-1 text-[12px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-40">Story angles</button>
+            <button onClick={() => runWorkshop("feature")} disabled={workshopLoading} className="rounded-md border px-2.5 py-1 text-[12px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-40">Who to feature</button>
+            <button onClick={() => runWorkshop("draft")} disabled={workshopLoading} className="rounded-md border px-2.5 py-1 text-[12px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-40">Draft copy</button>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <input value={workshopPrompt} onChange={(e) => setWorkshopPrompt(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") runWorkshop("ask"); }}
+              placeholder="Ask the Workshop…" className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1.5 text-[13px] outline-none placeholder:text-muted focus:border-accent" />
+            <button onClick={() => runWorkshop("ask")} disabled={workshopLoading || !workshopPrompt.trim()} className="shrink-0 rounded-md border border-accent px-2.5 py-1.5 text-[13px] font-medium text-accent disabled:opacity-40">Ask</button>
+          </div>
+          {(workshopLoading || workshopResult) && (
+            <div className="mt-2 rounded-lg border bg-background p-3">
+              {workshopLoading ? (
+                <div className="text-[13px] text-muted">Thinking…</div>
+              ) : (
+                <>
+                  <div className="whitespace-pre-wrap text-[13px]">{workshopResult}</div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <button onClick={() => workshopResult && navigator.clipboard.writeText(workshopResult).catch(() => {})} className="text-[12px] font-medium text-accent hover:underline">Copy</button>
+                    <button onClick={() => { if (workshopResult) onPatch({ notes: week.notes ? `${week.notes}\n\n${workshopResult}` : workshopResult }); setWorkshopResult(null); }} className="text-[12px] font-medium text-accent hover:underline">Append to notes</button>
+                    <button onClick={() => setWorkshopResult(null)} className="text-[12px] font-medium text-muted hover:text-foreground">Dismiss</button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
         <div className="divide-y">
           {PLANNER_CONTENT_SLOTS.map((slot) => {
             const biz = week.picks[slot];
@@ -524,70 +595,6 @@ function WeekWorkspace({ week, weeks, listings, cityName, onBack, onPatch, onDel
                   </div>
                 ))}
               </div>
-            </div>
-          )}
-        </div>
-
-        {/* Who to feature — computed live from the directory (claimed+offer
-            for Spotlight, unclaimed-by-score for Hidden Gem) plus this
-            territory's own feature-rotation history, instead of stored
-            data. "Due" businesses (never featured, or not in 90+ days)
-            sort first for Spotlight. */}
-        <div className="border-t p-4">
-          <div className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-muted">Who to feature</div>
-          {(["spotlight", "hiddenGem"] as const).map((key) => {
-            const list = pools[key];
-            if (!list.length) return null;
-            return (
-              <div key={key} className="mb-3 last:mb-0">
-                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted/70">{key === "spotlight" ? "Spotlight candidates (claimed, active offer)" : "Hidden Gem candidates (unclaimed, top-scored)"}</div>
-                <div className="space-y-1">
-                  {list.map((c) => (
-                    <div key={`${key}-${c.gdPlaceId ?? c.name}`} className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5">
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px] font-medium">{c.name}</span>
-                        <span className="block truncate text-[11px] text-muted">{c.cat}{c.due ? " · due" : c.lastFeatured ? ` · featured ${c.lastFeatured}` : ""}</span>
-                      </span>
-                      <button onClick={() => pickCandidate(c)} className="shrink-0 text-[12px] font-medium text-accent hover:underline">+ Pick</button>
-                      <button onClick={() => dismissCandidate(c)} title="Not this week" className="shrink-0 text-muted hover:text-danger"><I.close className="h-3 w-3" /></button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-          {pools.spotlight.length === 0 && pools.hiddenGem.length === 0 && <div className="text-[13px] text-muted">No candidates found yet.</div>}
-        </div>
-
-        {/* AI Workshop — a co-pilot scoped to this week's context (theme,
-            categories, notes, current picks, candidate pool). Never writes
-            anything on its own; results are Copy/Append-only. */}
-        <div className="border-t p-4">
-          <div className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-muted">AI Workshop</div>
-          <div className="mb-2 flex flex-wrap gap-1.5">
-            <button onClick={() => runWorkshop("angles")} disabled={workshopLoading} className="rounded-md border px-2.5 py-1 text-[12px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-40">Story angles</button>
-            <button onClick={() => runWorkshop("feature")} disabled={workshopLoading} className="rounded-md border px-2.5 py-1 text-[12px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-40">Who to feature</button>
-            <button onClick={() => runWorkshop("draft")} disabled={workshopLoading} className="rounded-md border px-2.5 py-1 text-[12px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-40">Draft copy</button>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <input value={workshopPrompt} onChange={(e) => setWorkshopPrompt(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") runWorkshop("ask"); }}
-              placeholder="Ask the Workshop…" className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1.5 text-[13px] outline-none placeholder:text-muted focus:border-accent" />
-            <button onClick={() => runWorkshop("ask")} disabled={workshopLoading || !workshopPrompt.trim()} className="shrink-0 rounded-md border border-accent px-2.5 py-1.5 text-[13px] font-medium text-accent disabled:opacity-40">Ask</button>
-          </div>
-          {(workshopLoading || workshopResult) && (
-            <div className="mt-2 rounded-lg border bg-background p-3">
-              {workshopLoading ? (
-                <div className="text-[13px] text-muted">Thinking…</div>
-              ) : (
-                <>
-                  <div className="whitespace-pre-wrap text-[13px]">{workshopResult}</div>
-                  <div className="mt-2 flex items-center gap-2">
-                    <button onClick={() => workshopResult && navigator.clipboard.writeText(workshopResult).catch(() => {})} className="text-[12px] font-medium text-accent hover:underline">Copy</button>
-                    <button onClick={() => { if (workshopResult) onPatch({ notes: week.notes ? `${week.notes}\n\n${workshopResult}` : workshopResult }); setWorkshopResult(null); }} className="text-[12px] font-medium text-accent hover:underline">Append to notes</button>
-                    <button onClick={() => setWorkshopResult(null)} className="text-[12px] font-medium text-muted hover:text-foreground">Dismiss</button>
-                  </div>
-                </>
-              )}
             </div>
           )}
         </div>
