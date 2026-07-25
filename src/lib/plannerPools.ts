@@ -49,6 +49,10 @@ export function computePlannerPools(opts: {
 
   const toCandidate = (l: PoolListing): PoolCandidate | null => {
     if (excluded.has(l.name.toLowerCase().trim())) return null;
+    // The agency's own directory listing isn't a real feature candidate —
+    // it surfaced as a Spotlight suggestion once already (a real,
+    // claimed+offer listing, just not a business anyone should feature).
+    if (l.name.toLowerCase().replace(/\s+/g, "") === "clickuplocal") return null;
     const idNum = typeof l.id === "number" ? l.id : parseInt(String(l.id), 10);
     if (Number.isFinite(idNum) && dismissed.has(idNum)) return null;
     const rec = history.get(l.name.toLowerCase().trim()) ?? null;
