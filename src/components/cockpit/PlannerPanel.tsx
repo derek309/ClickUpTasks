@@ -13,10 +13,11 @@ import {
   fetchPlannerSections, upsertPlannerSection, deletePlannerSectionDb,
   fetchPlannerEvents, upsertPlannerEvent, deletePlannerEventDb,
   fetchNewsletterItems, upsertNewsletterItem, deleteNewsletterItemDb,
+  fetchThemeCalendar,
 } from "@/lib/db";
 import {
-  PLANNER_CURRENT_WEEK, plannerWeekLabel, addDaysIso, todayIso, PLANNER_CONTENT_SLOTS,
-  type PlannerWeek, type PlannerSlot, type PlannerBiz, type PlannerSection, type PlannerEvent, type NewsletterItem,
+  PLANNER_CURRENT_WEEK, plannerWeekLabel, addDaysIso, todayIso, PLANNER_CONTENT_SLOTS, PLANNER_BUSINESS_SLOTS, themeForWeek,
+  type PlannerWeek, type PlannerSlot, type PlannerBiz, type PlannerSection, type PlannerEvent, type NewsletterItem, type ThemeCalendarEntry,
 } from "@/lib/data";
 import { generatePlannerBrief } from "@/lib/plannerBrief";
 import { pushPlannerWeek } from "@/lib/plannerPush";
@@ -32,6 +33,7 @@ const SLOT_LABELS: Record<PlannerSlot, string> = {
   story: "The Story (local news)",
 };
 const SECTION_PRESETS = ["The Story", "New In Town", "Ask Your Concierge", "Last Call"];
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekChange }: {
   territoryId: string; city: string; state: string;
@@ -43,11 +45,15 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
   const [weeks, setWeeks] = useState<PlannerWeek[]>([]);
   const [loading, setLoading] = useState(true);
   const [openWeekId, setOpenWeekId] = useState<string | null>(initialWeekId ?? null);
+  const [calendarOpen, setCalendarOpen] = useState(false);
   useEffect(() => { onWeekChange?.(openWeekId); }, [openWeekId, onWeekChange]);
   // Business typeahead source for slot/section/event picks — the same city
   // fetch TerritoryDirectory already uses, cached here independently since
   // this view can be open without the Businesses tab ever having loaded it.
   const [listings, setListings] = useState<DirectoryListing[]>([]);
+  // The theme calendar is shared across every city, so it's fetched once
+  // here rather than per-territory like weeks/listings.
+  const [themeCalendar, setThemeCalendar] = useState<ThemeCalendarEntry[]>([]);
 
   useEffect(() => {
     let alive = true;
@@ -56,6 +62,12 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
     fetchPlannerWeeks(territoryId).then((ws) => { if (alive) { setWeeks(ws); setLoading(false); } });
     return () => { alive = false; };
   }, [territoryId]);
+
+  useEffect(() => {
+    let alive = true;
+    fetchThemeCalendar().then((c) => { if (alive) setThemeCalendar(c); });
+    return () => { alive = false; };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -70,8 +82,12 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
   const hasWeek = (w: string) => weeks.some((x) => x.week === w);
 
   const createWeek = async (week: string) => {
+    // Pre-fill from the theme calendar as a starting default — themeOverride
+    // and categories stay fully editable either way, "override" already
+    // implies the calendar entry isn't the final word.
+    const assigned = themeForWeek(week, themeCalendar);
     const w: PlannerWeek = {
-      id: newId("pw_"), territoryId, week, themeOverride: "", categories: [], notes: "",
+      id: newId("pw_"), territoryId, week, themeOverride: assigned?.title ?? "", categories: assigned?.categories ?? [], notes: "",
       picks: {}, dismissed: [], archived: false, sentDate: null, wpPushedAt: null, createdAt: new Date().toISOString(),
     };
     setWeeks((ws) => [w, ...ws]);
@@ -97,7 +113,7 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
 
   if (openWeek) {
     return (
-      <WeekWorkspace week={openWeek} weeks={weeks} listings={listings} cityName={city} onBack={() => setOpenWeekId(null)}
+      <WeekWorkspace week={openWeek} weeks={weeks} listings={listings} cityName={city} state={state} themeCalendar={themeCalendar} onBack={() => setOpenWeekId(null)}
         onPatch={(patch) => patchWeek(openWeek.id, patch)} onDelete={() => deleteWeek(openWeek.id)} />
     );
   }
@@ -135,6 +151,40 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
           );
         })}
       </div>
+
+      {/* The full year's seasonal theme plan (planner_theme_calendar) — read
+          only here; a new week's theme/categories are pre-filled from this
+          via themeForWeek, but the calendar itself isn't edited in-app. */}
+      {themeCalendar.length > 0 && (
+        <div className="mt-3 overflow-hidden rounded-xl border bg-surface shadow-soft">
+          <button onClick={() => setCalendarOpen((o) => !o)} className="flex w-full items-center justify-between px-4 py-2.5 text-left">
+            <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Theme calendar</span>
+            <I.chevron className={`text-muted transition-transform ${calendarOpen ? "" : "-rotate-90"}`} />
+          </button>
+          {calendarOpen && (
+            <div className="divide-y border-t">
+              {MONTH_NAMES.map((name, i) => {
+                const entries = themeCalendar.filter((c) => c.month === i + 1).sort((a, b) => a.weekOfMonth - b.weekOfMonth);
+                if (!entries.length) return null;
+                return (
+                  <div key={name} className="px-4 py-2.5">
+                    <div className="mb-1 text-[12px] font-semibold text-foreground">{name}</div>
+                    <div className="space-y-0.5">
+                      {entries.map((e) => (
+                        <div key={e.id} className="flex flex-wrap items-baseline gap-x-2 text-[13px]">
+                          <span className="text-muted">Week {e.weekOfMonth}</span>
+                          <span className="font-medium">{e.title}</span>
+                          {e.categories.length > 0 && <span className="text-[12px] text-muted">· {e.categories.join(", ")}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -177,17 +227,25 @@ function BusinessPicker({ listings, onPick, onCancel }: {
   );
 }
 
-function WeekWorkspace({ week, weeks, listings, cityName, onBack, onPatch, onDelete }: {
+function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, onBack, onPatch, onDelete }: {
   week: PlannerWeek;
   weeks: PlannerWeek[]; // the territory's full week history, for rotation "due" status
   listings: DirectoryListing[];
   cityName: string;
+  state: string;
+  themeCalendar: ThemeCalendarEntry[];
   onBack: () => void;
   onPatch: (patch: Partial<PlannerWeek>) => void;
   onDelete: () => void;
 }) {
   const [pickerSlot, setPickerSlot] = useState<PlannerSlot | null>(null);
   const [catInput, setCatInput] = useState("");
+  const [themeOptions, setThemeOptions] = useState<{ title: string; description: string }[] | null>(null);
+  const [themeLoading, setThemeLoading] = useState(false);
+  const [themeError, setThemeError] = useState<string | null>(null);
+  const [categorySuggestions, setCategorySuggestions] = useState<string[] | null>(null);
+  const [categoriesLoading, setCategoriesLoading] = useState(false);
+  const [categoriesError, setCategoriesError] = useState<string | null>(null);
   const [sections, setSections] = useState<PlannerSection[]>([]);
   const [events, setEvents] = useState<PlannerEvent[]>([]);
   const [items, setItems] = useState<NewsletterItem[]>([]);
@@ -322,6 +380,111 @@ function WeekWorkspace({ week, weeks, listings, cityName, onBack, onPatch, onDel
     onPatch({ dismissed: [...week.dismissed, c.gdPlaceId] });
   };
 
+  // Inline per-slot AI suggest — a curated top 1-2 from the SAME deterministic
+  // pool "Who to feature" already computes (spotlight pool for the spotlight
+  // slot, the shared hidden-gem pool for gem/gem2/gem3), not a new candidate
+  // source. Never persisted: Accept writes through setSlot/dismissCandidate
+  // exactly like the bottom pool card does; Decline just drops the card.
+  const poolForSlot = (slot: PlannerSlot) => (slot === "spotlight" ? pools.spotlight : pools.hiddenGem);
+  const [slotSuggestLoading, setSlotSuggestLoading] = useState<Partial<Record<PlannerSlot, boolean>>>({});
+  const [slotSuggestions, setSlotSuggestions] = useState<Partial<Record<PlannerSlot, { name: string; rationale: string }[]>>>({});
+  const [slotSuggestError, setSlotSuggestError] = useState<Partial<Record<PlannerSlot, string>>>({});
+
+  const suggestForSlot = async (slot: PlannerSlot) => {
+    const candidates = poolForSlot(slot);
+    setSlotSuggestLoading((m) => ({ ...m, [slot]: true }));
+    setSlotSuggestions((m) => ({ ...m, [slot]: undefined }));
+    setSlotSuggestError((m) => ({ ...m, [slot]: undefined }));
+    try {
+      const res = await authedFetch("/api/ai/planner-workshop", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "suggest_slot", cityName, theme: week.themeOverride, categories: week.categories, slot,
+          candidates: candidates.map((c) => ({ name: c.name, cat: c.cat, due: c.due, lastFeatured: c.lastFeatured })),
+        }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(j.suggestions)) setSlotSuggestions((m) => ({ ...m, [slot]: j.suggestions }));
+      else setSlotSuggestError((m) => ({ ...m, [slot]: j.error || "Suggest failed." }));
+    } catch (e) {
+      setSlotSuggestError((m) => ({ ...m, [slot]: e instanceof Error ? e.message : "Suggest failed." }));
+    } finally {
+      setSlotSuggestLoading((m) => ({ ...m, [slot]: false }));
+    }
+  };
+  const acceptSlotSuggestion = (slot: PlannerSlot, s: { name: string; rationale: string }) => {
+    const candidate = poolForSlot(slot).find((c) => c.name === s.name);
+    setSlot(slot, candidate
+      ? { clientId: null, gdPlaceId: candidate.gdPlaceId, name: candidate.name, url: "", cat: candidate.cat, note: "" }
+      : { clientId: null, gdPlaceId: null, name: s.name, url: "", cat: "", note: "" });
+    setSlotSuggestions((m) => ({ ...m, [slot]: undefined }));
+  };
+  const declineSlotSuggestion = (slot: PlannerSlot, s: { name: string; rationale: string }) => {
+    const candidate = poolForSlot(slot).find((c) => c.name === s.name);
+    if (candidate) dismissCandidate(candidate);
+    setSlotSuggestions((m) => ({ ...m, [slot]: (m[slot] ?? []).filter((x) => x.name !== s.name) }));
+  };
+
+  // Story + Events: real, live web search (Gemini google_search grounding),
+  // not the deterministic pool above — genuinely new content this territory
+  // has no data of its own for. Same suggest → accept/decline shape either
+  // way; accept writes through the existing setSlot/upsertPlannerEvent paths.
+  type StorySuggestion = { headline: string; summary: string; sourceUrl?: string; sourceName?: string };
+  type EventSuggestion = { title: string; summary: string; startDate?: string; venue?: string; sourceUrl?: string };
+  const [storySuggestLoading, setStorySuggestLoading] = useState(false);
+  const [storySuggestions, setStorySuggestions] = useState<StorySuggestion[] | null>(null);
+  const [storySuggestError, setStorySuggestError] = useState<string | null>(null);
+  const [eventsSuggestLoading, setEventsSuggestLoading] = useState(false);
+  const [eventsSuggestions, setEventsSuggestions] = useState<EventSuggestion[] | null>(null);
+  const [eventsSuggestError, setEventsSuggestError] = useState<string | null>(null);
+
+  const suggestStory = async () => {
+    setStorySuggestLoading(true); setStorySuggestions(null); setStorySuggestError(null);
+    try {
+      const res = await authedFetch("/api/ai/planner-workshop", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "suggest_story", cityName, state }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(j.suggestions)) setStorySuggestions(j.suggestions);
+      else setStorySuggestError(j.error || "Search failed.");
+    } catch (e) {
+      setStorySuggestError(e instanceof Error ? e.message : "Search failed.");
+    } finally {
+      setStorySuggestLoading(false);
+    }
+  };
+  const acceptStorySuggestion = (s: StorySuggestion) => {
+    setSlot("story", { clientId: null, gdPlaceId: null, name: s.headline, url: s.sourceUrl ?? "", cat: "News", note: s.summary ?? "" });
+    setStorySuggestions(null);
+  };
+  const declineStorySuggestion = (s: StorySuggestion) => setStorySuggestions((list) => (list ?? []).filter((x) => x !== s));
+
+  const suggestEvents = async () => {
+    setEventsSuggestLoading(true); setEventsSuggestions(null); setEventsSuggestError(null);
+    try {
+      const res = await authedFetch("/api/ai/planner-workshop", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "suggest_events", cityName, state, dateFrom: addDaysIso(week.week, -3), dateTo: addDaysIso(week.week, 3) }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(j.suggestions)) setEventsSuggestions(j.suggestions);
+      else setEventsSuggestError(j.error || "Search failed.");
+    } catch (e) {
+      setEventsSuggestError(e instanceof Error ? e.message : "Search failed.");
+    } finally {
+      setEventsSuggestLoading(false);
+    }
+  };
+  const acceptEventSuggestion = (s: EventSuggestion) => {
+    const text = [s.title, [s.startDate, s.venue].filter(Boolean).join(" — ")].filter(Boolean).join("\n") + (s.summary ? `\n${s.summary}` : "");
+    const e: PlannerEvent = { id: newId("pev_"), weekId: week.id, position: events.length, text, biz: null };
+    setEvents((es) => [...es, e]);
+    upsertPlannerEvent(e);
+    setEventsSuggestions((list) => (list ?? []).filter((x) => x !== s));
+  };
+  const declineEventSuggestion = (s: EventSuggestion) => setEventsSuggestions((list) => (list ?? []).filter((x) => x !== s));
+
   const runWorkshop = async (mode: "angles" | "draft" | "feature" | "ask") => {
     if (mode === "ask" && !workshopPrompt.trim()) return;
     setWorkshopLoading(true); setWorkshopResult(null);
@@ -341,6 +504,57 @@ function WeekWorkspace({ week, weeks, listings, cityName, onBack, onPatch, onDel
     } finally {
       setWorkshopLoading(false);
     }
+  };
+
+  // The theme calendar's raw assignment for this week — a seed for
+  // suggest_theme, not something written to the week until a rep picks it.
+  const assignedTheme = useMemo(() => themeForWeek(week.week, themeCalendar), [week.week, themeCalendar]);
+
+  const suggestThemes = async () => {
+    setThemeLoading(true); setThemeOptions(null); setThemeError(null); setCategorySuggestions(null);
+    try {
+      const [, m, d] = week.week.split("-").map(Number);
+      const weekIndex = Math.min(5, Math.max(1, Math.ceil(d / 7)));
+      const res = await authedFetch("/api/ai/planner-workshop", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "suggest_theme", cityName, month: m, weekIndex, assignedTitle: assignedTheme?.title, assignedCategories: assignedTheme?.categories }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(j.options)) setThemeOptions(j.options);
+      else setThemeError(j.error || "Theme suggestion failed.");
+    } catch (e) {
+      setThemeError(e instanceof Error ? e.message : "Theme suggestion failed.");
+    } finally {
+      setThemeLoading(false);
+    }
+  };
+
+  const chooseTheme = (opt: { title: string; description: string }) => {
+    onPatch({ themeOverride: opt.title });
+    setThemeOptions(null);
+    suggestCategoriesFor(opt.title, opt.description);
+  };
+
+  const suggestCategoriesFor = async (theme: string, themeDescription?: string) => {
+    setCategoriesLoading(true); setCategorySuggestions(null); setCategoriesError(null);
+    try {
+      const res = await authedFetch("/api/ai/planner-workshop", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "suggest_categories", cityName, theme, themeDescription }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(j.categories)) setCategorySuggestions(j.categories);
+      else setCategoriesError(j.error || "Category suggestion failed.");
+    } catch (e) {
+      setCategoriesError(e instanceof Error ? e.message : "Category suggestion failed.");
+    } finally {
+      setCategoriesLoading(false);
+    }
+  };
+
+  const acceptCategorySuggestion = (c: string) => {
+    if (!week.categories.includes(c)) onPatch({ categories: [...week.categories, c] });
+    setCategorySuggestions((cs) => (cs ? cs.filter((x) => x !== c) : cs));
   };
 
   const weekItems = items.filter((it) => it.weekId === week.id);
@@ -371,9 +585,24 @@ function WeekWorkspace({ week, weeks, listings, cityName, onBack, onPatch, onDel
               <button onClick={onDelete} title="Delete this week" className="rounded-md p-1.5 text-muted hover:bg-background hover:text-danger"><I.trash /></button>
             </div>
           </div>
-          <input value={week.themeOverride} onChange={(e) => onPatch({ themeOverride: e.target.value })} placeholder="Theme (e.g. “Foodie favorites”)"
-            className="mb-2 w-full rounded-lg border bg-surface px-3 py-1.5 text-[14px] font-medium outline-none placeholder:text-muted focus:border-accent" />
-          <div className="mb-2 flex flex-wrap items-center gap-1.5">
+          <div className="mb-2 flex items-center gap-1.5">
+            <input value={week.themeOverride} onChange={(e) => onPatch({ themeOverride: e.target.value })} placeholder="Theme (e.g. “Foodie favorites”)"
+              className="min-w-0 flex-1 rounded-lg border bg-surface px-3 py-1.5 text-[14px] font-medium outline-none placeholder:text-muted focus:border-accent" />
+            <button onClick={suggestThemes} disabled={themeLoading} title="Suggest themes for this week" className="shrink-0 rounded-lg border px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-40">{themeLoading ? "Thinking…" : "✨ Suggest themes"}</button>
+          </div>
+          {themeError && <div className="mb-2 text-[12px] text-danger">{themeError}</div>}
+          {themeOptions && (
+            <div className="mb-2 space-y-1">
+              {themeOptions.map((opt) => (
+                <button key={opt.title} onClick={() => chooseTheme(opt)} className="block w-full rounded-md border bg-background px-2.5 py-1.5 text-left hover:bg-accent-soft/50">
+                  <span className="block text-[13px] font-medium">{opt.title}</span>
+                  <span className="block text-[12px] text-muted">{opt.description}</span>
+                </button>
+              ))}
+              <button onClick={() => setThemeOptions(null)} className="text-[12px] font-medium text-muted hover:text-foreground">Dismiss</button>
+            </div>
+          )}
+          <div className="mb-1 flex flex-wrap items-center gap-1.5">
             {week.categories.map((c) => (
               <span key={c} className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-[12px] font-medium text-accent">
                 {c}
@@ -382,7 +611,20 @@ function WeekWorkspace({ week, weeks, listings, cityName, onBack, onPatch, onDel
             ))}
             <input value={catInput} onChange={(e) => setCatInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCategory(); } }}
               placeholder="+ Theme category" className="min-w-[120px] flex-1 rounded-md border-transparent bg-transparent px-1.5 py-0.5 text-[12px] outline-none placeholder:text-muted focus:border-accent focus:bg-surface" />
+            {!categoriesLoading && !categorySuggestions && (
+              <button onClick={() => suggestCategoriesFor(week.themeOverride)} disabled={!week.themeOverride.trim()} title="Suggest categories for this theme" className="shrink-0 text-[12px] font-medium text-accent hover:underline disabled:opacity-40 disabled:hover:no-underline">✨ Suggest categories</button>
+            )}
+            {categoriesLoading && <span className="text-[12px] text-muted">Thinking…</span>}
           </div>
+          {categoriesError && <div className="mb-2 text-[12px] text-danger">{categoriesError}</div>}
+          {categorySuggestions && categorySuggestions.length > 0 && (
+            <div className="mb-2 flex flex-wrap items-center gap-1.5">
+              {categorySuggestions.map((c) => (
+                <button key={c} onClick={() => acceptCategorySuggestion(c)} className="inline-flex items-center gap-1 rounded-full border border-dashed border-accent px-2 py-0.5 text-[12px] font-medium text-accent hover:bg-accent-soft"><I.plus className="h-3 w-3" /> {c}</button>
+              ))}
+              <button onClick={() => setCategorySuggestions(null)} className="text-[12px] font-medium text-muted hover:text-foreground">Dismiss</button>
+            </div>
+          )}
           <textarea value={week.notes} onChange={(e) => onPatch({ notes: e.target.value })} placeholder="Notes for this week…" rows={2}
             className="w-full resize-y rounded-lg border bg-surface px-3 py-1.5 text-[13px] outline-none placeholder:text-muted focus:border-accent" />
         </div>
@@ -458,7 +700,50 @@ function WeekWorkspace({ week, weeks, listings, cityName, onBack, onPatch, onDel
                 ) : pickerSlot === slot ? (
                   <BusinessPicker listings={listings} onPick={(biz2) => setSlot(slot, biz2)} onCancel={() => setPickerSlot(null)} />
                 ) : (
-                  <button onClick={() => setPickerSlot(slot)} className="rounded-lg border border-dashed px-3 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">+ Pick a business</button>
+                  <div>
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={() => setPickerSlot(slot)} className="rounded-lg border border-dashed px-3 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">+ Pick a business</button>
+                      {PLANNER_BUSINESS_SLOTS.includes(slot) && (
+                        <button onClick={() => suggestForSlot(slot)} disabled={!!slotSuggestLoading[slot]} className="rounded-lg border px-3 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-40">{slotSuggestLoading[slot] ? "Thinking…" : "✨ Suggest"}</button>
+                      )}
+                      {slot === "story" && (
+                        <button onClick={suggestStory} disabled={storySuggestLoading} className="rounded-lg border px-3 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-40">{storySuggestLoading ? "Searching…" : "✨ Find local news"}</button>
+                      )}
+                    </div>
+                    {slotSuggestError[slot] && <div className="mt-1.5 text-[12px] text-danger">{slotSuggestError[slot]}</div>}
+                    {slotSuggestions[slot] && (
+                      <div className="mt-1.5 space-y-1.5">
+                        {(slotSuggestions[slot] ?? []).length === 0 && <div className="text-[13px] text-muted">No good fits found in the current candidate pool.</div>}
+                        {(slotSuggestions[slot] ?? []).map((s) => (
+                          <div key={s.name} className="rounded-lg border bg-background px-3 py-2">
+                            <div className="text-[13px] font-medium">{s.name}</div>
+                            <div className="mb-1.5 text-[12px] text-muted">{s.rationale}</div>
+                            <div className="flex items-center gap-2">
+                              <button onClick={() => acceptSlotSuggestion(slot, s)} className="text-[12px] font-medium text-accent hover:underline">Accept</button>
+                              <button onClick={() => declineSlotSuggestion(slot, s)} className="text-[12px] font-medium text-muted hover:text-foreground">Decline</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {slot === "story" && storySuggestError && <div className="mt-1.5 text-[12px] text-danger">{storySuggestError}</div>}
+                    {slot === "story" && storySuggestions && (
+                      <div className="mt-1.5 space-y-1.5">
+                        {storySuggestions.length === 0 && <div className="text-[13px] text-muted">No local news found.</div>}
+                        {storySuggestions.map((s) => (
+                          <div key={s.headline} className="rounded-lg border bg-background px-3 py-2">
+                            <div className="text-[13px] font-medium">{s.headline}</div>
+                            <div className="text-[12px] text-muted">{s.summary}</div>
+                            {s.sourceName && <div className="mb-1.5 text-[11px] text-muted">Source: {s.sourceName}</div>}
+                            <div className="flex items-center gap-2">
+                              <button onClick={() => acceptStorySuggestion(s)} className="text-[12px] font-medium text-accent hover:underline">Accept</button>
+                              <button onClick={() => declineStorySuggestion(s)} className="text-[12px] font-medium text-muted hover:text-foreground">Decline</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             );
@@ -509,8 +794,28 @@ function WeekWorkspace({ week, weeks, listings, cityName, onBack, onPatch, onDel
         <div className="border-t p-4">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Events</span>
-            <button onClick={addEvent} className="text-[12px] font-medium text-accent hover:underline">+ Add event</button>
+            <span className="flex items-center gap-2">
+              <button onClick={suggestEvents} disabled={eventsSuggestLoading} className="text-[12px] font-medium text-accent hover:underline disabled:opacity-40 disabled:hover:no-underline">{eventsSuggestLoading ? "Searching…" : "✨ Find events"}</button>
+              <button onClick={addEvent} className="text-[12px] font-medium text-accent hover:underline">+ Add event</button>
+            </span>
           </div>
+          {eventsSuggestError && <div className="mb-2 text-[12px] text-danger">{eventsSuggestError}</div>}
+          {eventsSuggestions && (
+            <div className="mb-3 space-y-1.5">
+              {eventsSuggestions.length === 0 && <div className="text-[13px] text-muted">No events found for this week.</div>}
+              {eventsSuggestions.map((s) => (
+                <div key={s.title} className="rounded-lg border bg-background p-3">
+                  <div className="text-[13px] font-medium">{s.title}</div>
+                  <div className="text-[12px] text-muted">{[s.startDate, s.venue].filter(Boolean).join(" · ")}</div>
+                  <div className="mb-1.5 text-[12px] text-muted">{s.summary}</div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => acceptEventSuggestion(s)} className="text-[12px] font-medium text-accent hover:underline">Accept</button>
+                    <button onClick={() => declineEventSuggestion(s)} className="text-[12px] font-medium text-muted hover:text-foreground">Decline</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="space-y-3">
             {events.map((ev) => (
               <div key={ev.id} className="rounded-lg border bg-background p-3">

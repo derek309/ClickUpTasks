@@ -419,6 +419,20 @@ export function plannerWeekLabel(week: string): string {
   return `${monthName(s.m)} ${s.d} – ${e.d}, ${e.y}`;
 }
 
+// The calendar entry auto-assigned to a week, by its Wednesday's month +
+// week-of-month — a direct port of WordPress's cul_sales_week_theme (same
+// clamped ceil(day/7) index, same "fall back to the month's last entry"
+// behavior when a month has fewer than 5 seeded rows) so a given date
+// resolves to the same theme it always has, just re-derived here instead of
+// carried over as stored data.
+export function themeForWeek(weekIso: string, calendar: ThemeCalendarEntry[]): ThemeCalendarEntry | null {
+  const [, m, d] = weekIso.split("-").map(Number);
+  const weekIndex = Math.min(5, Math.max(1, Math.ceil(d / 7)));
+  const list = calendar.filter((c) => c.month === m).sort((a, b) => a.weekOfMonth - b.weekOfMonth);
+  if (!list.length) return null;
+  return list[Math.min(weekIndex - 1, list.length - 1)];
+}
+
 // A reusable checklist, applied either to quick-populate a new task (title
 // defaults to the template name) or to append the checklist onto an
 // existing task's subtasks.
