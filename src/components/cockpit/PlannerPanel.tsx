@@ -451,6 +451,50 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     ? <span title="Claimed listing" className="shrink-0 text-emerald-500"><I.check className="h-3.5 w-3.5" /></span>
     : <span title="Unclaimed listing" className="h-2 w-2 shrink-0 rounded-full border border-muted/50" />;
 
+  // Invite-to-be-featured — proxies WordPress's own outreach/send action
+  // (real GHL email, real contact upsert, logged on WP's own outreach
+  // record). ClickUpTasks is just the trigger; nothing here is persisted
+  // locally beyond this session's own feedback. gdPlaceId-only: WordPress
+  // resolves the invite email from the GeoDirectory listing itself, so a
+  // free-text pick with no listing has nothing to invite.
+  const [inviteState, setInviteState] = useState<Partial<Record<number, "sending" | "sent" | string>>>({});
+  const [inviteArmed, setInviteArmed] = useState<number | null>(null);
+  const humanizeInviteError = (err: string | undefined) =>
+    err === "no_email" ? "No email on file for this listing."
+    : err === "ghl_not_connected" ? "GoHighLevel isn't connected for this city yet."
+    : err || "Invite failed.";
+  const sendInvite = async (gdPlaceId: number) => {
+    setInviteArmed(null);
+    setInviteState((m) => ({ ...m, [gdPlaceId]: "sending" }));
+    try {
+      const res = await authedFetch("/api/planner/invite/send", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ territoryId: week.territoryId, week: week.week, gdPlaceId }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (res.ok && j.ok) setInviteState((m) => ({ ...m, [gdPlaceId]: "sent" }));
+      else setInviteState((m) => ({ ...m, [gdPlaceId]: humanizeInviteError(j.error) }));
+    } catch (e) {
+      setInviteState((m) => ({ ...m, [gdPlaceId]: e instanceof Error ? e.message : "Invite failed." }));
+    }
+  };
+  // Two-click arm/confirm — mirrors WP's own caution around a button that
+  // sends a real email, not just an in-app action.
+  const renderInvite = (gdPlaceId: number | null) => {
+    if (gdPlaceId == null) return null;
+    const state = inviteState[gdPlaceId];
+    if (state === "sending") return <span className="shrink-0 text-[12px] text-muted">Sending…</span>;
+    if (state === "sent") return <span className="shrink-0 text-[12px] font-medium text-emerald-600">Invited ✓</span>;
+    if (state) return (
+      <span className="flex shrink-0 items-center gap-1.5">
+        <span className="text-[11px] text-danger">{state}</span>
+        <button onClick={() => setInviteState((m) => ({ ...m, [gdPlaceId]: undefined }))} className="text-[12px] font-medium text-muted hover:text-foreground">Dismiss</button>
+      </span>
+    );
+    if (inviteArmed === gdPlaceId) return <button onClick={() => sendInvite(gdPlaceId)} className="shrink-0 text-[12px] font-medium text-danger hover:underline">Confirm invite?</button>;
+    return <button onClick={() => setInviteArmed(gdPlaceId)} className="shrink-0 text-[12px] font-medium text-accent hover:underline">✉️ Invite</button>;
+  };
+
   // Story + Events: real, live web search (Gemini google_search grounding),
   // not the deterministic pool above — genuinely new content this territory
   // has no data of its own for. Same suggest → accept/decline shape either
@@ -796,9 +840,10 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
                           <div key={s.name} className="rounded-lg border bg-background px-3 py-2">
                             <div className="flex items-center gap-1.5"><ClaimBadge slot={slot} /><div className="text-[13px] font-medium">{s.name}</div></div>
                             <div className="mb-1.5 text-[12px] text-muted">{s.rationale}</div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                               <button onClick={() => acceptSlotSuggestion(slot, s)} className="text-[12px] font-medium text-accent hover:underline">Accept</button>
                               <button onClick={() => declineSlotSuggestion(slot, s)} className="text-[12px] font-medium text-muted hover:text-foreground">Decline</button>
+                              {renderInvite(poolForSlot(slot).find((c) => c.name === s.name)?.gdPlaceId ?? null)}
                             </div>
                           </div>
                         ))}
@@ -814,6 +859,7 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
                               <span className="block truncate text-[13px] font-medium">{c.name}</span>
                               <span className="block truncate text-[11px] text-muted">{c.cat}{c.due ? " · due" : c.lastFeatured ? ` · featured ${c.lastFeatured}` : ""}</span>
                             </span>
+                            {renderInvite(c.gdPlaceId)}
                             <button onClick={() => pickPoolCandidate(slot, c)} className="shrink-0 text-[12px] font-medium text-accent hover:underline">+ Pick</button>
                             <button onClick={() => dismissCandidate(c)} title="Not this week" className="shrink-0 text-muted hover:text-danger"><I.close className="h-3 w-3" /></button>
                           </div>
