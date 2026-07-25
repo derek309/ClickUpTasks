@@ -296,6 +296,11 @@ export interface Territory {
   city: string;
   state: string;
   assignedTo: string[]; // roster ids of the assigned ambassadors (one or more; [] = unassigned)
+  // Explicit override for the WordPress option-key slug push-sync writes
+  // into (WordPress's own PHP sanitize_title() of the city name) — avoids
+  // silently drifting from a JS re-derivation on punctuation/spelling edge
+  // cases. Null = derive it the simple way (see planner push route).
+  wpCitySlug: string | null;
 }
 
 // --- Content Planner (the per-city weekly newsletter workflow) -------------

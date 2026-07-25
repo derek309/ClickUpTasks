@@ -2617,7 +2617,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return { id, ready: upsertClient(nc) };
   };
   const addTerritory = (spec: { name: string; city: string; state: string; assignedTo: string[] }) => {
-    const t: Territory = { id: newId("terr_"), ...spec };
+    const t: Territory = { id: newId("terr_"), wpCitySlug: null, ...spec };
     setTerritories((ts) => [...ts, t]);
     upsertTerritory(t);
     ensureTerritoryClient(t);

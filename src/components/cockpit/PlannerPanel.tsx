@@ -6,7 +6,7 @@
 // public "{City} Weekly" archive page only (Phase 4). Phase 3: sections/
 // events editors + brief generation + the newsletter backlog. The AI
 // Workshop/candidate pools (Phase 5) aren't built yet.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
 import {
   fetchPlannerWeeks, upsertPlannerWeek, deletePlannerWeekDb,
@@ -15,10 +15,11 @@ import {
   fetchNewsletterItems, upsertNewsletterItem, deleteNewsletterItemDb,
 } from "@/lib/db";
 import {
-  PLANNER_CURRENT_WEEK, plannerWeekLabel, addDaysIso, PLANNER_CONTENT_SLOTS,
+  PLANNER_CURRENT_WEEK, plannerWeekLabel, addDaysIso, todayIso, PLANNER_CONTENT_SLOTS,
   type PlannerWeek, type PlannerSlot, type PlannerBiz, type PlannerSection, type PlannerEvent, type NewsletterItem,
 } from "@/lib/data";
 import { generatePlannerBrief } from "@/lib/plannerBrief";
+import { pushPlannerWeek } from "@/lib/plannerPush";
 import { I, newId } from "./ui";
 import { type DirectoryListing } from "./TerritoryDirectory";
 
@@ -187,17 +188,44 @@ function WeekWorkspace({ week, listings, cityName, onBack, onPatch, onDelete }: 
   const [pickerEventId, setPickerEventId] = useState<string | null>(null);
   const [newItemTitle, setNewItemTitle] = useState("");
   const [brief, setBrief] = useState<string | null>(null);
+  const [pushStatus, setPushStatus] = useState<"idle" | "pushing" | "pushed" | "error">("idle");
+  const [pushError, setPushError] = useState<string | null>(null);
+  // Skips the auto-push effect's very first fire for a given week (which
+  // otherwise trips the moment the section/event fetch above resolves,
+  // pushing on mere navigation instead of a real edit).
+  const skipNextAutoPush = useRef(true);
 
   useEffect(() => {
     let alive = true;
+    skipNextAutoPush.current = true;
     Promise.all([fetchPlannerSections(week.id), fetchPlannerEvents(week.id), fetchNewsletterItems(week.territoryId)]).then(([s, e, allItems]) => {
       if (!alive) return;
       setSections(s); setEvents(e);
       setItems(allItems.filter((it) => it.weekId === week.id || it.weekId === null));
     });
     setBrief(null);
+    setPushStatus("idle");
     return () => { alive = false; };
   }, [week.id, week.territoryId]);
+
+  const pushNow = async () => {
+    setPushStatus("pushing"); setPushError(null);
+    const r = await pushPlannerWeek(week, sections, events);
+    if (r.ok) { setPushStatus("pushed"); onPatch({ wpPushedAt: new Date().toISOString() }); }
+    else { setPushStatus("error"); setPushError(r.error ?? "Push failed"); }
+  };
+
+  // Auto-push on every settled change, per the plan's "push on every
+  // debounced save" call — the public archive already gates on ship-date,
+  // so an early partial push has zero exposure; not gating this behind a
+  // manual Publish avoids a rep forgetting and an issue silently not
+  // shipping. Debounced so a burst of keystrokes doesn't hammer WordPress.
+  useEffect(() => {
+    if (skipNextAutoPush.current) { skipNextAutoPush.current = false; return; }
+    const t = setTimeout(() => { pushNow(); }, 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [week.picks, week.themeOverride, week.categories, week.notes, sections, events]);
 
   const setSlot = (slot: PlannerSlot, biz: PlannerBiz | null) => {
     const picks = { ...week.picks };
@@ -273,10 +301,22 @@ function WeekWorkspace({ week, listings, cityName, onBack, onPatch, onDelete }: 
       <button onClick={onBack} className="mb-3 inline-flex items-center gap-1 text-[13px] font-medium text-muted hover:text-foreground"><I.chevron className="rotate-90" /> All weeks</button>
       <div className="overflow-hidden rounded-xl border bg-surface shadow-soft">
         <div className="border-b bg-background/40 px-4 py-3">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <span className="text-[15px] font-semibold">{plannerWeekLabel(week.week)}</span>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <span className="flex items-center gap-2">
+              <span className="text-[15px] font-semibold">{plannerWeekLabel(week.week)}</span>
+              {week.archived && <span className="rounded-full bg-background px-1.5 py-0.5 text-[11px] font-semibold text-muted">Archived</span>}
+            </span>
             <div className="flex items-center gap-1.5">
-              {week.sentDate && <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[12px] font-semibold text-emerald-600">Sent {week.sentDate}</span>}
+              <span title={pushError ?? undefined} className="text-[12px] text-muted">
+                {pushStatus === "pushing" ? "Pushing to site…" : pushStatus === "pushed" ? "Pushed ✓" : pushStatus === "error" ? "Push failed" : week.wpPushedAt ? `Pushed ${new Date(week.wpPushedAt).toLocaleTimeString()}` : "Not pushed yet"}
+              </span>
+              <button onClick={pushNow} disabled={pushStatus === "pushing"} className="rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-40">Push now</button>
+              {week.sentDate ? (
+                <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[12px] font-semibold text-emerald-600">Sent {week.sentDate}</span>
+              ) : (
+                <button onClick={() => { onPatch({ sentDate: todayIso() }); pushNow(); }} className="rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-background hover:text-foreground">Mark sent</button>
+              )}
+              <button onClick={() => { onPatch({ archived: !week.archived }); pushNow(); }} className="rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-background hover:text-foreground">{week.archived ? "Unarchive" : "Archive"}</button>
               <button onClick={generateBrief} className="rounded-md border border-accent px-2.5 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft">Generate brief</button>
               <button onClick={onDelete} title="Delete this week" className="rounded-md p-1.5 text-muted hover:bg-background hover:text-danger"><I.trash /></button>
             </div>
