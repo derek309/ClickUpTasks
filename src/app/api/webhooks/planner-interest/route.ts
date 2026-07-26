@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
   const email: string = String(body?.email ?? "").trim();
   const phone: string = String(body?.phone ?? "").trim();
   const ghlContactId: string = String(body?.ghl_contact_id ?? "").trim();
-  if (!city || !week || (event !== "interested" && event !== "intake")) {
+  if (!city || !week || (event !== "interested" && event !== "intake" && event !== "approved")) {
     return NextResponse.json({ error: "Missing city/week or unknown event" }, { status: 400 });
   }
 
@@ -87,6 +87,8 @@ export async function POST(req: NextRequest) {
   const weekLabel = plannerWeekLabel(week);
   const eventLine = event === "interested"
     ? `Clicked "I'm interested" on the ${weekLabel} newsletter invite.`
+    : event === "approved"
+    ? `Approved being featured in the ${weekLabel} newsletter (listing already claimed) — no appointment needed, ready to add to the newsletter.`
     : "Submitted intake answers on the newsletter invite:\n" + Object.entries(body?.answers ?? {}).map(([k, v]) => `- ${k}: ${v}`).join("\n");
   const newComment = { id: "cm_" + crypto.randomUUID(), authorId: SYSTEM_AUTHOR_ID, body: eventLine, at: new Date().toISOString(), kind: "event" };
 
@@ -102,9 +104,12 @@ export async function POST(req: NextRequest) {
       await supabaseAdmin.from("tasks").update({ comments: [...comments, newComment] }).eq("id", taskId);
     } else if (projectId) {
       taskId = "t_" + crypto.randomUUID();
+      const description = event === "approved"
+        ? `${businessName} approved being featured (listing already claimed) — no appointment needed, add them to the newsletter.`
+        : `${businessName} responded to a newsletter invite. Reach out to move them toward claiming their listing and booking an appointment.`;
       await supabaseAdmin.from("tasks").insert({
         id: taskId, project_id: projectId, client_id: clientId, title: TASK_TITLE, priority: "urgent",
-        description: `${businessName} responded to a newsletter invite. Reach out to move them toward claiming their listing and booking an appointment.`,
+        description,
         comments: [newComment],
       });
     }
@@ -121,6 +126,8 @@ export async function POST(req: NextRequest) {
     const nowIso = new Date().toISOString();
     const notifText = event === "interested"
       ? `${businessName} responded "interested" to this week's newsletter invite`
+      : event === "approved"
+      ? `${businessName} approved being featured — already claimed, no appointment needed`
       : `${businessName} submitted intake answers for this week's newsletter invite`;
     await supabaseAdmin.from("notifications").insert(recipients.map((rid) => ({
       id: "n_" + crypto.randomUUID(), recipient_id: rid, text: notifText, task_id: taskId,
