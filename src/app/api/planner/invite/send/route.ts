@@ -35,14 +35,25 @@ export async function POST(req: NextRequest) {
   const territoryId = String(body?.territoryId ?? "").trim();
   const week = String(body?.week ?? "").trim();
   const gdPlaceId = Number(body?.gdPlaceId);
+  const themeDescription = String(body?.themeDescription ?? "").trim();
   if (!territoryId || !/^\d{4}-\d{2}-\d{2}$/.test(week) || !Number.isFinite(gdPlaceId)) {
     return NextResponse.json({ error: "territoryId, week (yyyy-mm-dd), and gdPlaceId are required" }, { status: 400 });
   }
 
-  const { data: territory } = await supabaseAdmin.from("territories").select("city, wp_city_slug").eq("id", territoryId).maybeSingle();
+  const { data: territory } = await supabaseAdmin.from("territories").select("city, wp_city_slug, assigned_to").eq("id", territoryId).maybeSingle();
   if (!territory) return NextResponse.json({ error: "Territory not found" }, { status: 404 });
   const citySlug = (territory.wp_city_slug as string | null) || slugify(String(territory.city ?? ""));
   if (!citySlug) return NextResponse.json({ error: "This territory has no city name or wp_city_slug to invite through." }, { status: 400 });
+
+  // The territory's own assigned ambassador signs the email — there's no
+  // logged-in WP user to resolve a signature from when ClickUpTasks is the
+  // one triggering the send.
+  const assignedTo: string[] = Array.isArray(territory.assigned_to) ? (territory.assigned_to as string[]) : [];
+  let repName = "";
+  if (assignedTo[0]) {
+    const { data: rep } = await supabaseAdmin.from("profiles").select("name").eq("member_id", assignedTo[0]).maybeSingle();
+    repName = (rep?.name as string | undefined) ?? "";
+  }
 
   const url = `${WP_BASE.replace(/\/$/, "")}/wp-json/cul/v1/sales/outreach/send-external`;
   let res: Response;
@@ -50,7 +61,7 @@ export async function POST(req: NextRequest) {
     res = await fetch(url, {
       method: "POST",
       headers: { "X-ClickUpTasks-Key": WP_KEY, "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ city: citySlug, week, listing_id: gdPlaceId }),
+      body: JSON.stringify({ city: citySlug, week, listing_id: gdPlaceId, rep_name: repName, theme_description: themeDescription }),
     });
   } catch (e: any) {
     return NextResponse.json({ error: "Invite send failed", detail: String(e?.message ?? e) }, { status: 502 });

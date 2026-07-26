@@ -493,7 +493,7 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     try {
       const res = await authedFetch("/api/planner/invite/send", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ territoryId: week.territoryId, week: week.week, gdPlaceId }),
+        body: JSON.stringify({ territoryId: week.territoryId, week: week.week, gdPlaceId, themeDescription: week.themeDescription }),
       });
       const j = await res.json().catch(() => ({}));
       if (res.ok && j.ok) {
