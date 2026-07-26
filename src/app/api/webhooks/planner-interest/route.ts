@@ -39,7 +39,8 @@ export async function POST(req: NextRequest) {
   const email: string = String(body?.email ?? "").trim();
   const phone: string = String(body?.phone ?? "").trim();
   const ghlContactId: string = String(body?.ghl_contact_id ?? "").trim();
-  if (!city || !week || (event !== "interested" && event !== "intake" && event !== "approved")) {
+  const KNOWN_EVENTS = ["interested", "intake", "approved", "info_submitted"];
+  if (!city || !week || !KNOWN_EVENTS.includes(event)) {
     return NextResponse.json({ error: "Missing city/week or unknown event" }, { status: 400 });
   }
 
@@ -84,11 +85,15 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  const offerIncluded = Boolean(body?.offer_included);
   const weekLabel = plannerWeekLabel(week);
   const eventLine = event === "interested"
     ? `Clicked "I'm interested" on the ${weekLabel} newsletter invite.`
     : event === "approved"
     ? `Approved being featured in the ${weekLabel} newsletter (listing already claimed) — no appointment needed, ready to add to the newsletter.`
+    : event === "info_submitted"
+    ? `Submitted business info${offerIncluded ? " + offer" : ""} from the invite landing page. The listing is now HIDDEN from the directory pending phone verification — confirm identity and details on the call, then uncheck "Hide From Directory" in wp-admin to publish.\n`
+      + Object.entries(body?.answers ?? {}).map(([k, v]) => `- ${k}: ${v}`).join("\n")
     : "Submitted intake answers on the newsletter invite:\n" + Object.entries(body?.answers ?? {}).map(([k, v]) => `- ${k}: ${v}`).join("\n");
   const newComment = { id: "cm_" + crypto.randomUUID(), authorId: SYSTEM_AUTHOR_ID, body: eventLine, at: new Date().toISOString(), kind: "event" };
 
@@ -106,6 +111,8 @@ export async function POST(req: NextRequest) {
       taskId = "t_" + crypto.randomUUID();
       const description = event === "approved"
         ? `${businessName} approved being featured (listing already claimed) — no appointment needed, add them to the newsletter.`
+        : event === "info_submitted"
+        ? `${businessName} submitted business info${offerIncluded ? " + offer" : ""} from the invite landing page. Listing is hidden from the directory pending phone verification — call to confirm identity and details, then unhide it to publish.`
         : `${businessName} responded to a newsletter invite. Reach out to move them toward claiming their listing and booking an appointment.`;
       await supabaseAdmin.from("tasks").insert({
         id: taskId, project_id: projectId, client_id: clientId, title: TASK_TITLE, priority: "urgent",
@@ -128,6 +135,8 @@ export async function POST(req: NextRequest) {
       ? `${businessName} responded "interested" to this week's newsletter invite`
       : event === "approved"
       ? `${businessName} approved being featured — already claimed, no appointment needed`
+      : event === "info_submitted"
+      ? `${businessName} submitted info — listing hidden, needs a verification call`
       : `${businessName} submitted intake answers for this week's newsletter invite`;
     await supabaseAdmin.from("notifications").insert(recipients.map((rid) => ({
       id: "n_" + crypto.randomUUID(), recipient_id: rid, text: notifText, task_id: taskId,
