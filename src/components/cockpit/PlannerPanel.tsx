@@ -478,12 +478,15 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
   // locally beyond this session's own feedback. gdPlaceId-only: WordPress
   // resolves the invite email from the GeoDirectory listing itself, so a
   // free-text pick with no listing has nothing to invite.
-  const [inviteState, setInviteState] = useState<Partial<Record<number, "sending" | "sent" | string>>>({});
+  const [inviteState, setInviteState] = useState<Partial<Record<number, "sending" | string>>>({});
   const [inviteArmed, setInviteArmed] = useState<number | null>(null);
   const humanizeInviteError = (err: string | undefined) =>
     err === "no_email" ? "No email on file for this listing."
     : err === "ghl_not_connected" ? "GoHighLevel isn't connected for this city yet."
     : err || "Invite failed.";
+  // Sending again is allowed — a business might miss the first email, or a
+  // rep might want to follow up. Every send appends its own {gdPlaceId, at}
+  // entry (not deduped), so week.invited also doubles as a send count.
   const sendInvite = async (gdPlaceId: number) => {
     setInviteArmed(null);
     setInviteState((m) => ({ ...m, [gdPlaceId]: "sending" }));
@@ -494,30 +497,39 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
       });
       const j = await res.json().catch(() => ({}));
       if (res.ok && j.ok) {
-        setInviteState((m) => ({ ...m, [gdPlaceId]: "sent" }));
-        if (!week.invited.some((x) => x.gdPlaceId === gdPlaceId)) onPatch({ invited: [...week.invited, { gdPlaceId, at: new Date().toISOString() }] });
+        setInviteState((m) => { const n = { ...m }; delete n[gdPlaceId]; return n; });
+        onPatch({ invited: [...week.invited, { gdPlaceId, at: new Date().toISOString() }] });
       } else setInviteState((m) => ({ ...m, [gdPlaceId]: humanizeInviteError(j.error) }));
     } catch (e) {
       setInviteState((m) => ({ ...m, [gdPlaceId]: e instanceof Error ? e.message : "Invite failed." }));
     }
   };
   // Two-click arm/confirm — mirrors WP's own caution around a button that
-  // sends a real email, not just an in-app action. week.invited persists
-  // past a refresh; inviteState only tracks this session's in-flight/error
-  // states, so a persisted "sent" still shows even if inviteState is empty.
+  // sends a real email, not just an in-app action. The button never
+  // disappears after a successful send — only the persisted count (and the
+  // label, "Invite" vs "Invite again") changes — so following up is just
+  // clicking it again.
   const renderInvite = (gdPlaceId: number | null) => {
     if (gdPlaceId == null) return null;
     const state = inviteState[gdPlaceId];
-    if (state === "sending") return <span className="shrink-0 text-[12px] text-muted">Sending…</span>;
-    if (state === "sent" || week.invited.some((x) => x.gdPlaceId === gdPlaceId)) return <span className="shrink-0 text-[12px] font-medium text-emerald-600">Invited ✓</span>;
+    const count = week.invited.filter((x) => x.gdPlaceId === gdPlaceId).length;
+    const countLabel = count > 0 ? <span className="text-[11px] font-medium text-emerald-600">Invited {count}×</span> : null;
+    if (state === "sending") return <span className="flex shrink-0 items-center gap-1.5">{countLabel}<span className="text-[12px] text-muted">Sending…</span></span>;
     if (state) return (
       <span className="flex shrink-0 items-center gap-1.5">
+        {countLabel}
         <span className="text-[11px] text-danger">{state}</span>
-        <button onClick={() => setInviteState((m) => ({ ...m, [gdPlaceId]: undefined }))} className="text-[12px] font-medium text-muted hover:text-foreground">Dismiss</button>
+        <button onClick={() => setInviteState((m) => { const n = { ...m }; delete n[gdPlaceId]; return n; })} className="text-[12px] font-medium text-muted hover:text-foreground">Dismiss</button>
       </span>
     );
-    if (inviteArmed === gdPlaceId) return <button onClick={() => sendInvite(gdPlaceId)} className="shrink-0 text-[12px] font-medium text-danger hover:underline">Confirm invite?</button>;
-    return <button onClick={() => setInviteArmed(gdPlaceId)} className="shrink-0 text-[12px] font-medium text-accent hover:underline">✉️ Invite</button>;
+    return (
+      <span className="flex shrink-0 items-center gap-1.5">
+        {countLabel}
+        {inviteArmed === gdPlaceId
+          ? <button onClick={() => sendInvite(gdPlaceId)} className="text-[12px] font-medium text-danger hover:underline">Confirm{count > 0 ? " resend" : ""}?</button>
+          : <button onClick={() => setInviteArmed(gdPlaceId)} className="text-[12px] font-medium text-accent hover:underline">{count > 0 ? "✉️ Invite again" : "✉️ Invite"}</button>}
+      </span>
+    );
   };
 
   // Story + Events: real, live web search (Gemini google_search grounding),
