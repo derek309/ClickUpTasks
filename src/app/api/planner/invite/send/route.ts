@@ -15,6 +15,10 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 const WP_BASE = process.env.CUL_WP_BASE_URL || "";
 const WP_KEY = process.env.CLICKUPTASKS_API_KEY || "";
 const configured = Boolean(WP_BASE && WP_KEY);
+// WordPress now generates this week's email template on the fly (a Gemini
+// call) when none has been saved yet, instead of failing with no_template —
+// bump past the default serverless timeout for that extra latency.
+export const maxDuration = 60;
 
 // Rough JS approximation of WordPress's PHP sanitize_title() — same fallback
 // /api/planner/push/route.ts uses when a territory has no wp_city_slug override.
