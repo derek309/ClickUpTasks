@@ -4,6 +4,10 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { todayIso, type Attachment } from "@/lib/data";
 import { sanitizeWaitingAttachments } from "@/lib/waitingAttachments";
 import { isRateLimited } from "@/lib/rateLimit";
+import { sendGmailAs, googleConfigured } from "@/lib/googleMail";
+
+const APP_URL = "https://clickuptasks.vercel.app";
+const SEND_DOMAIN = "clickuplocal.com";
 
 // Public, token-gated — the client submits (or edits) their reply to a
 // waiting-on-them task. Reassignment/due-date/notification only fire when
@@ -69,6 +73,29 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
       task_id: taskId, actor_id: null, client_id: client.id, project_id: task.project_id ?? null,
       at: new Date().toISOString(), read: false, kind: "activity",
     });
+
+    // Best-effort email companion to the in-app notification above, same
+    // silently-degrading philosophy as mention-email/notifications-email —
+    // this is a public, client-facing route and must never fail (or even
+    // slow down) because email sending is unconfigured or errors. There's no
+    // logged-in caller here to send "as" (the client isn't a Workspace
+    // user), so this sends the recipient their own notification email —
+    // still a real Workspace send via domain-wide delegation, just self-to-self.
+    if (googleConfigured) {
+      try {
+        const { data: recipientProfile } = await supabaseAdmin.from("profiles").select("email").eq("member_id", notifyRecipient).maybeSingle();
+        const recipientEmail = (recipientProfile?.email as string | undefined)?.trim();
+        if (recipientEmail?.toLowerCase().endsWith(`@${SEND_DOMAIN}`)) {
+          const link = `${APP_URL}/?task=${encodeURIComponent(taskId)}`;
+          const preview = text ? `\n\nTheir reply:\n"${text.slice(0, 1000)}"` : "";
+          await sendGmailAs(recipientEmail, {
+            to: recipientEmail,
+            subject: `${client.name} responded on "${task.title}"`.slice(0, 200),
+            body: `${client.name} just responded on "${task.title}" — ready to work on.${preview}\n\nView in ClickUpTasks: ${link}`,
+          });
+        }
+      } catch { /* email is a nice-to-have; the in-app notification already fired */ }
+    }
   }
 
   return NextResponse.json({ ok: true });
