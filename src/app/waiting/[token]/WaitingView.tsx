@@ -277,7 +277,7 @@ export default function WaitingView({ token }: { token: string }) {
                   return (
                     <div
                       key={t.id}
-                      className={`rounded-xl border border-l-4 p-3.5 shadow-sm ${isDone ? "bg-green-50" : ""}`}
+                      className={`rounded-xl border border-l-4 p-3.5 shadow-sm ${isDone ? "bg-green-50" : "bg-yellow-50"}`}
                       // A global `* { border-color: var(--border) }` rule in globals.css is
                       // unlayered, so per CSS cascade-layer rules it beats ANY Tailwind
                       // border-color utility (including border-l-accent, border-green-200,
