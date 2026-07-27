@@ -3,7 +3,7 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/serverAuth";
 import { titleCase } from "@/lib/data";
 import { configuredLocations, tokenForLocation } from "@/lib/ghlTokens";
-import { resolveTrackedClientId, upsertConversationTask, toPacificDate } from "@/lib/ghlConversationTask";
+import { resolveOrPromoteTrackedClient, upsertConversationTask, toPacificDate } from "@/lib/ghlConversationTask";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -114,7 +114,7 @@ async function run(req: NextRequest) {
     for (const [ghlContactId, appt] of soonestByContact) {
       const { data: contact } = await supabaseAdmin.from("contacts").select("id, name, client_id").eq("ghl_contact_id", ghlContactId).maybeSingle();
       if (!contact) { skipped++; continue; }
-      contact.client_id = await resolveTrackedClientId(contact.id, contact.client_id);
+      contact.client_id = await resolveOrPromoteTrackedClient(contact);
       const taskId = await upsertConversationTask(contact, ghlContactId, {
         due: toPacificDate(appt.startTime),
         title: `Meeting with ${titleCase(contact.name)}`,

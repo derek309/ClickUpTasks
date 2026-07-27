@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { titleCase } from "@/lib/data";
-import { resolveTrackedClientId, upsertConversationTask } from "@/lib/ghlConversationTask";
+import { resolveOrPromoteTrackedClient, upsertConversationTask } from "@/lib/ghlConversationTask";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -102,8 +102,11 @@ async function handleMessageReply(body: any, custom: any) {
   // A contact's client_id points at the GHL sub-account it was imported from
   // (c_agency / c_directory), not the tracked client. Re-point to the tracked
   // client (cl_<contactId>, or a client manually linked to it) so the message
-  // + Conversation task land on the client's page, not off in a sub-account.
-  contact.client_id = await resolveTrackedClientId(contact.id, contact.client_id);
+  // + Conversation task land on the client's page, not off in a sub-account —
+  // and if this contact has never been tracked at all, promote them (a real
+  // inbound message is a strong enough signal on its own), so they don't
+  // silently stay invisible until someone notices and adds them by hand.
+  contact.client_id = await resolveOrPromoteTrackedClient(contact);
 
   const channel = body?.message?.type === 2 ? "sms" : "email";
   // GHL's own message id would be the ideal dedup key, but the wire-up notes
@@ -192,7 +195,7 @@ async function handleCall(body: any, custom: any) {
   if (!ghlContactId) return NextResponse.json({ ok: true, skipped: "missing contactId" });
   const { data: contact } = await supabaseAdmin.from("contacts").select("id, name, client_id").eq("ghl_contact_id", ghlContactId).maybeSingle();
   if (!contact) return NextResponse.json({ ok: true, skipped: "no contact for that ghlContactId" });
-  contact.client_id = await resolveTrackedClientId(contact.id, contact.client_id);
+  contact.client_id = await resolveOrPromoteTrackedClient(contact);
   const taskId = await upsertConversationTask(contact, ghlContactId);
   const status: string = typeof custom?.status === "string" ? custom.status : ((custom?.event ?? body?.event) === "missed_call" ? "missed" : "");
   const label = /miss|no.?answer|voicemail|unanswered/i.test(status) ? "Missed call from" : "Call from";

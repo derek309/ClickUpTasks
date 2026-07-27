@@ -28,6 +28,30 @@ async function resolveTrackedClientId(contactId: string, fallback: string): Prom
   return merged?.[0]?.id ?? fallback;
 }
 
+// Twin of ghlConversationTask.ts's resolveOrPromoteTrackedClient (kept as its
+// own copy for the same "deliberately separate from the webhook" reason as
+// the rest of this file) — auto-creates a tracked client the first time a
+// contact who was never promoted sends a real inbound message, instead of
+// silently filing it under the GHL sub-account until someone notices.
+async function resolveOrPromoteTrackedClient(contact: Contact): Promise<string> {
+  const resolved = await resolveTrackedClientId(contact.id, contact.client_id);
+  if (resolved !== contact.client_id) return resolved;
+
+  const trackedId = "cl_" + contact.id;
+  const { data: existing } = await supabaseAdmin.from("clients").select("id").eq("id", trackedId).maybeSingle();
+  if (!existing) {
+    const { error } = await supabaseAdmin.from("clients").insert({
+      id: trackedId, name: contact.name, color: "#a855f7", ghl_location_id: "", status: "lead", type: "prospect", assigned_to: [],
+    });
+    if (error) {
+      console.error("[inboundIngest] resolveOrPromoteTrackedClient: client insert failed", error);
+      return await resolveTrackedClientId(contact.id, contact.client_id);
+    }
+  }
+  await supabaseAdmin.from("contacts").update({ client_id: trackedId }).eq("id", contact.id);
+  return trackedId;
+}
+
 // One open Conversation-priority task per contact — bump due if one exists,
 // else create it under the client's first project (or a fallback "Tasks").
 async function upsertConversationTask(contact: Contact, ghlContactId: string | null): Promise<string | null> {
@@ -82,7 +106,7 @@ export async function ingestInboundMessage(opts: {
   contact: Contact; ghlContactId?: string | null; channel: "email" | "sms";
   subject?: string | null; body: string; gmailMessageId?: string | null; at?: string;
 }): Promise<boolean> {
-  const contact = { ...opts.contact, client_id: await resolveTrackedClientId(opts.contact.id, opts.contact.client_id) };
+  const contact = { ...opts.contact, client_id: await resolveOrPromoteTrackedClient(opts.contact) };
   const { channel, subject, body } = opts;
   if (opts.gmailMessageId) {
     const { data: dupe } = await supabaseAdmin.from("messages").select("id").eq("gmail_message_id", opts.gmailMessageId).limit(1);

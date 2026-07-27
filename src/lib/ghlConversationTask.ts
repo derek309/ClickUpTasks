@@ -18,6 +18,38 @@ export async function resolveTrackedClientId(contactId: string, fallback: string
   return merged?.[0]?.id ?? fallback;
 }
 
+// Same resolution as above, but when a contact has NEVER been promoted to a
+// tracked client (resolveTrackedClientId falls all the way through to the
+// sub-account fallback), auto-create one instead of silently leaving the
+// contact's activity filed under the sub-account — a real inbound
+// message/call/appointment is exactly the kind of signal that should surface
+// them as an actual client, not require someone to notice and add them by
+// hand. Same "lead"/"prospect" convention Cockpit.tsx's syncTerritoryClients
+// and the newsletter invite-response webhook already use for this. Also
+// repoints the contact's own client_id so future lookups resolve directly
+// without re-triggering this promotion every time.
+export async function resolveOrPromoteTrackedClient(contact: { id: string; name: string; client_id: string }): Promise<string> {
+  const resolved = await resolveTrackedClientId(contact.id, contact.client_id);
+  if (resolved !== contact.client_id) return resolved; // already tracked (or linked/merged) — nothing to promote
+
+  const trackedId = "cl_" + contact.id;
+  const { data: existing } = await supabaseAdmin.from("clients").select("id").eq("id", trackedId).maybeSingle();
+  if (!existing) {
+    const { error } = await supabaseAdmin.from("clients").insert({
+      id: trackedId, name: contact.name, color: "#a855f7", ghl_location_id: "", status: "lead", type: "prospect", assigned_to: [],
+    });
+    if (error) {
+      // Insert failed (race with a concurrent promotion, or a real error) —
+      // don't strand the caller on a client id that doesn't exist; fall back
+      // to whatever's there now rather than guessing.
+      console.error("[ghlConversationTask] resolveOrPromoteTrackedClient: client insert failed", error);
+      return await resolveTrackedClientId(contact.id, contact.client_id);
+    }
+  }
+  await supabaseAdmin.from("contacts").update({ client_id: trackedId }).eq("id", contact.id);
+  return trackedId;
+}
+
 // "Today" for a Conversation task's due date, in the team's operating
 // timezone (Pacific) rather than the server's UTC clock — due doubles as
 // "last touched" here (see below), and a UTC-computed date can already be
