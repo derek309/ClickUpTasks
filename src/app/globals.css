@@ -101,7 +101,7 @@ body {
    ships no CSS of its own, so block/list/quote/code spacing and the empty-
    state placeholder live here, keyed off the same color tokens as the rest
    of the app rather than a Tailwind Typography plugin. */
-.rte-content p { margin: 0.35em 0; }
+.rte-content p { margin: 0.75em 0; }
 .rte-content p:first-child { margin-top: 0; }
 .rte-content p:last-child { margin-bottom: 0; }
 .rte-content p.is-editor-empty:first-child::before {
