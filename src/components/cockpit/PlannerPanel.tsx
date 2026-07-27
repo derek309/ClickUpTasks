@@ -389,8 +389,8 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
   const filledSlotNames = PLANNER_CONTENT_SLOTS.map((s) => week.picks[s]?.name).filter(Boolean) as string[];
   const pools = useMemo(() => computePlannerPools({
     listings: listings.map((l) => ({ id: l.id, name: l.name, category: l.category ?? "", claimed: l.claimed, hasOffer: l.hasOffer, score: l.score })),
-    weeks, dismissedIds: week.dismissed, excludeNames: filledSlotNames, todayIso: todayIso(),
-  }), [listings, weeks, week.dismissed, filledSlotNames]);
+    weeks, dismissedIds: week.dismissed, excludeNames: filledSlotNames, todayIso: todayIso(), categories: week.categories,
+  }), [listings, weeks, week.dismissed, filledSlotNames, week.categories]);
 
   // Cross-week dedupe for Story/Events suggestions — a recurring event (a
   // weekly farmers market, say) has no "due" rotation logic like the
@@ -943,23 +943,30 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
                         ))}
                       </div>
                     )}
-                    {browseSlot === slot && (
-                      <div className="mt-1.5 space-y-1">
-                        {poolForSlot(slot).length === 0 && <div className="text-[13px] text-muted">No candidates found yet.</div>}
-                        {poolForSlot(slot).map((c) => (
-                          <div key={c.gdPlaceId ?? c.name} className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5">
-                            <ClaimBadge slot={slot} />
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate text-[13px] font-medium">{c.name}</span>
-                              <span className="block truncate text-[11px] text-muted">{c.cat}{c.due ? " · due" : c.lastFeatured ? ` · featured ${c.lastFeatured}` : ""}</span>
-                            </span>
-                            {renderInvite(c.gdPlaceId)}
-                            <button onClick={() => pickPoolCandidate(slot, c)} className="shrink-0 text-[12px] font-medium text-accent hover:underline">+ Pick</button>
-                            <button onClick={() => dismissCandidate(c)} title="Not this week" className="shrink-0 text-muted hover:text-danger"><I.close className="h-3 w-3" /></button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    {browseSlot === slot && (() => {
+                      // AI-suggested candidates above already show as their own
+                      // card (Accept/Decline) — drop them from Browse so the
+                      // same business never renders twice on screen at once.
+                      const suggestedNames = new Set((slotSuggestions[slot] ?? []).map((s) => s.name.toLowerCase().trim()));
+                      const browseCandidates = poolForSlot(slot).filter((c) => !suggestedNames.has(c.name.toLowerCase().trim()));
+                      return (
+                        <div className="mt-1.5 space-y-1">
+                          {browseCandidates.length === 0 && <div className="text-[13px] text-muted">No candidates found yet.</div>}
+                          {browseCandidates.map((c) => (
+                            <div key={c.gdPlaceId ?? c.name} className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5">
+                              <ClaimBadge slot={slot} />
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-[13px] font-medium">{c.name}</span>
+                                <span className="block truncate text-[11px] text-muted">{c.cat}{c.due ? " · due" : c.lastFeatured ? ` · featured ${c.lastFeatured}` : ""}</span>
+                              </span>
+                              {renderInvite(c.gdPlaceId)}
+                              <button onClick={() => pickPoolCandidate(slot, c)} className="shrink-0 text-[12px] font-medium text-accent hover:underline">+ Pick</button>
+                              <button onClick={() => dismissCandidate(c)} title="Not this week" className="shrink-0 text-muted hover:text-danger"><I.close className="h-3 w-3" /></button>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
                     {slot === "story" && storySuggestError && <div className="mt-1.5 text-[12px] text-danger">{storySuggestError}</div>}
                     {slot === "story" && storySuggestions && (
                       <div className="mt-1.5 space-y-1.5">

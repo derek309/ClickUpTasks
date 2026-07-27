@@ -41,11 +41,16 @@ export function computePlannerPools(opts: {
   dismissedIds: number[];
   excludeNames: string[]; // already picked in the open week's own slots
   todayIso: string;
+  categories?: string[]; // the week's theme categories — matches rank ahead of everything else
 }): { spotlight: PoolCandidate[]; hiddenGem: PoolCandidate[] } {
-  const { listings, weeks, dismissedIds, excludeNames, todayIso } = opts;
+  const { listings, weeks, dismissedIds, excludeNames, todayIso, categories } = opts;
   const history = featureHistory(weeks);
   const excluded = new Set(excludeNames.map((n) => n.toLowerCase().trim()));
   const dismissed = new Set(dismissedIds);
+  // Same lowercase-equality match plannerBrief.ts's Support Local section
+  // already uses. Empty categories (no theme assigned) matches everything.
+  const catsLower = (categories ?? []).map((c) => c.toLowerCase().trim()).filter(Boolean);
+  const matchesTheme = (c: PoolCandidate) => catsLower.length === 0 || catsLower.includes(c.cat.toLowerCase().trim());
 
   const toCandidate = (l: PoolListing): PoolCandidate | null => {
     if (excluded.has(l.name.toLowerCase().trim())) return null;
@@ -62,10 +67,25 @@ export function computePlannerPools(opts: {
     };
   };
 
-  const spotlight = listings.filter((l) => l.claimed && l.hasOffer).map(toCandidate).filter((c): c is PoolCandidate => !!c)
-    .sort((a, b) => (a.due === b.due ? (b.score ?? -1) - (a.score ?? -1) : a.due ? -1 : 1));
-  const hiddenGem = listings.filter((l) => !l.claimed).map(toCandidate).filter((c): c is PoolCandidate => !!c)
-    .sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+  // Theme-matching candidates rank ahead of everything else (rather than a
+  // hard filter) so a themed week never comes up empty just because the
+  // territory happens to be short on that category this cycle.
+  const rankByTheme = (list: PoolCandidate[], sortFn: (a: PoolCandidate, b: PoolCandidate) => number) => [
+    ...list.filter(matchesTheme).sort(sortFn),
+    ...list.filter((c) => !matchesTheme(c)).sort(sortFn),
+  ];
+
+  const dueThenScore = (a: PoolCandidate, b: PoolCandidate) => (a.due === b.due ? (b.score ?? -1) - (a.score ?? -1) : a.due ? -1 : 1);
+  const byScore = (a: PoolCandidate, b: PoolCandidate) => (b.score ?? -1) - (a.score ?? -1);
+
+  const spotlight = rankByTheme(
+    listings.filter((l) => l.claimed && l.hasOffer).map(toCandidate).filter((c): c is PoolCandidate => !!c),
+    dueThenScore
+  );
+  const hiddenGem = rankByTheme(
+    listings.filter((l) => !l.claimed).map(toCandidate).filter((c): c is PoolCandidate => !!c),
+    byScore
+  );
 
   return { spotlight: spotlight.slice(0, 8), hiddenGem: hiddenGem.slice(0, 8) };
 }
