@@ -46,6 +46,31 @@ export async function POST(req: NextRequest) {
 
   const { data: territory } = await supabaseAdmin.from("territories").select("id, assigned_to").eq("wp_city_slug", city).maybeSingle();
 
+  // Flip the matching week.invited entry's status to "accepted" so the
+  // Planner can show real response state instead of just "sent". Every
+  // event this route accepts (interested/intake/approved/info_submitted) is
+  // a positive response — WordPress has no "declined" event to send, so
+  // there's nothing to write for a no. Independent of the client/task work
+  // below; a listing invited before this shipped, or an invite link with no
+  // matching week row, just means nothing to update — not an error.
+  const gdPlaceId = Number(body?.listing_id);
+  if (territory?.id && Number.isFinite(gdPlaceId)) {
+    const { data: weekRow } = await supabaseAdmin.from("planner_weeks").select("id, picks").eq("territory_id", territory.id).eq("week", week).maybeSingle();
+    if (weekRow) {
+      const picks = (weekRow.picks && typeof weekRow.picks === "object") ? { ...(weekRow.picks as any) } : {};
+      const invited: any[] = Array.isArray(picks.__invited) ? picks.__invited : [];
+      // A business can be (re-)invited more than once (sends aren't
+      // deduped) — the most recent send for this listing is the one this
+      // response belongs to.
+      let latestIdx = -1;
+      for (let i = 0; i < invited.length; i++) if (invited[i]?.gdPlaceId === gdPlaceId) latestIdx = i;
+      if (latestIdx !== -1) {
+        invited[latestIdx] = { ...invited[latestIdx], status: "accepted", respondedAt: new Date().toISOString(), responseEvent: event };
+        await supabaseAdmin.from("planner_weeks").update({ picks: { ...picks, __invited: invited } }).eq("id", weekRow.id);
+      }
+    }
+  }
+
   // Resolve (or create) the tracked client this response belongs to. Only
   // possible when WordPress sent a ghl_contact_id — set on the listing when
   // the invite was originally sent (cul_sales_ghl_send_invite), so this is

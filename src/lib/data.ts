@@ -347,13 +347,25 @@ export interface PlannerWeek {
   dismissed: number[]; // gd_place_ids dismissed from this week's suggestion pools
   // gd_place_ids invited to be featured this week (via the WordPress outreach
   // proxy), with when — lets the "Invited ✓" mark survive a refresh instead
-  // of being session-only.
-  invited: { gdPlaceId: number; at: string }[];
+  // of being session-only. `status` starts "invited" and flips to "accepted"
+  // by the inbound response webhook (planner-interest route), or to
+  // "skipped" by a rep manually — WordPress has no "declined" signal to wait
+  // on, so skipped is always a local, manual call. Entries from before this
+  // field existed have no `status` — treat as "invited" at every read site.
+  invited: PlannerInvite[];
   archived: boolean;
   sentDate: string | null;
   wpPushedAt: string | null;
   createdAt: string;
 }
+
+export type PlannerInvite = {
+  gdPlaceId: number;
+  at: string;
+  status?: "invited" | "accepted" | "skipped";
+  respondedAt?: string;
+  responseEvent?: string;
+};
 
 export interface PlannerSection {
   id: string;

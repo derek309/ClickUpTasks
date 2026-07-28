@@ -32,6 +32,10 @@ export type DirectoryListing = {
   street: string;
   claimed: boolean;
   hasOffer: boolean;
+  hasActiveEvents: boolean;
+  // Wired through from WordPress's has_recent_post — false everywhere until
+  // the Phase 2 WP work (post-to-listing linking) ships; safe default either way.
+  hasRecentPost: boolean;
   score: number | null;
   category: string;
   // Outreach pipeline (from /sales — source of truth)

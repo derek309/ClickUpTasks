@@ -17,11 +17,11 @@ import {
 } from "@/lib/db";
 import {
   PLANNER_CURRENT_WEEK, plannerWeekLabel, addDaysIso, todayIso, PLANNER_CONTENT_SLOTS, PLANNER_BUSINESS_SLOTS, themeForWeek,
-  type PlannerWeek, type PlannerSlot, type PlannerBiz, type PlannerSection, type PlannerEvent, type NewsletterItem, type ThemeCalendarEntry,
+  type PlannerWeek, type PlannerSlot, type PlannerBiz, type PlannerSection, type PlannerEvent, type NewsletterItem, type ThemeCalendarEntry, type PlannerInvite,
 } from "@/lib/data";
 import { generatePlannerBrief } from "@/lib/plannerBrief";
 import { pushPlannerWeek } from "@/lib/plannerPush";
-import { computePlannerPools, featureHistory, type PoolCandidate } from "@/lib/plannerPools";
+import { computePlannerPools, featureHistory, inviteHistory, type PoolCandidate } from "@/lib/plannerPools";
 import { matchesAnyCategory } from "@/lib/categoryMatch";
 import { I, newId } from "./ui";
 import { type DirectoryListing } from "./TerritoryDirectory";
@@ -200,6 +200,11 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
 // Shared search-or-free-text business picker — used by slots, sections, and
 // events alike, so there's exactly one place defining how a business gets
 // attached to something in the planner.
+function toGdPlaceId(id: number | string): number | null {
+  const n = typeof id === "number" ? id : parseInt(String(id), 10);
+  return Number.isFinite(n) ? n : null;
+}
+
 function BusinessPicker({ listings, onPick, onCancel }: {
   listings: DirectoryListing[];
   onPick: (biz: PlannerBiz) => void;
@@ -403,6 +408,32 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
   // Same rotation history the Spotlight/Hidden Gem pool uses, keyed by name
   // — reused here to show "how many times featured" on the full list too.
   const featureCounts = useMemo(() => featureHistory(weeks), [weeks]);
+  const inviteCounts = useMemo(() => inviteHistory(weeks), [weeks]);
+  // Selection for bulk-invite on the category business list below — cleared
+  // implicitly on every week switch since WeekWorkspace fully unmounts then
+  // (PlannerPanel only ever renders it when a week is open, never keyed
+  // across different weeks).
+  const [selectedForInvite, setSelectedForInvite] = useState<Set<number>>(new Set());
+  const [bulkInviting, setBulkInviting] = useState(false);
+  const toggleSelectedForInvite = (gdPlaceId: number) =>
+    setSelectedForInvite((s) => { const n = new Set(s); if (n.has(gdPlaceId)) n.delete(gdPlaceId); else n.add(gdPlaceId); return n; });
+  // Most recent invited-entry for a listing in THIS week — mirrors the
+  // "latest send wins" logic the webhook write-back uses server-side.
+  const latestInviteFor = (gdPlaceId: number): PlannerInvite | null => {
+    let latest: PlannerInvite | null = null;
+    for (const inv of week.invited) if (inv.gdPlaceId === gdPlaceId) latest = inv;
+    return latest;
+  };
+  const skipInvite = (gdPlaceId: number) => {
+    let idx = -1;
+    week.invited.forEach((inv, i) => { if (inv.gdPlaceId === gdPlaceId) idx = i; });
+    if (idx === -1) return;
+    onPatch({ invited: week.invited.map((inv, i) => (i === idx ? { ...inv, status: "skipped" as const } : inv)) });
+  };
+  const assignListingToSlot = (l: DirectoryListing, slot: PlannerSlot) => {
+    const gdPlaceId = toGdPlaceId(l.id);
+    setSlot(slot, { clientId: null, gdPlaceId, name: l.name, url: "", cat: l.category ?? "", note: "" });
+  };
 
   // Cross-week dedupe for Story/Events suggestions — a recurring event (a
   // weekly farmers market, say) has no "due" rotation logic like the
@@ -499,7 +530,13 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
   // Sending again is allowed — a business might miss the first email, or a
   // rep might want to follow up. Every send appends its own {gdPlaceId, at}
   // entry (not deduped), so week.invited also doubles as a send count.
-  const sendInvite = async (gdPlaceId: number) => {
+  // Split from the onPatch call so bulk-invite (below) can send several ids
+  // in a row and apply ONE combined patch at the end — appending one at a
+  // time via separate onPatch calls would have each call compute
+  // `[...week.invited, entry]` off the same stale `week.invited` closure
+  // (the prop doesn't update mid-loop), silently dropping every entry but
+  // the last.
+  const postInvite = async (gdPlaceId: number): Promise<PlannerInvite | null> => {
     setInviteArmed(null);
     setInviteState((m) => ({ ...m, [gdPlaceId]: "sending" }));
     try {
@@ -510,11 +547,35 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
       const j = await res.json().catch(() => ({}));
       if (res.ok && j.ok) {
         setInviteState((m) => { const n = { ...m }; delete n[gdPlaceId]; return n; });
-        onPatch({ invited: [...week.invited, { gdPlaceId, at: new Date().toISOString() }] });
-      } else setInviteState((m) => ({ ...m, [gdPlaceId]: humanizeInviteError(j.error) }));
+        return { gdPlaceId, at: new Date().toISOString(), status: "invited" };
+      }
+      setInviteState((m) => ({ ...m, [gdPlaceId]: humanizeInviteError(j.error) }));
+      return null;
     } catch (e) {
       setInviteState((m) => ({ ...m, [gdPlaceId]: e instanceof Error ? e.message : "Invite failed." }));
+      return null;
     }
+  };
+  const sendInvite = async (gdPlaceId: number) => {
+    const entry = await postInvite(gdPlaceId);
+    if (entry) onPatch({ invited: [...week.invited, entry] });
+  };
+  // Bulk version — sends selected ids one at a time (a short stagger avoids
+  // hammering the WP endpoint) but applies a single combined patch at the
+  // end, same reasoning as postInvite's split above.
+  const inviteSelected = async () => {
+    const ids = Array.from(selectedForInvite);
+    if (ids.length === 0) return;
+    setBulkInviting(true);
+    const newEntries: PlannerInvite[] = [];
+    for (const gdPlaceId of ids) {
+      const entry = await postInvite(gdPlaceId);
+      if (entry) newEntries.push(entry);
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    if (newEntries.length > 0) onPatch({ invited: [...week.invited, ...newEntries] });
+    setBulkInviting(false);
+    setSelectedForInvite(new Set());
   };
   // Two-click arm/confirm — mirrors WP's own caution around a button that
   // sends a real email, not just an in-app action. The button never
@@ -840,19 +901,59 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
             {categoryMatches.length === 0 ? (
               <div className="text-[13px] text-muted">No directory listings match these categories yet.</div>
             ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {categoryMatches.map((l) => {
-                  const featured = featureCounts.get(l.name.toLowerCase().trim());
-                  return (
-                    <span key={l.id} title={featured ? `${l.category} — featured ${featured.count}× (last ${featured.last})` : l.category}
-                      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium ${l.claimed ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700" : "border-amber-500/30 bg-amber-500/10 text-amber-700"}`}>
-                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${l.claimed ? "bg-emerald-500" : "bg-amber-500"}`} />
-                      {l.name}
-                      {featured && <span className="opacity-70">· {featured.count}×</span>}
-                    </span>
-                  );
-                })}
-              </div>
+              <>
+                <div className="space-y-1">
+                  {categoryMatches.map((l) => {
+                    const gdPlaceId = toGdPlaceId(l.id);
+                    const featured = featureCounts.get(l.name.toLowerCase().trim());
+                    const allTime = gdPlaceId != null ? inviteCounts.get(gdPlaceId) : undefined;
+                    const latest = gdPlaceId != null ? latestInviteFor(gdPlaceId) : null;
+                    const status = latest ? (latest.status ?? "invited") : null;
+                    const selected = gdPlaceId != null && selectedForInvite.has(gdPlaceId);
+                    return (
+                      <div key={l.id} className="flex flex-wrap items-center gap-2 rounded-md border bg-background px-2 py-1.5">
+                        {gdPlaceId != null && (
+                          <button onClick={() => toggleSelectedForInvite(gdPlaceId)} title="Select for bulk invite"
+                            className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition ${selected ? "border-accent bg-accent text-white" : "border-border"}`}>
+                            {selected && <I.check />}
+                          </button>
+                        )}
+                        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${l.claimed ? "bg-emerald-500" : "bg-amber-500"}`} title={l.claimed ? "Claimed" : "Unclaimed"} />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[13px] font-medium">{l.name}</span>
+                          <span className="block truncate text-[11px] text-muted">
+                            {l.category}
+                            {featured && ` · featured ${featured.count}×`}
+                            {allTime && allTime.invited > 0 && ` · invited ${allTime.invited}× all-time`}
+                          </span>
+                        </span>
+                        {l.hasActiveEvents && <span title="Active event listing" className="shrink-0 text-accent"><I.calendar /></span>}
+                        {l.hasRecentPost && <span title="Recent blog post" className="shrink-0 text-[13px]">📝</span>}
+                        {status === "accepted" && <span className="shrink-0 text-[11px] font-semibold text-emerald-600">Accepted</span>}
+                        {status === "skipped" && <span className="shrink-0 text-[11px] font-medium text-muted">Skipped</span>}
+                        {status === "accepted" && (
+                          <span className="flex shrink-0 items-center gap-1">
+                            <button onClick={() => assignListingToSlot(l, "spotlight")} className="text-[11px] font-medium text-accent hover:underline">→ Spotlight</button>
+                            <button onClick={() => assignListingToSlot(l, "gem")} className="text-[11px] font-medium text-accent hover:underline">→ Hidden Gem</button>
+                          </span>
+                        )}
+                        {status === "invited" && gdPlaceId != null && (
+                          <button onClick={() => skipInvite(gdPlaceId)} className="shrink-0 text-[11px] font-medium text-muted hover:text-foreground">Skip</button>
+                        )}
+                        {renderInvite(gdPlaceId)}
+                      </div>
+                    );
+                  })}
+                </div>
+                {selectedForInvite.size > 0 && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-accent/40 bg-accent-soft/50 px-2.5 py-1.5">
+                    <span className="text-[12px] font-medium">{selectedForInvite.size} selected</span>
+                    <button onClick={inviteSelected} disabled={bulkInviting}
+                      className="rounded-md border border-accent px-2 py-1 text-[12px] font-semibold text-accent hover:bg-accent-soft disabled:opacity-40">{bulkInviting ? "Inviting…" : "✉️ Invite selected"}</button>
+                    <button onClick={() => setSelectedForInvite(new Set())} className="text-[12px] font-medium text-muted hover:text-foreground">Clear</button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}

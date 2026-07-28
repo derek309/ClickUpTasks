@@ -33,6 +33,31 @@ export function featureHistory(weeks: PlannerWeek[]): Map<string, { count: numbe
   return map;
 }
 
+export type InviteHistoryRecord = { invited: number; accepted: number; skipped: number; lastAt: string };
+
+// gdPlaceId -> invite/response counts across every week this territory has
+// ever invited that listing in — same scan-all-weeks approach as
+// featureHistory() above, just keyed by id (invited entries carry no name)
+// and counting by status instead of by slot occupancy. `invited` counts every
+// send (re-sends included, matching the existing per-week count convention
+// in renderInvite); `accepted`/`skipped` count entries currently in that
+// state (a re-invite after a skip resets that entry back to "invited", so
+// it's excluded from `skipped` until skipped again).
+export function inviteHistory(weeks: PlannerWeek[]): Map<number, InviteHistoryRecord> {
+  const map = new Map<number, InviteHistoryRecord>();
+  for (const w of weeks) {
+    for (const inv of w.invited ?? []) {
+      const rec = map.get(inv.gdPlaceId) ?? { invited: 0, accepted: 0, skipped: 0, lastAt: inv.at };
+      rec.invited += 1;
+      if (inv.status === "accepted") rec.accepted += 1;
+      else if (inv.status === "skipped") rec.skipped += 1;
+      if (inv.at > rec.lastAt) rec.lastAt = inv.at;
+      map.set(inv.gdPlaceId, rec);
+    }
+  }
+  return map;
+}
+
 function isDue(last: string | null, todayIso: string): boolean {
   if (!last) return true;
   const days = (new Date(todayIso).getTime() - new Date(last).getTime()) / 86400000;
