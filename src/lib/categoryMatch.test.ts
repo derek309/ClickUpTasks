@@ -24,6 +24,29 @@ describe("categoriesMatch (theme category vs real GD category, different vocabul
   });
 });
 
+describe("categoriesMatch ignores generic shop/bar/store/center/service/market words", () => {
+  // Real false positives reported live: a "Coffee Shops and Cafes" /
+  // "Juice Bars and Smoothies" theme was pulling in an auto body shop, a
+  // tire shop, a bike shop, a florist, sports bars, and a wine bar — all
+  // via the shared generic word "shop" or "bar", with no real relation to
+  // coffee or juice.
+  it("does not match on 'shop' alone", () => {
+    expect(categoriesMatch("Coffee Shops and Cafes", "Body Shops & Collision Repair")).toBe(false);
+    expect(categoriesMatch("Coffee Shops and Cafes", "Tire Shops")).toBe(false);
+    expect(categoriesMatch("Coffee Shops and Cafes", "Bicycle Shops")).toBe(false);
+    expect(categoriesMatch("Coffee Shops and Cafes", "Florists & Gift Shops")).toBe(false);
+  });
+  it("does not match on 'bar' alone", () => {
+    expect(categoriesMatch("Juice Bars and Smoothies", "Sports Bars")).toBe(false);
+    expect(categoriesMatch("Juice Bars and Smoothies", "Wine Bars")).toBe(false);
+    expect(categoriesMatch("Juice Bars and Smoothies", "Bar & Grill")).toBe(false);
+  });
+  it("still matches when a real distinguishing word overlaps", () => {
+    expect(categoriesMatch("Coffee Shops and Cafes", "Coffee Shops")).toBe(true);
+    expect(categoriesMatch("Coffee Shops and Cafes", "Cafés & Coffee Shops")).toBe(true);
+  });
+});
+
 describe("matchesAnyCategory", () => {
   it("matches if any theme category fuzzy-matches", () => {
     expect(matchesAnyCategory("Coffee Shops", ["Specialty Retail", "Coffee and Cafes", "Bakeries"])).toBe(true);

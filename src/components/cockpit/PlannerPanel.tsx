@@ -405,6 +405,19 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
       .sort((a, b) => (a.claimed === b.claimed ? a.name.localeCompare(b.name) : a.claimed ? 1 : -1))),
     [listings, week.categories]
   );
+  // Grouped by the listing's own real GD category (not the theme's category
+  // tags — a different vocabulary, see categoryMatch.ts) so it's obvious how
+  // many of each you actually have, not just a flat count. Biggest groups
+  // first, alphabetical among ties.
+  const categoryGroups = useMemo(() => {
+    const map = new Map<string, DirectoryListing[]>();
+    for (const l of categoryMatches) {
+      const key = l.category || "Uncategorized";
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(l);
+    }
+    return Array.from(map.entries()).sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+  }, [categoryMatches]);
   // Same rotation history the Spotlight/Hidden Gem pool uses, keyed by name
   // — reused here to show "how many times featured" on the full list too.
   const featureCounts = useMemo(() => featureHistory(weeks), [weeks]);
@@ -902,48 +915,57 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
               <div className="text-[13px] text-muted">No directory listings match these categories yet.</div>
             ) : (
               <>
-                <div className="space-y-1">
-                  {categoryMatches.map((l) => {
-                    const gdPlaceId = toGdPlaceId(l.id);
-                    const featured = featureCounts.get(l.name.toLowerCase().trim());
-                    const allTime = gdPlaceId != null ? inviteCounts.get(gdPlaceId) : undefined;
-                    const latest = gdPlaceId != null ? latestInviteFor(gdPlaceId) : null;
-                    const status = latest ? (latest.status ?? "invited") : null;
-                    const selected = gdPlaceId != null && selectedForInvite.has(gdPlaceId);
-                    return (
-                      <div key={l.id} className="flex flex-wrap items-center gap-2 rounded-md border bg-background px-2 py-1.5">
-                        {gdPlaceId != null && (
-                          <button onClick={() => toggleSelectedForInvite(gdPlaceId)} title="Select for bulk invite"
-                            className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition ${selected ? "border-accent bg-accent text-white" : "border-border"}`}>
-                            {selected && <I.check />}
-                          </button>
-                        )}
-                        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${l.claimed ? "bg-emerald-500" : "bg-amber-500"}`} title={l.claimed ? "Claimed" : "Unclaimed"} />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[13px] font-medium">{l.name}</span>
-                          <span className="block truncate text-[11px] text-muted">
-                            {l.category}
-                            {featured && ` · featured ${featured.count}×`}
-                            {allTime && allTime.invited > 0 && ` · invited ${allTime.invited}× all-time`}
-                          </span>
-                        </span>
-                        {l.hasActiveEvents && <span title="Active event listing" className="shrink-0 text-accent"><I.calendar /></span>}
-                        {l.hasRecentPost && <span title="Recent blog post" className="shrink-0 text-[13px]">📝</span>}
-                        {status === "accepted" && <span className="shrink-0 text-[11px] font-semibold text-emerald-600">Accepted</span>}
-                        {status === "skipped" && <span className="shrink-0 text-[11px] font-medium text-muted">Skipped</span>}
-                        {status === "accepted" && (
-                          <span className="flex shrink-0 items-center gap-1">
-                            <button onClick={() => assignListingToSlot(l, "spotlight")} className="text-[11px] font-medium text-accent hover:underline">→ Spotlight</button>
-                            <button onClick={() => assignListingToSlot(l, "gem")} className="text-[11px] font-medium text-accent hover:underline">→ Hidden Gem</button>
-                          </span>
-                        )}
-                        {status === "invited" && gdPlaceId != null && (
-                          <button onClick={() => skipInvite(gdPlaceId)} className="shrink-0 text-[11px] font-medium text-muted hover:text-foreground">Skip</button>
-                        )}
-                        {renderInvite(gdPlaceId)}
+                <div className="space-y-3">
+                  {categoryGroups.map(([category, group]) => (
+                    <div key={category}>
+                      <div className="mb-1 text-[11px] font-semibold text-muted">{category} ({group.length})</div>
+                      <div className="space-y-1">
+                        {group.map((l) => {
+                          const gdPlaceId = toGdPlaceId(l.id);
+                          const featured = featureCounts.get(l.name.toLowerCase().trim());
+                          const allTime = gdPlaceId != null ? inviteCounts.get(gdPlaceId) : undefined;
+                          const latest = gdPlaceId != null ? latestInviteFor(gdPlaceId) : null;
+                          const status = latest ? (latest.status ?? "invited") : null;
+                          const selected = gdPlaceId != null && selectedForInvite.has(gdPlaceId);
+                          return (
+                            <div key={l.id} className="flex flex-wrap items-center gap-2 rounded-md border bg-background px-2 py-1.5">
+                              {gdPlaceId != null && (
+                                <button onClick={() => toggleSelectedForInvite(gdPlaceId)} title="Select for bulk invite"
+                                  className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition ${selected ? "border-accent bg-accent text-white" : "border-border"}`}>
+                                  {selected && <I.check />}
+                                </button>
+                              )}
+                              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${l.claimed ? "bg-emerald-500" : "bg-amber-500"}`} title={l.claimed ? "Claimed" : "Unclaimed"} />
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-[13px] font-medium">{l.name}</span>
+                                {(featured || (allTime && allTime.invited > 0)) && (
+                                  <span className="block truncate text-[11px] text-muted">
+                                    {featured && `featured ${featured.count}×`}
+                                    {featured && allTime && allTime.invited > 0 && " · "}
+                                    {allTime && allTime.invited > 0 && `invited ${allTime.invited}× all-time`}
+                                  </span>
+                                )}
+                              </span>
+                              {l.hasActiveEvents && <span title="Active event listing" className="shrink-0 text-accent"><I.calendar /></span>}
+                              {l.hasRecentPost && <span title="Recent blog post" className="shrink-0 text-[13px]">📝</span>}
+                              {status === "accepted" && <span className="shrink-0 text-[11px] font-semibold text-emerald-600">Accepted</span>}
+                              {status === "skipped" && <span className="shrink-0 text-[11px] font-medium text-muted">Skipped</span>}
+                              {status === "accepted" && (
+                                <span className="flex shrink-0 items-center gap-1">
+                                  <button onClick={() => assignListingToSlot(l, "spotlight")} className="text-[11px] font-medium text-accent hover:underline">→ Spotlight</button>
+                                  <button onClick={() => assignListingToSlot(l, "gem")} className="text-[11px] font-medium text-accent hover:underline">→ Hidden Gem</button>
+                                </span>
+                              )}
+                              {status === "invited" && gdPlaceId != null && (
+                                <button onClick={() => skipInvite(gdPlaceId)} className="shrink-0 text-[11px] font-medium text-muted hover:text-foreground">Skip</button>
+                              )}
+                              {renderInvite(gdPlaceId)}
+                            </div>
+                          );
+                        })}
                       </div>
-                    );
-                  })}
+                    </div>
+                  ))}
                 </div>
                 {selectedForInvite.size > 0 && (
                   <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-accent/40 bg-accent-soft/50 px-2.5 py-1.5">

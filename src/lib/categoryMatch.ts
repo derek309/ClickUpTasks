@@ -11,6 +11,16 @@
 // requiring the two vocabularies to ever be kept in sync.
 const STOPWORDS = new Set(["and", "the", "of", "a", "an", "for", "or", "in", "at", "to"]);
 
+// Generic retail/venue-type nouns (post-stemming, singular form) that appear
+// as a suffix on huge swaths of unrelated GD categories — "Coffee Shops",
+// "Body Shops", "Tire Shops", "Bicycle Shops" all share "shop"; "Wine Bars",
+// "Sports Bars", "Juice Bars" all share "bar". Treated as meaningful overlap,
+// these produced real false positives (a body shop and a tire shop both
+// "matching" a coffee-and-cafes theme via the shared word "shop"). Excluded
+// the same way STOPWORDS are — a match still needs an actual distinguishing
+// word ("coffee", "body", "tire") to hit.
+const GENERIC_CATEGORY_WORDS = new Set(["shop", "store", "bar", "center", "centre", "service", "market"]);
+
 // Cheap English singular/plural normalization ("Bakeries" -> "bakery",
 // "Cafes" -> "cafe", "Shops" -> "shop") — not a real stemmer, just enough to
 // stop a plural/singular mismatch (a very likely category-naming difference)
@@ -25,6 +35,7 @@ function stem(word: string): string {
 function significantWords(s: string): Set<string> {
   return new Set(
     s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !STOPWORDS.has(w)).map(stem)
+      .filter((w) => !GENERIC_CATEGORY_WORDS.has(w))
   );
 }
 
