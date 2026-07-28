@@ -12,7 +12,7 @@ import { AttachmentThumbs } from "./AttachmentThumbs";
 import { AttachmentTile } from "./AttachmentTile";
 import { InlineAssignee, InlineDue } from "./GroupedList";
 import { RichTextEditor } from "./RichTextEditor";
-import { claudeCodeUrl } from "@/lib/claudeLink";
+import { claudeWorkUrl } from "@/lib/claudeLink";
 
 // Status/priority reuse the field's own STATUS_META/PRIORITY_META token (the
 // diff's "to" value is already the rendered label, so match it back against
@@ -1005,13 +1005,8 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
             <button onClick={copyForClaude} title="Copy this task as a brief to paste into Claude Code" className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
               <span aria-hidden>{copied ? "✓" : "✳"}</span><span className="hidden sm:inline">{copied ? "Copied" : "Copy for Claude"}</span>
             </button>
-            <button onClick={() => {
-                // Claude Desktop has no title/name param for claude://code/new —
-                // it auto-titles the session from the first message, so lead
-                // with "Client — Task" to give that auto-title something
-                // readable to pick up instead of a bare task id.
-                window.location.href = claudeCodeUrl(`${client.name} — ${task.title}\n\nLook up and start working on ClickUpTasks task ${task.id} using the clickuptasks MCP tools.`);
-              }} title="Open this task in Claude Desktop, ready to work on it" className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
+            <button onClick={() => { window.location.href = claudeWorkUrl({ task: task.id }); }}
+              title="Resume (or start) this task's Claude Code session" className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
               <span aria-hidden>▶</span><span className="hidden sm:inline">Work with Claude</span>
             </button>
             {ghlContactUrl && (

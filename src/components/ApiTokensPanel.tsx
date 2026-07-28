@@ -5,7 +5,6 @@
 // credential, not a team-management concern.
 import { useEffect, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
-import { CLAUDE_REPO_PATH_KEY, getClaudeRepoPath } from "@/lib/claudeLink";
 import { ConfirmModal, type ConfirmSpec } from "./cockpit/modals";
 import { I } from "./cockpit/ui";
 
@@ -21,16 +20,7 @@ export default function ApiTokensPanel() {
   const [copied, setCopied] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
   const [revoking, setRevoking] = useState<string | null>(null);
-  const [repoPath, setRepoPath] = useState("");
-  const [repoSaved, setRepoSaved] = useState(false);
-
-  useEffect(() => { setRepoPath(getClaudeRepoPath()); }, []);
-
-  function saveRepoPath() {
-    try { localStorage.setItem(CLAUDE_REPO_PATH_KEY, repoPath.trim()); } catch {}
-    setRepoSaved(true);
-    setTimeout(() => setRepoSaved(false), 2000);
-  }
+  const [installCopied, setInstallCopied] = useState(false);
 
   async function load() {
     try {
@@ -124,11 +114,27 @@ export default function ApiTokensPanel() {
 
         <div className="border-t bg-background/40 px-5 py-4">
           <div className="mb-2 text-[15px] font-semibold">Work with Claude</div>
-          <p className="mb-2 text-[13px] text-muted">The local folder &quot;Work with Claude&quot; opens Claude Code in, on this browser/computer. Set once here — never asks again.</p>
-          <div className="flex items-center gap-2">
-            <input value={repoPath} onChange={(e) => setRepoPath(e.target.value)} placeholder="/path/to/clickuptasks" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
-            <button onClick={saveRepoPath} className="shrink-0 rounded-md border bg-surface px-3 py-1.5 text-[15px] font-medium hover:bg-background">{repoSaved ? "Saved" : "Save"}</button>
-          </div>
+          <p className="mb-2 text-[13px] text-muted">
+            One-time setup per computer — lets &quot;Work with Claude&quot; buttons resume the
+            same named Claude Code session instead of starting a new one every click.
+          </p>
+          <ol className="mb-2 list-decimal space-y-1 pl-4 text-[13px] text-muted">
+            <li>Open a terminal in your local clickuptasks checkout.</li>
+            <li>
+              Run <code className="rounded bg-surface px-1 py-0.5">node desktop-helper/install-mac.mjs</code> (macOS) or{" "}
+              <code className="rounded bg-surface px-1 py-0.5">node desktop-helper/install-windows.mjs</code> (Windows).
+            </li>
+            <li>It&apos;ll ask for your repo path once, then register the <code className="rounded bg-surface px-1 py-0.5">clickuptasks://</code> link handler.</li>
+          </ol>
+          <button
+            onClick={() => {
+              const cmd = /Mac|iPhone|iPad/.test(navigator.userAgent) ? "node desktop-helper/install-mac.mjs" : "node desktop-helper/install-windows.mjs";
+              navigator.clipboard.writeText(cmd).then(() => { setInstallCopied(true); setTimeout(() => setInstallCopied(false), 2000); });
+            }}
+            className="rounded-md border bg-surface px-3 py-1.5 text-[15px] font-medium hover:bg-background"
+          >
+            {installCopied ? "Copied" : "Copy install command"}
+          </button>
         </div>
 
         <div className="border-t bg-background/40 px-5 py-4">

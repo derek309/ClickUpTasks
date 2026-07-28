@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Plain-Node local helper scripts, not tuned for eslint-config-next's rules.
+    "desktop-helper/**",
   ]),
 ]);
 

@@ -1,26 +1,26 @@
-// Builds claude://code/new deep links — Anthropic's own, already-registered
-// scheme (Claude Desktop) for opening a Claude Code session pre-seeded with
-// a prompt and a working folder. Replaces an earlier custom Tauri "desktop
-// helper" app that duplicated this; claude:// does the same job natively,
-// cross-platform, with nothing for this repo to build or maintain.
+// Builds clickuptasks:// deep links for the local desktop-helper
+// (desktop-helper/, a plain Node script — see its README) instead of
+// Anthropic's claude://code/new. claude:// can only ever start a
+// brand-new session — no resume-by-name, and no way for a launcher to
+// learn the session id it created. clickuptasks:// hands off to
+// desktop-helper/handler.mjs, which resumes a NAMED session
+// (cut-t-<taskId> / cut-c-<clientId>[-p-<projectId>]) if one already
+// exists for that scope, or creates it on first click — so re-clicking
+// the same task days later picks the conversation back up instead of
+// starting cold every time.
 //
-// The repo path is a per-machine local filesystem path, so it can't live in
-// the DB — set once in the API Tokens panel's "Work with Claude" section
-// (ApiTokensPanel.tsx), read here directly. No prompt() — if it's unset,
-// the link just omits folder rather than blocking the click.
-export const CLAUDE_REPO_PATH_KEY = "cut_claudeRepoPath";
-
-export function getClaudeRepoPath(): string {
-  try {
-    return localStorage.getItem(CLAUDE_REPO_PATH_KEY) || "";
-  } catch {
-    return "";
+// The URL carries only ids, never the local repo path or any free-text
+// title — the helper is the sole owner of the repo path
+// (~/.clickuptasks-helper.json, set once via desktop-helper/install-mac.mjs
+// or install-windows.mjs) and builds the whole seed prompt itself from the
+// ids via the clickuptasks MCP tools.
+export function claudeWorkUrl(scope: { task: string } | { client: string; project?: string | null }): string {
+  const q = new URLSearchParams();
+  if ("task" in scope) {
+    q.set("task", scope.task);
+  } else {
+    q.set("client", scope.client);
+    if (scope.project) q.set("project", scope.project);
   }
-}
-
-export function claudeCodeUrl(prompt: string): string {
-  const folder = getClaudeRepoPath();
-  const params = new URLSearchParams({ q: prompt });
-  if (folder) params.set("folder", folder);
-  return `claude://code/new?${params.toString()}`;
+  return `clickuptasks://work?${q.toString()}`;
 }

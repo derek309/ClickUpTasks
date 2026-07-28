@@ -93,7 +93,7 @@ import { ClientsBoard, type WorkBoardGroup, type WorkItem } from "./cockpit/Clie
 import { ClientsDirectory } from "./cockpit/ClientsDirectory";
 import { ProjectsDirectory } from "./cockpit/ProjectsDirectory";
 import { FolderRail } from "./cockpit/FolderRail";
-import { claudeCodeUrl } from "@/lib/claudeLink";
+import { claudeWorkUrl } from "@/lib/claudeLink";
 
 // --- Deep-link URL state ----------------------------------------------------
 // The whole app lives on "/", so we encode what you're looking at into the
@@ -3409,13 +3409,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </div>
           <button onClick={() => {
               setHeaderMoreOpen(false);
-              const scope = activeProject ? `client ${activeClient}, project ${activeProject}` : `client ${activeClient}`;
-              const clientName = clientById(activeClient)?.name ?? activeClient;
-              const projectName = activeProject ? projectById(activeProject)?.name : null;
-              const label = projectName ? `${clientName} — ${projectName}` : clientName;
-              window.location.href = claudeCodeUrl(`${label}\n\nWork through the open tasks for ClickUpTasks ${scope} using the clickuptasks MCP tools — start with list_client_tasks.`);
+              window.location.href = claudeWorkUrl({ client: activeClient, project: activeProject });
             }}
-            title="Open this client/project in Claude Desktop, ready to work through its open tasks"
+            title="Resume (or start) this client/project's Claude Code session"
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>▶</span> Work with Claude</button>
           {canAdmin && (
             <button onClick={() => { setHeaderMoreOpen(false); setLinkModal({}); }}
@@ -3893,15 +3889,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     </div>
                     <button onClick={() => {
                         setHeaderMoreOpen(false);
-                        const scope = activeProject ? `client ${activeClient}, project ${activeProject}` : `client ${activeClient}`;
-                        const clientName = clientById(activeClient)?.name ?? activeClient;
-                        const projectName = activeProject ? projectById(activeProject)?.name : null;
-                        // Same auto-title lean as the task-level button: no
-                        // title param exists, so lead with a readable label.
-                        const label = projectName ? `${clientName} — ${projectName}` : clientName;
-                        window.location.href = claudeCodeUrl(`${label}\n\nWork through the open tasks for ClickUpTasks ${scope} using the clickuptasks MCP tools — start with list_client_tasks.`);
+                        window.location.href = claudeWorkUrl({ client: activeClient, project: activeProject });
                       }}
-                      title="Open this client/project in Claude Desktop, ready to work through its open tasks"
+                      title="Resume (or start) this client/project's Claude Code session"
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>▶</span> Work with Claude</button>
                     {canAdmin && (
                       <button onClick={() => { setHeaderMoreOpen(false); setLinkModal({}); }}
