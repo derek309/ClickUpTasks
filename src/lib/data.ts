@@ -344,7 +344,11 @@ export interface PlannerWeek {
   // any other AI suggestion — replaces plannerBrief's old hardcoded stub.
   weatherNote: string;
   picks: Partial<Record<PlannerSlot, PlannerBiz>>;
-  dismissed: number[]; // gd_place_ids dismissed from this week's suggestion pools
+  // gd_place_ids explicitly skipped for this week's newsletter — "not using
+  // them this week," set before ever inviting them. Reversible (bring back
+  // clears it). A business that WAS invited and later marked skipped lives
+  // in `invited[].status` instead, not here — the two never overlap.
+  dismissed: number[];
   // gd_place_ids invited to be featured this week (via the WordPress outreach
   // proxy), with when — lets the "Invited ✓" mark survive a refresh instead
   // of being session-only. `status` starts "invited" and flips to "accepted"

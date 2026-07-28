@@ -431,11 +431,24 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     for (const inv of week.invited) if (inv.gdPlaceId === gdPlaceId) latest = inv;
     return latest;
   };
-  const skipInvite = (gdPlaceId: number) => {
+  // "Not using this business in this week's newsletter" — works whether or
+  // not they've been invited yet, and is always reversible. Already-invited
+  // businesses flip their invited entry's status (no dismissed-list entry
+  // needed); never-invited ones go on `week.dismissed` — that field is
+  // otherwise unused now that the AI candidate pool is gone, so it's a clean
+  // fit rather than inventing a new one. A business is never in both states
+  // at once, so these two branches never collide.
+  const skipBusiness = (gdPlaceId: number) => {
     let idx = -1;
     week.invited.forEach((inv, i) => { if (inv.gdPlaceId === gdPlaceId) idx = i; });
-    if (idx === -1) return;
-    onPatch({ invited: week.invited.map((inv, i) => (i === idx ? { ...inv, status: "skipped" as const } : inv)) });
+    if (idx !== -1) onPatch({ invited: week.invited.map((inv, i) => (i === idx ? { ...inv, status: "skipped" as const } : inv)) });
+    else if (!week.dismissed.includes(gdPlaceId)) onPatch({ dismissed: [...week.dismissed, gdPlaceId] });
+  };
+  const bringBackBusiness = (gdPlaceId: number) => {
+    let idx = -1;
+    week.invited.forEach((inv, i) => { if (inv.gdPlaceId === gdPlaceId) idx = i; });
+    if (idx !== -1 && week.invited[idx].status === "skipped") onPatch({ invited: week.invited.map((inv, i) => (i === idx ? { ...inv, status: "invited" as const } : inv)) });
+    else if (week.dismissed.includes(gdPlaceId)) onPatch({ dismissed: week.dismissed.filter((id) => id !== gdPlaceId) });
   };
   const assignListingToSlot = (l: DirectoryListing, slot: PlannerSlot) => {
     const gdPlaceId = toGdPlaceId(l.id);
@@ -885,8 +898,21 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
                           const thisWeek = gdPlaceId != null ? week.invited.filter((x) => x.gdPlaceId === gdPlaceId).length : 0;
                           const latest = gdPlaceId != null ? latestInviteFor(gdPlaceId) : null;
                           const status = latest ? (latest.status ?? "invited") : null;
+                          const dismissedFlag = gdPlaceId != null && week.dismissed.includes(gdPlaceId);
+                          const skipped = status === "skipped" || dismissedFlag;
                           const selected = gdPlaceId != null && selectedForInvite.has(gdPlaceId);
                           const statsLine = `this week ${thisWeek}× · all-time ${allTime?.invited ?? 0}× · accepted ${allTime?.accepted ?? 0} · skipped ${allTime?.skipped ?? 0} · featured ${featured?.count ?? 0}×`;
+                          if (skipped) {
+                            return (
+                              <div key={l.id} className="flex flex-wrap items-center gap-2 rounded-md border bg-background px-2 py-1.5 opacity-50">
+                                <span className="min-w-0 flex-1 truncate text-[13px] font-medium line-through">{l.name}</span>
+                                <span className="shrink-0 text-[11px] font-medium">Skipped — not used this newsletter</span>
+                                {gdPlaceId != null && (
+                                  <button onClick={() => bringBackBusiness(gdPlaceId)} className="shrink-0 text-[11px] font-semibold text-accent opacity-100 hover:underline">↺ Bring back</button>
+                                )}
+                              </div>
+                            );
+                          }
                           return (
                             <div key={l.id} className="flex flex-wrap items-center gap-2 rounded-md border bg-background px-2 py-1.5">
                               {gdPlaceId != null && (
@@ -905,13 +931,12 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
                               <span title={l.hasActiveEvents ? "Active event listing" : "No active event listing"} className={`shrink-0 ${l.hasActiveEvents ? "text-accent" : "text-muted/30"}`}><I.calendar /></span>
                               <span title={l.hasRecentPost ? "Recent blog post" : "No recent blog post"} className={`shrink-0 text-[13px] ${l.hasRecentPost ? "" : "opacity-25 grayscale"}`}>📝</span>
                               {status === "accepted" && <span className="shrink-0 text-[11px] font-semibold text-emerald-600">Accepted</span>}
-                              {status === "skipped" && <span className="shrink-0 text-[11px] font-medium text-muted">Skipped</span>}
                               <span className="flex shrink-0 items-center gap-1">
                                 <button onClick={() => assignListingToSlot(l, "spotlight")} className="text-[11px] font-medium text-accent hover:underline">→ Spotlight</button>
                                 <button onClick={() => assignListingToSlot(l, "gem")} className="text-[11px] font-medium text-accent hover:underline">→ Hidden Gem</button>
                               </span>
-                              {status === "invited" && gdPlaceId != null && (
-                                <button onClick={() => skipInvite(gdPlaceId)} className="shrink-0 text-[11px] font-medium text-muted hover:text-foreground">Skip</button>
+                              {status !== "accepted" && gdPlaceId != null && (
+                                <button onClick={() => skipBusiness(gdPlaceId)} className="shrink-0 text-[11px] font-medium text-muted hover:text-foreground">Skip</button>
                               )}
                               {renderInvite(gdPlaceId)}
                             </div>
