@@ -22,6 +22,7 @@ import {
 import { generatePlannerBrief } from "@/lib/plannerBrief";
 import { pushPlannerWeek } from "@/lib/plannerPush";
 import { computePlannerPools, type PoolCandidate } from "@/lib/plannerPools";
+import { matchesAnyCategory } from "@/lib/categoryMatch";
 import { I, newId } from "./ui";
 import { type DirectoryListing } from "./TerritoryDirectory";
 
@@ -389,6 +390,16 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     listings: listings.map((l) => ({ id: l.id, name: l.name, category: l.category ?? "", claimed: l.claimed, hasOffer: l.hasOffer, score: l.score })),
     weeks, dismissedIds: week.dismissed, excludeNames: filledSlotNames, todayIso: todayIso(), categories: week.categories,
   }), [listings, weeks, week.dismissed, filledSlotNames, week.categories]);
+
+  // Every directory listing matching the week's theme categories, claimed or
+  // not — separate from `pools` above (which is a curated, rotation-ranked
+  // top-8 for the Spotlight/Hidden Gem slots specifically). This is the full
+  // picture: "what's actually out there in these categories right now."
+  const categoryMatches = useMemo(
+    () => (week.categories.length === 0 ? [] : listings.filter((l) => matchesAnyCategory(l.category ?? "", week.categories))
+      .sort((a, b) => (a.claimed === b.claimed ? a.name.localeCompare(b.name) : a.claimed ? 1 : -1))),
+    [listings, week.categories]
+  );
 
   // Cross-week dedupe for Story/Events suggestions — a recurring event (a
   // weekly farmers market, say) has no "due" rotation logic like the
@@ -813,6 +824,31 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
           <textarea value={week.notes} onChange={(e) => onPatch({ notes: e.target.value })} placeholder="Notes for this week…" rows={2}
             className="w-full resize-y rounded-lg border bg-surface px-3 py-1.5 text-[13px] outline-none placeholder:text-muted focus:border-accent" />
         </div>
+
+        {week.categories.length > 0 && (
+          <div className="border-b bg-background/40 p-4">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Businesses in these categories ({categoryMatches.length})</span>
+              <span className="flex items-center gap-3 text-[11px] text-muted">
+                <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> Claimed</span>
+                <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-500" /> Unclaimed</span>
+              </span>
+            </div>
+            {categoryMatches.length === 0 ? (
+              <div className="text-[13px] text-muted">No directory listings match these categories yet.</div>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {categoryMatches.map((l) => (
+                  <span key={l.id} title={l.category}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium ${l.claimed ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700" : "border-amber-500/30 bg-amber-500/10 text-amber-700"}`}>
+                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${l.claimed ? "bg-emerald-500" : "bg-amber-500"}`} />
+                    {l.name}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {brief && (
           <div className="border-b bg-background/40 px-4 py-3">
