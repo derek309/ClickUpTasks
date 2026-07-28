@@ -36,6 +36,7 @@ export type DirectoryListing = {
   // Wired through from WordPress's has_recent_post — false everywhere until
   // the Phase 2 WP work (post-to-listing linking) ships; safe default either way.
   hasRecentPost: boolean;
+  url: string; // public listing page — "" if CUL_WP_BASE_URL isn't configured
   score: number | null;
   category: string;
   // Outreach pipeline (from /sales — source of truth)

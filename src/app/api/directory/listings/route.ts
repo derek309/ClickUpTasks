@@ -142,6 +142,10 @@ export async function GET(req: NextRequest) {
       hasOffer: Boolean(it.has_offer),
       hasActiveEvents: Boolean(it.has_active_events),
       hasRecentPost: Boolean(it.has_recent_post),
+      // `/?p=<id>` is WordPress's built-in permalink redirect — works
+      // without needing the listing's actual slug, which this endpoint
+      // doesn't return.
+      url: WP_BASE ? `${WP_BASE}/?p=${it.id}` : "",
       // The hydrated /sales payload returns the score as a string ("72") and
       // categories as an array of breadcrumbs ("A › B › Leaf"); normalize both.
       score: (() => { const n = parseInt(String(it.clickuplocal_score ?? ""), 10); return Number.isFinite(n) ? n : null; })(),

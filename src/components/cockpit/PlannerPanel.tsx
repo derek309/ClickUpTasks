@@ -21,7 +21,7 @@ import {
 } from "@/lib/data";
 import { generatePlannerBrief } from "@/lib/plannerBrief";
 import { pushPlannerWeek } from "@/lib/plannerPush";
-import { computePlannerPools, featureHistory, inviteHistory, type PoolCandidate } from "@/lib/plannerPools";
+import { featureHistory, inviteHistory } from "@/lib/plannerPools";
 import { matchesAnyCategory } from "@/lib/categoryMatch";
 import { I, newId } from "./ui";
 import { type DirectoryListing } from "./TerritoryDirectory";
@@ -215,7 +215,7 @@ function BusinessPicker({ listings, onPick, onCancel }: {
   const matches = ql ? listings.filter((l) => l.name.toLowerCase().includes(ql)).slice(0, 8) : [];
   const pickFromListing = (l: DirectoryListing) => {
     const gdPlaceId = typeof l.id === "number" ? l.id : parseInt(String(l.id), 10);
-    onPick({ clientId: null, gdPlaceId: Number.isFinite(gdPlaceId) ? gdPlaceId : null, name: l.name, url: "", cat: l.category ?? "", note: "" });
+    onPick({ clientId: null, gdPlaceId: Number.isFinite(gdPlaceId) ? gdPlaceId : null, name: l.name, url: l.url ?? "", cat: l.category ?? "", note: "" });
   };
   return (
     <div className="relative">
@@ -390,16 +390,10 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     URL.revokeObjectURL(url);
   };
 
-  const filledSlotNames = PLANNER_CONTENT_SLOTS.map((s) => week.picks[s]?.name).filter(Boolean) as string[];
-  const pools = useMemo(() => computePlannerPools({
-    listings: listings.map((l) => ({ id: l.id, name: l.name, category: l.category ?? "", claimed: l.claimed, hasOffer: l.hasOffer, score: l.score })),
-    weeks, dismissedIds: week.dismissed, excludeNames: filledSlotNames, todayIso: todayIso(), categories: week.categories,
-  }), [listings, weeks, week.dismissed, filledSlotNames, week.categories]);
-
   // Every directory listing matching the week's theme categories, claimed or
-  // not — separate from `pools` above (which is a curated, rotation-ranked
-  // top-8 for the Spotlight/Hidden Gem slots specifically). This is the full
-  // picture: "what's actually out there in these categories right now."
+  // not — the actual "who to invite" surface. Filling Spotlight/Hidden Gem
+  // happens by inviting from this list and assigning accepted responses,
+  // not from a separate AI-suggested candidate pool.
   const categoryMatches = useMemo(
     () => (week.categories.length === 0 ? [] : listings.filter((l) => matchesAnyCategory(l.category ?? "", week.categories))
       .sort((a, b) => (a.claimed === b.claimed ? a.name.localeCompare(b.name) : a.claimed ? 1 : -1))),
@@ -445,7 +439,7 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
   };
   const assignListingToSlot = (l: DirectoryListing, slot: PlannerSlot) => {
     const gdPlaceId = toGdPlaceId(l.id);
-    setSlot(slot, { clientId: null, gdPlaceId, name: l.name, url: "", cat: l.category ?? "", note: "" });
+    setSlot(slot, { clientId: null, gdPlaceId, name: l.name, url: l.url ?? "", cat: l.category ?? "", note: "" });
   };
 
   // Cross-week dedupe for Story/Events suggestions — a recurring event (a
@@ -462,71 +456,6 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
   }, [weeks]);
   const recentEventTitles = useMemo(() => [...new Set(recentEvents.map((e) => e.text.split("\n")[0]?.trim()).filter(Boolean))], [recentEvents]);
   const recentStoryHeadlines = useMemo(() => [...new Set(weeks.map((w) => w.picks.story?.name).filter((n): n is string => !!n))], [weeks]);
-
-  const dismissCandidate = (c: PoolCandidate) => {
-    if (c.gdPlaceId == null || week.dismissed.includes(c.gdPlaceId)) return;
-    onPatch({ dismissed: [...week.dismissed, c.gdPlaceId] });
-  };
-  const pickPoolCandidate = (slot: PlannerSlot, c: PoolCandidate) => {
-    setSlot(slot, { clientId: null, gdPlaceId: c.gdPlaceId, name: c.name, url: "", cat: c.cat, note: "" });
-    setBrowseSlot(null);
-  };
-
-  // Inline per-slot AI suggest — a curated pick from the SAME deterministic
-  // pool "Browse candidates" shows (spotlight pool for the spotlight slot —
-  // claimed businesses, shown green; the shared hidden-gem pool for
-  // gem/gem2/gem3 — unclaimed, shown with the same neutral dot Businesses
-  // uses), not a new candidate source. Never persisted: Accept writes
-  // through setSlot exactly like picking from the browse list does.
-  // Suggest more (re-click) APPENDS rather than replacing — excludeNames
-  // tells the route not to repeat what's already on screen.
-  const poolForSlot = (slot: PlannerSlot) => (slot === "spotlight" ? pools.spotlight : pools.hiddenGem);
-  const [slotSuggestLoading, setSlotSuggestLoading] = useState<Partial<Record<PlannerSlot, boolean>>>({});
-  const [slotSuggestions, setSlotSuggestions] = useState<Partial<Record<PlannerSlot, { name: string; rationale: string }[]>>>({});
-  const [slotSuggestError, setSlotSuggestError] = useState<Partial<Record<PlannerSlot, string>>>({});
-  const [browseSlot, setBrowseSlot] = useState<PlannerSlot | null>(null);
-
-  const suggestForSlot = async (slot: PlannerSlot) => {
-    const already = slotSuggestions[slot] ?? [];
-    const candidates = poolForSlot(slot).filter((c) => !already.some((s) => s.name === c.name));
-    setSlotSuggestLoading((m) => ({ ...m, [slot]: true }));
-    setSlotSuggestError((m) => ({ ...m, [slot]: undefined }));
-    try {
-      const res = await authedFetch("/api/ai/planner-workshop", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode: "suggest_slot", cityName, theme: week.themeOverride, categories: week.categories, slot,
-          candidates: candidates.map((c) => ({ name: c.name, cat: c.cat, due: c.due, lastFeatured: c.lastFeatured })),
-        }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (res.ok && Array.isArray(j.suggestions)) setSlotSuggestions((m) => ({ ...m, [slot]: [...already, ...j.suggestions] }));
-      else setSlotSuggestError((m) => ({ ...m, [slot]: j.error || "Suggest failed." }));
-    } catch (e) {
-      setSlotSuggestError((m) => ({ ...m, [slot]: e instanceof Error ? e.message : "Suggest failed." }));
-    } finally {
-      setSlotSuggestLoading((m) => ({ ...m, [slot]: false }));
-    }
-  };
-  const acceptSlotSuggestion = (slot: PlannerSlot, s: { name: string; rationale: string }) => {
-    const candidate = poolForSlot(slot).find((c) => c.name === s.name);
-    setSlot(slot, candidate
-      ? { clientId: null, gdPlaceId: candidate.gdPlaceId, name: candidate.name, url: "", cat: candidate.cat, note: "" }
-      : { clientId: null, gdPlaceId: null, name: s.name, url: "", cat: "", note: "" });
-    setSlotSuggestions((m) => ({ ...m, [slot]: (m[slot] ?? []).filter((x) => x.name !== s.name) }));
-  };
-  const declineSlotSuggestion = (slot: PlannerSlot, s: { name: string; rationale: string }) => {
-    const candidate = poolForSlot(slot).find((c) => c.name === s.name);
-    if (candidate) dismissCandidate(candidate);
-    setSlotSuggestions((m) => ({ ...m, [slot]: (m[slot] ?? []).filter((x) => x.name !== s.name) }));
-  };
-  // Claimed (Spotlight pool) vs unclaimed (Hidden Gem pool) badge — same
-  // green-check / neutral-dot convention as the Businesses tab
-  // (TerritoryDirectory.tsx), inferred from which pool the slot draws from
-  // rather than a stored field, since spotlight is claimed-only by construction.
-  const ClaimBadge = ({ slot }: { slot: PlannerSlot }) => slot === "spotlight"
-    ? <span title="Claimed listing" className="shrink-0 text-emerald-500"><I.check className="h-3.5 w-3.5" /></span>
-    : <span title="Unclaimed listing" className="h-2 w-2 shrink-0 rounded-full border border-muted/50" />;
 
   // Invite-to-be-featured — proxies WordPress's own outreach/send action
   // (real GHL email, real contact upsert, logged on WP's own outreach
@@ -729,7 +658,6 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
       const d = JSON.parse(raw);
       if (d.themeOptions) setThemeOptions(d.themeOptions);
       if (d.categorySuggestions) setCategorySuggestions(d.categorySuggestions);
-      if (d.slotSuggestions) setSlotSuggestions(d.slotSuggestions);
       if (d.storySuggestions) setStorySuggestions(d.storySuggestions);
       if (d.eventsSuggestions) setEventsSuggestions(d.eventsSuggestions);
       if (d.weatherSuggestion) setWeatherSuggestion(d.weatherSuggestion);
@@ -739,12 +667,11 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     if (skipNextDraftPersist.current) { skipNextDraftPersist.current = false; return; }
     try {
       const key = DRAFT_CACHE_PREFIX + week.id;
-      const hasSlotSuggestions = Object.values(slotSuggestions).some((v) => v && v.length > 0);
-      const isEmpty = !themeOptions && !categorySuggestions && !hasSlotSuggestions && !storySuggestions && !eventsSuggestions && !weatherSuggestion;
+      const isEmpty = !themeOptions && !categorySuggestions && !storySuggestions && !eventsSuggestions && !weatherSuggestion;
       if (isEmpty) localStorage.removeItem(key);
-      else localStorage.setItem(key, JSON.stringify({ themeOptions, categorySuggestions, slotSuggestions, storySuggestions, eventsSuggestions, weatherSuggestion }));
+      else localStorage.setItem(key, JSON.stringify({ themeOptions, categorySuggestions, storySuggestions, eventsSuggestions, weatherSuggestion }));
     } catch {}
-  }, [week.id, themeOptions, categorySuggestions, slotSuggestions, storySuggestions, eventsSuggestions, weatherSuggestion]);
+  }, [week.id, themeOptions, categorySuggestions, storySuggestions, eventsSuggestions, weatherSuggestion]);
 
   // "Draft this week" — fires every applicable suggest_* call in parallel for
   // whatever's still empty, so a rep reviews one batch of suggestions
@@ -758,8 +685,9 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     const tasks: Promise<unknown>[] = [];
     if (!week.themeOverride.trim()) tasks.push(suggestThemes());
     else if (!categorySuggestions) tasks.push(suggestCategoriesFor(week.themeOverride, week.themeDescription || undefined));
-    if (!week.picks.spotlight) tasks.push(suggestForSlot("spotlight"));
-    if (!week.picks.gem) tasks.push(suggestForSlot("gem"));
+    // Spotlight/Hidden Gem no longer auto-draft here — filling those is now
+    // the category business list's job (invite → accept → assign to slot),
+    // not an AI guess.
     if (!week.picks.story) tasks.push(suggestStory());
     tasks.push(suggestEvents(false));
     if (!week.weatherNote) tasks.push(suggestWeather());
@@ -937,7 +865,9 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
                               )}
                               <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${l.claimed ? "bg-emerald-500" : "bg-amber-500"}`} title={l.claimed ? "Claimed" : "Unclaimed"} />
                               <span className="min-w-0 flex-1">
-                                <span className="block truncate text-[13px] font-medium">{l.name}</span>
+                                {l.url
+                                  ? <a href={l.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="block truncate text-[13px] font-medium text-accent hover:underline">{l.name}</a>
+                                  : <span className="block truncate text-[13px] font-medium">{l.name}</span>}
                                 {(featured || (allTime && allTime.invited > 0)) && (
                                   <span className="block truncate text-[11px] text-muted">
                                     {featured && `featured ${featured.count}×`}
@@ -1008,7 +938,9 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
                 {biz ? (
                   <div className="flex items-start gap-2 rounded-lg border bg-background px-3 py-2">
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-[14px] font-medium">{biz.name}</div>
+                      {biz.url
+                        ? <a href={biz.url} target="_blank" rel="noopener noreferrer" className="block truncate text-[14px] font-medium text-accent hover:underline">{biz.name}</a>
+                        : <div className="truncate text-[14px] font-medium">{biz.name}</div>}
                       {biz.cat && <div className="text-[12px] text-muted">{biz.cat}</div>}
                       <textarea value={biz.note} onChange={(e) => setSlot(slot, { ...biz, note: e.target.value })} placeholder="Note for this pick…" rows={1}
                         className="mt-1 w-full resize-y rounded-md border bg-surface px-2 py-1 text-[13px] outline-none placeholder:text-muted focus:border-accent" />
@@ -1025,61 +957,10 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
                   <div>
                     <div className="flex flex-wrap gap-2">
                       <button onClick={() => setPickerSlot(slot)} className="rounded-lg border border-dashed px-3 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">+ Pick a business</button>
-                      {PLANNER_BUSINESS_SLOTS.includes(slot) && (
-                        <>
-                          <button onClick={() => suggestForSlot(slot)} disabled={!!slotSuggestLoading[slot]} className="rounded-lg border px-3 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-40">
-                            {slotSuggestLoading[slot] ? "Thinking…" : slotSuggestions[slot]?.length ? "✨ Suggest more" : "✨ Suggest"}
-                          </button>
-                          <button onClick={() => setBrowseSlot((b) => (b === slot ? null : slot))} className="rounded-lg border px-3 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
-                            {browseSlot === slot ? "Hide candidates" : `Browse candidates (${poolForSlot(slot).length})`}
-                          </button>
-                        </>
-                      )}
                       {slot === "story" && (
                         <button onClick={suggestStory} disabled={storySuggestLoading} className="rounded-lg border px-3 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-40">{storySuggestLoading ? "Searching…" : "✨ Find local news"}</button>
                       )}
                     </div>
-                    {slotSuggestError[slot] && <div className="mt-1.5 text-[12px] text-danger">{slotSuggestError[slot]}</div>}
-                    {slotSuggestions[slot] && (
-                      <div className="mt-1.5 space-y-1.5">
-                        {(slotSuggestions[slot] ?? []).length === 0 && <div className="text-[13px] text-muted">No good fits found in the current candidate pool.</div>}
-                        {(slotSuggestions[slot] ?? []).map((s) => (
-                          <div key={s.name} className="rounded-lg border bg-background px-3 py-2">
-                            <div className="flex items-center gap-1.5"><ClaimBadge slot={slot} /><div className="text-[13px] font-medium">{s.name}</div></div>
-                            <div className="mb-1.5 text-[12px] text-muted">{s.rationale}</div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <button onClick={() => acceptSlotSuggestion(slot, s)} className="text-[12px] font-medium text-accent hover:underline">Accept</button>
-                              <button onClick={() => declineSlotSuggestion(slot, s)} className="text-[12px] font-medium text-muted hover:text-foreground">Decline</button>
-                              {renderInvite(poolForSlot(slot).find((c) => c.name === s.name)?.gdPlaceId ?? null)}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {browseSlot === slot && (() => {
-                      // AI-suggested candidates above already show as their own
-                      // card (Accept/Decline) — drop them from Browse so the
-                      // same business never renders twice on screen at once.
-                      const suggestedNames = new Set((slotSuggestions[slot] ?? []).map((s) => s.name.toLowerCase().trim()));
-                      const browseCandidates = poolForSlot(slot).filter((c) => !suggestedNames.has(c.name.toLowerCase().trim()));
-                      return (
-                        <div className="mt-1.5 space-y-1">
-                          {browseCandidates.length === 0 && <div className="text-[13px] text-muted">No candidates found yet.</div>}
-                          {browseCandidates.map((c) => (
-                            <div key={c.gdPlaceId ?? c.name} className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5">
-                              <ClaimBadge slot={slot} />
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate text-[13px] font-medium">{c.name}</span>
-                                <span className="block truncate text-[11px] text-muted">{c.cat}{c.timesFeatured > 0 ? ` · featured ${c.timesFeatured}×` : ""}{c.due ? " · due" : c.lastFeatured ? ` · last ${c.lastFeatured}` : ""}</span>
-                              </span>
-                              {renderInvite(c.gdPlaceId)}
-                              <button onClick={() => pickPoolCandidate(slot, c)} className="shrink-0 text-[12px] font-medium text-accent hover:underline">+ Pick</button>
-                              <button onClick={() => dismissCandidate(c)} title="Not this week" className="shrink-0 text-muted hover:text-danger"><I.close className="h-3 w-3" /></button>
-                            </div>
-                          ))}
-                        </div>
-                      );
-                    })()}
                     {slot === "story" && storySuggestError && <div className="mt-1.5 text-[12px] text-danger">{storySuggestError}</div>}
                     {slot === "story" && storySuggestions && (
                       <div className="mt-1.5 space-y-1.5">
