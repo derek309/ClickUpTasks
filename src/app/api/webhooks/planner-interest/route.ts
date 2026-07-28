@@ -5,6 +5,13 @@ import { plannerWeekLabel } from "@/lib/data";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+// Rough JS approximation of WordPress's PHP sanitize_title() — same
+// fallback /api/planner/push/route.ts and /api/planner/invite/send/route.ts
+// already use (each keeps its own copy rather than sharing one).
+function slugify(s: string): string {
+  return s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
 // Inbound webhook: WordPress -> ClickUpTasks, fired the instant a business
 // responds to a Content Planner "invite to be featured" (see
 // sales-outreach.php's cul_sales_notify_clickuptasks_interest, called from
@@ -44,7 +51,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Missing city/week or unknown event" }, { status: 400 });
   }
 
-  const { data: territory } = await supabaseAdmin.from("territories").select("id, assigned_to").eq("wp_city_slug", city).maybeSingle();
+  // wp_city_slug is an optional per-territory override, null on every
+  // territory today — the effective slug WordPress actually sent is
+  // wp_city_slug || slugify(city), same fallback the outbound routes
+  // (invite/send, push) already use. A raw .eq("wp_city_slug", city") here
+  // would never match anything, so fetch and reverse-match in JS instead.
+  const { data: territories } = await supabaseAdmin.from("territories").select("id, city, wp_city_slug, assigned_to");
+  const territory = (territories ?? []).find((t: any) => (t.wp_city_slug || slugify(String(t.city ?? ""))) === city) ?? null;
 
   // Flip the matching week.invited entry's status to "accepted" so the
   // Planner can show real response state instead of just "sent". Every
