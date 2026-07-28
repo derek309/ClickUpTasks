@@ -88,12 +88,13 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
   const hasWeek = (w: string) => weeks.some((x) => x.week === w);
 
   const createWeek = async (week: string) => {
-    // Pre-fill from the theme calendar as a starting default — themeOverride
-    // and categories stay fully editable either way, "override" already
-    // implies the calendar entry isn't the final word.
-    const assigned = themeForWeek(week, themeCalendar);
+    // No theme/categories prefilled here — the calendar's assignment is
+    // only ever offered as a suggestion (it's fed to "Suggest themes" as
+    // context), never written to the week until the user actually picks
+    // one. A prefilled theme reads as already-decided and skews the
+    // Spotlight/Hidden Gem pools before anyone chose anything.
     const w: PlannerWeek = {
-      id: newId("pw_"), territoryId, week, themeOverride: assigned?.title ?? "", themeDescription: "", categories: assigned?.categories ?? [], notes: "", weatherNote: "",
+      id: newId("pw_"), territoryId, week, themeOverride: "", themeDescription: "", categories: [], notes: "", weatherNote: "",
       picks: {}, dismissed: [], invited: [], archived: false, sentDate: null, wpPushedAt: null, createdAt: new Date().toISOString(),
     };
     setWeeks((ws) => [w, ...ws]);
@@ -779,8 +780,16 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
               )}
               <button onClick={() => { onPatch({ archived: !week.archived }); pushNow(); }} className="rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-background hover:text-foreground">{week.archived ? "Unarchive" : "Archive"}</button>
               <button onClick={generateBrief} className="rounded-md border border-accent px-2.5 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft">Generate brief</button>
-              <button onClick={onDelete} title="Delete this week" className="rounded-md p-1.5 text-muted hover:bg-background hover:text-danger"><I.trash /></button>
             </div>
+            {/* Kept apart from the routine action buttons above (its own
+                flex item, with a divider) instead of sitting right next to
+                Generate brief — a destructive, unrecoverable action is too
+                easy to misclick when it's packed into the same tight
+                button row. */}
+            <span className="mx-1 hidden h-5 w-px bg-border sm:inline-block" />
+            <button
+              onClick={() => { if (window.confirm(`Delete "${plannerWeekLabel(week.week)}"? This can't be undone.`)) onDelete(); }}
+              title="Delete this week" className="rounded-md p-1.5 text-muted hover:bg-background hover:text-danger"><I.trash /></button>
           </div>
           <div className="mb-2 flex items-center gap-1.5">
             <input value={week.themeOverride} onChange={(e) => onPatch({ themeOverride: e.target.value })} placeholder="Theme (e.g. “Foodie favorites”)"
