@@ -338,6 +338,31 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     setCatInput("");
   };
   const removeCategory = (c: string) => onPatch({ categories: week.categories.filter((x) => x !== c) });
+  // Real GD categories that actually have listings behind them, with counts
+  // — typing (or AI-suggesting) a category name in different wording from
+  // the directory's own taxonomy is exactly what produced zero-match
+  // categories live ("Indoor Recreation and Arcades", "Museums and Cultural
+  // Centers" — neither shares a word with any real Lincoln category).
+  // Picking straight from this list guarantees at least one match.
+  const categoryOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const l of listings) {
+      const c = (l.category || "").trim();
+      if (c) counts.set(c, (counts.get(c) ?? 0) + 1);
+    }
+    return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [listings]);
+  const [catDropdownOpen, setCatDropdownOpen] = useState(false);
+  const filteredCategoryOptions = useMemo(() => {
+    const q = catInput.trim().toLowerCase();
+    const opts = q ? categoryOptions.filter(([c]) => c.toLowerCase().includes(q)) : categoryOptions;
+    return opts.filter(([c]) => !week.categories.includes(c)).slice(0, 12);
+  }, [categoryOptions, catInput, week.categories]);
+  const pickCategoryOption = (c: string) => {
+    if (!week.categories.includes(c)) onPatch({ categories: [...week.categories, c] });
+    setCatInput("");
+    setCatDropdownOpen(false);
+  };
 
   const addSection = (type: string) => {
     const s: PlannerSection = { id: newId("psec_"), weekId: week.id, position: sections.length, type, text: "", biz: null };
@@ -839,8 +864,24 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
                 <button onClick={() => removeCategory(c)} className="hover:text-danger"><I.close className="h-3 w-3" /></button>
               </span>
             ))}
-            <input value={catInput} onChange={(e) => setCatInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCategory(); } }}
-              placeholder="+ Theme category" className="min-w-[120px] flex-1 rounded-md border-transparent bg-transparent px-1.5 py-0.5 text-[12px] outline-none placeholder:text-muted focus:border-accent focus:bg-surface" />
+            <div className="relative min-w-[120px] flex-1">
+              <input value={catInput} onChange={(e) => setCatInput(e.target.value)} onFocus={() => setCatDropdownOpen(true)}
+                onBlur={() => setTimeout(() => setCatDropdownOpen(false), 150)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCategory(); setCatDropdownOpen(false); } }}
+                placeholder="+ Theme category" className="w-full rounded-md border-transparent bg-transparent px-1.5 py-0.5 text-[12px] outline-none placeholder:text-muted focus:border-accent focus:bg-surface" />
+              {catDropdownOpen && filteredCategoryOptions.length > 0 && (
+                <div className="absolute left-0 top-full z-10 mt-1 max-h-56 w-64 overflow-y-auto rounded-lg border bg-surface shadow-soft-md">
+                  <div className="border-b px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">Real categories with listings</div>
+                  {filteredCategoryOptions.map(([c, n]) => (
+                    <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => pickCategoryOption(c)}
+                      className="flex w-full items-center justify-between px-2.5 py-1.5 text-left text-[13px] hover:bg-background">
+                      <span className="truncate">{c}</span>
+                      <span className="shrink-0 pl-2 text-[11px] text-muted">{n}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             {!categoriesLoading && !categorySuggestions && (
               <button onClick={() => suggestCategoriesFor(week.themeOverride)} disabled={!week.themeOverride.trim()} title="Suggest categories for this theme" className="shrink-0 text-[12px] font-medium text-accent hover:underline disabled:opacity-40 disabled:hover:no-underline">✨ Suggest categories</button>
             )}
