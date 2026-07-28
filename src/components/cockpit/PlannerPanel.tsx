@@ -21,7 +21,7 @@ import {
 } from "@/lib/data";
 import { generatePlannerBrief } from "@/lib/plannerBrief";
 import { pushPlannerWeek } from "@/lib/plannerPush";
-import { computePlannerPools, type PoolCandidate } from "@/lib/plannerPools";
+import { computePlannerPools, featureHistory, type PoolCandidate } from "@/lib/plannerPools";
 import { matchesAnyCategory } from "@/lib/categoryMatch";
 import { I, newId } from "./ui";
 import { type DirectoryListing } from "./TerritoryDirectory";
@@ -400,6 +400,9 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
       .sort((a, b) => (a.claimed === b.claimed ? a.name.localeCompare(b.name) : a.claimed ? 1 : -1))),
     [listings, week.categories]
   );
+  // Same rotation history the Spotlight/Hidden Gem pool uses, keyed by name
+  // — reused here to show "how many times featured" on the full list too.
+  const featureCounts = useMemo(() => featureHistory(weeks), [weeks]);
 
   // Cross-week dedupe for Story/Events suggestions — a recurring event (a
   // weekly farmers market, say) has no "due" rotation logic like the
@@ -838,13 +841,17 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
               <div className="text-[13px] text-muted">No directory listings match these categories yet.</div>
             ) : (
               <div className="flex flex-wrap gap-1.5">
-                {categoryMatches.map((l) => (
-                  <span key={l.id} title={l.category}
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium ${l.claimed ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700" : "border-amber-500/30 bg-amber-500/10 text-amber-700"}`}>
-                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${l.claimed ? "bg-emerald-500" : "bg-amber-500"}`} />
-                    {l.name}
-                  </span>
-                ))}
+                {categoryMatches.map((l) => {
+                  const featured = featureCounts.get(l.name.toLowerCase().trim());
+                  return (
+                    <span key={l.id} title={featured ? `${l.category} — featured ${featured.count}× (last ${featured.last})` : l.category}
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium ${l.claimed ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700" : "border-amber-500/30 bg-amber-500/10 text-amber-700"}`}>
+                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${l.claimed ? "bg-emerald-500" : "bg-amber-500"}`} />
+                      {l.name}
+                      {featured && <span className="opacity-70">· {featured.count}×</span>}
+                    </span>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -940,7 +947,7 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
                               <ClaimBadge slot={slot} />
                               <span className="min-w-0 flex-1">
                                 <span className="block truncate text-[13px] font-medium">{c.name}</span>
-                                <span className="block truncate text-[11px] text-muted">{c.cat}{c.due ? " · due" : c.lastFeatured ? ` · featured ${c.lastFeatured}` : ""}</span>
+                                <span className="block truncate text-[11px] text-muted">{c.cat}{c.timesFeatured > 0 ? ` · featured ${c.timesFeatured}×` : ""}{c.due ? " · due" : c.lastFeatured ? ` · last ${c.lastFeatured}` : ""}</span>
                               </span>
                               {renderInvite(c.gdPlaceId)}
                               <button onClick={() => pickPoolCandidate(slot, c)} className="shrink-0 text-[12px] font-medium text-accent hover:underline">+ Pick</button>

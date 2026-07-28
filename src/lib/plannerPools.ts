@@ -14,8 +14,11 @@ const ROTATION_WINDOW_DAYS = 90;
 
 // name -> { count, last week iso } across every week this territory has ever
 // had picks for, regardless of which slot — mirrors WP's rotation history,
-// just off real rows instead of an options-table LIKE scan.
-function featureHistory(weeks: PlannerWeek[]): Map<string, { count: number; last: string }> {
+// just off real rows instead of an options-table LIKE scan. Exported so
+// callers outside the pool (e.g. the full theme-category business list, which
+// isn't restricted to the pool's claimed/unclaimed slot eligibility) can show
+// the same "how many times featured" count without recomputing it.
+export function featureHistory(weeks: PlannerWeek[]): Map<string, { count: number; last: string }> {
   const map = new Map<string, { count: number; last: string }>();
   for (const w of weeks) {
     for (const slot of FEATURE_SLOTS) {
