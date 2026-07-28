@@ -441,6 +441,22 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     const gdPlaceId = toGdPlaceId(l.id);
     setSlot(slot, { clientId: null, gdPlaceId, name: l.name, url: l.url ?? "", cat: l.category ?? "", note: "" });
   };
+  // Accepted-but-not-yet-in-a-slot — the "decide who to feature" shortlist,
+  // separate from the full category list so responses don't get lost among
+  // everyone who hasn't replied yet. Excludes anyone already placed in a
+  // business slot this week (nothing to decide on there anymore).
+  const acceptedUnassigned = useMemo(() => {
+    const placedIds = new Set(
+      (["spotlight", "gem", "gem2", "gem3"] as const).map((s) => week.picks[s]?.gdPlaceId).filter((id): id is number => id != null)
+    );
+    return categoryMatches.filter((l) => {
+      const gdPlaceId = toGdPlaceId(l.id);
+      if (gdPlaceId == null || placedIds.has(gdPlaceId)) return false;
+      let latestStatus: string | undefined;
+      for (const inv of week.invited) if (inv.gdPlaceId === gdPlaceId) latestStatus = inv.status;
+      return latestStatus === "accepted";
+    });
+  }, [categoryMatches, week.picks, week.invited]);
 
   // Cross-week dedupe for Story/Events suggestions — a recurring event (a
   // weekly farmers market, say) has no "due" rotation logic like the
@@ -843,6 +859,20 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
               <div className="text-[13px] text-muted">No directory listings match these categories yet.</div>
             ) : (
               <>
+                {acceptedUnassigned.length > 0 && (
+                  <div className="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2.5">
+                    <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Accepted — ready to feature ({acceptedUnassigned.length})</div>
+                    <div className="space-y-1">
+                      {acceptedUnassigned.map((l) => (
+                        <div key={l.id} className="flex flex-wrap items-center gap-2 rounded-md border bg-background px-2 py-1.5">
+                          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{l.name}</span>
+                          <button onClick={() => assignListingToSlot(l, "spotlight")} className="shrink-0 rounded-md border border-accent px-2 py-1 text-[11px] font-semibold text-accent hover:bg-accent-soft">→ Spotlight</button>
+                          <button onClick={() => assignListingToSlot(l, "gem")} className="shrink-0 rounded-md border border-accent px-2 py-1 text-[11px] font-semibold text-accent hover:bg-accent-soft">→ Hidden Gem</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="space-y-3">
                   {categoryGroups.map(([category, group]) => (
                     <div key={category}>
@@ -852,9 +882,11 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
                           const gdPlaceId = toGdPlaceId(l.id);
                           const featured = featureCounts.get(l.name.toLowerCase().trim());
                           const allTime = gdPlaceId != null ? inviteCounts.get(gdPlaceId) : undefined;
+                          const thisWeek = gdPlaceId != null ? week.invited.filter((x) => x.gdPlaceId === gdPlaceId).length : 0;
                           const latest = gdPlaceId != null ? latestInviteFor(gdPlaceId) : null;
                           const status = latest ? (latest.status ?? "invited") : null;
                           const selected = gdPlaceId != null && selectedForInvite.has(gdPlaceId);
+                          const statsLine = `this week ${thisWeek}× · all-time ${allTime?.invited ?? 0}× · accepted ${allTime?.accepted ?? 0} · skipped ${allTime?.skipped ?? 0} · featured ${featured?.count ?? 0}×`;
                           return (
                             <div key={l.id} className="flex flex-wrap items-center gap-2 rounded-md border bg-background px-2 py-1.5">
                               {gdPlaceId != null && (
@@ -868,24 +900,16 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
                                 {l.url
                                   ? <a href={l.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="block truncate text-[13px] font-medium text-accent hover:underline">{l.name}</a>
                                   : <span className="block truncate text-[13px] font-medium">{l.name}</span>}
-                                {(featured || (allTime && allTime.invited > 0)) && (
-                                  <span className="block truncate text-[11px] text-muted">
-                                    {featured && `featured ${featured.count}×`}
-                                    {featured && allTime && allTime.invited > 0 && " · "}
-                                    {allTime && allTime.invited > 0 && `invited ${allTime.invited}× all-time`}
-                                  </span>
-                                )}
+                                <span title={statsLine} className="block truncate text-[11px] text-muted">{statsLine}</span>
                               </span>
-                              {l.hasActiveEvents && <span title="Active event listing" className="shrink-0 text-accent"><I.calendar /></span>}
-                              {l.hasRecentPost && <span title="Recent blog post" className="shrink-0 text-[13px]">📝</span>}
+                              <span title={l.hasActiveEvents ? "Active event listing" : "No active event listing"} className={`shrink-0 ${l.hasActiveEvents ? "text-accent" : "text-muted/30"}`}><I.calendar /></span>
+                              <span title={l.hasRecentPost ? "Recent blog post" : "No recent blog post"} className={`shrink-0 text-[13px] ${l.hasRecentPost ? "" : "opacity-25 grayscale"}`}>📝</span>
                               {status === "accepted" && <span className="shrink-0 text-[11px] font-semibold text-emerald-600">Accepted</span>}
                               {status === "skipped" && <span className="shrink-0 text-[11px] font-medium text-muted">Skipped</span>}
-                              {status === "accepted" && (
-                                <span className="flex shrink-0 items-center gap-1">
-                                  <button onClick={() => assignListingToSlot(l, "spotlight")} className="text-[11px] font-medium text-accent hover:underline">→ Spotlight</button>
-                                  <button onClick={() => assignListingToSlot(l, "gem")} className="text-[11px] font-medium text-accent hover:underline">→ Hidden Gem</button>
-                                </span>
-                              )}
+                              <span className="flex shrink-0 items-center gap-1">
+                                <button onClick={() => assignListingToSlot(l, "spotlight")} className="text-[11px] font-medium text-accent hover:underline">→ Spotlight</button>
+                                <button onClick={() => assignListingToSlot(l, "gem")} className="text-[11px] font-medium text-accent hover:underline">→ Hidden Gem</button>
+                              </span>
                               {status === "invited" && gdPlaceId != null && (
                                 <button onClick={() => skipInvite(gdPlaceId)} className="shrink-0 text-[11px] font-medium text-muted hover:text-foreground">Skip</button>
                               )}
