@@ -2123,11 +2123,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // than planned, snooze whatever's actually blocking it" — only tasks due
   // today or already overdue jump to the new date (anything due later is
   // untouched, since it was never what pushed the follow-up date out).
-  // Unscoped by assignee on purpose, same as the pill's own autoTracked
-  // check below: the goal is nothing under this client/project reads
-  // overdue, not just the viewer's own tasks. That's also why this is
-  // admin-only — tasks_update RLS rejects a non-admin writing a teammate's
-  // task, which would silently fail per task while the toast claimed success.
+  // Scoped to the viewer's own assigned tasks (Derek, Jul 27): moving the
+  // follow-up date used to drag every assignee's overdue tasks forward,
+  // which silently rescheduled a teammate's work out from under them. Only
+  // the current user's own tasks move now — a teammate's overdue tasks on
+  // the same client/project are untouched, so the follow-up date can still
+  // show overdue on their account even after you move yours.
   const alignOverdueTasksTo = (clientId: string, projectId: string | null, newDate: string) => {
     // Conversation-priority tasks ("Reply to X") are excluded: they re-pin
     // their own due date to today on every inbound message
@@ -2136,7 +2137,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // (implies "we'll wait" on it) or pointless (the next message just
     // bounces it right back to today), which is exactly the loop this was
     // built to prevent, not cause.
-    const blocking = tasks.filter((t) => t.status !== "done" && t.priority !== "conversation" && !!t.due && t.due <= TODAY && (projectId ? t.projectId === projectId : t.clientId === clientId));
+    const blocking = tasks.filter((t) => t.status !== "done" && t.priority !== "conversation" && t.assigneeId === me.id && !!t.due && t.due <= TODAY && (projectId ? t.projectId === projectId : t.clientId === clientId));
     if (!blocking.length) return;
     blocking.forEach((t) => patchTask(t.id, { due: newDate }));
     pushToast(`Moved ${blocking.length} overdue task${blocking.length === 1 ? "" : "s"} to ${formatDue(newDate)}.`);
