@@ -4,6 +4,7 @@
 // The ClickUpTasks equivalent of WordPress's cul_sales_featured_map(),
 // scanning real rows instead of LIKE-matching wp_options.
 import type { PlannerWeek } from "./data";
+import { matchesAnyCategory } from "./categoryMatch";
 
 export type PoolListing = { id: number | string; name: string; category: string; claimed: boolean; hasOffer: boolean; score: number | null };
 export type PoolCandidate = { gdPlaceId: number | null; name: string; cat: string; score: number | null; timesFeatured: number; lastFeatured: string | null; due: boolean };
@@ -47,10 +48,12 @@ export function computePlannerPools(opts: {
   const history = featureHistory(weeks);
   const excluded = new Set(excludeNames.map((n) => n.toLowerCase().trim()));
   const dismissed = new Set(dismissedIds);
-  // Same lowercase-equality match plannerBrief.ts's Support Local section
-  // already uses. Empty categories (no theme assigned) matches everything.
-  const catsLower = (categories ?? []).map((c) => c.toLowerCase().trim()).filter(Boolean);
-  const matchesTheme = (c: PoolCandidate) => catsLower.length === 0 || catsLower.includes(c.cat.toLowerCase().trim());
+  // Fuzzy word-overlap match (categoryMatch.ts) — theme categories and real
+  // GD categories are different vocabularies, so exact string equality
+  // rarely hits (e.g. theme "Coffee and Cafes" vs GD "Coffee Shops"). Empty
+  // categories (no theme assigned) matches everything.
+  const themeCats = (categories ?? []).filter((c) => c.trim());
+  const matchesTheme = (c: PoolCandidate) => matchesAnyCategory(c.cat, themeCats);
 
   const toCandidate = (l: PoolListing): PoolCandidate | null => {
     if (excluded.has(l.name.toLowerCase().trim())) return null;

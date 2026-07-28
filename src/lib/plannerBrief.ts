@@ -4,6 +4,7 @@
 // generated client-side with no server round-trip (every input already
 // lives in the open week's own state).
 import { plannerWeekLabel, type PlannerWeek, type PlannerSection, type PlannerEvent, type PlannerSlot } from "./data";
+import { matchesAnyCategory } from "./categoryMatch";
 
 const SLOT_HEADINGS: Record<PlannerSlot, string> = {
   spotlight: "Business Spotlight (new business)",
@@ -74,10 +75,12 @@ export function generatePlannerBrief(opts: {
     (["spotlight", "gem", "gem2", "gem3"] as const).map((s) => week.picks[s]?.name?.toLowerCase().trim()).filter(Boolean) as string[]
   );
   lines.push("## Support Local (claimed businesses with active offers, by category)");
-  const catsLower = week.categories.map((c) => c.toLowerCase());
+  // Fuzzy word-overlap match (categoryMatch.ts), not exact string equality —
+  // theme categories and real GD categories are different vocabularies (see
+  // categoryMatch.ts's own doc comment for why).
   const supportRows = listings.filter((l) =>
     l.claimed && l.hasOffer && !featuredNames.has(l.name.toLowerCase().trim())
-    && (catsLower.length === 0 || catsLower.includes(l.category.toLowerCase()))
+    && matchesAnyCategory(l.category, week.categories)
   );
   if (supportRows.length) {
     for (const l of supportRows.slice(0, 20)) lines.push(`- ${l.name}${l.offerTitle ? ` — ${l.offerTitle}` : ""}`);
