@@ -3470,38 +3470,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         </div>
 
         {/* Dashboard leads — the single place everyone works from (Derek).
-            Chat and the Clients/Projects/Personal group follow below it. */}
+            The Clients/Projects/Personal group follows below it; Chat sits
+            at the very bottom of the sidebar (see below Territories). */}
         <nav className="shrink-0 space-y-0.5 px-2">
           {navVisible.work && <SideItem active={myWork} onClick={() => { setMyWork(true); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>Dashboard</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
         </nav>
-
-        {/* Chat hub: Team Chat + one row per teammate for private DMs, merged
-            into a single section per Derek's ask — "different chat groups...
-            a team chat that's everyone but then we can all private chat with
-            each other." Roster is small (a handful of people), so every
-            teammate gets a row rather than only ones you've messaged before —
-            no extra state to derive, matches how Territories/Pinned already
-            work at this scale. */}
-        {navVisible.inbox && (
-          <div className="mt-1.5 shrink-0 space-y-0.5 border-t px-2 pt-1.5">
-            <div className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Chat</div>
-            <SideItem active={inboxView && dmUserId === null} onClick={openTeamChat}><I.comment className="text-muted" /> <span>Team</span>{(teamChatUnread || unread > 0) && (
-              // Both indicators, not either/or: notifications accumulate
-              // routinely, and an exclusive check meant a real unread chat
-              // message showed nothing at all whenever any notice was pending.
-              <span className="ml-auto flex items-center gap-1.5">
-                {teamChatUnread && <span title="Unread team chat" className="h-2 w-2 rounded-full bg-accent" />}
-                {unread > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{unread}</span>}
-              </span>
-            )}</SideItem>
-            {users.filter((u) => u.id !== me.id && u.id !== "u_claude").map((u) => (
-              <SideItem key={u.id} active={inboxView && dmUserId === u.id} onClick={() => openDm(u.id)}>
-                <Avatar id={u.id} size={20} /> <span className="min-w-0 flex-1 truncate text-left">{u.name}</span>
-                {dmUnread(u.id) && <span title="Unread messages" className="ml-auto h-2 w-2 rounded-full bg-accent" />}
-              </SideItem>
-            ))}
-          </div>
-        )}
 
         {/* Clients / Projects / Personal, grouped together — Projects is
             still a directory page rather than an inline list (day-to-day
@@ -3581,6 +3554,35 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </nav>
         )}
 
+        {/* Chat hub: Team Chat + one row per teammate for private DMs, merged
+            into a single section per Derek's ask — "different chat groups...
+            a team chat that's everyone but then we can all private chat with
+            each other." Roster is small (a handful of people), so every
+            teammate gets a row rather than only ones you've messaged before —
+            no extra state to derive, matches how Territories/Pinned already
+            work at this scale. Moved to the bottom of the sidebar (was right
+            below Dashboard) since nobody's using it currently — still one
+            click away, just not competing for the top of the list. */}
+        {navVisible.inbox && (
+          <div className="mt-1.5 shrink-0 space-y-0.5 border-t px-2 pt-1.5">
+            <div className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Chat</div>
+            <SideItem active={inboxView && dmUserId === null} onClick={openTeamChat}><I.comment className="text-muted" /> <span>Team</span>{(teamChatUnread || unread > 0) && (
+              // Both indicators, not either/or: notifications accumulate
+              // routinely, and an exclusive check meant a real unread chat
+              // message showed nothing at all whenever any notice was pending.
+              <span className="ml-auto flex items-center gap-1.5">
+                {teamChatUnread && <span title="Unread team chat" className="h-2 w-2 rounded-full bg-accent" />}
+                {unread > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{unread}</span>}
+              </span>
+            )}</SideItem>
+            {users.filter((u) => u.id !== me.id && u.id !== "u_claude").map((u) => (
+              <SideItem key={u.id} active={inboxView && dmUserId === u.id} onClick={() => openDm(u.id)}>
+                <Avatar id={u.id} size={20} /> <span className="min-w-0 flex-1 truncate text-left">{u.name}</span>
+                {dmUnread(u.id) && <span title="Unread messages" className="ml-auto h-2 w-2 rounded-full bg-accent" />}
+              </SideItem>
+            ))}
+          </div>
+        )}
 
       </aside>
 
