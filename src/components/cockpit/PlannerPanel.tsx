@@ -277,9 +277,6 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
   const [pickerEventId, setPickerEventId] = useState<string | null>(null);
   const [newItemTitle, setNewItemTitle] = useState("");
   const [brief, setBrief] = useState<string | null>(null);
-  const [workshopPrompt, setWorkshopPrompt] = useState("");
-  const [workshopLoading, setWorkshopLoading] = useState(false);
-  const [workshopResult, setWorkshopResult] = useState<string | null>(null);
   const [pushStatus, setPushStatus] = useState<"idle" | "pushing" | "pushed" | "error">("idle");
   const [pushError, setPushError] = useState<string | null>(null);
   // Skips the auto-push effect's very first fire for a given week (which
@@ -682,27 +679,6 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     setDraftLoading(false);
   };
 
-  const runWorkshop = async (mode: "angles" | "draft" | "feature" | "ask") => {
-    if (mode === "ask" && !workshopPrompt.trim()) return;
-    setWorkshopLoading(true); setWorkshopResult(null);
-    try {
-      const res = await authedFetch("/api/ai/planner-workshop", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode, cityName, theme: week.themeOverride, categories: week.categories, notes: week.notes,
-          filledSlots: filledSlotNames, candidateNames: [...pools.spotlight, ...pools.hiddenGem].map((c) => c.name),
-          prompt: mode === "ask" ? workshopPrompt.trim() : undefined,
-        }),
-      });
-      const j = await res.json().catch(() => ({}));
-      setWorkshopResult(res.ok && !j.error ? j.text : (j.error || "Workshop request failed."));
-    } catch (e) {
-      setWorkshopResult(e instanceof Error ? e.message : "Workshop request failed.");
-    } finally {
-      setWorkshopLoading(false);
-    }
-  };
-
   // The theme calendar's raw assignment for this week — a seed for
   // suggest_theme, not something written to the week until a rep picks it.
   const assignedTheme = useMemo(() => themeForWeek(week.week, themeCalendar), [week.week, themeCalendar]);
@@ -851,44 +827,6 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
             <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border bg-surface p-3 text-[12px] leading-relaxed text-foreground">{brief}</pre>
           </div>
         )}
-
-        {/* AI Workshop sits here, right below the theme/notes header — decide
-            what this week is about first, then use it to help think through
-            picks, before touching the manual slots below (same "decide
-            before you write" reasoning applied to Prompt Claude elsewhere in
-            the app). "Who to feature" stays down by the slots it feeds. */}
-        {/* AI Workshop — a co-pilot scoped to this week's context (theme,
-            categories, notes, current picks, candidate pool). Never writes
-            anything on its own; results are Copy/Append-only. */}
-        <div className="border-b bg-background/40 p-4">
-          <div className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-muted">AI Workshop</div>
-          <div className="mb-2 flex flex-wrap gap-1.5">
-            <button onClick={() => runWorkshop("angles")} disabled={workshopLoading} className="rounded-md border px-2.5 py-1 text-[12px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-40">Story angles</button>
-            <button onClick={() => runWorkshop("feature")} disabled={workshopLoading} className="rounded-md border px-2.5 py-1 text-[12px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-40">Who to feature</button>
-            <button onClick={() => runWorkshop("draft")} disabled={workshopLoading} className="rounded-md border px-2.5 py-1 text-[12px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-40">Draft copy</button>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <input value={workshopPrompt} onChange={(e) => setWorkshopPrompt(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") runWorkshop("ask"); }}
-              placeholder="Ask the Workshop…" className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1.5 text-[13px] outline-none placeholder:text-muted focus:border-accent" />
-            <button onClick={() => runWorkshop("ask")} disabled={workshopLoading || !workshopPrompt.trim()} className="shrink-0 rounded-md border border-accent px-2.5 py-1.5 text-[13px] font-medium text-accent disabled:opacity-40">Ask</button>
-          </div>
-          {(workshopLoading || workshopResult) && (
-            <div className="mt-2 rounded-lg border bg-background p-3">
-              {workshopLoading ? (
-                <div className="text-[13px] text-muted">Thinking…</div>
-              ) : (
-                <>
-                  <div className="whitespace-pre-wrap text-[13px]">{workshopResult}</div>
-                  <div className="mt-2 flex items-center gap-2">
-                    <button onClick={() => workshopResult && navigator.clipboard.writeText(workshopResult).catch(() => {})} className="text-[12px] font-medium text-accent hover:underline">Copy</button>
-                    <button onClick={() => { if (workshopResult) onPatch({ notes: week.notes ? `${week.notes}\n\n${workshopResult}` : workshopResult }); setWorkshopResult(null); }} className="text-[12px] font-medium text-accent hover:underline">Append to notes</button>
-                    <button onClick={() => setWorkshopResult(null)} className="text-[12px] font-medium text-muted hover:text-foreground">Dismiss</button>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-        </div>
 
         <div className="divide-y">
           {/* Only one Hidden Gem slot is offered by default now — gem2/gem3
