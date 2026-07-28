@@ -22,7 +22,7 @@ import {
 import { generatePlannerBrief } from "@/lib/plannerBrief";
 import { pushPlannerWeek } from "@/lib/plannerPush";
 import { featureHistory, inviteHistory } from "@/lib/plannerPools";
-import { matchesAnyCategory } from "@/lib/categoryMatch";
+import { categoriesMatch, matchesAnyCategory } from "@/lib/categoryMatch";
 import { I, newId } from "./ui";
 import { type DirectoryListing } from "./TerritoryDirectory";
 
@@ -424,6 +424,16 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
       .sort((a, b) => (a.claimed === b.claimed ? a.name.localeCompare(b.name) : a.claimed ? 1 : -1))),
     [listings, week.categories]
   );
+  // Per-pill match count — how many listings THIS specific theme category
+  // matches on its own (unlike categoryMatches above, which is the union
+  // across every selected category). Lets a zero-match pill (wrong
+  // vocabulary, see categoryOptions above) be spotted at a glance instead
+  // of only showing up as "the total didn't grow."
+  const categoryPillCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const c of week.categories) map.set(c, listings.filter((l) => categoriesMatch(c, l.category ?? "")).length);
+    return map;
+  }, [week.categories, listings]);
   // Grouped by the listing's own real GD category (not the theme's category
   // tags — a different vocabulary, see categoryMatch.ts) so it's obvious how
   // many of each you actually have, not just a flat count. Biggest groups
@@ -858,12 +868,17 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
             </div>
           )}
           <div className="mb-1 flex flex-wrap items-center gap-1.5">
-            {week.categories.map((c) => (
-              <span key={c} className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-[12px] font-medium text-accent">
-                {c}
-                <button onClick={() => removeCategory(c)} className="hover:text-danger"><I.close className="h-3 w-3" /></button>
-              </span>
-            ))}
+            {week.categories.map((c) => {
+              const n = categoryPillCounts.get(c) ?? 0;
+              return (
+                <span key={c} title={`${n} matching listing${n === 1 ? "" : "s"}`}
+                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium ${n === 0 ? "bg-danger/10 text-danger" : "bg-accent-soft text-accent"}`}>
+                  {c}
+                  <span className="opacity-70">· {n}</span>
+                  <button onClick={() => removeCategory(c)} className="hover:opacity-70"><I.close className="h-3 w-3" /></button>
+                </span>
+              );
+            })}
             <div className="relative min-w-[120px] flex-1">
               <input value={catInput} onChange={(e) => setCatInput(e.target.value)} onFocus={() => setCatDropdownOpen(true)}
                 onBlur={() => setTimeout(() => setCatDropdownOpen(false), 150)}
