@@ -606,6 +606,7 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
   const humanizeInviteError = (err: string | undefined) =>
     err === "no_email" ? "No email on file for this listing."
     : err === "ghl_not_connected" ? "GoHighLevel isn't connected for this city yet."
+    : err === "outside_business_hours" ? "Outside business hours (8am–6pm Mon–Fri) — nothing was sent, try again in the morning."
     : err || "Invite failed.";
   // Sending again is allowed — a business might miss the first email, or a
   // rep might want to follow up. Every send appends its own {gdPlaceId, at}

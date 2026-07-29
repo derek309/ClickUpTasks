@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/serverAuth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { isWithinBusinessHours, OUTSIDE_BUSINESS_HOURS } from "@/lib/businessHours";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -38,6 +39,18 @@ export async function POST(req: NextRequest) {
   const themeDescription = String(body?.themeDescription ?? "").trim();
   if (!territoryId || !/^\d{4}-\d{2}-\d{2}$/.test(week) || !Number.isFinite(gdPlaceId)) {
     return NextResponse.json({ error: "territoryId, week (yyyy-mm-dd), and gdPlaceId are required" }, { status: 400 });
+  }
+
+  // Don't land an invite in a business owner's inbox at 2am. Checked here
+  // rather than in the UI because this route is the single choke point both
+  // the single and bulk invite paths go through — a stale client can't route
+  // around it. 200 with {ok:false}, matching how WordPress's own expected
+  // failures (no_email, ghl_not_connected) are passed through below rather
+  // than thrown; PlannerPanel's humanizeInviteError turns it into a sentence.
+  // Blocked, not deferred: nothing in this stack has a send queue, so there's
+  // nowhere to park it until morning.
+  if (!isWithinBusinessHours(new Date())) {
+    return NextResponse.json({ ok: false, error: OUTSIDE_BUSINESS_HOURS });
   }
 
   const { data: territory } = await supabaseAdmin.from("territories").select("city, wp_city_slug, assigned_to").eq("id", territoryId).maybeSingle();
