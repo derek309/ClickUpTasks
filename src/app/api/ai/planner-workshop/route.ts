@@ -180,20 +180,54 @@ export async function POST(req: NextRequest) {
     ].join("\n");
   }
 
+  // Grounding makes Gemini sprinkle inline citation markers ("[1.2.1]") into
+  // its prose. Inside a JSON string value that's a live grenade: measured
+  // against the real API, ~40% of weather calls came back structurally
+  // destroyed, with everything from the array's opening "[" through the first
+  // citation's closing "]" simply gone — leaving '"suggestions":. Daytime
+  // highs…' where the array, the object and the summary key should have been.
+  // No parser can repair that, so the fix is upstream: ask for no brackets.
+  if (STRUCTURED_MODES.has(mode) && GROUNDED_MODES.has(mode)) {
+    prompt += "\n\nDo not include citation markers, footnote references, or square brackets of any kind inside the JSON — write plain prose in the string values.";
+  }
+
   try {
     const requestBody: Record<string, unknown> = { contents: [{ parts: [{ text: prompt }] }] };
     if (GROUNDED_MODES.has(mode)) requestBody.tools = [{ google_search: {} }];
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(requestBody),
-    });
-    if (!res.ok) { const errText = await res.text().catch(() => ""); return NextResponse.json({ error: `Gemini API ${res.status}: ${errText.slice(0, 240)}` }, { status: 502 }); }
-    const json = await res.json();
-    const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    const askGemini = async (): Promise<{ text?: string; failed?: NextResponse }> => {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+      });
+      if (!res.ok) { const errText = await res.text().catch(() => ""); return { failed: NextResponse.json({ error: `Gemini API ${res.status}: ${errText.slice(0, 240)}` }, { status: 502 }) }; }
+      const json = await res.json();
+      // Join every text part rather than reading parts[0] — a grounded
+      // response can legitimately arrive split across several.
+      const rawParts: unknown[] = Array.isArray(json?.candidates?.[0]?.content?.parts) ? json.candidates[0].content.parts : [];
+      const joined = rawParts.map((p) => { const t = (p as { text?: unknown })?.text; return typeof t === "string" ? t : ""; }).join("").trim();
+      return { text: joined };
+    };
+
+    // The bracket instruction above makes corruption rare, not impossible —
+    // one cheap retry rather than handing back an error the rep can only fix
+    // by clicking the same button again themselves.
+    let text = "";
+    let parsed: ParsedPayload | null = null;
+    const attempts = STRUCTURED_MODES.has(mode) ? 2 : 1;
+    for (let i = 0; i < attempts; i++) {
+      const r = await askGemini();
+      if (r.failed) return r.failed;
+      text = r.text ?? "";
+      if (!STRUCTURED_MODES.has(mode)) break;
+      parsed = parseJsonBlock(text);
+      if (parsed) break;
+    }
     if (!text) return NextResponse.json({ error: "Gemini returned no text." }, { status: 502 });
 
     if (STRUCTURED_MODES.has(mode)) {
-      const parsed = parseJsonBlock(text);
+      // Say what actually came back — "unexpected format" alone left no way
+      // to tell a malformed response from a wrong-shaped one.
+      if (!parsed) return NextResponse.json({ error: `Gemini returned malformed JSON — try again. Response began: ${text.slice(0, 140)}` }, { status: 502 });
       if (mode === "suggest_theme") {
         const options = Array.isArray(parsed?.options) ? parsed.options.filter((o) => o?.title) : null;
         if (!options) return NextResponse.json({ error: "Gemini returned an unexpected format." }, { status: 502 });
