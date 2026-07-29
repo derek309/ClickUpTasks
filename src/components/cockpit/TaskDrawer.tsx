@@ -507,7 +507,32 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     const body = await onDraftDescription(task.title, task.description, descDraftPrompt.trim() || undefined);
     if (body) onPatch({ description: plainTextToHtml(body) });
   };
-  const descriptionBlock = (
+
+  // Description / Checklist / Attachments are empty on most tasks — the
+  // auto-created "Reply to <person>" conversation ones especially — but each
+  // still rendered a full card regardless: header, rich-text toolbar, empty
+  // input, dropzone. Three empty cards cost ~430px of pure scaffolding and
+  // pushed the actual work below the fold. Collapse them into one row of add
+  // chips until there's something to show, or until asked for.
+  //
+  // Keyed by task id rather than reset in an effect: this drawer isn't
+  // remounted per task (no key prop at the call site), so plain boolean state
+  // would leak one task's expanded sections onto the next one you open.
+  const [openSections, setOpenSections] = useState<{ taskId: string; keys: string[] }>({ taskId: task.id, keys: [] });
+  const sectionOpen = (k: string) => openSections.taskId === task.id && openSections.keys.includes(k);
+  const openSection = (k: string) =>
+    setOpenSections((s) => (s.taskId === task.id ? { taskId: task.id, keys: [...s.keys, k] } : { taskId: task.id, keys: [k] }));
+  const showDescription = htmlToText(task.description).trim().length > 0 || sectionOpen("description");
+  const showChecklist = task.subtasks.length > 0 || sectionOpen("checklist");
+  const showAttachments = task.attachments.length > 0 || sectionOpen("attachments");
+  // The hidden file input lives in whichever of the two is actually mounted
+  // (never both, since they're mutually exclusive) so fileRef always resolves.
+  const hiddenFileInput = (
+    <input ref={fileRef} type="file" multiple className="hidden"
+      onChange={(e) => { if (e.target.files) onAddFiles(e.target.files); e.target.value = ""; }} />
+  );
+
+  const descriptionBlock = !showDescription ? null : (
     <div className="mt-4 rounded-xl border bg-surface p-4">
       <div className="mb-2 text-[15px] font-semibold">Description</div>
       <RichTextEditor value={task.description} onChange={(html) => onPatch({ description: html })} placeholder="Add a description…" />
@@ -695,7 +720,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       )}
     </div>
   );
-  const subtasksBlock = (
+  const subtasksBlock = !showChecklist ? null : (
     <div className="mt-4 rounded-xl border bg-surface p-4">
       <div className="mb-2 flex items-center justify-between">
         <span className="text-[15px] font-semibold">Checklist {task.subtasks.length > 0 && <span className="text-muted">· {doneSubs}/{task.subtasks.length} · {Math.round((doneSubs / task.subtasks.length) * 100)}%</span>}</span>
@@ -737,7 +762,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     if (attSort === "type") return ATT_KIND_ORDER[a.kind] - ATT_KIND_ORDER[b.kind];
     return 0; // "added" — keep stored order (oldest first, matches how they were attached)
   });
-  const attachmentsBlock = (
+  const attachmentsBlock = !showAttachments ? null : (
     <div className="mt-4 rounded-xl border bg-surface p-4">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <span className="text-[15px] font-semibold">Attachments {task.attachments.length > 0 && <span className="text-muted">· {task.attachments.length}</span>}</span>
@@ -753,7 +778,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
           <button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1 text-[15px] font-medium text-accent"><I.plus /> Attach</button>
         </span>
       </div>
-      <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) onAddFiles(e.target.files); e.target.value = ""; }} />
+      {hiddenFileInput}
       {linkOpen && (
         <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border bg-background p-2">
           <input autoFocus value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLink(); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
@@ -821,6 +846,26 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
           </div>
         </>
       )}
+    </div>
+  );
+  // Stands in for whichever of the three sections above are still empty —
+  // one ~40px row instead of up to ~430px of empty cards. Also a drop
+  // target, so dragging a file in still works when Attachments is collapsed
+  // (the expanded block has its own dropzone).
+  const addChip = "rounded-lg border border-dashed px-3 py-1.5 text-[13px] font-medium text-muted transition hover:bg-background hover:text-foreground";
+  const emptySectionsRow = (showDescription && showChecklist && showAttachments) ? null : (
+    <div
+      onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setAttFileDragOver(true); } }}
+      onDragLeave={(e) => { if (e.currentTarget === e.target) setAttFileDragOver(false); }}
+      onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); setAttFileDragOver(false); openSection("attachments"); onAddFiles(e.dataTransfer.files); } }}
+      className={`mt-4 flex flex-wrap items-center gap-2 rounded-xl p-1 transition ${attFileDragOver ? "outline-2 outline-dashed outline-accent bg-accent-soft/30" : ""}`}
+    >
+      {!showDescription && <button onClick={() => openSection("description")} className={addChip}>+ Description</button>}
+      {!showChecklist && <button onClick={() => openSection("checklist")} className={addChip}>+ Checklist</button>}
+      {!showAttachments && (<>
+        {hiddenFileInput}
+        <button onClick={() => { openSection("attachments"); fileRef.current?.click(); }} className={addChip}>+ Attach</button>
+      </>)}
     </div>
   );
   // Quick-jump list of the *whole* list (project) this task belongs to,
@@ -1045,6 +1090,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                 {descriptionBlock}
                 {subtasksBlock}
                 {attachmentsBlock}
+                {emptySectionsRow}
                 {siblingsBlock}
                 <div className="mt-5 border-t pt-4">
                   <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Activity</div>
@@ -1072,6 +1118,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                 {descriptionBlock}
                 {subtasksBlock}
                 {attachmentsBlock}
+                {emptySectionsRow}
                 {siblingsBlock}
               </div>
             </div>
@@ -1125,6 +1172,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               {descriptionBlock}
               {subtasksBlock}
               {attachmentsBlock}
+              {emptySectionsRow}
               {siblingsBlock}
               <div className="mt-6">
                 {hasMessaging && (
