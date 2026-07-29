@@ -140,11 +140,15 @@ export async function POST(req: NextRequest) {
   // visit — and append to it instead of creating a duplicate.
   let taskId: string | null = null;
   if (clientId) {
-    const { data: openTasks } = await supabaseAdmin.from("tasks").select("id, comments").eq("client_id", clientId).eq("title", TASK_TITLE).neq("status", "done").limit(1);
+    const { data: openTasks } = await supabaseAdmin.from("tasks").select("id").eq("client_id", clientId).eq("title", TASK_TITLE).neq("status", "done").limit(1);
     if (openTasks && openTasks.length > 0) {
       taskId = openTasks[0].id;
-      const comments = Array.isArray(openTasks[0].comments) ? openTasks[0].comments : [];
-      await supabaseAdmin.from("tasks").update({ comments: [...comments, newComment] }).eq("id", taskId);
+      // Atomic JSONB append (append_comment, supabase/realtime.sql) rather
+      // than read-modify-write of the whole comments array — "interested" and
+      // "intake" fire back to back in the same visit, and a rep commenting on
+      // the task at that moment would otherwise have their comment (or the
+      // webhook's) silently dropped by whichever write landed second.
+      await supabaseAdmin.rpc("append_comment", { task_id: taskId, comment: newComment });
     } else if (projectId) {
       taskId = "t_" + crypto.randomUUID();
       const description = event === "approved"

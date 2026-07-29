@@ -33,6 +33,10 @@ const SLOT_LABELS: Record<PlannerSlot, string> = {
   gem3: "Hidden Gem 3",
   story: "The Story (local news)",
 };
+// A week patch, or a function deriving one from the CURRENT row. The function
+// form matters for array appends (invited/dismissed/categories) issued after
+// an await, where the captured `week` prop is already stale.
+type PlannerWeekPatch = Partial<PlannerWeek> | ((w: PlannerWeek) => Partial<PlannerWeek>);
 const SECTION_PRESETS = ["The Story", "New In Town", "Ask Your Concierge", "Last Call"];
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 // A batch of live-search suggestions is a paid, ~10-60s Gemini call — losing
@@ -103,10 +107,27 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
     setOpenWeekId(w.id);
   };
 
-  const patchWeek = (id: string, patch: Partial<PlannerWeek>) => {
-    setWeeks((ws) => ws.map((w) => (w.id === id ? { ...w, ...patch } : w)));
-    const w = weeks.find((x) => x.id === id);
-    if (w) upsertPlannerWeek({ ...w, ...patch });
+  // upsertPlannerWeek REPLACES the whole row, so every save must be built from
+  // the very latest week — a merge built from a stale snapshot silently erases
+  // whatever landed in between (this is why notes/categories kept "not
+  // sticking"). weeksRef is updated SYNCHRONOUSLY inside patchWeek rather than
+  // only by the effect below, because the effect can't run until after a
+  // render: two edits in the same tick would otherwise both read the
+  // pre-render value and the second would clobber the first.
+  const weeksRef = useRef<PlannerWeek[]>(weeks);
+  useEffect(() => { weeksRef.current = weeks; }, [weeks]);
+
+  // `patch` may be a function so callers appending to an array (invited,
+  // dismissed, categories) derive from the current row instead of a `week`
+  // prop captured before an await — see sendInvite, where the GHL send takes
+  // seconds and two overlapping invites would otherwise drop one.
+  const patchWeek = (id: string, patch: PlannerWeekPatch) => {
+    const cur = weeksRef.current.find((w) => w.id === id);
+    if (!cur) return;
+    const merged: PlannerWeek = { ...cur, ...(typeof patch === "function" ? patch(cur) : patch) };
+    weeksRef.current = weeksRef.current.map((w) => (w.id === id ? merged : w));
+    setWeeks(weeksRef.current);
+    upsertPlannerWeek(merged);
   };
 
   const deleteWeek = (id: string) => {
@@ -262,7 +283,7 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
   state: string;
   themeCalendar: ThemeCalendarEntry[];
   onBack: () => void;
-  onPatch: (patch: Partial<PlannerWeek>) => void;
+  onPatch: (patch: PlannerWeekPatch) => void;
   onDelete: () => void;
 }) {
   const [pickerSlot, setPickerSlot] = useState<PlannerSlot | null>(null);
@@ -275,6 +296,13 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
   const [categoriesError, setCategoriesError] = useState<string | null>(null);
   const [sections, setSections] = useState<PlannerSection[]>([]);
   const [events, setEvents] = useState<PlannerEvent[]>([]);
+  // Mirror the two lists so patchSection/patchEvent can build each whole-row
+  // save from the latest value (see their comments). Kept in sync here for
+  // loads/adds/removes, and updated synchronously inside the patchers.
+  const sectionsRef = useRef<PlannerSection[]>([]);
+  const eventsRef = useRef<PlannerEvent[]>([]);
+  useEffect(() => { sectionsRef.current = sections; }, [sections]);
+  useEffect(() => { eventsRef.current = events; }, [events]);
   const [items, setItems] = useState<NewsletterItem[]>([]);
   // Collapsed by default; opened automatically once the fetch resolves if
   // this week (or the unscheduled backlog) actually has something queued.
@@ -369,10 +397,18 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     setSections((ss) => [...ss, s]);
     upsertPlannerSection(s);
   };
+  // Same whole-row-replace hazard as patchWeek: typing a section's write-up
+  // and then retitling it (or attaching a business) would each save a merge
+  // built from the same pre-render `sections` snapshot, so the second write
+  // erased the first. Ref is updated synchronously here, not just by the
+  // effect, so same-tick edits build on each other.
   const patchSection = (id: string, patch: Partial<PlannerSection>) => {
-    setSections((ss) => ss.map((s) => (s.id === id ? { ...s, ...patch } : s)));
-    const s = sections.find((x) => x.id === id);
-    if (s) upsertPlannerSection({ ...s, ...patch });
+    const cur = sectionsRef.current.find((x) => x.id === id);
+    if (!cur) return;
+    const merged: PlannerSection = { ...cur, ...patch };
+    sectionsRef.current = sectionsRef.current.map((s) => (s.id === id ? merged : s));
+    setSections(sectionsRef.current);
+    upsertPlannerSection(merged);
   };
   const removeSection = (id: string) => { setSections((ss) => ss.filter((s) => s.id !== id)); deletePlannerSectionDb(id); };
 
@@ -382,9 +418,12 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     upsertPlannerEvent(e);
   };
   const patchEvent = (id: string, patch: Partial<PlannerEvent>) => {
-    setEvents((es) => es.map((e) => (e.id === id ? { ...e, ...patch } : e)));
-    const e = events.find((x) => x.id === id);
-    if (e) upsertPlannerEvent({ ...e, ...patch });
+    const cur = eventsRef.current.find((x) => x.id === id);
+    if (!cur) return;
+    const merged: PlannerEvent = { ...cur, ...patch };
+    eventsRef.current = eventsRef.current.map((e) => (e.id === id ? merged : e));
+    setEvents(eventsRef.current);
+    upsertPlannerEvent(merged);
   };
   const removeEvent = (id: string) => { setEvents((es) => es.filter((e) => e.id !== id)); deletePlannerEventDb(id); };
 
@@ -537,11 +576,12 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
   // rep might want to follow up. Every send appends its own {gdPlaceId, at}
   // entry (not deduped), so week.invited also doubles as a send count.
   // Split from the onPatch call so bulk-invite (below) can send several ids
-  // in a row and apply ONE combined patch at the end — appending one at a
-  // time via separate onPatch calls would have each call compute
-  // `[...week.invited, entry]` off the same stale `week.invited` closure
-  // (the prop doesn't update mid-loop), silently dropping every entry but
-  // the last.
+  // in a row. Both callers append via onPatch's FUNCTION form, which derives
+  // from the current row rather than the `week` prop captured before the
+  // send — a real GHL email round-trip takes seconds, and two overlapping
+  // invites (or a single invite landing mid-bulk) would otherwise each write
+  // an `invited` array built without the other's entry, silently dropping a
+  // send that actually went out.
   const postInvite = async (gdPlaceId: number): Promise<PlannerInvite | null> => {
     setInviteArmed(null);
     setInviteState((m) => ({ ...m, [gdPlaceId]: "sending" }));
@@ -564,11 +604,10 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
   };
   const sendInvite = async (gdPlaceId: number) => {
     const entry = await postInvite(gdPlaceId);
-    if (entry) onPatch({ invited: [...week.invited, entry] });
+    if (entry) onPatch((w) => ({ invited: [...w.invited, entry] }));
   };
   // Bulk version — sends selected ids one at a time (a short stagger avoids
-  // hammering the WP endpoint) but applies a single combined patch at the
-  // end, same reasoning as postInvite's split above.
+  // hammering the WP endpoint) and applies a single combined patch at the end.
   const inviteSelected = async () => {
     const ids = Array.from(selectedForInvite);
     if (ids.length === 0) return;
@@ -579,7 +618,7 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
       if (entry) newEntries.push(entry);
       await new Promise((r) => setTimeout(r, 250));
     }
-    if (newEntries.length > 0) onPatch({ invited: [...week.invited, ...newEntries] });
+    if (newEntries.length > 0) onPatch((w) => ({ invited: [...w.invited, ...newEntries] }));
     setBulkInviting(false);
     setSelectedForInvite(new Set());
   };

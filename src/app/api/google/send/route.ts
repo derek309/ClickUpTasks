@@ -23,6 +23,20 @@ const mimeFor = (name: string) => MIME_BY_EXT[(name.split(".").pop() || "").toLo
 
 const SEND_DOMAIN = "clickuplocal.com";
 
+// True only if `path` is an attachment this client legitimately owns. See the
+// call site for why this gate exists. Rejects traversal outright — a stored
+// path never contains ".." and Storage would resolve it against the bucket
+// root, so treating it as untrusted is cheaper than reasoning about it.
+async function pathBelongsToClient(path: string, clientId: string): Promise<boolean> {
+  if (!path || path.includes("..")) return false;
+  if (path.startsWith(`waiting/${clientId}/`) || path.startsWith(`extension/${clientId}/`)) return true;
+  // Main-app task attachments: `<taskId>/<file>`, so the owning task decides.
+  const taskId = path.split("/")[0];
+  if (!taskId || taskId === "waiting" || taskId === "extension") return false;
+  const { data: task } = await supabaseAdmin.from("tasks").select("client_id").eq("id", taskId).maybeSingle();
+  return !!task && task.client_id === clientId;
+}
+
 export async function POST(req: NextRequest) {
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -84,6 +98,15 @@ export async function POST(req: NextRequest) {
   let totalBytes = 0;
   for (const a of attachments ?? []) {
     if (!a?.path) continue;
+    // The path is caller-supplied and the download runs with the service-role
+    // key, so it MUST be proven to belong to this client first — otherwise any
+    // user who can message one client could name any path in the bucket and
+    // have the server email them the bytes. The bucket has three legitimate
+    // shapes: `waiting/<clientId>/…` and `extension/<clientId>/…` (namespaced
+    // by client, so a prefix check settles it) and the main app's
+    // `<taskId>/<file>` (not client-namespaced — resolve the task and compare
+    // its client_id). Anything else is skipped rather than sent.
+    if (!(await pathBelongsToClient(a.path, clientId))) continue;
     const { data: file, error } = await supabaseAdmin.storage.from(TASK_FILES_BUCKET).download(a.path);
     if (error || !file) continue;
     const buf = Buffer.from(await file.arrayBuffer());

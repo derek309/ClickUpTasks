@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/serverAuth";
+import { isClientVisible } from "@/lib/extensionApi";
 import { htmlToText } from "@/lib/data";
 
 // Drafts a task description via Gemini — never writes anything itself, just
@@ -21,6 +22,10 @@ export async function POST(req: NextRequest) {
   const { clientId, title, description, prompt: userPrompt } = (await req.json().catch(() => ({}))) as
     { clientId?: string; title?: string; description?: string; prompt?: string };
   if (!clientId || !title) return NextResponse.json({ error: "Missing clientId or title." }, { status: 400 });
+  // Same visibility gate as the extension routes — this pulls the client's
+  // internal journal notes into the draft, so requireUser alone (which only
+  // proves who is calling) isn't sufficient.
+  if (!(await isClientVisible(caller, clientId))) return NextResponse.json({ error: "Unknown or inaccessible client." }, { status: 403 });
   const instruction = (userPrompt ?? "").trim();
   const existing = htmlToText(description ?? "").trim();
 

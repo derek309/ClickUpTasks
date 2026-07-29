@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/serverAuth";
+import { isClientVisible } from "@/lib/extensionApi";
 import { isCompletionEvent } from "@/lib/data";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -23,6 +24,10 @@ export async function POST(req: NextRequest) {
 
   const { clientId, projectId, channel, prompt: userPrompt } = (await req.json().catch(() => ({}))) as { clientId?: string; projectId?: string; channel?: "email" | "sms"; prompt?: string };
   if (!clientId || !channel) return NextResponse.json({ error: "Missing clientId or channel." }, { status: 400 });
+  // Same visibility gate as the extension routes — this pulls the client's
+  // tasks, messages and internal notes into the draft, so requireUser (which
+  // only proves who is calling) isn't sufficient on its own.
+  if (!(await isClientVisible(caller, clientId))) return NextResponse.json({ error: "Unknown or inaccessible client." }, { status: 403 });
   const instruction = (userPrompt ?? "").trim();
 
   const { data: client } = await supabaseAdmin.from("clients").select("name").eq("id", clientId).maybeSingle();

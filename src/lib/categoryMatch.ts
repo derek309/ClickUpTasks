@@ -27,7 +27,14 @@ const GENERIC_CATEGORY_WORDS = new Set(["shop", "store", "bar", "center", "centr
 // from silently defeating the word-overlap match below.
 function stem(word: string): string {
   if (word.length > 4 && word.endsWith("ies")) return word.slice(0, -3) + "y";
-  if (word.length > 3 && word.endsWith("es")) return word.slice(0, -2);
+  // "-es" is only a true es-plural after a sibilant (boxes, dishes, churches).
+  // Everywhere else it's just an "-e" word pluralized with a bare "-s", and
+  // stripping both letters mangles it: "wines" became "win" while "wine"
+  // stayed "wine", so a Wine theme silently matched no wine business at all.
+  // Same for shoes/shoe, bikes/bike, cakes/cake.
+  if (word.length > 3 && word.endsWith("es")) {
+    return /(?:s|x|z|ch|sh)$/.test(word.slice(0, -2)) ? word.slice(0, -2) : word.slice(0, -1);
+  }
   if (word.length > 3 && word.endsWith("s")) return word.slice(0, -1);
   return word;
 }

@@ -57,6 +57,16 @@ export async function POST(req: NextRequest) {
     const { data: clientRow } = await supabaseAdmin.from("clients").select("can_message").eq("id", clientId).maybeSingle();
     const allowed = ((clientRow?.can_message as string[] | null) ?? []).includes(caller.memberId ?? "");
     if (!allowed) return NextResponse.json({ error: "You don't have permission to message this client. Ask an admin to enable it for you." }, { status: 403 });
+    // The check above authorises a CLIENT, but the send targets ghlContactId —
+    // both caller-supplied and, until now, unrelated. Without this, a VA
+    // allowed to message one client could pass that clientId while addressing
+    // any other client's contact, and the per-client roster would mean
+    // nothing. Admins skip it: they're allowed to message anyone anyway, and
+    // they can legitimately address a contact that hasn't synced into
+    // `contacts` yet.
+    const { data: contactRow } = await supabaseAdmin.from("contacts").select("client_id").eq("ghl_contact_id", ghlContactId).maybeSingle();
+    if (!contactRow || contactRow.client_id !== clientId)
+      return NextResponse.json({ error: "That contact doesn't belong to this client." }, { status: 403 });
   }
 
   const token = await tokenForLocation(locationId);

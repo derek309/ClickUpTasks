@@ -161,6 +161,14 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true) 
   for (;;) {
     let q = supabase.from(table).select("*").range(from, from + PAGE_SIZE - 1);
     if (orderCol) q = q.order(orderCol, { ascending });
+    // Paging without a deterministic total order is how you silently drop or
+    // duplicate rows: Postgres makes no ordering promise between the separate
+    // requests, so page 2's offset can land anywhere relative to page 1. An
+    // explicit orderCol isn't enough on its own either — created_at ties are
+    // common — so always break ties on the primary key. Contacts (3,500+ rows,
+    // no orderCol) is the table that actually pages today, and re-truncating
+    // it is exactly the bug this function was written to fix.
+    q = q.order("id", { ascending: true });
     const { data, error } = await q;
     if (error) return { data: null as any[] | null, error };
     all = all.concat(data ?? []);

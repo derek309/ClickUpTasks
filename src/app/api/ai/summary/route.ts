@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/serverAuth";
+import { isClientVisible } from "@/lib/extensionApi";
 import { isCompletionEvent } from "@/lib/data";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -23,6 +24,11 @@ export async function POST(req: NextRequest) {
 
   const { clientId } = (await req.json().catch(() => ({}))) as { clientId?: string };
   if (!clientId) return NextResponse.json({ error: "Missing clientId." }, { status: 400 });
+  // This route reads the client's tasks, messages and internal journal notes
+  // (including ones marked background-only) and writes clients.ai_summary, so
+  // it needs the same visibility gate the extension routes enforce —
+  // requireUser alone only proves WHO is calling, not what they may see.
+  if (!(await isClientVisible(caller, clientId))) return NextResponse.json({ error: "Unknown or inaccessible client." }, { status: 403 });
 
   const { data: client } = await supabaseAdmin.from("clients").select("*").eq("id", clientId).maybeSingle();
   if (!client) return NextResponse.json({ error: "Client not found." }, { status: 404 });

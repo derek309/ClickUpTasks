@@ -47,6 +47,23 @@ describe("categoriesMatch ignores generic shop/bar/store/center/service/market w
   });
 });
 
+describe("categoriesMatch handles -e words pluralized with a bare -s", () => {
+  // Regression: the old "-es" rule stripped two letters unconditionally, so
+  // "wines" stemmed to "win" while "wine" stayed "wine" — a Wine-themed week
+  // silently matched no wine business at all.
+  it("matches e-plurals against their singular", () => {
+    expect(categoriesMatch("Wines", "Wine Bars")).toBe(true);
+    expect(categoriesMatch("Shoes", "Shoe Stores")).toBe(true);
+    expect(categoriesMatch("Bikes", "Bike Repair")).toBe(true);
+    expect(categoriesMatch("Cakes", "Cake Shops")).toBe(true);
+  });
+  it("still strips true es-plurals after a sibilant", () => {
+    expect(categoriesMatch("Boxes", "Box Storage")).toBe(true);
+    expect(categoriesMatch("Dishes", "Dish Repair")).toBe(true);
+    expect(categoriesMatch("Churches", "Church Services")).toBe(true);
+  });
+});
+
 describe("matchesAnyCategory", () => {
   it("matches if any theme category fuzzy-matches", () => {
     expect(matchesAnyCategory("Coffee Shops", ["Specialty Retail", "Coffee and Cafes", "Bakeries"])).toBe(true);
