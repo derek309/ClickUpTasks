@@ -71,8 +71,15 @@ export function generatePlannerBrief(opts: {
     lines.push("_(none this week)_", "");
   }
 
+  // Businesses attached to sections count as featured too, not just the ones
+  // in the fixed slots — otherwise a business written up in a section (an
+  // extra "Hidden Gem", say) gets named twice in the same brief: once as its
+  // own feature, then again in the Support Local list of offers to mention.
   const featuredNames = new Set(
-    (["spotlight", "gem", "gem2", "gem3"] as const).map((s) => week.picks[s]?.name?.toLowerCase().trim()).filter(Boolean) as string[]
+    [
+      ...(["spotlight", "gem", "gem2", "gem3"] as const).map((s) => week.picks[s]?.name),
+      ...sections.map((sec) => sec.biz?.name),
+    ].map((n) => n?.toLowerCase().trim()).filter(Boolean) as string[]
   );
   lines.push("## Support Local (claimed businesses with active offers, by category)");
   // Fuzzy word-overlap match (categoryMatch.ts), not exact string equality —

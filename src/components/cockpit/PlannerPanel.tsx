@@ -37,7 +37,11 @@ const SLOT_LABELS: Record<PlannerSlot, string> = {
 // form matters for array appends (invited/dismissed/categories) issued after
 // an await, where the captured `week` prop is already stale.
 type PlannerWeekPatch = Partial<PlannerWeek> | ((w: PlannerWeek) => Partial<PlannerWeek>);
-const SECTION_PRESETS = ["The Story", "New In Town", "Ask Your Concierge", "Last Call"];
+// "Hidden Gem" is here as well as being a fixed slot above: the slot is the
+// week's one headline gem, and this is how you add a second, third, nth one.
+// Sections already carry an attached business and flow into the brief under
+// their own heading, so an extra gem needs no new slot machinery.
+const SECTION_PRESETS = ["Hidden Gem", "The Story", "New In Town", "Ask Your Concierge", "Last Call"];
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 // A batch of live-search suggestions is a paid, ~10-60s Gemini call — losing
 // it to an accidental refresh mid-review means paying for it again. Cached
@@ -1072,7 +1076,8 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
           {/* Only one Hidden Gem slot is offered by default now — gem2/gem3
               stay hidden unless a week already has one filled (older weeks),
               so nothing existing disappears. Need more than one gem for a
-              week? Use Sections instead — it already supports an arbitrary
+              week? Add a "Hidden Gem" section below — it's a preset in the
+              Add-section dropdown, and sections already support an arbitrary
               number of business-attached write-ups. */}
           {PLANNER_CONTENT_SLOTS.filter((slot) => (slot !== "gem2" && slot !== "gem3") || week.picks[slot]).map((slot) => {
             const biz = week.picks[slot];
