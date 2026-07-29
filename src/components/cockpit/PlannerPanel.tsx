@@ -768,7 +768,13 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     try {
       const res = await authedFetch("/api/ai/planner-workshop", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "suggest_weather", cityName, state, dateFrom: addDaysIso(week.week, -3), dateTo: addDaysIso(week.week, 3) }),
+        // Ship date forward, NOT the week's Sunday-Saturday label span. The
+        // issue lands ON week.week (Wednesday), so the label's range starts
+        // three days in the past — readers were being shown a "forecast" for
+        // days that had already happened. Wed->Sun matches how Derek writes
+        // it by hand and keeps the weekend, which is the part worth planning
+        // around, in view.
+        body: JSON.stringify({ mode: "suggest_weather", cityName, state, dateFrom: week.week, dateTo: addDaysIso(week.week, 4) }),
       });
       const j = await res.json().catch(() => ({}));
       if (res.ok && Array.isArray(j.suggestions) && j.suggestions[0]) setWeatherSuggestion(j.suggestions[0]);
@@ -867,7 +873,16 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     try {
       const res = await authedFetch("/api/ai/planner-workshop", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "suggest_categories", cityName, theme, themeDescription }),
+        // Send the city's real GD categories (with counts) so the model
+        // picks from what actually exists instead of inventing plausible
+        // directory-sounding phrases. Unconstrained, it produced things like
+        // "Indoor Recreation and Arcades" and "Museums and Cultural Centers"
+        // for Lincoln — reasonable English, zero matching businesses, so the
+        // list below just stayed empty and looked broken.
+        body: JSON.stringify({
+          mode: "suggest_categories", cityName, theme, themeDescription,
+          availableCategories: categoryOptions.map(([c, n]) => `${c} (${n})`),
+        }),
       });
       const j = await res.json().catch(() => ({}));
       if (res.ok && Array.isArray(j.categories)) setCategorySuggestions(j.categories);

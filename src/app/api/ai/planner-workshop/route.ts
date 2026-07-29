@@ -54,6 +54,7 @@ export async function POST(req: NextRequest) {
     month?: number; weekIndex?: number; assignedTitle?: string; assignedCategories?: string[]; themeDescription?: string;
     slot?: string; candidates?: { name: string; cat: string; due: boolean; lastFeatured: string | null }[];
     dateFrom?: string; dateTo?: string; excludeTitles?: string[];
+    availableCategories?: string[]; // real GD categories for this city, "Name (count)"
   };
   const mode = String(body.mode ?? "");
   if (!MODES.has(mode)) return NextResponse.json({ error: "Missing or unknown mode." }, { status: 400 });
@@ -146,10 +147,23 @@ export async function POST(req: NextRequest) {
       '{"suggestions": [{"headline": "story headline", "summary": "2-3 sentence description", "sourceUrl": "https://...", "sourceName": "publication or site name"}]}',
     ].filter(Boolean).join("\n");
   } else if (mode === "suggest_categories") {
+    // Grounded in the city's own category list when the caller sends one.
+    // Left to invent, the model returns fluent directory-sounding phrases
+    // that match nothing in the actual GeoDirectory taxonomy ("Indoor
+    // Recreation and Arcades", "Museums and Cultural Centers"), so the
+    // business list under them comes back empty and reads as a bug. The
+    // counts are included so it can prefer categories with real depth.
+    const available = (body.availableCategories ?? []).filter((c) => typeof c === "string" && c.trim());
     prompt = [
       "You're a co-pilot helping an editor plan a local weekly newsletter issue.",
       `City: ${body.cityName || "this city"}. Chosen theme: "${body.theme}".${body.themeDescription ? ` (${body.themeDescription})` : ""}`,
-      "List the business categories that best fit this theme — short phrases like a local directory would use (e.g. \"Bakeries\", \"Coffee and Cafes\", \"Family Entertainment\"), not full sentences.",
+      available.length
+        ? [
+            "Choose from ONLY this list of categories that exist in this city's directory. The number after each is how many businesses it has — prefer ones with more.",
+            "Copy the names EXACTLY as written, without the counts. Do not invent categories that aren't listed, and do not reword them.",
+            available.join("\n"),
+          ].join("\n")
+        : "List the business categories that best fit this theme — short phrases like a local directory would use (e.g. \"Bakeries\", \"Coffee and Cafes\", \"Family Entertainment\"), not full sentences.",
       "Return ONLY a fenced ```json code block with this exact shape, no other text:",
       '{"categories": ["Category One", "Category Two"]}',
       "Provide 3-6 categories.",
