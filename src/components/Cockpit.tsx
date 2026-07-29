@@ -142,6 +142,16 @@ function parseSearch(search: string): NavState {
   };
 }
 
+// Number-key shortcuts for the top-level views, in sidebar order. Shown as
+// a hint on each sidebar item and handled by the keydown effect below.
+const NAV_KEY_VIEWS: Record<string, "dashboard" | "clients" | "projects" | "personal" | "teamchat"> = {
+  "1": "dashboard",
+  "2": "clients",
+  "3": "projects",
+  "4": "personal",
+  "5": "teamchat",
+};
+
 export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [clients, setClients] = useState<Client[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -261,15 +271,35 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // "showing a DM thread" and null means "showing Team Chat" (see the Team
   // Chat page's render branch further down).
   const [dmUserId, setDmUserId] = useState<string | null>(null);
+  // Declared up here rather than down with the other layout state because
+  // goToView (just below) closes over it — every navigation also dismisses
+  // the mobile sidebar.
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Every top-level destination resets the same pile of view flags. One
+  // helper for all of them so the sidebar click and the keyboard shortcut
+  // set identical state by construction rather than by two hand-maintained
+  // copies that quietly drift — and so adding a view later is one edit, not
+  // five. NAV_KEY_VIEWS maps the number keys onto these.
+  const goToView = (view: "dashboard" | "clients" | "projects" | "personal" | "teamchat") => {
+    setMyWork(view === "dashboard");
+    setPersonalView(view === "personal");
+    setInboxView(view === "teamchat");
+    setDirView(view === "clients" ? "clients" : view === "projects" ? "projects" : null);
+    setDmUserId(null);
+    setSettingsView(false);
+    setTerritoryView(null);
+    setOpenTaskId(null);
+    setSidebarOpen(false);
+    // Only the two directory views cleared this before; leaving it alone
+    // elsewhere preserves the previously-open project when you bounce to
+    // Dashboard/Personal/Chat and back.
+    if (view === "clients" || view === "projects") setActiveProject(null);
+    if (view === "teamchat") markTeamChatRead();
+  };
   // Team Chat is a real view now, not an overlay — open the page on its Chat
   // tab and clear the unread dot. Used by both the sidebar item and the
   // header shortcut so there's exactly one home for it.
-  const openTeamChat = () => {
-    setInboxView(true); setDmUserId(null);
-    setMyWork(false); setPersonalView(false); setDirView(null); setTerritoryView(null); setSettingsView(false);
-    setOpenTaskId(null); setSidebarOpen(false);
-    markTeamChatRead();
-  };
+  const openTeamChat = () => goToView("teamchat");
   const teamChatUnread = teamMessages.some((m) => m.authorId !== me.id && m.at > teamChatLastRead);
   // Chat is always on screen now (Team Chat page shows Chat + Activity
   // side by side, not as tabs), so this fires any time you're on that page
@@ -726,9 +756,42 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+  // Jump to a top-level view with a single number key — 1 Dashboard,
+  // 2 Clients, 3 Projects, 4 Personal, 5 Team.
+  //
+  // Bare keys rather than Cmd/Ctrl+1-5: browsers reserve Cmd/Ctrl+1-9 for
+  // tab switching and never hand the event to the page at all (Chrome,
+  // Safari and Edge don't dispatch it; Firefox dispatches but ignores
+  // preventDefault), deliberately, so keyboard-only users can't be trapped
+  // in a page. A modifier version is therefore impossible here, not just
+  // inadvisable. Bare keys also match the j/k task navigation this app
+  // already uses.
+  //
+  // The refs let this bind once instead of re-registering the listener on
+  // every render, while still calling the current render's goToView. Both
+  // are written from an effect, not during render.
+  const goToViewRef = useRef(goToView);
+  const navBlockedRef = useRef(false);
+  useEffect(() => { goToViewRef.current = goToView; });
+  // Don't navigate out from under something that's asking for an answer —
+  // a confirm dialog, the link editor, or the command palette.
+  useEffect(() => { navBlockedRef.current = !!confirmDialog || !!linkModal || cmdkOpen; }, [confirmDialog, linkModal, cmdkOpen]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (navBlockedRef.current) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      const view = NAV_KEY_VIEWS[e.key];
+      if (!view) return;
+      e.preventDefault();
+      goToViewRef.current(view);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [theme, setTheme] = useState<"light" | "dark" | "auto">("light");
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarHidden, setSidebarHidden] = useState(false);
   // Team Chat's Chat/Activity split — Chat's share as a percentage of the
   // row, Activity gets the rest. Percentage (not a fixed px width like the
@@ -3469,7 +3532,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             The Clients/Projects/Personal group follows below it; Chat sits
             at the very bottom of the sidebar (see below Territories). */}
         <nav className="shrink-0 space-y-0.5 px-2">
-          {navVisible.work && <SideItem active={myWork} onClick={() => { setMyWork(true); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.grid className="text-muted" /> <span>Dashboard</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
+          {navVisible.work && <SideItem active={myWork} title="Dashboard (press 1)" onClick={() => goToView("dashboard")}><I.grid className="text-muted" /> <span>Dashboard</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
         </nav>
 
         {/* Clients / Projects / Personal, grouped together — Projects is
@@ -3477,11 +3540,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             work happens from Dashboard), and Personal sits last in this
             group rather than up by Dashboard. */}
         <nav className="mt-1.5 shrink-0 space-y-0.5 border-t px-2 pt-1.5">
-          <SideItem active={dirView === "clients"} onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{clientList.length}</span></SideItem>
+          <SideItem active={dirView === "clients"} title="Clients (press 2)" onClick={() => goToView("clients")}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{clientList.length}</span></SideItem>
           {clients.some((c) => c.id === WORKSPACE_CLIENT_ID) && (
-            <SideItem active={dirView === "projects"} onClick={() => { setDirView("projects"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.folder className="text-muted" /> <span>Projects</span><span className="ml-auto text-[13px] text-muted">{workspaceProjects.length}</span></SideItem>
+            <SideItem active={dirView === "projects"} title="Projects (press 3)" onClick={() => goToView("projects")}><I.folder className="text-muted" /> <span>Projects</span><span className="ml-auto text-[13px] text-muted">{workspaceProjects.length}</span></SideItem>
           )}
-          {navVisible.personal && <SideItem active={personalView} onClick={() => { setPersonalView(true); setMyWork(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); }}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>}
+          {navVisible.personal && <SideItem active={personalView} title="Personal (press 4)" onClick={() => goToView("personal")}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>}
         </nav>
 
         {/* Pinned — per-user quick access to starred clients + lists. Starring
@@ -3562,7 +3625,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         {navVisible.inbox && (
           <div className="mt-1.5 shrink-0 space-y-0.5 border-t px-2 pt-1.5">
             <div className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Chat</div>
-            <SideItem active={inboxView && dmUserId === null} onClick={openTeamChat}><I.comment className="text-muted" /> <span>Team</span>{(teamChatUnread || unread > 0) && (
+            <SideItem active={inboxView && dmUserId === null} title="Team chat (press 5)" onClick={openTeamChat}><I.comment className="text-muted" /> <span>Team</span>{(teamChatUnread || unread > 0) && (
               // Both indicators, not either/or: notifications accumulate
               // routinely, and an exclusive check meant a real unread chat
               // message showed nothing at all whenever any notice was pending.
