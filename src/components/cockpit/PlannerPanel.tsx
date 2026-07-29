@@ -481,6 +481,37 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
   // tags — a different vocabulary, see categoryMatch.ts) so it's obvious how
   // many of each you actually have, not just a flat count. Biggest groups
   // first, alphabetical among ties.
+  // The public "I'm interested" link per business — the same page the invite
+  // email points at, so a rep can hand it over directly (text it, read it out
+  // on a call) instead of only being able to trigger an email. Fetched for
+  // the whole visible set at once when the week or its categories change, so
+  // the URL is already in hand when the copy button is clicked: awaiting a
+  // fetch inside the click handler first would trip Safari's user-gesture
+  // rule and silently fail to write the clipboard.
+  const [inviteLinks, setInviteLinks] = useState<Record<string, string>>({});
+  const [copiedLinkId, setCopiedLinkId] = useState<number | null>(null);
+  useEffect(() => {
+    const ids = categoryMatches.map((l) => toGdPlaceId(l.id)).filter((id): id is number => id != null);
+    if (ids.length === 0) return;
+    let alive = true;
+    authedFetch("/api/planner/invite/links", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ territoryId: week.territoryId, week: week.week, gdPlaceIds: ids }),
+    })
+      .then((r) => r.json())
+      .then((j) => { if (alive && j?.links) setInviteLinks(j.links); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [categoryMatches, week.territoryId, week.week]);
+  const copyInviteLink = (gdPlaceId: number) => {
+    const url = inviteLinks[String(gdPlaceId)];
+    if (!url) return;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedLinkId(gdPlaceId);
+      setTimeout(() => setCopiedLinkId((c) => (c === gdPlaceId ? null : c)), 2000);
+    }).catch(() => {});
+  };
+
   const categoryGroups = useMemo(() => {
     const map = new Map<string, DirectoryListing[]>();
     for (const l of categoryMatches) {
@@ -1036,6 +1067,12 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
                               </span>
                               {status !== "accepted" && gdPlaceId != null && (
                                 <button onClick={() => skipBusiness(gdPlaceId)} className="shrink-0 text-[11px] font-medium text-muted hover:text-foreground">Skip</button>
+                              )}
+                              {gdPlaceId != null && inviteLinks[String(gdPlaceId)] && (
+                                <button onClick={() => copyInviteLink(gdPlaceId)} title={inviteLinks[String(gdPlaceId)]}
+                                  className="shrink-0 text-[11px] font-medium text-muted hover:text-foreground">
+                                  {copiedLinkId === gdPlaceId ? "Copied ✓" : "🔗 Copy link"}
+                                </button>
                               )}
                               {renderInvite(gdPlaceId)}
                             </div>
