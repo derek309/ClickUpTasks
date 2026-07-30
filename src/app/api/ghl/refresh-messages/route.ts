@@ -2,8 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { tokenForLocation } from "@/lib/ghlTokens";
 import { requireUser } from "@/lib/serverAuth";
+import { normalizeBody, DEDUP_WINDOW_MS } from "@/lib/inboundIngest";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
+// A TYPE_CALL message carries no body/subject — meta.call.duration (seconds)
+// and meta.call.status are all GHL gives us (confirmed live; no transcript,
+// no recording URL inline — those need separate calls we deliberately don't
+// make, since only "a call happened" was asked for, not the recording).
+function formatCallBody(m: any): string {
+  const status: string = m?.meta?.call?.status ?? m?.status ?? "";
+  if (/missed|no-?answer|voicemail/i.test(status)) return "Missed call";
+  const secs = Number(m?.meta?.call?.duration);
+  if (!Number.isFinite(secs) || secs <= 0) return "Call";
+  const mins = Math.floor(secs / 60), rem = secs % 60;
+  return `Call · ${mins > 0 ? `${mins}m ` : ""}${rem}s`;
+}
 
 // Backfills any GoHighLevel messages for a contact that our webhook never
 // captured (webhook downtime, a message sent directly in GHL's own UI
@@ -54,13 +68,11 @@ export async function POST(req: NextRequest) {
   // imports via 2-way sync — that would double-post the sent email in the
   // Journal. Guard by matching an incoming OUTBOUND message against an existing
   // local outbound row by contact + normalized body within a time window.
-  const norm = (s: string) => (s || "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/\s+/g, " ").trim().toLowerCase().slice(0, 200);
   const { data: outRows } = await supabaseAdmin.from("messages").select("body, created_at").eq("contact_id", contactId).eq("direction", "outbound");
-  const localOutbound = (outRows ?? []).map((r) => ({ body: norm(r.body as string), at: new Date(r.created_at as string).getTime() }));
-  const DEDUP_MS = 10 * 60 * 1000;
+  const localOutbound = (outRows ?? []).map((r) => ({ body: normalizeBody(r.body as string), at: new Date(r.created_at as string).getTime() }));
   const isDupOutbound = (body: string, dateAdded: string) => {
-    const nb = norm(body); const t = new Date(dateAdded).getTime();
-    return localOutbound.some((o) => o.body === nb && Math.abs(o.at - t) <= DEDUP_MS);
+    const nb = normalizeBody(body); const t = new Date(dateAdded).getTime();
+    return localOutbound.some((o) => o.body === nb && Math.abs(o.at - t) <= DEDUP_WINDOW_MS);
   };
 
   let inserted = 0;
@@ -82,7 +94,11 @@ export async function POST(req: NextRequest) {
       const rows = messages
         .filter((m) => m?.id && !known.has(m.id))
         .map((m) => {
-          const channel = m.messageType === "SMS" ? "sms" : m.messageType === "Email" ? "email" : null;
+          // GHL's real messageType values are "TYPE_SMS"/"TYPE_EMAIL"/"TYPE_CALL"
+          // (confirmed against a live conversations/{id}/messages response) —
+          // NOT the bare "SMS"/"Email" this used to check, which meant this
+          // backfill silently matched nothing at all until now.
+          const channel = m.messageType === "TYPE_SMS" ? "sms" : m.messageType === "TYPE_EMAIL" ? "email" : m.messageType === "TYPE_CALL" ? "call" : null;
           if (!channel || !m.dateAdded) return null;
           // Don't re-import an outbound email we already sent via Google.
           if (m.direction !== "inbound" && isDupOutbound(m.body ?? "", m.dateAdded)) return null;
@@ -96,7 +112,10 @@ export async function POST(req: NextRequest) {
             // subject field for email-type messages — falls back to null
             // (same as any message with no subject) rather than guessing.
             subject: m.subject ?? null,
-            body: m.body ?? "",
+            // A call carries no body/subject from GHL — meta.call.duration/
+            // status is all there is, so the "content" is a short synthesized
+            // summary instead of a real message body.
+            body: channel === "call" ? formatCallBody(m) : (m.body ?? ""),
             ghl_message_id: m.id,
             created_by: null,
             created_at: m.dateAdded,

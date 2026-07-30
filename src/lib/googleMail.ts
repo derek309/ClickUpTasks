@@ -181,3 +181,48 @@ export async function readInboundGmail(userEmail: string, query: string, max = 2
   }
   return out;
 }
+
+export type SentEmail = { gmailId: string; threadId: string; toEmails: string[]; subject: string; body: string; internalDate: string };
+
+// Read recent SENT email for a teammate (same DWD impersonation/scope as
+// readInboundGmail) — a reply they sent directly from their own Gmail
+// (bypassing the in-app "send as" composer), so it still lands in the
+// Journal. Deliberately a separate function, not a parameterized mode on
+// readInboundGmail: for sent mail the teammate IS the From address (useless
+// to match on) and the client is in `To` instead, and the bulk/automated-mail
+// `auto` heuristic is meaningless for mail you sent yourself — different
+// enough logic that forking reads cleaner than branching one function two ways.
+export async function readSentGmail(userEmail: string, query: string, max = 25): Promise<SentEmail[]> {
+  if (!googleConfigured) throw new Error("Google Workspace is not configured.");
+  const jwt = new JWT({ email: SA_EMAIL, key: SA_KEY, scopes: [GMAIL_READ_SCOPE], subject: userEmail });
+  const { token } = await jwt.getAccessToken();
+  if (!token) throw new Error("Could not obtain a Google access token.");
+  const auth = { Authorization: `Bearer ${token}` };
+
+  const listRes = await fetch(`${GMAIL_LIST}?q=${encodeURIComponent(query)}&maxResults=${max}`, { headers: auth });
+  if (!listRes.ok) throw new Error(`Gmail list failed (${listRes.status}): ${(await listRes.text().catch(() => "")).slice(0, 200)}`);
+  const listJson = await listRes.json().catch(() => ({}));
+  const ids: string[] = (listJson.messages ?? []).map((m: any) => m.id).filter(Boolean);
+
+  const out: SentEmail[] = [];
+  for (const id of ids) {
+    const mRes = await fetch(`${GMAIL_LIST}/${id}?format=full`, { headers: auth });
+    if (!mRes.ok) continue;
+    const m = await mRes.json().catch(() => null);
+    if (!m) continue;
+    const headers: any[] = m.payload?.headers ?? [];
+    const h = (name: string) => headers.find((x) => x.name?.toLowerCase() === name)?.value ?? "";
+    // A To header can list multiple recipients — extract every email address
+    // (not just the first, unlike From above) so a reply-all still matches
+    // whichever recipient turns out to be a known contact.
+    const toRaw = h("to");
+    const toEmails = [...toRaw.matchAll(/[^<>@\s,]+@[^<>\s,]+/g)].map((mm) => mm[0].trim().toLowerCase());
+    if (!toEmails.length) continue;
+    out.push({
+      gmailId: m.id, threadId: m.threadId ?? "", toEmails,
+      subject: h("subject"), body: extractBody(m.payload, m.snippet ?? ""),
+      internalDate: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : new Date().toISOString(),
+    });
+  }
+  return out;
+}

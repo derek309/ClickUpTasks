@@ -465,7 +465,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                 );
               }
               if (row.kind === "message-group") {
-                const channelColor = row.channel === "email" ? "#3b82f6" : "#22c55e";
+                const channelColor = row.channel === "email" ? "#3b82f6" : row.channel === "sms" ? "#22c55e" : "#f59e0b";
                 return (
                   // Solid bg-surface for both directions — a translucent
                   // accent tint on outbound (bg-accent-soft/30) let the page
@@ -475,7 +475,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                     <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-white" style={{ background: channelColor }}><I.bolt /></span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 text-[13px] text-muted">
-                        <span className="font-medium" style={{ color: channelColor }}>{row.channel === "email" ? "Email" : "SMS"}</span>
+                        <span className="font-medium" style={{ color: channelColor }}>{row.channel === "email" ? "Email" : row.channel === "sms" ? "SMS" : "Call"}</span>
                         <span>{row.direction === "inbound" ? "Received" : "Sent"}</span>
                       </div>
                       <div className="mt-1.5 space-y-2.5">

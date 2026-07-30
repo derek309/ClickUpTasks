@@ -131,3 +131,43 @@ export async function ingestInboundMessage(opts: {
   await notifyInbound(contact, taskId, text);
   return true;
 }
+
+// Shared by refresh-messages/route.ts and ingestOutboundMessage below: an
+// email sent through the app's own composer has no gmail_message_id (it
+// wasn't read back from Gmail), so a later scan that sees GHL's or Gmail's
+// own copy of the same send can't dedup on that id — match by contact +
+// normalized body within a time window instead. `normalizeBody`/`DEDUP_WINDOW_MS`
+// are exported so a caller looping over many candidate messages (refresh-messages)
+// can fetch the contact's existing outbound rows ONCE and match in-memory,
+// rather than re-querying per message the way the one-shot `isDuplicateOutboundBody`
+// convenience below does (fine for its single-message call site, wrong for a loop).
+export const normalizeBody = (s: string) => (s || "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/\s+/g, " ").trim().toLowerCase().slice(0, 200);
+export const DEDUP_WINDOW_MS = 10 * 60 * 1000;
+export async function isDuplicateOutboundBody(contactId: string, body: string, dateAdded: string): Promise<boolean> {
+  const { data: outRows } = await supabaseAdmin.from("messages").select("body, created_at").eq("contact_id", contactId).eq("direction", "outbound");
+  const nb = normalizeBody(body);
+  const t = new Date(dateAdded).getTime();
+  return (outRows ?? []).some((r) => normalizeBody(r.body as string) === nb && Math.abs(new Date(r.created_at as string).getTime() - t) <= DEDUP_WINDOW_MS);
+}
+
+// Twin of ingestInboundMessage, for a teammate's own reply sent directly from
+// their Gmail (not the in-app composer) — see /api/google/poll-replies'
+// Sent-folder pass. Deliberately minimal: just makes the message visible in
+// the Journal. Does NOT touch the Conversation task or fire a notification —
+// nobody needs pinging that the team sent something, unlike an inbound reply.
+export async function ingestOutboundMessage(opts: {
+  contact: Contact; channel: "email"; subject?: string | null; body: string; gmailMessageId: string; createdBy: string; at?: string;
+}): Promise<boolean> {
+  const contact = { ...opts.contact, client_id: await resolveOrPromoteTrackedClient(opts.contact) };
+  const { data: dupe } = await supabaseAdmin.from("messages").select("id").eq("gmail_message_id", opts.gmailMessageId).limit(1);
+  if (dupe && dupe.length > 0) return false;
+  if (await isDuplicateOutboundBody(contact.id, opts.body, opts.at ?? new Date().toISOString())) return false;
+  const { error } = await supabaseAdmin.from("messages").insert({
+    id: "msg_" + crypto.randomUUID(), contact_id: contact.id, client_id: contact.client_id,
+    channel: opts.channel, direction: "outbound",
+    subject: opts.subject?.trim() || null, body: opts.body, gmail_message_id: opts.gmailMessageId, created_by: opts.createdBy,
+    ...(opts.at ? { created_at: opts.at } : {}),
+  });
+  if (error) return false; // unique-index hit (already ingested) — not a real failure
+  return true;
+}

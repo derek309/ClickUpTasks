@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/serverAuth";
-import { googleConfigured, readInboundGmail } from "@/lib/googleMail";
-import { ingestInboundMessage } from "@/lib/inboundIngest";
+import { googleConfigured, readInboundGmail, readSentGmail, type SentEmail } from "@/lib/googleMail";
+import { ingestInboundMessage, ingestOutboundMessage } from "@/lib/inboundIngest";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -42,8 +42,16 @@ async function run(req: NextRequest) {
   if (!googleConfigured) return NextResponse.json({ error: "Google Workspace is not configured." }, { status: 501 });
 
   // Which mailboxes to read — the team's own @clickuplocal.com accounts.
-  const { data: profiles } = await supabaseAdmin.from("profiles").select("email").ilike("email", "%@clickuplocal.com");
+  const { data: profiles } = await supabaseAdmin.from("profiles").select("email, member_id").ilike("email", "%@clickuplocal.com");
   const mailboxes = Array.from(new Set((profiles ?? []).map((p: any) => (p.email ?? "").toLowerCase()).filter(Boolean)));
+  // Sent-folder pass (below) needs each mailbox's roster id to stamp as
+  // created_by — the inbound pass has no equivalent need (created_by is
+  // always null for a client's own inbound message).
+  const memberIdByMailbox = new Map<string, string>();
+  for (const p of profiles ?? []) {
+    const email = (p.email ?? "").toLowerCase();
+    if (email && p.member_id) memberIdByMailbox.set(email, p.member_id as string);
+  }
 
   // Sender-email → contact map. A client email in a teammate's inbox is only
   // ingested when its From address matches a known contact.
@@ -60,7 +68,9 @@ async function run(req: NextRequest) {
   // category:primary keeps Gmail's own Promotions/Social/Updates tabs (where
   // newsletters + notifications live) out of what we scan.
   const query = "in:inbox category:primary newer_than:2d -from:me";
+  const sentQuery = "in:sent newer_than:2d";
   let ingested = 0, scanned = 0, matched = 0, unmatched = 0, skippedAuto = 0;
+  let sentScanned = 0, sentMatched = 0, sentIngested = 0;
   const errors: string[] = [];
   const unmatchedRows: any[] = [];
 
@@ -99,6 +109,38 @@ async function run(req: NextRequest) {
         unmatchedRows.push({ id: em.gmailId, from_email: em.fromEmail, from_name: em.fromName || null, subject: em.subject || null, body: em.body || null, at: em.internalDate });
       }
     }
+
+    // Sent-folder pass — a reply the teammate sent directly from their own
+    // Gmail (not the in-app "send as" composer), which the inbound pass above
+    // can never see (it explicitly excludes -from:me). Unmatched sent mail is
+    // skipped silently: unlike an unmatched inbound email, it's not a lead to
+    // triage — just the teammate emailing someone outside the CRM.
+    const createdBy = memberIdByMailbox.get(mailbox);
+    if (createdBy) {
+      let sent: SentEmail[];
+      try {
+        sent = await readSentGmail(mailbox, sentQuery);
+      } catch (e) {
+        errors.push(`${mailbox} (sent): ${e instanceof Error ? e.message : "read failed"}`);
+        sent = [];
+      }
+      for (const em of sent) {
+        sentScanned++;
+        const contact = em.toEmails.map((e) => byEmail.get(e)).find(Boolean);
+        if (!contact) continue;
+        sentMatched++;
+        try {
+          const did = await ingestOutboundMessage({
+            contact: { id: contact.id, name: contact.name, client_id: contact.client_id },
+            channel: "email", subject: em.subject, body: em.body,
+            gmailMessageId: em.gmailId, createdBy, at: em.internalDate,
+          });
+          if (did) sentIngested++;
+        } catch (e) {
+          errors.push(`ingest sent ${em.gmailId}: ${e instanceof Error ? e.message : "failed"}`);
+        }
+      }
+    }
   }
 
   // Park unknown-but-real senders for triage in the Inbox (read → add as client
@@ -112,5 +154,9 @@ async function run(req: NextRequest) {
     else surfaced = count ?? 0;
   }
 
-  return NextResponse.json({ ok: true, mailboxes: mailboxes.length, scanned, matched, ingested, unmatched, surfaced, skippedAuto, ...(errors.length ? { errors: errors.slice(0, 10) } : {}) });
+  return NextResponse.json({
+    ok: true, mailboxes: mailboxes.length, scanned, matched, ingested, unmatched, surfaced, skippedAuto,
+    sentScanned, sentMatched, sentIngested,
+    ...(errors.length ? { errors: errors.slice(0, 10) } : {}),
+  });
 }

@@ -198,8 +198,35 @@ async function handleCall(body: any, custom: any) {
   contact.client_id = await resolveOrPromoteTrackedClient(contact);
   const taskId = await upsertConversationTask(contact, ghlContactId);
   const status: string = typeof custom?.status === "string" ? custom.status : ((custom?.event ?? body?.event) === "missed_call" ? "missed" : "");
-  const label = /miss|no.?answer|voicemail|unanswered/i.test(status) ? "Missed call from" : "Call from";
-  await notifyInbound(contact, taskId, `📞 ${label} ${titleCase(contact.name)}`);
+  const missed = /miss|no.?answer|voicemail|unanswered/i.test(status);
+  const label = missed ? "Missed call from" : "Call from";
+
+  // Log it to the Journal too, same as handleMessageReply — this webhook's
+  // Custom Data setup has no duration field (unlike the Conversations-API
+  // backfill in refresh-messages/route.ts), so this entry is just "a call
+  // happened," not timed. No confirmed messageId Custom Data merge field
+  // here either, so dedup on the same synthetic-hash-bucketed-by-hour key
+  // handleMessageReply uses, keyed off status instead of body text.
+  const hourBucket = new Date().toISOString().slice(0, 13);
+  const ghlMessageId = `synthetic:${ghlContactId}:call:${hourBucket}:${createHash("sha256").update(status || "call").digest("hex").slice(0, 16)}`;
+  const { error: msgError } = await supabaseAdmin.from("messages").insert({
+    id: "msg_" + crypto.randomUUID(),
+    contact_id: contact.id,
+    client_id: contact.client_id,
+    channel: "call",
+    direction: "inbound",
+    subject: null,
+    body: missed ? "Missed call" : "Call",
+    ghl_message_id: ghlMessageId,
+    created_by: null,
+    task_id: taskId,
+  });
+  // A duplicate delivery hits the same unique index handleMessageReply
+  // relies on — treat as already-processed, don't double-notify.
+  if (msgError && !msgError.message.includes("duplicate key")) {
+    return NextResponse.json({ error: msgError.message }, { status: 500 });
+  }
+  if (!msgError) await notifyInbound(contact, taskId, `📞 ${label} ${titleCase(contact.name)}`);
   return NextResponse.json({ ok: true });
 }
 

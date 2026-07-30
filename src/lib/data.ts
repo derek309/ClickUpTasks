@@ -565,7 +565,7 @@ export function normalizeState(state: string): string {
   return (US_STATE_ABBR[s] ?? state.trim()).toUpperCase();
 }
 
-export type MessageChannel = "email" | "sms";
+export type MessageChannel = "email" | "sms" | "call";
 export type MessageDirection = "outbound" | "inbound";
 
 /** A single email/SMS with a Contact, sent or received via GoHighLevel's
