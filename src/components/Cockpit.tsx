@@ -57,6 +57,7 @@ import {
   type PlaybookTask,
   playbookCompletion,
   PLAYBOOK_STEPS,
+  PLAYBOOK_PHASES,
   playbookProjectId,
   type VaultFolder,
   type Folder,
@@ -1981,6 +1982,24 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (dim === "priority") return PRIORITY_ORDER.map((p) => ({ key: p, label: PRIORITY_META[p].label, color: PRIORITY_META[p].color, tasks: list.filter((t) => t.priority === p) }));
     if (dim === "due") { const defs: [string, string, string][] = [["overdue", "Overdue", "#ef4444"], ["today", "Due today", "#f59e0b"], ["tomorrow", "Due tomorrow", "#eab308"], ["week", "This week", "#3b82f6"], ["nextWeek", "Next week", "#6366f1"], ["later", "Later", "#94a3b8"], ["none", "No due date", "#cbd5e1"]]; return defs.map(([k, l, c]) => ({ key: k, label: l, color: c, tasks: list.filter((t) => dueBucket(t) === k) })); }
     return visibleProjects.map((p) => ({ key: p.id, label: p.name, color: clientById(p.clientId)?.color ?? "#94a3b8", tasks: list.filter((t) => t.projectId === p.id) }));
+  };
+
+  // Owner Growth Plan view: fixed Level sections (PLAYBOOK_PHASES), each in
+  // catalog order (PLAYBOOK_STEPS) — never the caller's current sortBy/sortDir,
+  // so the sequence can't drift no matter what column-sort is active elsewhere
+  // in the app. Any non-step task that ends up in the Playbook project (a
+  // one-off note an ambassador quick-added) still shows, under "Other", so
+  // nothing silently disappears.
+  const stepPhase = new Map(PLAYBOOK_STEPS.map((s) => [s.key, s.phase]));
+  const stepOrder = new Map(PLAYBOOK_STEPS.map((s, i) => [s.key, i]));
+  const buildPlaybookGroups = (list: Task[]): Grp[] => {
+    const byPhase = PLAYBOOK_PHASES.map((phase) => ({
+      key: phase.key, label: phase.label, color: "#5c8ac4",
+      tasks: list.filter((t) => t.playbookStepKey && stepPhase.get(t.playbookStepKey) === phase.key)
+        .sort((a, b) => (stepOrder.get(a.playbookStepKey!) ?? 0) - (stepOrder.get(b.playbookStepKey!) ?? 0)),
+    }));
+    const extra = list.filter((t) => !t.playbookStepKey);
+    return extra.length ? [...byPhase, { key: "extra", label: "Other", color: "#94a3b8", tasks: extra }] : byPhase;
   };
 
   // Flat, in-display-order list of the tasks currently shown — drives prev/next
@@ -4331,7 +4350,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 onReorderFolders={(ids) => reorderFolders(activeClient, ids)} onReorderLists={(fid, ids) => reorderLists(activeClient, fid, ids)} />
             );
           })()}
-          {activeProject && stagesForProject(activeProject).length > 0 ? (
+          {activeProject === playbookProjectId(activeClient) ? (
+            // Owner Growth Plan: fixed Level sections, catalog order — no
+            // onDropInGroup/onMergeTasks, so there's no drag-to-recategorize
+            // or merge affordance that could scramble or collapse a step.
+            <GroupedList groups={buildPlaybookGroups(baseTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="" onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={false} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
+          ) : activeProject && stagesForProject(activeProject).length > 0 ? (
             <StageBoard stages={stagesForProject(activeProject)} tasks={baseTasks.filter(passesFilters)} canAdmin={canAdmin}
               onOpenTask={setOpenTaskId} onSetTaskStage={setTaskStage} onQuickAdd={(stageId, title) => quickAddInStage(activeProject, stageId, title)}
               onCreateStage={() => createStage(activeProject)} onRenameStage={renameStage} onToggleStageIsDone={toggleStageIsDone} onDeleteStage={deleteStage}
