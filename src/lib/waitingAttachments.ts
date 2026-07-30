@@ -11,11 +11,15 @@ import type { Attachment } from "@/lib/data";
 //     path would get a working signed URL to that file. We only keep paths that
 //     live under this client's own `waiting/<clientId>/` namespace (exactly what
 //     upload/route.ts writes).
-//   - `url` is never legitimately sent (real uploads only carry `path`), and a
-//     stored `javascript:`/phishing URL renders as a clickable <a href> in the
-//     team's task drawer — so we drop it entirely and rely on read-time signing.
-//   - `kind` drives the "changes_requested" auto-flip, so we re-derive it from
-//     the filename server-side rather than trusting the client's label.
+//   - `url` (kind "link") IS accepted — the client can share a reference link,
+//     same as an ambassador adding one in TaskDrawer, and it renders as a real
+//     clickable link in the team's task drawer (confirmed acceptable risk).
+//     Still restricted to http(s) — never javascript:/data:/other schemes,
+//     which is basic hygiene rather than a trust decision.
+//   - `kind` drives the "changes_requested" auto-flip, so a file's kind is
+//     re-derived from its filename server-side rather than trusting the
+//     client's label; "link" is the one kind the caller is allowed to assert,
+//     since it's the only thing that distinguishes a link entry from a file.
 //
 // The result is a clean Attachment[] built from scratch — we never spread the
 // caller's object, so no unexpected field survives.
@@ -37,12 +41,21 @@ export function sanitizeWaitingAttachments(raw: unknown, clientId: string): Atta
   for (const a of raw) {
     if (clean.length >= MAX_ATTACHMENTS) break;
     if (!a || typeof a !== "object") continue;
-    const path = (a as { path?: unknown }).path;
-    // A stored file is the only shape a client can legitimately submit, and it
-    // must sit inside its own namespace — anything else is dropped, not signed.
-    if (typeof path !== "string" || !path.startsWith(prefix)) continue;
     const rawName = (a as { name?: unknown }).name;
     const name = (typeof rawName === "string" ? rawName : "file").slice(0, 200);
+    if ((a as { kind?: unknown }).kind === "link") {
+      const rawUrl = (a as { url?: unknown }).url;
+      if (typeof rawUrl !== "string") continue;
+      let url: URL;
+      try { url = new URL(rawUrl); } catch { continue; }
+      if (url.protocol !== "http:" && url.protocol !== "https:") continue;
+      clean.push({ id: "a_" + randomUUID(), name: name.slice(0, 200) || url.href, kind: "link", size: "", url: url.href });
+      continue;
+    }
+    const path = (a as { path?: unknown }).path;
+    // A stored file is the only other shape a client can legitimately submit,
+    // and it must sit inside its own namespace — anything else is dropped, not signed.
+    if (typeof path !== "string" || !path.startsWith(prefix)) continue;
     const rawSize = (a as { size?: unknown }).size;
     const size = typeof rawSize === "string" ? rawSize.slice(0, 20) : "";
     clean.push({ id: "a_" + randomUUID(), name, kind: kindFromName(name), size, path });

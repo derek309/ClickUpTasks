@@ -18,7 +18,11 @@ type WaitingTask = {
   attachments: WaitingAttachment[];
   response: { body: string; submittedAt: string; attachments: WaitingAttachment[] } | null;
 };
-type DraftAttachment = { id: string; name: string; kind: Attachment["kind"]; size: string; path: string };
+// A draft attachment is either a stored file (has `path`, uploaded via
+// upload/route.ts) or a plain link (kind "link", has `url` instead) — mirrors
+// the real Attachment shape closely enough for sanitizeWaitingAttachments to
+// accept either on submit.
+type DraftAttachment = { id: string; name: string; kind: Attachment["kind"]; size: string; path?: string; url?: string };
 type Draft = { body: string; attachments: DraftAttachment[] };
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
@@ -104,6 +108,22 @@ export default function WaitingView({ token }: { token: string }) {
   const [newError, setNewError] = useState<string | null>(null);
   const [newSent, setNewSent] = useState(false);
 
+  // Shared "add a link" popover — only one open at a time, keyed by task id
+  // or the "__new__" sentinel for the "Need something else?" composer, so
+  // both places reuse the same small bit of state instead of duplicating it.
+  const [linkForId, setLinkForId] = useState<string | null>(null);
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkLabel, setLinkLabel] = useState("");
+  const addLinkAttachment = (id: string) => {
+    const raw = linkUrl.trim();
+    if (!raw) return;
+    const href = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    const att: DraftAttachment = { id: localId(), name: linkLabel.trim() || href.replace(/^https?:\/\//, ""), kind: "link", size: "", url: href };
+    if (id === "__new__") setNewAttachments((prev) => [...prev, att]);
+    else setDrafts((prev) => { const d = prev[id] ?? { body: "", attachments: [] }; return { ...prev, [id]: { ...d, attachments: [...d.attachments, att] } }; });
+    setLinkUrl(""); setLinkLabel(""); setLinkForId(null);
+  };
+
   const load = async () => {
     try {
       const res = await fetch(`/api/waiting/${token}`);
@@ -121,7 +141,7 @@ export default function WaitingView({ token }: { token: string }) {
         for (const t of list) {
           if (next[t.id]) continue;
           next[t.id] = t.response
-            ? { body: t.response.body, attachments: t.response.attachments.filter((a) => a.path).map((a) => ({ id: a.id, name: a.name, kind: a.kind, size: a.size, path: a.path as string })) }
+            ? { body: t.response.body, attachments: t.response.attachments.filter((a) => a.path || a.url).map((a) => ({ id: a.id, name: a.name, kind: a.kind, size: a.size, path: a.path ?? undefined, url: a.url ?? undefined })) }
             : { body: "", attachments: [] };
         }
         return next;
@@ -334,11 +354,21 @@ export default function WaitingView({ token }: { token: string }) {
                               ))}
                             </div>
                           )}
+                          {linkForId === t.id && (
+                            <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-background p-2">
+                              <input autoFocus value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLinkAttachment(t.id); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[13px] outline-none focus:border-accent" />
+                              <input value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLinkAttachment(t.id); }} placeholder="Label (optional)" className="w-32 rounded-md border bg-surface px-2.5 py-1.5 text-[13px] outline-none focus:border-accent" />
+                              <button onClick={() => addLinkAttachment(t.id)} disabled={!linkUrl.trim()} className="rounded-md bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white disabled:opacity-40">Add</button>
+                            </div>
+                          )}
                           <div className="flex items-center justify-between gap-2">
-                            <label className="inline-flex cursor-pointer items-center gap-1 text-[13px] font-medium text-accent">
-                              + Attach files
-                              <input type="file" multiple className="hidden" onChange={(e) => { handleFiles(t.id, e.target.files); e.target.value = ""; }} />
-                            </label>
+                            <div className="flex items-center gap-3">
+                              <label className="inline-flex cursor-pointer items-center gap-1 text-[13px] font-medium text-accent">
+                                + Attach files
+                                <input type="file" multiple className="hidden" onChange={(e) => { handleFiles(t.id, e.target.files); e.target.value = ""; }} />
+                              </label>
+                              <button onClick={() => { setLinkForId((id) => (id === t.id ? null : t.id)); setLinkUrl(""); setLinkLabel(""); }} className="text-[13px] font-medium text-accent">+ Add link</button>
+                            </div>
                             <div className="flex items-center gap-2">
                               {editingIds.has(t.id) && !t.needsResponse && (
                                 <button onClick={() => setEditingIds((s) => { const n = new Set(s); n.delete(t.id); return n; })} className="text-[13px] text-muted hover:text-foreground">Cancel</button>
@@ -396,11 +426,21 @@ export default function WaitingView({ token }: { token: string }) {
                   ))}
                 </div>
               )}
+              {linkForId === "__new__" && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border bg-background p-2">
+                  <input autoFocus value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLinkAttachment("__new__"); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[13px] outline-none focus:border-accent" />
+                  <input value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLinkAttachment("__new__"); }} placeholder="Label (optional)" className="w-32 rounded-md border bg-surface px-2.5 py-1.5 text-[13px] outline-none focus:border-accent" />
+                  <button onClick={() => addLinkAttachment("__new__")} disabled={!linkUrl.trim()} className="rounded-md bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white disabled:opacity-40">Add</button>
+                </div>
+              )}
               <div className="mt-2 flex items-center justify-between gap-2">
-                <label className="inline-flex cursor-pointer items-center gap-1 text-[13px] font-medium text-accent">
-                  + Attach files
-                  <input type="file" multiple className="hidden" onChange={(e) => { handleNewFiles(e.target.files); e.target.value = ""; }} />
-                </label>
+                <div className="flex items-center gap-3">
+                  <label className="inline-flex cursor-pointer items-center gap-1 text-[13px] font-medium text-accent">
+                    + Attach files
+                    <input type="file" multiple className="hidden" onChange={(e) => { handleNewFiles(e.target.files); e.target.value = ""; }} />
+                  </label>
+                  <button onClick={() => { setLinkForId((id) => (id === "__new__" ? null : "__new__")); setLinkUrl(""); setLinkLabel(""); }} className="text-[13px] font-medium text-accent">+ Add link</button>
+                </div>
                 <button
                   onClick={submitNewRequest}
                   disabled={newSaving || newUploading || (!newBody.trim() && newAttachments.length === 0)}
