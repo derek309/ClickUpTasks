@@ -513,27 +513,368 @@ export const PLAYBOOK_PHASES: PlaybookPhase[] = [
   { key: "campaigns", label: "Campaign Builder" },
   { key: "grow", label: "Grow & compound" },
 ];
-export type PlaybookStepDef = { key: string; phase: string; label: string };
+export type ScoreImpact = "low" | "medium" | "high"; // ⚡ / ⚡⚡ / ⚡⚡⚡ in the source doc
+/** All content beyond key/phase/label is pure reference material for the
+ * read-only guide panel in TaskDrawer.tsx (gated on Task.playbookStepKey,
+ * looked up via PLAYBOOK_STEP_BY_KEY below) — never stored on the Task row,
+ * so it can't drift per client and needs no reconciliation when the wording
+ * changes here. commonMistake/weGive/youGet are optional, not empty strings,
+ * where the source doc genuinely doesn't call one out for that step. */
+export type PlaybookStepDef = {
+  key: string; phase: string; label: string;
+  timeEstimate: string;
+  whyItMatters: string;
+  howTo: string[];
+  commonMistake?: string;
+  weGive?: string;
+  youGet?: string;
+  scoreImpact: ScoreImpact;
+};
 export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
-  { key: "claim_listing", phase: "map", label: "Claim listing" },
-  { key: "complete_listing", phase: "map", label: "Complete business listing" },
-  { key: "first_offer", phase: "map", label: "Create first offer" },
-  { key: "add_events", phase: "map", label: "Add events" },
-  { key: "connect_gbp", phase: "reputation", label: "Connect Google Business Profile" },
-  { key: "review_engine", phase: "reputation", label: "Turn on review engine" },
-  { key: "first_review_request", phase: "reputation", label: "Send first review request" },
-  { key: "reviews_widget", phase: "reputation", label: "Add reviews widget to website" },
-  { key: "import_contacts", phase: "list", label: "Import contacts" },
-  { key: "ongoing_capture", phase: "list", label: "Set up ongoing capture (QR/table tents)" },
-  { key: "smart_website", phase: "everywhere", label: "Get Smart Website" },
-  { key: "optimize_gbp_nap", phase: "everywhere", label: "Optimize Google profile + NAP" },
-  { key: "campaign_start", phase: "campaigns", label: "Start a campaign" },
-  { key: "campaign_answer", phase: "campaigns", label: "Answer the campaign question" },
-  { key: "campaign_review", phase: "campaigns", label: "Review the five pieces" },
-  { key: "campaign_publish", phase: "campaigns", label: "Publish + send campaign" },
-  { key: "video_testimonials", phase: "grow", label: "Collect video testimonials" },
-  { key: "paid_ads", phase: "grow", label: "Run paid ads (optional)" },
+  {
+    key: "claim_listing", phase: "map", label: "Claim listing",
+    timeEstimate: "~5 min",
+    whyItMatters: "Claiming unlocks your My Business dashboard, where everything else lives. Your Score was already calculated when we built your profile — claiming lets you start improving it.",
+    howTo: [
+      "From the directory: search your business at clickuplocal.com, open your listing, and click \"Claim this business, it's free.\"",
+      "Or from the Businesses page: go to clickuplocal.com/businesses and click \"Claim My Free Listing.\"",
+      "Find your business (or add it if it's not there), verify you're the owner, and you'll land in My Business.",
+    ],
+    commonMistake: "Thinking you have to pay to claim — you don't. Free gets you a verified listing, Google Business Profile setup, and automated review requests at no cost.",
+    weGive: "We open your dashboard and mark you a verified local owner.",
+    youGet: "Control of your directory presence, free.",
+    scoreImpact: "low",
+  },
+  {
+    key: "complete_listing", phase: "map", label: "Complete business listing",
+    timeEstimate: "~10 min (established shortcut: copy straight from your website/Google)",
+    whyItMatters: "Photo-rich, complete listings get far more clicks, rank higher, and become eligible to be featured. Profile completeness is one of the biggest Score factors.",
+    howTo: [
+      "Add your logo and 5–10 photos (storefront, interior, products, team).",
+      "Complete every field: name, category, description, services/products, hours, phone, website, address.",
+      "Add your social links.",
+      "Save / Publish, then check the live preview.",
+    ],
+    commonMistake: "A thin listing — no photos, blank description. Fill it all in now.",
+    weGive: "We optimize your listing for local + AI search — completeness is one of the biggest Score drivers, so this keeps lifting you as your Score refreshes.",
+    youGet: "A listing that gets found and chosen.",
+    scoreImpact: "high",
+  },
+  {
+    key: "first_offer", phase: "map", label: "Create first offer",
+    timeEstimate: "~10 min",
+    whyItMatters: "An offer drives residents through your door — and every redemption hands you a new customer contact you own. It doesn't have to be a discount: a bonus, upgrade, bundle, priority booking, free add-on, or VIP perk all work — what matters is it's compelling enough to make someone actually come in.",
+    howTo: [
+      "Go to Offers & Events → Offers → Create Offer.",
+      "Not sure what to offer? Use the built-in offer suggestion tool.",
+      "Write a clear title + the fine print; set the expiration (residents get 14 days to redeem).",
+      "Publish, and set up a Comeback Offer for after they redeem.",
+    ],
+    commonMistake: "Too small to matter, or so big it hurts. Get someone off the couch, but make it pencil out.",
+    weGive: "We push it to residents, notify the town, and feature it in the newsletter, on social, and in the app. Every redemption auto-adds a new contact to your list.",
+    youGet: "Foot traffic now + a new owned customer per redemption.",
+    scoreImpact: "medium",
+  },
+  {
+    key: "add_events", phase: "map", label: "Add events",
+    timeEstimate: "~5 min each",
+    whyItMatters: "Events give residents a reason to visit now, and give the Campaign Builder (Phase 5) more to promote.",
+    howTo: [
+      "Go to Offers & Events → Events → Add Event.",
+      "Fill in name, date/time, description, photo.",
+      "Publish. Add all your upcoming events.",
+    ],
+    weGive: "We surface your events in the directory + newsletter, and let you turn any event into a full campaign later.",
+    youGet: "More reasons for residents to show up, promoted for you.",
+    scoreImpact: "low",
+  },
+  {
+    key: "connect_gbp", phase: "reputation", label: "Connect Google Business Profile",
+    timeEstimate: "~5 min",
+    whyItMatters: "Google is where new customers judge you and where your review requests point. Nothing else in reputation works until this is connected.",
+    howTo: [
+      "Go to Reputation → Settings → Integrations.",
+      "Click Google Business Profile → Connect.",
+      "Sign in with the account that owns the listing (not a personal one) → Allow.",
+      "Confirm it says Connected.",
+    ],
+    commonMistake: "Signing in with the wrong Google account — it must own the listing.",
+    weGive: "We get you ready to auto-respond to every review, past and future.",
+    youGet: "The connection that powers your whole reputation engine.",
+    scoreImpact: "medium",
+  },
+  {
+    key: "review_engine", phase: "reputation", label: "Turn on review engine",
+    timeEstimate: "~10 min",
+    whyItMatters: "Reviews are the #1 thing people check before choosing a local business — and responding to every review, good and bad, signals you care, builds trust, and lifts your Google ranking. (Industry research puts each extra Google star at roughly 5–9% more revenue.) Doing this by hand is a grind; this automates all of it.",
+    howTo: [
+      "In Reputation → Settings, Review Link: select Google (already connected — no pasting).",
+      "Requests: enable SMS Requests + Email Requests, set up Reviews QR for in-store capture, and turn on Spam Reviews filtering.",
+      "Reviews AI (Settings → AI): choose Auto Responses and set a short wait time before responding so it feels human.",
+      "Past reviews — Drip Mode: under \"Respond to Reviews – Drip Mode,\" create a new campaign — name it, set the review date range, Frequency: Daily, replies per day (e.g. 10/day), an optional time window, select an AI Agent, and create it.",
+    ],
+    commonMistake: "Replies-per-day too high — a natural pace looks more genuine than a same-minute flood.",
+    weGive: "We give you a review count that climbs on its own, and AI that responds to every new review and every past review — automatically, in your voice.",
+    youGet: "A reputation that works 24/7 without you touching it.",
+    scoreImpact: "high",
+  },
+  {
+    key: "first_review_request", phase: "reputation", label: "Send first review request",
+    timeEstimate: "~2 min",
+    whyItMatters: "A quick way to prove the review engine actually works before you rely on it for everyone. To text, you first need a business number with A2P completed (see the A2P side quest) — email works right away.",
+    howTo: [
+      "Go to Reputation → Requests → Send a request.",
+      "Enter a happy customer's name + phone (or email).",
+      "Click Send.",
+    ],
+    commonMistake: "Sending to someone who wasn't thrilled — pick a customer who loves you.",
+    weGive: "We auto-respond to the review the moment it lands and notify you.",
+    youGet: "Proof the engine works, immediately.",
+    scoreImpact: "low",
+  },
+  {
+    key: "reviews_widget", phase: "reputation", label: "Add reviews widget to website",
+    timeEstimate: "~5 min",
+    whyItMatters: "Fresh reviews on your own site are social proof right where people decide — and they update themselves.",
+    howTo: [
+      "Go to Reputation → Widgets.",
+      "Pick a reviews widget.",
+      "Copy the embed onto your site (or we place it on your Smart Website).",
+    ],
+    weGive: "We keep it updating automatically as new reviews land.",
+    youGet: "Your best reviews selling for you on every page.",
+    scoreImpact: "low",
+  },
+  {
+    key: "import_contacts", phase: "list", label: "Import contacts",
+    timeEstimate: "~10 min (established shortcut: your biggest instant win — you already have the list)",
+    whyItMatters: "The people who already know you are your cheapest, highest-converting customers — but you can only market to the ones whose name, phone, and email you own. A big owned list is free marketing forever that no platform can take.",
+    howTo: [
+      "Export your customers (POS, email tool, phone) to a CSV.",
+      "Delete every column except three: name, phone, email (extra columns cause errors — the #1 fix).",
+      "Format phones with country code (+1 + 10 digits).",
+      "Go to Contacts → Import, upload, map columns, Import, and confirm the count.",
+    ],
+    commonMistake: "Leaving extra columns in the CSV beyond name, phone, and email — the #1 cause of import errors.",
+    weGive: "We send your \"You're on ClickUpLocal\" launch announcement to your whole list — from you — driving them to your offer.",
+    youGet: "Your existing customers reactivated on day one.",
+    scoreImpact: "medium",
+  },
+  {
+    key: "ongoing_capture", phase: "list", label: "Set up ongoing capture (QR/table tents)",
+    timeEstimate: "Varies",
+    whyItMatters: "This is the joint marketing effort between you and ClickUpLocal — you capture the customer in person, we market to them forever after.",
+    howTo: [
+      "Use our built-in QR code creator to make a code that points to your ClickUpLocal offer.",
+      "Put it on table tents, counter signs, receipts, your window, WiFi login — anywhere a customer is in front of you.",
+      "Point it at your ClickUpLocal offer (not just \"follow us\") — everyone who claims it lands in your list and rides along with our ongoing town marketing.",
+    ],
+    weGive: "We wire every claimed offer to auto-add the contact and market to them on repeat.",
+    youGet: "To never lose a customer's name + number again.",
+    scoreImpact: "medium",
+  },
+  {
+    key: "smart_website", phase: "everywhere", label: "Get Smart Website",
+    timeEstimate: "~20–45 min to set up",
+    whyItMatters: "Your Smart Website is your listing, your website, and your marketing hub in one — the \"business brain\" that gets you found in Google (SEO), AI answers (AEO), and local/AI search (GEO).",
+    howTo: [
+      "Go to Sites and tell us your path: (A) no website, or ready to replace it — we build one from a template, fast and included; or (B) keep your current site and want it smart — we transfer and rebuild it (additional build fee).",
+      "Provide branding + confirm content (services, about, hours, service area, photos).",
+      "Review the preview (desktop + mobile).",
+      "Publish + connect your domain.",
+    ],
+    weGive: "We build, host, and maintain it for you — you never touch code.",
+    youGet: "One site that's your website + listing + marketing hub, wired together; found everywhere (SEO, AEO, GEO); no separate hosting bill (Path A).",
+    scoreImpact: "high",
+  },
+  {
+    key: "optimize_gbp_nap", phase: "everywhere", label: "Optimize Google profile + NAP",
+    timeEstimate: "~15 min",
+    whyItMatters: "A fully complete Google Business Profile is required to truly be found — incomplete profiles get buried. Your NAP (Name, Address, Phone) must be identical everywhere — when it doesn't match, Google and AI stop trusting you and rank you lower.",
+    howTo: [
+      "Go to Reputation → GBP Optimization and run the optimizer.",
+      "Set your primary category accurately + relevant additional categories.",
+      "Fill in services/products + your business description.",
+      "Confirm hours, phone, website, address; add strong photos.",
+      "Turn on messaging.",
+      "Confirm your NAP matches across website, Google, and listing.",
+    ],
+    commonMistake: "Vague/wrong categories or a half-finished profile — pick the most specific accurate primary category and complete every field.",
+    weGive: "We keep you accurate + consistent across the web (Listings Sync) so search + AI trust and surface you.",
+    youGet: "To show up correctly everywhere someone — or some AI — looks.",
+    scoreImpact: "high",
+  },
+  {
+    key: "campaign_start", phase: "campaigns", label: "Start a campaign",
+    timeEstimate: "A couple minutes",
+    whyItMatters: "One offer or event becomes the seed for a full week of marketing — you don't start from a blank page.",
+    howTo: [
+      "Open My Business → Marketing → Campaign Builder.",
+      "Click + Create new campaign.",
+      "Choose from Your offers or Your events.",
+      "Click Start my campaign.",
+    ],
+    weGive: "We already stocked your offers + events, so there's always something ready to build from.",
+    youGet: "A campaign started from content you already have.",
+    scoreImpact: "low",
+  },
+  {
+    key: "campaign_answer", phase: "campaigns", label: "Answer the campaign question",
+    timeEstimate: "A minute or two",
+    whyItMatters: "Your answer + your profile + the offer is what makes the generated campaign sound like you, not a generic template.",
+    howTo: [
+      "The builder asks one real question customers ask (never a repeat).",
+      "Type your answer in your own words.",
+      "Click Generate my campaign.",
+    ],
+    weGive: "Once you answer, the AI drafts all five pieces from your profile, the offer, and your own words.",
+    youGet: "A campaign that sounds like you, not a robot.",
+    scoreImpact: "low",
+  },
+  {
+    key: "campaign_review", phase: "campaigns", label: "Review the five pieces",
+    timeEstimate: "~5 min",
+    whyItMatters: "Skimming the five pieces before they go out keeps everything in your voice and catches anything off before customers see it.",
+    howTo: [
+      "Review the five pieces, generated one at a time (blog first): blog post, social post, email, text, and Facebook ad.",
+      "Use Regenerate, Copy, or Save to vault on each — Save to vault leaves a permanent copy in your Emails / Social / Facebook / Text tabs.",
+    ],
+    commonMistake: "Treating drafts as final — skim and tweak to your voice first.",
+    weGive: "Every piece comes pre-written and ready to tweak — no blank page for any of the five.",
+    youGet: "Five ready-to-use marketing pieces, tuned to your voice before anything goes out.",
+    scoreImpact: "low",
+  },
+  {
+    key: "campaign_publish", phase: "campaigns", label: "Publish + send campaign",
+    timeEstimate: "~5 min your side",
+    whyItMatters: "This is where the campaign actually reaches customers — the FAQ answer alone gets displayed on your Smart Website and your listing, answering customers before they even ask.",
+    howTo: [
+      "Blog → saved as a draft → publish it (or we do).",
+      "FAQ answer → displayed on your Smart Website and your listing automatically.",
+      "Social / Email / Text / Facebook → Copy or Save to vault, then post/send (first-name merge tags ready).",
+    ],
+    weGive: "Hand the finished campaign to your ambassador and we publish the blog, schedule the social, send the email + text, and launch the Facebook ad for you.",
+    youGet: "A full multi-channel campaign from about five minutes of your time.",
+    scoreImpact: "medium",
+  },
+  {
+    key: "video_testimonials", phase: "grow", label: "Collect video testimonials",
+    timeEstimate: "~15 min",
+    whyItMatters: "Nothing sells a local business like a real neighbor on camera. Collect a new one regularly, not just once.",
+    howTo: [
+      "Go to Reputation → Video Testimonials.",
+      "Send the capture link (or record on a phone).",
+      "Approve it. Ask a great customer every week or two.",
+    ],
+    weGive: "We feature them on your listing, Smart Website, social, and in your ads.",
+    youGet: "Your most powerful next-sale tool, refreshed over time.",
+    scoreImpact: "medium",
+  },
+  {
+    key: "paid_ads", phase: "grow", label: "Run paid ads (optional)",
+    timeEstimate: "~15 min to start",
+    whyItMatters: "Optional — turn ads on only once the basics are paying off. They bring in new customers faster than organic alone.",
+    howTo: [
+      "We run your ads through the ClickUpLocal Ads Manager, driving new contacts to your best offer.",
+      "Set a monthly budget + confirm payment.",
+    ],
+    weGive: "We build and manage the campaign for you. Add-on: want a pro-built ad? We'll create, write, and design the creative for an additional fee.",
+    youGet: "New customers faster than organic alone.",
+    scoreImpact: "low",
+  },
 ];
+
+// A2P (texting registration) — real, trackable steps, but deliberately a
+// SEPARATE catalog from PLAYBOOK_STEPS, not a 7th phase: the source doc
+// frames it as "not part of the main path, do it early" (folding it into the
+// phase loop would put it last, the opposite of that), the app's "X of 18"
+// progress math is a real doc-verified number that shouldn't silently become
+// 22, and the source material never Score-weights A2P the way the main 18
+// are. Still real Task rows via reconcilePlaybookTasks — just excluded from
+// playbookCompletion()'s total and rendered as its own group (Cockpit.tsx),
+// positioned right after Phase 1 to match "do it early."
+export const PLAYBOOK_A2P_PHASE: PlaybookPhase = { key: "a2p", label: "Turn on texting (A2P) — side quest" };
+export const PLAYBOOK_A2P_STEPS: PlaybookStepDef[] = [
+  {
+    key: "a2p_get_number", phase: "a2p", label: "Get a marketing phone number",
+    timeEstimate: "~5 min",
+    whyItMatters: "You need a number before you can register for A2P — this is the first domino. To send review requests and campaigns by text, your business has to be registered (a phone-carrier requirement, not a ClickUpLocal one).",
+    howTo: ["Go to Settings → Phone Numbers → Add a Number.", "Pick a local number."],
+    youGet: "A dedicated marketing number, ready to register.",
+    weGive: "Prefer to skip the whole thing? Our team will do the entire A2P setup for $97 — phone number, business details, and registration, all completed and approved.",
+    scoreImpact: "low",
+  },
+  {
+    key: "a2p_business_profile", phase: "a2p", label: "Complete business profile details",
+    timeEstimate: "~10 min",
+    whyItMatters: "Registration is rejected without these — legal name, address, EIN, website, and contact all have to be on file first.",
+    howTo: ["Go to Settings → Business Profile.", "Fill in your legal business name, address, EIN, website, and contact info."],
+    youGet: "A complete business profile that won't get your registration bounced.",
+    weGive: "Prefer to skip the whole thing? Our team will do the entire A2P setup for $97.",
+    scoreImpact: "low",
+  },
+  {
+    key: "a2p_register", phase: "a2p", label: "Register for A2P",
+    timeEstimate: "A few minutes to submit",
+    whyItMatters: "This is the actual carrier registration — a phone-carrier requirement (not a ClickUpLocal one) that has to clear before texting works.",
+    howTo: [
+      "Go to Settings → Trust Center.",
+      "Submit your business + campaign registration.",
+      "Easiest approval: use the in-dashboard chat widget — message us right there and we'll walk your registration through.",
+    ],
+    youGet: "A submitted registration, one step from approval.",
+    weGive: "Prefer to skip the whole thing? Our team will do the entire A2P setup for $97.",
+    scoreImpact: "low",
+  },
+  {
+    key: "a2p_wait_approval", phase: "a2p", label: "Wait for approval",
+    timeEstimate: "A few days",
+    whyItMatters: "Approval takes a few days — email keeps working meanwhile, so nothing stalls while you wait.",
+    howTo: ["Wait for carrier approval (typically a few days).", "Once approved, texting switches on across your review requests and campaigns."],
+    youGet: "Texting turned on across requests + campaigns — including the review drip, which needs A2P.",
+    scoreImpact: "low",
+  },
+];
+// Combined lookup so the TaskDrawer guide panel can resolve a task's
+// playbookStepKey regardless of which catalog it came from.
+export const PLAYBOOK_STEP_BY_KEY: Map<string, PlaybookStepDef> = new Map(
+  [...PLAYBOOK_STEPS, ...PLAYBOOK_A2P_STEPS].map((s) => [s.key, s])
+);
+
+// Non-task, purely informational content from the source doc — rendered as
+// read-only banners around the Playbook task list (Cockpit.tsx), never
+// tracked as completable steps.
+export const PLAYBOOK_INTRO = {
+  title: "We go first",
+  body: "The give-first move. Nothing to do yet — this is what's already waiting for you.",
+  items: [
+    "We already built your listing in the directory and calculated your ClickUpLocal Score when we created your profile.",
+    "We've run a marketing audit (website, reviews, citations, SEO, social) and a competitor comparison.",
+  ],
+  youGet: "A running start — you're claiming work we already did.",
+};
+export const PLAYBOOK_MILESTONE = {
+  title: "Foundation complete — your first big win",
+  intro: "You just finished the four steps that make you real in town: claimed, complete, an offer, and your events — in about 30 minutes.",
+  items: [
+    "The Verified Local Business badge goes on your listing.",
+    "You're live — go see your listing. Your complete listing, with your offer right on it, is now public in the directory.",
+    "We start actively promoting you to the whole town — booked into the newsletter, our social, and the app, with a preview of your feature.",
+    "A featured post, on us — we automatically publish a social post introducing you to the community.",
+    "We want to tell your story — we'll write an article featuring your business; just book a quick interview with your ClickUpLocal ambassador and we'll handle the rest.",
+    "You've set your biggest Score drivers in motion — your Score keeps climbing from here as reviews and engagement roll in.",
+  ],
+};
+export const PLAYBOOK_ALWAYS_RUNNING: string[] = [
+  "Town promotion — newsletter, our social channels, and the app residents use to find local businesses.",
+  "Ongoing AI social — scheduled posts beyond the one-off Campaign Builder posts.",
+  "Review drip — automated review requests to new + past customers, forever (needs A2P).",
+  "Comeback + loyalty — post-redemption thank-you → review ask → comeback offer, automatically.",
+  "Seasonal + birthday — a 12-month offer calendar and birthday offers that run on their own.",
+];
+export const PLAYBOOK_FINISH_LINE =
+  "When the plan is complete, you're the go-to business in town: found everywhere, chosen for your reputation, marketing that runs itself, and a customer list that's yours forever. Your ClickUpLocal Score is as high as your effort makes it — and it keeps climbing. What's next: you've mastered the foundation. Guide 2 unlocks the advanced tools for businesses like yours — online booking, an AI assistant, memberships & loyalty, and more. We'll invite you when you're ready.";
+
 /** Reads completion straight off real Task rows (Task.playbookStepKey) — no
  * separate progress table. `total` is always the *current* catalog length,
  * not however many step-tasks happen to exist yet for this client, so the
@@ -773,7 +1114,8 @@ export interface Task {
    * with no custom stages defined — those keep today's fixed status board. */
   stageId?: string | null;
   /** Set when this task IS one of the fixed Owner Growth Plan steps (matches
-   * a PLAYBOOK_STEPS key) — reconcilePlaybookTasks() keeps its title synced
+   * a PLAYBOOK_STEPS or PLAYBOOK_A2P_STEPS key — look up either via
+   * PLAYBOOK_STEP_BY_KEY) — reconcilePlaybookTasks() keeps its title synced
    * to the catalog and it can't be deleted or retitled by hand (see
    * TaskDrawer.tsx). Also the stable join key a future sync with the
    * customer-facing Playbook (on the business's public listing) will match

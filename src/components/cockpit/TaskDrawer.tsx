@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, formatDue, htmlToText, looksLikeHtml, plainTextToHtml, clientStatusMeta,
-  STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseEventDiff, parseDaysOfMonth,
+  STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseEventDiff, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, newId } from "./ui";
@@ -487,6 +487,36 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   // The client's own reply, submitted through the public /waiting/[token]
   // page — surfaced prominently (its own bordered card, above Description)
   // since it's the reason this task just landed back on someone's plate.
+  // Read-only reference panel for an Owner Growth Plan step — looked up live
+  // from the catalog by key, never stored on the task, so it can't drift per
+  // client and needs no reconciliation if the wording changes later. Fully
+  // separate from the Description field below, which stays free for the
+  // ambassador's own working notes on this business.
+  const playbookStep = task.playbookStepKey ? PLAYBOOK_STEP_BY_KEY.get(task.playbookStepKey) : undefined;
+  const scoreImpactDots: Record<string, string> = { low: "⚡", medium: "⚡⚡", high: "⚡⚡⚡" };
+  const playbookGuideBlock = playbookStep ? (
+    <div className="mt-4 rounded-xl border bg-surface p-4">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="text-[15px] font-semibold">Playbook guide</div>
+        <span className="shrink-0 rounded-md bg-background px-2 py-0.5 text-[12px] font-medium text-muted" title="Score impact">{scoreImpactDots[playbookStep.scoreImpact]} · {playbookStep.timeEstimate}</span>
+      </div>
+      <p className="text-[14px]">{playbookStep.whyItMatters}</p>
+      <div className="mt-3 text-[13px] font-semibold uppercase tracking-wide text-muted">How to do it</div>
+      <ol className="mt-1 list-decimal space-y-1 pl-5 text-[14px]">
+        {playbookStep.howTo.map((step, i) => <li key={i}>{step}</li>)}
+      </ol>
+      {playbookStep.commonMistake && (
+        <div className="mt-3 rounded-lg bg-background p-2.5 text-[13px]"><span className="font-medium">Common mistake:</span> {playbookStep.commonMistake}</div>
+      )}
+      {(playbookStep.weGive || playbookStep.youGet) && (
+        <div className="mt-3 space-y-1 text-[13px] text-muted">
+          {playbookStep.weGive && <div>🎁 {playbookStep.weGive}</div>}
+          {playbookStep.youGet && <div>📈 {playbookStep.youGet}</div>}
+        </div>
+      )}
+    </div>
+  ) : null;
+
   const clientResponseBlock = task.clientResponse && (task.clientResponse.body || task.clientResponse.attachments.length > 0) ? (
     <div className="mt-4 rounded-xl border border-accent/30 bg-accent-soft/20 p-4">
       <div className="mb-2 flex items-center gap-1.5 text-[15px] font-semibold text-accent"><I.user className="h-4 w-4" /> Client response</div>
@@ -1109,6 +1139,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                 {propsBlock}
                 <div className="my-4 border-t" />
                 {draftEmailBlock}
+                {playbookGuideBlock}
                 {clientResponseBlock}
                 {descriptionBlock}
                 {subtasksBlock}
@@ -1137,6 +1168,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                 {propsBlock}
                 <div className="my-4 border-t" />
                 {draftEmailBlock}
+                {playbookGuideBlock}
                 {clientResponseBlock}
                 {descriptionBlock}
                 {subtasksBlock}
@@ -1191,6 +1223,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               {ghlWarningBanner}
               <div className="mt-5">{propsBlock}</div>
               {draftEmailBlock}
+              {playbookGuideBlock}
               {clientResponseBlock}
               {descriptionBlock}
               {subtasksBlock}

@@ -58,6 +58,12 @@ import {
   playbookCompletion,
   PLAYBOOK_STEPS,
   PLAYBOOK_PHASES,
+  PLAYBOOK_A2P_PHASE,
+  PLAYBOOK_A2P_STEPS,
+  PLAYBOOK_INTRO,
+  PLAYBOOK_MILESTONE,
+  PLAYBOOK_ALWAYS_RUNNING,
+  PLAYBOOK_FINISH_LINE,
   playbookProjectId,
   type VaultFolder,
   type Folder,
@@ -1908,7 +1914,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     }
     const byKey = new Map(tasks.filter((t) => t.clientId === clientId && t.playbookStepKey).map((t) => [t.playbookStepKey as string, t]));
     const toWrite: Task[] = [];
-    for (const step of PLAYBOOK_STEPS) {
+    // A2P rides the same reconciliation as the main 18 (same project, same
+    // create/retitle logic) — it's just excluded from playbookCompletion()'s
+    // total and rendered as its own group (buildPlaybookGroups below).
+    for (const step of [...PLAYBOOK_STEPS, ...PLAYBOOK_A2P_STEPS]) {
       const existing = byKey.get(step.key);
       if (!existing) {
         toWrite.push({
@@ -1990,14 +1999,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // in the app. Any non-step task that ends up in the Playbook project (a
   // one-off note an ambassador quick-added) still shows, under "Other", so
   // nothing silently disappears.
-  const stepPhase = new Map(PLAYBOOK_STEPS.map((s) => [s.key, s.phase]));
-  const stepOrder = new Map(PLAYBOOK_STEPS.map((s, i) => [s.key, i]));
+  const allPlaybookSteps = [...PLAYBOOK_STEPS, ...PLAYBOOK_A2P_STEPS];
+  const stepPhase = new Map(allPlaybookSteps.map((s) => [s.key, s.phase]));
+  const stepOrder = new Map(allPlaybookSteps.map((s, i) => [s.key, i]));
   const buildPlaybookGroups = (list: Task[]): Grp[] => {
-    const byPhase = PLAYBOOK_PHASES.map((phase) => ({
-      key: phase.key, label: phase.label, color: "#5c8ac4",
+    const groupFor = (phase: { key: string; label: string }) => ({
+      key: phase.key, label: phase.label, color: phase.key === "a2p" ? "#a855f7" : "#5c8ac4",
       tasks: list.filter((t) => t.playbookStepKey && stepPhase.get(t.playbookStepKey) === phase.key)
         .sort((a, b) => (stepOrder.get(a.playbookStepKey!) ?? 0) - (stepOrder.get(b.playbookStepKey!) ?? 0)),
-    }));
+    });
+    // A2P sits right after "Get on the map" (PLAYBOOK_PHASES[0]) — "do it
+    // early," per the source doc — not folded into the phase array itself so
+    // playbookCompletion()'s "X of 18" total never counts it.
+    const byPhase = [groupFor(PLAYBOOK_PHASES[0]), groupFor(PLAYBOOK_A2P_PHASE), ...PLAYBOOK_PHASES.slice(1).map(groupFor)];
     const extra = list.filter((t) => !t.playbookStepKey);
     return extra.length ? [...byPhase, { key: "extra", label: "Other", color: "#94a3b8", tasks: extra }] : byPhase;
   };
@@ -4354,7 +4368,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 onReorderFolders={(ids) => reorderFolders(activeClient, ids)} onReorderLists={(fid, ids) => reorderLists(activeClient, fid, ids)} />
             );
           })()}
-          {activeProject === playbookProjectId(activeClient) ? (
+          {activeProject === playbookProjectId(activeClient) ? (() => {
             // Owner Growth Plan: fixed Level sections, catalog order. No
             // onDropInGroup/onMergeTasks (no drag-to-recategorize or merge),
             // and no selectedIds/onToggleSelect either — that's what the
@@ -4366,8 +4380,44 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             // business's Playbook or out of its fixed Level — status,
             // priority, and due date remain fully editable, only the plan's
             // shape itself is locked.
-            <GroupedList groups={buildPlaybookGroups(baseTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="" onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={false} colOrder={colOrder} onReorderCols={reorderCols} />
-          ) : activeProject && stagesForProject(activeProject).length > 0 ? (
+            const pb = playbookCompletion(activeClient, tasks);
+            const foundationDone = ["claim_listing", "complete_listing", "first_offer", "add_events"].every((k) => pb.done.has(k));
+            const allDone = pb.doneCount === pb.total;
+            return (
+              <>
+                <div className="mb-3 rounded-xl border bg-surface p-4">
+                  <div className="text-[13px] font-semibold uppercase tracking-wide text-muted">{PLAYBOOK_INTRO.title}</div>
+                  <div className="mt-1 text-[14px] text-muted">{PLAYBOOK_INTRO.body}</div>
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-[14px]">
+                    {PLAYBOOK_INTRO.items.map((it) => <li key={it}>{it}</li>)}
+                  </ul>
+                  <div className="mt-2 text-[13px] text-muted">📈 {PLAYBOOK_INTRO.youGet}</div>
+                </div>
+                {foundationDone && (
+                  <div className="mb-3 rounded-xl border border-accent/30 bg-accent-soft p-4">
+                    <div className="text-[15px] font-semibold text-accent">🎉 {PLAYBOOK_MILESTONE.title}</div>
+                    <div className="mt-1 text-[14px]">{PLAYBOOK_MILESTONE.intro}</div>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-[14px]">
+                      {PLAYBOOK_MILESTONE.items.map((it) => <li key={it}>{it}</li>)}
+                    </ul>
+                  </div>
+                )}
+                <GroupedList groups={buildPlaybookGroups(baseTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="" onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={false} colOrder={colOrder} onReorderCols={reorderCols} />
+                <div className="mt-3 rounded-xl border bg-surface p-4">
+                  <div className="text-[13px] font-semibold uppercase tracking-wide text-muted">Always running for you</div>
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-[14px] text-muted">
+                    {PLAYBOOK_ALWAYS_RUNNING.map((it) => <li key={it}>{it}</li>)}
+                  </ul>
+                </div>
+                {allDone && (
+                  <div className="mt-3 rounded-xl border border-accent/30 bg-accent-soft p-4">
+                    <div className="text-[15px] font-semibold text-accent">🎓 You&apos;ve graduated</div>
+                    <div className="mt-1 text-[14px]">{PLAYBOOK_FINISH_LINE}</div>
+                  </div>
+                )}
+              </>
+            );
+          })() : activeProject && stagesForProject(activeProject).length > 0 ? (
             <StageBoard stages={stagesForProject(activeProject)} tasks={baseTasks.filter(passesFilters)} canAdmin={canAdmin}
               onOpenTask={setOpenTaskId} onSetTaskStage={setTaskStage} onQuickAdd={(stageId, title) => quickAddInStage(activeProject, stageId, title)}
               onCreateStage={() => createStage(activeProject)} onRenameStage={renameStage} onToggleStageIsDone={toggleStageIsDone} onDeleteStage={deleteStage}
