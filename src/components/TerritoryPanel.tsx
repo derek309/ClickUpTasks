@@ -6,11 +6,11 @@
 // vs "unclaimed" (still just a raw synced contact). Reuses the existing client
 // status funnel for pipeline stage instead of a second, parallel state.
 import { useState } from "react";
-import { users, clientStatusMeta, normalizeState, playbookCompletion, type Me, type Territory, type Contact, type Client, type Task, type PlaybookProgress } from "@/lib/data";
+import { users, clientStatusMeta, normalizeState, playbookCompletion, type Me, type Territory, type Contact, type Client, type Task } from "@/lib/data";
 import { I, Avatar } from "./cockpit/ui";
 import TerritoryDirectory from "./cockpit/TerritoryDirectory";
 
-export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onDeleteTerritory, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, onAddTask, onOpenTask, playbookByClient, onTogglePlaybookStep, focusId }: {
+export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onDeleteTerritory, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, onAddTask, onOpenTask, playbookTasksByClient, onOpenPlaybook, focusId }: {
   me: Me; canAdmin: boolean;
   territories: Territory[]; contacts: Contact[]; clients: Client[];
   onAddTerritory: (t: { name: string; city: string; state: string; assignedTo: string[] }) => void;
@@ -30,10 +30,10 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
   tasksByClient?: Map<string, Task[]>;
   onAddTask?: (clientId: string, title: string) => void;
   onOpenTask?: (taskId: string) => void;
-  // Owner Growth Plan completion per business, and the toggle handler — same
-  // optional-so-the-admin-overview-degrades-gracefully shape as tasksByClient.
-  playbookByClient?: Map<string, PlaybookProgress[]>;
-  onTogglePlaybookStep?: (clientId: string, stepKey: string, done: boolean) => void;
+  // Owner Growth Plan tasks per business, and the navigate-to-it handler —
+  // same optional-so-the-admin-overview-degrades-gracefully shape as tasksByClient.
+  playbookTasksByClient?: Map<string, Task[]>;
+  onOpenPlaybook?: (clientId: string) => void;
   focusId?: string; // when set, render only this one city, auto-expanded (the sidebar city page)
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(() => (focusId ? new Set([focusId]) : new Set()));
@@ -194,7 +194,7 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                     onSyncClients={onSyncClients} onOpenClient={onOpenClient}
                     featuredClientIds={featuredClientIds} onFeature={onFeature} sort={sort} onSetSort={setSort}
                     tasksByClient={tasksByClient} onAddTask={onAddTask} onOpenTask={onOpenTask}
-                    playbookByClient={playbookByClient} onTogglePlaybookStep={onTogglePlaybookStep} />
+                    playbookTasksByClient={playbookTasksByClient} onOpenPlaybook={onOpenPlaybook} />
                 )}
                 {open && !focusId && (
                   <div className="space-y-1 border-t px-3 py-2">
@@ -209,12 +209,16 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                       const client = clients.find((cl) => cl.id === "cl_" + c.id);
                       if (!client) return null;
                       const meta = clientStatusMeta(client.status);
-                      const pb = playbookByClient ? playbookCompletion(client.id, playbookByClient.get(client.id) ?? []) : null;
+                      const pb = playbookTasksByClient ? playbookCompletion(client.id, playbookTasksByClient.get(client.id) ?? []) : null;
                       return (
                         <button key={c.id} onClick={() => onOpenClient(client.id)} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[15px] hover:bg-background">
                           <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: meta.dot }} />
                           <span className="min-w-0 flex-1 truncate">{c.name}</span>
-                          {pb && <span title={pb.next ? `Next: ${pb.next.label}` : "All steps complete"} className="shrink-0 rounded bg-background px-1.5 py-0.5 text-[12px] font-medium text-muted">Playbook {pb.doneCount}/{pb.total}</span>}
+                          {pb && (
+                            <span onClick={(e) => { e.stopPropagation(); onOpenPlaybook?.(client.id); }}
+                              title={pb.next ? `Open Playbook — next: ${pb.next.label}` : "Open Playbook — all steps complete"}
+                              className="shrink-0 rounded bg-background px-1.5 py-0.5 text-[12px] font-medium text-muted hover:bg-accent-soft hover:text-accent">Playbook {pb.doneCount}/{pb.total}</span>
+                          )}
                           <span className="shrink-0 text-[13px] text-muted">{meta.label}</span>
                         </button>
                       );

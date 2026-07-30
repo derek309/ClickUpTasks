@@ -492,9 +492,12 @@ export interface Playbook {
 // phases. Order matters: playbookCompletion()'s "next" step is just the
 // first one in this array a business hasn't finished. NOT the same thing as
 // Playbook/PlaybookTask above (an admin-authored, reusable task-bundle
-// template) — this is a fixed catalog matched against per-client rows in the
-// `playbook_progress` table (see PlaybookProgress below), one per completed
-// step. Content mirrors THE-OWNER-GROWTH-PLAN-DRAFT.md's step order.
+// template) — this catalog is the single source of truth for the *content*
+// (label/phase/order) of each step; reconcilePlaybookTasks() (Cockpit.tsx)
+// keeps every client's real Task rows (Task.playbookStepKey) in sync with
+// whatever's defined here, so editing a step's wording here is the only way
+// it ever changes — no client ever has its own frozen copy. Content mirrors
+// THE-OWNER-GROWTH-PLAN-DRAFT.md's step order.
 export type PlaybookPhase = { key: string; label: string };
 export const PLAYBOOK_PHASES: PlaybookPhase[] = [
   { key: "map", label: "Get on the map" },
@@ -525,17 +528,17 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
   { key: "video_testimonials", phase: "grow", label: "Collect video testimonials" },
   { key: "paid_ads", phase: "grow", label: "Run paid ads (optional)" },
 ];
-/** One completed step for one client — a row's mere existence means done
- * (see supabase/playbook-progress.sql; toggling off deletes the row). */
-export interface PlaybookProgress {
-  id: string;
-  clientId: string;
-  stepKey: string;
-  completedAt: string;
-  completedBy?: string | null;
-}
-export function playbookCompletion(clientId: string, progress: PlaybookProgress[]) {
-  const done = new Set(progress.filter((p) => p.clientId === clientId).map((p) => p.stepKey));
+/** Reads completion straight off real Task rows (Task.playbookStepKey) — no
+ * separate progress table. `total` is always the *current* catalog length,
+ * not however many step-tasks happen to exist yet for this client, so the
+ * fraction stays honest even before reconcilePlaybookTasks() has caught a
+ * client up to a newly-added step. */
+/** Deterministic id for a client's one Playbook project — found by id, never
+ * by name, so it can't collide with an ambassador's own manually-named list. */
+export const playbookProjectId = (clientId: string) => "p_playbook_" + clientId;
+export function playbookCompletion(clientId: string, tasks: Task[]) {
+  const stepTasks = tasks.filter((t) => t.clientId === clientId && t.playbookStepKey);
+  const done = new Set(stepTasks.filter((t) => t.status === "done").map((t) => t.playbookStepKey as string));
   const total = PLAYBOOK_STEPS.length;
   const next = PLAYBOOK_STEPS.find((s) => !done.has(s.key)) ?? null;
   return { done, doneCount: done.size, total, pct: Math.round((done.size / total) * 100), next };
@@ -763,6 +766,13 @@ export interface Task {
   /** Custom Kanban column (see Stage below), or null/undefined for a project
    * with no custom stages defined — those keep today's fixed status board. */
   stageId?: string | null;
+  /** Set when this task IS one of the fixed Owner Growth Plan steps (matches
+   * a PLAYBOOK_STEPS key) — reconcilePlaybookTasks() keeps its title synced
+   * to the catalog and it can't be deleted or retitled by hand (see
+   * TaskDrawer.tsx). Also the stable join key a future sync with the
+   * customer-facing Playbook (on the business's public listing) will match
+   * against — never match on the editable title. */
+  playbookStepKey?: string | null;
 }
 
 /** A custom Kanban-style column for one project's own task board (e.g.

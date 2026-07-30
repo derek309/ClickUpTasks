@@ -360,8 +360,14 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // Owner Growth Plan steps stay word-for-word in sync with the catalog
+  // (reconcilePlaybookTasks resyncs the title if it ever drifts) — letting an
+  // ambassador rename one here would just get silently reverted next time,
+  // so it's read-only instead, with a title explaining why.
   const titleBlock = (
-    <textarea value={task.title} onChange={(e) => onPatch({ title: e.target.value })} rows={1} className={`-mx-1 w-full resize-none rounded-md bg-transparent px-1 font-semibold leading-snug outline-none [field-sizing:content] transition focus:bg-background ${full ? "text-[28px]" : "text-[18px]"}`} />
+    <textarea value={task.title} onChange={(e) => onPatch({ title: e.target.value })} readOnly={!!task.playbookStepKey}
+      title={task.playbookStepKey ? "Synced from the Owner Growth Plan — always the same for every business" : undefined}
+      rows={1} className={`-mx-1 w-full resize-none rounded-md bg-transparent px-1 font-semibold leading-snug outline-none [field-sizing:content] transition focus:bg-background ${full ? "text-[28px]" : "text-[18px]"} ${task.playbookStepKey ? "cursor-default" : ""}`} />
   );
   // Comment/event timestamps already cover every field-change and message —
   // the latest one is a true "last updated", not just a metadata guess.
@@ -1066,7 +1072,9 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               </button>
             )}
             <button onClick={onToggleFull} title={full ? "Collapse to sidebar" : "Expand to full page"} className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground">{full ? <I.minimize /> : <I.expand />}</button>
-            <button onClick={onDelete} title="Delete task" className="rounded-md p-1 text-muted hover:bg-background hover:text-danger"><I.trash /></button>
+            {!task.playbookStepKey && (
+              <button onClick={onDelete} title="Delete task" className="rounded-md p-1 text-muted hover:bg-background hover:text-danger"><I.trash /></button>
+            )}
             <button onClick={onClose} className="rounded-md p-1 text-muted hover:bg-background"><I.close /></button>
           </div>
         </div>

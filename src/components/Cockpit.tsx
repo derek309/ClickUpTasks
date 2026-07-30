@@ -55,8 +55,9 @@ import {
   type TaskTemplate,
   type Playbook,
   type PlaybookTask,
-  type PlaybookProgress,
   playbookCompletion,
+  PLAYBOOK_STEPS,
+  playbookProjectId,
   type VaultFolder,
   type Folder,
   type Stage,
@@ -71,7 +72,7 @@ import {
   normalizeState,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, upsertPlaybookProgress, deletePlaybookProgressDb, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, markMessagesReadDb, reassignMessagesTaskDb, insertMessage, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, markMessagesReadDb, reassignMessagesTaskDb, insertMessage, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import { Inbox } from "./cockpit/Inbox";
 import SettingsHub from "./SettingsHub";
@@ -89,7 +90,6 @@ import StageBoard from "./cockpit/StageBoard";
 import { TaskDrawer } from "./cockpit/TaskDrawer";
 import { QuickLinksBar } from "./cockpit/ClientLinks";
 import { ClientJournal } from "./cockpit/ClientJournal";
-import { ClientPlaybook } from "./cockpit/ClientPlaybook";
 import { QuickAddTask } from "./cockpit/QuickAddTask";
 import { VaultView, type VaultItem } from "./cockpit/VaultView";
 import { ClientsBoard, type WorkBoardGroup, type WorkItem } from "./cockpit/ClientsBoard";
@@ -106,7 +106,7 @@ import { claudeWorkUrl } from "@/lib/claudeLink";
 //   ?client=<id>[&project=<id>]   a client (optionally scoped to one project)
 //   ?territory=<id>[&mode=planner[&week=<id>]]   a city, or its Content Planner
 //   ?task=<id>                    the task drawer (layers over any of the above)
-type NavState = { view: "work" | "personal" | "inbox" | "clients" | "projects" | "settings" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | "vault" | "playbook" | null; vaultFolder: string | null; dm: string | null; territory: string | null; plannerMode: boolean; plannerWeek: string | null };
+type NavState = { view: "work" | "personal" | "inbox" | "clients" | "projects" | "settings" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | "vault" | null; vaultFolder: string | null; dm: string | null; territory: string | null; plannerMode: boolean; plannerWeek: string | null };
 function buildSearch(s: NavState): string {
   const p = new URLSearchParams();
   if (s.territory) {
@@ -136,7 +136,7 @@ function parseSearch(search: string): NavState {
     client: p.get("client") ?? "all",
     project: p.get("project"),
     task: p.get("task"),
-    clientTab: tab === "chat" || tab === "vault" || tab === "playbook" ? tab : null,
+    clientTab: tab === "chat" || tab === "vault" ? tab : null,
     vaultFolder: p.get("folder"),
     dm: p.get("dm"),
     territory: p.get("territory"),
@@ -188,13 +188,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [plannerWeekId, setPlannerWeekId] = useState<string | null>(null);
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
   const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
-  const [playbookProgress, setPlaybookProgress] = useState<PlaybookProgress[]>([]);
   const [vaultFolders, setVaultFolders] = useState<VaultFolder[]>([]);
   const [unmatchedEmails, setUnmatchedEmails] = useState<UnmatchedEmail[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [stages, setStages] = useState<Stage[]>([]);
   const [importingTasks, setImportingTasks] = useState(false);
-  const [clientTab, setClientTab] = useState<"tasks" | "chat" | "vault" | "playbook">("tasks");
+  const [clientTab, setClientTab] = useState<"tasks" | "chat" | "vault">("tasks");
   // Set once from a deep link's ?folder= param (see applyNav); VaultView
   // reads it only as its initial selected-folder value, not a live prop.
   const [initialVaultFolder, setInitialVaultFolder] = useState<string | null>(null);
@@ -457,6 +456,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setClients((cs) => cs.map((x) => (x.id === id ? nc : x)));
     markOwnClientWrite(nc.id);
     upsertClient(nc);
+    if (promoted) reconcilePlaybookTasks(id);
     pushToast(promoted ? `${c.name} → ${CLIENT_STATUS_META[status].label} · now a client` : `${c.name} → ${CLIENT_STATUS_META[status].label}`);
   };
   // "Follow" a client: adds/removes a team member from assigned_to, which
@@ -901,7 +901,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setTerritories(d.territories);
         setTaskTemplates(d.taskTemplates);
         setPlaybooks(d.playbooks);
-        setPlaybookProgress(d.playbookProgress);
         setVaultFolders(d.vaultFolders);
         setFolders(d.folders);
         setStages(d.stages);
@@ -1112,7 +1111,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           incoming.forEach((x) => byId.set(x.id, x));
           return [...byId.values()];
         };
-        setContacts(d.contacts); setClientLinks(d.clientLinks); setProjects(d.projects); setPlaybookProgress(d.playbookProgress);
+        setContacts(d.contacts); setClientLinks(d.clientLinks); setProjects(d.projects);
         setTasks((prev) => mergeById(prev, d.tasks));
         setClients((prev) => mergeById(prev, d.clients));
         setNotifications((prev) => mergeById(prev, d.notifications));
@@ -1875,28 +1874,64 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // creation path as the ⌘-quick-add dialog (default project resolution
   // included) so a task added here is identical to one added anywhere else.
   const addTerritoryBusinessTask = (clientId: string, title: string) => createQuickTask(clientId, null, title, null, "normal");
-  // Owner Growth Plan completion, bucketed by client — same one-pass-not-
-  // memoized shape as territoryTasksByClient above, for the same reason.
-  const playbookProgressByClient = (() => {
-    const m = new Map<string, PlaybookProgress[]>();
-    for (const p of playbookProgress) {
-      const list = m.get(p.clientId);
-      if (list) list.push(p); else m.set(p.clientId, [p]);
+  // Owner Growth Plan tasks, bucketed by client — same one-pass-not-memoized
+  // shape as territoryTasksByClient above, but WITHOUT the status==="done"
+  // exclusion (playbookCompletion needs to see done steps too, to count them).
+  const playbookTasksByClient = (() => {
+    const m = new Map<string, Task[]>();
+    for (const t of tasks) {
+      if (!t.playbookStepKey) continue;
+      const list = m.get(t.clientId);
+      if (list) list.push(t); else m.set(t.clientId, [t]);
     }
     return m;
   })();
-  // Toggling a step: a row's mere existence means done, so "on" upserts a
-  // fresh row and "off" deletes it outright (see supabase/playbook-progress.sql).
-  const togglePlaybookStep = (clientId: string, stepKey: string, done: boolean) => {
-    const id = `pp_${clientId}_${stepKey}`;
-    if (done) {
-      const row: PlaybookProgress = { id, clientId, stepKey, completedAt: new Date().toISOString(), completedBy: me.id };
-      setPlaybookProgress((ps) => [...ps.filter((p) => p.id !== id), row]);
-      upsertPlaybookProgress(row);
-    } else {
-      setPlaybookProgress((ps) => ps.filter((p) => p.id !== id));
-      deletePlaybookProgressDb(id);
+  // Owner Growth Plan — every client's Playbook is the SAME fixed catalog
+  // (PLAYBOOK_STEPS), never a per-client copy. This is the one place that
+  // keeps a client's real Task rows in sync with whatever the catalog
+  // currently says: creates any step that doesn't have a task yet, and fixes
+  // a task's title if the catalog's wording for that step has since changed.
+  // Never touches status/assignee/due/comments — those are the ambassador's
+  // own per-client progress. Idempotent — safe to call repeatedly. Called
+  // both eagerly (the moment a business becomes a client, see
+  // addClientContact/setClientStatus) and lazily (openClientPlaybook below),
+  // so a pre-existing client self-heals to the current catalog instead of
+  // needing a one-time bulk backfill across every business.
+  const reconcilePlaybookTasks = (clientId: string) => {
+    const pbProjectId = playbookProjectId(clientId);
+    let projectWrite: PromiseLike<unknown> | null = null;
+    if (!projects.some((p) => p.id === pbProjectId)) {
+      const p: Project = { id: pbProjectId, clientId, name: "Playbook", description: "" };
+      setProjects((ps) => [...ps, p]);
+      projectWrite = upsertProject(p);
     }
+    const byKey = new Map(tasks.filter((t) => t.clientId === clientId && t.playbookStepKey).map((t) => [t.playbookStepKey as string, t]));
+    const toWrite: Task[] = [];
+    for (const step of PLAYBOOK_STEPS) {
+      const existing = byKey.get(step.key);
+      if (!existing) {
+        toWrite.push({
+          id: newId("t_"), projectId: pbProjectId, clientId, title: step.label, description: "",
+          status: "todo", priority: "none", assigneeId: null, contactId: clientId.slice(3), due: null,
+          recurrence: "none", labelIds: [], ghlTaskId: null, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
+          playbookStepKey: step.key,
+        });
+      } else if (existing.title !== step.label) {
+        toWrite.push({ ...existing, title: step.label });
+      }
+    }
+    if (!toWrite.length) return;
+    const writeIds = new Set(toWrite.map((t) => t.id));
+    setTasks((ts) => [...ts.filter((t) => !writeIds.has(t.id)), ...toWrite]);
+    if (projectWrite) projectWrite.then(() => bulkUpsertTasks(toWrite));
+    else bulkUpsertTasks(toWrite);
+  };
+  // Opens a business's Playbook the same way onOpenClient opens its Tasks —
+  // reconciling first so a business that's never been looked at yet lands on
+  // a fully caught-up list, not a stale/empty one.
+  const openClientPlaybook = (clientId: string) => {
+    reconcilePlaybookTasks(clientId);
+    setTerritoryView(null); setActiveClient(clientId); setActiveProject(playbookProjectId(clientId)); setClientTab("tasks");
   };
   // Not gated by myWorkUser (the admin-only "viewing work for" selector) —
   // RLS never even returns another person's private tasks in `tasks`, so
@@ -2234,6 +2269,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     pushToast(`Moved ${blocking.length} overdue task${blocking.length === 1 ? "" : "s"} to ${formatDue(newDate)}.`);
   };
   const deleteTask = (id: string) => {
+    // Owner Growth Plan steps are a fixed template every business gets —
+    // defense in depth alongside the hidden delete button in TaskDrawer, in
+    // case some other path ever calls this directly.
+    if (tasksRef.current.find((x) => x.id === id)?.playbookStepKey) { pushToast("Playbook steps can't be deleted."); return; }
     setConfirmDialog({
       title: "Delete this task?", message: "This can't be undone.", confirmLabel: "Delete",
       onConfirm: () => {
@@ -2562,6 +2601,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setClients((cs) => [...cs, c]);
     markOwnClientWrite(c.id);
     upsertClient(c);
+    if (type === "client") reconcilePlaybookTasks(id);
     // Bring any of this contact's stranded conversation onto the new client's
     // page — inbound created a Conversation task under the GHL sub-account
     // before they were a tracked client. Re-point those tasks (by contact_id)
@@ -3379,7 +3419,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // drives the breadcrumb and subtitle so the page reads as city work rather
   // than as a client that wandered out of the roster.
   const activeTerritoryClient = territoryForClientId(activeClient);
-  const showFilterControl = !territoryView && !inboxView && !dirView && !myWork && !settingsView && !(activeClient !== "all" && (clientTab === "chat" || clientTab === "vault" || clientTab === "playbook"));
+  const showFilterControl = !territoryView && !inboxView && !dirView && !myWork && !settingsView && !(activeClient !== "all" && (clientTab === "chat" || clientTab === "vault"));
   const bellControl = (
     <div className="relative">
       <button onClick={() => { const opening = !bellOpen; setBellOpen(opening); if (opening) { setNotifications((ns) => ns.map((n) => (n.recipientId === me.id ? { ...n, read: true } : n))); markNotifsReadDb(me.id); } }} aria-label="Notifications" className="relative rounded-lg border bg-background p-2 text-muted hover:text-foreground">
@@ -3708,7 +3748,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 <button onClick={() => setClientTab("tasks")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${clientTab === "tasks" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Tasks</button>
                 <button onClick={() => setClientTab("chat")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${clientTab === "chat" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Journal</button>
                 <button onClick={() => setClientTab("vault")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${clientTab === "vault" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Vault</button>
-                <button onClick={() => setClientTab("playbook")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${clientTab === "playbook" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Playbook</button>
               </div>
               {clientTab === "tasks" && filterControl}
             </div>
@@ -3865,7 +3904,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 return noteCount + messageCount + activityCount;
               })()}</button>
               <button onClick={() => setClientTab("vault")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "vault" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Vault · {vaultItems.length}</button>
-              <button onClick={() => setClientTab("playbook")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "playbook" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Playbook · {playbookCompletion(activeClient, playbookProgress).doneCount}/{playbookCompletion(activeClient, playbookProgress).total}</button>
             </div>
           )}
           {/* Quick Email/SMS — jumps straight into the Journal composer in that
@@ -4034,7 +4072,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 <I.list className="h-3.5 w-3.5" /> All tasks
               </button>
             </div>
-          ) : !personalView && (clientTab === "chat" || clientTab === "vault" || clientTab === "playbook") ? null : (
+          ) : !personalView && (clientTab === "chat" || clientTab === "vault") ? null : (
             <div className="relative">
               <button onClick={() => setFilterOpen((o) => !o)} title="Filter & view" className="relative rounded-md border bg-background p-2 text-muted hover:text-foreground">
                 <I.filter />
@@ -4174,8 +4212,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               tasksByClient={territoryTasksByClient}
               onAddTask={addTerritoryBusinessTask}
               onOpenTask={setOpenTaskId}
-              playbookByClient={playbookProgressByClient}
-              onTogglePlaybookStep={togglePlaybookStep}
+              playbookTasksByClient={playbookTasksByClient}
+              onOpenPlaybook={openClientPlaybook}
               focusId={territoryView === "all" ? undefined : territoryView} />
           </div>
         ) : inboxView && dmUserId ? (
@@ -4273,8 +4311,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onAddFiles={(files) => addVaultFiles(activeClient, activeProject, files)}
             onReorder={reorderVaultGroup}
             initialFolderId={initialVaultFolder} />
-        ) : activeClient !== "all" && clientTab === "playbook" ? (
-          <ClientPlaybook clientId={activeClient} progress={playbookProgress.filter((p) => p.clientId === activeClient)} onToggle={togglePlaybookStep} />
         ) : (
           <>
           {activeClient !== "all" && (() => {

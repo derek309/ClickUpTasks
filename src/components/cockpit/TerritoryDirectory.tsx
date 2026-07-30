@@ -20,9 +20,8 @@
 // "No listing" — exactly the pre-directory behavior, just relabeled.
 import { useEffect, useMemo, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
-import { clientStatusMeta, formatDue, isOverdue, STATUS_META, playbookCompletion, type Contact, type Client, type Task, type PlaybookProgress } from "@/lib/data";
+import { clientStatusMeta, formatDue, isOverdue, STATUS_META, playbookCompletion, type Contact, type Client, type Task } from "@/lib/data";
 import { I, Avatar } from "./ui";
-import { ClientPlaybook } from "./ClientPlaybook";
 
 export type DirectoryListing = {
   id: number | string;
@@ -128,7 +127,7 @@ export type OppRef = { opportunityId: string; stageId: string };
 // module-scope and shared across territories rather than keyed per city.
 let oppCache: { stages: PipelineStage[]; byContact: Record<string, OppRef>; at: number } | null = null;
 
-export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, sort, onSetSort, tasksByClient, onAddTask, onOpenTask, playbookByClient, onTogglePlaybookStep }: {
+export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, sort, onSetSort, tasksByClient, onAddTask, onOpenTask, playbookTasksByClient, onOpenPlaybook }: {
   city: string;
   state: string;
   contacts: Contact[];   // already scoped to this city/state by the caller
@@ -161,10 +160,10 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   tasksByClient?: Map<string, Task[]>;
   onAddTask?: (clientId: string, title: string) => void;
   onOpenTask?: (taskId: string) => void;
-  // Owner Growth Plan completion per business — optional so the admin
-  // multi-city overview (which never passes this) degrades to no chip.
-  playbookByClient?: Map<string, PlaybookProgress[]>;
-  onTogglePlaybookStep?: (clientId: string, stepKey: string, done: boolean) => void;
+  // Owner Growth Plan tasks per business — optional so the admin multi-city
+  // overview (which never passes this) degrades to no chip.
+  playbookTasksByClient?: Map<string, Task[]>;
+  onOpenPlaybook?: (clientId: string) => void;
 }) {
   const cacheKey = `${city}|${state}`;
   const warm = () => listingsCache.get(cacheKey);
@@ -412,7 +411,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                     canFeature={!!(r.client || r.contact)}
                     onFeature={onFeature && ((rr) => onFeature({ clientId: rr.client?.id ?? null, contact: rr.contact, name: rr.listing.name, city, state }))}
                     tasks={(r.client && tasksByClient?.get(r.client.id)) || []} onAddTask={onAddTask} onOpenTask={onOpenTask}
-                    playbookProgress={(r.client && playbookByClient?.get(r.client.id)) || []} onTogglePlaybookStep={onTogglePlaybookStep} />
+                    playbookTasks={(r.client && playbookTasksByClient?.get(r.client.id)) || []} onOpenPlaybook={onOpenPlaybook} />
                 ))}
               </div>
             );
@@ -435,7 +434,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, onPatch, stages, opp, onSetStage, featured, canFeature, onFeature, tasks, onAddTask, onOpenTask, playbookProgress, onTogglePlaybookStep }: {
+function ListingRow({ row, onAddContact, onOpenClient, onPatch, stages, opp, onSetStage, featured, canFeature, onFeature, tasks, onAddTask, onOpenTask, playbookTasks, onOpenPlaybook }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
   onOpenClient: (id: string) => void;
@@ -458,9 +457,9 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, stages, opp, onS
   tasks: Task[];
   onAddTask?: (clientId: string, title: string) => void;
   onOpenTask?: (taskId: string) => void;
-  // Owner Growth Plan completion — same "empty when no client row yet" shape as tasks.
-  playbookProgress: PlaybookProgress[];
-  onTogglePlaybookStep?: (clientId: string, stepKey: string, done: boolean) => void;
+  // Owner Growth Plan tasks — same "empty when no client row yet" shape as tasks.
+  playbookTasks: Task[];
+  onOpenPlaybook?: (clientId: string) => void;
 }) {
   const { listing, contact, client } = row;
   const meta = client ? clientStatusMeta(client.status) : null;
@@ -477,12 +476,11 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, stages, opp, onS
   const [histLoading, setHistLoading] = useState(false);
   const [tasksOpen, setTasksOpen] = useState(false);
   const [newTask, setNewTask] = useState("");
-  const [playbookOpen, setPlaybookOpen] = useState(false);
 
   const due = fmtDue(listing.followupDue);
   const log = listing.activityLog;
-  const playbook = client ? playbookCompletion(client.id, playbookProgress) : null;
-  const expanded = logOpen || histOpen || tasksOpen || playbookOpen;
+  const playbook = client ? playbookCompletion(client.id, playbookTasks) : null;
+  const expanded = logOpen || histOpen || tasksOpen;
 
   // Soonest due date across this business's open tasks — the one number worth
   // showing in a dense row, since "3 open" alone doesn't say whether anything
@@ -621,9 +619,9 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, stages, opp, onS
         {/* Actions */}
         <div className="flex flex-wrap items-center gap-1.5 pl-5 sm:pl-0">
           {listing.phone && <button onClick={call} disabled={calling} title={`Bridge-call ${listing.phone}`} className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground disabled:opacity-40">{calling ? "…" : "Call"}</button>}
-          {client && onTogglePlaybookStep && playbook && (
-            <button onClick={() => setPlaybookOpen((o) => !o)} title={playbook.next ? `Next: ${playbook.next.label}` : "All steps complete"}
-              className={`shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium ${playbookOpen ? "bg-accent-soft text-accent" : "text-muted hover:bg-surface hover:text-foreground"}`}>
+          {client && onOpenPlaybook && playbook && (
+            <button onClick={() => onOpenPlaybook(client.id)} title={playbook.next ? `Open Playbook — next: ${playbook.next.label}` : "Open Playbook — all steps complete"}
+              className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">
               Playbook {playbook.doneCount}/{playbook.total}
             </button>
           )}
@@ -669,15 +667,6 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, stages, opp, onS
               half-typed thought, and committing there creates junk tasks. */}
           <input value={newTask} onChange={(e) => setNewTask(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addTask(); }}
             placeholder="Add a task…  ↵" className="mt-1 w-full rounded-md border bg-surface px-2 py-1 text-[13px] outline-none focus:border-accent" />
-        </div>
-      )}
-
-      {/* Owner Growth Plan checklist — same compact component as the client's
-          own Playbook tab, just rendered inline here so a step can be toggled
-          without leaving the territory list. */}
-      {playbookOpen && client && onTogglePlaybookStep && (
-        <div className="border-t bg-background/40 px-4 py-2 pl-9">
-          <ClientPlaybook compact clientId={client.id} progress={playbookProgress} onToggle={onTogglePlaybookStep} />
         </div>
       )}
 
