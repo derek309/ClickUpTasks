@@ -1727,7 +1727,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // own tasks by default — reusing scopedTasks' own assigneeId === me.id
   // pattern. Redundant-but-harmless for VAs, who are already fully
   // restricted by scopedTasks; only changes anything for admins.
-  const baseTasks = scopedTasks.filter((t) => t.clientId.startsWith("cl_") && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject) && (!activeFolder || projectById(t.projectId)?.folderId === activeFolder) && (activeClient !== "all" || allTasksScope === "all" || t.assigneeId === me.id));
+  // Owner Growth Plan tasks are excluded from any unscoped-by-project view
+  // (activeProject === null — "All" for a client, or the cross-client All
+  // Tasks tab) — they're only ever meant to be seen inside their own
+  // Playbook list, never mixed in with a business's regular work. Once a
+  // specific project IS selected, the existing t.projectId === activeProject
+  // check already scopes correctly (only matches when that project happens
+  // to be the Playbook one), so this only needs to guard the unscoped case.
+  const baseTasks = scopedTasks.filter((t) => t.clientId.startsWith("cl_") && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject) && (!activeFolder || projectById(t.projectId)?.folderId === activeFolder) && (activeClient !== "all" || allTasksScope === "all" || t.assigneeId === me.id) && (!t.playbookStepKey || !!activeProject));
 
   // Client/project-wide equivalent of TaskDrawer's per-task copyForClaude —
   // same clipboard hand-off pattern, just widened from one task to every
