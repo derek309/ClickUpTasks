@@ -487,6 +487,60 @@ export interface Playbook {
   tasks: PlaybookTask[];
 }
 
+// The Owner Growth Plan — a fixed, code-defined 18-step journey every
+// business works through (claim listing → ... → paid ads), grouped into 6
+// phases. Order matters: playbookCompletion()'s "next" step is just the
+// first one in this array a business hasn't finished. NOT the same thing as
+// Playbook/PlaybookTask above (an admin-authored, reusable task-bundle
+// template) — this is a fixed catalog matched against per-client rows in the
+// `playbook_progress` table (see PlaybookProgress below), one per completed
+// step. Content mirrors THE-OWNER-GROWTH-PLAN-DRAFT.md's step order.
+export type PlaybookPhase = { key: string; label: string };
+export const PLAYBOOK_PHASES: PlaybookPhase[] = [
+  { key: "map", label: "Get on the map" },
+  { key: "reputation", label: "Jumpstart your reputation" },
+  { key: "list", label: "Build your list" },
+  { key: "everywhere", label: "Be everywhere they look" },
+  { key: "campaigns", label: "Campaign Builder" },
+  { key: "grow", label: "Grow & compound" },
+];
+export type PlaybookStepDef = { key: string; phase: string; label: string };
+export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
+  { key: "claim_listing", phase: "map", label: "Claim listing" },
+  { key: "complete_listing", phase: "map", label: "Complete business listing" },
+  { key: "first_offer", phase: "map", label: "Create first offer" },
+  { key: "add_events", phase: "map", label: "Add events" },
+  { key: "connect_gbp", phase: "reputation", label: "Connect Google Business Profile" },
+  { key: "review_engine", phase: "reputation", label: "Turn on review engine" },
+  { key: "first_review_request", phase: "reputation", label: "Send first review request" },
+  { key: "reviews_widget", phase: "reputation", label: "Add reviews widget to website" },
+  { key: "import_contacts", phase: "list", label: "Import contacts" },
+  { key: "ongoing_capture", phase: "list", label: "Set up ongoing capture (QR/table tents)" },
+  { key: "smart_website", phase: "everywhere", label: "Get Smart Website" },
+  { key: "optimize_gbp_nap", phase: "everywhere", label: "Optimize Google profile + NAP" },
+  { key: "campaign_start", phase: "campaigns", label: "Start a campaign" },
+  { key: "campaign_answer", phase: "campaigns", label: "Answer the campaign question" },
+  { key: "campaign_review", phase: "campaigns", label: "Review the five pieces" },
+  { key: "campaign_publish", phase: "campaigns", label: "Publish + send campaign" },
+  { key: "video_testimonials", phase: "grow", label: "Collect video testimonials" },
+  { key: "paid_ads", phase: "grow", label: "Run paid ads (optional)" },
+];
+/** One completed step for one client — a row's mere existence means done
+ * (see supabase/playbook-progress.sql; toggling off deletes the row). */
+export interface PlaybookProgress {
+  id: string;
+  clientId: string;
+  stepKey: string;
+  completedAt: string;
+  completedBy?: string | null;
+}
+export function playbookCompletion(clientId: string, progress: PlaybookProgress[]) {
+  const done = new Set(progress.filter((p) => p.clientId === clientId).map((p) => p.stepKey));
+  const total = PLAYBOOK_STEPS.length;
+  const next = PLAYBOOK_STEPS.find((s) => !done.has(s.key)) ?? null;
+  return { done, doneCount: done.size, total, pct: Math.round((done.size / total) * 100), next };
+}
+
 // GHL contacts store state inconsistently — full name ("California"), abbreviation
 // ("CA"), or mixed case ("Ca") all show up for the same state in practice. Territory
 // matching needs both sides normalized to the 2-letter form or a typed "CA" silently

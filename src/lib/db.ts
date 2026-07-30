@@ -17,6 +17,7 @@ import {
   type ClientLink,
   type ClientNote,
   type VaultFolder,
+  type PlaybookProgress,
   type Folder,
   type Stage,
   type NoteType,
@@ -111,6 +112,9 @@ export const rowToDmMessage = (r: any): DmMessage => ({ id: r.id, conversationId
 const vaultFolderToRow = (f: VaultFolder) => ({ id: f.id, client_id: f.clientId, project_id: f.projectId, name: f.name, created_at: f.createdAt });
 const rowToVaultFolder = (r: any): VaultFolder => ({ id: r.id, clientId: r.client_id, projectId: r.project_id ?? null, name: r.name, createdAt: r.created_at });
 
+const playbookProgressToRow = (p: PlaybookProgress) => ({ id: p.id, client_id: p.clientId, step_key: p.stepKey, completed_at: p.completedAt, completed_by: p.completedBy ?? null });
+const rowToPlaybookProgress = (r: any): PlaybookProgress => ({ id: r.id, clientId: r.client_id, stepKey: r.step_key, completedAt: r.completed_at, completedBy: r.completed_by ?? null });
+
 const territoryToRow = (t: Territory) => ({ id: t.id, name: t.name, city: t.city, state: t.state, assigned_to: t.assignedTo ?? [], wp_city_slug: t.wpCitySlug ?? null });
 const rowToTerritory = (r: any): Territory => ({ id: r.id, name: r.name, city: r.city, state: r.state, assignedTo: Array.isArray(r.assigned_to) ? r.assigned_to : (r.member_id ? [r.member_id] : []), wpCitySlug: r.wp_city_slug ?? null });
 
@@ -179,7 +183,7 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true) 
 }
 
 export async function fetchAll() {
-  const [c, ct, p, t, n, cl, cn, m, tr, tt, vf, fd, um, sg, tm, pb, dm] = await Promise.all([
+  const [c, ct, p, t, n, cl, cn, m, tr, tt, vf, fd, um, sg, tm, pb, dm, pp] = await Promise.all([
     fetchAllRows("clients", "created_at"),
     fetchAllRows("contacts"),
     fetchAllRows("projects"),
@@ -200,6 +204,7 @@ export async function fetchAll() {
     fetchAllRows("team_messages", "created_at", false),
     fetchAllRows("playbooks", "created_at"),
     fetchAllRows("dm_messages", "created_at", false),
+    fetchAllRows("playbook_progress", "completed_at"),
   ]);
   // NB: `projects` stays in the hard-fail set — its new folder_id/position
   // columns are read via `select *`, which tolerates their absence pre-migration
@@ -218,6 +223,7 @@ export async function fetchAll() {
   if (tm.error) console.warn("[db] team_messages unavailable — run supabase/team-chat.sql", tm.error.message);
   if (pb.error) console.warn("[db] playbooks unavailable — run supabase/playbooks.sql", pb.error.message);
   if (dm.error) console.warn("[db] dm_messages unavailable — run supabase/dm-chat.sql", dm.error.message);
+  if (pp.error) console.warn("[db] playbook_progress unavailable — run supabase/playbook-progress.sql", pp.error.message);
   return {
     clients: (c.data ?? []).map(rowToClient),
     contacts: (ct.data ?? []).map(rowToContact),
@@ -236,6 +242,7 @@ export async function fetchAll() {
     teamMessages: tm.error ? [] : (tm.data ?? []).map(rowToTeamMessage),
     playbooks: pb.error ? [] : (pb.data ?? []).map(rowToPlaybook),
     dmMessages: dm.error ? [] : (dm.data ?? []).map(rowToDmMessage),
+    playbookProgress: pp.error ? [] : (pp.data ?? []).map(rowToPlaybookProgress),
   };
 }
 
@@ -302,6 +309,8 @@ export const updateDmMessageDb = (id: string, patch: { pinned: boolean; pinnedBy
   supabase.from("dm_messages").update({ pinned: patch.pinned, pinned_by: patch.pinnedBy, pinned_at: patch.pinnedAt }).eq("id", id).then(logErr);
 export const upsertVaultFolder = (f: VaultFolder) => supabase.from("vault_folders").upsert(vaultFolderToRow(f)).then(logErr);
 export const deleteVaultFolderDb = (id: string) => supabase.from("vault_folders").delete().eq("id", id).then(logErr);
+export const upsertPlaybookProgress = (p: PlaybookProgress) => supabase.from("playbook_progress").upsert(playbookProgressToRow(p)).then(logErr);
+export const deletePlaybookProgressDb = (id: string) => supabase.from("playbook_progress").delete().eq("id", id).then(logErr);
 export const upsertFolder = (f: Folder) => supabase.from("folders").upsert(folderToRow(f)).then(logErr);
 export const deleteFolderDb = (id: string) => supabase.from("folders").delete().eq("id", id).then(logErr);
 export const upsertStage = (s: Stage) => supabase.from("stages").upsert(stageToRow(s)).then(logErr);
