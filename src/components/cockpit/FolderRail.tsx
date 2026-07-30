@@ -5,7 +5,7 @@
 // list to that folder's lists (grouped by list); selecting a standalone list
 // scopes to just it. Admin chips carry a ⋮ menu (rename/delete/move).
 import { useState } from "react";
-import { type Folder, type Project } from "@/lib/data";
+import { type Folder, type Project, playbookProjectId } from "@/lib/data";
 import { I } from "./ui";
 
 export function FolderRail({
@@ -37,7 +37,13 @@ export function FolderRail({
   const [menu, setMenu] = useState<string | null>(null); // "folder:<id>" | "list:<id>"
   const [dragFolder, setDragFolder] = useState<string | null>(null);
   const [dragList, setDragList] = useState<string | null>(null);
-  const standalone = lists.filter((l) => !l.folderId).sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+  // Playbook is pulled out of the normal standalone/drag-sort/menu machinery
+  // entirely — it's rendered first, unconditionally, with no rename/delete/
+  // move-to-folder affordance and not draggable, matching the same "static,
+  // always there" lock already applied to its tasks (no delete/retitle/move).
+  const isPlaybookList = (l: Project) => l.id === playbookProjectId(l.clientId);
+  const playbookList = lists.find(isPlaybookList);
+  const standalone = lists.filter((l) => !l.folderId && !isPlaybookList(l)).sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
   const allActive = !activeFolder && !activeProject;
 
   // Drag-sort helpers — same splice-before-target idiom as QuickLinksBar.
@@ -80,6 +86,15 @@ export function FolderRail({
   return (
     <div className="no-scrollbar flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b bg-background/40 px-4 py-2 sm:flex-wrap sm:overflow-visible">
       {chip("All", allActive, onSelectAll)}
+      {playbookList && (
+        <span className="relative inline-flex shrink-0">
+          <button onClick={() => onSelectList(playbookList.id)}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] font-medium ${activeProject === playbookList.id ? "border-white ring-2 ring-white/50" : "border-transparent"}`}
+            style={{ background: "#1e3a5f", color: "#fff" }}>
+            {playbookList.name}
+          </button>
+        </span>
+      )}
       {folders.map((f) => chip(
         <><I.folder className="h-3.5 w-3.5" /> {f.name}</>,
         activeFolder === f.id,
