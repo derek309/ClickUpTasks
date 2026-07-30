@@ -529,6 +529,9 @@ export type PlaybookStepDef = {
   weGive?: string;
   youGet?: string;
   scoreImpact: ScoreImpact;
+  /** Created with recurrence: "monthly" instead of "none" (reconcilePlaybookTasks) —
+   * for standing ambassador duties (the monthly report), not one-time owner actions. */
+  recurring?: boolean;
 };
 export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
   {
@@ -546,19 +549,41 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     scoreImpact: "low",
   },
   {
+    key: "upload_photos", phase: "map", label: "Upload your logo + photos",
+    timeEstimate: "~5 min",
+    whyItMatters: "Listings with photos and a complete profile get far more clicks and rank better — photo coverage is repeatedly called out as the single biggest lever for a listing looking alive and actually converting.",
+    howTo: [
+      "Add your logo.",
+      "Add 5–10 photos: storefront, interior, products, team.",
+    ],
+    commonMistake: "A thin listing with no photos — fill this in before anything else on your profile.",
+    weGive: "We optimize your listing for local + AI search — a photo-rich profile is one of the biggest Score drivers.",
+    youGet: "A listing that looks alive and gets chosen over a bare one.",
+    scoreImpact: "high",
+  },
+  {
     key: "complete_listing", phase: "map", label: "Complete business listing",
     timeEstimate: "~10 min (established shortcut: copy straight from your website/Google)",
-    whyItMatters: "Photo-rich, complete listings get far more clicks, rank higher, and become eligible to be featured. Profile completeness is one of the biggest Score factors.",
+    whyItMatters: "A fully complete listing gets found and ranks higher, and becomes eligible to be featured. Profile completeness is one of the biggest Score factors.",
     howTo: [
-      "Add your logo and 5–10 photos (storefront, interior, products, team).",
       "Complete every field: name, category, description, services/products, hours, phone, website, address.",
-      "Add your social links.",
       "Save / Publish, then check the live preview.",
     ],
-    commonMistake: "A thin listing — no photos, blank description. Fill it all in now.",
+    commonMistake: "A blank description or half-filled fields. Fill it all in now.",
     weGive: "We optimize your listing for local + AI search — completeness is one of the biggest Score drivers, so this keeps lifting you as your Score refreshes.",
     youGet: "A listing that gets found and chosen.",
     scoreImpact: "high",
+  },
+  {
+    key: "add_social_links", phase: "map", label: "Add your social links",
+    timeEstimate: "~2 min",
+    whyItMatters: "Rounds out a complete profile and gives residents another way to find and follow you.",
+    howTo: [
+      "Add your Facebook, Instagram, and any other social links to your listing.",
+    ],
+    weGive: "We keep your profile looking complete and current across every channel.",
+    youGet: "One more path for residents to find and follow you.",
+    scoreImpact: "low",
   },
   {
     key: "first_offer", phase: "map", label: "Create first offer",
@@ -611,12 +636,25 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
       "In Reputation → Settings, Review Link: select Google (already connected — no pasting).",
       "Requests: enable SMS Requests + Email Requests, set up Reviews QR for in-store capture, and turn on Spam Reviews filtering.",
       "Reviews AI (Settings → AI): choose Auto Responses and set a short wait time before responding so it feels human.",
-      "Past reviews — Drip Mode: under \"Respond to Reviews – Drip Mode,\" create a new campaign — name it, set the review date range, Frequency: Daily, replies per day (e.g. 10/day), an optional time window, select an AI Agent, and create it.",
     ],
-    commonMistake: "Replies-per-day too high — a natural pace looks more genuine than a same-minute flood.",
-    weGive: "We give you a review count that climbs on its own, and AI that responds to every new review and every past review — automatically, in your voice.",
+    commonMistake: "Replies-per-day too high on the requests side — a natural pace looks more genuine than a same-minute flood.",
+    weGive: "We give you a review count that climbs on its own, with AI responding to every new review automatically, in your voice.",
     youGet: "A reputation that works 24/7 without you touching it.",
     scoreImpact: "high",
+  },
+  {
+    key: "ai_respond_past_reviews", phase: "reputation", label: "Turn on AI responses to past reviews",
+    timeEstimate: "~3 min",
+    whyItMatters: "A separate, one-time action from turning on requests for new reviews — this responds to every review your business already has, so nothing from before you joined sits unanswered.",
+    howTo: [
+      "Under \"Respond to Reviews – Drip Mode,\" click + Create a New Campaign.",
+      "Name it, set the review date range (how far back), Frequency: Daily, and a natural replies-per-day pace (e.g. 10/day).",
+      "Optional time window (e.g. 9–5 local), select an AI Agent, and Create Drip Campaign.",
+    ],
+    commonMistake: "Assuming turning on the review engine already covers this — it doesn't. Skipping this step leaves every past review unanswered.",
+    weGive: "We respond to every past review automatically, in your voice, at a natural pace.",
+    youGet: "A clean slate — nothing left unanswered from before you joined.",
+    scoreImpact: "medium",
   },
   {
     key: "first_review_request", phase: "reputation", label: "Send first review request",
@@ -782,6 +820,18 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     youGet: "New customers faster than organic alone.",
     scoreImpact: "low",
   },
+  {
+    key: "ask_referral", phase: "grow", label: "Ask for a referral",
+    timeEstimate: "~2 min",
+    whyItMatters: "Referrals are the natural close of a strong month — a neighbor who just heard your own results is the warmest possible source of the next local business.",
+    howTo: [
+      "At your happiest moment (a strong month, a big win), ask if there's a local business you'd want to see get the same results.",
+      "Refer a business that signs up → you get one free month, no limit on how many times.",
+    ],
+    weGive: "We track every referral and apply the free month automatically.",
+    youGet: "A free month for every local business you send our way, no cap.",
+    scoreImpact: "low",
+  },
 ];
 
 // A2P (texting registration) — real, trackable steps, but deliberately a
@@ -835,10 +885,59 @@ export const PLAYBOOK_A2P_STEPS: PlaybookStepDef[] = [
     scoreImpact: "low",
   },
 ];
+
+// Second side quest — same "separate catalog, not a phase" reasoning as A2P:
+// the source doc lists it as its own optional side quest alongside A2P, not
+// part of the main path.
+export const PLAYBOOK_EMAIL_DOMAIN_PHASE: PlaybookPhase = { key: "email_domain", label: "Set up dedicated email domain — side quest" };
+export const PLAYBOOK_EMAIL_DOMAIN_STEPS: PlaybookStepDef[] = [
+  {
+    key: "email_domain_setup", phase: "email_domain", label: "Set up a dedicated email domain",
+    timeEstimate: "~10 min (DNS records)",
+    whyItMatters: "Improves your email deliverability so newsletters and review requests land in the inbox instead of spam.",
+    howTo: [
+      "Go to Settings → Email Services → Dedicated Domain.",
+      "Add the DNS records shown (your domain provider, or we can help).",
+    ],
+    weGive: "We can add the DNS records for you if you'd rather hand it off.",
+    youGet: "Newsletters and requests that actually land in the inbox.",
+    scoreImpact: "low",
+  },
+];
+
+// The standing ambassador-side retention task — NOT a one-time owner action
+// like the rest of the catalog, so it's created with recurrence: "monthly"
+// (see reconcilePlaybookTasks) instead of "none". Excluded from
+// playbookCompletion()'s "X of 18" the same way A2P/email-domain are, just by
+// virtue of living outside PLAYBOOK_STEPS.
+export const PLAYBOOK_ONGOING_PHASE: PlaybookPhase = { key: "ongoing", label: "Monthly retention (ambassador)" };
+export const PLAYBOOK_ONGOING_STEPS: PlaybookStepDef[] = [
+  {
+    key: "monthly_proof_report", phase: "ongoing", label: "Send monthly proof-of-results report",
+    timeEstimate: "Recurring, monthly",
+    whyItMatters: "The single most important recurring retention task — a business that sees a clear win in their inbox every month builds a habit of expecting value from us, which is exactly what makes renewal automatic. A skipped month is itself an at-risk signal.",
+    howTo: [
+      "Lead with the growing owned-contact count as the headline ROI (\"You now own 118 contacts, up 43 this month\").",
+      "Offers claimed and redeemed, translated to tracked dollars.",
+      "Reviews gained and AI Score movement (before to after).",
+      "Where they rank locally now versus when they started.",
+      "One clear next step for the coming month.",
+    ],
+    commonMistake: "Letting it slide because nothing urgent is happening — a skipped report is itself the first step toward a business going dark and churning.",
+    weGive: "We auto-draft it every month so it never depends on anyone remembering.",
+    youGet: "A business that renews on its own because the value is undeniable, every month.",
+    scoreImpact: "high",
+    recurring: true,
+  },
+];
+
 // Combined lookup so the TaskDrawer guide panel can resolve a task's
 // playbookStepKey regardless of which catalog it came from.
+export const PLAYBOOK_ALL_STEPS: PlaybookStepDef[] = [
+  ...PLAYBOOK_STEPS, ...PLAYBOOK_A2P_STEPS, ...PLAYBOOK_EMAIL_DOMAIN_STEPS, ...PLAYBOOK_ONGOING_STEPS,
+];
 export const PLAYBOOK_STEP_BY_KEY: Map<string, PlaybookStepDef> = new Map(
-  [...PLAYBOOK_STEPS, ...PLAYBOOK_A2P_STEPS].map((s) => [s.key, s])
+  PLAYBOOK_ALL_STEPS.map((s) => [s.key, s])
 );
 
 // Non-task, purely informational content from the source doc — rendered as

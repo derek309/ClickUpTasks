@@ -56,10 +56,11 @@ import {
   type Playbook,
   type PlaybookTask,
   playbookCompletion,
-  PLAYBOOK_STEPS,
   PLAYBOOK_PHASES,
   PLAYBOOK_A2P_PHASE,
-  PLAYBOOK_A2P_STEPS,
+  PLAYBOOK_EMAIL_DOMAIN_PHASE,
+  PLAYBOOK_ONGOING_PHASE,
+  PLAYBOOK_ALL_STEPS,
   PLAYBOOK_INTRO,
   PLAYBOOK_MILESTONE,
   PLAYBOOK_ALWAYS_RUNNING,
@@ -1914,16 +1915,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     }
     const byKey = new Map(tasks.filter((t) => t.clientId === clientId && t.playbookStepKey).map((t) => [t.playbookStepKey as string, t]));
     const toWrite: Task[] = [];
-    // A2P rides the same reconciliation as the main 18 (same project, same
-    // create/retitle logic) — it's just excluded from playbookCompletion()'s
-    // total and rendered as its own group (buildPlaybookGroups below).
-    for (const step of [...PLAYBOOK_STEPS, ...PLAYBOOK_A2P_STEPS]) {
+    // A2P/email-domain/ongoing ride the same reconciliation as the main 18
+    // (same project, same create/retitle logic) — they're just excluded from
+    // playbookCompletion()'s total and rendered as their own groups
+    // (buildPlaybookGroups below).
+    for (const step of PLAYBOOK_ALL_STEPS) {
       const existing = byKey.get(step.key);
       if (!existing) {
         toWrite.push({
           id: newId("t_"), projectId: pbProjectId, clientId, title: step.label, description: "",
           status: "todo", priority: "none", assigneeId: null, contactId: clientId.slice(3), due: null,
-          recurrence: "none", labelIds: [], ghlTaskId: null, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
+          recurrence: step.recurring ? "monthly" : "none", labelIds: [], ghlTaskId: null, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
           playbookStepKey: step.key,
         });
       } else if (existing.title !== step.label) {
@@ -2020,19 +2022,26 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // in the app. Any non-step task that ends up in the Playbook project (a
   // one-off note an ambassador quick-added) still shows, under "Other", so
   // nothing silently disappears.
-  const allPlaybookSteps = [...PLAYBOOK_STEPS, ...PLAYBOOK_A2P_STEPS];
-  const stepPhase = new Map(allPlaybookSteps.map((s) => [s.key, s.phase]));
-  const stepOrder = new Map(allPlaybookSteps.map((s, i) => [s.key, i]));
+  const stepPhase = new Map(PLAYBOOK_ALL_STEPS.map((s) => [s.key, s.phase]));
+  const stepOrder = new Map(PLAYBOOK_ALL_STEPS.map((s, i) => [s.key, i]));
+  const sideQuestColor: Record<string, string> = { a2p: "#a855f7", email_domain: "#a855f7", ongoing: "#0ea5e9" };
   const buildPlaybookGroups = (list: Task[]): Grp[] => {
     const groupFor = (phase: { key: string; label: string }) => ({
-      key: phase.key, label: phase.label, color: phase.key === "a2p" ? "#a855f7" : "#5c8ac4",
+      key: phase.key, label: phase.label, color: sideQuestColor[phase.key] ?? "#5c8ac4",
       tasks: list.filter((t) => t.playbookStepKey && stepPhase.get(t.playbookStepKey) === phase.key)
         .sort((a, b) => (stepOrder.get(a.playbookStepKey!) ?? 0) - (stepOrder.get(b.playbookStepKey!) ?? 0)),
     });
-    // A2P sits right after "Get on the map" (PLAYBOOK_PHASES[0]) — "do it
-    // early," per the source doc — not folded into the phase array itself so
-    // playbookCompletion()'s "X of 18" total never counts it.
-    const byPhase = [groupFor(PLAYBOOK_PHASES[0]), groupFor(PLAYBOOK_A2P_PHASE), ...PLAYBOOK_PHASES.slice(1).map(groupFor)];
+    // A2P + email-domain sit right after "Get on the map" (PLAYBOOK_PHASES[0])
+    // — "do it early," per both source docs — not folded into the phase array
+    // itself so playbookCompletion()'s "X of 18" total never counts them.
+    // Monthly retention sits at the very end — an ongoing duty, not something
+    // to front-load, and distinct from the fully-passive PLAYBOOK_ALWAYS_RUNNING
+    // banner since it needs an ambassador to actually act on it each month.
+    const byPhase = [
+      groupFor(PLAYBOOK_PHASES[0]), groupFor(PLAYBOOK_A2P_PHASE), groupFor(PLAYBOOK_EMAIL_DOMAIN_PHASE),
+      ...PLAYBOOK_PHASES.slice(1).map(groupFor),
+      groupFor(PLAYBOOK_ONGOING_PHASE),
+    ];
     const extra = list.filter((t) => !t.playbookStepKey);
     return extra.length ? [...byPhase, { key: "extra", label: "Other", color: "#94a3b8", tasks: extra }] : byPhase;
   };
