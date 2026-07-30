@@ -71,6 +71,20 @@ export function generatePlannerBrief(opts: {
     lines.push("_(none this week)_", "");
   }
 
+  // Always-shown Offers — every claimed business with an active offer,
+  // city-wide, regardless of the week's theme categories. Distinct from
+  // "Support Local" below (which is deliberately theme-scoped) — the whole
+  // point here is residents seeing this every single week no matter what
+  // the theme is, so it's never filtered down to nothing.
+  lines.push("## Offers (always include — every claimed business with an active offer)");
+  const allOfferRows = listings.filter((l) => l.claimed && l.hasOffer);
+  if (allOfferRows.length) {
+    for (const l of allOfferRows) lines.push(`- ${l.name}${l.category ? ` (${l.category})` : ""}`);
+    lines.push("");
+  } else {
+    lines.push("_(no claimed businesses with an active offer right now)_", "");
+  }
+
   // Businesses attached to sections count as featured too, not just the ones
   // in the fixed slots — otherwise a business written up in a section (an
   // extra "Hidden Gem", say) gets named twice in the same brief: once as its

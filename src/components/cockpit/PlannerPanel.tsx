@@ -1192,6 +1192,29 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
           })}
         </div>
 
+        {/* Offers — always present, not a deletable/addable section like the
+            ones below: every claimed business that currently has an active
+            offer, so residents always see something to go claim regardless
+            of the week's theme. Synthesized live from `listings` (hasOffer),
+            not stored as its own row, so it can never drift or get
+            accidentally deleted the way a custom section could. */}
+        <div className="border-t p-4">
+          <div className="mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-muted">Offers</div>
+          {(() => {
+            const offerRows = listings.filter((l) => l.claimed && l.hasOffer);
+            if (!offerRows.length) return <div className="text-[13px] text-muted">No claimed businesses with an active offer yet.</div>;
+            return (
+              <div className="flex flex-wrap gap-1.5">
+                {offerRows.map((l) => (
+                  l.url
+                    ? <a key={l.id} href={l.url} target="_blank" rel="noopener noreferrer" className="rounded-md border bg-background px-2 py-1 text-[13px] font-medium text-accent hover:underline">{l.name}</a>
+                    : <span key={l.id} className="rounded-md border bg-background px-2 py-1 text-[13px] font-medium">{l.name}</span>
+                ))}
+              </div>
+            );
+          })()}
+        </div>
+
         {/* Custom sections — repeatable typed write-ups (preset types or a
             custom title), each with an optional attached business. */}
         <div className="border-t p-4">
