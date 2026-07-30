@@ -1936,6 +1936,27 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (projectWrite) projectWrite.then(() => bulkUpsertTasks(toWrite));
     else bulkUpsertTasks(toWrite);
   };
+  // The Playbook is standard on every contact, not just ones that came
+  // through the territory-claim flow (addClientContact/setClientStatus
+  // already reconcile eagerly there) — this is what makes it "just show up"
+  // for a plain agency client too: opening ANY real client's page reconciles
+  // its Playbook, so a client added before this feature existed (or added
+  // through some other path entirely) self-heals the first time anyone
+  // actually looks at them, same lazy philosophy as the territory rollout,
+  // just with no special-cased entry point required anymore.
+  // Same exclusion as clientList's own real-business filter — the Workspace
+  // container and per-territory city-work buckets are pseudo-clients (no real
+  // GHL contact behind them), not businesses on the Owner Growth Plan.
+  useEffect(() => {
+    if (activeClient.startsWith("cl_") && activeClient !== WORKSPACE_CLIENT_ID && !activeClient.startsWith(TERRITORY_CLIENT_PREFIX)) {
+      reconcilePlaybookTasks(activeClient);
+    }
+    // reconcilePlaybookTasks intentionally excluded — it's redefined every
+    // render (closes over live `tasks`/`projects`), and including it here
+    // would refire this effect every render instead of only on a real
+    // client switch, which is the only time re-reconciling is meaningful.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeClient]);
   // Opens a business's Playbook the same way onOpenClient opens its Tasks —
   // reconciling first so a business that's never been looked at yet lands on
   // a fully caught-up list, not a stale/empty one.
