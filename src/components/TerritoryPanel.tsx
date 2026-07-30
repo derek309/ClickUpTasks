@@ -6,7 +6,7 @@
 // vs "unclaimed" (still just a raw synced contact). Reuses the existing client
 // status funnel for pipeline stage instead of a second, parallel state.
 import { useState } from "react";
-import { users, clientStatusMeta, normalizeState, type Me, type Territory, type Contact, type Client, type Task, type PlaybookProgress } from "@/lib/data";
+import { users, clientStatusMeta, normalizeState, playbookCompletion, type Me, type Territory, type Contact, type Client, type Task, type PlaybookProgress } from "@/lib/data";
 import { I, Avatar } from "./cockpit/ui";
 import TerritoryDirectory from "./cockpit/TerritoryDirectory";
 
@@ -209,10 +209,12 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                       const client = clients.find((cl) => cl.id === "cl_" + c.id);
                       if (!client) return null;
                       const meta = clientStatusMeta(client.status);
+                      const pb = playbookByClient ? playbookCompletion(client.id, playbookByClient.get(client.id) ?? []) : null;
                       return (
                         <button key={c.id} onClick={() => onOpenClient(client.id)} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[15px] hover:bg-background">
                           <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: meta.dot }} />
                           <span className="min-w-0 flex-1 truncate">{c.name}</span>
+                          {pb && <span title={pb.next ? `Next: ${pb.next.label}` : "All steps complete"} className="shrink-0 rounded bg-background px-1.5 py-0.5 text-[12px] font-medium text-muted">Playbook {pb.doneCount}/{pb.total}</span>}
                           <span className="shrink-0 text-[13px] text-muted">{meta.label}</span>
                         </button>
                       );
