@@ -389,12 +389,13 @@ const plannerWeekToRow = (w: PlannerWeek) => ({
     ...Object.fromEntries(Object.entries(w.picks).map(([k, v]) => [k, bizToJson(v as PlannerBiz)])),
     __dismissed: w.dismissed ?? [], __cats: w.categories ?? [], __themeDesc: w.themeDescription ?? "", __weather: w.weatherNote ?? "",
     __invited: w.invited ?? [],
+    __slExcluded: w.supportLocalExcluded ?? [], __slAdded: (w.supportLocalAdded ?? []).map(bizToJson),
   },
   archived: w.archived ?? false, sent_date: w.sentDate ?? null, wp_pushed_at: w.wpPushedAt ?? null,
 });
 export const rowToPlannerWeek = (r: any): PlannerWeek => {
   const raw = (r.picks && typeof r.picks === "object") ? r.picks : {};
-  const { __dismissed, __cats, __themeDesc, __weather, __invited, ...slots } = raw;
+  const { __dismissed, __cats, __themeDesc, __weather, __invited, __slExcluded, __slAdded, ...slots } = raw;
   const picks: PlannerWeek["picks"] = {};
   for (const [k, v] of Object.entries(slots)) { const b = jsonToBiz(v); if (b) (picks as any)[k] = b; }
   return {
@@ -404,6 +405,8 @@ export const rowToPlannerWeek = (r: any): PlannerWeek => {
     weatherNote: typeof __weather === "string" ? __weather : "",
     invited: Array.isArray(__invited) ? __invited : [],
     picks, dismissed: Array.isArray(__dismissed) ? __dismissed : [],
+    supportLocalExcluded: Array.isArray(__slExcluded) ? __slExcluded : [],
+    supportLocalAdded: Array.isArray(__slAdded) ? (__slAdded as any[]).map(jsonToBiz).filter((b): b is PlannerBiz => !!b) : [],
     archived: !!r.archived, sentDate: r.sent_date ?? null, wpPushedAt: r.wp_pushed_at ?? null,
     createdAt: r.created_at,
   };

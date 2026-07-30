@@ -4,7 +4,6 @@
 // generated client-side with no server round-trip (every input already
 // lives in the open week's own state).
 import { plannerWeekLabel, type PlannerWeek, type PlannerSection, type PlannerEvent, type PlannerSlot } from "./data";
-import { matchesAnyCategory } from "./categoryMatch";
 
 const SLOT_HEADINGS: Record<PlannerSlot, string> = {
   spotlight: "Business Spotlight (new business)",
@@ -16,7 +15,7 @@ const SLOT_HEADINGS: Record<PlannerSlot, string> = {
 
 // Minimal shape the brief needs for "Support Local" — decoupled from
 // DirectoryListing (a component-file type) so this stays a plain lib module.
-export type BriefListing = { name: string; category: string; claimed: boolean; hasOffer: boolean; offerTitle?: string };
+export type BriefListing = { id: string; name: string; category: string; claimed: boolean; hasOffer: boolean };
 
 export function generatePlannerBrief(opts: {
   cityName: string;
@@ -71,43 +70,31 @@ export function generatePlannerBrief(opts: {
     lines.push("_(none this week)_", "");
   }
 
-  // Always-shown Offers — every claimed business with an active offer,
-  // city-wide, regardless of the week's theme categories. Distinct from
-  // "Support Local" below (which is deliberately theme-scoped) — the whole
-  // point here is residents seeing this every single week no matter what
-  // the theme is, so it's never filtered down to nothing.
-  lines.push("## Offers (always include — every claimed business with an active offer)");
-  const allOfferRows = listings.filter((l) => l.claimed && l.hasOffer);
-  if (allOfferRows.length) {
-    for (const l of allOfferRows) lines.push(`- ${l.name}${l.category ? ` (${l.category})` : ""}`);
-    lines.push("");
-  } else {
-    lines.push("_(no claimed businesses with an active offer right now)_", "");
-  }
-
   // Businesses attached to sections count as featured too, not just the ones
   // in the fixed slots — otherwise a business written up in a section (an
   // extra "Hidden Gem", say) gets named twice in the same brief: once as its
-  // own feature, then again in the Support Local list of offers to mention.
+  // own feature, then again in Support Local.
   const featuredNames = new Set(
     [
       ...(["spotlight", "gem", "gem2", "gem3"] as const).map((s) => week.picks[s]?.name),
       ...sections.map((sec) => sec.biz?.name),
     ].map((n) => n?.toLowerCase().trim()).filter(Boolean) as string[]
   );
-  lines.push("## Support Local (claimed businesses with active offers, by category)");
-  // Fuzzy word-overlap match (categoryMatch.ts), not exact string equality —
-  // theme categories and real GD categories are different vocabularies (see
-  // categoryMatch.ts's own doc comment for why).
-  const supportRows = listings.filter((l) =>
-    l.claimed && l.hasOffer && !featuredNames.has(l.name.toLowerCase().trim())
-    && matchesAnyCategory(l.category, week.categories)
-  );
-  if (supportRows.length) {
-    for (const l of supportRows.slice(0, 20)) lines.push(`- ${l.name}${l.offerTitle ? ` — ${l.offerTitle}` : ""}`);
+  // Support Local — every claimed business with an active offer, city-wide,
+  // regardless of the week's theme (never filtered down to nothing just
+  // because the theme doesn't match this week) — minus anything hidden for
+  // this week and plus anything added on top, both editable per week in the
+  // Planner UI (week.supportLocalExcluded/Added).
+  lines.push("## Support Local (claimed businesses with an active offer)");
+  const excluded = new Set(week.supportLocalExcluded);
+  const autoRows = listings.filter((l) => l.claimed && l.hasOffer && !excluded.has(l.id) && !featuredNames.has(l.name.toLowerCase().trim()));
+  const addedRows = week.supportLocalAdded.filter((b) => b.name.trim());
+  if (autoRows.length || addedRows.length) {
+    for (const l of autoRows) lines.push(`- ${l.name}${l.category ? ` (${l.category})` : ""}`);
+    for (const b of addedRows) lines.push(`- ${b.name}${b.cat ? ` (${b.cat})` : ""}`);
     lines.push("");
   } else {
-    lines.push("_(no other claimed offers in these categories yet)_", "");
+    lines.push("_(no claimed businesses with an active offer right now)_", "");
   }
 
   lines.push("## Weather", week.weatherNote || `A short local outlook for ${cityName || "this city"} (not fetched yet — use the Weather section's Get weather button).`, "");

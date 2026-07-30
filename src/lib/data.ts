@@ -357,6 +357,12 @@ export interface PlannerWeek {
   // on, so skipped is always a local, manual call. Entries from before this
   // field existed have no `status` — treat as "invited" at every read site.
   invited: PlannerInvite[];
+  // Support Local override, on top of the auto-populated "every claimed
+  // business with an active offer" list: ids hidden this week (a listing id,
+  // as a string), and businesses added on top that don't otherwise qualify
+  // (e.g. not flagged hasOffer, or unclaimed but worth a shout-out anyway).
+  supportLocalExcluded: string[];
+  supportLocalAdded: PlannerBiz[];
   archived: boolean;
   sentDate: string | null;
   wpPushedAt: string | null;

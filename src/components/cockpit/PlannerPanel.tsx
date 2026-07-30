@@ -104,7 +104,7 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
     // Spotlight/Hidden Gem pools before anyone chose anything.
     const w: PlannerWeek = {
       id: newId("pw_"), territoryId, week, themeOverride: "", themeDescription: "", categories: [], notes: "", weatherNote: "",
-      picks: {}, dismissed: [], invited: [], archived: false, sentDate: null, wpPushedAt: null, createdAt: new Date().toISOString(),
+      picks: {}, dismissed: [], invited: [], supportLocalExcluded: [], supportLocalAdded: [], archived: false, sentDate: null, wpPushedAt: null, createdAt: new Date().toISOString(),
     };
     setWeeks((ws) => [w, ...ws]);
     await upsertPlannerWeek(w);
@@ -291,6 +291,7 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
   onDelete: () => void;
 }) {
   const [pickerSlot, setPickerSlot] = useState<PlannerSlot | null>(null);
+  const [slPickerOpen, setSlPickerOpen] = useState(false);
   const [catInput, setCatInput] = useState("");
   const [themeOptions, setThemeOptions] = useState<{ title: string; description: string }[] | null>(null);
   const [themeLoading, setThemeLoading] = useState(false);
@@ -445,7 +446,7 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
   const removeBacklogItem = (id: string) => { setItems((its) => its.filter((it) => it.id !== id)); deleteNewsletterItemDb(id); };
 
   const generateBrief = () => {
-    const briefListings = listings.map((l) => ({ name: l.name, category: l.category ?? "", claimed: l.claimed, hasOffer: l.hasOffer, offerTitle: undefined as string | undefined }));
+    const briefListings = listings.map((l) => ({ id: String(l.id), name: l.name, category: l.category ?? "", claimed: l.claimed, hasOffer: l.hasOffer }));
     setBrief(generatePlannerBrief({ cityName, week, sections, events, listings: briefListings }));
   };
   const downloadBrief = () => {
@@ -1192,23 +1193,42 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
           })}
         </div>
 
-        {/* Offers — always present, not a deletable/addable section like the
-            ones below: every claimed business that currently has an active
-            offer, so residents always see something to go claim regardless
-            of the week's theme. Synthesized live from `listings` (hasOffer),
-            not stored as its own row, so it can never drift or get
-            accidentally deleted the way a custom section could. */}
+        {/* Support Local — auto-populated (every claimed business with an
+            active offer), so residents always see something to go claim
+            regardless of the week's theme, but not a fixed list: an
+            auto-included business can be hidden for this week (excluded, not
+            deleted — it comes back if it still qualifies later), and any
+            business can be added on top even if it doesn't otherwise qualify.
+            Overrides live on the week itself (supportLocalExcluded/Added),
+            not as their own deletable rows like the sections below. */}
         <div className="border-t p-4">
-          <div className="mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-muted">Offers</div>
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Support Local</span>
+            <button onClick={() => setSlPickerOpen((o) => !o)} className="rounded-lg border border-dashed px-2.5 py-1 text-[12px] font-medium text-muted hover:bg-background hover:text-foreground">+ Add business</button>
+          </div>
+          {slPickerOpen && (
+            <div className="mb-2">
+              <BusinessPicker listings={listings} onCancel={() => setSlPickerOpen(false)}
+                onPick={(biz) => { onPatch((w) => ({ supportLocalAdded: [...w.supportLocalAdded, biz] })); setSlPickerOpen(false); }} />
+            </div>
+          )}
           {(() => {
-            const offerRows = listings.filter((l) => l.claimed && l.hasOffer);
-            if (!offerRows.length) return <div className="text-[13px] text-muted">No claimed businesses with an active offer yet.</div>;
+            const autoRows = listings.filter((l) => l.claimed && l.hasOffer && !week.supportLocalExcluded.includes(String(l.id)));
+            const addedRows = week.supportLocalAdded;
+            if (!autoRows.length && !addedRows.length) return <div className="text-[13px] text-muted">No claimed businesses with an active offer yet — add one above to feature something.</div>;
             return (
               <div className="flex flex-wrap gap-1.5">
-                {offerRows.map((l) => (
-                  l.url
-                    ? <a key={l.id} href={l.url} target="_blank" rel="noopener noreferrer" className="rounded-md border bg-background px-2 py-1 text-[13px] font-medium text-accent hover:underline">{l.name}</a>
-                    : <span key={l.id} className="rounded-md border bg-background px-2 py-1 text-[13px] font-medium">{l.name}</span>
+                {autoRows.map((l) => (
+                  <span key={`auto_${l.id}`} className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 text-[13px] font-medium">
+                    {l.url ? <a href={l.url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">{l.name}</a> : <span>{l.name}</span>}
+                    <button onClick={() => onPatch((w) => ({ supportLocalExcluded: [...w.supportLocalExcluded, String(l.id)] }))} title="Hide this week" className="text-muted hover:text-danger">✕</button>
+                  </span>
+                ))}
+                {addedRows.map((b, i) => (
+                  <span key={`added_${i}`} className="inline-flex items-center gap-1 rounded-md border border-accent/30 bg-accent-soft px-2 py-1 text-[13px] font-medium text-accent">
+                    {b.url ? <a href={b.url} target="_blank" rel="noopener noreferrer" className="hover:underline">{b.name}</a> : <span>{b.name}</span>}
+                    <button onClick={() => onPatch((w) => ({ supportLocalAdded: w.supportLocalAdded.filter((_, j) => j !== i) }))} title="Remove" className="text-accent/70 hover:text-danger">✕</button>
+                  </span>
                 ))}
               </div>
             );
