@@ -53,12 +53,17 @@ export const I = {
 
 export function Avatar({ id, size = 26 }: { id: string | null; size?: number }) {
   const u = userById(id);
-  if (!u) return (<span className="inline-flex items-center justify-center rounded-full border border-dashed text-muted" style={{ width: size, height: size, fontSize: size * 0.42 }}><I.user /></span>);
+  // Proportional radius (not a fixed Tailwind class) so the "rounded square"
+  // look stays consistent across the whole 14-32px range this is used at —
+  // a fixed radius would read as barely-rounded at 32px but nearly circular
+  // at 14px.
+  const radius = Math.round(size * 0.28);
+  if (!u) return (<span className="inline-flex items-center justify-center border border-dashed text-muted" style={{ width: size, height: size, fontSize: size * 0.42, borderRadius: radius }}><I.user /></span>);
   if (u.avatarUrl) return (
     // eslint-disable-next-line @next/next/no-img-element -- sizes are dynamic per call site; next/image's fixed-dimension model doesn't fit this many tiny inline avatars.
-    <img src={u.avatarUrl} alt={u.name} title={u.name} className="rounded-full object-cover" style={{ width: size, height: size }} />
+    <img src={u.avatarUrl} alt={u.name} title={u.name} className="object-cover" style={{ width: size, height: size, borderRadius: radius }} />
   );
-  return (<span className="inline-flex items-center justify-center rounded-full font-semibold text-white" style={{ width: size, height: size, background: u.color, fontSize: size * 0.4 }} title={u.name}>{u.initials}</span>);
+  return (<span className="inline-flex items-center justify-center font-semibold text-white" style={{ width: size, height: size, background: u.color, fontSize: size * 0.4, borderRadius: radius }} title={u.name}>{u.initials}</span>);
 }
 
 // Flat file-type badge — replaces platform-inconsistent emoji, respects theme

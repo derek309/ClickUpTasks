@@ -90,7 +90,7 @@ export interface Me {
   role: Role;
   canSendMessages: boolean; // admins always true; VAs only when an admin grants it
 }
-export type TaskStatus = "todo" | "in_progress" | "review" | "changes_requested" | "done";
+export type TaskStatus = "todo" | "in_progress" | "review" | "changes_requested" | "waiting" | "done";
 export type Priority = "conversation" | "urgent" | "normal" | "none";
 export type Recurrence = "none" | "daily" | "weekday" | "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly" | "custom";
 export const RECURRENCE_ORDER: Recurrence[] = ["none", "daily", "weekday", "weekly", "biweekly", "monthly", "quarterly", "yearly", "custom"];
@@ -532,10 +532,14 @@ export type PlaybookStepDef = {
   /** Created with recurrence: "monthly" instead of "none" (reconcilePlaybookTasks) —
    * for standing ambassador duties (the monthly report), not one-time owner actions. */
   recurring?: boolean;
+  /** Which of the 4 owner-facing dashboard progress bars this counts toward
+   * (branding/reputation/presence/income) — orthogonal to phase, which is
+   * the internal ambassador ordering. Read by playbookCompletionByCategory(). */
+  category: "branding" | "reputation" | "presence" | "income";
 };
 export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
   {
-    key: "claim_listing", phase: "map", label: "Claim listing",
+    key: "claim_listing", phase: "map", label: "Claim listing", category: "presence",
     timeEstimate: "~5 min",
     whyItMatters: "Claiming unlocks your My Business dashboard, where everything else lives. Your Score was already calculated when we built your profile — claiming lets you start improving it.",
     howTo: [
@@ -549,7 +553,7 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     scoreImpact: "low",
   },
   {
-    key: "upload_photos", phase: "map", label: "Upload your logo + photos",
+    key: "upload_photos", phase: "map", label: "Upload your logo + photos", category: "branding",
     timeEstimate: "~5 min",
     whyItMatters: "Listings with photos and a complete profile get far more clicks and rank better — photo coverage is repeatedly called out as the single biggest lever for a listing looking alive and actually converting.",
     howTo: [
@@ -562,7 +566,7 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     scoreImpact: "high",
   },
   {
-    key: "complete_listing", phase: "map", label: "Complete business listing",
+    key: "complete_listing", phase: "map", label: "Complete business listing", category: "branding",
     timeEstimate: "~10 min (established shortcut: copy straight from your website/Google)",
     whyItMatters: "A fully complete listing gets found and ranks higher, and becomes eligible to be featured. Profile completeness is one of the biggest Score factors.",
     howTo: [
@@ -575,7 +579,7 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     scoreImpact: "high",
   },
   {
-    key: "add_social_links", phase: "map", label: "Add your social links",
+    key: "add_social_links", phase: "map", label: "Add your social links", category: "branding",
     timeEstimate: "~2 min",
     whyItMatters: "Rounds out a complete profile and gives residents another way to find and follow you.",
     howTo: [
@@ -586,7 +590,7 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     scoreImpact: "low",
   },
   {
-    key: "first_offer", phase: "map", label: "Create first offer",
+    key: "first_offer", phase: "map", label: "Create first offer", category: "income",
     timeEstimate: "~10 min",
     whyItMatters: "An offer drives residents through your door — and every redemption hands you a new customer contact you own. It doesn't have to be a discount: a bonus, upgrade, bundle, priority booking, free add-on, or VIP perk all work — what matters is it's compelling enough to make someone actually come in.",
     howTo: [
@@ -601,7 +605,7 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     scoreImpact: "medium",
   },
   {
-    key: "add_events", phase: "map", label: "Add events",
+    key: "add_events", phase: "map", label: "Add events", category: "income",
     timeEstimate: "~5 min each",
     whyItMatters: "Events give residents a reason to visit now, and give the Campaign Builder (Phase 5) more to promote.",
     howTo: [
@@ -614,7 +618,7 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     scoreImpact: "low",
   },
   {
-    key: "connect_gbp", phase: "reputation", label: "Connect Google Business Profile",
+    key: "connect_gbp", phase: "reputation", label: "Connect Google Business Profile", category: "reputation",
     timeEstimate: "~5 min",
     whyItMatters: "Google is where new customers judge you and where your review requests point. Nothing else in reputation works until this is connected.",
     howTo: [
@@ -629,7 +633,7 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     scoreImpact: "medium",
   },
   {
-    key: "review_engine", phase: "reputation", label: "Turn on review engine",
+    key: "review_engine", phase: "reputation", label: "Turn on review engine", category: "reputation",
     timeEstimate: "~10 min",
     whyItMatters: "Reviews are the #1 thing people check before choosing a local business — and responding to every review, good and bad, signals you care, builds trust, and lifts your Google ranking. (Industry research puts each extra Google star at roughly 5–9% more revenue.) Doing this by hand is a grind; this automates all of it.",
     howTo: [
@@ -643,7 +647,7 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     scoreImpact: "high",
   },
   {
-    key: "ai_respond_past_reviews", phase: "reputation", label: "Turn on AI responses to past reviews",
+    key: "ai_respond_past_reviews", phase: "reputation", label: "Turn on AI responses to past reviews", category: "reputation",
     timeEstimate: "~3 min",
     whyItMatters: "A separate, one-time action from turning on requests for new reviews — this responds to every review your business already has, so nothing from before you joined sits unanswered.",
     howTo: [
@@ -657,7 +661,7 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     scoreImpact: "medium",
   },
   {
-    key: "first_review_request", phase: "reputation", label: "Send first review request",
+    key: "first_review_request", phase: "reputation", label: "Send first review request", category: "reputation",
     timeEstimate: "~2 min",
     whyItMatters: "A quick way to prove the review engine actually works before you rely on it for everyone. To text, you first need a business number with A2P completed (see the A2P side quest) — email works right away.",
     howTo: [
@@ -671,7 +675,7 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     scoreImpact: "low",
   },
   {
-    key: "reviews_widget", phase: "reputation", label: "Add reviews widget to website",
+    key: "reviews_widget", phase: "reputation", label: "Add reviews widget to website", category: "reputation",
     timeEstimate: "~5 min",
     whyItMatters: "Fresh reviews on your own site are social proof right where people decide — and they update themselves.",
     howTo: [
@@ -684,7 +688,7 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     scoreImpact: "low",
   },
   {
-    key: "import_contacts", phase: "list", label: "Import contacts",
+    key: "import_contacts", phase: "list", label: "Import contacts", category: "income",
     timeEstimate: "~10 min (established shortcut: your biggest instant win — you already have the list)",
     whyItMatters: "The people who already know you are your cheapest, highest-converting customers — but you can only market to the ones whose name, phone, and email you own. A big owned list is free marketing forever that no platform can take.",
     howTo: [
@@ -699,7 +703,7 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     scoreImpact: "medium",
   },
   {
-    key: "ongoing_capture", phase: "list", label: "Set up ongoing capture (QR/table tents)",
+    key: "ongoing_capture", phase: "list", label: "Set up ongoing capture (QR/table tents)", category: "income",
     timeEstimate: "Varies",
     whyItMatters: "This is the joint marketing effort between you and ClickUpLocal — you capture the customer in person, we market to them forever after.",
     howTo: [
@@ -712,7 +716,7 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     scoreImpact: "medium",
   },
   {
-    key: "smart_website", phase: "everywhere", label: "Get Smart Website",
+    key: "smart_website", phase: "everywhere", label: "Get Smart Website", category: "branding",
     timeEstimate: "~20–45 min to set up",
     whyItMatters: "Your Smart Website is your listing, your website, and your marketing hub in one — the \"business brain\" that gets you found in Google (SEO), AI answers (AEO), and local/AI search (GEO).",
     howTo: [
@@ -726,7 +730,7 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     scoreImpact: "high",
   },
   {
-    key: "optimize_gbp_nap", phase: "everywhere", label: "Optimize Google profile + NAP",
+    key: "optimize_gbp_nap", phase: "everywhere", label: "Optimize Google profile + NAP", category: "branding",
     timeEstimate: "~15 min",
     whyItMatters: "A fully complete Google Business Profile is required to truly be found — incomplete profiles get buried. Your NAP (Name, Address, Phone) must be identical everywhere — when it doesn't match, Google and AI stop trusting you and rank you lower.",
     howTo: [
@@ -743,7 +747,7 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     scoreImpact: "high",
   },
   {
-    key: "campaign_start", phase: "campaigns", label: "Start a campaign",
+    key: "campaign_start", phase: "campaigns", label: "Start a campaign", category: "income",
     timeEstimate: "A couple minutes",
     whyItMatters: "One offer or event becomes the seed for a full week of marketing — you don't start from a blank page.",
     howTo: [
@@ -757,7 +761,7 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     scoreImpact: "low",
   },
   {
-    key: "campaign_answer", phase: "campaigns", label: "Answer the campaign question",
+    key: "campaign_answer", phase: "campaigns", label: "Answer the campaign question", category: "income",
     timeEstimate: "A minute or two",
     whyItMatters: "Your answer + your profile + the offer is what makes the generated campaign sound like you, not a generic template.",
     howTo: [
@@ -770,7 +774,7 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     scoreImpact: "low",
   },
   {
-    key: "campaign_review", phase: "campaigns", label: "Review the five pieces",
+    key: "campaign_review", phase: "campaigns", label: "Review the five pieces", category: "income",
     timeEstimate: "~5 min",
     whyItMatters: "Skimming the five pieces before they go out keeps everything in your voice and catches anything off before customers see it.",
     howTo: [
@@ -783,7 +787,7 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     scoreImpact: "low",
   },
   {
-    key: "campaign_publish", phase: "campaigns", label: "Publish + send campaign",
+    key: "campaign_publish", phase: "campaigns", label: "Publish + send campaign", category: "income",
     timeEstimate: "~5 min your side",
     whyItMatters: "This is where the campaign actually reaches customers — the FAQ answer alone gets displayed on your Smart Website and your listing, answering customers before they even ask.",
     howTo: [
@@ -796,7 +800,7 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     scoreImpact: "medium",
   },
   {
-    key: "video_testimonials", phase: "grow", label: "Collect video testimonials",
+    key: "video_testimonials", phase: "grow", label: "Collect video testimonials", category: "reputation",
     timeEstimate: "~15 min",
     whyItMatters: "Nothing sells a local business like a real neighbor on camera. Collect a new one regularly, not just once.",
     howTo: [
@@ -809,7 +813,7 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     scoreImpact: "medium",
   },
   {
-    key: "paid_ads", phase: "grow", label: "Run paid ads (optional)",
+    key: "paid_ads", phase: "grow", label: "Run paid ads (optional)", category: "income",
     timeEstimate: "~15 min to start",
     whyItMatters: "Optional — turn ads on only once the basics are paying off. They bring in new customers faster than organic alone.",
     howTo: [
@@ -821,7 +825,7 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     scoreImpact: "low",
   },
   {
-    key: "ask_referral", phase: "grow", label: "Ask for a referral",
+    key: "ask_referral", phase: "grow", label: "Ask for a referral", category: "income",
     timeEstimate: "~2 min",
     whyItMatters: "Referrals are the natural close of a strong month — a neighbor who just heard your own results is the warmest possible source of the next local business.",
     howTo: [
@@ -846,7 +850,7 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
 export const PLAYBOOK_A2P_PHASE: PlaybookPhase = { key: "a2p", label: "Turn on texting (A2P) — side quest" };
 export const PLAYBOOK_A2P_STEPS: PlaybookStepDef[] = [
   {
-    key: "a2p_get_number", phase: "a2p", label: "Get a marketing phone number",
+    key: "a2p_get_number", phase: "a2p", label: "Get a marketing phone number", category: "presence",
     timeEstimate: "~5 min",
     whyItMatters: "You need a number before you can register for A2P — this is the first domino. To send review requests and campaigns by text, your business has to be registered (a phone-carrier requirement, not a ClickUpLocal one).",
     howTo: ["Go to Settings → Phone Numbers → Add a Number.", "Pick a local number."],
@@ -855,7 +859,7 @@ export const PLAYBOOK_A2P_STEPS: PlaybookStepDef[] = [
     scoreImpact: "low",
   },
   {
-    key: "a2p_business_profile", phase: "a2p", label: "Complete business profile details",
+    key: "a2p_business_profile", phase: "a2p", label: "Complete business profile details", category: "presence",
     timeEstimate: "~10 min",
     whyItMatters: "Registration is rejected without these — legal name, address, EIN, website, and contact all have to be on file first.",
     howTo: ["Go to Settings → Business Profile.", "Fill in your legal business name, address, EIN, website, and contact info."],
@@ -864,7 +868,7 @@ export const PLAYBOOK_A2P_STEPS: PlaybookStepDef[] = [
     scoreImpact: "low",
   },
   {
-    key: "a2p_register", phase: "a2p", label: "Register for A2P",
+    key: "a2p_register", phase: "a2p", label: "Register for A2P", category: "presence",
     timeEstimate: "A few minutes to submit",
     whyItMatters: "This is the actual carrier registration — a phone-carrier requirement (not a ClickUpLocal one) that has to clear before texting works.",
     howTo: [
@@ -877,7 +881,7 @@ export const PLAYBOOK_A2P_STEPS: PlaybookStepDef[] = [
     scoreImpact: "low",
   },
   {
-    key: "a2p_wait_approval", phase: "a2p", label: "Wait for approval",
+    key: "a2p_wait_approval", phase: "a2p", label: "Wait for approval", category: "presence",
     timeEstimate: "A few days",
     whyItMatters: "Approval takes a few days — email keeps working meanwhile, so nothing stalls while you wait.",
     howTo: ["Wait for carrier approval (typically a few days).", "Once approved, texting switches on across your review requests and campaigns."],
@@ -892,7 +896,7 @@ export const PLAYBOOK_A2P_STEPS: PlaybookStepDef[] = [
 export const PLAYBOOK_EMAIL_DOMAIN_PHASE: PlaybookPhase = { key: "email_domain", label: "Set up dedicated email domain — side quest" };
 export const PLAYBOOK_EMAIL_DOMAIN_STEPS: PlaybookStepDef[] = [
   {
-    key: "email_domain_setup", phase: "email_domain", label: "Set up a dedicated email domain",
+    key: "email_domain_setup", phase: "email_domain", label: "Set up a dedicated email domain", category: "presence",
     timeEstimate: "~10 min (DNS records)",
     whyItMatters: "Improves your email deliverability so newsletters and review requests land in the inbox instead of spam.",
     howTo: [
@@ -913,7 +917,7 @@ export const PLAYBOOK_EMAIL_DOMAIN_STEPS: PlaybookStepDef[] = [
 export const PLAYBOOK_ONGOING_PHASE: PlaybookPhase = { key: "ongoing", label: "Monthly retention (ambassador)" };
 export const PLAYBOOK_ONGOING_STEPS: PlaybookStepDef[] = [
   {
-    key: "monthly_proof_report", phase: "ongoing", label: "Send monthly proof-of-results report",
+    key: "monthly_proof_report", phase: "ongoing", label: "Send monthly proof-of-results report", category: "income",
     timeEstimate: "Recurring, monthly",
     whyItMatters: "The single most important recurring retention task — a business that sees a clear win in their inbox every month builds a habit of expecting value from us, which is exactly what makes renewal automatic. A skipped month is itself an at-risk signal.",
     howTo: [
@@ -988,6 +992,28 @@ export function playbookCompletion(clientId: string, tasks: Task[]) {
   const total = PLAYBOOK_STEPS.length;
   const next = PLAYBOOK_STEPS.find((s) => !done.has(s.key)) ?? null;
   return { done, doneCount: done.size, total, pct: Math.round((done.size / total) * 100), next };
+}
+
+/** Owner-facing dashboard progress bars (branding/reputation/presence/income) —
+ * unlike playbookCompletion()'s "X of 22" (which only counts PLAYBOOK_STEPS,
+ * the main path), this tallies every entry in PLAYBOOK_ALL_STEPS, since a
+ * category bar shouldn't silently exclude an owner's A2P/email-domain/ongoing
+ * progress just because those steps live outside the main phase ordering. */
+export function playbookCompletionByCategory(clientId: string, tasks: Task[]) {
+  const stepTasks = tasks.filter((t) => t.clientId === clientId && t.playbookStepKey);
+  const done = new Set(stepTasks.filter((t) => t.status === "done").map((t) => t.playbookStepKey as string));
+  const categories: Record<PlaybookStepDef["category"], { done: number; total: number }> = {
+    branding: { done: 0, total: 0 },
+    reputation: { done: 0, total: 0 },
+    presence: { done: 0, total: 0 },
+    income: { done: 0, total: 0 },
+  };
+  for (const step of PLAYBOOK_ALL_STEPS) {
+    const bucket = categories[step.category];
+    bucket.total += 1;
+    if (done.has(step.key)) bucket.done += 1;
+  }
+  return categories;
 }
 
 // GHL contacts store state inconsistently — full name ("California"), abbreviation
@@ -1220,6 +1246,12 @@ export interface Task {
    * customer-facing Playbook (on the business's public listing) will match
    * against — never match on the editable title. */
   playbookStepKey?: string | null;
+  /** Who (or what) created this task — a roster member id, "u_claude" (fully
+   * automated system creation, matching the sentinel already used for
+   * automated comments), "client" (raised from the public waiting page), or
+   * null (legacy row, or a path that predates this field). Recurrence clones
+   * propagate the original creator rather than stamping a new one. */
+  createdBy?: string | null;
 }
 
 /** A custom Kanban-style column for one project's own task board (e.g.
@@ -1263,12 +1295,35 @@ export const territoryClientId = (territoryId: string) => TERRITORY_CLIENT_PREFI
 
 export const STATUS_META: Record<TaskStatus, { label: string; dot: string; chip: string }> = {
   todo: { label: "To do", dot: "#94a3b8", chip: "#f1f5f9" },
-  in_progress: { label: "In progress", dot: "#3b82f6", chip: "#eff6ff" },
+  in_progress: { label: "Progress", dot: "#3b82f6", chip: "#eff6ff" },
   review: { label: "Review", dot: "#f59e0b", chip: "#fffbeb" },
-  changes_requested: { label: "Change Requests", dot: "#ef4444", chip: "#fef2f2" },
+  changes_requested: { label: "Changes", dot: "#ef4444", chip: "#fef2f2" },
+  waiting: { label: "Waiting", dot: "#14b8a6", chip: "#f0fdfa" },
   done: { label: "Done", dot: "#22c55e", chip: "#f0fdf4" },
 };
-export const STATUS_ORDER: TaskStatus[] = ["todo", "in_progress", "review", "changes_requested", "done"];
+export const STATUS_ORDER: TaskStatus[] = ["todo", "in_progress", "review", "changes_requested", "waiting", "done"];
+
+// Status "waiting" and Task.waitingOnClient must always move together — this
+// is the one place that rule lives. Every mutation path (update/patchTask
+// client-side, the public /waiting/[token]/respond route server-side) must
+// run its patch through this before writing, so the "⏳ Waiting on client"
+// assignee option, the public client-response page, and the Waiting column
+// never drift out of agreement with each other.
+export function applyWaitingStatusSync(before: { status: TaskStatus; waitingOnClient?: boolean }, patch: Partial<Task>): Partial<Task> {
+  const out: Partial<Task> = {};
+  if (patch.status === "waiting") {
+    out.waitingOnClient = true;
+    if (patch.assigneeId === undefined) out.assigneeId = null;
+  } else if (patch.status !== undefined && before.status === "waiting") {
+    out.waitingOnClient = false;
+  } else if (patch.waitingOnClient === true && patch.status === undefined) {
+    out.status = "waiting";
+    if (patch.assigneeId === undefined) out.assigneeId = null;
+  } else if (patch.waitingOnClient === false && patch.status === undefined && before.status === "waiting") {
+    out.status = "review";
+  }
+  return out;
+}
 
 // Parses describeFieldChange's (Cockpit.tsx) event strings into a structured
 // before/after pair — used by TaskDrawer's Activity diff cards and by the

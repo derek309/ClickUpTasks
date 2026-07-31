@@ -74,6 +74,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     contact_id: client.id.startsWith("cl_") ? client.id.slice(3) : null,
     due: todayIso(),
     client_response: { body: text, attachments, submittedAt: nowIso },
+    created_by: "client",
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 

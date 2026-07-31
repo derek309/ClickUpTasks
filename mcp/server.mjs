@@ -23,7 +23,7 @@ async function sb(path, method = "GET", body) {
   return t ? JSON.parse(t) : null;
 }
 const enc = encodeURIComponent;
-const STATUSES = ["todo", "in_progress", "review", "changes_requested", "done"];
+const STATUSES = ["todo", "in_progress", "review", "changes_requested", "waiting", "done"];
 const GHL = "https://services.leadconnectorhq.com";
 const SUB2LOC = { c_agency: "7B0Y8xCOblcTHzYnM1Kc", c_directory: "GN4HK1ybbTBWcolEjLHl" };
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36";
@@ -207,10 +207,15 @@ server.tool("create_task",
     }
     const t = {
       id: rid("t_"), project_id: pid, client_id, title: title.trim(), description: description || "",
-      status: "todo", priority: priority || "normal", assignee_id: assigneeIdResolved,
+      // "waiting" status and waiting_on_client always move together (see
+      // data.ts's applyWaitingStatusSync) — this tool bypasses that helper
+      // (separate Node process, no app import), so it replicates the same
+      // invariant inline instead of just setting the flag on its own.
+      status: waiting_on_client ? "waiting" : "todo", priority: priority || "normal", assignee_id: assigneeIdResolved,
       waiting_on_client: Boolean(waiting_on_client),
       contact_id: client_id.startsWith("cl_") ? client_id.slice(3) : null,
       due: due || addDaysIso(todayIso(), 1),
+      created_by: ME,
     };
     await sb("tasks", "POST", t);
     await members();
@@ -235,17 +240,28 @@ server.tool("update_task",
     if (description !== undefined) patch.description = description;
     if (priority !== undefined) patch.priority = priority;
     if (due !== undefined) patch.due = due;
+    // "waiting" status and waiting_on_client always move together (see
+    // data.ts's applyWaitingStatusSync) — only fetch the task's current
+    // status when a change here could actually cross that boundary, to
+    // avoid a round-trip on a plain title/description/due edit.
+    let before = null;
+    if (assignee_id !== undefined || waiting_on_client !== undefined) {
+      [before] = await sb(`tasks?select=status&id=eq.${enc(id)}`);
+      if (!before) return { content: [{ type: "text", text: `No task ${id}.` }] };
+    }
     if (assignee_id !== undefined) {
       const resolved = await resolveAssignee(assignee_id);
       if (resolved.error) return { content: [{ type: "text", text: resolved.error }] };
       patch.assignee_id = resolved.id;
       patch.waiting_on_client = false;
+      if (before.status === "waiting") patch.status = "review";
     }
     if (waiting_on_client !== undefined) {
       patch.waiting_on_client = waiting_on_client;
       // Setting the flag clears the assignee (mirrors the app); clearing it
       // just drops the flag and leaves assignment to an explicit assignee_id.
-      if (waiting_on_client) patch.assignee_id = null;
+      if (waiting_on_client) { patch.assignee_id = null; patch.status = "waiting"; }
+      else if (before.status === "waiting") patch.status = "review";
     }
     if (!Object.keys(patch).length) return { content: [{ type: "text", text: "Nothing to update — provide at least one field." }] };
     const [t] = await sb(`tasks?id=eq.${enc(id)}`, "PATCH", patch);
@@ -271,10 +287,19 @@ server.tool("delete_task",
   });
 
 server.tool("set_task_status",
-  "Set a task's status (todo | in_progress | review | changes_requested | done). Use to start or complete work.",
+  "Set a task's status (todo | in_progress | review | changes_requested | waiting | done). Use to start or complete work. Setting \"waiting\" also marks the task waiting on the client (clearing its assignee), same as the app's Waiting column.",
   { id: z.string(), status: z.enum(STATUSES) },
   async ({ id, status }) => {
-    const [t] = await sb(`tasks?id=eq.${enc(id)}`, "PATCH", { status });
+    const patch = { status };
+    // "waiting" status and waiting_on_client always move together (see
+    // data.ts's applyWaitingStatusSync) — replicated here since this tool
+    // is a separate Node process with no app import.
+    if (status === "waiting") { patch.waiting_on_client = true; patch.assignee_id = null; }
+    else {
+      const [before] = await sb(`tasks?select=status&id=eq.${enc(id)}`);
+      if (before?.status === "waiting") patch.waiting_on_client = false;
+    }
+    const [t] = await sb(`tasks?id=eq.${enc(id)}`, "PATCH", patch);
     let ghl = "";
     if (t?.ghl_task_id) { try { const ok = await pushGhlStatus(t); ghl = ok ? " (synced to GoHighLevel)" : " (GoHighLevel push failed)"; } catch { ghl = " (GoHighLevel push errored)"; } }
     return { content: [{ type: "text", text: `Set ${id} → ${status}.${ghl}` }] };

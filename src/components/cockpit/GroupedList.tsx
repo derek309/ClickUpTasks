@@ -164,7 +164,7 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
     if (key === "assignee") return <InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a, waitingOnClient: false })} onSetWaiting={() => onPatch(task.id, { waitingOnClient: true, assigneeId: null })} />;
     if (key === "due") return <InlineDue value={task.due} overdue={overdue} recurrence={task.recurrence} onChange={(d) => onPatch(task.id, { due: d })} onRecurrenceChange={(r) => onPatch(task.id, { recurrence: r })} />;
     if (key === "comments") return <InlineComments task={task} onAddComment={onAddComment} />;
-    if (key === "contact") { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return <span className="truncate text-[13px] text-muted">{ct?.name ?? "—"}</span>; }
+    if (key === "contact") { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return <span className="truncate text-[11px] text-muted">{ct?.name ?? "—"}</span>; }
     if (key === "labels") return <LabelChips ids={task.labelIds} />;
     return null;
   };
@@ -188,13 +188,13 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
             {/* Project crumb is redundant once the Client column is already
                 shown (My Work, All tasks) — keep it only in single-client
                 views where there's no other column carrying that context. */}
-            {!showClient && crumb && <span className="truncate text-[13px] leading-tight text-muted">{crumb}</span>}
+            {!showClient && crumb && <span className="truncate text-[11px] leading-tight text-muted">{crumb}</span>}
             <span className="flex min-w-0 items-center gap-1.5">
               {delegated && <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">Delegated</span>}
-              <span className="line-clamp-none min-w-0 flex-1 break-words text-[17px] font-medium leading-snug sm:line-clamp-2" title={task.title}>{task.title}</span>
+              <span className="line-clamp-none min-w-0 flex-1 break-words text-[15px] font-medium leading-snug sm:line-clamp-2" title={task.title}>{task.title}</span>
               {task.recurrence !== "none" && <span title={describeRecurrence(task.recurrence, task.recurrenceInterval, task.recurrenceUnit, task.recurrenceDaysOfMonth)}><I.repeat className="shrink-0 text-muted" /></span>}
               {task.attachments.length > 0 && <I.clip className="shrink-0 text-muted" />}
-              {task.subtasks.length > 0 && <span className="inline-flex shrink-0 items-center gap-0.5 text-[13px] text-muted"><I.check />{doneSubs}/{task.subtasks.length}</span>}
+              {task.subtasks.length > 0 && <span className="inline-flex shrink-0 items-center gap-0.5 text-[11px] text-muted"><I.check />{doneSubs}/{task.subtasks.length}</span>}
             </span>
           </button>
         </div>
@@ -202,7 +202,7 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
             the avatar); on sm+ `contents` dissolves the wrapper so each cell
             drops back into its own grid column. */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pl-11 sm:contents sm:pl-0">
-          {showClient && <span className="flex min-w-0 items-center gap-1.5 text-[15px]"><span className="h-2 w-2 shrink-0 rounded-full" style={{ background: client?.color }} /><span className="truncate">{client?.name}</span></span>}
+          {showClient && <span className="flex min-w-0 items-center gap-1.5 text-[13px]"><span className="h-2 w-2 shrink-0 rounded-full" style={{ background: client?.color }} /><span className="truncate">{client?.name}</span></span>}
           {cols.map((c) => <div key={c.key} className="min-w-0">{cell(c.key)}</div>)}
         </div>
       </div>
@@ -246,7 +246,7 @@ function InlineStatus({ value, onChange }: { value: TaskStatus; onChange: (s: Ta
   const [pos, setPos] = useState({ top: 0, left: 0 });
   return (
     <div className="relative">
-      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 144, STATUS_ORDER.length * 32 + 8)); setOpen((o) => !o); }} className="inline-flex items-center gap-1.5 rounded px-1 py-0.5 text-[15px] font-medium hover:bg-background">
+      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 144, STATUS_ORDER.length * 32 + 8)); setOpen((o) => !o); }} className="inline-flex items-center gap-1.5 rounded px-1 py-0.5 text-[13px] font-medium hover:bg-background">
         <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[value].dot }} /> {STATUS_META[value].label}
       </button>
       {open && (<>
@@ -274,7 +274,7 @@ function InlinePriority({ value, onChange }: { value: Priority; onChange: (p: Pr
   const options = manualPriorityOptions(value);
   return (
     <div className="relative">
-      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 128, options.length * 32 + 8)); setOpen((o) => !o); }} className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[15px] font-medium hover:bg-background" style={{ color: value === "none" ? "var(--muted)" : PRIORITY_META[value].color }}>
+      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 128, options.length * 32 + 8)); setOpen((o) => !o); }} className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[13px] font-medium hover:bg-background" style={{ color: value === "none" ? "var(--muted)" : PRIORITY_META[value].color }}>
         {value === "none" ? "—" : (<><I.flag />{PRIORITY_META[value].label}</>)}
       </button>
       {open && (<>
@@ -333,7 +333,7 @@ function InlineComments({ task, onAddComment }: { task: Task; onAddComment: (tas
   const send = () => { if (!body.trim()) return; onAddComment(task.id, body); setBody(""); };
   return (
     <div className="relative flex justify-center">
-      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 320, 360)); setOpen((o) => !o); }} className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[13px] text-muted hover:bg-background">
+      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 320, 360)); setOpen((o) => !o); }} className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-muted hover:bg-background">
         <I.comment className={`h-[18px] w-[18px] ${visible.length ? "" : "opacity-30"}`} /> {visible.length > 0 && visible.length}
       </button>
       {open && (<>
@@ -407,7 +407,7 @@ export function InlineDue({ value, overdue, recurrence = "none", onChange, onRec
   const tone = overdue ? "font-medium text-danger" : strong ? (value ? "font-semibold text-accent" : "font-medium text-accent/70") : "text-muted";
   return (
     <>
-      <button ref={ref} onClick={openIt} className={`inline-flex items-center gap-1 rounded px-1 py-0.5 text-[13px] hover:bg-background ${tone}`}>
+      <button ref={ref} onClick={openIt} className={`inline-flex items-center gap-1 rounded px-1 py-0.5 text-[11px] hover:bg-background ${tone}`}>
         {value ? friendlyDue(value) : emptyLabel}{recurrence !== "none" && <I.repeat className="text-accent" />}
       </button>
       {open && <DatePopover pos={pos} value={value} recurrence={recurrence} onSelect={(d) => { onChange(d); setOpen(false); }} onRecurrenceChange={onRecurrenceChange} onClose={() => setOpen(false)} />}

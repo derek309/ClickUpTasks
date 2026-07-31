@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { resolveTrackedClientId } from "@/lib/ghlConversationTask";
 import { plannerWeekLabel } from "@/lib/data";
+import { verifyClickUpTasksKey } from "@/lib/verifyBridgeKey";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -35,8 +36,7 @@ const SYSTEM_AUTHOR_ID = "u_claude";
 
 export async function POST(req: NextRequest) {
   if (!adminConfigured) return NextResponse.json({ error: "Not configured" }, { status: 501 });
-  const key = process.env.CLICKUPTASKS_API_KEY || "";
-  if (!key || req.headers.get("x-clickuptasks-key") !== key) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!verifyClickUpTasksKey(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => ({} as any));
   const event: string = body?.event ?? "";
@@ -158,7 +158,7 @@ export async function POST(req: NextRequest) {
         : `${businessName} responded to a newsletter invite. Reach out to move them toward claiming their listing and booking an appointment.`;
       await supabaseAdmin.from("tasks").insert({
         id: taskId, project_id: projectId, client_id: clientId, title: TASK_TITLE, priority: "urgent",
-        description,
+        description, created_by: "client",
         comments: [newComment],
       });
     }

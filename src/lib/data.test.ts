@@ -13,6 +13,9 @@ import {
   users,
   clientHealth,
   normalizeState,
+  playbookCompletionByCategory,
+  PLAYBOOK_ALL_STEPS,
+  applyWaitingStatusSync,
   TODAY,
   type User,
   type Task,
@@ -242,6 +245,81 @@ describe("clientHealth", () => {
   it("only considers tasks belonging to the given client", () => {
     const tasks = [mkTask({ clientId: "cl_other", due: "2000-01-01", status: "todo" })];
     expect(clientHealth("cl_a", tasks)).toBe("calm");
+  });
+});
+
+describe("playbookCompletionByCategory", () => {
+  it("totals every category to the full catalog count when nothing is done", () => {
+    const cats = playbookCompletionByCategory("cl_a", []);
+    const totals = Object.fromEntries(Object.entries(cats).map(([k, v]) => [k, v.total]));
+    const expected = { branding: 0, reputation: 0, presence: 0, income: 0 };
+    for (const step of PLAYBOOK_ALL_STEPS) expected[step.category] += 1;
+    expect(totals).toEqual(expected);
+    expect(Object.values(cats).every((v) => v.done === 0)).toBe(true);
+  });
+
+  it("counts a done task only toward its own step's category", () => {
+    const step = PLAYBOOK_ALL_STEPS.find((s) => s.key === "upload_photos")!; // category: branding
+    const tasks = [mkTask({ clientId: "cl_a", status: "done", playbookStepKey: step.key })];
+    const cats = playbookCompletionByCategory("cl_a", tasks);
+    expect(cats.branding.done).toBe(1);
+    expect(cats.reputation.done).toBe(0);
+    expect(cats.presence.done).toBe(0);
+    expect(cats.income.done).toBe(0);
+  });
+
+  it("ignores tasks from other clients", () => {
+    const step = PLAYBOOK_ALL_STEPS.find((s) => s.key === "upload_photos")!;
+    const tasks = [mkTask({ clientId: "cl_other", status: "done", playbookStepKey: step.key })];
+    const cats = playbookCompletionByCategory("cl_a", tasks);
+    expect(cats.branding.done).toBe(0);
+  });
+
+  it("ignores non-playbook tasks and not-done playbook tasks", () => {
+    const step = PLAYBOOK_ALL_STEPS.find((s) => s.key === "connect_gbp")!; // category: reputation
+    const tasks = [
+      mkTask({ clientId: "cl_a", status: "done", playbookStepKey: null }),
+      mkTask({ clientId: "cl_a", status: "todo", playbookStepKey: step.key }),
+    ];
+    const cats = playbookCompletionByCategory("cl_a", tasks);
+    expect(cats.reputation.done).toBe(0);
+  });
+});
+
+describe("applyWaitingStatusSync", () => {
+  it("moving status to waiting sets waitingOnClient and clears the assignee", () => {
+    const before = { status: "todo" as const, waitingOnClient: false };
+    expect(applyWaitingStatusSync(before, { status: "waiting" })).toEqual({ waitingOnClient: true, assigneeId: null });
+  });
+
+  it("moving status to waiting respects an explicit assigneeId already in the patch", () => {
+    const before = { status: "todo" as const, waitingOnClient: false };
+    expect(applyWaitingStatusSync(before, { status: "waiting", assigneeId: "u_x" })).toEqual({ waitingOnClient: true });
+  });
+
+  it("moving status away from waiting clears waitingOnClient", () => {
+    const before = { status: "waiting" as const, waitingOnClient: true };
+    expect(applyWaitingStatusSync(before, { status: "done" })).toEqual({ waitingOnClient: false });
+  });
+
+  it("setting waitingOnClient true directly (no explicit status) sets status to waiting", () => {
+    const before = { status: "todo" as const, waitingOnClient: false };
+    expect(applyWaitingStatusSync(before, { waitingOnClient: true })).toEqual({ status: "waiting", assigneeId: null });
+  });
+
+  it("clearing waitingOnClient while status was waiting advances status to review", () => {
+    const before = { status: "waiting" as const, waitingOnClient: true };
+    expect(applyWaitingStatusSync(before, { waitingOnClient: false, assigneeId: "u_x" })).toEqual({ status: "review" });
+  });
+
+  it("clearing waitingOnClient when status wasn't waiting does nothing extra", () => {
+    const before = { status: "todo" as const, waitingOnClient: false };
+    expect(applyWaitingStatusSync(before, { waitingOnClient: false })).toEqual({});
+  });
+
+  it("an unrelated patch (e.g. just a due-date change) is a no-op", () => {
+    const before = { status: "todo" as const, waitingOnClient: false };
+    expect(applyWaitingStatusSync(before, { due: "2026-08-01" })).toEqual({});
   });
 });
 

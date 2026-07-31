@@ -77,6 +77,7 @@ async function upsertConversationTask(contact: Contact, ghlContactId: string | n
     id: newTaskId, project_id: projectId, client_id: contact.client_id,
     title: `Reply to ${titleCase(contact.name)}`, priority: "conversation", contact_id: contact.id, due: today,
     attachments: ghlUrl ? [{ id: "at_" + crypto.randomUUID(), name: "GHL conversation", kind: "link", size: "", url: ghlUrl }] : [],
+    created_by: null,
   });
   if (taskErr) return null;
   return newTaskId;

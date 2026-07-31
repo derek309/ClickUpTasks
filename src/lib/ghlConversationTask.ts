@@ -162,6 +162,7 @@ export async function upsertConversationTask(
     priority: "conversation",
     contact_id: contact.id,
     due,
+    created_by: null,
     // On a brand-new task there's nothing to preserve, so a null "no change"
     // result just means "no meeting location" — fall back to the base array.
     attachments: (() => { const base = ghlUrl ? [{ id: "at_" + crypto.randomUUID(), name: "GHL conversation", kind: "link", size: "", url: ghlUrl }] : []; return withMeetingLocation(base, opts?.location) ?? base; })(),

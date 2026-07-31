@@ -22,6 +22,7 @@ import {
   NURTURE_CHECK_IN_DAYS,
   STATUS_META,
   STATUS_ORDER,
+  applyWaitingStatusSync,
   isCompletionEvent,
   CLIENT_STATUS_META,
   CLIENT_STATUS_ORDER,
@@ -1180,6 +1181,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   const myNotifs = notifications.filter((n) => n.recipientId === me.id);
   const unread = myNotifs.filter((n) => !n.read).length;
+  // A live comment/mention thread is easy to miss since notifications aren't
+  // reliably checked — surfaced separately from the bell, as its own
+  // top-of-list group/sort-boost (see buildGroups/sortTasks below), above
+  // even Urgent priority.
+  const hasUnreadReply = (t: Task) => notifications.some((n) => n.taskId === t.id && n.recipientId === me.id && n.kind === "message" && !n.read);
   const markAllNotifsRead = () => {
     setNotifications((ns) => ns.map((n) => (n.recipientId === me.id ? { ...n, read: true } : n)));
     markNotifsReadDb(me.id);
@@ -1246,6 +1252,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setNotifications((ns) => ns.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
     markNotifReadDb(n.id);
   };
+  // Notifications otherwise only get marked read in bulk via the bell
+  // dropdown (markAllNotifsRead) — since the whole point of the "Needs your
+  // reply" boost is that notifications aren't reliably checked, actually
+  // opening the task itself should clear it too.
+  const markTaskNotifsRead = (taskId: string) => {
+    const ids = notifications.filter((n) => n.taskId === taskId && n.recipientId === me.id && n.kind === "message" && !n.read).map((n) => n.id);
+    if (!ids.length) return;
+    setNotifications((ns) => ns.map((n) => (ids.includes(n.id) ? { ...n, read: true } : n)));
+    ids.forEach((id) => markNotifReadDb(id));
+  };
   const openNotification = (n: Notification) => {
     if (!n.read) markNotifRead(n);
     // A DM notification's actorId is exactly who sent it — that's the thread to open.
@@ -1275,7 +1291,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const dir = sortDir === "desc" ? -1 : 1;
     const arr = [...list];
     if (sortBy === "due") arr.sort((a, b) => ((a.due ?? "9999").localeCompare(b.due ?? "9999")) * dir);
-    else if (sortBy === "priority") arr.sort((a, b) => (PRIORITY_META[b.priority].rank - PRIORITY_META[a.priority].rank) * dir);
+    else if (sortBy === "priority") arr.sort((a, b) => {
+      // 4 sits one above "conversation"'s rank of 3 — a live reply thread
+      // outranks even an auto-created GHL conversation task.
+      const rank = (t: Task) => (hasUnreadReply(t) ? 4 : PRIORITY_META[t.priority].rank);
+      return (rank(b) - rank(a)) * dir;
+    });
     else if (sortBy === "title") arr.sort((a, b) => a.title.localeCompare(b.title) * dir);
     else if (sortBy === "status") arr.sort((a, b) => (STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status)) * dir);
     else if (sortBy === "assignee") arr.sort((a, b) => ((userById(a.assigneeId)?.name ?? "~").localeCompare(userById(b.assigneeId)?.name ?? "~")) * dir);
@@ -1933,7 +1954,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           id: newId("t_"), projectId: pbProjectId, clientId, title: step.label, description: "",
           status: "todo", priority: "none", assigneeId: null, contactId: clientId.slice(3), due: null,
           recurrence: step.recurring ? "monthly" : "none", labelIds: [], ghlTaskId: null, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
-          playbookStepKey: step.key,
+          playbookStepKey: step.key, createdBy: null,
         });
       } else if (existing.title !== step.label) {
         toWrite.push({ ...existing, title: step.label });
@@ -2018,7 +2039,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   type Grp = { key: string; label: string; color: string; tasks: Task[] };
   const buildGroups = (list: Task[], dim: typeof groupBy = groupBy): Grp[] => {
     if (dim === "status") return STATUS_ORDER.map((s) => ({ key: s, label: STATUS_META[s].label, color: STATUS_META[s].dot, tasks: list.filter((t) => t.status === s) }));
-    if (dim === "priority") return PRIORITY_ORDER.map((p) => ({ key: p, label: PRIORITY_META[p].label, color: PRIORITY_META[p].color, tasks: list.filter((t) => t.priority === p) }));
+    if (dim === "priority") {
+      const needsReply = list.filter(hasUnreadReply);
+      const needsReplyIds = new Set(needsReply.map((t) => t.id));
+      const rest = list.filter((t) => !needsReplyIds.has(t.id));
+      const buckets = PRIORITY_ORDER.map((p) => ({ key: p, label: PRIORITY_META[p].label, color: PRIORITY_META[p].color, tasks: rest.filter((t) => t.priority === p) }));
+      return needsReply.length ? [{ key: "needs_reply", label: "Needs your reply", color: "#0ea5e9", tasks: needsReply }, ...buckets] : buckets;
+    }
     if (dim === "due") { const defs: [string, string, string][] = [["overdue", "Overdue", "#ef4444"], ["today", "Due today", "#f59e0b"], ["tomorrow", "Due tomorrow", "#eab308"], ["week", "This week", "#3b82f6"], ["nextWeek", "Next week", "#6366f1"], ["later", "Later", "#94a3b8"], ["none", "No due date", "#cbd5e1"]]; return defs.map(([k, l, c]) => ({ key: k, label: l, color: c, tasks: list.filter((t) => dueBucket(t) === k) })); }
     return visibleProjects.map((p) => ({ key: p.id, label: p.name, color: clientById(p.clientId)?.color ?? "#94a3b8", tasks: list.filter((t) => t.projectId === p.id) }));
   };
@@ -2070,6 +2097,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [navSnapshot, setNavSnapshot] = useState<{ taskId: string | null; ids: string[] }>({ taskId: null, ids: [] });
   // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
   useEffect(() => { if (openTaskId) setNavSnapshot({ taskId: openTaskId, ids: orderedTaskIds }); }, [openTaskId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (openTaskId) markTaskNotifsRead(openTaskId); }, [openTaskId]);
   const navTaskIds = navSnapshot.taskId === openTaskId ? navSnapshot.ids : orderedTaskIds;
   const openTaskIdx = openTaskId ? navTaskIds.indexOf(openTaskId) : -1;
   const goToTask = (delta: number) => { if (openTaskIdx < 0) return; const next = navTaskIds[openTaskIdx + delta]; if (next) setOpenTaskId(next); };
@@ -2119,6 +2148,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       contactId: activeClient.slice(3),
       due: groupBy === "due" && groupKey === "today" ? TODAY : TOMORROW,
       recurrence: "none", labelIds: [], ghlTaskId: null, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
+      createdBy: me.id,
     };
     setTasks((ts) => [...ts, t]);
     if (projectWrite) projectWrite.then(() => upsertTask(t, me.id));
@@ -2143,6 +2173,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       status: "todo", priority: isManuallyAssignable(priority) ? priority : "none",
       assigneeId: me.id, contactId: clientId.slice(3), due,
       recurrence: "none", labelIds: [], ghlTaskId: null, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
+      createdBy: me.id,
     };
     setTasks((ts) => [...ts, t]);
     if (projectWrite) projectWrite.then(() => upsertTask(t, me.id));
@@ -2172,6 +2203,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       status: "todo", priority: "normal", assigneeId: me.id,
       contactId: clientId.startsWith("cl_") ? clientId.slice(3) : null,
       due: TOMORROW, recurrence: "none", labelIds: [], ghlTaskId: null, private: isPrivate, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
+      createdBy: me.id,
     };
     setTasks((ts) => [...ts, t]);
     upsertTask(t, me.id);
@@ -2186,6 +2218,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       assigneeId: me.id, contactId: null,
       due: groupBy === "due" && groupKey === "today" ? TODAY : TOMORROW,
       recurrence: "none", labelIds: [], ghlTaskId: null, private: true, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
+      createdBy: me.id,
     };
     setTasks((ts) => [...ts, t]);
     upsertTask(t, me.id);
@@ -2194,9 +2227,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // --- mutations ------------------------------------------------------------
 
   const update = (id: string, patch: Partial<Task>) => {
-    setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, ...patch } : t)));
     const cur = tasksRef.current.find((t) => t.id === id);
-    if (cur) { const merged = { ...cur, ...patch }; upsertTask(merged, me.id); syncGhlIfLinked(merged, patch); }
+    // Keeps status:"waiting" and waitingOnClient in lockstep regardless of
+    // which mutation path is used — setTaskStage (the Kanban drag handler)
+    // patches status through here, bypassing patchTask entirely, so this
+    // needs its own copy of the sync rather than relying on patchTask's.
+    const synced = cur ? { ...patch, ...applyWaitingStatusSync(cur, patch) } : patch;
+    setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, ...synced } : t)));
+    if (cur) { const merged = { ...cur, ...synced }; upsertTask(merged, me.id); syncGhlIfLinked(merged, patch); }
   };
 
   // Field changes on a task that are worth a line in its Activity feed. Stored
@@ -2222,26 +2260,29 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const patchTask = (id: string, patch: Partial<Task>) => {
     const before = tasksRef.current.find((x) => x.id === id);
     if (!before) return;
-    const events = describeFieldChange(before, patch).map((body) => ({ id: newId("cm_"), authorId: me.id, body, at: new Date().toISOString(), kind: "event" as const }));
-    const updated: Task = { ...before, ...patch, comments: events.length ? [...before.comments, ...events] : before.comments };
+    // Keeps status:"waiting" and waitingOnClient in lockstep — see update()'s
+    // matching comment for why this can't just live in one place.
+    const synced: Partial<Task> = { ...patch, ...applyWaitingStatusSync(before, patch) };
+    const events = describeFieldChange(before, synced).map((body) => ({ id: newId("cm_"), authorId: me.id, body, at: new Date().toISOString(), kind: "event" as const }));
+    const updated: Task = { ...before, ...synced, comments: events.length ? [...before.comments, ...events] : before.comments };
     let clone: Task | null = null;
-    if (patch.status === "done" && before.status !== "done" && before.recurrence !== "none") {
+    if (synced.status === "done" && before.status !== "done" && before.recurrence !== "none") {
       const nextDue = advanceDue(before.due, before.recurrence, before.recurrenceInterval, before.recurrenceUnit, before.recurrenceDaysOfMonth);
       clone = { ...before, id: newId("t_"), status: "todo", due: nextDue, subtasks: before.subtasks.map((s) => ({ ...s, id: newId("s_"), done: false })), comments: [], attachments: [...before.attachments], ghlTaskId: null };
       pushToast(`🔁 Recurring — next occurrence created for ${formatDue(nextDue)}`);
     }
     setTasks((prev) => { let next = prev.map((x) => (x.id === id ? updated : x)); if (clone) next = [...next, clone]; return next; });
     upsertTask(updated, me.id);
-    syncGhlIfLinked(updated, patch);
+    syncGhlIfLinked(updated, synced);
     if (clone) upsertTask(clone, me.id);
     if (patch.assigneeId && patch.assigneeId !== me.id && patch.assigneeId !== before.assigneeId) {
       notify(patch.assigneeId, `${me.name} assigned you “${before.title}”`, id);
       pushToast(`Notified ${userById(patch.assigneeId)?.name}`);
     }
     // Finishing work is worth surfacing to the rest of the team, not just silence.
-    if (patch.status && (patch.status === "review" || patch.status === "changes_requested" || patch.status === "done") && patch.status !== before.status) {
+    if (synced.status && (synced.status === "review" || synced.status === "changes_requested" || synced.status === "done") && synced.status !== before.status) {
       users.filter((u) => u.id !== me.id && (u.role === "admin" || before.assigneeId === u.id)).forEach((u) => {
-        notify(u.id, `${me.name} moved “${before.title}” to ${STATUS_META[patch.status as TaskStatus].label}`, id);
+        notify(u.id, `${me.name} moved “${before.title}” to ${STATUS_META[synced.status as TaskStatus].label}`, id);
       });
     }
     // A due-date change is easy for the assignee to miss otherwise.
@@ -2618,7 +2659,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         id: newId("t_"), projectId: projectId!, clientId: activeClient, title: g.title, description: g.description,
         status: "todo", priority: "none", assigneeId: null, contactId: contact.id,
         due: g.due, recurrence: "none", labelIds: [], ghlTaskId: g.ghlTaskId, private: false, subtasks: [], attachments: [], comments: [],
-        createdAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(), createdBy: me.id,
       }));
       setTasks((ts) => [...ts, ...newTasks]);
       newTasks.forEach((t) => upsertTask(t, me.id));
@@ -2810,7 +2851,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       id: newId("t_"), projectId: projectId!, clientId, title, description: "",
       status: "todo", priority: "normal", assigneeId: owner, contactId,
       due: addDaysIso(TODAY, offset), recurrence: "none", labelIds: [], ghlTaskId: null, private: false,
-      subtasks: [], comments: [], attachments: [], createdAt: new Date().toISOString(),
+      subtasks: [], comments: [], attachments: [], createdAt: new Date().toISOString(), createdBy: me.id,
     }));
     setTasks((ts) => [...ts, ...created]);
     created.forEach((t) => upsertTask(t, me.id));
@@ -2900,7 +2941,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       contactId: clientId.startsWith("cl_") ? clientId.slice(3) : null,
       due: TOMORROW, recurrence: "none", labelIds: [], ghlTaskId: null, private: false,
       subtasks: tpl.checklistItems.map((title) => ({ id: newId("s_"), title, done: false })),
-      attachments: [], comments: [], createdAt: new Date().toISOString(),
+      attachments: [], comments: [], createdAt: new Date().toISOString(), createdBy: me.id,
     };
     setTasks((ts) => [...ts, t]);
     upsertTask(t, me.id);
@@ -2927,7 +2968,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       status: "todo", priority: pt.priority ?? "normal", assigneeId: me.id, contactId,
       due: typeof pt.dueOffsetDays === "number" ? addDaysIso(TODAY, pt.dueOffsetDays) : null,
       recurrence: "none", labelIds: [], ghlTaskId: null, private: false,
-      subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
+      subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(), createdBy: me.id,
     }));
     setTasks((ts) => [...ts, ...created]);
     created.forEach((t) => upsertTask(t, me.id));
@@ -3202,7 +3243,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       id: newId("t_"), projectId, clientId: p.clientId, title: title.trim(), description: "",
       status: stage?.isDone ? "done" : "todo", priority: "normal", assigneeId: me.id, contactId: p.clientId.slice(3), due: null,
       recurrence: "none", labelIds: [], ghlTaskId: null, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
-      stageId,
+      stageId, createdBy: me.id,
     };
     setTasks((ts) => [...ts, t]);
     upsertTask(t, me.id);

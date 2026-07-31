@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
     // own token) — but let them explicitly hand it to a teammate instead.
     assignee_id: typeof body.assignee_id === "string" && body.assignee_id ? body.assignee_id : caller.memberId,
     contact_id: clientId.startsWith("cl_") ? clientId.slice(3) : null,
-    due, attachments,
+    due, attachments, created_by: caller.memberId,
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ id, title, clientId, projectId });

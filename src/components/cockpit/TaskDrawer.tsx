@@ -372,11 +372,14 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   // Comment/event timestamps already cover every field-change and message —
   // the latest one is a true "last updated", not just a metadata guess.
   const lastActivityAt = task.comments.reduce((max, c) => (c.at > max ? c.at : max), task.createdAt);
+  const creatorName = task.createdBy === "u_claude" ? "Automated"
+    : task.createdBy === "client" ? "the client"
+    : task.createdBy ? (userById(task.createdBy)?.name ?? null) : null;
   const metaLine = (
-    <div className="-mt-0.5 mb-1 text-[13px] text-muted">Created {new Date(task.createdAt).toLocaleDateString()} · Updated {timeAgo(lastActivityAt)}</div>
+    <div className="-mt-0.5 mb-1 text-[13px] text-muted">Created {new Date(task.createdAt).toLocaleDateString()}{creatorName ? ` by ${creatorName}` : ""} · Updated {timeAgo(lastActivityAt)}</div>
   );
   const statusBlock = (
-    <div className="mt-4 grid grid-cols-5 overflow-hidden rounded-lg border">
+    <div className="mt-4 grid grid-cols-6 overflow-hidden rounded-lg border">
       {STATUS_ORDER.map((s) => {
         const m = STATUS_META[s];
         const on = task.status === s;
@@ -390,6 +393,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
           <button key={s} onClick={() => onPatch({ status: s })} className={`flex items-center justify-center gap-1.5 border-r px-2 py-2.5 text-[13px] font-medium transition last:border-r-0 ${on ? "text-white" : "text-muted hover:bg-background"}`} style={on ? { background: m.dot, borderColor: m.dot } : {}}>
             {s === "done" ? <I.check className={iconCls} />
               : s === "changes_requested" ? <I.flag className={iconCls} />
+              : s === "waiting" ? <I.user className={iconCls} />
               : s === "review" ? <I.search className={iconCls} />
               : s === "in_progress" ? <I.repeat className={iconCls} />
               : <span className={`block h-3 w-3 shrink-0 rounded-full border-2 ${on ? "border-white" : ""}`} style={!on ? { borderColor: m.dot } : {}} />}
