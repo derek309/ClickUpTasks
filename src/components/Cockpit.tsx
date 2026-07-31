@@ -2337,27 +2337,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       },
     });
   };
-  // "Move all due dates forward" — a client/project list can pile up many
-  // dated tasks (a slow week leaves everything overdue) and re-dating each
-  // one by hand is exactly the tedium Derek flagged. Pick a new date for
-  // whichever open task is due soonest; every other dated open task on this
-  // client/project shifts by that same day-delta, preserving relative
-  // spacing (a task 3 days after another stays 3 days after) instead of
-  // collapsing everything onto one date the way the bulk-select toolbar's
-  // due-date field already does for a manually-selected set.
-  const pushAllDatesForward = (newEarliestDate: string) => {
-    const dated = baseTasks.filter((t) => t.status !== "done" && t.due);
-    if (!dated.length) { pushToast("No dated open tasks here to move."); return; }
-    const earliest = dated.reduce((a, b) => (b.due! < a.due! ? b : a)).due!;
-    const delta = daysBetween(earliest, newEarliestDate);
-    if (delta === 0) return;
-    dated.forEach((t) => update(t.id, { due: addDaysIso(t.due!, delta) }));
-    pushToast(`Moved ${dated.length} due date${dated.length === 1 ? "" : "s"} ${delta > 0 ? "forward" : "back"} ${Math.abs(delta)} day${Math.abs(delta) === 1 ? "" : "s"}.`);
-  };
-  // Backs the follow-up pill's own edit, not the overflow-menu "Move all due
-  // dates" above — different problem. That one shifts every dated task by
-  // the same delta to preserve spacing; this one is "we're waiting longer
-  // than planned, snooze whatever's actually blocking it" — only tasks due
+  // Backs the follow-up pill's own edit — "we're waiting longer than
+  // planned, snooze whatever's actually blocking it" — only tasks due
   // today or already overdue jump to the new date (anything due later is
   // untouched, since it was never what pushed the follow-up date out).
   // Scoped to the viewer's own assigned tasks (Derek, Jul 27): moving the
@@ -3646,13 +3627,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           )}
           <button onClick={() => { setHeaderMoreOpen(false); copyClientForClaude(); }}
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>✳</span> Copy for Claude</button>
-          <div title="Shifts every open dated task here by the same number of days, preserving their relative spacing"
-            className="rounded-md px-2.5 py-1.5 hover:bg-background">
-            <div className="mb-1 flex items-center gap-2 text-[13px]"><I.calendar className="shrink-0" /> Move all due dates to…</div>
-            <input type="date" onClick={(e) => e.stopPropagation()}
-              onChange={(e) => { if (e.target.value) { setHeaderMoreOpen(false); pushAllDatesForward(e.target.value); } e.target.value = ""; }}
-              className="w-full rounded border bg-background px-1.5 py-1 text-[13px] outline-none" />
-          </div>
           <button onClick={() => {
               setHeaderMoreOpen(false);
               window.location.href = claudeWorkUrl({ client: activeClient, project: activeProject });
@@ -4126,13 +4100,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     )}
                     <button onClick={() => { setHeaderMoreOpen(false); copyClientForClaude(); }}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>✳</span> Copy for Claude</button>
-                    <div title="Shifts every open dated task here by the same number of days, preserving their relative spacing"
-                      className="rounded-md px-2.5 py-1.5 hover:bg-background">
-                      <div className="mb-1 flex items-center gap-2 text-[13px]"><I.calendar className="shrink-0" /> Move all due dates to…</div>
-                      <input type="date" onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => { if (e.target.value) { setHeaderMoreOpen(false); pushAllDatesForward(e.target.value); } e.target.value = ""; }}
-                        className="w-full rounded border bg-background px-1.5 py-1 text-[13px] outline-none" />
-                    </div>
                     <button onClick={() => {
                         setHeaderMoreOpen(false);
                         window.location.href = claudeWorkUrl({ client: activeClient, project: activeProject });
