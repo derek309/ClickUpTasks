@@ -142,10 +142,12 @@ export async function GET(req: NextRequest) {
       hasOffer: Boolean(it.has_offer),
       hasActiveEvents: Boolean(it.has_active_events),
       hasRecentPost: Boolean(it.has_recent_post),
-      // `/?p=<id>` is WordPress's built-in permalink redirect — works
-      // without needing the listing's actual slug, which this endpoint
-      // doesn't return.
-      url: WP_BASE ? `${WP_BASE}/?p=${it.id}` : "",
+      // Prefer WP's own real permalink (listing_url, now returned by the
+      // light row too) over the `/?p=<id>` shortlink fallback — the brief
+      // export wants the actual canonical URL, not a redirect-through-id
+      // link. Only falls back when an older WP deploy hasn't shipped the
+      // field yet.
+      url: String(it.listing_url ?? "").trim() || (WP_BASE ? `${WP_BASE}/?p=${it.id}` : ""),
       // The hydrated /sales payload returns the score as a string ("72") and
       // categories as an array of breadcrumbs ("A › B › Leaf"); normalize both.
       score: (() => { const n = parseInt(String(it.clickuplocal_score ?? ""), 10); return Number.isFinite(n) ? n : null; })(),
