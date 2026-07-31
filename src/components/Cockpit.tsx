@@ -2327,6 +2327,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           .filter((x): x is { id: string; prev: Partial<Task> } => !!x);
         ids.forEach((id) => patchTask(id, patch));
         setConfirmDialog(null);
+        clearSelection();
         pushToast(`${summary} for ${n} task${plural}`, {
           label: "Undo",
           run: () => {
@@ -3294,6 +3295,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           .filter((x): x is { id: string; prev: Partial<Task> } => !!x);
         movable.forEach((id) => moveTaskToClient(id, clientId, true));
         setConfirmDialog(null);
+        clearSelection();
         pushToast(`Moved ${n} task${plural} to ${name}`, {
           label: "Undo",
           run: () => {

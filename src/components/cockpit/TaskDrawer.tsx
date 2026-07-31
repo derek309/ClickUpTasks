@@ -379,7 +379,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     <div className="-mt-0.5 mb-1 text-[13px] text-muted">Created {new Date(task.createdAt).toLocaleDateString()}{creatorName ? ` by ${creatorName}` : ""} · Updated {timeAgo(lastActivityAt)}</div>
   );
   const statusBlock = (
-    <div className="mt-4 grid grid-cols-6 overflow-hidden rounded-lg border">
+    <div className="mt-4 grid grid-cols-3 overflow-hidden rounded-lg border sm:grid-cols-6">
       {STATUS_ORDER.map((s) => {
         const m = STATUS_META[s];
         const on = task.status === s;
@@ -390,7 +390,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
         // do" actually visible instead of nearly invisible at small size.
         const iconCls = `h-3 w-3 shrink-0 ${on ? "text-white" : ""}`;
         return (
-          <button key={s} onClick={() => onPatch({ status: s })} className={`flex items-center justify-center gap-1.5 border-r px-2 py-2.5 text-[13px] font-medium transition last:border-r-0 ${on ? "text-white" : "text-muted hover:bg-background"}`} style={on ? { background: m.dot, borderColor: m.dot } : {}}>
+          <button key={s} onClick={() => onPatch({ status: s })} className={`flex items-center justify-center gap-1.5 border-r px-2 py-2.5 text-[13px] font-medium transition [&:nth-of-type(3n)]:border-r-0 sm:[&:nth-of-type(3n)]:border-r sm:last:border-r-0 ${on ? "text-white" : "text-muted hover:bg-background"}`} style={on ? { background: m.dot, borderColor: m.dot } : {}}>
             {s === "done" ? <I.check className={iconCls} />
               : s === "changes_requested" ? <I.flag className={iconCls} />
               : s === "waiting" ? <I.user className={iconCls} />

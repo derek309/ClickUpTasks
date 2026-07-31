@@ -61,7 +61,7 @@ export function FolderRail({
   };
 
   const chip = (label: React.ReactNode, active: boolean, onClick: () => void, menuKey?: string, menuBody?: React.ReactNode, drag?: { dim: boolean; onDragStart: () => void; onDrop: () => void }) => (
-    <span className={`relative inline-flex shrink-0 ${drag?.dim ? "opacity-40" : ""}`}
+    <span key={menuKey} className={`relative inline-flex shrink-0 ${drag?.dim ? "opacity-40" : ""}`}
       draggable={canAdmin && !!drag} onDragStart={drag?.onDragStart}
       onDragOver={(e) => { if (canAdmin && drag) e.preventDefault(); }} onDrop={(e) => { if (drag) { e.preventDefault(); drag.onDrop(); } }}>
       <button onClick={onClick}
@@ -79,12 +79,12 @@ export function FolderRail({
     </span>
   );
 
-  const item = (label: string, onClick: () => void, danger?: boolean) => (
-    <button onClick={() => { setMenu(null); onClick(); }} className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-background ${danger ? "text-danger" : ""}`}>{label}</button>
+  const item = (label: string, onClick: () => void, danger?: boolean, key?: string) => (
+    <button key={key} onClick={() => { setMenu(null); onClick(); }} className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-background ${danger ? "text-danger" : ""}`}>{label}</button>
   );
 
   return (
-    <div className="no-scrollbar flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b bg-background/40 px-4 py-2 sm:flex-wrap sm:overflow-visible">
+    <div className="no-scrollbar flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b bg-background/40 px-4 py-2 lg:flex-wrap lg:overflow-visible">
       {chip("All", allActive, onSelectAll)}
       {playbookList && (
         <span className="relative inline-flex shrink-0">
@@ -119,7 +119,7 @@ export function FolderRail({
         `list:${l.id}`,
         <>
           {folders.length > 0 && <div className="px-2 pb-0.5 pt-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Move to</div>}
-          {folders.map((f) => item(f.name, () => onMoveList(l.id, f.id)))}
+          {folders.map((f) => item(f.name, () => onMoveList(l.id, f.id), false, f.id))}
           <div className="my-0.5 border-t" />
           {item("Rename list", () => onRenameList(l.id))}
           {item("Delete list", () => onDeleteList(l.id), true)}

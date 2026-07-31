@@ -70,7 +70,7 @@ export default function SettingsPanel({
   }
 
   return (
-    <div>
+    <div className="px-5 py-3">
       <div className="mb-3 flex items-center gap-2">
             <span className="text-[15px] font-semibold">GoHighLevel</span>
             {configured === null ? (
