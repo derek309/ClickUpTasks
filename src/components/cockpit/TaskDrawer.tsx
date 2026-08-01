@@ -86,7 +86,7 @@ export function RecipientField({ label, value, onChange, contacts }: { label: st
   );
 }
 
-export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, onDraftDescription, draftingDescription, onRegenerateAiSummary, aiSummaryBusy, pushToast, onOpenClaudeSetup }: {
+export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, onRegenerateAiSummary, aiSummaryBusy, pushToast, onOpenClaudeSetup }: {
   task: Task; comment: string; setComment: (v: string) => void;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; navTasks: Task[]; onOpenTask: (id: string) => void; onAddSibling: (title: string) => void; onPrev: () => void; onNext: () => void;
@@ -109,6 +109,10 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   // link" quick-fill. Null when the client has no share token yet and the
   // caller isn't an admin (Cockpit's getClientShareUrl already toasts why).
   onGetTaskLink?: () => string | null;
+  canAdmin?: boolean; // gates message edit/delete — a wrongly sent client-facing message is corrected by an admin, not any assignee
+  onDeleteMessage?: (id: string) => void;
+  onEditMessage?: (id: string, body: string, subject?: string | null) => void;
+  onCopyClientLink?: () => void; // copies this client's public /waiting/[token] link — same link onGetTaskLink mints, just for the person, not one task
   onDraftDescription?: (title: string, description: string, prompt?: string) => Promise<string | null>; // Gemini draft, never saves
   draftingDescription?: boolean;
   onRegenerateAiSummary?: () => void; // AI tab's "Regenerate" — only ever called on click, never automatically
@@ -210,10 +214,23 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const replyToEmail = (m: Message) => {
     setRightTab("email");
     setEmailFocusNonce((n) => n + 1);
-    const subj = m.subject ?? "";
-    setMsgSubject(/^re:/i.test(subj) ? subj : `Re: ${subj}`.trim());
+    // A chat message has no subject — leave it blank rather than producing
+    // a bare "Re:" (`Re: ${""}`.trim() used to do exactly that).
+    const subj = (m.subject ?? "").trim();
+    setMsgSubject(subj ? (/^re:/i.test(subj) ? subj : `Re: ${subj}`) : "");
     setMsgBody("");
     requestAnimationFrame(() => emailBodyRef.current?.focus());
+  };
+  // Admin-only correction for a message that already sent wrong (see
+  // src/app/api/messages/edit/route.ts for why this is a real API call, not
+  // just an onEditMessage(id, body) fire-and-forget like most edits here).
+  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  const startEditMessage = (m: Message) => { setEditingMsgId(m.id); setEditDraft(looksLikeHtml(m.body) ? htmlToText(m.body) : m.body); };
+  const saveEditMessage = (m: Message) => {
+    if (!onEditMessage || !editDraft.trim()) return;
+    onEditMessage(m.id, looksLikeHtml(m.body) ? plainTextToHtml(editDraft.trim()) : editDraft.trim(), m.subject);
+    setEditingMsgId(null);
   };
   // Rough SMS segment estimate, matching how carriers actually bill: GSM-7
   // encoding (plain ASCII + a handful of accented/Greek chars) fits 160
@@ -1079,9 +1096,23 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                       <span className="h-1.5 w-1.5 rounded-full bg-accent" /> New
                     </span>
                   )}
-                  {m.channel === "email" && onSendTaskMessage && (
-                    <button onClick={() => replyToEmail(m)} className="ml-auto shrink-0 rounded-md border border-accent/30 px-2 py-0.5 text-[12px] font-medium text-accent hover:bg-accent-soft">Reply</button>
-                  )}
+                  <span className="ml-auto flex shrink-0 items-center gap-1">
+                    {/* Chat has no equivalent of its own "send" surface on
+                        this side — replying through email is what actually
+                        reaches the client and lands back in this same
+                        thread, so it gets the identical shortcut email does. */}
+                    {(m.channel === "email" || m.channel === "chat") && onSendTaskMessage && editingMsgId !== m.id && (
+                      <button onClick={() => replyToEmail(m)} className="rounded-md border border-accent/30 px-2 py-0.5 text-[12px] font-medium text-accent hover:bg-accent-soft">Reply</button>
+                    )}
+                    {canAdmin && onEditMessage && editingMsgId !== m.id && (
+                      <button onClick={() => startEditMessage(m)} title="Edit (this doesn't unsend anything already delivered)" className="rounded-md border px-2 py-0.5 text-[12px] font-medium text-muted hover:bg-background hover:text-foreground">Edit</button>
+                    )}
+                    {canAdmin && onDeleteMessage && (
+                      <button
+                        onClick={() => { if (window.confirm("Delete this message? This only removes it from ClickUpTasks and the client's waiting page — it does not unsend a real email or text already delivered.")) onDeleteMessage(m.id); }}
+                        title="Delete" className="rounded-md border px-2 py-0.5 text-[12px] font-medium text-muted hover:border-red-300 hover:bg-red-50 hover:text-red-600">Delete</button>
+                    )}
+                  </span>
                 </div>
                 {m.subject && <div className="mt-1 text-[15px] font-medium">{m.subject}</div>}
                 {((m.cc && m.cc.length > 0) || (m.bcc && m.bcc.length > 0)) && (
@@ -1091,12 +1122,23 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                     {m.bcc && m.bcc.length > 0 && <span>Bcc: {m.bcc.join(", ")}</span>}
                   </div>
                 )}
-                {/* Real HTML for anything sent through the Journal's rich-text
-                    email composer (always starts with a tag); plain text
-                    otherwise (SMS, or an email from before that composer). */}
-                {looksLikeHtml(m.body)
-                  ? <div className="rte-content mt-1 text-[15px]" dangerouslySetInnerHTML={{ __html: m.body }} />
-                  : <CollapsibleText text={m.body} className="mt-1 text-[15px]" />}
+                {editingMsgId === m.id ? (
+                  <div className="mt-1.5 space-y-1.5">
+                    <textarea value={editDraft} onChange={(e) => setEditDraft(e.target.value)} rows={3} autoFocus
+                      className="w-full rounded-lg border bg-background px-2.5 py-2 text-[14px] outline-none focus:border-accent" />
+                    <div className="flex justify-end gap-2">
+                      <button onClick={() => setEditingMsgId(null)} className="rounded-md px-2.5 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
+                      <button onClick={() => saveEditMessage(m)} disabled={!editDraft.trim()} className="rounded-md bg-accent px-2.5 py-1 text-[13px] font-medium text-white disabled:opacity-40">Save</button>
+                    </div>
+                  </div>
+                ) : (
+                  /* Real HTML for anything sent through the Journal's rich-text
+                     email composer (always starts with a tag); plain text
+                     otherwise (SMS, or an email from before that composer). */
+                  looksLikeHtml(m.body)
+                    ? <div className="rte-content mt-1 text-[15px]" dangerouslySetInnerHTML={{ __html: m.body }} />
+                    : <CollapsibleText text={m.body} className="mt-1 text-[15px]" />
+                )}
                 {m.attachments && m.attachments.length > 0 && <div className="mt-1.5"><AttachmentThumbs items={m.attachments} onOpen={onDownloadFile} /></div>}
               </div>
             </div>
@@ -1252,7 +1294,10 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: clientStatusMeta(client.status).dot }} />
                     <span className="min-w-0 flex-1 truncate text-[14px] font-semibold">{client.name}</span>
                   </div>
-                  <div className="mb-2 mt-0.5 text-[12px] text-muted">{clientStatusMeta(client.status).label}</div>
+                  <div className="mb-2 mt-0.5 flex items-center justify-between gap-2 text-[12px] text-muted">
+                    <span>{clientStatusMeta(client.status).label}</span>
+                    {onCopyClientLink && <button onClick={onCopyClientLink} className="shrink-0 font-medium text-accent hover:underline">Copy client link</button>}
+                  </div>
                   <div className="flex items-center gap-1.5">
                     {messageDest?.phone ? (
                       <a href={`tel:${messageDest.phone}`} className="flex-1 rounded-md border px-2 py-1 text-center text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">Call</a>
@@ -1294,6 +1339,12 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               {siblingsBlock}
               <div className="mt-6">
                 {hasMessaging && (
+                  <>
+                  {onCopyClientLink && (
+                    <div className="mb-1.5 text-right">
+                      <button onClick={onCopyClientLink} className="text-[12px] font-medium text-accent hover:underline">Copy client link</button>
+                    </div>
+                  )}
                   <div className="mb-2 flex items-center gap-1.5">
                     {messageDest?.phone ? (
                       <a href={`tel:${messageDest.phone}`} className="flex-1 rounded-md border px-2 py-1 text-center text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">Call</a>
@@ -1303,6 +1354,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                     <button onClick={() => switchRightTab("sms")} className={`flex-1 rounded-md border px-2 py-1 text-[13px] font-medium transition ${activeRightTab === "sms" ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>Text</button>
                     <button onClick={() => switchRightTab("email")} className={`flex-1 rounded-md border px-2 py-1 text-[13px] font-medium transition ${activeRightTab === "email" ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>Email</button>
                   </div>
+                  </>
                 )}
                 {rightTabBar}
                 {activeRightTab !== "ai" && <div className="mt-2">{commentsFeed}</div>}

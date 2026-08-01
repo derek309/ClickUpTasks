@@ -355,8 +355,10 @@ export const upsertFolder = (f: Folder) => supabase.from("folders").upsert(folde
 export const deleteFolderDb = (id: string) => supabase.from("folders").delete().eq("id", id).then(logErr);
 export const upsertStage = (s: Stage) => supabase.from("stages").upsert(stageToRow(s)).then(logErr);
 export const deleteStageDb = (id: string) => supabase.from("stages").delete().eq("id", id).then(logErr);
-// Messages are append-only (never edited), so insert not upsert. The caller
-// awaits the GHL send first (see Cockpit.tsx sendMessage) and only inserts an
+// Messages are insert-once from this call's perspective (never upserted) —
+// editing an existing row is a separate, admin-only path (see
+// src/app/api/messages/edit/route.ts), not this function. The caller awaits
+// the GHL send first (see Cockpit.tsx sendMessage) and only inserts an
 // outbound row after a confirmed success; this call itself is still
 // fire-and-forget from the UI's perspective, same as every other mutation here.
 export const insertMessage = (m: Message) => supabase.from("messages").insert(messageToRow(m)).then(logErr);
@@ -364,6 +366,10 @@ export const insertMessage = (m: Message) => supabase.from("messages").insert(me
 // inbound row for that contact in a single UPDATE.
 export const markMessagesReadDb = (contactId: string) =>
   supabase.from("messages").update({ read: true }).eq("contact_id", contactId).eq("read", false).then(logErr);
+// Admin-only per messages_delete RLS (see supabase/message-delete-policy.sql)
+// — a wrongly sent client-facing email/sms/chat message, not something any
+// assignee should be able to erase on their own.
+export const deleteMessageDb = (id: string) => supabase.from("messages").delete().eq("id", id).then(logErr);
 
 // Re-scopes every message on a Conversation task to a different task —
 // the write side of "merge this conversation into an existing task" (see
