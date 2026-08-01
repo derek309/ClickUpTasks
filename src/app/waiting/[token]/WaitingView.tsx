@@ -221,7 +221,7 @@ function TaskDetailBody({
                     would stretch edge to edge and be unreadable — but the
                     container itself is the full page width now, not a
                     narrow centered column. */}
-                <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[14px] lg:max-w-[640px] ${m.from === "client" ? "rounded-br-sm bg-accent text-white" : "rounded-bl-sm border bg-surface-2"}`}>
+                <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[14px] lg:max-w-[640px] ${m.from === "client" ? "rounded-br-sm bg-accent text-white" : "rounded-bl-sm border bg-surface"}`}>
                   {m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
                   <AttachmentGallery items={m.attachments} />
                   <div className={`mt-1 text-[11px] ${m.from === "client" ? "text-white/70" : "text-muted"}`}>
@@ -529,7 +529,7 @@ export default function WaitingView({ token }: { token: string }) {
       <button
         key={t.id}
         onClick={() => openTask(t.id)}
-        className="flex w-full items-center gap-3 rounded-xl border bg-surface px-4 py-3 text-left shadow-[var(--shadow-sm)] transition hover:bg-surface-2"
+        className="flex w-full items-center gap-3 rounded-xl border bg-surface px-4 py-3 text-left shadow-[var(--shadow-sm)] transition hover:bg-background"
       >
         <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: isDone ? "var(--success)" : t.needsResponse ? "var(--highlight)" : "var(--border)" }} />
         <div className="min-w-0 flex-1">
@@ -572,19 +572,20 @@ export default function WaitingView({ token }: { token: string }) {
         // strip instead of its own banner — brand, client, heading, and
         // progress all on a single line, with the privacy note folded in
         // underneath instead of repeated at the bottom of the page.
-        <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }} className="px-6 py-2.5 text-center md:px-10">
-          <div className="flex flex-wrap items-baseline justify-center gap-x-2 text-[13px] font-bold tracking-tight text-white">
-            <span>ClickUpLocal</span>
+        <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }} className="px-6 py-3 text-center md:px-10">
+          <div className="flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1 text-[14.5px] font-bold tracking-tight text-white">
             {clientName && <span>{clientName}</span>}
-            <span className="font-normal">Your open items</span>
+            <span className="font-normal">Tasks</span>
+            <span className="font-normal text-white/50">by ClickUpLocal</span>
+            {totalCount > 0 && (
+              <span className="flex items-center gap-1.5 font-normal text-white/80">
+                <span className="text-white/40">·</span>
+                <span>{doneCount} of {totalCount} done</span>
+                <span className="inline-block h-1 w-16 overflow-hidden rounded-full bg-white/20"><span className="block h-full rounded-full bg-white" style={{ width: `${progressPct}%` }} /></span>
+              </span>
+            )}
+            <span className="font-normal text-white/50"><span className="mr-2.5 text-white/40">·</span>This is a private link just for you. Please don&apos;t forward it.</span>
           </div>
-          {totalCount > 0 && (
-            <div className="mt-1 flex items-center justify-center gap-2">
-              <span className="text-[11.5px] text-white/70">{doneCount} of {totalCount} done</span>
-              <div className="h-1 w-20 overflow-hidden rounded-full bg-white/20"><div className="h-full rounded-full bg-white" style={{ width: `${progressPct}%` }} /></div>
-            </div>
-          )}
-          <p className="mt-0.5 text-[11px] text-white/50">This is a private link just for you. Please don&apos;t forward it.</p>
         </div>
       )}
 
@@ -681,18 +682,17 @@ export default function WaitingView({ token }: { token: string }) {
                 </div>
               ) : (
                 <div className="mb-3">
+                  {/* Folded the old standalone banner right into the button
+                      label instead of a separate caption underneath —
+                      same reminder, one line instead of two blocks. */}
                   <button onClick={() => setAddElseOpen(true)}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed bg-surface-2 py-2.5 text-[14px] font-bold text-accent transition hover:bg-surface"
+                    className="flex w-full flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-xl border-2 border-dashed bg-background py-2.5 text-[14px] text-accent transition hover:bg-surface"
                     style={{ borderColor: "color-mix(in srgb, var(--accent) 40%, var(--border))" }}>
-                    <span className="flex h-4 w-4 items-center justify-center rounded-full bg-accent text-[11px] font-black leading-none text-white">+</span> Add something else
+                    <span className="flex items-center gap-2 font-bold">
+                      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-accent text-[11px] font-black leading-none text-white">+</span> Add Something
+                    </span>
+                    <span className="text-[12.5px] font-normal">: One request per task, please. It&apos;s easier for us to track.</span>
                   </button>
-                  {/* Folded the old standalone banner into this one small
-                      caption instead of two separate blocks stacked on top
-                      of each other — same reminder, a fraction of the
-                      height. Deliberately under the usual 16px floor: a
-                      one-line aside under a button, not the kind of
-                      must-read instruction that rule exists to protect. */}
-                  <p className="mt-1 text-center text-[12px] text-muted">One request per task, please. It&apos;s easier for us to track.</p>
                 </div>
               )}
 
