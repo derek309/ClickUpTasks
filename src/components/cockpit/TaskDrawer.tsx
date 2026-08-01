@@ -814,11 +814,11 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       )}
       {msgAttBar}
       {/* Same rich-text editor the Journal composer and task descriptions
-          use; the paste-to-attach-an-image handler still works wrapped
-          around it — a paste event on a contentEditable child bubbles like
-          any other DOM event, same as the ⌘↵-to-send capture below it. */}
-      <div className="min-h-[160px] overflow-auto" onPaste={handleMsgPaste}>
-        <RichTextEditor key={`task-email-${emailFocusNonce}`} value={msgBody} onChange={setMsgBody} placeholder={chatStyleReply ? "Type a message…" : "Write an email…"} autoFocus />
+          use; the paste-to-attach-an-image handler and the ⌘↵-to-send
+          capture both still work wrapped around it — a keydown/paste event
+          on a contentEditable child bubbles like any other DOM event. */}
+      <div className="min-h-[160px] overflow-auto" onPaste={handleMsgPaste} onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitTaskMessage(); } }}>
+        <RichTextEditor key={`task-email-${emailFocusNonce}`} value={msgBody} onChange={setMsgBody} placeholder={chatStyleReply ? "Type a message… (⌘↵ to send)" : "Write an email… (⌘↵ to send)"} autoFocus />
       </div>
       <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
         <span className="text-[13px] text-muted">{wordCount(htmlToText(msgBody))} word{wordCount(htmlToText(msgBody)) === 1 ? "" : "s"}</span>

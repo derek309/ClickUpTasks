@@ -4,18 +4,21 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { todayIso, type Attachment } from "@/lib/data";
 import { sanitizeWaitingAttachments } from "@/lib/waitingAttachments";
 import { isRateLimited } from "@/lib/rateLimit";
+import { resolveNotifyRecipient, notifyTeamOfClientActivity } from "@/lib/waitingNotify";
 
 // Public, token-gated — lets the client raise a brand-new task themselves
 // ("need something else?"), not just reply to something we're already
-// waiting on them for. Mirrors ../respond/route.ts's reassignment logic
-// exactly (first client-following team member, else the first admin) and
-// stamps the request onto the new task's client_response field so it
-// renders through the exact same "Client response" panel in TaskDrawer and
-// the exact same "Submitted" card on this public page — no separate
-// rendering path needed for a client-originated task vs. a client-answered
-// one. Lands as a normal status:"todo" task (not a distinct pipeline
-// stage) — the highlighted client_response panel is what flags it as
-// needing a look, same as everywhere else in this feature.
+// waiting on them for. Stamps the request onto the new task's
+// client_response field so it renders through the exact same "Client
+// response" panel in TaskDrawer and the exact same "Submitted" card on this
+// public page — no separate rendering path needed for a client-originated
+// task vs. a client-answered one. ALSO inserts it as a real `messages` row
+// (channel: "chat") so the task's Activity feed and this page's own thread
+// show it from the start — without this, a task the client raised had
+// nothing in it to Reply to, since client_response alone never fed the
+// messages table the chat feature reads. Lands as a normal status:"todo"
+// task (not a distinct pipeline stage) — the highlighted client_response
+// panel is what flags it as needing a look, same as everywhere else here.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   if (!adminConfigured) return NextResponse.json({ error: "Not configured" }, { status: 501 });
   const { token } = await params;
@@ -56,14 +59,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     }
   }
 
-  const followers: string[] = Array.isArray(client.assigned_to) ? client.assigned_to : [];
-  let assignee: string | null = followers[0] ?? null;
-  if (!assignee) {
-    const { data: admin } = await supabaseAdmin
-      .from("profiles").select("member_id").eq("role", "admin").not("member_id", "is", null)
-      .order("created_at", { ascending: true }).limit(1).maybeSingle();
-    assignee = admin?.member_id ?? null;
-  }
+  const assignee = await resolveNotifyRecipient(client.assigned_to as string[] | null);
+  const contactId = client.id.startsWith("cl_") ? client.id.slice(3) : null;
 
   const title = text ? (text.length > 80 ? text.slice(0, 77) + "…" : text) : "New request";
   const taskId = "t_" + randomUUID();
@@ -71,19 +68,28 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   const { error } = await supabaseAdmin.from("tasks").insert({
     id: taskId, project_id: projectId, client_id: client.id, title, description: "",
     status: "todo", priority: "none", assignee_id: assignee,
-    contact_id: client.id.startsWith("cl_") ? client.id.slice(3) : null,
+    contact_id: contactId,
     due: todayIso(),
     client_response: { body: text, attachments, submittedAt: nowIso },
     created_by: "client",
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
+  if (contactId) {
+    await supabaseAdmin.from("messages").insert({
+      id: "msg_" + randomUUID(), contact_id: contactId, client_id: client.id, task_id: taskId,
+      channel: "chat", direction: "inbound", subject: null, body: text, attachments,
+      created_by: null, created_at: nowIso,
+    });
+  }
+
   if (assignee) {
-    await supabaseAdmin.from("notifications").insert({
-      id: "n_" + randomUUID(), recipient_id: assignee,
-      text: `${client.name} requested a new task: "${title}"`,
-      task_id: taskId, actor_id: null, client_id: client.id, project_id: projectId,
-      at: nowIso, read: false, kind: "activity",
+    await notifyTeamOfClientActivity({
+      notifyRecipient: assignee, clientId: client.id, taskId, projectId,
+      clientName: client.name, taskTitle: title,
+      notifText: `${client.name} requested a new task: "${title}".`,
+      previewText: text || null,
+      kind: "message",
     });
   }
 

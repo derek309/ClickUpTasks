@@ -16,7 +16,8 @@ type WaitingProject = { id: string; name: string };
 // One message in a task's running chat — see ./messages/route.ts (client
 // sends) and the team's existing task drawer (reads/sends the same
 // underlying `messages` row, just via the internal app instead of here).
-type WaitingMessage = { id: string; from: "team" | "client"; body: string; at: string; attachments: WaitingAttachment[] };
+type WaitingSender = { name: string; avatarUrl: string | null; color: string; initials: string };
+type WaitingMessage = { id: string; from: "team" | "client"; body: string; at: string; attachments: WaitingAttachment[]; sender?: WaitingSender | null };
 type WaitingTask = {
   id: string; projectId: string | null; title: string; due: string | null; description: string; status: string; needsResponse: boolean;
   attachments: WaitingAttachment[];
@@ -47,6 +48,24 @@ function kindFromName(name: string): Attachment["kind"] {
   return "doc";
 }
 const localId = () => `a_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+
+// Who's on the other end of a team message — a real photo if they've set
+// one, else a colored initials circle, same fallback the internal app's own
+// Avatar component uses (mirrored here rather than imported, since this
+// page deliberately doesn't pull in the cockpit component tree).
+function SenderAvatar({ sender }: { sender?: WaitingSender | null }) {
+  const size = 22;
+  if (!sender) return <span className="flex shrink-0 items-center justify-center rounded-full bg-accent text-[10px] font-bold text-white" style={{ width: size, height: size }}>CT</span>;
+  if (sender.avatarUrl) return (
+    // eslint-disable-next-line @next/next/no-img-element -- small inline avatar, not a next/image-friendly static asset.
+    <img src={sender.avatarUrl} alt={sender.name} title={sender.name} className="shrink-0 rounded-full object-cover" style={{ width: size, height: size }} />
+  );
+  return (
+    <span className="flex shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white" title={sender.name} style={{ width: size, height: size, background: sender.color }}>
+      {sender.initials}
+    </span>
+  );
+}
 
 // Mockups/screenshots/staging links the team attached to a task, or the
 // client's own reply attachments — same tile treatment either way, so the
@@ -169,6 +188,22 @@ export default function WaitingView({ token }: { token: string }) {
   // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [token]);
 
+  // Nothing pushes to this page in real time (it's public/unauthenticated,
+  // not wired into the app's Supabase Realtime channel), so if a client
+  // leaves it open, a team reply would otherwise never show up until they
+  // manually reload. Poll instead — paused while the tab isn't visible, so
+  // a forgotten background tab doesn't hammer the API forever. load()'s own
+  // draft-seeding only fills in NEW tasks, so a silent background refresh
+  // never clobbers a draft someone's mid-typing.
+  useEffect(() => {
+    const POLL_MS = 15000;
+    const tick = () => { if (document.visibilityState === "visible") load(); };
+    const id = setInterval(tick, POLL_MS);
+    document.addEventListener("visibilitychange", tick);
+    return () => { clearInterval(id); document.removeEventListener("visibilitychange", tick); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
   // Scroll the deep-linked task into view once its card exists — a one-shot
   // effect (empty ref, not re-armed) so a later state change (e.g. saving a
   // draft) doesn't yank the page back down to it.
@@ -179,6 +214,15 @@ export default function WaitingView({ token }: { token: string }) {
     scrolledToDeepLink.current = true;
     deepLinkRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [tasks, deepLinkTaskId]);
+
+  // Keep each task's thread pane scrolled to its newest message — runs
+  // after every load() (initial, post-send, or the background poll above),
+  // not just once, so a reply that arrives via polling is visible without
+  // the client having to scroll down themselves.
+  const threadRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  useEffect(() => {
+    for (const el of Object.values(threadRefs.current)) { if (el) el.scrollTop = el.scrollHeight; }
+  }, [tasks]);
 
   const sorted = useMemo(() => {
     if (!tasks) return [];
@@ -483,14 +527,20 @@ export default function WaitingView({ token }: { token: string }) {
                         <AttachmentGallery items={t.attachments} />
 
                         {displayThread.length > 0 && (
-                          <div className="mt-3 space-y-2">
+                          // Fixed-height scroll pane, not an ever-growing
+                          // card — a chatty thread otherwise makes the whole
+                          // page longer every time someone replies. Auto-
+                          // scrolled to the newest message (see the effect
+                          // above) so it opens already showing what's current.
+                          <div ref={(el) => { threadRefs.current[t.id] = el; }} className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
                             {displayThread.map((m) => (
-                              <div key={m.id} className={`flex ${m.from === "client" ? "justify-end" : "justify-start"}`}>
+                              <div key={m.id} className={`flex items-end gap-1.5 ${m.from === "client" ? "justify-end" : "justify-start"}`}>
+                                {m.from === "team" && <SenderAvatar sender={m.sender} />}
                                 <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[14px] ${m.from === "client" ? "rounded-br-sm bg-accent text-white" : "rounded-bl-sm border bg-surface-2"}`}>
                                   {m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
                                   <AttachmentGallery items={m.attachments} />
                                   <div className={`mt-1 text-[11px] ${m.from === "client" ? "text-white/70" : "text-muted"}`}>
-                                    {m.from === "client" ? "You" : "Team"} · {timeAgo(m.at)}
+                                    {m.from === "client" ? "You" : m.sender?.name ?? "Team"} · {timeAgo(m.at)}
                                   </div>
                                 </div>
                               </div>

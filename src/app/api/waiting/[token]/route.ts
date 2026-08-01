@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
-import { htmlToText, type Attachment } from "@/lib/data";
+import { htmlToText, initialsOf, type Attachment } from "@/lib/data";
 import { TASK_FILES_BUCKET } from "@/lib/db";
 import { isRateLimited } from "@/lib/rateLimit";
 
@@ -71,10 +71,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   // already scoped to a task via task_id, so this is the same data the
   // team's own task drawer reads, just filtered to this client and stripped
   // to a public-safe shape (no createdBy, no ghl/gmail ids, no cc/bcc).
-  type MessageRow = { id: string; task_id: string | null; direction: string; body: string; created_at: string; attachments: Attachment[] | null };
+  type MessageRow = { id: string; task_id: string | null; direction: string; body: string; created_at: string; attachments: Attachment[] | null; created_by: string | null };
   const taskIds = rows.map((t) => t.id);
   const { data: messageRows } = taskIds.length
-    ? await supabaseAdmin.from("messages").select("id, task_id, direction, body, created_at, attachments")
+    ? await supabaseAdmin.from("messages").select("id, task_id, direction, body, created_at, attachments, created_by")
         .eq("client_id", client.id).in("task_id", taskIds).order("created_at", { ascending: true })
     : { data: [] as MessageRow[] };
   const threadByTask = new Map<string, MessageRow[]>();
@@ -84,6 +84,19 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     list.push(m);
     threadByTask.set(m.task_id, list);
   }
+
+  // Who sent each outbound message — so the client sees a face/name, not
+  // just "Team". Batched once for every sender across every task, not
+  // per-message: name/color/avatar are the only profile fields that leave
+  // this public route.
+  const senderIds = Array.from(new Set((messageRows ?? []).map((m) => m.created_by).filter((id): id is string => !!id)));
+  const { data: senderRows } = senderIds.length
+    ? await supabaseAdmin.from("profiles").select("member_id, name, color, avatar_url").in("member_id", senderIds)
+    : { data: [] as { member_id: string; name: string; color: string; avatar_url: string | null }[] };
+  const senderById = new Map((senderRows ?? []).map((p) => [p.member_id as string, {
+    name: (p.name as string) || "Team", avatarUrl: (p.avatar_url as string | null) ?? null,
+    color: (p.color as string) || "#1b3a5c", initials: initialsOf((p.name as string) || "Team"),
+  }]));
 
   const tasks = await Promise.all(rows.map(async (t) => {
     const cr = t.client_response as { body: string; attachments: Attachment[]; submittedAt: string } | null;
@@ -100,6 +113,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
         body: htmlToText(m.body ?? ""),
         at: m.created_at,
         attachments: await resolveAttachments(m.attachments ?? []),
+        sender: m.direction === "outbound" && m.created_by ? senderById.get(m.created_by) ?? null : null,
       }))),
     ]);
     return {
