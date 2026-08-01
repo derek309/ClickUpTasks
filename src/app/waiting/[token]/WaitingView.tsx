@@ -282,13 +282,21 @@ export default function WaitingView({ token }: { token: string }) {
 
   // Reused for both the sidebar's vertical tab rail (desktop) and the
   // horizontal one shown inline on mobile — same buttons, different layout.
+  // Tailwind border-color utilities (border-highlight, border-accent, …)
+  // never win here: globals.css has an unlayered `* { border-color:
+  // var(--border) }` that beats any layered Tailwind utility regardless of
+  // specificity. Every colored border on this page has to go through
+  // inline style instead — the same workaround the pre-chat version of
+  // this file already used for the done/waiting card borders.
+  const tabPill = (active: boolean) => ({
+    className: `rounded-full border px-3 py-1.5 text-[13px] font-medium ${active ? "bg-accent text-white" : "bg-surface text-muted hover:bg-background"}`,
+    style: active ? { borderColor: "var(--highlight)" } : undefined,
+  });
   const projectTabs = (
     <>
-      <button onClick={() => setActiveProjectId(null)}
-        className={`rounded-full px-3 py-1.5 text-[13px] font-medium ${activeProjectId === null ? "border border-highlight bg-accent text-white" : "border bg-surface text-muted hover:bg-background"}`}>All</button>
+      <button onClick={() => setActiveProjectId(null)} {...tabPill(activeProjectId === null)}>All</button>
       {projects.map((p) => (
-        <button key={p.id} onClick={() => setActiveProjectId(p.id)}
-          className={`rounded-full px-3 py-1.5 text-[13px] font-medium ${activeProjectId === p.id ? "border border-highlight bg-accent text-white" : "border bg-surface text-muted hover:bg-background"}`}>{p.name}</button>
+        <button key={p.id} onClick={() => setActiveProjectId(p.id)} {...tabPill(activeProjectId === p.id)}>{p.name}</button>
       ))}
     </>
   );
@@ -338,9 +346,78 @@ export default function WaitingView({ token }: { token: string }) {
             <div className="min-w-0">
               {projects.length > 1 && <div className="mb-4 flex flex-wrap gap-1.5 md:hidden">{projectTabs}</div>}
 
-              <div className="mb-5 rounded-xl border border-highlight/35 bg-highlight-soft px-4 py-3 text-[16px] text-foreground">
+              <div className="mb-5 rounded-xl border bg-highlight-soft px-4 py-3 text-[16px] text-foreground" style={{ borderColor: "color-mix(in srgb, var(--highlight) 35%, var(--border))" }}>
                 <span className="font-bold">One request per line, please.</span> If you have more than one thing, give each its own line (or send them one at a time below). It helps us track and finish each one quickly instead of it getting lost inside a combined message.
               </div>
+
+              {addElseOpen ? (
+                <div className="mb-5 rounded-xl border bg-surface-2 p-4 shadow-[var(--shadow-sm)]">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="text-[15px] font-bold">Need something else?</div>
+                      <div className="mt-0.5 text-[13px] text-muted">Tell us what you need and we&apos;ll take a look.</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {projects.length > 1 && (
+                        <select value={effectiveNewProjectId ?? ""} onChange={(e) => setNewProjectId(e.target.value)} title="Which list this goes on"
+                          className="rounded-md border bg-background px-2 py-1 text-[13px] outline-none focus:border-accent">
+                          {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                      )}
+                      <button onClick={() => setAddElseOpen(false)} title="Close" className="text-muted hover:text-foreground">✕</button>
+                    </div>
+                  </div>
+                  <textarea
+                    autoFocus
+                    value={newBody}
+                    onChange={(e) => setNewBody(e.target.value)}
+                    placeholder="What do you need?"
+                    rows={3}
+                    className="mt-2 w-full rounded-lg border bg-surface px-2.5 py-2 text-[14px] outline-none focus:border-accent"
+                  />
+                  {newAttachments.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {newAttachments.map((a) => (
+                        <span key={a.id} className="inline-flex items-center gap-1.5 rounded-md border bg-surface px-2 py-1 text-[12px]">
+                          {a.name} <span className="text-muted">{a.size}</span>
+                          <button onClick={() => setNewAttachments((prev) => prev.filter((x) => x.id !== a.id))} title="Remove" className="text-muted hover:text-danger">✕</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {linkForId === "__new__" && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border bg-surface p-2">
+                      <input autoFocus value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLinkAttachment("__new__"); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-md border bg-background px-2.5 py-1.5 text-[13px] outline-none focus:border-accent" />
+                      <input value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLinkAttachment("__new__"); }} placeholder="Label (optional)" className="w-32 rounded-md border bg-background px-2.5 py-1.5 text-[13px] outline-none focus:border-accent" />
+                      <button onClick={() => addLinkAttachment("__new__")} disabled={!linkUrl.trim()} className="rounded-md bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white disabled:opacity-40">Add</button>
+                    </div>
+                  )}
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-3">
+                      <label className="inline-flex cursor-pointer items-center gap-1 text-[13px] font-medium text-accent">
+                        + Attach files
+                        <input type="file" multiple className="hidden" onChange={(e) => { handleNewFiles(e.target.files); e.target.value = ""; }} />
+                      </label>
+                      <button onClick={() => { setLinkForId((id) => (id === "__new__" ? null : "__new__")); setLinkUrl(""); setLinkLabel(""); }} className="text-[13px] font-medium text-accent">+ Add link</button>
+                    </div>
+                    <button
+                      onClick={submitNewRequest}
+                      disabled={newSaving || newUploading || (!newBody.trim() && newAttachments.length === 0)}
+                      className="rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-40"
+                    >
+                      {newSaving ? "Sending…" : newUploading ? "Uploading…" : "Send"}
+                    </button>
+                  </div>
+                  {newError && <div className="mt-1.5 text-[13px] text-danger">{newError}</div>}
+                  {newSent && <div className="mt-1.5 text-[13px] text-success">Sent, we&apos;ll take a look!</div>}
+                </div>
+              ) : (
+                <button onClick={() => setAddElseOpen(true)}
+                  className="mb-5 flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed bg-surface-2 py-4 text-[15px] font-bold text-accent transition hover:bg-surface"
+                  style={{ borderColor: "color-mix(in srgb, var(--accent) 40%, var(--border))" }}>
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-[13px] font-black leading-none text-white">+</span> Add something else
+                </button>
+              )}
 
               {isEmpty ? emptyState : (
                 <div className="space-y-3">
@@ -382,7 +459,7 @@ export default function WaitingView({ token }: { token: string }) {
                       ref={isDeepLinked ? deepLinkRef : undefined}
                       className={`overflow-hidden rounded-2xl border bg-surface shadow-[var(--shadow-md)] ${isDeepLinked ? "ring-2 ring-accent ring-offset-2" : ""}`}
                     >
-                      <div className="border-l-4 border-highlight p-4">
+                      <div className="border-l-4 p-4" style={{ borderLeftColor: "var(--highlight)" }}>
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <div className="text-[17px] font-bold">{t.title}</div>
@@ -394,7 +471,10 @@ export default function WaitingView({ token }: { token: string }) {
                             )}
                           </div>
                           {t.due && (
-                            <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[12px] font-medium ${isOverdue(t.due) ? "border-danger/30 bg-danger-soft text-danger" : "border-transparent bg-accent-soft text-accent"}`}>
+                            <span
+                              className={`shrink-0 rounded-full border px-2 py-0.5 text-[12px] font-medium ${isOverdue(t.due) ? "bg-danger-soft text-danger" : "bg-accent-soft text-accent"}`}
+                              style={{ borderColor: isOverdue(t.due) ? "color-mix(in srgb, var(--danger) 30%, var(--border))" : "transparent" }}
+                            >
                               {formatDue(t.due)}
                             </span>
                           )}
@@ -468,74 +548,6 @@ export default function WaitingView({ token }: { token: string }) {
                   );
                 })}
                 </div>
-              )}
-
-              {addElseOpen ? (
-                <div className="mt-4 rounded-xl border bg-surface-2 p-4 shadow-[var(--shadow-sm)]">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <div className="text-[15px] font-bold">Need something else?</div>
-                      <div className="mt-0.5 text-[13px] text-muted">Tell us what you need and we&apos;ll take a look.</div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {projects.length > 1 && (
-                        <select value={effectiveNewProjectId ?? ""} onChange={(e) => setNewProjectId(e.target.value)} title="Which list this goes on"
-                          className="rounded-md border bg-background px-2 py-1 text-[13px] outline-none focus:border-accent">
-                          {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                        </select>
-                      )}
-                      <button onClick={() => setAddElseOpen(false)} title="Close" className="text-muted hover:text-foreground">✕</button>
-                    </div>
-                  </div>
-                  <textarea
-                    autoFocus
-                    value={newBody}
-                    onChange={(e) => setNewBody(e.target.value)}
-                    placeholder="What do you need?"
-                    rows={3}
-                    className="mt-2 w-full rounded-lg border bg-surface px-2.5 py-2 text-[14px] outline-none focus:border-accent"
-                  />
-                  {newAttachments.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {newAttachments.map((a) => (
-                        <span key={a.id} className="inline-flex items-center gap-1.5 rounded-md border bg-surface px-2 py-1 text-[12px]">
-                          {a.name} <span className="text-muted">{a.size}</span>
-                          <button onClick={() => setNewAttachments((prev) => prev.filter((x) => x.id !== a.id))} title="Remove" className="text-muted hover:text-danger">✕</button>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {linkForId === "__new__" && (
-                    <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border bg-surface p-2">
-                      <input autoFocus value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLinkAttachment("__new__"); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-md border bg-background px-2.5 py-1.5 text-[13px] outline-none focus:border-accent" />
-                      <input value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLinkAttachment("__new__"); }} placeholder="Label (optional)" className="w-32 rounded-md border bg-background px-2.5 py-1.5 text-[13px] outline-none focus:border-accent" />
-                      <button onClick={() => addLinkAttachment("__new__")} disabled={!linkUrl.trim()} className="rounded-md bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white disabled:opacity-40">Add</button>
-                    </div>
-                  )}
-                  <div className="mt-2 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-3">
-                      <label className="inline-flex cursor-pointer items-center gap-1 text-[13px] font-medium text-accent">
-                        + Attach files
-                        <input type="file" multiple className="hidden" onChange={(e) => { handleNewFiles(e.target.files); e.target.value = ""; }} />
-                      </label>
-                      <button onClick={() => { setLinkForId((id) => (id === "__new__" ? null : "__new__")); setLinkUrl(""); setLinkLabel(""); }} className="text-[13px] font-medium text-accent">+ Add link</button>
-                    </div>
-                    <button
-                      onClick={submitNewRequest}
-                      disabled={newSaving || newUploading || (!newBody.trim() && newAttachments.length === 0)}
-                      className="rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-40"
-                    >
-                      {newSaving ? "Sending…" : newUploading ? "Uploading…" : "Send"}
-                    </button>
-                  </div>
-                  {newError && <div className="mt-1.5 text-[13px] text-danger">{newError}</div>}
-                  {newSent && <div className="mt-1.5 text-[13px] text-success">Sent, we&apos;ll take a look!</div>}
-                </div>
-              ) : (
-                <button onClick={() => setAddElseOpen(true)}
-                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-accent/40 bg-surface-2 py-4 text-[15px] font-bold text-accent transition hover:border-accent hover:bg-surface">
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-[13px] font-black leading-none text-white">+</span> Add something else
-                </button>
               )}
 
               <p className="mt-6 text-[12.5px] text-muted md:hidden">This is a private link just for you. Please don&apos;t forward it.</p>
