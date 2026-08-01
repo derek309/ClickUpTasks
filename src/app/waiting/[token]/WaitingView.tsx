@@ -8,7 +8,7 @@
 // deliberately self-contained (its own tiny formatBytes/kindFromName)
 // rather than importing from src/components/cockpit/ui.tsx, so this public
 // page doesn't pull in the internal component tree.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { formatDue, isOverdue, type Attachment } from "@/lib/data";
 
 type WaitingAttachment = { id: string; name: string; kind: Attachment["kind"]; size: string; path: string | null; url: string | null };
@@ -84,6 +84,11 @@ export default function WaitingView({ token }: { token: string }) {
   // useEffect, so the switcher doesn't visibly flash "All" first.
   const [activeProjectId, setActiveProjectId] = useState<string | null>(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("project"));
+  // ?task=<id> — a link composed from one specific task (the task drawer's
+  // email tab) so that exact item is visible here even if it isn't
+  // otherwise waiting-on-client or answered (e.g. "this is done"), and gets
+  // scrolled to + highlighted below instead of buried in the rest of the list.
+  const deepLinkTaskId = useMemo(() => (typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("task")), []);
   const [tasks, setTasks] = useState<WaitingTask[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
@@ -126,7 +131,7 @@ export default function WaitingView({ token }: { token: string }) {
 
   const load = async () => {
     try {
-      const res = await fetch(`/api/waiting/${token}`);
+      const res = await fetch(`/api/waiting/${token}${deepLinkTaskId ? `?task=${encodeURIComponent(deepLinkTaskId)}` : ""}`);
       const j = await res.json().catch(() => ({}));
       if (!res.ok) { setError(j.error || "This link isn't valid."); return; }
       setClientName(j.clientName ?? null);
@@ -153,6 +158,17 @@ export default function WaitingView({ token }: { token: string }) {
 
   // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [token]);
+
+  // Scroll the deep-linked task into view once its card exists — a one-shot
+  // effect (empty ref, not re-armed) so a later state change (e.g. saving a
+  // draft) doesn't yank the page back down to it.
+  const deepLinkRef = useRef<HTMLDivElement | null>(null);
+  const scrolledToDeepLink = useRef(false);
+  useEffect(() => {
+    if (!deepLinkTaskId || scrolledToDeepLink.current || !deepLinkRef.current) return;
+    scrolledToDeepLink.current = true;
+    deepLinkRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [tasks, deepLinkTaskId]);
 
   const sorted = useMemo(() => {
     if (!tasks) return [];
@@ -294,10 +310,12 @@ export default function WaitingView({ token }: { token: string }) {
                   const saving = savingIds.has(t.id);
                   const uploading = uploadingIds.has(t.id);
                   const justSaved = savedIds.has(t.id);
+                  const isDeepLinked = t.id === deepLinkTaskId;
                   return (
                     <div
                       key={t.id}
-                      className={`rounded-xl border border-l-4 p-3.5 shadow-sm ${isDone ? "bg-green-50" : "bg-yellow-50"}`}
+                      ref={isDeepLinked ? deepLinkRef : undefined}
+                      className={`rounded-xl border border-l-4 p-3.5 shadow-sm ${isDone ? "bg-green-50" : "bg-yellow-50"} ${isDeepLinked ? "ring-2 ring-accent ring-offset-2" : ""}`}
                       // A global `* { border-color: var(--border) }` rule in globals.css is
                       // unlayered, so per CSS cascade-layer rules it beats ANY Tailwind
                       // border-color utility (including border-l-accent, border-green-200,
@@ -384,12 +402,12 @@ export default function WaitingView({ token }: { token: string }) {
                           </div>
                           {saveErrors[t.id] && <div className="text-[13px] text-red-600">{saveErrors[t.id]}</div>}
                         </div>
-                      ) : (
+                      ) : t.response ? (
                         <div className="mt-2.5 flex items-center justify-between gap-2 rounded-lg bg-accent-soft/40 px-2.5 py-2">
                           <div className="min-w-0 text-[13px] text-muted">{justSaved ? "Saved — the team's on it." : "Submitted — the team's working on it."}</div>
                           <button onClick={() => setEditingIds((s) => new Set(s).add(t.id))} className="shrink-0 text-[13px] font-medium text-accent hover:underline">Edit</button>
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   );
                 })}

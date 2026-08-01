@@ -25,6 +25,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   const { data: client } = await supabaseAdmin.from("clients").select("id, name").eq("share_token", token).maybeSingle();
   if (!client) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+  // A link composed from one specific task (see the task drawer's email
+  // composer) carries ?task=<id> so that task shows up here even when it's
+  // neither waiting-on-client nor already answered — e.g. a plain "this is
+  // done" status update the client should be able to see, not just tasks
+  // that need their input.
+  const deepLinkTaskId = req.nextUrl.searchParams.get("task");
+
   // The client's own project list — lets the page group tasks by list and
   // offer a switcher when there's more than one, instead of one flat pile.
   // Only id/name leave this route; nothing else about a project is public.
@@ -37,12 +44,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     attachments: Attachment[] | null;
   };
   const cols = "id, project_id, title, due, description, status, waiting_on_client, client_response, attachments";
-  const [{ data: waiting }, { data: responded }] = await Promise.all([
+  const [{ data: waiting }, { data: responded }, { data: deepLinked }] = await Promise.all([
     supabaseAdmin.from("tasks").select(cols).eq("client_id", client.id).eq("waiting_on_client", true),
     supabaseAdmin.from("tasks").select(cols).eq("client_id", client.id).not("client_response", "is", null),
+    // Proven to belong to this client (same eq("client_id", ...) as the two
+    // queries above) before it's allowed to appear — a task id is not itself
+    // a secret, so this must never trust deepLinkTaskId alone.
+    deepLinkTaskId
+      ? supabaseAdmin.from("tasks").select(cols).eq("client_id", client.id).eq("id", deepLinkTaskId)
+      : Promise.resolve({ data: [] as Row[] }),
   ]);
   const byId = new Map<string, Row>();
-  [...(waiting ?? []), ...(responded ?? [])].forEach((t) => byId.set((t as Row).id, t as Row));
+  [...(waiting ?? []), ...(responded ?? []), ...(deepLinked ?? [])].forEach((t) => byId.set((t as Row).id, t as Row));
   const rows = [...byId.values()].sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999"));
 
   // Resolve any attachment's storage path to a short-lived signed URL — used
@@ -74,5 +87,5 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     };
   }));
 
-  return NextResponse.json({ clientName: client.name, projects, tasks });
+  return NextResponse.json({ clientName: client.name, projects, tasks, deepLinkTaskId: deepLinkTaskId || null });
 }

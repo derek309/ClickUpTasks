@@ -52,6 +52,25 @@ async function resolveOrPromoteTrackedClient(contact: Contact): Promise<string> 
   return trackedId;
 }
 
+// Ticket-style threading: if this inbound message's Gmail thread already has
+// an outbound message tied to a specific task (composed from that task's own
+// email tab, not just the generic Conversation task), route the reply back
+// to that same task instead of bumping/creating a "Reply to X" task. Gmail
+// assigns the SAME threadId to a client's reply as the message we sent it
+// replied to (standard References/In-Reply-To threading), so this is a
+// simple most-recent-match lookup — no header parsing needed. Once a thread
+// has been matched to a task once (even the generic Conversation task, on a
+// cold thread's first inbound), every later reply in that thread keeps
+// landing on the same task, since the inbound rows also get tagged with the
+// thread id below.
+async function resolveTaskForThread(contactId: string, gmailThreadId: string | null | undefined): Promise<string | null> {
+  if (!gmailThreadId) return null;
+  const { data } = await supabaseAdmin
+    .from("messages").select("task_id").eq("contact_id", contactId).eq("gmail_thread_id", gmailThreadId)
+    .not("task_id", "is", null).order("created_at", { ascending: false }).limit(1);
+  return (data?.[0]?.task_id as string | undefined) ?? null;
+}
+
 // One open Conversation-priority task per contact — bump due if one exists,
 // else create it under the client's first project (or a fallback "Tasks").
 async function upsertConversationTask(contact: Contact, ghlContactId: string | null): Promise<string | null> {
@@ -105,7 +124,7 @@ async function notifyInbound(contact: Contact, taskId: string | null, text: stri
 // message was ingested.
 export async function ingestInboundMessage(opts: {
   contact: Contact; ghlContactId?: string | null; channel: "email" | "sms";
-  subject?: string | null; body: string; gmailMessageId?: string | null; at?: string;
+  subject?: string | null; body: string; gmailMessageId?: string | null; gmailThreadId?: string | null; at?: string;
 }): Promise<boolean> {
   const contact = { ...opts.contact, client_id: await resolveOrPromoteTrackedClient(opts.contact) };
   const { channel, subject, body } = opts;
@@ -116,14 +135,20 @@ export async function ingestInboundMessage(opts: {
   const messageId = "msg_" + crypto.randomUUID();
   const { error } = await supabaseAdmin.from("messages").insert({
     id: messageId, contact_id: contact.id, client_id: contact.client_id, channel, direction: "inbound",
-    subject: subject?.trim() || null, body, gmail_message_id: opts.gmailMessageId ?? null, created_by: null,
+    subject: subject?.trim() || null, body, gmail_message_id: opts.gmailMessageId ?? null, gmail_thread_id: opts.gmailThreadId ?? null, created_by: null,
     ...(opts.at ? { created_at: opts.at } : {}),
   });
   if (error) {
     // A unique-index hit (e.g. gmail_message_id) means it was already ingested.
     return false;
   }
-  const taskId = await upsertConversationTask(contact, opts.ghlContactId ?? null);
+  // A reply within a thread that started from a specific task's own email tab
+  // (ticket-style) lands back on that same task, bumped to today so it
+  // resurfaces; only a thread with no such history falls back to the
+  // generic per-contact Conversation task.
+  let taskId = await resolveTaskForThread(contact.id, opts.gmailThreadId);
+  if (taskId) await supabaseAdmin.from("tasks").update({ due: todayPacific() }).eq("id", taskId);
+  else taskId = await upsertConversationTask(contact, opts.ghlContactId ?? null);
   if (taskId) await supabaseAdmin.from("messages").update({ task_id: taskId }).eq("id", messageId);
   const snippet = body.replace(/\s+/g, " ").trim().slice(0, 80);
   const text = channel === "sms"
@@ -157,7 +182,7 @@ export async function isDuplicateOutboundBody(contactId: string, body: string, d
 // the Journal. Does NOT touch the Conversation task or fire a notification —
 // nobody needs pinging that the team sent something, unlike an inbound reply.
 export async function ingestOutboundMessage(opts: {
-  contact: Contact; channel: "email"; subject?: string | null; body: string; gmailMessageId: string; createdBy: string; at?: string;
+  contact: Contact; channel: "email"; subject?: string | null; body: string; gmailMessageId: string; gmailThreadId?: string | null; createdBy: string; at?: string;
 }): Promise<boolean> {
   const contact = { ...opts.contact, client_id: await resolveOrPromoteTrackedClient(opts.contact) };
   const { data: dupe } = await supabaseAdmin.from("messages").select("id").eq("gmail_message_id", opts.gmailMessageId).limit(1);
@@ -166,7 +191,7 @@ export async function ingestOutboundMessage(opts: {
   const { error } = await supabaseAdmin.from("messages").insert({
     id: "msg_" + crypto.randomUUID(), contact_id: contact.id, client_id: contact.client_id,
     channel: opts.channel, direction: "outbound",
-    subject: opts.subject?.trim() || null, body: opts.body, gmail_message_id: opts.gmailMessageId, created_by: opts.createdBy,
+    subject: opts.subject?.trim() || null, body: opts.body, gmail_message_id: opts.gmailMessageId, gmail_thread_id: opts.gmailThreadId ?? null, created_by: opts.createdBy,
     ...(opts.at ? { created_at: opts.at } : {}),
   });
   if (error) return false; // unique-index hit (already ingested) — not a real failure

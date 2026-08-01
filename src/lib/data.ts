@@ -1072,6 +1072,12 @@ export interface Message {
    * per-teammate "from" path) rather than GHL — see supabase/gmail-message-id.sql
    * and src/lib/googleMail.ts. Null for GHL sends and inbound rows. */
   gmailMessageId?: string | null;
+  /** Gmail conversation id for this message's thread — set alongside
+   * gmailMessageId on Gmail sends/reads. Used to match an inbound reply back
+   * to the specific task an outbound message was sent from; see
+   * supabase/message-gmail-thread-id.sql and resolveTaskForThread in
+   * src/lib/inboundIngest.ts. */
+  gmailThreadId?: string | null;
   createdBy: string | null; // roster id for outbound; null for inbound
   at: string; // ISO
   /** Shared team-wide, not per-user (one flag per message). Outbound rows are

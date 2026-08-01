@@ -90,13 +90,13 @@ export async function sendScheduledMessageNow(input: ScheduledSendInput): Promis
     }
     if (!attachmentFailed) {
       try {
-        const { id: gmailMessageId } = await sendGmailAs(sender, {
+        const { id: gmailMessageId, threadId: gmailThreadId } = await sendGmailAs(sender, {
           to: contact.email, cc: input.cc.length ? input.cc : undefined, bcc: input.bcc.length ? input.bcc : undefined,
           subject: (input.subject || "").slice(0, 200), body: input.body, isHtml: true,
           fromName: (authorProfile?.name as string | null)?.trim() || undefined,
           attachments: attParts.length ? attParts : undefined,
         });
-        return insertSentMessage(input, contact.id, null, gmailMessageId);
+        return insertSentMessage(input, contact.id, null, gmailMessageId, gmailThreadId);
       } catch (e) {
         // Fall through to GHL below rather than failing the whole send.
         console.warn("[sendScheduledMessageNow] Gmail send failed, falling back to GHL:", e instanceof Error ? e.message : e);
@@ -139,11 +139,11 @@ export async function sendScheduledMessageNow(input: ScheduledSendInput): Promis
   }
 }
 
-async function insertSentMessage(input: ScheduledSendInput, contactId: string, ghlMessageId: string | null, gmailMessageId: string | null): Promise<{ ok: true; messageId: string }> {
+async function insertSentMessage(input: ScheduledSendInput, contactId: string, ghlMessageId: string | null, gmailMessageId: string | null, gmailThreadId: string | null = null): Promise<{ ok: true; messageId: string }> {
   const messageId = "msg_" + randomUUID();
   await supabaseAdmin.from("messages").insert({
     id: messageId, contact_id: contactId, client_id: input.clientId, task_id: input.taskId, channel: input.channel, direction: "outbound",
-    subject: input.subject, body: input.body, ghl_message_id: ghlMessageId, gmail_message_id: gmailMessageId,
+    subject: input.subject, body: input.body, ghl_message_id: ghlMessageId, gmail_message_id: gmailMessageId, gmail_thread_id: gmailThreadId,
     created_by: input.createdBy, read: true, attachments: input.attachments, cc: input.cc, bcc: input.bcc,
   });
   return { ok: true, messageId };

@@ -86,7 +86,7 @@ export function RecipientField({ label, value, onChange, contacts }: { label: st
   );
 }
 
-export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onDraftDescription, draftingDescription, onRegenerateAiSummary, aiSummaryBusy, pushToast, onOpenClaudeSetup }: {
+export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, onDraftDescription, draftingDescription, onRegenerateAiSummary, aiSummaryBusy, pushToast, onOpenClaudeSetup }: {
   task: Task; comment: string; setComment: (v: string) => void;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; navTasks: Task[]; onOpenTask: (id: string) => void; onAddSibling: (title: string) => void; onPrev: () => void; onNext: () => void;
@@ -104,6 +104,11 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   sendingMessage?: boolean;
   onDraftMessage?: (channel: "email" | "sms", prompt?: string) => Promise<{ subject?: string; body: string } | null>; // Gemini draft, never sends
   draftingMessage?: boolean;
+  // Mints/reuses this task's client's public /waiting/[token] link, scoped to
+  // this one task (?task=<id>) — used by the email composer's "Add task
+  // link" quick-fill. Null when the client has no share token yet and the
+  // caller isn't an admin (Cockpit's getClientShareUrl already toasts why).
+  onGetTaskLink?: () => string | null;
   onDraftDescription?: (title: string, description: string, prompt?: string) => Promise<string | null>; // Gemini draft, never saves
   draftingDescription?: boolean;
   onRegenerateAiSummary?: () => void; // AI tab's "Regenerate" — only ever called on click, never automatically
@@ -679,6 +684,20 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     <input ref={msgFileRef} type="file" multiple accept="image/*" className="hidden" onChange={(e) => { handleMsgFileSelect(e.target.files); e.target.value = ""; }} />
   </>);
   const smsSeg = smsSegments(msgBody);
+  // Explicit action (not a silent auto-fill on tab-switch, which would risk
+  // clobbering a draft the next time the composer opens) that drops in this
+  // task's own title/description plus its client link — the "ticket" shape:
+  // the client can open the link to see exactly this item and reply/attach
+  // media, and a reply lands back on this task (see resolveTaskForThread in
+  // src/lib/inboundIngest.ts).
+  const fillFromTask = () => {
+    const descText = htmlToText(task.description).trim();
+    const link = onGetTaskLink?.() ?? null;
+    const lines = [descText, link ? `You can view this and reply anytime here: ${link}` : null].filter(Boolean).join("\n\n");
+    if (!msgSubject.trim()) setMsgSubject(task.title);
+    setMsgBody(plainTextToHtml(lines));
+    setEmailFocusNonce((n) => n + 1);
+  };
   // "Prompt Claude" — type an intent, Gemini writes the message (subject+body)
   // from that + client context. Never sends. Shared by the SMS/Email composers.
   const runDraft = async (channel: "email" | "sms") => {
@@ -736,7 +755,10 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     <div className="max-h-[60vh] shrink-0 overflow-y-auto border-t-2 border-t-[#3b82f6] bg-[#3b82f60d] p-3">
       <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
         <span className="min-w-0 truncate text-[13px] text-muted">To: <span className="font-medium text-foreground">{messageDest?.email || "no email on file"}</span></span>
-        {!showCcBcc && <button onClick={() => setShowCcBcc(true)} className="shrink-0 text-[12px] font-medium text-accent hover:underline">Cc / Bcc</button>}
+        <span className="flex shrink-0 items-center gap-2">
+          <button onClick={fillFromTask} title="Fill in this task's title, description, and a client link to view/respond" className="text-[12px] font-medium text-accent hover:underline">Add task details + link</button>
+          {!showCcBcc && <button onClick={() => setShowCcBcc(true)} className="text-[12px] font-medium text-accent hover:underline">Cc / Bcc</button>}
+        </span>
       </div>
       <div className="mb-2">{promptClaudeBlock("email")}</div>
       {showCcBcc && (

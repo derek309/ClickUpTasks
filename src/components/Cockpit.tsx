@@ -979,13 +979,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // client with several projects gets ONE link to hand out (or bookmark),
   // not a separate one to track per list — the ?project= param is just a
   // convenience starting point, copyable from any project's own menu.
-  const copyClientShareLink = (clientId: string, projectId?: string) => {
+  // Core of copyClientShareLink below, factored out so the task email
+  // composer (auto-populating a client link in the draft) can mint/reuse the
+  // same token without going through the clipboard. Returns null (and toasts)
+  // when a non-admin hits a client with no token yet — same refusal as before.
+  const getClientShareUrl = (clientId: string, opts?: { projectId?: string; taskId?: string }): string | null => {
     const c = clientById(clientId);
-    if (!c) return;
-    // Minting a token is an admin-only write (clients_write RLS). If a VA hits
-    // this on a client with no token yet, the upsert would be silently rejected
-    // and they'd copy a URL that 404s forever — so refuse up front instead.
-    if (!c.shareToken && !canAdmin) { pushToast("Ask an admin to create this client's share link first."); return; }
+    if (!c) return null;
+    if (!c.shareToken && !canAdmin) { pushToast("Ask an admin to create this client's share link first."); return null; }
     const token = c.shareToken ?? crypto.randomUUID().replace(/-/g, "");
     if (!c.shareToken) {
       const nc = { ...c, shareToken: token };
@@ -993,7 +994,28 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       markOwnClientWrite(nc.id);
       upsertClient(nc);
     }
-    const url = `${window.location.origin}/waiting/${token}${projectId ? `?project=${projectId}` : ""}`;
+    const params = new URLSearchParams();
+    if (opts?.projectId) params.set("project", opts.projectId);
+    if (opts?.taskId) params.set("task", opts.taskId);
+    const qs = params.toString();
+    return `${window.location.origin}/waiting/${token}${qs ? `?${qs}` : ""}`;
+  };
+  // Public "here's what we need from you" link for this client — see
+  // supabase/client-share-token.sql. Unlike copyLink above, this is a share
+  // link, not an app deep-link: it needs to keep working (and copy to the
+  // same URL) every time it's clicked, so the token is generated once and
+  // reused, not regenerated per click. crypto.randomUUID() is fine here —
+  // this only needs to be unguessable, not secret from the browser that's
+  // about to hand it to the client.
+  // projectId is optional — when given, the copied link opens pre-switched
+  // to that one list (the public page's own project switcher) instead of
+  // the client's merged view. Still the exact same token underneath: a
+  // client with several projects gets ONE link to hand out (or bookmark),
+  // not a separate one to track per list — the ?project= param is just a
+  // convenience starting point, copyable from any project's own menu.
+  const copyClientShareLink = (clientId: string, projectId?: string) => {
+    const url = getClientShareUrl(clientId, { projectId });
+    if (!url) return;
     navigator.clipboard?.writeText(url).then(
       () => pushToast(projectId ? "🔗 List link copied — opens straight to this list" : "🔗 Client link copied — shows what we're waiting on them for"),
       () => pushToast("⚠️ Couldn't copy link"),
@@ -2627,7 +2649,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           const gm: Message = {
             id: newId("msg_"), contactId: contact.id, clientId, taskId, channel, direction: "outbound",
             subject: subject.trim() ? subject.trim() : null, body,
-            ghlMessageId: null, gmailMessageId: gj.gmailMessageId ?? null, createdBy: me.id, at: new Date().toISOString(), read: true,
+            ghlMessageId: null, gmailMessageId: gj.gmailMessageId ?? null, gmailThreadId: gj.gmailThreadId ?? null, createdBy: me.id, at: new Date().toISOString(), read: true,
             attachments, cc: emailCc, bcc: emailBcc,
           };
           setMessages((ms) => [...ms, gm]);
@@ -4619,7 +4641,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={navTaskIds.length} navTasks={navTaskIds.map((id) => tasks.find((t) => t.id === id)).filter((t): t is Task => !!t)} onOpenTask={setOpenTaskId} onAddSibling={(title) => addTaskToList(openTask.clientId, openTask.projectId, openTask.private, title)} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(attachments) => addComment(openTask.id, comment, attachments)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { if (openTask.playbookStepKey) { pushToast("Playbook steps can't be moved to a different list."); return; } patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, territory: null, plannerMode: false, plannerWeek: null })} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} onScheduleTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, scheduledAt, attachments, cc, bcc) => scheduleMessage(openTask.clientId, channel, subject, body, scheduledAt, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId)} draftingMessage={draftingMessage} onDraftDescription={draftDescription} draftingDescription={draftingDescription} onRegenerateAiSummary={() => regenerateAiSummary(openTask.clientId)} aiSummaryBusy={aiSummaryBusyId === openTask.clientId} pushToast={pushToast} onOpenClaudeSetup={() => openSettingsTab("tokens")} />
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { if (openTask.playbookStepKey) { pushToast("Playbook steps can't be moved to a different list."); return; } patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, territory: null, plannerMode: false, plannerWeek: null })} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} onScheduleTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, scheduledAt, attachments, cc, bcc) => scheduleMessage(openTask.clientId, channel, subject, body, scheduledAt, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId)} draftingMessage={draftingMessage} onGetTaskLink={() => getClientShareUrl(openTask.clientId, { projectId: openTask.projectId, taskId: openTask.id })} onDraftDescription={draftDescription} draftingDescription={draftingDescription} onRegenerateAiSummary={() => regenerateAiSummary(openTask.clientId)} aiSummaryBusy={aiSummaryBusyId === openTask.clientId} pushToast={pushToast} onOpenClaudeSetup={() => openSettingsTab("tokens")} />
       )}
 
       {addClientOpen && <AddClientModal subAccounts={subAccounts} contacts={contacts} existingIds={new Set(clients.map((c) => c.id))} onAdd={addClientContact} onClose={() => setAddClientOpen(false)} />}
