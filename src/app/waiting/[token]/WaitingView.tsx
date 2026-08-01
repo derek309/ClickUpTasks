@@ -188,18 +188,17 @@ function TaskDetailCard({
     </>
   );
   return (
-    // Below md this is a fixed full-screen shell, not a card in the normal
-    // page flow — a header (title/due) and composer that stay put, with
-    // ONE scrollable region between them (description+attachments+thread
-    // together). That replaces a page that scrolled AND a thread box inside
-    // it that ALSO scrolled independently, which read as two conflicting
-    // scroll gestures on a touch screen. At md+ this reverts to the earlier
-    // normal-flow card (the page scrolls, the thread keeps its own capped
-    // height) since there's a sidebar next to it and no viewport pressure.
-    <div className="fixed inset-0 z-20 flex flex-col bg-surface md:static md:z-auto md:block md:overflow-hidden md:rounded-2xl md:border md:shadow-[var(--shadow-md)]">
-      <div className="flex min-h-0 flex-1 flex-col border-l-4 md:block" style={{ borderLeftColor: isDone ? "var(--success)" : "var(--highlight)" }}>
-        <div className="shrink-0 border-b p-4 md:border-b-0">
-          <button onClick={onBack} className="mb-3 inline-flex items-center gap-1 text-[14px] font-medium text-accent md:hidden">← Back to your tasks</button>
+    // Same chat-shell shape at every width: a header (back, title, due) and
+    // composer that stay put, with ONE scrollable region between them
+    // (description+attachments+thread together) — no separate scrollbox
+    // floating in the middle of a page that also scrolls. Below md it's a
+    // fixed full-screen shell; at md+ it's a sticky card bound to the
+    // viewport height instead (there's a sidebar next to it, so it can't
+    // take the whole screen, but the "one scroll region" shape is identical).
+    <div className="fixed inset-0 z-20 flex flex-col overflow-hidden bg-surface md:sticky md:inset-auto md:top-6 md:z-auto md:h-[calc(100vh-6rem)] md:rounded-2xl md:border md:shadow-[var(--shadow-md)]">
+      <div className="flex min-h-0 flex-1 flex-col border-l-4" style={{ borderLeftColor: isDone ? "var(--success)" : "var(--highlight)" }}>
+        <div className="shrink-0 border-b p-4">
+          <button onClick={onBack} className="mb-3 inline-flex items-center gap-1 text-[14px] font-medium text-accent">← Back to your tasks</button>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className={`text-[17px] font-bold ${isDone ? "text-muted line-through decoration-muted/40" : ""}`}>{t.title}</div>
@@ -221,16 +220,12 @@ function TaskDetailCard({
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-4 md:flex-none md:overflow-visible md:pt-0">
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {t.description && <p className="max-w-[62ch] whitespace-pre-wrap break-words text-[14px] text-muted">{t.description}</p>}
           <AttachmentGallery items={t.attachments} />
 
           {displayThread.length > 0 && (
-            // Capped height + its own scroll only at md+, where the page
-            // scrolling separately from this box isn't confusing (mouse
-            // wheel over a nested box behaves predictably) — below md it's
-            // just part of the one scrollable region above, no cap needed.
-            <div ref={threadRef} className="mt-3 space-y-2 md:max-h-[50vh] md:overflow-y-auto md:pr-1">
+            <div ref={threadRef} className="mt-3 space-y-2">
               {displayThread.map((m) => (
                 <div key={m.id} className={`flex items-end gap-1.5 ${m.from === "client" ? "justify-end" : "justify-start"}`}>
                   {m.from === "team" && <SenderAvatar sender={m.sender} />}
@@ -245,16 +240,9 @@ function TaskDetailCard({
               ))}
             </div>
           )}
-
-          {/* Composer rides inside the scrolling body at md+ (matches the
-              original layout — the page scrolls past it like everything
-              else), but needs to be lifted out to its own fixed footer
-              below md, so it stays pinned under the fixed shell instead of
-              scrolling out of reach. */}
-          <div className="mt-3 hidden border-t pt-3 md:block">{composer}</div>
         </div>
 
-        <div className="shrink-0 border-t p-4 md:hidden">{composer}</div>
+        <div className="shrink-0 border-t p-4">{composer}</div>
       </div>
     </div>
   );
@@ -590,42 +578,35 @@ export default function WaitingView({ token }: { token: string }) {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* One compact line, not a two-line banner — the brand name plus a
-          muted tagline says the same thing in a third of the height. */}
-      <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }} className="px-6 py-2 md:px-10">
-        <div className="mx-auto max-w-[1280px] text-center text-[13px] font-bold tracking-tight text-white">
-          ClickUpLocal <span className="font-normal text-white/60">· What we&apos;re waiting on you for</span>
+      {/* The old sidebar (client name, "Your open items", progress) folded
+          in here instead of its own column — there's nothing else on the
+          page competing for space now that the task list is a single
+          column, so this hero carries all of it instead of repeating a
+          tiny brand strip up top and the real heading further down. */}
+      <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }} className="px-6 py-6 md:px-10">
+        <div className="mx-auto max-w-[820px]">
+          <div className="text-[12px] font-bold tracking-tight text-white/70">ClickUpLocal</div>
+          {clientName && <div className="mt-3 text-[11px] font-bold uppercase tracking-wide text-highlight">{clientName}</div>}
+          <h1 className="mt-0.5 text-[24px] font-extrabold tracking-tight text-white">Your open items</h1>
+          {totalCount > 0 && (
+            <div className="mt-4 max-w-xs">
+              <div className="mb-1.5 flex justify-between text-[12.5px] text-white/70"><span>Progress</span><span className="font-medium text-white">{doneCount} of {totalCount} done</span></div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-white/20"><div className="h-full rounded-full bg-white" style={{ width: `${progressPct}%` }} /></div>
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="mx-auto max-w-[1280px] px-6 pb-10 pt-5 md:px-10">
+      <div className="mx-auto max-w-[820px] px-6 pb-10 pt-6 md:px-10">
         {error ? (
           <div className="rounded-lg bg-danger-soft px-3 py-2 text-[15px] text-danger">{error}</div>
         ) : !tasks ? (
           <div className="py-8 text-center text-[13px] text-muted">Loading…</div>
         ) : (
-          <div className="grid grid-cols-1 gap-10 md:grid-cols-[220px_minmax(0,760px)]">
-            {/* Identity + nav rail — desktop only; mobile gets the equivalent
-                pieces inline in the main column below instead. */}
-            <div className="sticky top-6 hidden self-start md:block">
-              {clientName && <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-highlight">{clientName}</div>}
-              <h1 className="mb-3 text-[22px] font-extrabold tracking-tight">Your open items</h1>
-              {totalCount > 0 && (
-                <div className="mb-4">
-                  <div className="mb-1.5 flex justify-between text-[12.5px] text-muted"><span>Progress</span><span className="font-medium text-foreground">{doneCount} of {totalCount} done</span></div>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-border"><div className="h-full rounded-full bg-success" style={{ width: `${progressPct}%` }} /></div>
-                </div>
-              )}
-              <div className="border-t pt-4">{privacyNote}</div>
-            </div>
-
+          <>
             <div className="min-w-0">
               {selectedTask ? (
                 <div>
-                  {/* Mobile gets its own back button inside the fixed shell
-                      (see TaskDetailCard) — this one is desktop-only, where
-                      the card is back to sitting in normal page flow. */}
-                  <button onClick={closeTask} className="mb-4 hidden items-center gap-1 text-[14px] font-medium text-accent hover:underline md:inline-flex">← Back to your tasks</button>
                   <TaskDetailCard
                     task={selectedTask}
                     showProjectName={projects.length > 1}
@@ -751,10 +732,10 @@ export default function WaitingView({ token }: { token: string }) {
                 </div>
               )}
               </>)}
-
-              <p className="mt-6 text-[12.5px] text-muted md:hidden">This is a private link just for you. Please don&apos;t forward it.</p>
             </div>
-          </div>
+
+            <div className="mt-6">{privacyNote}</div>
+          </>
         )}
       </div>
     </div>
