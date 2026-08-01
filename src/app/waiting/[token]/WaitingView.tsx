@@ -187,13 +187,17 @@ function TaskDetailCard({
         )}
 
         <div className="mt-3 space-y-2 border-t pt-3">
+          {/* text-[16px] isn't a style choice here — any input/textarea under
+              16px makes iOS Safari auto-zoom on focus, and the zoom (plus
+              its "scroll the focused field into view") is exactly what was
+              shoving the whole page sideways when the keyboard opened. */}
           <textarea
             value={draft.body}
             onChange={(e) => onBody(e.target.value)}
             onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") onSend(); }}
             placeholder="Type a message…"
             rows={2}
-            className="w-full rounded-lg border bg-background px-2.5 py-2 text-[14px] outline-none focus:border-accent"
+            className="w-full rounded-lg border bg-background px-2.5 py-2 text-[16px] outline-none focus:border-accent"
           />
           {draft.attachments.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
@@ -207,8 +211,8 @@ function TaskDetailCard({
           )}
           {linkOpen && (
             <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-background p-2">
-              <input autoFocus value={linkUrl} onChange={(e) => onLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAddLink(); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[13px] outline-none focus:border-accent" />
-              <input value={linkLabel} onChange={(e) => onLinkLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAddLink(); }} placeholder="Label (optional)" className="w-32 rounded-md border bg-surface px-2.5 py-1.5 text-[13px] outline-none focus:border-accent" />
+              <input autoFocus value={linkUrl} onChange={(e) => onLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAddLink(); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
+              <input value={linkLabel} onChange={(e) => onLinkLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAddLink(); }} placeholder="Label (optional)" className="w-32 rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
               <button onClick={onAddLink} disabled={!linkUrl.trim()} className="rounded-md bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white disabled:opacity-40">Add</button>
             </div>
           )}
@@ -485,7 +489,7 @@ export default function WaitingView({ token }: { token: string }) {
   // inline style instead — the same workaround the pre-chat version of
   // this file already used for the done/waiting card borders.
   const tabPill = (active: boolean) => ({
-    className: `rounded-full border px-3 py-1.5 text-[13px] font-medium ${active ? "bg-accent text-white" : "bg-surface text-muted hover:bg-background"}`,
+    className: `rounded-full border px-2.5 py-1 text-[12.5px] font-medium ${active ? "bg-accent text-white" : "bg-surface text-muted hover:bg-background"}`,
     style: active ? { borderColor: "var(--highlight)" } : undefined,
   });
   const projectTabs = (
@@ -550,14 +554,15 @@ export default function WaitingView({ token }: { token: string }) {
 
   return (
     <div className="min-h-screen bg-background">
-      <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }} className="px-6 py-3 md:px-10">
-        <div className="mx-auto max-w-[1280px] text-center">
-          <div className="text-[15px] font-bold tracking-tight text-white">ClickUpLocal</div>
-          <div className="text-[11px] text-white/70">What we&apos;re waiting on you for</div>
+      {/* One compact line, not a two-line banner — the brand name plus a
+          muted tagline says the same thing in a third of the height. */}
+      <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }} className="px-6 py-2 md:px-10">
+        <div className="mx-auto max-w-[1280px] text-center text-[13px] font-bold tracking-tight text-white">
+          ClickUpLocal <span className="font-normal text-white/60">· What we&apos;re waiting on you for</span>
         </div>
       </div>
 
-      <div className="mx-auto max-w-[1280px] px-6 pb-16 pt-8 md:px-10">
+      <div className="mx-auto max-w-[1280px] px-6 pb-10 pt-5 md:px-10">
         {error ? (
           <div className="rounded-lg bg-danger-soft px-3 py-2 text-[15px] text-danger">{error}</div>
         ) : !tasks ? (
@@ -606,16 +611,7 @@ export default function WaitingView({ token }: { token: string }) {
                   />
                 </div>
               ) : (<>
-              {projects.length > 1 && <div className="mb-4 flex flex-wrap gap-1.5 md:hidden">{projectTabs}</div>}
-
-              {/* text-[16px] is the floor, not a target — this app never
-                  goes below 16px in user-facing copy (readability on a
-                  client's own phone, no exceptions for "fine print"), so a
-                  lighter/tighter treatment (padding, weight, line-height)
-                  is how this reads smaller without crossing that line. */}
-              <div className="mb-5 rounded-xl border bg-highlight-soft px-3.5 py-2.5 text-[16px] leading-snug text-foreground" style={{ borderColor: "color-mix(in srgb, var(--highlight) 35%, var(--border))" }}>
-                <span className="font-semibold">One request per line, please.</span> If you have more than one thing, give each its own line (or send them one at a time below). It helps us track and finish each one quickly instead of it getting lost inside a combined message.
-              </div>
+              {projects.length > 1 && <div className="mb-3 flex flex-wrap gap-1.5 md:hidden">{projectTabs}</div>}
 
               {addElseOpen ? (
                 <div className="mb-5 rounded-xl border bg-surface-2 p-4 shadow-[var(--shadow-sm)]">
@@ -679,11 +675,20 @@ export default function WaitingView({ token }: { token: string }) {
                   {newSent && <div className="mt-1.5 text-[13px] text-success">Sent, we&apos;ll take a look!</div>}
                 </div>
               ) : (
-                <button onClick={() => setAddElseOpen(true)}
-                  className="mb-5 flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed bg-surface-2 py-4 text-[15px] font-bold text-accent transition hover:bg-surface"
-                  style={{ borderColor: "color-mix(in srgb, var(--accent) 40%, var(--border))" }}>
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-[13px] font-black leading-none text-white">+</span> Add something else
-                </button>
+                <div className="mb-3">
+                  <button onClick={() => setAddElseOpen(true)}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed bg-surface-2 py-2.5 text-[14px] font-bold text-accent transition hover:bg-surface"
+                    style={{ borderColor: "color-mix(in srgb, var(--accent) 40%, var(--border))" }}>
+                    <span className="flex h-4 w-4 items-center justify-center rounded-full bg-accent text-[11px] font-black leading-none text-white">+</span> Add something else
+                  </button>
+                  {/* Folded the old standalone banner into this one small
+                      caption instead of two separate blocks stacked on top
+                      of each other — same reminder, a fraction of the
+                      height. Deliberately under the usual 16px floor: a
+                      one-line aside under a button, not the kind of
+                      must-read instruction that rule exists to protect. */}
+                  <p className="mt-1 text-center text-[12px] text-muted">One request per task, please. It&apos;s easier for us to track.</p>
+                </div>
               )}
 
               {isEmpty ? emptyState : (
