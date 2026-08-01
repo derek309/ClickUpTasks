@@ -202,7 +202,10 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     const subject = rightTab === "email" ? (msgSubject.trim() || task.title) : msgSubject;
     onSendTaskMessage(rightTab, subject, rightTab === "email" ? msgBody : msgBody.trim(), pendingMsgAtts.length ? pendingMsgAtts : undefined, cc, bcc);
     setMsgSubject(""); setMsgBody(""); setPendingMsgAtts([]); setMsgCc([]); setMsgBcc([]); setShowCcBcc(false);
-    setRightTab("activity"); // so the send is immediately visible in the feed
+    // Stay on whichever tab was active — each channel has its own tab now,
+    // so the sent message is immediately visible right here. Bouncing back
+    // to Team (the old behavior, from when everything shared one merged
+    // feed) meant a chat/email/SMS send disappeared from view.
   };
   const submitScheduledTaskMessage = (whenIso: string) => {
     // Chat has no deferred-send path (see Cockpit.tsx's sendMessage) — it's meant to be immediate.
@@ -858,25 +861,41 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const chatMsgCount = (messages ?? []).filter((m) => m.channel === "chat").length;
   const emailMsgCount = (messages ?? []).filter((m) => m.channel === "email").length;
   const smsMsgCount = (messages ?? []).filter((m) => m.channel === "sms").length;
-  const tabBtnClass = (active: boolean) => `inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium ${active ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`;
+  // Same colors the message feed already uses per channel (dotColor in
+  // commentsFeed) and the composers' own top border — reused here so the
+  // tab itself, and the whole panel while it's active, both say which
+  // channel you're about to send through at a glance, not just the small
+  // text label.
+  const tabColors: Record<"activity" | "chat" | "email" | "sms", string> = {
+    activity: "var(--accent)", chat: "#e87722", email: "#3b82f6", sms: "#22c55e",
+  };
+  const activeTabColor = activeRightTab === "ai" ? null : tabColors[activeRightTab];
+  const tabBtnStyle = (tab: "activity" | "chat" | "email" | "sms") => {
+    const active = activeRightTab === tab;
+    return {
+      className: `inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium ${active ? "" : "text-muted hover:text-foreground"}`,
+      style: active ? { background: tabColors[tab] + "1a", color: tabColors[tab] } : undefined,
+    };
+  };
+  const aiTabClass = `inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium ${activeRightTab === "ai" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`;
   // One tab per channel, each icon-labeled so team chat / client chat /
   // email / SMS read as distinct at a glance instead of a single merged
   // "Activity" feed — Call has no log/composer, so it stays a plain link
   // near the client header instead of a tab here.
   const rightTabBar = (
     <div className="flex flex-wrap items-center gap-1">
-      <button onClick={() => switchRightTab("activity")} title="Team chat (internal only)" className={tabBtnClass(activeRightTab === "activity")}><I.comment /> Team · {commentCount}</button>
+      <button onClick={() => switchRightTab("activity")} title="Team chat (internal only)" {...tabBtnStyle("activity")}><I.comment /> Team · {commentCount}</button>
       {hasMessaging && (
-        <button onClick={() => switchRightTab("chat")} title="Client chat" className={tabBtnClass(activeRightTab === "chat")}><I.chatBubbles /> Chat{chatMsgCount > 0 ? ` · ${chatMsgCount}` : ""}</button>
+        <button onClick={() => switchRightTab("chat")} title="Client chat" {...tabBtnStyle("chat")}><I.chatBubbles /> Chat{chatMsgCount > 0 ? ` · ${chatMsgCount}` : ""}</button>
       )}
       {hasMessaging && (
-        <button onClick={() => switchRightTab("email")} title="Email" className={tabBtnClass(activeRightTab === "email")}><I.mail /> Email{emailMsgCount > 0 ? ` · ${emailMsgCount}` : ""}</button>
+        <button onClick={() => switchRightTab("email")} title="Email" {...tabBtnStyle("email")}><I.mail /> Email{emailMsgCount > 0 ? ` · ${emailMsgCount}` : ""}</button>
       )}
       {hasMessaging && (
-        <button onClick={() => switchRightTab("sms")} title="Text message" className={tabBtnClass(activeRightTab === "sms")}><I.phone /> SMS{smsMsgCount > 0 ? ` · ${smsMsgCount}` : ""}</button>
+        <button onClick={() => switchRightTab("sms")} title="Text message" {...tabBtnStyle("sms")}><I.phone /> SMS{smsMsgCount > 0 ? ` · ${smsMsgCount}` : ""}</button>
       )}
       {onRegenerateAiSummary && (
-        <button onClick={() => switchRightTab("ai")} className={tabBtnClass(activeRightTab === "ai")}>AI</button>
+        <button onClick={() => switchRightTab("ai")} className={aiTabClass}>AI</button>
       )}
     </div>
   );
@@ -1369,8 +1388,12 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
             {/* Stacks below the document on mobile (each pane its own scroll);
                 fixed, resizable side column at md+. Width rides a CSS var so a
                 responsive class can override the inline value below md. */}
-            <div className="relative flex min-h-0 flex-1 flex-col border-t bg-background/50 md:w-[var(--activity-w)] md:flex-none md:border-l md:border-t-0"
-              style={{ "--activity-w": `${activityW}px` } as React.CSSProperties}>
+            <div className="relative flex min-h-0 flex-1 flex-col border-t-4 md:w-[var(--activity-w)] md:flex-none md:border-l-4 md:border-t-0"
+              style={{
+                "--activity-w": `${activityW}px`,
+                background: activeTabColor ? activeTabColor + "0d" : "color-mix(in srgb, var(--background) 50%, transparent)",
+                borderTopColor: activeTabColor ?? undefined, borderLeftColor: activeTabColor ?? undefined,
+              } as React.CSSProperties}>
               <div onMouseDown={startResize} title="Drag to resize"
                 className="absolute inset-y-0 -left-1 z-10 hidden w-2 cursor-col-resize hover:bg-accent/30 active:bg-accent/40 md:block" />
               {hasMessaging && (
@@ -1392,7 +1415,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                   </div>
                 </div>
               )}
-              <div className="flex items-center gap-1 border-b bg-surface px-3 py-2">
+              <div className="flex items-center gap-1 border-b px-3 py-2" style={{ background: activeTabColor ? activeTabColor + "14" : "var(--surface)" }}>
                 {rightTabBar}
               </div>
               {activeRightTab === "ai" ? aiSummaryBlock : (<>
@@ -1431,9 +1454,11 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                     {onCopyClientLink && <button onClick={onCopyClientLink} className="font-medium text-accent hover:underline">Copy client link</button>}
                   </div>
                 )}
-                {rightTabBar}
-                {activeRightTab !== "ai" && <div className="mt-2">{commentsFeed}</div>}
-                {activeRightTab === "ai" && <div className="mt-2">{aiSummaryBlock}</div>}
+                <div className="-mx-3 rounded-xl border-t-4 px-3 pt-2" style={{ borderTopColor: activeTabColor ?? "transparent", background: activeTabColor ? activeTabColor + "0d" : undefined }}>
+                  {rightTabBar}
+                  {activeRightTab !== "ai" && <div className="mt-2">{commentsFeed}</div>}
+                  {activeRightTab === "ai" && <div className="mt-2">{aiSummaryBlock}</div>}
+                </div>
               </div>
             </div>
             {activeRightTab === "chat" ? chatComposerBlock : activeRightTab === "sms" ? smsComposerBlock : activeRightTab === "email" ? emailComposerBlock : activeRightTab === "ai" ? null : composer}

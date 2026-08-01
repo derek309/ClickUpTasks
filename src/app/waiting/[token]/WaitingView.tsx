@@ -262,8 +262,23 @@ export default function WaitingView({ token }: { token: string }) {
   // other. A ?task= deep link (e.g. from the task drawer's email tab) opens
   // straight into that task's detail view instead of the list.
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(() => deepLinkTaskId);
-  const openTask = (id: string) => setSelectedTaskId(id);
-  const closeTask = () => setSelectedTaskId(null);
+  // Keeps ?task=<id> in the URL in sync with the open detail view (no new
+  // history entry — this is "what page am I on", not a back-button stop),
+  // so refreshing the browser lands back on the same task instead of
+  // bouncing to the list — deepLinkTaskId above only reads this once at
+  // first load, so without this a reload always lost the current view.
+  const openTask = (id: string) => {
+    setSelectedTaskId(id);
+    const url = new URL(window.location.href);
+    url.searchParams.set("task", id);
+    window.history.replaceState(null, "", url.toString());
+  };
+  const closeTask = () => {
+    setSelectedTaskId(null);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("task");
+    window.history.replaceState(null, "", url.toString());
+  };
   const [tasks, setTasks] = useState<WaitingTask[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
