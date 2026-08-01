@@ -2625,6 +2625,34 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!body.trim()) return;
     const contact = contactForClient(clientId);
     if (!contact) { pushToast("This client isn't linked to a GHL contact yet."); return; }
+    // Chat needs neither GHL nor Gmail — it's just a `messages` row the
+    // client sees on their own /waiting/[token] page (picked up by the
+    // page's own polling), not something delivered through either provider.
+    // No per-message email either: only a debounced "you have a new
+    // message" nudge, gated server-side by a per-CLIENT cooldown (not
+    // per-task — replying across several of the same client's tasks in one
+    // pass must still add up to one email, see notify-client/route.ts).
+    if (channel === "chat") {
+      setSendingMessage(true);
+      try {
+        const m: Message = {
+          id: newId("msg_"), contactId: contact.id, clientId, taskId, channel, direction: "outbound",
+          subject: null, body, ghlMessageId: null, createdBy: me.id, at: new Date().toISOString(), read: true,
+          attachments, cc: [], bcc: [],
+        };
+        setMessages((ms) => [...ms, m]);
+        insertMessage(m);
+        if (taskId) {
+          authedFetch("/api/messages/notify-client", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ clientId, taskId }),
+          }).catch(() => {});
+        }
+      } finally {
+        setSendingMessage(false);
+      }
+      return;
+    }
     const target = ghlTargetForContact(contact);
     if (!target) { pushToast("No GoHighLevel connection for this client's sub-account."); return; }
     // Cc/Bcc are an email-only concept — never carry them onto an SMS send.

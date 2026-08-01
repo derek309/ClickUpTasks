@@ -200,20 +200,32 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     setRightTab(tab);
   };
   const hasComposedMessage = rightTab === "email" ? !!htmlToText(msgBody).trim() : !!msgBody.trim();
+  // A reply to a chat message actually sends as its own "chat" channel now
+  // (see Cockpit.tsx's sendMessage — no email goes out, it's a real
+  // messages row the client sees on their waiting page), not as email with
+  // a chat-flavored composer. rightTab still says "email" throughout (that's
+  // just which composer UI is showing); this is the one place that maps it
+  // to what's actually being sent.
+  const effectiveChannel: MessageChannel | "activity" | "ai" = chatStyleReply ? "chat" : rightTab;
   const submitTaskMessage = () => {
     if ((!hasComposedMessage && pendingMsgAtts.length === 0) || !onSendTaskMessage || rightTab === "activity" || rightTab === "ai") return;
-    // Cc/Bcc ride along only on email; SMS ignores them (Cockpit also guards this).
-    const cc = rightTab === "email" ? msgCc : undefined;
-    const bcc = rightTab === "email" ? msgBcc : undefined;
-    onSendTaskMessage(rightTab, msgSubject, rightTab === "email" ? msgBody : msgBody.trim(), pendingMsgAtts.length ? pendingMsgAtts : undefined, cc, bcc);
+    // Cc/Bcc ride along only on real email; SMS/chat ignore them (Cockpit also guards this).
+    const cc = effectiveChannel === "email" ? msgCc : undefined;
+    const bcc = effectiveChannel === "email" ? msgBcc : undefined;
+    // A blank subject line used to go out as a literal "(no subject)" email
+    // — default to the task's own title instead, same as how the task
+    // title already becomes the subject via "Add task details + link".
+    const subject = effectiveChannel === "email" ? (msgSubject.trim() || task.title) : msgSubject;
+    onSendTaskMessage(effectiveChannel as MessageChannel, subject, rightTab === "email" ? msgBody : msgBody.trim(), pendingMsgAtts.length ? pendingMsgAtts : undefined, cc, bcc);
     setMsgSubject(""); setMsgBody(""); setPendingMsgAtts([]); setMsgCc([]); setMsgBcc([]); setShowCcBcc(false); setChatStyleReply(false);
     setRightTab("activity"); // so the send is immediately visible in the feed
   };
   const submitScheduledTaskMessage = (whenIso: string) => {
-    if ((!hasComposedMessage && pendingMsgAtts.length === 0) || !onScheduleTaskMessage || rightTab === "activity" || rightTab === "ai") return;
+    if ((!hasComposedMessage && pendingMsgAtts.length === 0) || !onScheduleTaskMessage || rightTab === "activity" || rightTab === "ai" || chatStyleReply) return;
     const cc = rightTab === "email" ? msgCc : undefined;
     const bcc = rightTab === "email" ? msgBcc : undefined;
-    onScheduleTaskMessage(rightTab, msgSubject, rightTab === "email" ? msgBody : msgBody.trim(), whenIso, pendingMsgAtts.length ? pendingMsgAtts : undefined, cc, bcc);
+    const subject = rightTab === "email" ? (msgSubject.trim() || task.title) : msgSubject;
+    onScheduleTaskMessage(rightTab, subject, rightTab === "email" ? msgBody : msgBody.trim(), whenIso, pendingMsgAtts.length ? pendingMsgAtts : undefined, cc, bcc);
     setMsgSubject(""); setMsgBody(""); setPendingMsgAtts([]); setMsgCc([]); setMsgBcc([]); setShowCcBcc(false);
   };
   // Switches to Email and pre-fills "Re: subject" — no quoted body, same
@@ -825,8 +837,10 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
         <span className="flex items-center gap-1.5">
           {msgAttachButton}
           <button onClick={() => switchRightTab("activity")} className="rounded-lg px-2.5 py-1.5 text-[15px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
-          {onScheduleTaskMessage && <SchedulePopover disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} onSchedule={submitScheduledTaskMessage} />}
-          <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg bg-[#3b82f6] px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : chatStyleReply ? "Send" : "Send email"}</button>
+          {/* Scheduling a chat reply isn't supported — chat has no deferred-send
+              path (see Cockpit.tsx's sendMessage), it's meant to be immediate. */}
+          {onScheduleTaskMessage && !chatStyleReply && <SchedulePopover disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} onSchedule={submitScheduledTaskMessage} />}
+          <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40" style={{ background: chatStyleReply ? "#e87722" : "#3b82f6" }}>{sendingMessage ? "Sending…" : chatStyleReply ? "Send" : "Send email"}</button>
         </span>
       </div>
     </div>

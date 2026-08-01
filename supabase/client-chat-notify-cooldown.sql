@@ -1,0 +1,12 @@
+-- ClickUpTasks — per-client cooldown for "you have a new message" chat
+-- notification emails (see src/app/api/messages/notify-client/route.ts).
+-- Run once.
+--
+-- Why per-CLIENT, not per-task: replying to a client's chat message on one
+-- task is a "first of burst" problem solvable by looking at that task's own
+-- thread (same trick sendDmMessage already uses) — but an admin working
+-- through a review pass often replies across SEVERAL of the same client's
+-- tasks in a few minutes. Per-task debouncing would still fire one email
+-- per task in that case. A client-wide cooldown timestamp is the only thing
+-- that actually caps it to one email regardless of how many tasks changed.
+alter table clients add column if not exists last_chat_notified_at timestamptz;
