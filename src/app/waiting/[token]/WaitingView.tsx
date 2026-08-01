@@ -136,7 +136,12 @@ function TaskDetailCard({
     ? t.thread
     : [{ id: "legacy_response", from: "client", body: t.response.body, at: t.response.submittedAt, attachments: t.response.attachments }];
   return (
-    <div className="overflow-hidden rounded-2xl border bg-surface shadow-[var(--shadow-md)]">
+    // Full-bleed below md — the page's own -mx-6 side padding otherwise
+    // stacks with this card's border+rounded corners+shadow to read like a
+    // boxed iframe on a phone, when the whole point of the detail view is
+    // to actually use the screen. Reintroduced at md, where there's a
+    // sidebar next to it and the boxed look reads as a real card again.
+    <div className="-mx-6 overflow-hidden border-y bg-surface md:mx-0 md:rounded-2xl md:border md:shadow-[var(--shadow-md)]">
       <div className="border-l-4 p-4" style={{ borderLeftColor: isDone ? "var(--success)" : "var(--highlight)" }}>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -288,6 +293,10 @@ export default function WaitingView({ token }: { token: string }) {
   // to whatever's actually open; this is deliberately a request, not the
   // default state of the page.
   const [addElseOpen, setAddElseOpen] = useState(false);
+  // Completed items are history, not something waiting on the client — kept
+  // out of the main list and tucked behind a closed-by-default toggle at
+  // the bottom instead of sorted inline with what's still open.
+  const [completedOpen, setCompletedOpen] = useState(false);
 
   // Shared "add a link" popover — only one open at a time, keyed by task id
   // or the "__new__" sentinel for the "Need something else?" composer, so
@@ -365,6 +374,10 @@ export default function WaitingView({ token }: { token: string }) {
     const scoped = activeProjectId ? tasks.filter((t) => t.projectId === activeProjectId) : tasks;
     return [...scoped].sort((a, b) => rank(a) - rank(b) || (a.due ?? "9999").localeCompare(b.due ?? "9999"));
   }, [tasks, activeProjectId]);
+  // Split out of the main list entirely — done items are history, not
+  // something to scan past on the way to what's still open.
+  const openTasks = sorted.filter((t) => t.status !== "done");
+  const completedTasks = sorted.filter((t) => t.status === "done");
   // Looked up from the full list, not `sorted` — a task opened via a
   // deep link or an earlier project tab should still open in detail even if
   // the client has since switched to a different list's tab.
@@ -484,7 +497,7 @@ export default function WaitingView({ token }: { token: string }) {
     </>
   );
   const privacyNote = <p className="text-[12.5px] text-muted">This is a private link just for you. Please don&apos;t forward it.</p>;
-  const isEmpty = tasks && (tasks.length === 0 || sorted.length === 0);
+  const isEmpty = tasks && (tasks.length === 0 || openTasks.length === 0);
   const emptyState = (
     <div className="rounded-2xl border border-dashed bg-surface px-6 py-14 text-center">
       <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-success-soft text-[26px] text-success">✓</div>
@@ -495,12 +508,52 @@ export default function WaitingView({ token }: { token: string }) {
     </div>
   );
 
+  // One lean row — title, status, one-line preview — shared by the open
+  // list and the collapsed Completed section below it.
+  const renderTaskRow = (t: WaitingTask) => {
+    const isDone = t.status === "done";
+    // Newest message (either side) as a one-line preview — gives the list
+    // some content beyond a bare title/status without pulling the whole
+    // thread onto the landing page.
+    const lastMsg = t.thread.length > 0 ? t.thread[t.thread.length - 1] : null;
+    const preview = lastMsg
+      ? `${lastMsg.from === "client" ? "You" : lastMsg.sender?.name ?? "Team"}: ${lastMsg.body || (lastMsg.attachments.length > 0 ? "Sent an attachment" : "")}`
+      : t.description;
+    return (
+      <button
+        key={t.id}
+        onClick={() => openTask(t.id)}
+        className="flex w-full items-center gap-3 rounded-xl border bg-surface px-4 py-3 text-left shadow-[var(--shadow-sm)] transition hover:bg-surface-2"
+      >
+        <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: isDone ? "var(--success)" : t.needsResponse ? "var(--highlight)" : "var(--border)" }} />
+        <div className="min-w-0 flex-1">
+          <div className={`truncate text-[15.5px] font-semibold ${isDone ? "text-muted line-through decoration-muted/40" : ""}`}>{t.title}</div>
+          {preview && <div className="truncate text-[13px] text-muted">{preview}</div>}
+          {!activeProjectId && projects.length > 1 && projectName(t.projectId) && (
+            <div className="text-[12px] text-muted">{projectName(t.projectId)}</div>
+          )}
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          {isDone ? (
+            <span className="text-[12px] text-muted">Completed{t.due ? ` ${formatDue(t.due)}` : ""}</span>
+          ) : (<>
+            <span className={`rounded-full px-2 py-0.5 text-[11.5px] font-semibold ${t.needsResponse ? "bg-highlight-soft text-highlight" : "bg-accent-soft text-accent"}`}>
+              {t.needsResponse ? "Needs your input" : "In progress"}
+            </span>
+            {t.due && <span className={`text-[12px] ${isOverdue(t.due) ? "font-medium text-danger" : "text-muted"}`}>{formatDue(t.due)}</span>}
+          </>)}
+        </div>
+        <span className="shrink-0 text-muted" aria-hidden>›</span>
+      </button>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-background">
-      <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }} className="px-6 py-6 md:px-10">
-        <div className="mx-auto max-w-[1280px]">
-          <div className="text-[20px] font-extrabold tracking-tight text-white">ClickUpLocal</div>
-          <div className="mt-0.5 text-[13.5px] text-white/70">What we&apos;re waiting on you for</div>
+      <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }} className="px-6 py-3 md:px-10">
+        <div className="mx-auto max-w-[1280px] text-center">
+          <div className="text-[15px] font-bold tracking-tight text-white">ClickUpLocal</div>
+          <div className="text-[11px] text-white/70">What we&apos;re waiting on you for</div>
         </div>
       </div>
 
@@ -555,8 +608,13 @@ export default function WaitingView({ token }: { token: string }) {
               ) : (<>
               {projects.length > 1 && <div className="mb-4 flex flex-wrap gap-1.5 md:hidden">{projectTabs}</div>}
 
-              <div className="mb-5 rounded-xl border bg-highlight-soft px-4 py-3 text-[16px] text-foreground" style={{ borderColor: "color-mix(in srgb, var(--highlight) 35%, var(--border))" }}>
-                <span className="font-bold">One request per line, please.</span> If you have more than one thing, give each its own line (or send them one at a time below). It helps us track and finish each one quickly instead of it getting lost inside a combined message.
+              {/* text-[16px] is the floor, not a target — this app never
+                  goes below 16px in user-facing copy (readability on a
+                  client's own phone, no exceptions for "fine print"), so a
+                  lighter/tighter treatment (padding, weight, line-height)
+                  is how this reads smaller without crossing that line. */}
+              <div className="mb-5 rounded-xl border bg-highlight-soft px-3.5 py-2.5 text-[16px] leading-snug text-foreground" style={{ borderColor: "color-mix(in srgb, var(--highlight) 35%, var(--border))" }}>
+                <span className="font-semibold">One request per line, please.</span> If you have more than one thing, give each its own line (or send them one at a time below). It helps us track and finish each one quickly instead of it getting lost inside a combined message.
               </div>
 
               {addElseOpen ? (
@@ -630,43 +688,17 @@ export default function WaitingView({ token }: { token: string }) {
 
               {isEmpty ? emptyState : (
                 <div className="space-y-2">
-                  {sorted.map((t) => {
-                    const isDone = t.status === "done";
-                    // Newest message (either side) as a one-line preview —
-                    // gives the list some content beyond a bare title/status
-                    // without pulling the whole thread onto the landing page.
-                    const lastMsg = t.thread.length > 0 ? t.thread[t.thread.length - 1] : null;
-                    const preview = lastMsg
-                      ? `${lastMsg.from === "client" ? "You" : lastMsg.sender?.name ?? "Team"}: ${lastMsg.body || (lastMsg.attachments.length > 0 ? "Sent an attachment" : "")}`
-                      : t.description;
-                    return (
-                      <button
-                        key={t.id}
-                        onClick={() => openTask(t.id)}
-                        className="flex w-full items-center gap-3 rounded-xl border bg-surface px-4 py-3 text-left shadow-[var(--shadow-sm)] transition hover:bg-surface-2"
-                      >
-                        <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: isDone ? "var(--success)" : t.needsResponse ? "var(--highlight)" : "var(--border)" }} />
-                        <div className="min-w-0 flex-1">
-                          <div className={`truncate text-[15.5px] font-semibold ${isDone ? "text-muted line-through decoration-muted/40" : ""}`}>{t.title}</div>
-                          {preview && <div className="truncate text-[13px] text-muted">{preview}</div>}
-                          {!activeProjectId && projects.length > 1 && projectName(t.projectId) && (
-                            <div className="text-[12px] text-muted">{projectName(t.projectId)}</div>
-                          )}
-                        </div>
-                        <div className="flex shrink-0 flex-col items-end gap-1">
-                          {isDone ? (
-                            <span className="text-[12px] text-muted">Completed{t.due ? ` ${formatDue(t.due)}` : ""}</span>
-                          ) : (<>
-                            <span className={`rounded-full px-2 py-0.5 text-[11.5px] font-semibold ${t.needsResponse ? "bg-highlight-soft text-highlight" : "bg-accent-soft text-accent"}`}>
-                              {t.needsResponse ? "Needs your input" : "In progress"}
-                            </span>
-                            {t.due && <span className={`text-[12px] ${isOverdue(t.due) ? "font-medium text-danger" : "text-muted"}`}>{formatDue(t.due)}</span>}
-                          </>)}
-                        </div>
-                        <span className="shrink-0 text-muted" aria-hidden>›</span>
-                      </button>
-                    );
-                  })}
+                  {openTasks.map((t) => renderTaskRow(t))}
+                </div>
+              )}
+
+              {completedTasks.length > 0 && (
+                <div className={isEmpty ? "" : "mt-5"}>
+                  <button onClick={() => setCompletedOpen((o) => !o)} className="flex items-center gap-1.5 text-[13px] font-medium text-muted hover:text-foreground">
+                    <span className={`inline-block transition-transform ${completedOpen ? "rotate-90" : ""}`} aria-hidden>›</span>
+                    Completed · {completedTasks.length}
+                  </button>
+                  {completedOpen && <div className="mt-2 space-y-2">{completedTasks.map((t) => renderTaskRow(t))}</div>}
                 </div>
               )}
               </>)}
