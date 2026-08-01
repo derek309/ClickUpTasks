@@ -141,12 +141,6 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const [labelOpen, setLabelOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  // Still delivered as a real email underneath (that's the only channel
-  // that reaches the client and lands back in the same thread), but a reply
-  // to a chat message shouldn't look like drafting a formal email — no
-  // subject line, lighter copy. Set by replyToEmail, cleared by explicitly
-  // switching to Email (switchRightTab), which is a real fresh email either way.
-  const [chatStyleReply, setChatStyleReply] = useState(false);
   const [msgSubject, setMsgSubject] = useState("");
   const [msgBody, setMsgBody] = useState("");
   const [draftPrompt, setDraftPrompt] = useState("");
@@ -177,51 +171,42 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     for (const f of images) { const att = await onUploadMessageImage(f); if (att) setPendingMsgAtts((a) => [...a, att]); }
     setUploadingMsgAtt(false);
   };
-  // Merged into the Activity panel as a 3-way switcher rather than its own
+  // Merged into the Activity panel as a tabbed switcher rather than its own
   // block in the document body — messaging the contact and the internal
   // comment thread are both "activity on this task", just different
   // channels. The channel is just whichever tab is active, not separate
   // state, so there's one source of truth for what Send will do.
-  const [rightTab, setRightTab] = useState<"activity" | "sms" | "email" | "ai">("activity");
+  const [rightTab, setRightTab] = useState<"activity" | "chat" | "sms" | "email" | "ai">("activity");
   // Forces the email RichTextEditor to remount (see its `key` below), same
   // reasoning as the Journal composer's identical nonce: TipTap needs a
   // remount to pick up a programmatic content change or to refocus.
   const [emailFocusNonce, setEmailFocusNonce] = useState(0);
-  // Switching sms<->email converts msgBody in whichever direction is
-  // needed — email's is real HTML, sms's is plain — so neither composer
+  // Switching sms/chat<->email converts msgBody in whichever direction is
+  // needed — email's is real HTML, sms/chat's is plain — so no composer
   // ever shows raw tags or a collapsed run-on line. Activity/AI aren't
   // compose channels, so they pass through untouched.
-  const switchRightTab = (tab: "activity" | "sms" | "email" | "ai") => {
+  const switchRightTab = (tab: "activity" | "chat" | "sms" | "email" | "ai") => {
     if (tab === "email" && !looksLikeHtml(msgBody)) { setMsgBody((b) => plainTextToHtml(b)); setEmailFocusNonce((n) => n + 1); }
-    else if (tab === "sms" && looksLikeHtml(msgBody)) setMsgBody((b) => htmlToText(b));
-    // A deliberate switch to Email (the top button, not replyToEmail below)
-    // is always a real fresh email, never the lightweight chat-reply look.
-    if (tab === "email") setChatStyleReply(false);
+    else if ((tab === "sms" || tab === "chat") && looksLikeHtml(msgBody)) setMsgBody((b) => htmlToText(b));
     setRightTab(tab);
   };
   const hasComposedMessage = rightTab === "email" ? !!htmlToText(msgBody).trim() : !!msgBody.trim();
-  // A reply to a chat message actually sends as its own "chat" channel now
-  // (see Cockpit.tsx's sendMessage — no email goes out, it's a real
-  // messages row the client sees on their waiting page), not as email with
-  // a chat-flavored composer. rightTab still says "email" throughout (that's
-  // just which composer UI is showing); this is the one place that maps it
-  // to what's actually being sent.
-  const effectiveChannel: MessageChannel | "activity" | "ai" = chatStyleReply ? "chat" : rightTab;
   const submitTaskMessage = () => {
     if ((!hasComposedMessage && pendingMsgAtts.length === 0) || !onSendTaskMessage || rightTab === "activity" || rightTab === "ai") return;
     // Cc/Bcc ride along only on real email; SMS/chat ignore them (Cockpit also guards this).
-    const cc = effectiveChannel === "email" ? msgCc : undefined;
-    const bcc = effectiveChannel === "email" ? msgBcc : undefined;
+    const cc = rightTab === "email" ? msgCc : undefined;
+    const bcc = rightTab === "email" ? msgBcc : undefined;
     // A blank subject line used to go out as a literal "(no subject)" email
     // — default to the task's own title instead, same as how the task
     // title already becomes the subject via "Add task details + link".
-    const subject = effectiveChannel === "email" ? (msgSubject.trim() || task.title) : msgSubject;
-    onSendTaskMessage(effectiveChannel as MessageChannel, subject, rightTab === "email" ? msgBody : msgBody.trim(), pendingMsgAtts.length ? pendingMsgAtts : undefined, cc, bcc);
-    setMsgSubject(""); setMsgBody(""); setPendingMsgAtts([]); setMsgCc([]); setMsgBcc([]); setShowCcBcc(false); setChatStyleReply(false);
+    const subject = rightTab === "email" ? (msgSubject.trim() || task.title) : msgSubject;
+    onSendTaskMessage(rightTab, subject, rightTab === "email" ? msgBody : msgBody.trim(), pendingMsgAtts.length ? pendingMsgAtts : undefined, cc, bcc);
+    setMsgSubject(""); setMsgBody(""); setPendingMsgAtts([]); setMsgCc([]); setMsgBcc([]); setShowCcBcc(false);
     setRightTab("activity"); // so the send is immediately visible in the feed
   };
   const submitScheduledTaskMessage = (whenIso: string) => {
-    if ((!hasComposedMessage && pendingMsgAtts.length === 0) || !onScheduleTaskMessage || rightTab === "activity" || rightTab === "ai" || chatStyleReply) return;
+    // Chat has no deferred-send path (see Cockpit.tsx's sendMessage) — it's meant to be immediate.
+    if ((!hasComposedMessage && pendingMsgAtts.length === 0) || !onScheduleTaskMessage || rightTab === "activity" || rightTab === "ai" || rightTab === "chat") return;
     const cc = rightTab === "email" ? msgCc : undefined;
     const bcc = rightTab === "email" ? msgBcc : undefined;
     const subject = rightTab === "email" ? (msgSubject.trim() || task.title) : msgSubject;
@@ -230,20 +215,17 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   };
   // Switches to Email and pre-fills "Re: subject" — no quoted body, same
   // reasoning as the client Journal's reply: GHL threads it and the
-  // recipient's client already shows the prior message via the thread.
+  // recipient's client already shows the prior message via the thread. A
+  // reply to a chat message just switches to the Chat tab instead — chat has
+  // its own dedicated composer now, no subject or "Re:" involved.
   const emailBodyRef = useRef<HTMLTextAreaElement>(null);
   const replyToEmail = (m: Message) => {
+    if (m.channel === "chat") { setRightTab("chat"); return; }
     setRightTab("email");
     setEmailFocusNonce((n) => n + 1);
-    // A chat message has no subject — leave it blank rather than producing
-    // a bare "Re:" (`Re: ${""}`.trim() used to do exactly that).
     const subj = (m.subject ?? "").trim();
     setMsgSubject(subj ? (/^re:/i.test(subj) ? subj : `Re: ${subj}`) : "");
     setMsgBody("");
-    // Still sent as a real email underneath (the only channel that reaches
-    // the client and lands back in this thread) — just doesn't need to look
-    // like drafting formal email when replying to something informal.
-    setChatStyleReply(m.channel === "chat");
     requestAnimationFrame(() => emailBodyRef.current?.focus());
   };
   // Admin-only correction for a message that already sent wrong (see
@@ -744,7 +726,6 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     const lines = [descText, link ? `You can view this and reply anytime here: ${link}` : null].filter(Boolean).join("\n\n");
     if (!msgSubject.trim()) setMsgSubject(task.title);
     setMsgBody(plainTextToHtml(lines));
-    setChatStyleReply(false); // this fills in a subject, so it needs the field visible
     setEmailFocusNonce((n) => n + 1);
   };
   // "Prompt Claude" — type an intent, Gemini writes the message (subject+body)
@@ -753,7 +734,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     if (!onDraftMessage || draftingMessage) return;
     const d = await onDraftMessage(channel, draftPrompt.trim() || undefined);
     if (d) {
-      if (channel === "email") { setMsgSubject(d.subject ?? ""); setChatStyleReply(false); }
+      if (channel === "email") setMsgSubject(d.subject ?? "");
       // The AI drafter only ever returns plain text — give the email editor
       // real paragraphs instead of one run-on line with literal \n's in it.
       setMsgBody(channel === "email" ? plainTextToHtml(d.body) : d.body);
@@ -809,55 +790,82 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
           {!showCcBcc && <button onClick={() => setShowCcBcc(true)} className="text-[12px] font-medium text-accent hover:underline">Cc / Bcc</button>}
         </span>
       </div>
-      {!chatStyleReply && <div className="mb-2">{promptClaudeBlock("email")}</div>}
+      <div className="mb-2">{promptClaudeBlock("email")}</div>
       {showCcBcc && (
         <div className="mb-2 flex shrink-0 flex-col gap-1.5">
           <RecipientField label="Cc" value={msgCc} onChange={setMsgCc} contacts={ccContacts ?? []} />
           <RecipientField label="Bcc" value={msgBcc} onChange={setMsgBcc} contacts={ccContacts ?? []} />
         </div>
       )}
-      {/* A reply to a chat message skips the subject line entirely — chat
-          has no subject, and showing an empty one made a quick reply feel
-          like drafting formal email (still IS a real email underneath,
-          it's still delivered as one — the difference is purely cosmetic). */}
-      {!chatStyleReply && (
-        <input value={msgSubject} onChange={(e) => setMsgSubject(e.target.value)} placeholder="Subject"
-          className="mb-2 w-full shrink-0 rounded-lg border bg-background px-3 py-2 text-[15px] font-medium outline-none placeholder:text-muted focus:border-accent" />
-      )}
+      <input value={msgSubject} onChange={(e) => setMsgSubject(e.target.value)} placeholder="Subject"
+        className="mb-2 w-full shrink-0 rounded-lg border bg-background px-3 py-2 text-[15px] font-medium outline-none placeholder:text-muted focus:border-accent" />
       {msgAttBar}
       {/* Same rich-text editor the Journal composer and task descriptions
           use; the paste-to-attach-an-image handler and the ⌘↵-to-send
           capture both still work wrapped around it — a keydown/paste event
           on a contentEditable child bubbles like any other DOM event. */}
       <div className="min-h-[160px] overflow-auto" onPaste={handleMsgPaste} onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitTaskMessage(); } }}>
-        <RichTextEditor key={`task-email-${emailFocusNonce}`} value={msgBody} onChange={setMsgBody} placeholder={chatStyleReply ? "Type a message… (⌘↵ to send)" : "Write an email… (⌘↵ to send)"} autoFocus />
+        <RichTextEditor key={`task-email-${emailFocusNonce}`} value={msgBody} onChange={setMsgBody} placeholder="Write an email… (⌘↵ to send)" autoFocus />
       </div>
       <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
         <span className="text-[13px] text-muted">{wordCount(htmlToText(msgBody))} word{wordCount(htmlToText(msgBody)) === 1 ? "" : "s"}</span>
         <span className="flex items-center gap-1.5">
           {msgAttachButton}
           <button onClick={() => switchRightTab("activity")} className="rounded-lg px-2.5 py-1.5 text-[15px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
-          {/* Scheduling a chat reply isn't supported — chat has no deferred-send
-              path (see Cockpit.tsx's sendMessage), it's meant to be immediate. */}
-          {onScheduleTaskMessage && !chatStyleReply && <SchedulePopover disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} onSchedule={submitScheduledTaskMessage} />}
-          <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40" style={{ background: chatStyleReply ? "#e87722" : "#3b82f6" }}>{sendingMessage ? "Sending…" : chatStyleReply ? "Send" : "Send email"}</button>
+          {onScheduleTaskMessage && <SchedulePopover disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} onSchedule={submitScheduledTaskMessage} />}
+          <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg bg-[#3b82f6] px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send email"}</button>
         </span>
       </div>
     </div>
   ) : null;
-  // Falls back to "activity" if an SMS/Email tab was active but the
-  // contact got unlinked out from under it. AI isn't gated on hasMessaging —
-  // it summarizes tasks even without a linked contact, messages just add to it.
-  const activeRightTab = (rightTab === "sms" || rightTab === "email") && !hasMessaging ? "activity" : rightTab;
-  // SMS/Email aren't separate tabs anymore — Text/Email above (or a
-  // message's Reply button) switch the composer directly, and the feed
-  // stays put underneath either way. This just toggles Activity vs AI,
-  // which are genuinely different content, not different compose channels.
+  // A real "chat" channel message — a `messages` row the client sees on
+  // their public /waiting/[token] page, not an email (see Cockpit.tsx's
+  // sendMessage, channel: "chat" branch). No subject, no Cc/Bcc, no
+  // scheduling — it's meant to read and send like an actual chat.
+  const chatComposerBlock = hasMessaging ? (
+    <div className="max-h-[50vh] shrink-0 overflow-y-auto border-t-2 border-t-[#e87722] bg-[#e877220d] p-3">
+      <div className="mb-2 shrink-0 text-[13px] text-muted">Client chat — shows up on {client.name}&apos;s waiting page, no email or text goes out.</div>
+      {msgAttBar}
+      <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)} onPaste={handleMsgPaste}
+        onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitTaskMessage(); } }}
+        placeholder="Type a message… (⌘↵ to send, paste to attach an image)"
+        className="min-h-[100px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
+      <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
+        <span className="text-[13px] text-muted">{wordCount(msgBody)} word{wordCount(msgBody) === 1 ? "" : "s"}</span>
+        <span className="flex items-center gap-1.5">
+          {msgAttachButton}
+          <button onClick={() => switchRightTab("activity")} className="rounded-lg px-2.5 py-1.5 text-[15px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
+          <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg bg-[#e87722] px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send"}</button>
+        </span>
+      </div>
+    </div>
+  ) : null;
+  // Falls back to "activity" if a messaging tab was active but the contact
+  // got unlinked out from under it. AI isn't gated on hasMessaging — it
+  // summarizes tasks even without a linked contact, messages just add to it.
+  const activeRightTab = (rightTab === "chat" || rightTab === "sms" || rightTab === "email") && !hasMessaging ? "activity" : rightTab;
+  const chatMsgCount = (messages ?? []).filter((m) => m.channel === "chat").length;
+  const emailMsgCount = (messages ?? []).filter((m) => m.channel === "email").length;
+  const smsMsgCount = (messages ?? []).filter((m) => m.channel === "sms").length;
+  const tabBtnClass = (active: boolean) => `inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium ${active ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`;
+  // One tab per channel, each icon-labeled so team chat / client chat /
+  // email / SMS read as distinct at a glance instead of a single merged
+  // "Activity" feed — Call has no log/composer, so it stays a plain link
+  // near the client header instead of a tab here.
   const rightTabBar = (
-    <div className="flex items-center gap-1">
-      <button onClick={() => switchRightTab("activity")} className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium ${activeRightTab !== "ai" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Activity · {commentCount}</button>
+    <div className="flex flex-wrap items-center gap-1">
+      <button onClick={() => switchRightTab("activity")} title="Team chat (internal only)" className={tabBtnClass(activeRightTab === "activity")}><I.comment /> Team · {commentCount}</button>
+      {hasMessaging && (
+        <button onClick={() => switchRightTab("chat")} title="Client chat" className={tabBtnClass(activeRightTab === "chat")}><I.chatBubbles /> Chat{chatMsgCount > 0 ? ` · ${chatMsgCount}` : ""}</button>
+      )}
+      {hasMessaging && (
+        <button onClick={() => switchRightTab("email")} title="Email" className={tabBtnClass(activeRightTab === "email")}><I.mail /> Email{emailMsgCount > 0 ? ` · ${emailMsgCount}` : ""}</button>
+      )}
+      {hasMessaging && (
+        <button onClick={() => switchRightTab("sms")} title="Text message" className={tabBtnClass(activeRightTab === "sms")}><I.phone /> SMS{smsMsgCount > 0 ? ` · ${smsMsgCount}` : ""}</button>
+      )}
       {onRegenerateAiSummary && (
-        <button onClick={() => switchRightTab("ai")} className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium ${activeRightTab === "ai" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>AI</button>
+        <button onClick={() => switchRightTab("ai")} className={tabBtnClass(activeRightTab === "ai")}>AI</button>
       )}
     </div>
   );
@@ -1080,10 +1088,14 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   // Sent/received emails and texts aren't tied to one task in the data
   // model (just the contact/client), but merging them into this task's feed
   // — instead of only the client-level Chat tab — means sending from here
-  // shows up right where you sent it from.
+  // shows up right where you sent it from. Each tab shows only its own
+  // channel now (Team = comments/events, Chat/Email/SMS = that channel's
+  // messages) instead of one merged feed for everything.
   const activityItems: ({ at: string; kind: "comment" | "event"; comment: (typeof task.comments)[number] } | { at: string; kind: "message"; message: Message })[] = [
-    ...task.comments.map((c) => ({ at: c.at, kind: c.kind === "event" ? ("event" as const) : ("comment" as const), comment: c })),
-    ...(messages ?? []).map((m) => ({ at: m.at, kind: "message" as const, message: m })),
+    ...(activeRightTab === "activity" ? task.comments.map((c) => ({ at: c.at, kind: c.kind === "event" ? ("event" as const) : ("comment" as const), comment: c })) : []),
+    ...(activeRightTab === "chat" || activeRightTab === "email" || activeRightTab === "sms"
+      ? (messages ?? []).filter((m) => m.channel === activeRightTab).map((m) => ({ at: m.at, kind: "message" as const, message: m }))
+      : []),
   ].sort((a, b) => a.at.localeCompare(b.at));
   // GitHub/Slack-style vertical timeline: a single connecting line down a
   // fixed 32px node gutter (line sits at x=16px — the exact center of that
@@ -1191,7 +1203,13 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
           </div>
         );
       })}
-      {activityItems.length === 0 && (<div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted"><I.comment /><span className="text-[15px]">No activity yet</span><span className="text-[13px]">Start the team chat — type @ to mention a teammate.</span></div>)}
+      {activityItems.length === 0 && (
+        <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted">
+          <I.comment />
+          <span className="text-[15px]">No {activeRightTab === "activity" ? "team chat" : activeRightTab === "chat" ? "client chat" : activeRightTab} yet</span>
+          <span className="text-[13px]">{activeRightTab === "activity" ? "Type @ to mention a teammate." : "Nothing sent or received on this channel yet."}</span>
+        </div>
+      )}
     </div>
   );
   const composer = (
@@ -1328,18 +1346,16 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: clientStatusMeta(client.status).dot }} />
                     <span className="min-w-0 flex-1 truncate text-[14px] font-semibold">{client.name}</span>
                   </div>
-                  <div className="mb-2 mt-0.5 flex items-center justify-between gap-2 text-[12px] text-muted">
+                  <div className="mt-0.5 flex items-center justify-between gap-2 text-[12px] text-muted">
                     <span>{clientStatusMeta(client.status).label}</span>
-                    {onCopyClientLink && <button onClick={onCopyClientLink} className="shrink-0 font-medium text-accent hover:underline">Copy client link</button>}
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    {messageDest?.phone ? (
-                      <a href={`tel:${messageDest.phone}`} className="flex-1 rounded-md border px-2 py-1 text-center text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">Call</a>
-                    ) : (
-                      <span title="No phone on file" className="flex-1 cursor-not-allowed rounded-md border px-2 py-1 text-center text-[13px] font-medium text-muted opacity-40">Call</span>
-                    )}
-                    <button onClick={() => switchRightTab("sms")} className={`flex-1 rounded-md border px-2 py-1 text-[13px] font-medium transition ${activeRightTab === "sms" ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>Text</button>
-                    <button onClick={() => switchRightTab("email")} className={`flex-1 rounded-md border px-2 py-1 text-[13px] font-medium transition ${activeRightTab === "email" ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>Email</button>
+                    <span className="flex shrink-0 items-center gap-2">
+                      {messageDest?.phone ? (
+                        <a href={`tel:${messageDest.phone}`} className="font-medium text-accent hover:underline">Call</a>
+                      ) : (
+                        <span title="No phone on file" className="cursor-not-allowed opacity-40">Call</span>
+                      )}
+                      {onCopyClientLink && <button onClick={onCopyClientLink} className="font-medium text-accent hover:underline">Copy client link</button>}
+                    </span>
                   </div>
                 </div>
               )}
@@ -1347,10 +1363,10 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                 {rightTabBar}
               </div>
               {activeRightTab === "ai" ? aiSummaryBlock : (<>
-                {/* Feed always stays visible — SMS/Email replace only the
+                {/* Feed always stays visible — Chat/Email/SMS replace only the
                     composer below it, not the conversation history above. */}
                 <div className="flex-1 overflow-y-auto px-5 py-4">{commentsFeed}</div>
-                {activeRightTab === "sms" ? smsComposerBlock : activeRightTab === "email" ? emailComposerBlock : composer}
+                {activeRightTab === "chat" ? chatComposerBlock : activeRightTab === "sms" ? smsComposerBlock : activeRightTab === "email" ? emailComposerBlock : composer}
               </>)}
             </div>
           </div>
@@ -1373,29 +1389,21 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               {siblingsBlock}
               <div className="mt-6">
                 {hasMessaging && (
-                  <>
-                  {onCopyClientLink && (
-                    <div className="mb-1.5 text-right">
-                      <button onClick={onCopyClientLink} className="text-[12px] font-medium text-accent hover:underline">Copy client link</button>
-                    </div>
-                  )}
-                  <div className="mb-2 flex items-center gap-1.5">
+                  <div className="mb-1.5 flex items-center justify-end gap-2 text-[12px]">
                     {messageDest?.phone ? (
-                      <a href={`tel:${messageDest.phone}`} className="flex-1 rounded-md border px-2 py-1 text-center text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">Call</a>
+                      <a href={`tel:${messageDest.phone}`} className="font-medium text-accent hover:underline">Call</a>
                     ) : (
-                      <span title="No phone on file" className="flex-1 cursor-not-allowed rounded-md border px-2 py-1 text-center text-[13px] font-medium text-muted opacity-40">Call</span>
+                      <span title="No phone on file" className="cursor-not-allowed text-muted opacity-40">Call</span>
                     )}
-                    <button onClick={() => switchRightTab("sms")} className={`flex-1 rounded-md border px-2 py-1 text-[13px] font-medium transition ${activeRightTab === "sms" ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>Text</button>
-                    <button onClick={() => switchRightTab("email")} className={`flex-1 rounded-md border px-2 py-1 text-[13px] font-medium transition ${activeRightTab === "email" ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>Email</button>
+                    {onCopyClientLink && <button onClick={onCopyClientLink} className="font-medium text-accent hover:underline">Copy client link</button>}
                   </div>
-                  </>
                 )}
                 {rightTabBar}
                 {activeRightTab !== "ai" && <div className="mt-2">{commentsFeed}</div>}
                 {activeRightTab === "ai" && <div className="mt-2">{aiSummaryBlock}</div>}
               </div>
             </div>
-            {activeRightTab === "sms" ? smsComposerBlock : activeRightTab === "email" ? emailComposerBlock : activeRightTab === "ai" ? null : composer}
+            {activeRightTab === "chat" ? chatComposerBlock : activeRightTab === "sms" ? smsComposerBlock : activeRightTab === "email" ? emailComposerBlock : activeRightTab === "ai" ? null : composer}
           </>
         )}
       </aside>

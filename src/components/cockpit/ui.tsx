@@ -50,6 +50,12 @@ export const I = {
   key: (p: { className?: string }) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={p.className} width="15" height="15"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.5 12.5L20 3M20 3v5h-5M17 6l-3 3"/></svg>),
   download: (p: { className?: string }) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={p.className} width="13" height="13"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 19h16"/></svg>),
   clock: (p: { className?: string }) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={p.className} width="14" height="14"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>),
+  mail: (p: { className?: string }) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={p.className} width="14" height="14"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>),
+  phone: (p: { className?: string }) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={p.className} width="14" height="14"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.68 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.32 1.85.55 2.81.68A2 2 0 0 1 22 16.92z"/></svg>),
+  // Two overlapping bubbles — distinct at a glance from the single-bubble
+  // `comment` icon used for internal team chat, since they sit right next
+  // to each other in the same tab bar.
+  chatBubbles: (p: { className?: string }) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={p.className} width="14" height="14"><path d="M8 10a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v1a5 5 0 0 1-5 5h-1l-3 2.5V16h0a5 5 0 0 1-5-5z"/><path d="M8 17.5A4.5 4.5 0 0 1 3.5 13V8"/></svg>),
 };
 
 export function Avatar({ id, size = 26 }: { id: string | null; size?: number }) {
