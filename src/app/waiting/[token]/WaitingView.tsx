@@ -96,14 +96,17 @@ function AttachmentGallery({ items }: { items: WaitingAttachment[] }) {
   );
 }
 
-// Full task detail — title, due date, description, attachments, the
+// Full task detail body — due/status, description, attachments, the
 // complete running chat, and a composer. Used only for whichever one task
 // is currently selected (see selectedTaskId in WaitingView) — pulled out of
 // the list rows entirely so the landing page can stay a lean list instead
 // of every row carrying its own thread+composer inline (that's what made
 // the old combined view unreadable on mobile with more than a task or two).
-function TaskDetailCard({
-  task: t, showProjectName, projectName, draft, sending, uploading, sendError, linkOpen, linkUrl, linkLabel, threadRef, onBack,
+// No title/back button here — those live in the shared hero bar above this
+// (see WaitingView's return), which becomes this task's header instead of
+// a second one nested inside a card.
+function TaskDetailBody({
+  task: t, showProjectName, projectName, draft, sending, uploading, sendError, linkOpen, linkUrl, linkLabel, threadRef,
   onBody, onFiles, onRemoveAttachment, onToggleLink, onLinkUrl, onLinkLabel, onAddLink, onSend,
 }: {
   task: WaitingTask;
@@ -117,7 +120,6 @@ function TaskDetailCard({
   linkUrl: string;
   linkLabel: string;
   threadRef: (el: HTMLDivElement | null) => void;
-  onBack: () => void;
   onBody: (body: string) => void;
   onFiles: (files: FileList | null) => void;
   onRemoveAttachment: (attId: string) => void;
@@ -188,21 +190,19 @@ function TaskDetailCard({
     </>
   );
   return (
-    // Same chat-shell shape at every width: a header (back, title, due) and
-    // composer that stay put, with ONE scrollable region between them
-    // (description+attachments+thread together) — no separate scrollbox
-    // floating in the middle of a page that also scrolls. Below md it's a
-    // fixed full-screen shell; at md+ it's a sticky card bound to the
-    // viewport height instead (there's a sidebar next to it, so it can't
-    // take the whole screen, but the "one scroll region" shape is identical).
-    <div className="fixed inset-0 z-20 flex flex-col overflow-hidden bg-surface md:sticky md:inset-auto md:top-6 md:z-auto md:h-[calc(100vh-6rem)] md:rounded-2xl md:border md:shadow-[var(--shadow-md)]">
-      <div className="flex min-h-0 flex-1 flex-col border-l-4" style={{ borderLeftColor: isDone ? "var(--success)" : "var(--highlight)" }}>
-        <div className="relative shrink-0 border-b p-4">
-          <button onClick={onBack} title="Back to your tasks" className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full text-accent hover:bg-accent-soft">←</button>
-          <div className="mx-auto max-w-[calc(100%-3rem)] text-center">
-            <div className={`text-[17px] font-bold ${isDone ? "text-muted line-through decoration-muted/40" : ""}`}>{t.title}</div>
-            {showProjectName && projectName && <div className="text-[12px] text-muted">{projectName}</div>}
-            <span className="mt-1.5 inline-flex items-center gap-1.5">
+    <>
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        {/* A conversation still needs to read like one — two columns of
+            bubbles with a huge dead gap between them on a wide desktop
+            window looked like two separate floating boxes, not a chat.
+            Centering a normal reading-width column here gets both: the
+            page underneath is full width, but the conversation itself
+            still reads like an actual chat instead of spreading out with
+            the window. */}
+        <div className="mx-auto max-w-[720px]">
+          {(showProjectName && projectName) || isDone || t.due ? (
+            <div className="mb-2 flex flex-wrap items-center justify-center gap-1.5 text-center">
+              {showProjectName && projectName && <span className="text-[12px] text-muted">{projectName}</span>}
               {isDone && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-success-soft px-2 py-0.5 text-[12px] font-medium text-success">✓ Completed</span>
               )}
@@ -214,44 +214,32 @@ function TaskDetailCard({
                   {formatDue(t.due)}
                 </span>
               )}
-            </span>
-          </div>
-        </div>
+            </div>
+          ) : null}
+          {t.description && <p className="max-w-[62ch] whitespace-pre-wrap break-words text-[14px] text-muted">{t.description}</p>}
+          <AttachmentGallery items={t.attachments} />
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
-          {/* The card itself is full width now (no more boxed-iframe side
-              margins), but a conversation still needs to read like one —
-              two columns of bubbles with a huge dead gap between them on a
-              wide desktop window looked like two separate floating boxes,
-              not a chat. Centering a normal reading-width column inside the
-              full-width card gets both: no wasted-looking margins around
-              the card, but a real chat layout inside it. */}
-          <div className="mx-auto max-w-[720px]">
-            {t.description && <p className="max-w-[62ch] whitespace-pre-wrap break-words text-[14px] text-muted">{t.description}</p>}
-            <AttachmentGallery items={t.attachments} />
-
-            {displayThread.length > 0 && (
-              <div ref={threadRef} className="mt-3 space-y-2">
-                {displayThread.map((m) => (
-                  <div key={m.id} className={`flex items-end gap-1.5 ${m.from === "client" ? "justify-end" : "justify-start"}`}>
-                    {m.from === "team" && <SenderAvatar sender={m.sender} />}
-                    <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[14px] ${m.from === "client" ? "rounded-br-sm bg-accent text-white" : "rounded-bl-sm border bg-surface-2"}`}>
-                      {m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
-                      <AttachmentGallery items={m.attachments} />
-                      <div className={`mt-1 text-[11px] ${m.from === "client" ? "text-white/70" : "text-muted"}`}>
-                        {m.from === "client" ? "You" : m.sender?.name ?? "Team"} · {timeAgo(m.at)}
-                      </div>
+          {displayThread.length > 0 && (
+            <div ref={threadRef} className="mt-3 space-y-2">
+              {displayThread.map((m) => (
+                <div key={m.id} className={`flex items-end gap-1.5 ${m.from === "client" ? "justify-end" : "justify-start"}`}>
+                  {m.from === "team" && <SenderAvatar sender={m.sender} />}
+                  <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[14px] ${m.from === "client" ? "rounded-br-sm bg-accent text-white" : "rounded-bl-sm border bg-surface-2"}`}>
+                    {m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
+                    <AttachmentGallery items={m.attachments} />
+                    <div className={`mt-1 text-[11px] ${m.from === "client" ? "text-white/70" : "text-muted"}`}>
+                      {m.from === "client" ? "You" : m.sender?.name ?? "Team"} · {timeAgo(m.at)}
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-
-        <div className="shrink-0 border-t p-4"><div className="mx-auto max-w-[720px]">{composer}</div></div>
       </div>
-    </div>
+
+      <div className="shrink-0 border-t bg-surface p-4"><div className="mx-auto max-w-[720px]">{composer}</div></div>
+    </>
   );
 }
 
@@ -278,20 +266,8 @@ export default function WaitingView({ token }: { token: string }) {
   // other. A ?task= deep link (e.g. from the task drawer's email tab) opens
   // straight into that task's detail view instead of the list.
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(() => deepLinkTaskId);
-  const openTask = (id: string) => { setSelectedTaskId(id); window.scrollTo({ top: 0, behavior: "smooth" }); };
-  const closeTask = () => { setSelectedTaskId(null); window.scrollTo({ top: 0, behavior: "smooth" }); };
-  // Below md, the detail view is a fixed full-screen shell (see
-  // TaskDetailCard) so its own body can be the only scrollable region —
-  // without this, the underlying page is still swipeable behind it on iOS,
-  // which is exactly the "double scroll" this shell exists to avoid. Only
-  // locks at mobile widths: at md+ the card sits in normal page flow and
-  // the page is supposed to scroll.
-  useEffect(() => {
-    if (!selectedTaskId || !window.matchMedia("(max-width: 767px)").matches) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = prev; };
-  }, [selectedTaskId]);
+  const openTask = (id: string) => setSelectedTaskId(id);
+  const closeTask = () => setSelectedTaskId(null);
   const [tasks, setTasks] = useState<WaitingTask[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
@@ -583,62 +559,71 @@ export default function WaitingView({ token }: { token: string }) {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Everything that used to be the sidebar, compressed into one thin
-          strip instead of its own banner — brand, client, heading, and
-          progress all on a single line, with the privacy note folded in
-          underneath instead of repeated at the bottom of the page. */}
-      <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }} className="px-6 py-2.5 md:px-10">
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-          <div className="flex flex-wrap items-baseline gap-x-2 text-[13px] font-bold tracking-tight text-white">
-            <span className="text-white/60">ClickUpLocal</span>
-            {clientName && <span className="text-highlight">{clientName}</span>}
-            <span className="font-normal text-white/80">Your open items</span>
-          </div>
-          {totalCount > 0 && (
-            <div className="flex items-center gap-2">
-              <span className="text-[11.5px] text-white/70">{doneCount} of {totalCount} done</span>
-              <div className="h-1 w-20 overflow-hidden rounded-full bg-white/20"><div className="h-full rounded-full bg-white" style={{ width: `${progressPct}%` }} /></div>
-            </div>
-          )}
+    // Detail mode locks to exactly one viewport height with no page-level
+    // scroll at all — the hero becomes this task's header (back + title)
+    // and the body below it is the only scrollable region, full width, no
+    // card/border/shadow wrapping it. List mode is the normal page: a
+    // short hero, then content that scrolls with the page like any other
+    // site (see below).
+    <div className={selectedTask ? "flex h-[100dvh] flex-col overflow-hidden bg-background" : "min-h-screen bg-background"}>
+      {selectedTask ? (
+        <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }} className="relative flex shrink-0 items-center justify-center px-14 py-3 md:px-20">
+          <button onClick={closeTask} title="Back to your tasks" className="absolute left-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-white hover:bg-white/10">←</button>
+          <div className="max-w-[75%] truncate text-center text-[15px] font-bold text-white">{selectedTask.title}</div>
         </div>
-        <p className="mt-0.5 text-[11px] text-white/50">This is a private link just for you. Please don&apos;t forward it.</p>
-      </div>
+      ) : (
+        // Everything that used to be the sidebar, compressed into one thin
+        // strip instead of its own banner — brand, client, heading, and
+        // progress all on a single line, with the privacy note folded in
+        // underneath instead of repeated at the bottom of the page.
+        <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }} className="px-6 py-2.5 md:px-10">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+            <div className="flex flex-wrap items-baseline gap-x-2 text-[13px] font-bold tracking-tight text-white">
+              <span className="text-white/60">ClickUpLocal</span>
+              {clientName && <span className="text-highlight">{clientName}</span>}
+              <span className="font-normal text-white/80">Your open items</span>
+            </div>
+            {totalCount > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="text-[11.5px] text-white/70">{doneCount} of {totalCount} done</span>
+                <div className="h-1 w-20 overflow-hidden rounded-full bg-white/20"><div className="h-full rounded-full bg-white" style={{ width: `${progressPct}%` }} /></div>
+              </div>
+            )}
+          </div>
+          <p className="mt-0.5 text-[11px] text-white/50">This is a private link just for you. Please don&apos;t forward it.</p>
+        </div>
+      )}
 
+      {selectedTask ? (
+        <TaskDetailBody
+          task={selectedTask}
+          showProjectName={projects.length > 1}
+          projectName={projectName(selectedTask.projectId)}
+          draft={drafts[selectedTask.id] ?? { body: "", attachments: [] }}
+          sending={sendingIds.has(selectedTask.id)}
+          uploading={uploadingIds.has(selectedTask.id)}
+          sendError={sendErrors[selectedTask.id]}
+          linkOpen={linkForId === selectedTask.id}
+          linkUrl={linkUrl}
+          linkLabel={linkLabel}
+          threadRef={(el) => { threadRefs.current[selectedTask.id] = el; }}
+          onBody={(body) => updateBody(selectedTask.id, body)}
+          onFiles={(files) => handleFiles(selectedTask.id, files)}
+          onRemoveAttachment={(attId) => removeAttachment(selectedTask.id, attId)}
+          onToggleLink={() => { setLinkForId((id) => (id === selectedTask.id ? null : selectedTask.id)); setLinkUrl(""); setLinkLabel(""); }}
+          onLinkUrl={setLinkUrl}
+          onLinkLabel={setLinkLabel}
+          onAddLink={() => addLinkAttachment(selectedTask.id)}
+          onSend={() => sendChatMessage(selectedTask.id)}
+        />
+      ) : (
       <div className="px-6 pb-10 pt-6 md:px-10">
         {error ? (
           <div className="rounded-lg bg-danger-soft px-3 py-2 text-[15px] text-danger">{error}</div>
         ) : !tasks ? (
           <div className="py-8 text-center text-[13px] text-muted">Loading…</div>
         ) : (
-          <>
             <div className="min-w-0">
-              {selectedTask ? (
-                <div>
-                  <TaskDetailCard
-                    task={selectedTask}
-                    showProjectName={projects.length > 1}
-                    projectName={projectName(selectedTask.projectId)}
-                    draft={drafts[selectedTask.id] ?? { body: "", attachments: [] }}
-                    sending={sendingIds.has(selectedTask.id)}
-                    uploading={uploadingIds.has(selectedTask.id)}
-                    sendError={sendErrors[selectedTask.id]}
-                    linkOpen={linkForId === selectedTask.id}
-                    linkUrl={linkUrl}
-                    linkLabel={linkLabel}
-                    threadRef={(el) => { threadRefs.current[selectedTask.id] = el; }}
-                    onBack={closeTask}
-                    onBody={(body) => updateBody(selectedTask.id, body)}
-                    onFiles={(files) => handleFiles(selectedTask.id, files)}
-                    onRemoveAttachment={(attId) => removeAttachment(selectedTask.id, attId)}
-                    onToggleLink={() => { setLinkForId((id) => (id === selectedTask.id ? null : selectedTask.id)); setLinkUrl(""); setLinkLabel(""); }}
-                    onLinkUrl={setLinkUrl}
-                    onLinkLabel={setLinkLabel}
-                    onAddLink={() => addLinkAttachment(selectedTask.id)}
-                    onSend={() => sendChatMessage(selectedTask.id)}
-                  />
-                </div>
-              ) : (<>
               {addElseOpen ? (
                 <div className="mb-5 rounded-xl border bg-surface p-4 shadow-[var(--shadow-sm)]">
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -739,11 +724,10 @@ export default function WaitingView({ token }: { token: string }) {
                   {completedOpen && <div className="mt-2 space-y-2">{completedTasks.map((t) => renderTaskRow(t, { showProject: true }))}</div>}
                 </div>
               )}
-              </>)}
             </div>
-          </>
         )}
       </div>
+      )}
     </div>
   );
 }
