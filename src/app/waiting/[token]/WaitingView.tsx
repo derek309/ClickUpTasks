@@ -243,15 +243,13 @@ function TaskDetailCard({
 export default function WaitingView({ token }: { token: string }) {
   const [clientName, setClientName] = useState<string | null>(null);
   const [projects, setProjects] = useState<WaitingProject[]>([]);
-  // Which list the switcher is showing — null = "All". Seeded from
-  // ?project=<id> so a link copied from a specific project's "Copy list
-  // link" (Cockpit.tsx) opens straight into that list, without this being a
-  // second kind of link — it's the same client token, just a starting
-  // filter. Read once via the raw querystring (no next/navigation import
-  // elsewhere in this deliberately self-contained page) rather than a
-  // useEffect, so the switcher doesn't visibly flash "All" first.
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(() =>
-    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("project"));
+  // The list is grouped by project (section headers) rather than filtered
+  // by a tab switcher, so there's no "current list" state to hold — but a
+  // link copied from a specific project's "Copy list link" (Cockpit.tsx)
+  // still carries ?project=<id>, so that section gets scrolled to on load
+  // instead of the client having to find it themselves (see the scroll
+  // effect near groupRefs below).
+  const initialProjectId = useMemo(() => (typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("project")), []);
   // ?task=<id> — a link composed from one specific task (the task drawer's
   // email tab) so that exact item is visible here even if it isn't
   // otherwise waiting-on-client or answered (e.g. "this is done"), and gets
@@ -372,27 +370,51 @@ export default function WaitingView({ token }: { token: string }) {
     for (const el of Object.values(threadRefs.current)) { if (el) el.scrollTop = el.scrollHeight; }
   }, [tasks]);
 
-  const sorted = useMemo(() => {
+  const rankOpen = (t: WaitingTask) => (t.needsResponse ? 0 : 1);
+  const sortFn = (a: WaitingTask, b: WaitingTask) => (a.due ?? "9999").localeCompare(b.due ?? "9999");
+  // Open tasks grouped by list — a section per project (needing-response
+  // tasks first within each), plus a catch-all for anything whose project
+  // got deleted/reassigned out from under it. Skipped when there's only
+  // one project total, since a single repeated header would just be noise.
+  const openGroups = useMemo(() => {
     if (!tasks) return [];
-    const rank = (t: WaitingTask) => (t.status === "done" ? 2 : t.needsResponse ? 0 : 1);
-    const scoped = activeProjectId ? tasks.filter((t) => t.projectId === activeProjectId) : tasks;
-    return [...scoped].sort((a, b) => rank(a) - rank(b) || (a.due ?? "9999").localeCompare(b.due ?? "9999"));
-  }, [tasks, activeProjectId]);
-  // Split out of the main list entirely — done items are history, not
-  // something to scan past on the way to what's still open.
-  const openTasks = sorted.filter((t) => t.status !== "done");
-  const completedTasks = sorted.filter((t) => t.status === "done");
-  // Looked up from the full list, not `sorted` — a task opened via a
-  // deep link or an earlier project tab should still open in detail even if
-  // the client has since switched to a different list's tab.
+    const open = tasks.filter((t) => t.status !== "done");
+    const groups = projects
+      .map((p) => ({ project: p as WaitingProject | null, tasks: open.filter((t) => t.projectId === p.id).sort((a, b) => rankOpen(a) - rankOpen(b) || sortFn(a, b)) }))
+      .filter((g) => g.tasks.length > 0);
+    const orphan = open.filter((t) => !projects.some((p) => p.id === t.projectId)).sort((a, b) => rankOpen(a) - rankOpen(b) || sortFn(a, b));
+    if (orphan.length > 0) groups.push({ project: null, tasks: orphan });
+    return groups;
+  }, [tasks, projects]);
+  const totalOpen = openGroups.reduce((n, g) => n + g.tasks.length, 0);
+  // Completed items are their own flat list (not grouped) since there's
+  // rarely more than a handful — shown behind the collapsed toggle below.
+  const completedTasks = useMemo(() => (tasks ?? []).filter((t) => t.status === "done").sort(sortFn), [tasks]);
+  // Looked up from the full list, not a filtered one — a task opened via a
+  // deep link should still open in detail regardless of which section it's
+  // actually in.
   const selectedTask = selectedTaskId ? (tasks ?? []).find((t) => t.id === selectedTaskId) ?? null : null;
   const projectName = (id: string | null) => (id ? projects.find((p) => p.id === id)?.name ?? null : null);
-  const doneCount = sorted.filter((t) => t.status === "done").length;
-  const progressPct = sorted.length ? Math.round((doneCount / sorted.length) * 100) : 0;
+  const doneCount = completedTasks.length;
+  const totalCount = (tasks ?? []).length;
+  const progressPct = totalCount ? Math.round((doneCount / totalCount) * 100) : 0;
   // Which list a new request will actually go to: the client's own pick
-  // once they've touched the dropdown, else whatever list they're currently
-  // viewing, else the first one — never asked at all when there's only one.
-  const effectiveNewProjectId = newProjectId ?? activeProjectId ?? projects[0]?.id ?? null;
+  // once they've touched the dropdown, else the first one — never asked at
+  // all when there's only one.
+  const effectiveNewProjectId = newProjectId ?? projects[0]?.id ?? null;
+  // Scrolls a project's section into view once, if this page was opened via
+  // a "Copy list link" (?project=<id>) — the grouped layout replaced the
+  // old filter-by-tab behavior, so this is what "opens straight to this
+  // list" means now.
+  const groupRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const scrolledToProject = useRef(false);
+  useEffect(() => {
+    if (!initialProjectId || scrolledToProject.current) return;
+    const el = groupRefs.current[initialProjectId];
+    if (!el) return;
+    scrolledToProject.current = true;
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [openGroups, initialProjectId]);
 
   const updateBody = (taskId: string, body: string) =>
     setDrafts((prev) => ({ ...prev, [taskId]: { ...(prev[taskId] ?? { attachments: [] }), body } }));
@@ -480,41 +502,23 @@ export default function WaitingView({ token }: { token: string }) {
     }
   };
 
-  // Reused for both the sidebar's vertical tab rail (desktop) and the
-  // horizontal one shown inline on mobile — same buttons, different layout.
-  // Tailwind border-color utilities (border-highlight, border-accent, …)
-  // never win here: globals.css has an unlayered `* { border-color:
-  // var(--border) }` that beats any layered Tailwind utility regardless of
-  // specificity. Every colored border on this page has to go through
-  // inline style instead — the same workaround the pre-chat version of
-  // this file already used for the done/waiting card borders.
-  const tabPill = (active: boolean) => ({
-    className: `rounded-full border px-2.5 py-1 text-[12.5px] font-medium ${active ? "bg-accent text-white" : "bg-surface text-muted hover:bg-background"}`,
-    style: active ? { borderColor: "var(--highlight)" } : undefined,
-  });
-  const projectTabs = (
-    <>
-      <button onClick={() => setActiveProjectId(null)} {...tabPill(activeProjectId === null)}>All</button>
-      {projects.map((p) => (
-        <button key={p.id} onClick={() => setActiveProjectId(p.id)} {...tabPill(activeProjectId === p.id)}>{p.name}</button>
-      ))}
-    </>
-  );
   const privacyNote = <p className="text-[12.5px] text-muted">This is a private link just for you. Please don&apos;t forward it.</p>;
-  const isEmpty = tasks && (tasks.length === 0 || openTasks.length === 0);
+  const isEmpty = tasks && (tasks.length === 0 || totalOpen === 0);
   const emptyState = (
     <div className="rounded-2xl border border-dashed bg-surface px-6 py-14 text-center">
       <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-success-soft text-[26px] text-success">✓</div>
       <h2 className="text-[18px] font-bold">You&apos;re all caught up</h2>
-      <p className="mt-1 text-[14.5px] text-muted">
-        {tasks && tasks.length === 0 ? "Nothing needs your input right now. We'll email you the moment something does." : `Nothing needed from you in ${projectName(activeProjectId)} right now.`}
-      </p>
+      <p className="mt-1 text-[14.5px] text-muted">Nothing needs your input right now. We&apos;ll email you the moment something does.</p>
     </div>
   );
 
-  // One lean row — title, status, one-line preview — shared by the open
-  // list and the collapsed Completed section below it.
-  const renderTaskRow = (t: WaitingTask) => {
+  // One lean row — title, status, one-line preview — shared by every
+  // project's open section and the collapsed Completed section below them.
+  // showProject only makes sense outside a grouped section (the Completed
+  // list is flat, not grouped) — a section header already says which list
+  // it is for everything above.
+  const renderTaskRow = (t: WaitingTask, opts?: { showProject?: boolean }) => {
+    const showProject = opts?.showProject ?? false;
     const isDone = t.status === "done";
     // Newest message (either side) as a one-line preview — gives the list
     // some content beyond a bare title/status without pulling the whole
@@ -533,7 +537,7 @@ export default function WaitingView({ token }: { token: string }) {
         <div className="min-w-0 flex-1">
           <div className={`truncate text-[15.5px] font-semibold ${isDone ? "text-muted line-through decoration-muted/40" : ""}`}>{t.title}</div>
           {preview && <div className="truncate text-[13px] text-muted">{preview}</div>}
-          {!activeProjectId && projects.length > 1 && projectName(t.projectId) && (
+          {showProject && projects.length > 1 && projectName(t.projectId) && (
             <div className="text-[12px] text-muted">{projectName(t.projectId)}</div>
           )}
         </div>
@@ -574,13 +578,12 @@ export default function WaitingView({ token }: { token: string }) {
             <div className="sticky top-6 hidden self-start md:block">
               {clientName && <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-highlight">{clientName}</div>}
               <h1 className="mb-3 text-[22px] font-extrabold tracking-tight">Your open items</h1>
-              {sorted.length > 0 && (
+              {totalCount > 0 && (
                 <div className="mb-4">
-                  <div className="mb-1.5 flex justify-between text-[12.5px] text-muted"><span>Progress</span><span className="font-medium text-foreground">{doneCount} of {sorted.length} done</span></div>
+                  <div className="mb-1.5 flex justify-between text-[12.5px] text-muted"><span>Progress</span><span className="font-medium text-foreground">{doneCount} of {totalCount} done</span></div>
                   <div className="h-1.5 overflow-hidden rounded-full bg-border"><div className="h-full rounded-full bg-success" style={{ width: `${progressPct}%` }} /></div>
                 </div>
               )}
-              {projects.length > 1 && <div className="mb-5 flex flex-col items-stretch gap-1.5">{projectTabs}</div>}
               <div className="border-t pt-4">{privacyNote}</div>
             </div>
 
@@ -590,7 +593,7 @@ export default function WaitingView({ token }: { token: string }) {
                   <button onClick={closeTask} className="mb-4 inline-flex items-center gap-1 text-[14px] font-medium text-accent hover:underline">← Back to your tasks</button>
                   <TaskDetailCard
                     task={selectedTask}
-                    showProjectName={!activeProjectId && projects.length > 1}
+                    showProjectName={projects.length > 1}
                     projectName={projectName(selectedTask.projectId)}
                     draft={drafts[selectedTask.id] ?? { body: "", attachments: [] }}
                     sending={sendingIds.has(selectedTask.id)}
@@ -611,10 +614,8 @@ export default function WaitingView({ token }: { token: string }) {
                   />
                 </div>
               ) : (<>
-              {projects.length > 1 && <div className="mb-3 flex flex-wrap gap-1.5 md:hidden">{projectTabs}</div>}
-
               {addElseOpen ? (
-                <div className="mb-5 rounded-xl border bg-surface-2 p-4 shadow-[var(--shadow-sm)]">
+                <div className="mb-5 rounded-xl border bg-surface p-4 shadow-[var(--shadow-sm)]">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <div className="text-[15px] font-bold">Need something else?</div>
@@ -636,12 +637,12 @@ export default function WaitingView({ token }: { token: string }) {
                     onChange={(e) => setNewBody(e.target.value)}
                     placeholder="What do you need?"
                     rows={3}
-                    className="mt-2 w-full rounded-lg border bg-surface px-2.5 py-2 text-[14px] outline-none focus:border-accent"
+                    className="mt-2 w-full rounded-lg border bg-background px-2.5 py-2 text-[16px] outline-none focus:border-accent"
                   />
                   {newAttachments.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {newAttachments.map((a) => (
-                        <span key={a.id} className="inline-flex items-center gap-1.5 rounded-md border bg-surface px-2 py-1 text-[12px]">
+                        <span key={a.id} className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-[12px]">
                           {a.name} <span className="text-muted">{a.size}</span>
                           <button onClick={() => setNewAttachments((prev) => prev.filter((x) => x.id !== a.id))} title="Remove" className="text-muted hover:text-danger">✕</button>
                         </span>
@@ -649,9 +650,9 @@ export default function WaitingView({ token }: { token: string }) {
                     </div>
                   )}
                   {linkForId === "__new__" && (
-                    <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border bg-surface p-2">
-                      <input autoFocus value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLinkAttachment("__new__"); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-md border bg-background px-2.5 py-1.5 text-[13px] outline-none focus:border-accent" />
-                      <input value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLinkAttachment("__new__"); }} placeholder="Label (optional)" className="w-32 rounded-md border bg-background px-2.5 py-1.5 text-[13px] outline-none focus:border-accent" />
+                    <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border bg-background p-2">
+                      <input autoFocus value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLinkAttachment("__new__"); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
+                      <input value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLinkAttachment("__new__"); }} placeholder="Label (optional)" className="w-32 rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
                       <button onClick={() => addLinkAttachment("__new__")} disabled={!linkUrl.trim()} className="rounded-md bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white disabled:opacity-40">Add</button>
                     </div>
                   )}
@@ -692,8 +693,15 @@ export default function WaitingView({ token }: { token: string }) {
               )}
 
               {isEmpty ? emptyState : (
-                <div className="space-y-2">
-                  {openTasks.map((t) => renderTaskRow(t))}
+                <div className="space-y-5">
+                  {openGroups.map((g) => (
+                    <div key={g.project?.id ?? "__other__"} ref={g.project ? (el) => { groupRefs.current[g.project!.id] = el; } : undefined}>
+                      {projects.length > 1 && (
+                        <div className="mb-2 text-[12.5px] font-semibold uppercase tracking-wide text-muted">{g.project?.name ?? "Other"}</div>
+                      )}
+                      <div className="space-y-2">{g.tasks.map((t) => renderTaskRow(t))}</div>
+                    </div>
+                  ))}
                 </div>
               )}
 
@@ -703,7 +711,7 @@ export default function WaitingView({ token }: { token: string }) {
                     <span className={`inline-block transition-transform ${completedOpen ? "rotate-90" : ""}`} aria-hidden>›</span>
                     Completed · {completedTasks.length}
                   </button>
-                  {completedOpen && <div className="mt-2 space-y-2">{completedTasks.map((t) => renderTaskRow(t))}</div>}
+                  {completedOpen && <div className="mt-2 space-y-2">{completedTasks.map((t) => renderTaskRow(t, { showProject: true }))}</div>}
                 </div>
               )}
               </>)}
