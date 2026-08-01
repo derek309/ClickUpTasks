@@ -356,7 +356,7 @@ function InlineComments({ task, onAddComment }: { task: Task; onAddComment: (tas
             {visible.length === 0 && <div className="py-4 text-center text-[13px] text-muted">No comments yet.</div>}
           </div>
           <div className="flex items-end gap-1.5 border-t p-2">
-            <textarea value={body} onChange={(e) => setBody(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder="Write a comment…" rows={1} className="max-h-32 min-h-[32px] flex-1 resize-y rounded-lg border bg-background px-2 py-1.5 text-[14px] outline-none placeholder:text-muted" />
+            <textarea value={body} onChange={(e) => setBody(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder="Write a team chat… (internal only)" rows={1} className="max-h-32 min-h-[32px] flex-1 resize-y rounded-lg border bg-background px-2 py-1.5 text-[14px] outline-none placeholder:text-muted" />
             <button onClick={send} disabled={!body.trim()} className="rounded-lg bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white disabled:opacity-40">Send</button>
           </div>
         </div>

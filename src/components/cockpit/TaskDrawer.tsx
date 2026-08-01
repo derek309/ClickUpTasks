@@ -141,6 +141,12 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const [labelOpen, setLabelOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  // Still delivered as a real email underneath (that's the only channel
+  // that reaches the client and lands back in the same thread), but a reply
+  // to a chat message shouldn't look like drafting a formal email — no
+  // subject line, lighter copy. Set by replyToEmail, cleared by explicitly
+  // switching to Email (switchRightTab), which is a real fresh email either way.
+  const [chatStyleReply, setChatStyleReply] = useState(false);
   const [msgSubject, setMsgSubject] = useState("");
   const [msgBody, setMsgBody] = useState("");
   const [draftPrompt, setDraftPrompt] = useState("");
@@ -188,6 +194,9 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const switchRightTab = (tab: "activity" | "sms" | "email" | "ai") => {
     if (tab === "email" && !looksLikeHtml(msgBody)) { setMsgBody((b) => plainTextToHtml(b)); setEmailFocusNonce((n) => n + 1); }
     else if (tab === "sms" && looksLikeHtml(msgBody)) setMsgBody((b) => htmlToText(b));
+    // A deliberate switch to Email (the top button, not replyToEmail below)
+    // is always a real fresh email, never the lightweight chat-reply look.
+    if (tab === "email") setChatStyleReply(false);
     setRightTab(tab);
   };
   const hasComposedMessage = rightTab === "email" ? !!htmlToText(msgBody).trim() : !!msgBody.trim();
@@ -197,7 +206,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     const cc = rightTab === "email" ? msgCc : undefined;
     const bcc = rightTab === "email" ? msgBcc : undefined;
     onSendTaskMessage(rightTab, msgSubject, rightTab === "email" ? msgBody : msgBody.trim(), pendingMsgAtts.length ? pendingMsgAtts : undefined, cc, bcc);
-    setMsgSubject(""); setMsgBody(""); setPendingMsgAtts([]); setMsgCc([]); setMsgBcc([]); setShowCcBcc(false);
+    setMsgSubject(""); setMsgBody(""); setPendingMsgAtts([]); setMsgCc([]); setMsgBcc([]); setShowCcBcc(false); setChatStyleReply(false);
     setRightTab("activity"); // so the send is immediately visible in the feed
   };
   const submitScheduledTaskMessage = (whenIso: string) => {
@@ -219,6 +228,10 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     const subj = (m.subject ?? "").trim();
     setMsgSubject(subj ? (/^re:/i.test(subj) ? subj : `Re: ${subj}`) : "");
     setMsgBody("");
+    // Still sent as a real email underneath (the only channel that reaches
+    // the client and lands back in this thread) — just doesn't need to look
+    // like drafting formal email when replying to something informal.
+    setChatStyleReply(m.channel === "chat");
     requestAnimationFrame(() => emailBodyRef.current?.focus());
   };
   // Admin-only correction for a message that already sent wrong (see
@@ -719,6 +732,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     const lines = [descText, link ? `You can view this and reply anytime here: ${link}` : null].filter(Boolean).join("\n\n");
     if (!msgSubject.trim()) setMsgSubject(task.title);
     setMsgBody(plainTextToHtml(lines));
+    setChatStyleReply(false); // this fills in a subject, so it needs the field visible
     setEmailFocusNonce((n) => n + 1);
   };
   // "Prompt Claude" — type an intent, Gemini writes the message (subject+body)
@@ -727,7 +741,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     if (!onDraftMessage || draftingMessage) return;
     const d = await onDraftMessage(channel, draftPrompt.trim() || undefined);
     if (d) {
-      if (channel === "email") setMsgSubject(d.subject ?? "");
+      if (channel === "email") { setMsgSubject(d.subject ?? ""); setChatStyleReply(false); }
       // The AI drafter only ever returns plain text — give the email editor
       // real paragraphs instead of one run-on line with literal \n's in it.
       setMsgBody(channel === "email" ? plainTextToHtml(d.body) : d.body);
@@ -783,22 +797,28 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
           {!showCcBcc && <button onClick={() => setShowCcBcc(true)} className="text-[12px] font-medium text-accent hover:underline">Cc / Bcc</button>}
         </span>
       </div>
-      <div className="mb-2">{promptClaudeBlock("email")}</div>
+      {!chatStyleReply && <div className="mb-2">{promptClaudeBlock("email")}</div>}
       {showCcBcc && (
         <div className="mb-2 flex shrink-0 flex-col gap-1.5">
           <RecipientField label="Cc" value={msgCc} onChange={setMsgCc} contacts={ccContacts ?? []} />
           <RecipientField label="Bcc" value={msgBcc} onChange={setMsgBcc} contacts={ccContacts ?? []} />
         </div>
       )}
-      <input value={msgSubject} onChange={(e) => setMsgSubject(e.target.value)} placeholder="Subject"
-        className="mb-2 w-full shrink-0 rounded-lg border bg-background px-3 py-2 text-[15px] font-medium outline-none placeholder:text-muted focus:border-accent" />
+      {/* A reply to a chat message skips the subject line entirely — chat
+          has no subject, and showing an empty one made a quick reply feel
+          like drafting formal email (still IS a real email underneath,
+          it's still delivered as one — the difference is purely cosmetic). */}
+      {!chatStyleReply && (
+        <input value={msgSubject} onChange={(e) => setMsgSubject(e.target.value)} placeholder="Subject"
+          className="mb-2 w-full shrink-0 rounded-lg border bg-background px-3 py-2 text-[15px] font-medium outline-none placeholder:text-muted focus:border-accent" />
+      )}
       {msgAttBar}
       {/* Same rich-text editor the Journal composer and task descriptions
           use; the paste-to-attach-an-image handler still works wrapped
           around it — a paste event on a contentEditable child bubbles like
           any other DOM event, same as the ⌘↵-to-send capture below it. */}
       <div className="min-h-[160px] overflow-auto" onPaste={handleMsgPaste}>
-        <RichTextEditor key={`task-email-${emailFocusNonce}`} value={msgBody} onChange={setMsgBody} placeholder="Write an email…" autoFocus />
+        <RichTextEditor key={`task-email-${emailFocusNonce}`} value={msgBody} onChange={setMsgBody} placeholder={chatStyleReply ? "Type a message…" : "Write an email…"} autoFocus />
       </div>
       <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
         <span className="text-[13px] text-muted">{wordCount(htmlToText(msgBody))} word{wordCount(htmlToText(msgBody)) === 1 ? "" : "s"}</span>
@@ -806,7 +826,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
           {msgAttachButton}
           <button onClick={() => switchRightTab("activity")} className="rounded-lg px-2.5 py-1.5 text-[15px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
           {onScheduleTaskMessage && <SchedulePopover disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} onSchedule={submitScheduledTaskMessage} />}
-          <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg bg-[#3b82f6] px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send email"}</button>
+          <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg bg-[#3b82f6] px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : chatStyleReply ? "Send" : "Send email"}</button>
         </span>
       </div>
     </div>
@@ -1157,7 +1177,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
           </div>
         );
       })}
-      {activityItems.length === 0 && (<div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted"><I.comment /><span className="text-[15px]">No activity yet</span><span className="text-[13px]">Start the thread — type @ to mention a teammate.</span></div>)}
+      {activityItems.length === 0 && (<div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted"><I.comment /><span className="text-[15px]">No activity yet</span><span className="text-[13px]">Start the team chat — type @ to mention a teammate.</span></div>)}
     </div>
   );
   const composer = (
@@ -1170,7 +1190,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
         </div>
       )}
       <div className="flex items-end gap-2 rounded-xl border bg-background px-2.5 py-2 focus-within:border-accent">
-        <textarea value={comment} onChange={(e) => setComment(e.target.value)} onPaste={handleCommentPaste} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !(mentionMatch && mentionCands.length)) { e.preventDefault(); submitComment(); } }} placeholder="Write a comment…  (type @ to mention, paste to attach an image)" rows={1} className="max-h-72 min-h-[38px] flex-1 resize-y bg-transparent text-[15px] outline-none placeholder:text-muted" />
+        <textarea value={comment} onChange={(e) => setComment(e.target.value)} onPaste={handleCommentPaste} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !(mentionMatch && mentionCands.length)) { e.preventDefault(); submitComment(); } }} placeholder="Write a team chat…  (internal only — type @ to mention, paste to attach an image)" rows={1} className="max-h-72 min-h-[38px] flex-1 resize-y bg-transparent text-[15px] outline-none placeholder:text-muted" />
         <button onClick={submitComment} disabled={!comment.trim() && pendingCommentAtts.length === 0} className="rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">Send</button>
       </div>
     </div>
