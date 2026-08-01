@@ -1,14 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { todayIso, applyWaitingStatusSync, type Attachment, type Task } from "@/lib/data";
 import { sanitizeWaitingAttachments } from "@/lib/waitingAttachments";
 import { isRateLimited } from "@/lib/rateLimit";
-import { sendGmailAs, googleConfigured } from "@/lib/googleMail";
-
-const APP_URL = "https://clickuptasks.vercel.app";
-const SEND_DOMAIN = "clickuplocal.com";
-const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+import { resolveNotifyRecipient, notifyTeamOfClientActivity } from "@/lib/waitingNotify";
 
 // Public, token-gated — the client submits (or edits) their reply to a
 // waiting-on-them task. Reassignment/due-date/notification only fire when
@@ -55,19 +50,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   // bump is exclusive to the "this was waiting on them" case below; a reply
   // on a task shared via its own ticket link (never flagged waiting) still
   // needs to reach someone, it just doesn't reassign/reopen anything.
-  const followers: string[] = Array.isArray(client.assigned_to) ? client.assigned_to : [];
-  let assignee: string | null = followers[0] ?? null;
-  if (!assignee) {
-    const { data: admin } = await supabaseAdmin
-      .from("profiles").select("member_id").eq("role", "admin").not("member_id", "is", null)
-      .order("created_at", { ascending: true }).limit(1).maybeSingle();
-    assignee = admin?.member_id ?? null;
-  }
-  const notifyRecipient: string | null = assignee;
+  const notifyRecipient = await resolveNotifyRecipient(client.assigned_to as string[] | null);
   let dueToday = false;
   if (task.waiting_on_client === true) {
     camelPatch.waitingOnClient = false;
-    camelPatch.assigneeId = assignee;
+    camelPatch.assigneeId = notifyRecipient;
     dueToday = true;
   }
 
@@ -85,49 +72,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
   if (notifyRecipient) {
-    await supabaseAdmin.from("notifications").insert({
-      id: "n_" + randomUUID(), recipient_id: notifyRecipient,
-      text: `${client.name} responded on "${task.title}" — ready to work on`,
-      task_id: taskId, actor_id: null, client_id: client.id, project_id: task.project_id ?? null,
-      at: new Date().toISOString(), read: false, kind: "activity",
+    await notifyTeamOfClientActivity({
+      notifyRecipient, clientId: client.id, taskId, projectId: task.project_id ?? null,
+      clientName: client.name, taskTitle: task.title,
+      notifText: `${client.name} responded on "${task.title}". Ready to work on.`,
+      previewText: text || null,
     });
-
-    // Best-effort email companion to the in-app notification above, same
-    // silently-degrading philosophy as mention-email/notifications-email —
-    // this is a public, client-facing route and must never fail (or even
-    // slow down) because email sending is unconfigured or errors. There's no
-    // logged-in caller here to send "as" (the client isn't a Workspace
-    // user), so this sends the recipient their own notification email —
-    // still a real Workspace send via domain-wide delegation, just self-to-self.
-    // Self-to-self means hitting Gmail's Reply button on this email just
-    // emails yourself, not the client — spelled out below in bold, not left
-    // implicit, after that being the exact confusion a real send surfaced.
-    if (googleConfigured) {
-      try {
-        const { data: recipientProfile } = await supabaseAdmin.from("profiles").select("email").eq("member_id", notifyRecipient).maybeSingle();
-        const recipientEmail = (recipientProfile?.email as string | undefined)?.trim();
-        if (recipientEmail?.toLowerCase().endsWith(`@${SEND_DOMAIN}`)) {
-          const link = `${APP_URL}/?task=${encodeURIComponent(taskId)}`;
-          const clientName = escapeHtml(client.name);
-          const taskTitle = escapeHtml(task.title);
-          const preview = text
-            ? `<p style="margin:16px 0 0">Their reply:</p><p style="margin:4px 0 0;padding:10px 12px;background:#f6f9fd;border-radius:8px;white-space:pre-wrap">${escapeHtml(text.slice(0, 1000))}</p>`
-            : "";
-          const html = [
-            `<p style="margin:0">${clientName} responded on &quot;${taskTitle}&quot;. Ready to work on.</p>`,
-            preview,
-            `<p style="margin:18px 0"><a href="${link}" style="display:inline-block;background:#1b3a5c;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600">Open in ClickUpTasks</a></p>`,
-            `<p style="margin:0;color:#6b7280;font-size:13px"><strong>This is a notification only. Do not reply to this email.</strong> Replying goes nowhere. Click the button above to respond to ${clientName}.</p>`,
-          ].join("");
-          await sendGmailAs(recipientEmail, {
-            to: recipientEmail,
-            subject: `${client.name} responded on "${task.title}"`.slice(0, 200),
-            body: html,
-            isHtml: true,
-          });
-        }
-      } catch { /* email is a nice-to-have; the in-app notification already fired */ }
-    }
   }
 
   return NextResponse.json({ ok: true });

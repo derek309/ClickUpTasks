@@ -9,14 +9,19 @@
 // rather than importing from src/components/cockpit/ui.tsx, so this public
 // page doesn't pull in the internal component tree.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { formatDue, isOverdue, type Attachment } from "@/lib/data";
+import { formatDue, isOverdue, timeAgo, type Attachment } from "@/lib/data";
 
 type WaitingAttachment = { id: string; name: string; kind: Attachment["kind"]; size: string; path: string | null; url: string | null };
 type WaitingProject = { id: string; name: string };
+// One message in a task's running chat — see ./messages/route.ts (client
+// sends) and the team's existing task drawer (reads/sends the same
+// underlying `messages` row, just via the internal app instead of here).
+type WaitingMessage = { id: string; from: "team" | "client"; body: string; at: string; attachments: WaitingAttachment[] };
 type WaitingTask = {
   id: string; projectId: string | null; title: string; due: string | null; description: string; status: string; needsResponse: boolean;
   attachments: WaitingAttachment[];
   response: { body: string; submittedAt: string; attachments: WaitingAttachment[] } | null;
+  thread: WaitingMessage[];
 };
 // A draft attachment is either a stored file (has `path`, uploaded via
 // upload/route.ts) or a plain link (kind "link", has `url` instead) — mirrors
@@ -92,11 +97,12 @@ export default function WaitingView({ token }: { token: string }) {
   const [tasks, setTasks] = useState<WaitingTask[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
-  const [editingIds, setEditingIds] = useState<Set<string>>(new Set());
-  const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
+  // Chat is always open for any non-done task (no more "submit once, then
+  // click Edit to reopen" toggle) — a running conversation doesn't have an
+  // edit mode, just a composer that's always there until the task is done.
+  const [sendingIds, setSendingIds] = useState<Set<string>>(new Set());
   const [uploadingIds, setUploadingIds] = useState<Set<string>>(new Set());
-  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
-  const [saveErrors, setSaveErrors] = useState<Record<string, string>>({});
+  const [sendErrors, setSendErrors] = useState<Record<string, string>>({});
 
   // A separate "need something else?" composer — raises a brand-new task
   // rather than replying to one already waiting on the client.
@@ -138,16 +144,14 @@ export default function WaitingView({ token }: { token: string }) {
       setProjects(Array.isArray(j.projects) ? j.projects : []);
       const list: WaitingTask[] = Array.isArray(j.tasks) ? j.tasks : [];
       setTasks(list);
-      // Seed a draft per task from its existing response (so "Edit" opens
-      // pre-filled) — only for tasks with no draft yet, so a later refetch
-      // (after Save) doesn't clobber a draft someone's mid-typing elsewhere.
+      // Seed an empty draft per task — only for tasks with no draft yet, so
+      // a later refetch (after Send) doesn't clobber a draft someone's
+      // mid-typing elsewhere, and doesn't resurrect text that was just sent.
       setDrafts((prev) => {
         const next = { ...prev };
         for (const t of list) {
           if (next[t.id]) continue;
-          next[t.id] = t.response
-            ? { body: t.response.body, attachments: t.response.attachments.filter((a) => a.path || a.url).map((a) => ({ id: a.id, name: a.name, kind: a.kind, size: a.size, path: a.path ?? undefined, url: a.url ?? undefined })) }
-            : { body: "", attachments: [] };
+          next[t.id] = { body: "", attachments: [] };
         }
         return next;
       });
@@ -210,23 +214,25 @@ export default function WaitingView({ token }: { token: string }) {
   const removeAttachment = (taskId: string, attId: string) =>
     setDrafts((prev) => { const d = prev[taskId]; if (!d) return prev; return { ...prev, [taskId]: { ...d, attachments: d.attachments.filter((a) => a.id !== attId) } }; });
 
-  const save = async (taskId: string) => {
+  const sendChatMessage = async (taskId: string) => {
     const draft = drafts[taskId] ?? { body: "", attachments: [] };
-    setSavingIds((s) => new Set(s).add(taskId));
+    if (!draft.body.trim() && draft.attachments.length === 0) return;
+    setSendingIds((s) => new Set(s).add(taskId));
     try {
-      const res = await fetch(`/api/waiting/${token}/respond`, {
+      const res = await fetch(`/api/waiting/${token}/messages`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ taskId, body: draft.body, attachments: draft.attachments }),
       });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok) { setSaveErrors((e) => ({ ...e, [taskId]: j.error || "Couldn't save — try again." })); return; }
-      setSaveErrors((e) => { const n = { ...e }; delete n[taskId]; return n; });
-      setEditingIds((s) => { const n = new Set(s); n.delete(taskId); return n; });
-      setSavedIds((s) => new Set(s).add(taskId));
-      setTimeout(() => setSavedIds((s) => { const n = new Set(s); n.delete(taskId); return n; }), 3000);
+      if (!res.ok) { setSendErrors((e) => ({ ...e, [taskId]: j.error || "Couldn't send — try again." })); return; }
+      setSendErrors((e) => { const n = { ...e }; delete n[taskId]; return n; });
+      // Clear the composer immediately — load()'s draft-seeding only fills
+      // in tasks with NO existing entry, so without this the just-sent text
+      // would still sit in the box looking unsent.
+      setDrafts((prev) => ({ ...prev, [taskId]: { body: "", attachments: [] } }));
       await load();
     } finally {
-      setSavingIds((s) => { const n = new Set(s); n.delete(taskId); return n; });
+      setSendingIds((s) => { const n = new Set(s); n.delete(taskId); return n; });
     }
   };
 
@@ -284,8 +290,8 @@ export default function WaitingView({ token }: { token: string }) {
         ) : (
           <>
             {clientName && <h1 className="mb-1 text-[20px] font-semibold">{clientName}</h1>}
-            <div className="mb-4 rounded-lg bg-accent-soft/40 px-3 py-2 text-[13px] text-muted">
-              One request per line, please. If you have more than one thing, give each its own line (or send them one at a time below) so we can track and finish each one quickly instead of it getting lost inside a combined message.
+            <div className="mb-4 rounded-lg border-l-4 border-amber-500 bg-amber-50 px-4 py-3 text-[16px] text-amber-900">
+              <span className="font-bold">One request per line, please.</span> If you have more than one thing, give each its own line (or send them one at a time below). It helps us track and finish each one quickly instead of it getting lost inside a combined message.
             </div>
             {/* Only shown once there's something to switch between — a
                 client with one list never sees this, same as the "which
@@ -309,21 +315,18 @@ export default function WaitingView({ token }: { token: string }) {
                 {sorted.map((t) => {
                   const isDone = t.status === "done";
                   const isDeepLinked = t.id === deepLinkTaskId;
-                  // A task reached via its own ticket link (?task=<id>) is
-                  // respondable up front — the point of that link is letting
-                  // the client add feedback/media on that exact item, not
-                  // just view it, whether or not the team happened to flag
-                  // it "waiting on client" first. Only until the first
-                  // response exists, though: once t.response is set, this
-                  // must fall through to the same "Submitted"/Edit flow as
-                  // every other task, or Save would look like a no-op —
-                  // isDeepLinked never turns itself off, since it's derived
-                  // from the immutable URL param, not task state.
-                  const isEditing = !isDone && (t.needsResponse || editingIds.has(t.id) || (isDeepLinked && !t.response));
                   const draft = drafts[t.id] ?? { body: "", attachments: [] };
-                  const saving = savingIds.has(t.id);
+                  const sending = sendingIds.has(t.id);
                   const uploading = uploadingIds.has(t.id);
-                  const justSaved = savedIds.has(t.id);
+                  // Backward compat: a response submitted before per-task
+                  // chat existed lives on the task itself, not in the
+                  // messages table — shown as the thread's opening message
+                  // only when there's no real thread yet, so history isn't
+                  // lost but a task that's since moved to real chat doesn't
+                  // show it twice.
+                  const displayThread: WaitingMessage[] = t.thread.length > 0 || !t.response
+                    ? t.thread
+                    : [{ id: "legacy_response", from: "client", body: t.response.body, at: t.response.submittedAt, attachments: t.response.attachments }];
                   return (
                     <div
                       key={t.id}
@@ -358,21 +361,38 @@ export default function WaitingView({ token }: { token: string }) {
                       {t.description && <p className="mt-1.5 whitespace-pre-wrap text-[14px] text-muted">{t.description}</p>}
                       <AttachmentGallery items={t.attachments} />
 
-                      {isDone ? (
-                        t.response && (t.response.body || t.response.attachments.length > 0) && (
-                          <div className="mt-2 rounded-lg bg-white/70 p-2.5 text-[13px] text-green-900">
-                            <div className="mb-1 font-medium">Completed</div>
-                            {t.response.body && <p className="whitespace-pre-wrap">{t.response.body}</p>}
-                            <AttachmentGallery items={t.response.attachments} />
-                          </div>
-                        )
-                      ) : isEditing ? (
+                      {isDone && t.response && (t.response.body || t.response.attachments.length > 0) && (
+                        <div className="mt-2 rounded-lg bg-white/70 p-2.5 text-[13px] text-green-900">
+                          <div className="mb-1 font-medium">Completed</div>
+                          {t.response.body && <p className="whitespace-pre-wrap">{t.response.body}</p>}
+                          <AttachmentGallery items={t.response.attachments} />
+                        </div>
+                      )}
+
+                      {displayThread.length > 0 && (
+                        <div className="mt-3 space-y-2">
+                          {displayThread.map((m) => (
+                            <div key={m.id} className={`flex ${m.from === "client" ? "justify-end" : "justify-start"}`}>
+                              <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[14px] ${m.from === "client" ? "rounded-br-sm bg-accent text-white" : "rounded-bl-sm border bg-white"}`}>
+                                {m.body && <p className="whitespace-pre-wrap">{m.body}</p>}
+                                <AttachmentGallery items={m.attachments} />
+                                <div className={`mt-1 text-[11px] ${m.from === "client" ? "text-white/70" : "text-muted"}`}>
+                                  {m.from === "client" ? "You" : "Team"} · {timeAgo(m.at)}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {!isDone && (
                         <div className="mt-3 space-y-2">
                           <textarea
                             value={draft.body}
                             onChange={(e) => updateBody(t.id, e.target.value)}
-                            placeholder="Type your answer or notes here…"
-                            rows={3}
+                            onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") sendChatMessage(t.id); }}
+                            placeholder="Type a message…"
+                            rows={2}
                             className="w-full rounded-lg border bg-background px-2.5 py-2 text-[14px] outline-none focus:border-accent"
                           />
                           {draft.attachments.length > 0 && (
@@ -400,27 +420,18 @@ export default function WaitingView({ token }: { token: string }) {
                               </label>
                               <button onClick={() => { setLinkForId((id) => (id === t.id ? null : t.id)); setLinkUrl(""); setLinkLabel(""); }} className="text-[13px] font-medium text-accent">+ Add link</button>
                             </div>
-                            <div className="flex items-center gap-2">
-                              {editingIds.has(t.id) && !t.needsResponse && (
-                                <button onClick={() => setEditingIds((s) => { const n = new Set(s); n.delete(t.id); return n; })} className="text-[13px] text-muted hover:text-foreground">Cancel</button>
-                              )}
-                              <button
-                                onClick={() => save(t.id)}
-                                disabled={saving || uploading || (!draft.body.trim() && draft.attachments.length === 0)}
-                                className="rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-40"
-                              >
-                                {saving ? "Saving…" : uploading ? "Uploading…" : "Save"}
-                              </button>
-                            </div>
+                            <button
+                              onClick={() => sendChatMessage(t.id)}
+                              disabled={sending || uploading || (!draft.body.trim() && draft.attachments.length === 0)}
+                              className="rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-40"
+                            >
+                              {sending ? "Sending…" : uploading ? "Uploading…" : "Send"}
+                            </button>
                           </div>
-                          {saveErrors[t.id] && <div className="text-[13px] text-red-600">{saveErrors[t.id]}</div>}
+                          {sendErrors[t.id] && <div className="text-[13px] text-red-600">{sendErrors[t.id]}</div>}
+                          <div className="text-[12px] text-muted">We&apos;ll email the team when you send a message here.</div>
                         </div>
-                      ) : t.response ? (
-                        <div className="mt-2.5 flex items-center justify-between gap-2 rounded-lg bg-accent-soft/40 px-2.5 py-2">
-                          <div className="min-w-0 text-[13px] text-muted">{justSaved ? "Saved — the team's on it." : "Submitted — the team's working on it."}</div>
-                          <button onClick={() => setEditingIds((s) => new Set(s).add(t.id))} className="shrink-0 text-[13px] font-medium text-accent hover:underline">Edit</button>
-                        </div>
-                      ) : null}
+                      )}
                     </div>
                   );
                 })}

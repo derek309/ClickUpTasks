@@ -1057,13 +1057,18 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
         }
         if (item.kind === "message") {
           const m = item.message;
-          const dotColor = m.channel === "email" ? "#3b82f6" : "#22c55e";
+          // "chat" = the client's own message sent from their public
+          // /waiting/[token] page (see resolveTaskForThread's twin,
+          // src/app/api/waiting/[token]/messages/route.ts) — lands in this
+          // same feed with zero other changes needed on this side.
+          const dotColor = m.channel === "email" ? "#3b82f6" : m.channel === "chat" ? "#e87722" : "#22c55e";
+          const channelLabel = m.channel === "email" ? "Email" : m.channel === "chat" ? "Chat" : "SMS";
           return (
             <div key={m.id} className={`relative flex gap-3 ${gap}`}>
               <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface" style={{ background: dotColor }} /></div>
               <div className={`min-w-0 flex-1 rounded-xl border p-3 ${m.direction === "inbound" ? "bg-surface" : "bg-accent-soft/40"}`}>
                 <div className="flex items-center gap-2 text-[13px] text-muted">
-                  <span className="inline-flex items-center gap-1 rounded px-1.5 py-0 font-medium" style={{ background: dotColor + "1a", color: dotColor }}>{m.channel === "email" ? "Email" : "SMS"}</span>
+                  <span className="inline-flex items-center gap-1 rounded px-1.5 py-0 font-medium" style={{ background: dotColor + "1a", color: dotColor }}>{channelLabel}</span>
                   <span>{m.direction === "inbound" ? "Received" : "Sent"}</span>
                   {m.direction === "outbound" && m.createdBy && (
                     <span className="inline-flex items-center gap-1"><Avatar id={m.createdBy} size={14} /> {userById(m.createdBy)?.name ?? "Unknown"}</span>

@@ -67,11 +67,40 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     url: a.path ? (await supabaseAdmin.storage.from(TASK_FILES_BUCKET).createSignedUrl(a.path, 3600)).data?.signedUrl ?? null : a.url ?? null,
   })));
 
+  // The per-task chat thread (see ./messages/route.ts) — every message
+  // already scoped to a task via task_id, so this is the same data the
+  // team's own task drawer reads, just filtered to this client and stripped
+  // to a public-safe shape (no createdBy, no ghl/gmail ids, no cc/bcc).
+  type MessageRow = { id: string; task_id: string | null; direction: string; body: string; created_at: string; attachments: Attachment[] | null };
+  const taskIds = rows.map((t) => t.id);
+  const { data: messageRows } = taskIds.length
+    ? await supabaseAdmin.from("messages").select("id, task_id, direction, body, created_at, attachments")
+        .eq("client_id", client.id).in("task_id", taskIds).order("created_at", { ascending: true })
+    : { data: [] as MessageRow[] };
+  const threadByTask = new Map<string, MessageRow[]>();
+  for (const m of (messageRows ?? []) as MessageRow[]) {
+    if (!m.task_id) continue;
+    const list = threadByTask.get(m.task_id) ?? [];
+    list.push(m);
+    threadByTask.set(m.task_id, list);
+  }
+
   const tasks = await Promise.all(rows.map(async (t) => {
     const cr = t.client_response as { body: string; attachments: Attachment[]; submittedAt: string } | null;
-    const [attachments, responseAttachments] = await Promise.all([
+    const threadRows = threadByTask.get(t.id) ?? [];
+    const [attachments, responseAttachments, thread] = await Promise.all([
       resolveAttachments(t.attachments ?? []),
       cr ? resolveAttachments(cr.attachments) : Promise.resolve([]),
+      Promise.all(threadRows.map(async (m) => ({
+        id: m.id,
+        // "inbound" is team-side terminology (inbound TO the team) — from
+        // here it's the client's own message, so this is the one field
+        // worth translating rather than leaking the app's internal framing.
+        from: m.direction === "inbound" ? "client" as const : "team" as const,
+        body: htmlToText(m.body ?? ""),
+        at: m.created_at,
+        attachments: await resolveAttachments(m.attachments ?? []),
+      }))),
     ]);
     return {
       id: t.id, projectId: t.project_id ?? null, title: t.title, due: t.due ?? null,
@@ -84,6 +113,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
       // approving/responding to, not just a text description.
       attachments,
       response: cr ? { body: cr.body, submittedAt: cr.submittedAt, attachments: responseAttachments } : null,
+      thread,
     };
   }));
 
