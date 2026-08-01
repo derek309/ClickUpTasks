@@ -148,7 +148,7 @@ function TaskDetailBody({
         value={draft.body}
         onChange={(e) => onBody(e.target.value)}
         onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") onSend(); }}
-        placeholder="Type a message…"
+        placeholder="Type a message, we'll email the team…"
         rows={2}
         className="w-full resize-none rounded-lg border bg-background px-2.5 py-2 text-[16px] outline-none focus:border-accent"
       />
@@ -186,12 +186,19 @@ function TaskDetailBody({
         </button>
       </div>
       {sendError && <div className="mt-1.5 text-[13px] text-danger">{sendError}</div>}
-      <div className="mt-1.5 text-[12px] text-muted">We&apos;ll email the team when you send a message here.</div>
     </>
   );
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const scrollToBottom = () => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   return (
     <>
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 md:px-10">
+      {/* threadRef used to sit on the message list itself, which no longer
+          scrolls on its own now that the conversation is full width (it's
+          the OUTER div below that scrolls) — auto-scroll-to-newest silently
+          stopped working when that changed, since scrollTop/scrollHeight on
+          a non-overflowing element does nothing. Fixed by moving the ref
+          here, onto the actual scrolling container. */}
+      <div ref={(el) => { scrollRef.current = el; threadRef(el); }} className="min-h-0 flex-1 overflow-y-auto px-6 py-4 md:px-10">
         {(showProjectName && projectName) || isDone || t.due ? (
           <div className="mb-2 flex flex-wrap items-center justify-center gap-1.5 text-center">
             {showProjectName && projectName && <span className="text-[12px] text-muted">{projectName}</span>}
@@ -212,7 +219,7 @@ function TaskDetailBody({
         <AttachmentGallery items={t.attachments} />
 
         {displayThread.length > 0 && (
-          <div ref={threadRef} className="mt-3 space-y-2">
+          <div className="mt-3 space-y-2">
             {displayThread.map((m) => (
               <div key={m.id} className={`flex items-end gap-1.5 ${m.from === "client" ? "justify-end" : "justify-start"}`}>
                 {m.from === "team" && <SenderAvatar sender={m.sender} />}
@@ -230,6 +237,16 @@ function TaskDetailBody({
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Sticky-to-the-scroll-viewport rather than fixed to the page — it
+            floats above the newest message once you've scrolled up to read
+            history, and rides back out of view once you're already at the
+            bottom (its own normal-flow position, at the end of the thread). */}
+        {displayThread.length > 0 && (
+          <div className="pointer-events-none sticky bottom-2 z-10 flex justify-end pr-1">
+            <button onClick={scrollToBottom} title="Jump to the latest message" className="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full bg-accent text-white shadow-[var(--shadow-md)] hover:opacity-90">↓</button>
           </div>
         )}
       </div>
