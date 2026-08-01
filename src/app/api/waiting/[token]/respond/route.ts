@@ -49,21 +49,25 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   // plain text-only reply.
   if (attachments.some((a) => a.kind === "image")) camelPatch.status = "changes_requested";
 
-  let notifyRecipient: string | null = null;
+  // Resolve who should hear about this: the client's own followers, else
+  // the earliest admin — same fallback either way. Only reassignment/due-
+  // bump is exclusive to the "this was waiting on them" case below; a reply
+  // on a task shared via its own ticket link (never flagged waiting) still
+  // needs to reach someone, it just doesn't reassign/reopen anything.
+  const followers: string[] = Array.isArray(client.assigned_to) ? client.assigned_to : [];
+  let assignee: string | null = followers[0] ?? null;
+  if (!assignee) {
+    const { data: admin } = await supabaseAdmin
+      .from("profiles").select("member_id").eq("role", "admin").not("member_id", "is", null)
+      .order("created_at", { ascending: true }).limit(1).maybeSingle();
+    assignee = admin?.member_id ?? null;
+  }
+  const notifyRecipient: string | null = assignee;
   let dueToday = false;
   if (task.waiting_on_client === true) {
-    const followers: string[] = Array.isArray(client.assigned_to) ? client.assigned_to : [];
-    let assignee: string | null = followers[0] ?? null;
-    if (!assignee) {
-      const { data: admin } = await supabaseAdmin
-        .from("profiles").select("member_id").eq("role", "admin").not("member_id", "is", null)
-        .order("created_at", { ascending: true }).limit(1).maybeSingle();
-      assignee = admin?.member_id ?? null;
-    }
     camelPatch.waitingOnClient = false;
     camelPatch.assigneeId = assignee;
     dueToday = true;
-    notifyRecipient = assignee;
   }
 
   const synced: Partial<Task> = { ...camelPatch, ...applyWaitingStatusSync({ status: task.status, waitingOnClient: task.waiting_on_client }, camelPatch) };

@@ -141,6 +141,12 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const [msgBody, setMsgBody] = useState("");
   const [draftPrompt, setDraftPrompt] = useState("");
   const [descDraftPrompt, setDescDraftPrompt] = useState("");
+  // RichTextEditor only takes `value` as its boot-time content and never
+  // re-syncs from props after mount (see its own comment) — a caller that
+  // programmatically replaces the content, like the AI draft below, has to
+  // force a remount via a changing `key`, same as the email composer's
+  // emailFocusNonce.
+  const [descFocusNonce, setDescFocusNonce] = useState(0);
   const [msgCc, setMsgCc] = useState<string[]>([]);
   const [msgBcc, setMsgBcc] = useState<string[]>([]);
   const [showCcBcc, setShowCcBcc] = useState(false);
@@ -588,7 +594,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const runDraftDescription = async () => {
     if (!onDraftDescription || draftingDescription) return;
     const body = await onDraftDescription(task.title, task.description, descDraftPrompt.trim() || undefined);
-    if (body) onPatch({ description: plainTextToHtml(body) });
+    if (body) { onPatch({ description: plainTextToHtml(body) }); setDescFocusNonce((n) => n + 1); }
   };
 
   // Description / Checklist / Attachments are empty on most tasks — the
@@ -618,7 +624,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const descriptionBlock = !showDescription ? null : (
     <div className="mt-4 rounded-xl border bg-surface p-4">
       <div className="mb-2 text-[15px] font-semibold">Description</div>
-      <RichTextEditor value={task.description} onChange={(html) => onPatch({ description: html })} placeholder="Add a description…" />
+      <RichTextEditor key={`task-desc-${task.id}-${descFocusNonce}`} value={task.description} onChange={(html) => onPatch({ description: html })} placeholder="Add a description…" />
       {onDraftDescription && (
         <div className="mt-2 flex shrink-0 items-center gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
           <span aria-hidden className="pl-1 text-[13px]">✨</span>

@@ -284,6 +284,9 @@ export default function WaitingView({ token }: { token: string }) {
         ) : (
           <>
             {clientName && <h1 className="mb-1 text-[20px] font-semibold">{clientName}</h1>}
+            <div className="mb-4 rounded-lg bg-accent-soft/40 px-3 py-2 text-[13px] text-muted">
+              One request per line, please. If you have more than one thing, give each its own line (or send them one at a time below) so we can track and finish each one quickly instead of it getting lost inside a combined message.
+            </div>
             {/* Only shown once there's something to switch between — a
                 client with one list never sees this, same as the "which
                 list?" picker in the composer below. */}
@@ -305,12 +308,17 @@ export default function WaitingView({ token }: { token: string }) {
               <div className="space-y-4">
                 {sorted.map((t) => {
                   const isDone = t.status === "done";
-                  const isEditing = !isDone && (t.needsResponse || editingIds.has(t.id));
+                  const isDeepLinked = t.id === deepLinkTaskId;
+                  // A task reached via its own ticket link (?task=<id>) is
+                  // always respondable — the point of that link is letting
+                  // the client add feedback/media on that exact item, not
+                  // just view it, whether or not the team happened to flag
+                  // it "waiting on client" first.
+                  const isEditing = !isDone && (t.needsResponse || editingIds.has(t.id) || isDeepLinked);
                   const draft = drafts[t.id] ?? { body: "", attachments: [] };
                   const saving = savingIds.has(t.id);
                   const uploading = uploadingIds.has(t.id);
                   const justSaved = savedIds.has(t.id);
-                  const isDeepLinked = t.id === deepLinkTaskId;
                   return (
                     <div
                       key={t.id}
