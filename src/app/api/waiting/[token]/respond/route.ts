@@ -8,6 +8,7 @@ import { sendGmailAs, googleConfigured } from "@/lib/googleMail";
 
 const APP_URL = "https://clickuptasks.vercel.app";
 const SEND_DOMAIN = "clickuplocal.com";
+const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 // Public, token-gated — the client submits (or edits) their reply to a
 // waiting-on-them task. Reassignment/due-date/notification only fire when
@@ -98,17 +99,31 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     // logged-in caller here to send "as" (the client isn't a Workspace
     // user), so this sends the recipient their own notification email —
     // still a real Workspace send via domain-wide delegation, just self-to-self.
+    // Self-to-self means hitting Gmail's Reply button on this email just
+    // emails yourself, not the client — spelled out below in bold, not left
+    // implicit, after that being the exact confusion a real send surfaced.
     if (googleConfigured) {
       try {
         const { data: recipientProfile } = await supabaseAdmin.from("profiles").select("email").eq("member_id", notifyRecipient).maybeSingle();
         const recipientEmail = (recipientProfile?.email as string | undefined)?.trim();
         if (recipientEmail?.toLowerCase().endsWith(`@${SEND_DOMAIN}`)) {
           const link = `${APP_URL}/?task=${encodeURIComponent(taskId)}`;
-          const preview = text ? `\n\nTheir reply:\n"${text.slice(0, 1000)}"` : "";
+          const clientName = escapeHtml(client.name);
+          const taskTitle = escapeHtml(task.title);
+          const preview = text
+            ? `<p style="margin:16px 0 0">Their reply:</p><p style="margin:4px 0 0;padding:10px 12px;background:#f6f9fd;border-radius:8px;white-space:pre-wrap">${escapeHtml(text.slice(0, 1000))}</p>`
+            : "";
+          const html = [
+            `<p style="margin:0">${clientName} responded on &quot;${taskTitle}&quot;. Ready to work on.</p>`,
+            preview,
+            `<p style="margin:18px 0"><a href="${link}" style="display:inline-block;background:#1b3a5c;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600">Open in ClickUpTasks</a></p>`,
+            `<p style="margin:0;color:#6b7280;font-size:13px"><strong>This is a notification only. Do not reply to this email.</strong> Replying goes nowhere. Click the button above to respond to ${clientName}.</p>`,
+          ].join("");
           await sendGmailAs(recipientEmail, {
             to: recipientEmail,
             subject: `${client.name} responded on "${task.title}"`.slice(0, 200),
-            body: `${client.name} just responded on "${task.title}" — ready to work on.${preview}\n\nView in ClickUpTasks: ${link}`,
+            body: html,
+            isHtml: true,
           });
         }
       } catch { /* email is a nice-to-have; the in-app notification already fired */ }
