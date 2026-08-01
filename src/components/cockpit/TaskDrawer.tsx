@@ -596,7 +596,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const clientResponseBlock = task.clientResponse && (task.clientResponse.body || task.clientResponse.attachments.length > 0) ? (
     <div className="mt-4 rounded-xl border border-accent/30 bg-surface p-4">
       <div className="mb-2 flex items-center gap-1.5 text-[15px] font-semibold text-accent"><I.user className="h-4 w-4" /> Client response</div>
-      {task.clientResponse.body && <p className="whitespace-pre-wrap text-[14px]">{task.clientResponse.body}</p>}
+      {task.clientResponse.body && <CollapsibleText text={task.clientResponse.body} className="text-[14px]" />}
       {task.clientResponse.attachments.length > 0 && (
         <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
           {task.clientResponse.attachments.map((a) => {

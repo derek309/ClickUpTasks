@@ -47,7 +47,37 @@ function kindFromName(name: string): Attachment["kind"] {
   if (["xls", "xlsx", "csv", "numbers"].includes(ext)) return "sheet";
   return "doc";
 }
+// The shared Attachment type (src/lib/data.ts) has no "video" kind — it's
+// used across the whole app, not just this page, so a video still stores
+// as kind "doc". Checked by filename here instead, purely for how
+// AttachmentGallery renders it (an inline player instead of a file chip).
+// Matches the upload route's own allowlist exactly (src/app/api/waiting/
+// [token]/upload/route.ts) — no point recognizing an extension here that
+// the server would reject before it ever got this far.
+const VIDEO_EXTENSIONS = ["mp4", "mov", "webm", "m4v"];
+const isVideoName = (name: string) => VIDEO_EXTENSIONS.includes(name.split(".").pop()?.toLowerCase() ?? "");
 const localId = () => `a_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+
+// A plain http(s) URL typed into a message (or a task description) should
+// still be clickable — same URL-detection idiom the internal app's own
+// renderRichText (src/components/cockpit/ui.tsx) uses, duplicated here
+// rather than imported since this page deliberately doesn't pull in the
+// cockpit component tree.
+const URL_RE = /(https?:\/\/[^\s<>"'[\]]+)/g;
+const URL_TRAILING_PUNCT_RE = /[).,;:!?\]}'"]+$/;
+function linkify(text: string) {
+  return text.split(URL_RE).map((part, i) => {
+    if (i % 2 === 0) return part;
+    const trailing = part.match(URL_TRAILING_PUNCT_RE)?.[0] ?? "";
+    const url = trailing ? part.slice(0, -trailing.length) : part;
+    return (
+      <span key={i}>
+        <a href={url} target="_blank" rel="noopener noreferrer" className="underline">{url}</a>
+        {trailing}
+      </span>
+    );
+  });
+}
 
 // Who's on the other end of a team message — a real photo if they've set
 // one, else a colored initials circle, same fallback the internal app's own
@@ -84,6 +114,11 @@ function AttachmentGallery({ items }: { items: WaitingAttachment[] }) {
               {/* eslint-disable-next-line @next/next/no-img-element -- signed-URL thumbnail, not a next/image-friendly static asset. */}
               <img src={a.url} alt={a.name} className="h-full w-full object-cover" />
             </a>
+          );
+        }
+        if (isVideoName(a.name)) {
+          return (
+            <video key={a.id} src={a.url} controls preload="metadata" className="h-40 max-w-full rounded-lg border bg-black" />
           );
         }
         return (
@@ -130,6 +165,17 @@ function TaskDetailBody({
   onSend: () => void;
 }) {
   const isDone = t.status === "done";
+  const [dragOver, setDragOver] = useState(false);
+  // Shows the jump-to-latest button only while scrolled away from the
+  // bottom — starts true since the thread opens already scrolled down
+  // (see the auto-scroll effect in WaitingView), and native scroll events
+  // fire even for that effect's own programmatic scrollTop assignment, so
+  // this stays in sync without any extra wiring.
+  const [atBottom, setAtBottom] = useState(true);
+  const checkAtBottom = (el: HTMLDivElement | null) => {
+    if (!el) return;
+    setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 60);
+  };
   // Backward compat: a response submitted before per-task chat existed
   // lives on the task itself, not in the messages table — shown as the
   // thread's opening message only when there's no real thread yet, so
@@ -144,13 +190,21 @@ function TaskDetailBody({
           16px makes iOS Safari auto-zoom on focus, and the zoom (plus its
           "scroll the focused field into view") is exactly what was shoving
           the whole page sideways when the keyboard opened. */}
+      {/* Drag-and-drop straight onto the composer — same upload path as
+          "+ Attach files" (onFiles), just fed from the drop event's files
+          instead of a picked FileList. Native drag-drop already hands over
+          every dropped file at once, images and videos alike, no separate
+          multi-file wiring needed beyond what "+ Attach files" already has. */}
       <textarea
         value={draft.body}
         onChange={(e) => onBody(e.target.value)}
         onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") onSend(); }}
-        placeholder="Type a message, we'll email the team…"
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => { e.preventDefault(); setDragOver(false); onFiles(e.dataTransfer.files); }}
+        placeholder={dragOver ? "Drop to attach…" : "Type a message, we'll email the team…"}
         rows={2}
-        className="w-full resize-none rounded-lg border bg-background px-2.5 py-2 text-[16px] outline-none focus:border-accent"
+        className={`w-full resize-none rounded-lg border px-2.5 py-2 text-[16px] outline-none focus:border-accent ${dragOver ? "border-accent bg-accent-soft/30" : "bg-background"}`}
       />
       {draft.attachments.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
@@ -198,7 +252,7 @@ function TaskDetailBody({
           stopped working when that changed, since scrollTop/scrollHeight on
           a non-overflowing element does nothing. Fixed by moving the ref
           here, onto the actual scrolling container. */}
-      <div ref={(el) => { scrollRef.current = el; threadRef(el); }} className="min-h-0 flex-1 overflow-y-auto px-6 py-4 md:px-10">
+      <div ref={(el) => { scrollRef.current = el; threadRef(el); }} onScroll={(e) => checkAtBottom(e.currentTarget)} className="relative min-h-0 flex-1 overflow-y-auto px-6 py-4 md:px-10">
         {(showProjectName && projectName) || isDone || t.due ? (
           <div className="mb-2 flex flex-wrap items-center justify-center gap-1.5 text-center">
             {showProjectName && projectName && <span className="text-[12px] text-muted">{projectName}</span>}
@@ -215,7 +269,7 @@ function TaskDetailBody({
             )}
           </div>
         ) : null}
-        {t.description && <p className="max-w-[62ch] whitespace-pre-wrap break-words text-[14px] text-muted">{t.description}</p>}
+        {t.description && <p className="max-w-[62ch] whitespace-pre-wrap break-words text-[14px] text-muted">{linkify(t.description)}</p>}
         <AttachmentGallery items={t.attachments} />
 
         {displayThread.length > 0 && (
@@ -229,7 +283,7 @@ function TaskDetailBody({
                     container itself is the full page width now, not a
                     narrow centered column. */}
                 <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[14px] lg:max-w-[640px] ${m.from === "client" ? "rounded-br-sm bg-accent text-white" : "rounded-bl-sm border bg-surface"}`}>
-                  {m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
+                  {m.body && <p className="whitespace-pre-wrap break-words">{linkify(m.body)}</p>}
                   <AttachmentGallery items={m.attachments} />
                   <div className={`mt-1 text-[11px] ${m.from === "client" ? "text-white/70" : "text-muted"}`}>
                     {m.from === "client" ? "You" : m.sender?.name ?? "Team"} · {timeAgo(m.at)}
@@ -240,14 +294,15 @@ function TaskDetailBody({
           </div>
         )}
 
-        {/* Sticky-to-the-scroll-viewport rather than fixed to the page — it
-            floats above the newest message once you've scrolled up to read
-            history, and rides back out of view once you're already at the
-            bottom (its own normal-flow position, at the end of the thread). */}
-        {displayThread.length > 0 && (
-          <div className="pointer-events-none sticky bottom-2 z-10 flex justify-end pr-1">
-            <button onClick={scrollToBottom} title="Jump to the latest message" className="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full bg-accent text-white shadow-[var(--shadow-md)] hover:opacity-90">↓</button>
-          </div>
+        {/* Pinned to this scroll viewport's own corner (absolute against
+            the `relative` container it's in) rather than placed in the
+            document flow — sticky-in-flow put it wherever the thread's
+            content happened to end, which could land in the middle of the
+            screen on a short thread. Only shown once actually scrolled
+            away from the bottom. */}
+        {displayThread.length > 0 && !atBottom && (
+          <button onClick={scrollToBottom} title="Jump to the latest message"
+            className="absolute bottom-4 right-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-accent text-white shadow-[var(--shadow-md)] hover:opacity-90 md:right-10">↓</button>
         )}
       </div>
 
@@ -320,6 +375,7 @@ export default function WaitingView({ token }: { token: string }) {
   const [newSaving, setNewSaving] = useState(false);
   const [newError, setNewError] = useState<string | null>(null);
   const [newSent, setNewSent] = useState(false);
+  const [newDragOver, setNewDragOver] = useState(false);
 
   // Collapsed behind a big "Add something else" button by default — an
   // always-open composer read as a third thing competing for attention next
@@ -392,14 +448,15 @@ export default function WaitingView({ token }: { token: string }) {
   }, [token]);
 
 
-  // Keep each task's thread pane scrolled to its newest message — runs
-  // after every load() (initial, post-send, or the background poll above),
-  // not just once, so a reply that arrives via polling is visible without
-  // the client having to scroll down themselves.
+  // Keep the open task's thread scrolled to its newest message — runs
+  // after every load() (initial, post-send, or the background poll above)
+  // AND whenever a task is newly opened, not just once, so a reply that
+  // arrives via polling is visible without the client having to scroll
+  // down themselves, and opening a task doesn't land mid-conversation.
   const threadRefs = useRef<Record<string, HTMLDivElement | null>>({});
   useEffect(() => {
     for (const el of Object.values(threadRefs.current)) { if (el) el.scrollTop = el.scrollHeight; }
-  }, [tasks]);
+  }, [tasks, selectedTaskId]);
 
   const rankOpen = (t: WaitingTask) => (t.needsResponse ? 0 : 1);
   const sortFn = (a: WaitingTask, b: WaitingTask) => (a.due ?? "9999").localeCompare(b.due ?? "9999");
@@ -663,9 +720,12 @@ export default function WaitingView({ token }: { token: string }) {
                     autoFocus
                     value={newBody}
                     onChange={(e) => setNewBody(e.target.value)}
-                    placeholder="What do you need?"
+                    onDragOver={(e) => { e.preventDefault(); setNewDragOver(true); }}
+                    onDragLeave={() => setNewDragOver(false)}
+                    onDrop={(e) => { e.preventDefault(); setNewDragOver(false); handleNewFiles(e.dataTransfer.files); }}
+                    placeholder={newDragOver ? "Drop to attach…" : "What do you need?"}
                     rows={3}
-                    className="mt-2 w-full rounded-lg border bg-background px-2.5 py-2 text-[16px] outline-none focus:border-accent"
+                    className={`mt-2 w-full rounded-lg border px-2.5 py-2 text-[16px] outline-none focus:border-accent ${newDragOver ? "border-accent bg-accent-soft/30" : "bg-background"}`}
                   />
                   {newAttachments.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1.5">
