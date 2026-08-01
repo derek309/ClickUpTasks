@@ -8,6 +8,7 @@ import {
   daysBetween,
   mostRecentMonday,
   timeAgo,
+  htmlToText,
   initialsOf,
   setUsers,
   users,
@@ -158,6 +159,22 @@ describe("timeAgo", () => {
   it("passes legacy non-ISO strings through unchanged", () => {
     expect(timeAgo("just now")).toBe("just now");
     expect(timeAgo("2d ago")).toBe("2d ago");
+  });
+});
+
+describe("htmlToText", () => {
+  // This file's vitest environment has no `document`, so every call here
+  // exercises the server-side regex fallback specifically — the same path
+  // hit by the waiting-page API route, where a link like "...?a=1&b=2" was
+  // coming through as literal "&amp;" before entity decoding was added.
+  it("strips tags and decodes common entities without a DOM", () => {
+    expect(htmlToText("<p>Hi &amp; welcome</p>")).toBe("Hi & welcome");
+    expect(htmlToText("a=1&amp;b=2")).toBe("a=1&b=2");
+    expect(htmlToText("&lt;script&gt;")).toBe("<script>");
+    expect(htmlToText("&quot;quoted&quot; &amp; it&#39;s fine")).toBe("\"quoted\" & it's fine");
+  });
+  it("returns an empty string for empty input", () => {
+    expect(htmlToText("")).toBe("");
   });
 });
 

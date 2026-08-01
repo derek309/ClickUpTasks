@@ -1739,7 +1739,16 @@ export function dayLabel(iso: string): string {
  *  risk despite using innerHTML — it's read-only text extraction. */
 export function htmlToText(html: string): string {
   if (!html) return "";
-  if (typeof document === "undefined") return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  if (typeof document === "undefined") {
+    // No DOM to decode entities for us server-side — a link with a bare "&"
+    // (e.g. "...?project=x&task=y") would otherwise come through as
+    // literal "&amp;", which is exactly the shape of link this app hands
+    // out (see the waiting-page task link). Covers the entities real
+    // content actually produces, not a full HTML entity table.
+    return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")
+      .replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">")
+      .replace(/&quot;/gi, "\"").replace(/&#0?39;|&apos;/gi, "'").trim();
+  }
   const div = document.createElement("div");
   div.innerHTML = html;
   div.querySelectorAll("p, li, h1, h2, h3, blockquote, br").forEach((el) => el.after(document.createTextNode("\n")));

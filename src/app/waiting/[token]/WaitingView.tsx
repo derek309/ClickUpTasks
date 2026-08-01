@@ -119,6 +119,12 @@ export default function WaitingView({ token }: { token: string }) {
   const [newError, setNewError] = useState<string | null>(null);
   const [newSent, setNewSent] = useState(false);
 
+  // Collapsed behind a big "Add something else" button by default — an
+  // always-open composer read as a third thing competing for attention next
+  // to whatever's actually open; this is deliberately a request, not the
+  // default state of the page.
+  const [addElseOpen, setAddElseOpen] = useState(false);
+
   // Shared "add a link" popover — only one open at a time, keyed by task id
   // or the "__new__" sentinel for the "Need something else?" composer, so
   // both places reuse the same small bit of state instead of duplicating it.
@@ -181,6 +187,8 @@ export default function WaitingView({ token }: { token: string }) {
     return [...scoped].sort((a, b) => rank(a) - rank(b) || (a.due ?? "9999").localeCompare(b.due ?? "9999"));
   }, [tasks, activeProjectId]);
   const projectName = (id: string | null) => (id ? projects.find((p) => p.id === id)?.name ?? null : null);
+  const doneCount = sorted.filter((t) => t.status === "done").length;
+  const progressPct = sorted.length ? Math.round((doneCount / sorted.length) * 100) : 0;
   // Which list a new request will actually go to: the client's own pick
   // once they've touched the dropdown, else whatever list they're currently
   // viewing, else the first one — never asked at all when there's only one.
@@ -272,47 +280,71 @@ export default function WaitingView({ token }: { token: string }) {
     }
   };
 
-  return (
-    <div className="flex min-h-screen items-start justify-center bg-background px-4 py-10">
-      <div className="w-full max-w-7xl">
-        <div className="mb-5 flex items-center gap-2.5">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent text-[15px] font-bold text-white">CT</span>
-          <div className="leading-tight">
-            <div className="font-semibold">ClickUpLocal</div>
-            <div className="text-[13px] text-muted">What we&apos;re waiting on you for</div>
-          </div>
-        </div>
+  // Reused for both the sidebar's vertical tab rail (desktop) and the
+  // horizontal one shown inline on mobile — same buttons, different layout.
+  const projectTabs = (
+    <>
+      <button onClick={() => setActiveProjectId(null)}
+        className={`rounded-full px-3 py-1.5 text-[13px] font-medium ${activeProjectId === null ? "border border-highlight bg-accent text-white" : "border bg-surface text-muted hover:bg-background"}`}>All</button>
+      {projects.map((p) => (
+        <button key={p.id} onClick={() => setActiveProjectId(p.id)}
+          className={`rounded-full px-3 py-1.5 text-[13px] font-medium ${activeProjectId === p.id ? "border border-highlight bg-accent text-white" : "border bg-surface text-muted hover:bg-background"}`}>{p.name}</button>
+      ))}
+    </>
+  );
+  const privacyNote = <p className="text-[12.5px] text-muted">This is a private link just for you. Please don&apos;t forward it.</p>;
+  const isEmpty = tasks && (tasks.length === 0 || sorted.length === 0);
+  const emptyState = (
+    <div className="rounded-2xl border border-dashed bg-surface px-6 py-14 text-center">
+      <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-success-soft text-[26px] text-success">✓</div>
+      <h2 className="text-[18px] font-bold">You&apos;re all caught up</h2>
+      <p className="mt-1 text-[14.5px] text-muted">
+        {tasks && tasks.length === 0 ? "Nothing needs your input right now. We'll email you the moment something does." : `Nothing needed from you in ${projectName(activeProjectId)} right now.`}
+      </p>
+    </div>
+  );
 
+  return (
+    <div className="min-h-screen bg-background">
+      <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }} className="px-6 py-6 md:px-10">
+        <div className="mx-auto max-w-[1280px]">
+          <div className="text-[20px] font-extrabold tracking-tight text-white">ClickUpLocal</div>
+          <div className="mt-0.5 text-[13.5px] text-white/70">What we&apos;re waiting on you for</div>
+        </div>
+      </div>
+
+      <div className="mx-auto max-w-[1280px] px-6 pb-16 pt-0 md:px-10">
         {error ? (
-          <div className="rounded-lg bg-red-50 px-3 py-2 text-[15px] text-red-600">{error}</div>
+          <div className="-mt-4 rounded-lg bg-danger-soft px-3 py-2 text-[15px] text-danger">{error}</div>
         ) : !tasks ? (
           <div className="py-8 text-center text-[13px] text-muted">Loading…</div>
         ) : (
-          <>
-            {clientName && <h1 className="mb-1 text-[20px] font-semibold">{clientName}</h1>}
-            <div className="mb-4 rounded-lg border-l-4 border-amber-500 bg-amber-50 px-4 py-3 text-[16px] text-amber-900">
-              <span className="font-bold">One request per line, please.</span> If you have more than one thing, give each its own line (or send them one at a time below). It helps us track and finish each one quickly instead of it getting lost inside a combined message.
+          <div className="grid grid-cols-1 gap-10 md:grid-cols-[220px_minmax(0,760px)]">
+            {/* Identity + nav rail — desktop only; mobile gets the equivalent
+                pieces inline in the main column below instead. */}
+            <div className="sticky top-6 hidden self-start md:block">
+              {clientName && <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-highlight">{clientName}</div>}
+              <h1 className="mb-3 text-[22px] font-extrabold tracking-tight">Your open items</h1>
+              {sorted.length > 0 && (
+                <div className="mb-4">
+                  <div className="mb-1.5 flex justify-between text-[12.5px] text-muted"><span>Progress</span><span className="font-medium text-foreground">{doneCount} of {sorted.length} done</span></div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-border"><div className="h-full rounded-full bg-success" style={{ width: `${progressPct}%` }} /></div>
+                </div>
+              )}
+              {projects.length > 1 && <div className="mb-5 flex flex-col items-stretch gap-1.5">{projectTabs}</div>}
+              <div className="border-t pt-4">{privacyNote}</div>
             </div>
-            {/* Only shown once there's something to switch between — a
-                client with one list never sees this, same as the "which
-                list?" picker in the composer below. */}
-            {projects.length > 1 && (
-              <div className="mb-4 flex flex-wrap gap-1.5">
-                <button onClick={() => setActiveProjectId(null)}
-                  className={`rounded-full px-3 py-1 text-[13px] font-medium ${activeProjectId === null ? "bg-accent text-white" : "border text-muted hover:bg-background"}`}>All</button>
-                {projects.map((p) => (
-                  <button key={p.id} onClick={() => setActiveProjectId(p.id)}
-                    className={`rounded-full px-3 py-1 text-[13px] font-medium ${activeProjectId === p.id ? "bg-accent text-white" : "border text-muted hover:bg-background"}`}>{p.name}</button>
-                ))}
+
+            <div className="min-w-0">
+              {projects.length > 1 && <div className="mb-4 flex flex-wrap gap-1.5 md:hidden">{projectTabs}</div>}
+
+              <div className="mb-5 rounded-xl border border-highlight/35 bg-highlight-soft px-4 py-3 text-[16px] text-foreground">
+                <span className="font-bold">One request per line, please.</span> If you have more than one thing, give each its own line (or send them one at a time below). It helps us track and finish each one quickly instead of it getting lost inside a combined message.
               </div>
-            )}
-            {tasks.length === 0 ? (
-              <div className="py-8 text-center text-[15px] text-muted">Nothing needed from you right now — you&apos;re all caught up. 🎉</div>
-            ) : sorted.length === 0 ? (
-              <div className="py-8 text-center text-[15px] text-muted">Nothing needed from you in {projectName(activeProjectId)} right now.</div>
-            ) : (
-              <div className="space-y-4">
-                {sorted.map((t) => {
+
+              {isEmpty ? emptyState : (
+                <div className="space-y-3">
+                  {sorted.map((t) => {
                   const isDone = t.status === "done";
                   const isDeepLinked = t.id === deepLinkTaskId;
                   const draft = drafts[t.id] ?? { body: "", attachments: [] };
@@ -327,66 +359,66 @@ export default function WaitingView({ token }: { token: string }) {
                   const displayThread: WaitingMessage[] = t.thread.length > 0 || !t.response
                     ? t.thread
                     : [{ id: "legacy_response", from: "client", body: t.response.body, at: t.response.submittedAt, attachments: t.response.attachments }];
+                  // A finished item is context, not a call to action — a
+                  // quiet single row next to an open ticket's full card
+                  // treatment, so the thing that still needs attention wins
+                  // the eye instead of competing evenly with what's done.
+                  if (isDone) {
+                    return (
+                      <div key={t.id} ref={isDeepLinked ? deepLinkRef : undefined}
+                        className={`flex items-center gap-2.5 rounded-xl border bg-surface-2 px-4 py-2.5 ${isDeepLinked ? "ring-2 ring-accent ring-offset-2" : ""}`}>
+                        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-success text-[10px] font-black text-white">✓</span>
+                        <span className="truncate text-[14.5px] font-medium text-muted line-through decoration-muted/40">{t.title}</span>
+                        {!activeProjectId && projects.length > 1 && projectName(t.projectId) && (
+                          <span className="shrink-0 text-[12px] text-muted">{projectName(t.projectId)}</span>
+                        )}
+                        <span className="ml-auto shrink-0 text-[12.5px] text-muted">Completed{t.due ? ` ${formatDue(t.due)}` : ""}</span>
+                      </div>
+                    );
+                  }
                   return (
                     <div
                       key={t.id}
                       ref={isDeepLinked ? deepLinkRef : undefined}
-                      className={`rounded-xl border border-l-4 p-3.5 shadow-sm ${isDone ? "bg-green-50" : "bg-yellow-50"} ${isDeepLinked ? "ring-2 ring-accent ring-offset-2" : ""}`}
-                      // A global `* { border-color: var(--border) }` rule in globals.css is
-                      // unlayered, so per CSS cascade-layer rules it beats ANY Tailwind
-                      // border-color utility (including border-l-accent, border-green-200,
-                      // etc.) regardless of specificity — inline style is the reliable way
-                      // to override it.
-                      style={{ borderColor: isDone ? "#bbf7d0" : undefined, borderLeftColor: isDone ? "#22c55e" : "var(--accent)" }}
+                      className={`overflow-hidden rounded-2xl border bg-surface shadow-[var(--shadow-md)] ${isDeepLinked ? "ring-2 ring-accent ring-offset-2" : ""}`}
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 text-[17px] font-medium">
-                            {isDone && <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-500 text-[11px] text-white">✓</span>}
-                            <span className={isDone ? "text-green-800" : ""}>{t.title}</span>
+                      <div className="border-l-4 border-highlight p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-[17px] font-bold">{t.title}</div>
+                            {/* Which list this is — only worth saying while
+                                viewing the merged "All" tab; redundant once
+                                you're already inside that list's own tab. */}
+                            {!activeProjectId && projects.length > 1 && projectName(t.projectId) && (
+                              <div className="text-[12px] text-muted">{projectName(t.projectId)}</div>
+                            )}
                           </div>
-                          {/* Which list this is — only worth saying while
-                              viewing the merged "All" tab; redundant once
-                              you're already inside that list's own tab. */}
-                          {!activeProjectId && projects.length > 1 && projectName(t.projectId) && (
-                            <div className="text-[12px] text-muted">{projectName(t.projectId)}</div>
+                          {t.due && (
+                            <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[12px] font-medium ${isOverdue(t.due) ? "border-danger/30 bg-danger-soft text-danger" : "border-transparent bg-accent-soft text-accent"}`}>
+                              {formatDue(t.due)}
+                            </span>
                           )}
                         </div>
-                        {t.due && !isDone && (
-                          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[12px] font-medium ${isOverdue(t.due) ? "bg-red-50 text-red-600" : "bg-accent-soft text-accent"}`}>
-                            {formatDue(t.due)}
-                          </span>
-                        )}
-                      </div>
-                      {t.description && <p className="mt-1.5 whitespace-pre-wrap text-[14px] text-muted">{t.description}</p>}
-                      <AttachmentGallery items={t.attachments} />
+                        {t.description && <p className="mt-1.5 max-w-[62ch] whitespace-pre-wrap break-words text-[14px] text-muted">{t.description}</p>}
+                        <AttachmentGallery items={t.attachments} />
 
-                      {isDone && t.response && (t.response.body || t.response.attachments.length > 0) && (
-                        <div className="mt-2 rounded-lg bg-white/70 p-2.5 text-[13px] text-green-900">
-                          <div className="mb-1 font-medium">Completed</div>
-                          {t.response.body && <p className="whitespace-pre-wrap">{t.response.body}</p>}
-                          <AttachmentGallery items={t.response.attachments} />
-                        </div>
-                      )}
-
-                      {displayThread.length > 0 && (
-                        <div className="mt-3 space-y-2">
-                          {displayThread.map((m) => (
-                            <div key={m.id} className={`flex ${m.from === "client" ? "justify-end" : "justify-start"}`}>
-                              <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[14px] ${m.from === "client" ? "rounded-br-sm bg-accent text-white" : "rounded-bl-sm border bg-white"}`}>
-                                {m.body && <p className="whitespace-pre-wrap">{m.body}</p>}
-                                <AttachmentGallery items={m.attachments} />
-                                <div className={`mt-1 text-[11px] ${m.from === "client" ? "text-white/70" : "text-muted"}`}>
-                                  {m.from === "client" ? "You" : "Team"} · {timeAgo(m.at)}
+                        {displayThread.length > 0 && (
+                          <div className="mt-3 space-y-2">
+                            {displayThread.map((m) => (
+                              <div key={m.id} className={`flex ${m.from === "client" ? "justify-end" : "justify-start"}`}>
+                                <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[14px] ${m.from === "client" ? "rounded-br-sm bg-accent text-white" : "rounded-bl-sm border bg-surface-2"}`}>
+                                  {m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
+                                  <AttachmentGallery items={m.attachments} />
+                                  <div className={`mt-1 text-[11px] ${m.from === "client" ? "text-white/70" : "text-muted"}`}>
+                                    {m.from === "client" ? "You" : "Team"} · {timeAgo(m.at)}
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                            ))}
+                          </div>
+                        )}
 
-                      {!isDone && (
-                        <div className="mt-3 space-y-2">
+                        <div className="mt-3 space-y-2 border-t pt-3">
                           <textarea
                             value={draft.body}
                             onChange={(e) => updateBody(t.id, e.target.value)}
@@ -400,7 +432,7 @@ export default function WaitingView({ token }: { token: string }) {
                               {draft.attachments.map((a) => (
                                 <span key={a.id} className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-[12px]">
                                   {a.name} <span className="text-muted">{a.size}</span>
-                                  <button onClick={() => removeAttachment(t.id, a.id)} title="Remove" className="text-muted hover:text-red-500">✕</button>
+                                  <button onClick={() => removeAttachment(t.id, a.id)} title="Remove" className="text-muted hover:text-danger">✕</button>
                                 </span>
                               ))}
                             </div>
@@ -428,73 +460,87 @@ export default function WaitingView({ token }: { token: string }) {
                               {sending ? "Sending…" : uploading ? "Uploading…" : "Send"}
                             </button>
                           </div>
-                          {sendErrors[t.id] && <div className="text-[13px] text-red-600">{sendErrors[t.id]}</div>}
+                          {sendErrors[t.id] && <div className="text-[13px] text-danger">{sendErrors[t.id]}</div>}
                           <div className="text-[12px] text-muted">We&apos;ll email the team when you send a message here.</div>
                         </div>
-                      )}
+                      </div>
                     </div>
                   );
                 })}
-              </div>
-            )}
+                </div>
+              )}
 
-            <div className="mt-4 rounded-xl border border-dashed p-3.5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <div className="text-[15px] font-medium">Need something else?</div>
-                  <div className="mt-0.5 text-[13px] text-muted">Tell us what you need and we&apos;ll take a look.</div>
+              {addElseOpen ? (
+                <div className="mt-4 rounded-xl border bg-surface-2 p-4 shadow-[var(--shadow-sm)]">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="text-[15px] font-bold">Need something else?</div>
+                      <div className="mt-0.5 text-[13px] text-muted">Tell us what you need and we&apos;ll take a look.</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {projects.length > 1 && (
+                        <select value={effectiveNewProjectId ?? ""} onChange={(e) => setNewProjectId(e.target.value)} title="Which list this goes on"
+                          className="rounded-md border bg-background px-2 py-1 text-[13px] outline-none focus:border-accent">
+                          {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                      )}
+                      <button onClick={() => setAddElseOpen(false)} title="Close" className="text-muted hover:text-foreground">✕</button>
+                    </div>
+                  </div>
+                  <textarea
+                    autoFocus
+                    value={newBody}
+                    onChange={(e) => setNewBody(e.target.value)}
+                    placeholder="What do you need?"
+                    rows={3}
+                    className="mt-2 w-full rounded-lg border bg-surface px-2.5 py-2 text-[14px] outline-none focus:border-accent"
+                  />
+                  {newAttachments.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {newAttachments.map((a) => (
+                        <span key={a.id} className="inline-flex items-center gap-1.5 rounded-md border bg-surface px-2 py-1 text-[12px]">
+                          {a.name} <span className="text-muted">{a.size}</span>
+                          <button onClick={() => setNewAttachments((prev) => prev.filter((x) => x.id !== a.id))} title="Remove" className="text-muted hover:text-danger">✕</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {linkForId === "__new__" && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border bg-surface p-2">
+                      <input autoFocus value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLinkAttachment("__new__"); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-md border bg-background px-2.5 py-1.5 text-[13px] outline-none focus:border-accent" />
+                      <input value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLinkAttachment("__new__"); }} placeholder="Label (optional)" className="w-32 rounded-md border bg-background px-2.5 py-1.5 text-[13px] outline-none focus:border-accent" />
+                      <button onClick={() => addLinkAttachment("__new__")} disabled={!linkUrl.trim()} className="rounded-md bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white disabled:opacity-40">Add</button>
+                    </div>
+                  )}
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-3">
+                      <label className="inline-flex cursor-pointer items-center gap-1 text-[13px] font-medium text-accent">
+                        + Attach files
+                        <input type="file" multiple className="hidden" onChange={(e) => { handleNewFiles(e.target.files); e.target.value = ""; }} />
+                      </label>
+                      <button onClick={() => { setLinkForId((id) => (id === "__new__" ? null : "__new__")); setLinkUrl(""); setLinkLabel(""); }} className="text-[13px] font-medium text-accent">+ Add link</button>
+                    </div>
+                    <button
+                      onClick={submitNewRequest}
+                      disabled={newSaving || newUploading || (!newBody.trim() && newAttachments.length === 0)}
+                      className="rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-40"
+                    >
+                      {newSaving ? "Sending…" : newUploading ? "Uploading…" : "Send"}
+                    </button>
+                  </div>
+                  {newError && <div className="mt-1.5 text-[13px] text-danger">{newError}</div>}
+                  {newSent && <div className="mt-1.5 text-[13px] text-success">Sent, we&apos;ll take a look!</div>}
                 </div>
-                {projects.length > 1 && (
-                  <select value={effectiveNewProjectId ?? ""} onChange={(e) => setNewProjectId(e.target.value)} title="Which list this goes on"
-                    className="rounded-md border bg-background px-2 py-1 text-[13px] outline-none focus:border-accent">
-                    {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
-                )}
-              </div>
-              <textarea
-                value={newBody}
-                onChange={(e) => setNewBody(e.target.value)}
-                placeholder="What do you need?"
-                rows={3}
-                className="mt-2 w-full rounded-lg border bg-background px-2.5 py-2 text-[14px] outline-none focus:border-accent"
-              />
-              {newAttachments.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {newAttachments.map((a) => (
-                    <span key={a.id} className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-[12px]">
-                      {a.name} <span className="text-muted">{a.size}</span>
-                      <button onClick={() => setNewAttachments((prev) => prev.filter((x) => x.id !== a.id))} title="Remove" className="text-muted hover:text-red-500">✕</button>
-                    </span>
-                  ))}
-                </div>
-              )}
-              {linkForId === "__new__" && (
-                <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border bg-background p-2">
-                  <input autoFocus value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLinkAttachment("__new__"); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[13px] outline-none focus:border-accent" />
-                  <input value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLinkAttachment("__new__"); }} placeholder="Label (optional)" className="w-32 rounded-md border bg-surface px-2.5 py-1.5 text-[13px] outline-none focus:border-accent" />
-                  <button onClick={() => addLinkAttachment("__new__")} disabled={!linkUrl.trim()} className="rounded-md bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white disabled:opacity-40">Add</button>
-                </div>
-              )}
-              <div className="mt-2 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-3">
-                  <label className="inline-flex cursor-pointer items-center gap-1 text-[13px] font-medium text-accent">
-                    + Attach files
-                    <input type="file" multiple className="hidden" onChange={(e) => { handleNewFiles(e.target.files); e.target.value = ""; }} />
-                  </label>
-                  <button onClick={() => { setLinkForId((id) => (id === "__new__" ? null : "__new__")); setLinkUrl(""); setLinkLabel(""); }} className="text-[13px] font-medium text-accent">+ Add link</button>
-                </div>
-                <button
-                  onClick={submitNewRequest}
-                  disabled={newSaving || newUploading || (!newBody.trim() && newAttachments.length === 0)}
-                  className="rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-40"
-                >
-                  {newSaving ? "Sending…" : newUploading ? "Uploading…" : "Send"}
+              ) : (
+                <button onClick={() => setAddElseOpen(true)}
+                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-accent/40 bg-surface-2 py-4 text-[15px] font-bold text-accent transition hover:border-accent hover:bg-surface">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-[13px] font-black leading-none text-white">+</span> Add something else
                 </button>
-              </div>
-              {newError && <div className="mt-1.5 text-[13px] text-red-600">{newError}</div>}
-              {newSent && <div className="mt-1.5 text-[13px] text-green-700">Sent — we&apos;ll take a look!</div>}
+              )}
+
+              <p className="mt-6 text-[12.5px] text-muted md:hidden">This is a private link just for you. Please don&apos;t forward it.</p>
             </div>
-          </>
+          </div>
         )}
       </div>
     </div>
