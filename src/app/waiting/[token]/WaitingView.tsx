@@ -96,6 +96,141 @@ function AttachmentGallery({ items }: { items: WaitingAttachment[] }) {
   );
 }
 
+// Full task detail — title, due date, description, attachments, the
+// complete running chat, and a composer. Used only for whichever one task
+// is currently selected (see selectedTaskId in WaitingView) — pulled out of
+// the list rows entirely so the landing page can stay a lean list instead
+// of every row carrying its own thread+composer inline (that's what made
+// the old combined view unreadable on mobile with more than a task or two).
+function TaskDetailCard({
+  task: t, showProjectName, projectName, draft, sending, uploading, sendError, linkOpen, linkUrl, linkLabel, threadRef,
+  onBody, onFiles, onRemoveAttachment, onToggleLink, onLinkUrl, onLinkLabel, onAddLink, onSend,
+}: {
+  task: WaitingTask;
+  showProjectName: boolean;
+  projectName: string | null;
+  draft: Draft;
+  sending: boolean;
+  uploading: boolean;
+  sendError?: string;
+  linkOpen: boolean;
+  linkUrl: string;
+  linkLabel: string;
+  threadRef: (el: HTMLDivElement | null) => void;
+  onBody: (body: string) => void;
+  onFiles: (files: FileList | null) => void;
+  onRemoveAttachment: (attId: string) => void;
+  onToggleLink: () => void;
+  onLinkUrl: (v: string) => void;
+  onLinkLabel: (v: string) => void;
+  onAddLink: () => void;
+  onSend: () => void;
+}) {
+  const isDone = t.status === "done";
+  // Backward compat: a response submitted before per-task chat existed
+  // lives on the task itself, not in the messages table — shown as the
+  // thread's opening message only when there's no real thread yet, so
+  // history isn't lost but a task that's since moved to real chat doesn't
+  // show it twice.
+  const displayThread: WaitingMessage[] = t.thread.length > 0 || !t.response
+    ? t.thread
+    : [{ id: "legacy_response", from: "client", body: t.response.body, at: t.response.submittedAt, attachments: t.response.attachments }];
+  return (
+    <div className="overflow-hidden rounded-2xl border bg-surface shadow-[var(--shadow-md)]">
+      <div className="border-l-4 p-4" style={{ borderLeftColor: isDone ? "var(--success)" : "var(--highlight)" }}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className={`text-[17px] font-bold ${isDone ? "text-muted line-through decoration-muted/40" : ""}`}>{t.title}</div>
+            {showProjectName && projectName && <div className="text-[12px] text-muted">{projectName}</div>}
+          </div>
+          <span className="flex shrink-0 items-center gap-1.5">
+            {isDone && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-success-soft px-2 py-0.5 text-[12px] font-medium text-success">✓ Completed</span>
+            )}
+            {t.due && (
+              <span
+                className={`shrink-0 rounded-full border px-2 py-0.5 text-[12px] font-medium ${isOverdue(t.due) && !isDone ? "bg-danger-soft text-danger" : "bg-accent-soft text-accent"}`}
+                style={{ borderColor: isOverdue(t.due) && !isDone ? "color-mix(in srgb, var(--danger) 30%, var(--border))" : "transparent" }}
+              >
+                {formatDue(t.due)}
+              </span>
+            )}
+          </span>
+        </div>
+        {t.description && <p className="mt-1.5 max-w-[62ch] whitespace-pre-wrap break-words text-[14px] text-muted">{t.description}</p>}
+        <AttachmentGallery items={t.attachments} />
+
+        {displayThread.length > 0 && (
+          // Fixed-height scroll pane, not an ever-growing card — a chatty
+          // thread otherwise makes the whole page longer every time someone
+          // replies. Auto-scrolled to the newest message (see the effect in
+          // WaitingView) so it opens already showing what's current.
+          <div ref={threadRef} className="mt-3 max-h-[50vh] space-y-2 overflow-y-auto pr-1">
+            {displayThread.map((m) => (
+              <div key={m.id} className={`flex items-end gap-1.5 ${m.from === "client" ? "justify-end" : "justify-start"}`}>
+                {m.from === "team" && <SenderAvatar sender={m.sender} />}
+                <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[14px] ${m.from === "client" ? "rounded-br-sm bg-accent text-white" : "rounded-bl-sm border bg-surface-2"}`}>
+                  {m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
+                  <AttachmentGallery items={m.attachments} />
+                  <div className={`mt-1 text-[11px] ${m.from === "client" ? "text-white/70" : "text-muted"}`}>
+                    {m.from === "client" ? "You" : m.sender?.name ?? "Team"} · {timeAgo(m.at)}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="mt-3 space-y-2 border-t pt-3">
+          <textarea
+            value={draft.body}
+            onChange={(e) => onBody(e.target.value)}
+            onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") onSend(); }}
+            placeholder="Type a message…"
+            rows={2}
+            className="w-full rounded-lg border bg-background px-2.5 py-2 text-[14px] outline-none focus:border-accent"
+          />
+          {draft.attachments.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {draft.attachments.map((a) => (
+                <span key={a.id} className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-[12px]">
+                  {a.name} <span className="text-muted">{a.size}</span>
+                  <button onClick={() => onRemoveAttachment(a.id)} title="Remove" className="text-muted hover:text-danger">✕</button>
+                </span>
+              ))}
+            </div>
+          )}
+          {linkOpen && (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-background p-2">
+              <input autoFocus value={linkUrl} onChange={(e) => onLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAddLink(); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[13px] outline-none focus:border-accent" />
+              <input value={linkLabel} onChange={(e) => onLinkLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAddLink(); }} placeholder="Label (optional)" className="w-32 rounded-md border bg-surface px-2.5 py-1.5 text-[13px] outline-none focus:border-accent" />
+              <button onClick={onAddLink} disabled={!linkUrl.trim()} className="rounded-md bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white disabled:opacity-40">Add</button>
+            </div>
+          )}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-3">
+              <label className="inline-flex cursor-pointer items-center gap-1 text-[13px] font-medium text-accent">
+                + Attach files
+                <input type="file" multiple className="hidden" onChange={(e) => { onFiles(e.target.files); e.target.value = ""; }} />
+              </label>
+              <button onClick={onToggleLink} className="text-[13px] font-medium text-accent">+ Add link</button>
+            </div>
+            <button
+              onClick={onSend}
+              disabled={sending || uploading || (!draft.body.trim() && draft.attachments.length === 0)}
+              className="rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-40"
+            >
+              {sending ? "Sending…" : uploading ? "Uploading…" : "Send"}
+            </button>
+          </div>
+          {sendError && <div className="text-[13px] text-danger">{sendError}</div>}
+          <div className="text-[12px] text-muted">We&apos;ll email the team when you send a message here.</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function WaitingView({ token }: { token: string }) {
   const [clientName, setClientName] = useState<string | null>(null);
   const [projects, setProjects] = useState<WaitingProject[]>([]);
@@ -113,6 +248,16 @@ export default function WaitingView({ token }: { token: string }) {
   // otherwise waiting-on-client or answered (e.g. "this is done"), and gets
   // scrolled to + highlighted below instead of buried in the rest of the list.
   const deepLinkTaskId = useMemo(() => (typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("task")), []);
+  // Landing page is a plain list — title + status only, no inline threads —
+  // and opening one task swaps the whole main column to that task's full
+  // chat instead of every card carrying its own thread+composer inline.
+  // That's what was making the list unreadable on mobile: N tasks each
+  // rendering a scrollable thread and a composer, stacked on top of each
+  // other. A ?task= deep link (e.g. from the task drawer's email tab) opens
+  // straight into that task's detail view instead of the list.
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(() => deepLinkTaskId);
+  const openTask = (id: string) => { setSelectedTaskId(id); window.scrollTo({ top: 0, behavior: "smooth" }); };
+  const closeTask = () => { setSelectedTaskId(null); window.scrollTo({ top: 0, behavior: "smooth" }); };
   const [tasks, setTasks] = useState<WaitingTask[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
@@ -204,16 +349,6 @@ export default function WaitingView({ token }: { token: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  // Scroll the deep-linked task into view once its card exists — a one-shot
-  // effect (empty ref, not re-armed) so a later state change (e.g. saving a
-  // draft) doesn't yank the page back down to it.
-  const deepLinkRef = useRef<HTMLDivElement | null>(null);
-  const scrolledToDeepLink = useRef(false);
-  useEffect(() => {
-    if (!deepLinkTaskId || scrolledToDeepLink.current || !deepLinkRef.current) return;
-    scrolledToDeepLink.current = true;
-    deepLinkRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [tasks, deepLinkTaskId]);
 
   // Keep each task's thread pane scrolled to its newest message — runs
   // after every load() (initial, post-send, or the background poll above),
@@ -230,6 +365,10 @@ export default function WaitingView({ token }: { token: string }) {
     const scoped = activeProjectId ? tasks.filter((t) => t.projectId === activeProjectId) : tasks;
     return [...scoped].sort((a, b) => rank(a) - rank(b) || (a.due ?? "9999").localeCompare(b.due ?? "9999"));
   }, [tasks, activeProjectId]);
+  // Looked up from the full list, not `sorted` — a task opened via a
+  // deep link or an earlier project tab should still open in detail even if
+  // the client has since switched to a different list's tab.
+  const selectedTask = selectedTaskId ? (tasks ?? []).find((t) => t.id === selectedTaskId) ?? null : null;
   const projectName = (id: string | null) => (id ? projects.find((p) => p.id === id)?.name ?? null : null);
   const doneCount = sorted.filter((t) => t.status === "done").length;
   const progressPct = sorted.length ? Math.round((doneCount / sorted.length) * 100) : 0;
@@ -388,6 +527,32 @@ export default function WaitingView({ token }: { token: string }) {
             </div>
 
             <div className="min-w-0">
+              {selectedTask ? (
+                <div>
+                  <button onClick={closeTask} className="mb-4 inline-flex items-center gap-1 text-[14px] font-medium text-accent hover:underline">← Back to your tasks</button>
+                  <TaskDetailCard
+                    task={selectedTask}
+                    showProjectName={!activeProjectId && projects.length > 1}
+                    projectName={projectName(selectedTask.projectId)}
+                    draft={drafts[selectedTask.id] ?? { body: "", attachments: [] }}
+                    sending={sendingIds.has(selectedTask.id)}
+                    uploading={uploadingIds.has(selectedTask.id)}
+                    sendError={sendErrors[selectedTask.id]}
+                    linkOpen={linkForId === selectedTask.id}
+                    linkUrl={linkUrl}
+                    linkLabel={linkLabel}
+                    threadRef={(el) => { threadRefs.current[selectedTask.id] = el; }}
+                    onBody={(body) => updateBody(selectedTask.id, body)}
+                    onFiles={(files) => handleFiles(selectedTask.id, files)}
+                    onRemoveAttachment={(attId) => removeAttachment(selectedTask.id, attId)}
+                    onToggleLink={() => { setLinkForId((id) => (id === selectedTask.id ? null : selectedTask.id)); setLinkUrl(""); setLinkLabel(""); }}
+                    onLinkUrl={setLinkUrl}
+                    onLinkLabel={setLinkLabel}
+                    onAddLink={() => addLinkAttachment(selectedTask.id)}
+                    onSend={() => sendChatMessage(selectedTask.id)}
+                  />
+                </div>
+              ) : (<>
               {projects.length > 1 && <div className="mb-4 flex flex-wrap gap-1.5 md:hidden">{projectTabs}</div>}
 
               <div className="mb-5 rounded-xl border bg-highlight-soft px-4 py-3 text-[16px] text-foreground" style={{ borderColor: "color-mix(in srgb, var(--highlight) 35%, var(--border))" }}>
@@ -464,141 +629,47 @@ export default function WaitingView({ token }: { token: string }) {
               )}
 
               {isEmpty ? emptyState : (
-                <div className="space-y-3">
+                <div className="space-y-2">
                   {sorted.map((t) => {
-                  const isDone = t.status === "done";
-                  const isDeepLinked = t.id === deepLinkTaskId;
-                  const draft = drafts[t.id] ?? { body: "", attachments: [] };
-                  const sending = sendingIds.has(t.id);
-                  const uploading = uploadingIds.has(t.id);
-                  // Backward compat: a response submitted before per-task
-                  // chat existed lives on the task itself, not in the
-                  // messages table — shown as the thread's opening message
-                  // only when there's no real thread yet, so history isn't
-                  // lost but a task that's since moved to real chat doesn't
-                  // show it twice.
-                  const displayThread: WaitingMessage[] = t.thread.length > 0 || !t.response
-                    ? t.thread
-                    : [{ id: "legacy_response", from: "client", body: t.response.body, at: t.response.submittedAt, attachments: t.response.attachments }];
-                  // A finished item is context, not a call to action — a
-                  // quiet single row next to an open ticket's full card
-                  // treatment, so the thing that still needs attention wins
-                  // the eye instead of competing evenly with what's done.
-                  if (isDone) {
+                    const isDone = t.status === "done";
+                    // Newest message (either side) as a one-line preview —
+                    // gives the list some content beyond a bare title/status
+                    // without pulling the whole thread onto the landing page.
+                    const lastMsg = t.thread.length > 0 ? t.thread[t.thread.length - 1] : null;
+                    const preview = lastMsg
+                      ? `${lastMsg.from === "client" ? "You" : lastMsg.sender?.name ?? "Team"}: ${lastMsg.body || (lastMsg.attachments.length > 0 ? "Sent an attachment" : "")}`
+                      : t.description;
                     return (
-                      <div key={t.id} ref={isDeepLinked ? deepLinkRef : undefined}
-                        className={`flex items-center gap-2.5 rounded-xl border bg-surface-2 px-4 py-2.5 ${isDeepLinked ? "ring-2 ring-accent ring-offset-2" : ""}`}>
-                        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-success text-[10px] font-black text-white">✓</span>
-                        <span className="truncate text-[14.5px] font-medium text-muted line-through decoration-muted/40">{t.title}</span>
-                        {!activeProjectId && projects.length > 1 && projectName(t.projectId) && (
-                          <span className="shrink-0 text-[12px] text-muted">{projectName(t.projectId)}</span>
-                        )}
-                        <span className="ml-auto shrink-0 text-[12.5px] text-muted">Completed{t.due ? ` ${formatDue(t.due)}` : ""}</span>
-                      </div>
-                    );
-                  }
-                  return (
-                    <div
-                      key={t.id}
-                      ref={isDeepLinked ? deepLinkRef : undefined}
-                      className={`overflow-hidden rounded-2xl border bg-surface shadow-[var(--shadow-md)] ${isDeepLinked ? "ring-2 ring-accent ring-offset-2" : ""}`}
-                    >
-                      <div className="border-l-4 p-4" style={{ borderLeftColor: "var(--highlight)" }}>
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="text-[17px] font-bold">{t.title}</div>
-                            {/* Which list this is — only worth saying while
-                                viewing the merged "All" tab; redundant once
-                                you're already inside that list's own tab. */}
-                            {!activeProjectId && projects.length > 1 && projectName(t.projectId) && (
-                              <div className="text-[12px] text-muted">{projectName(t.projectId)}</div>
-                            )}
-                          </div>
-                          {t.due && (
-                            <span
-                              className={`shrink-0 rounded-full border px-2 py-0.5 text-[12px] font-medium ${isOverdue(t.due) ? "bg-danger-soft text-danger" : "bg-accent-soft text-accent"}`}
-                              style={{ borderColor: isOverdue(t.due) ? "color-mix(in srgb, var(--danger) 30%, var(--border))" : "transparent" }}
-                            >
-                              {formatDue(t.due)}
+                      <button
+                        key={t.id}
+                        onClick={() => openTask(t.id)}
+                        className="flex w-full items-center gap-3 rounded-xl border bg-surface px-4 py-3 text-left shadow-[var(--shadow-sm)] transition hover:bg-surface-2"
+                      >
+                        <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: isDone ? "var(--success)" : t.needsResponse ? "var(--highlight)" : "var(--border)" }} />
+                        <div className="min-w-0 flex-1">
+                          <div className={`truncate text-[15.5px] font-semibold ${isDone ? "text-muted line-through decoration-muted/40" : ""}`}>{t.title}</div>
+                          {preview && <div className="truncate text-[13px] text-muted">{preview}</div>}
+                          {!activeProjectId && projects.length > 1 && projectName(t.projectId) && (
+                            <div className="text-[12px] text-muted">{projectName(t.projectId)}</div>
+                          )}
+                        </div>
+                        <div className="flex shrink-0 flex-col items-end gap-1">
+                          {isDone ? (
+                            <span className="text-[12px] text-muted">Completed{t.due ? ` ${formatDue(t.due)}` : ""}</span>
+                          ) : (<>
+                            <span className={`rounded-full px-2 py-0.5 text-[11.5px] font-semibold ${t.needsResponse ? "bg-highlight-soft text-highlight" : "bg-accent-soft text-accent"}`}>
+                              {t.needsResponse ? "Needs your input" : "In progress"}
                             </span>
-                          )}
+                            {t.due && <span className={`text-[12px] ${isOverdue(t.due) ? "font-medium text-danger" : "text-muted"}`}>{formatDue(t.due)}</span>}
+                          </>)}
                         </div>
-                        {t.description && <p className="mt-1.5 max-w-[62ch] whitespace-pre-wrap break-words text-[14px] text-muted">{t.description}</p>}
-                        <AttachmentGallery items={t.attachments} />
-
-                        {displayThread.length > 0 && (
-                          // Fixed-height scroll pane, not an ever-growing
-                          // card — a chatty thread otherwise makes the whole
-                          // page longer every time someone replies. Auto-
-                          // scrolled to the newest message (see the effect
-                          // above) so it opens already showing what's current.
-                          <div ref={(el) => { threadRefs.current[t.id] = el; }} className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
-                            {displayThread.map((m) => (
-                              <div key={m.id} className={`flex items-end gap-1.5 ${m.from === "client" ? "justify-end" : "justify-start"}`}>
-                                {m.from === "team" && <SenderAvatar sender={m.sender} />}
-                                <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[14px] ${m.from === "client" ? "rounded-br-sm bg-accent text-white" : "rounded-bl-sm border bg-surface-2"}`}>
-                                  {m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
-                                  <AttachmentGallery items={m.attachments} />
-                                  <div className={`mt-1 text-[11px] ${m.from === "client" ? "text-white/70" : "text-muted"}`}>
-                                    {m.from === "client" ? "You" : m.sender?.name ?? "Team"} · {timeAgo(m.at)}
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        <div className="mt-3 space-y-2 border-t pt-3">
-                          <textarea
-                            value={draft.body}
-                            onChange={(e) => updateBody(t.id, e.target.value)}
-                            onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") sendChatMessage(t.id); }}
-                            placeholder="Type a message…"
-                            rows={2}
-                            className="w-full rounded-lg border bg-background px-2.5 py-2 text-[14px] outline-none focus:border-accent"
-                          />
-                          {draft.attachments.length > 0 && (
-                            <div className="flex flex-wrap gap-1.5">
-                              {draft.attachments.map((a) => (
-                                <span key={a.id} className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-[12px]">
-                                  {a.name} <span className="text-muted">{a.size}</span>
-                                  <button onClick={() => removeAttachment(t.id, a.id)} title="Remove" className="text-muted hover:text-danger">✕</button>
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                          {linkForId === t.id && (
-                            <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-background p-2">
-                              <input autoFocus value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLinkAttachment(t.id); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[13px] outline-none focus:border-accent" />
-                              <input value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLinkAttachment(t.id); }} placeholder="Label (optional)" className="w-32 rounded-md border bg-surface px-2.5 py-1.5 text-[13px] outline-none focus:border-accent" />
-                              <button onClick={() => addLinkAttachment(t.id)} disabled={!linkUrl.trim()} className="rounded-md bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white disabled:opacity-40">Add</button>
-                            </div>
-                          )}
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-3">
-                              <label className="inline-flex cursor-pointer items-center gap-1 text-[13px] font-medium text-accent">
-                                + Attach files
-                                <input type="file" multiple className="hidden" onChange={(e) => { handleFiles(t.id, e.target.files); e.target.value = ""; }} />
-                              </label>
-                              <button onClick={() => { setLinkForId((id) => (id === t.id ? null : t.id)); setLinkUrl(""); setLinkLabel(""); }} className="text-[13px] font-medium text-accent">+ Add link</button>
-                            </div>
-                            <button
-                              onClick={() => sendChatMessage(t.id)}
-                              disabled={sending || uploading || (!draft.body.trim() && draft.attachments.length === 0)}
-                              className="rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-40"
-                            >
-                              {sending ? "Sending…" : uploading ? "Uploading…" : "Send"}
-                            </button>
-                          </div>
-                          {sendErrors[t.id] && <div className="text-[13px] text-danger">{sendErrors[t.id]}</div>}
-                          <div className="text-[12px] text-muted">We&apos;ll email the team when you send a message here.</div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+                        <span className="shrink-0 text-muted" aria-hidden>›</span>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
+              </>)}
 
               <p className="mt-6 text-[12.5px] text-muted md:hidden">This is a private link just for you. Please don&apos;t forward it.</p>
             </div>

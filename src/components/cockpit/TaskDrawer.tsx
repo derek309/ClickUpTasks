@@ -273,10 +273,21 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     setPreviewUrl(null);
     if (att.path) setPreviewUrl(await onGetSignedUrl(att.path));
   };
+  // Copies a message attachment (e.g. a photo the client sent over chat)
+  // onto the task's own Attachments section — same storage object, just a
+  // second reference with its own id, same idiom as fillFromTask's link
+  // attachment below. A no-op if it's already there (matched by path).
+  const attachToTask = (a: Attachment) => {
+    if (a.path && task.attachments.some((x) => x.path === a.path)) { pushToast("Already on this task's attachments."); return; }
+    onPatch({ attachments: [...task.attachments, { ...a, id: newId("at_") }] });
+    pushToast("Added to task attachments.");
+  };
   // Gallery grid needs every visible image thumbnail up front, not resolved
   // one at a time on click like openPreview above — batch-fetch in
-  // parallel, mirroring VaultView's identical pattern.
-  const attImagePaths = [...task.attachments, ...(task.clientResponse?.attachments ?? [])].filter((a) => a.kind === "image" && a.path).map((a) => a.path as string).join(",");
+  // parallel, mirroring VaultView's identical pattern. Includes message
+  // attachments (e.g. a photo the client sent over chat) so those render as
+  // real thumbnails in the feed too, not just a filename chip.
+  const attImagePaths = [...task.attachments, ...(task.clientResponse?.attachments ?? []), ...(messages ?? []).flatMap((m) => m.attachments ?? [])].filter((a) => a.kind === "image" && a.path).map((a) => a.path as string).join(",");
   const [attImageUrls, setAttImageUrls] = useState<Record<string, string>>({});
   useEffect(() => {
     let cancelled = false;
@@ -1129,10 +1140,16 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
           return (
             <div key={m.id} className={`relative flex gap-3 ${gap}`}>
               <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface" style={{ background: dotColor }} /></div>
-              <div className={`min-w-0 flex-1 rounded-xl border p-3 ${m.direction === "inbound" ? "bg-surface" : "bg-accent-soft/40"}`}>
+              {/* A left accent bar + background tint carry the client/team
+                  distinction on their own — same color pairing used
+                  everywhere else in the app (highlight = client-facing,
+                  accent = us) — instead of relying on the small Sent/
+                  Received label alone, which is easy to miss scanning a
+                  same-channel tab where every dot color is identical. */}
+              <div className={`min-w-0 flex-1 rounded-xl border border-l-4 p-3 ${m.direction === "inbound" ? "bg-highlight-soft" : "bg-surface"}`} style={{ borderLeftColor: m.direction === "inbound" ? "var(--highlight)" : "var(--accent)" }}>
                 <div className="flex items-center gap-2 text-[13px] text-muted">
                   <span className="inline-flex items-center gap-1 rounded px-1.5 py-0 font-medium" style={{ background: dotColor + "1a", color: dotColor }}>{channelLabel}</span>
-                  <span>{m.direction === "inbound" ? "Received" : "Sent"}</span>
+                  <span className="font-medium" style={{ color: m.direction === "inbound" ? "var(--highlight)" : "var(--accent)" }}>{m.direction === "inbound" ? "Received" : "Sent"}</span>
                   {m.direction === "outbound" && m.createdBy && (
                     <span className="inline-flex items-center gap-1"><Avatar id={m.createdBy} size={14} /> {userById(m.createdBy)?.name ?? "Unknown"}</span>
                   )}
@@ -1185,7 +1202,23 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                     ? <div className="rte-content mt-1 text-[15px]" dangerouslySetInnerHTML={{ __html: m.body }} />
                     : <CollapsibleText text={m.body} className="mt-1 text-[15px]" />
                 )}
-                {m.attachments && m.attachments.length > 0 && <div className="mt-1.5"><AttachmentThumbs items={m.attachments} onOpen={onDownloadFile} /></div>}
+                {m.attachments && m.attachments.length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {m.attachments.filter((a) => a.kind === "image").length > 0 && (
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {m.attachments.filter((a) => a.kind === "image").map((a) => (
+                          <AttachmentTile key={a.id} item={a} small url={a.path ? attImageUrls[a.path] : undefined} onOpen={() => openPreview(a)}
+                            actions={<>
+                              {a.path && <button onClick={(e) => { e.stopPropagation(); onDownloadFileAs(a.path!, a.name); }} title="Download" className="flex h-5 w-5 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.download className="h-2.5 w-2.5" /></button>}
+                              <button onClick={(e) => { e.stopPropagation(); attachToTask(a); }} title="Add to task attachments" className="flex h-5 w-5 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.plus className="h-2.5 w-2.5" /></button>
+                            </>}
+                          />
+                        ))}
+                      </div>
+                    )}
+                    {m.attachments.filter((a) => a.kind !== "image").length > 0 && <AttachmentThumbs items={m.attachments.filter((a) => a.kind !== "image")} onOpen={onDownloadFile} />}
+                  </div>
+                )}
               </div>
             </div>
           );
