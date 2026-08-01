@@ -191,54 +191,50 @@ function TaskDetailBody({
   );
   return (
     <>
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        {/* A conversation still needs to read like one — two columns of
-            bubbles with a huge dead gap between them on a wide desktop
-            window looked like two separate floating boxes, not a chat.
-            Centering a normal reading-width column here gets both: the
-            page underneath is full width, but the conversation itself
-            still reads like an actual chat instead of spreading out with
-            the window. */}
-        <div className="mx-auto max-w-[720px]">
-          {(showProjectName && projectName) || isDone || t.due ? (
-            <div className="mb-2 flex flex-wrap items-center justify-center gap-1.5 text-center">
-              {showProjectName && projectName && <span className="text-[12px] text-muted">{projectName}</span>}
-              {isDone && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-success-soft px-2 py-0.5 text-[12px] font-medium text-success">✓ Completed</span>
-              )}
-              {t.due && (
-                <span
-                  className={`shrink-0 rounded-full border px-2 py-0.5 text-[12px] font-medium ${isOverdue(t.due) && !isDone ? "bg-danger-soft text-danger" : "bg-accent-soft text-accent"}`}
-                  style={{ borderColor: isOverdue(t.due) && !isDone ? "color-mix(in srgb, var(--danger) 30%, var(--border))" : "transparent" }}
-                >
-                  {formatDue(t.due)}
-                </span>
-              )}
-            </div>
-          ) : null}
-          {t.description && <p className="max-w-[62ch] whitespace-pre-wrap break-words text-[14px] text-muted">{t.description}</p>}
-          <AttachmentGallery items={t.attachments} />
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 md:px-10">
+        {(showProjectName && projectName) || isDone || t.due ? (
+          <div className="mb-2 flex flex-wrap items-center justify-center gap-1.5 text-center">
+            {showProjectName && projectName && <span className="text-[12px] text-muted">{projectName}</span>}
+            {isDone && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-success-soft px-2 py-0.5 text-[12px] font-medium text-success">✓ Completed</span>
+            )}
+            {t.due && (
+              <span
+                className={`shrink-0 rounded-full border px-2 py-0.5 text-[12px] font-medium ${isOverdue(t.due) && !isDone ? "bg-danger-soft text-danger" : "bg-accent-soft text-accent"}`}
+                style={{ borderColor: isOverdue(t.due) && !isDone ? "color-mix(in srgb, var(--danger) 30%, var(--border))" : "transparent" }}
+              >
+                {formatDue(t.due)}
+              </span>
+            )}
+          </div>
+        ) : null}
+        {t.description && <p className="max-w-[62ch] whitespace-pre-wrap break-words text-[14px] text-muted">{t.description}</p>}
+        <AttachmentGallery items={t.attachments} />
 
-          {displayThread.length > 0 && (
-            <div ref={threadRef} className="mt-3 space-y-2">
-              {displayThread.map((m) => (
-                <div key={m.id} className={`flex items-end gap-1.5 ${m.from === "client" ? "justify-end" : "justify-start"}`}>
-                  {m.from === "team" && <SenderAvatar sender={m.sender} />}
-                  <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[14px] ${m.from === "client" ? "rounded-br-sm bg-accent text-white" : "rounded-bl-sm border bg-surface-2"}`}>
-                    {m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
-                    <AttachmentGallery items={m.attachments} />
-                    <div className={`mt-1 text-[11px] ${m.from === "client" ? "text-white/70" : "text-muted"}`}>
-                      {m.from === "client" ? "You" : m.sender?.name ?? "Team"} · {timeAgo(m.at)}
-                    </div>
+        {displayThread.length > 0 && (
+          <div ref={threadRef} className="mt-3 space-y-2">
+            {displayThread.map((m) => (
+              <div key={m.id} className={`flex items-end gap-1.5 ${m.from === "client" ? "justify-end" : "justify-start"}`}>
+                {m.from === "team" && <SenderAvatar sender={m.sender} />}
+                {/* Bubbles still cap below their full-width container (like
+                    the Fox Coach reference) — otherwise a one-line message
+                    would stretch edge to edge and be unreadable — but the
+                    container itself is the full page width now, not a
+                    narrow centered column. */}
+                <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[14px] lg:max-w-[640px] ${m.from === "client" ? "rounded-br-sm bg-accent text-white" : "rounded-bl-sm border bg-surface-2"}`}>
+                  {m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
+                  <AttachmentGallery items={m.attachments} />
+                  <div className={`mt-1 text-[11px] ${m.from === "client" ? "text-white/70" : "text-muted"}`}>
+                    {m.from === "client" ? "You" : m.sender?.name ?? "Team"} · {timeAgo(m.at)}
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      <div className="shrink-0 border-t bg-surface p-4"><div className="mx-auto max-w-[720px]">{composer}</div></div>
+      <div className="shrink-0 border-t bg-surface px-6 py-4 md:px-10">{composer}</div>
     </>
   );
 }
@@ -576,20 +572,18 @@ export default function WaitingView({ token }: { token: string }) {
         // strip instead of its own banner — brand, client, heading, and
         // progress all on a single line, with the privacy note folded in
         // underneath instead of repeated at the bottom of the page.
-        <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }} className="px-6 py-2.5 md:px-10">
-          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-            <div className="flex flex-wrap items-baseline gap-x-2 text-[13px] font-bold tracking-tight text-white">
-              <span className="text-white/60">ClickUpLocal</span>
-              {clientName && <span className="text-highlight">{clientName}</span>}
-              <span className="font-normal text-white/80">Your open items</span>
-            </div>
-            {totalCount > 0 && (
-              <div className="flex items-center gap-2">
-                <span className="text-[11.5px] text-white/70">{doneCount} of {totalCount} done</span>
-                <div className="h-1 w-20 overflow-hidden rounded-full bg-white/20"><div className="h-full rounded-full bg-white" style={{ width: `${progressPct}%` }} /></div>
-              </div>
-            )}
+        <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }} className="px-6 py-2.5 text-center md:px-10">
+          <div className="flex flex-wrap items-baseline justify-center gap-x-2 text-[13px] font-bold tracking-tight text-white">
+            <span>ClickUpLocal</span>
+            {clientName && <span>{clientName}</span>}
+            <span className="font-normal">Your open items</span>
           </div>
+          {totalCount > 0 && (
+            <div className="mt-1 flex items-center justify-center gap-2">
+              <span className="text-[11.5px] text-white/70">{doneCount} of {totalCount} done</span>
+              <div className="h-1 w-20 overflow-hidden rounded-full bg-white/20"><div className="h-full rounded-full bg-white" style={{ width: `${progressPct}%` }} /></div>
+            </div>
+          )}
           <p className="mt-0.5 text-[11px] text-white/50">This is a private link just for you. Please don&apos;t forward it.</p>
         </div>
       )}
