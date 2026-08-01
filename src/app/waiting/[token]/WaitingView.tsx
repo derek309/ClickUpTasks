@@ -310,11 +310,16 @@ export default function WaitingView({ token }: { token: string }) {
                   const isDone = t.status === "done";
                   const isDeepLinked = t.id === deepLinkTaskId;
                   // A task reached via its own ticket link (?task=<id>) is
-                  // always respondable — the point of that link is letting
+                  // respondable up front — the point of that link is letting
                   // the client add feedback/media on that exact item, not
                   // just view it, whether or not the team happened to flag
-                  // it "waiting on client" first.
-                  const isEditing = !isDone && (t.needsResponse || editingIds.has(t.id) || isDeepLinked);
+                  // it "waiting on client" first. Only until the first
+                  // response exists, though: once t.response is set, this
+                  // must fall through to the same "Submitted"/Edit flow as
+                  // every other task, or Save would look like a no-op —
+                  // isDeepLinked never turns itself off, since it's derived
+                  // from the immutable URL param, not task state.
+                  const isEditing = !isDone && (t.needsResponse || editingIds.has(t.id) || (isDeepLinked && !t.response));
                   const draft = drafts[t.id] ?? { body: "", attachments: [] };
                   const saving = savingIds.has(t.id);
                   const uploading = uploadingIds.has(t.id);
