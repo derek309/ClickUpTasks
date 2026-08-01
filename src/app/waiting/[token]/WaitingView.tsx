@@ -411,7 +411,6 @@ export default function WaitingView({ token }: { token: string }) {
   const projectName = (id: string | null) => (id ? projects.find((p) => p.id === id)?.name ?? null : null);
   const doneCount = completedTasks.length;
   const totalCount = (tasks ?? []).length;
-  const progressPct = totalCount ? Math.round((doneCount / totalCount) * 100) : 0;
   // Which list a new request will actually go to: the client's own pick
   // once they've touched the dropdown, else the first one — never asked at
   // all when there's only one.
@@ -579,7 +578,7 @@ export default function WaitingView({ token }: { token: string }) {
     <div className={selectedTask ? "flex h-[100dvh] flex-col overflow-hidden bg-background" : "min-h-screen bg-background"}>
       {selectedTask ? (
         <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }} className="relative flex shrink-0 items-center justify-center px-14 py-3 md:px-20">
-          <button onClick={closeTask} title="Back to your tasks" className="absolute left-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-white hover:bg-white/10">←</button>
+          <button onClick={closeTask} title="Back to your tasks" className="absolute left-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full text-[22px] text-white hover:bg-white/10">←</button>
           <div className="max-w-[75%] truncate text-center text-[15px] font-bold text-white">{selectedTask.title}</div>
         </div>
       ) : (
@@ -591,12 +590,7 @@ export default function WaitingView({ token }: { token: string }) {
           <div className="flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1 text-[14.5px] font-bold tracking-tight text-white">
             {clientName && <span>{clientName}</span>}
             <span className="font-normal">Tasks</span>
-            {totalCount > 0 && (
-              <span className="flex items-center gap-1.5 font-normal text-white/80">
-                <span>{doneCount} of {totalCount} done</span>
-                <span className="inline-block h-1 w-16 overflow-hidden rounded-full bg-white/20"><span className="block h-full rounded-full bg-white" style={{ width: `${progressPct}%` }} /></span>
-              </span>
-            )}
+            {totalCount > 0 && <span className="font-normal text-white/80">{doneCount} of {totalCount} done</span>}
           </div>
         </div>
       )}
@@ -694,17 +688,19 @@ export default function WaitingView({ token }: { token: string }) {
                 </div>
               ) : (
                 <div className="mb-3">
-                  {/* Folded the old standalone banner right into the button
-                      label instead of a separate caption underneath —
-                      same reminder, one line instead of two blocks. */}
+                  {/* The explanatory sentence used to be jammed inside the
+                      button's own text — the whole clickable target ended
+                      up being "Add Something: One request per task,
+                      please...", which read oddly and wrapped mid-sentence
+                      on narrow screens. Back to a caption underneath: the
+                      button says exactly what it does, the reminder sits
+                      below it. */}
                   <button onClick={() => setAddElseOpen(true)}
-                    className="flex w-full flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-xl border-2 border-dashed bg-background py-2.5 text-[14px] text-accent transition hover:bg-surface"
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed bg-background py-2.5 text-[14px] font-bold text-accent transition hover:bg-surface"
                     style={{ borderColor: "color-mix(in srgb, var(--accent) 40%, var(--border))" }}>
-                    <span className="flex items-center gap-2 font-bold">
-                      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-accent text-[11px] font-black leading-none text-white">+</span> Add Something
-                    </span>
-                    <span className="text-[12.5px] font-normal">: One request per task, please. It&apos;s easier for us to track.</span>
+                    <span className="flex h-4 w-4 items-center justify-center rounded-full bg-accent text-[11px] font-black leading-none text-white">+</span> Add Something
                   </button>
+                  <p className="mt-1 text-center text-[12px] text-muted">One request per task, please. It&apos;s easier for us to track.</p>
                 </div>
               )}
 
