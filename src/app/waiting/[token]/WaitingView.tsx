@@ -219,28 +219,37 @@ function TaskDetailCard({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
-          {t.description && <p className="max-w-[62ch] whitespace-pre-wrap break-words text-[14px] text-muted">{t.description}</p>}
-          <AttachmentGallery items={t.attachments} />
+          {/* The card itself is full width now (no more boxed-iframe side
+              margins), but a conversation still needs to read like one —
+              two columns of bubbles with a huge dead gap between them on a
+              wide desktop window looked like two separate floating boxes,
+              not a chat. Centering a normal reading-width column inside the
+              full-width card gets both: no wasted-looking margins around
+              the card, but a real chat layout inside it. */}
+          <div className="mx-auto max-w-[720px]">
+            {t.description && <p className="max-w-[62ch] whitespace-pre-wrap break-words text-[14px] text-muted">{t.description}</p>}
+            <AttachmentGallery items={t.attachments} />
 
-          {displayThread.length > 0 && (
-            <div ref={threadRef} className="mt-3 space-y-2">
-              {displayThread.map((m) => (
-                <div key={m.id} className={`flex items-end gap-1.5 ${m.from === "client" ? "justify-end" : "justify-start"}`}>
-                  {m.from === "team" && <SenderAvatar sender={m.sender} />}
-                  <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[14px] lg:max-w-[560px] ${m.from === "client" ? "rounded-br-sm bg-accent text-white" : "rounded-bl-sm border bg-surface-2"}`}>
-                    {m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
-                    <AttachmentGallery items={m.attachments} />
-                    <div className={`mt-1 text-[11px] ${m.from === "client" ? "text-white/70" : "text-muted"}`}>
-                      {m.from === "client" ? "You" : m.sender?.name ?? "Team"} · {timeAgo(m.at)}
+            {displayThread.length > 0 && (
+              <div ref={threadRef} className="mt-3 space-y-2">
+                {displayThread.map((m) => (
+                  <div key={m.id} className={`flex items-end gap-1.5 ${m.from === "client" ? "justify-end" : "justify-start"}`}>
+                    {m.from === "team" && <SenderAvatar sender={m.sender} />}
+                    <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[14px] ${m.from === "client" ? "rounded-br-sm bg-accent text-white" : "rounded-bl-sm border bg-surface-2"}`}>
+                      {m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
+                      <AttachmentGallery items={m.attachments} />
+                      <div className={`mt-1 text-[11px] ${m.from === "client" ? "text-white/70" : "text-muted"}`}>
+                        {m.from === "client" ? "You" : m.sender?.name ?? "Team"} · {timeAgo(m.at)}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="shrink-0 border-t p-4">{composer}</div>
+        <div className="shrink-0 border-t p-4"><div className="mx-auto max-w-[720px]">{composer}</div></div>
       </div>
     </div>
   );
