@@ -591,15 +591,12 @@ export default function WaitingView({ token }: { token: string }) {
           <div className="flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1 text-[14.5px] font-bold tracking-tight text-white">
             {clientName && <span>{clientName}</span>}
             <span className="font-normal">Tasks</span>
-            <span className="font-normal text-white/50">by ClickUpLocal</span>
             {totalCount > 0 && (
               <span className="flex items-center gap-1.5 font-normal text-white/80">
-                <span className="text-white/40">·</span>
                 <span>{doneCount} of {totalCount} done</span>
                 <span className="inline-block h-1 w-16 overflow-hidden rounded-full bg-white/20"><span className="block h-full rounded-full bg-white" style={{ width: `${progressPct}%` }} /></span>
               </span>
             )}
-            <span className="font-normal text-white/50"><span className="mr-2.5 text-white/40">·</span>This is a private link just for you. Please don&apos;t forward it.</span>
           </div>
         </div>
       )}
@@ -733,6 +730,8 @@ export default function WaitingView({ token }: { token: string }) {
                   {completedOpen && <div className="mt-2 space-y-2">{completedTasks.map((t) => renderTaskRow(t, { showProject: true }))}</div>}
                 </div>
               )}
+
+              <p className="mt-6 text-center text-[12px] text-muted">This is a private link just for you. Please don&apos;t forward it.</p>
             </div>
         )}
       </div>
