@@ -103,7 +103,7 @@ function AttachmentGallery({ items }: { items: WaitingAttachment[] }) {
 // of every row carrying its own thread+composer inline (that's what made
 // the old combined view unreadable on mobile with more than a task or two).
 function TaskDetailCard({
-  task: t, showProjectName, projectName, draft, sending, uploading, sendError, linkOpen, linkUrl, linkLabel, threadRef,
+  task: t, showProjectName, projectName, draft, sending, uploading, sendError, linkOpen, linkUrl, linkLabel, threadRef, onBack,
   onBody, onFiles, onRemoveAttachment, onToggleLink, onLinkUrl, onLinkLabel, onAddLink, onSend,
 }: {
   task: WaitingTask;
@@ -117,6 +117,7 @@ function TaskDetailCard({
   linkUrl: string;
   linkLabel: string;
   threadRef: (el: HTMLDivElement | null) => void;
+  onBack: () => void;
   onBody: (body: string) => void;
   onFiles: (files: FileList | null) => void;
   onRemoveAttachment: (attId: string) => void;
@@ -135,106 +136,125 @@ function TaskDetailCard({
   const displayThread: WaitingMessage[] = t.thread.length > 0 || !t.response
     ? t.thread
     : [{ id: "legacy_response", from: "client", body: t.response.body, at: t.response.submittedAt, attachments: t.response.attachments }];
-  return (
-    // Full-bleed below md — the page's own -mx-6 side padding otherwise
-    // stacks with this card's border+rounded corners+shadow to read like a
-    // boxed iframe on a phone, when the whole point of the detail view is
-    // to actually use the screen. Reintroduced at md, where there's a
-    // sidebar next to it and the boxed look reads as a real card again.
-    <div className="-mx-6 overflow-hidden border-y bg-surface md:mx-0 md:rounded-2xl md:border md:shadow-[var(--shadow-md)]">
-      <div className="border-l-4 p-4" style={{ borderLeftColor: isDone ? "var(--success)" : "var(--highlight)" }}>
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className={`text-[17px] font-bold ${isDone ? "text-muted line-through decoration-muted/40" : ""}`}>{t.title}</div>
-            {showProjectName && projectName && <div className="text-[12px] text-muted">{projectName}</div>}
-          </div>
-          <span className="flex shrink-0 items-center gap-1.5">
-            {isDone && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-success-soft px-2 py-0.5 text-[12px] font-medium text-success">✓ Completed</span>
-            )}
-            {t.due && (
-              <span
-                className={`shrink-0 rounded-full border px-2 py-0.5 text-[12px] font-medium ${isOverdue(t.due) && !isDone ? "bg-danger-soft text-danger" : "bg-accent-soft text-accent"}`}
-                style={{ borderColor: isOverdue(t.due) && !isDone ? "color-mix(in srgb, var(--danger) 30%, var(--border))" : "transparent" }}
-              >
-                {formatDue(t.due)}
-              </span>
-            )}
-          </span>
+  const composer = (
+    <>
+      {/* text-[16px] isn't a style choice here — any input/textarea under
+          16px makes iOS Safari auto-zoom on focus, and the zoom (plus its
+          "scroll the focused field into view") is exactly what was shoving
+          the whole page sideways when the keyboard opened. */}
+      <textarea
+        value={draft.body}
+        onChange={(e) => onBody(e.target.value)}
+        onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") onSend(); }}
+        placeholder="Type a message…"
+        rows={2}
+        className="w-full resize-none rounded-lg border bg-background px-2.5 py-2 text-[16px] outline-none focus:border-accent"
+      />
+      {draft.attachments.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {draft.attachments.map((a) => (
+            <span key={a.id} className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-[12px]">
+              {a.name} <span className="text-muted">{a.size}</span>
+              <button onClick={() => onRemoveAttachment(a.id)} title="Remove" className="text-muted hover:text-danger">✕</button>
+            </span>
+          ))}
         </div>
-        {t.description && <p className="mt-1.5 max-w-[62ch] whitespace-pre-wrap break-words text-[14px] text-muted">{t.description}</p>}
-        <AttachmentGallery items={t.attachments} />
+      )}
+      {linkOpen && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border bg-background p-2">
+          <input autoFocus value={linkUrl} onChange={(e) => onLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAddLink(); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
+          <input value={linkLabel} onChange={(e) => onLinkLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAddLink(); }} placeholder="Label (optional)" className="w-32 rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
+          <button onClick={onAddLink} disabled={!linkUrl.trim()} className="rounded-md bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white disabled:opacity-40">Add</button>
+        </div>
+      )}
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-3">
+          <label className="inline-flex cursor-pointer items-center gap-1 text-[13px] font-medium text-accent">
+            + Attach files
+            <input type="file" multiple className="hidden" onChange={(e) => { onFiles(e.target.files); e.target.value = ""; }} />
+          </label>
+          <button onClick={onToggleLink} className="text-[13px] font-medium text-accent">+ Add link</button>
+        </div>
+        <button
+          onClick={onSend}
+          disabled={sending || uploading || (!draft.body.trim() && draft.attachments.length === 0)}
+          className="rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-40"
+        >
+          {sending ? "Sending…" : uploading ? "Uploading…" : "Send"}
+        </button>
+      </div>
+      {sendError && <div className="mt-1.5 text-[13px] text-danger">{sendError}</div>}
+      <div className="mt-1.5 text-[12px] text-muted">We&apos;ll email the team when you send a message here.</div>
+    </>
+  );
+  return (
+    // Below md this is a fixed full-screen shell, not a card in the normal
+    // page flow — a header (title/due) and composer that stay put, with
+    // ONE scrollable region between them (description+attachments+thread
+    // together). That replaces a page that scrolled AND a thread box inside
+    // it that ALSO scrolled independently, which read as two conflicting
+    // scroll gestures on a touch screen. At md+ this reverts to the earlier
+    // normal-flow card (the page scrolls, the thread keeps its own capped
+    // height) since there's a sidebar next to it and no viewport pressure.
+    <div className="fixed inset-0 z-20 flex flex-col bg-surface md:static md:z-auto md:block md:overflow-hidden md:rounded-2xl md:border md:shadow-[var(--shadow-md)]">
+      <div className="flex min-h-0 flex-1 flex-col border-l-4 md:block" style={{ borderLeftColor: isDone ? "var(--success)" : "var(--highlight)" }}>
+        <div className="shrink-0 border-b p-4 md:border-b-0">
+          <button onClick={onBack} className="mb-3 inline-flex items-center gap-1 text-[14px] font-medium text-accent md:hidden">← Back to your tasks</button>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className={`text-[17px] font-bold ${isDone ? "text-muted line-through decoration-muted/40" : ""}`}>{t.title}</div>
+              {showProjectName && projectName && <div className="text-[12px] text-muted">{projectName}</div>}
+            </div>
+            <span className="flex shrink-0 items-center gap-1.5">
+              {isDone && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-success-soft px-2 py-0.5 text-[12px] font-medium text-success">✓ Completed</span>
+              )}
+              {t.due && (
+                <span
+                  className={`shrink-0 rounded-full border px-2 py-0.5 text-[12px] font-medium ${isOverdue(t.due) && !isDone ? "bg-danger-soft text-danger" : "bg-accent-soft text-accent"}`}
+                  style={{ borderColor: isOverdue(t.due) && !isDone ? "color-mix(in srgb, var(--danger) 30%, var(--border))" : "transparent" }}
+                >
+                  {formatDue(t.due)}
+                </span>
+              )}
+            </span>
+          </div>
+        </div>
 
-        {displayThread.length > 0 && (
-          // Fixed-height scroll pane, not an ever-growing card — a chatty
-          // thread otherwise makes the whole page longer every time someone
-          // replies. Auto-scrolled to the newest message (see the effect in
-          // WaitingView) so it opens already showing what's current.
-          <div ref={threadRef} className="mt-3 max-h-[50vh] space-y-2 overflow-y-auto pr-1">
-            {displayThread.map((m) => (
-              <div key={m.id} className={`flex items-end gap-1.5 ${m.from === "client" ? "justify-end" : "justify-start"}`}>
-                {m.from === "team" && <SenderAvatar sender={m.sender} />}
-                <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[14px] ${m.from === "client" ? "rounded-br-sm bg-accent text-white" : "rounded-bl-sm border bg-surface-2"}`}>
-                  {m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
-                  <AttachmentGallery items={m.attachments} />
-                  <div className={`mt-1 text-[11px] ${m.from === "client" ? "text-white/70" : "text-muted"}`}>
-                    {m.from === "client" ? "You" : m.sender?.name ?? "Team"} · {timeAgo(m.at)}
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 md:flex-none md:overflow-visible md:pt-0">
+          {t.description && <p className="max-w-[62ch] whitespace-pre-wrap break-words text-[14px] text-muted">{t.description}</p>}
+          <AttachmentGallery items={t.attachments} />
+
+          {displayThread.length > 0 && (
+            // Capped height + its own scroll only at md+, where the page
+            // scrolling separately from this box isn't confusing (mouse
+            // wheel over a nested box behaves predictably) — below md it's
+            // just part of the one scrollable region above, no cap needed.
+            <div ref={threadRef} className="mt-3 space-y-2 md:max-h-[50vh] md:overflow-y-auto md:pr-1">
+              {displayThread.map((m) => (
+                <div key={m.id} className={`flex items-end gap-1.5 ${m.from === "client" ? "justify-end" : "justify-start"}`}>
+                  {m.from === "team" && <SenderAvatar sender={m.sender} />}
+                  <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[14px] ${m.from === "client" ? "rounded-br-sm bg-accent text-white" : "rounded-bl-sm border bg-surface-2"}`}>
+                    {m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
+                    <AttachmentGallery items={m.attachments} />
+                    <div className={`mt-1 text-[11px] ${m.from === "client" ? "text-white/70" : "text-muted"}`}>
+                      {m.from === "client" ? "You" : m.sender?.name ?? "Team"} · {timeAgo(m.at)}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className="mt-3 space-y-2 border-t pt-3">
-          {/* text-[16px] isn't a style choice here — any input/textarea under
-              16px makes iOS Safari auto-zoom on focus, and the zoom (plus
-              its "scroll the focused field into view") is exactly what was
-              shoving the whole page sideways when the keyboard opened. */}
-          <textarea
-            value={draft.body}
-            onChange={(e) => onBody(e.target.value)}
-            onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") onSend(); }}
-            placeholder="Type a message…"
-            rows={2}
-            className="w-full rounded-lg border bg-background px-2.5 py-2 text-[16px] outline-none focus:border-accent"
-          />
-          {draft.attachments.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {draft.attachments.map((a) => (
-                <span key={a.id} className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-[12px]">
-                  {a.name} <span className="text-muted">{a.size}</span>
-                  <button onClick={() => onRemoveAttachment(a.id)} title="Remove" className="text-muted hover:text-danger">✕</button>
-                </span>
               ))}
             </div>
           )}
-          {linkOpen && (
-            <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-background p-2">
-              <input autoFocus value={linkUrl} onChange={(e) => onLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAddLink(); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
-              <input value={linkLabel} onChange={(e) => onLinkLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAddLink(); }} placeholder="Label (optional)" className="w-32 rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
-              <button onClick={onAddLink} disabled={!linkUrl.trim()} className="rounded-md bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white disabled:opacity-40">Add</button>
-            </div>
-          )}
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-3">
-              <label className="inline-flex cursor-pointer items-center gap-1 text-[13px] font-medium text-accent">
-                + Attach files
-                <input type="file" multiple className="hidden" onChange={(e) => { onFiles(e.target.files); e.target.value = ""; }} />
-              </label>
-              <button onClick={onToggleLink} className="text-[13px] font-medium text-accent">+ Add link</button>
-            </div>
-            <button
-              onClick={onSend}
-              disabled={sending || uploading || (!draft.body.trim() && draft.attachments.length === 0)}
-              className="rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-40"
-            >
-              {sending ? "Sending…" : uploading ? "Uploading…" : "Send"}
-            </button>
-          </div>
-          {sendError && <div className="text-[13px] text-danger">{sendError}</div>}
-          <div className="text-[12px] text-muted">We&apos;ll email the team when you send a message here.</div>
+
+          {/* Composer rides inside the scrolling body at md+ (matches the
+              original layout — the page scrolls past it like everything
+              else), but needs to be lifted out to its own fixed footer
+              below md, so it stays pinned under the fixed shell instead of
+              scrolling out of reach. */}
+          <div className="mt-3 hidden border-t pt-3 md:block">{composer}</div>
         </div>
+
+        <div className="shrink-0 border-t p-4 md:hidden">{composer}</div>
       </div>
     </div>
   );
@@ -265,6 +285,18 @@ export default function WaitingView({ token }: { token: string }) {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(() => deepLinkTaskId);
   const openTask = (id: string) => { setSelectedTaskId(id); window.scrollTo({ top: 0, behavior: "smooth" }); };
   const closeTask = () => { setSelectedTaskId(null); window.scrollTo({ top: 0, behavior: "smooth" }); };
+  // Below md, the detail view is a fixed full-screen shell (see
+  // TaskDetailCard) so its own body can be the only scrollable region —
+  // without this, the underlying page is still swipeable behind it on iOS,
+  // which is exactly the "double scroll" this shell exists to avoid. Only
+  // locks at mobile widths: at md+ the card sits in normal page flow and
+  // the page is supposed to scroll.
+  useEffect(() => {
+    if (!selectedTaskId || !window.matchMedia("(max-width: 767px)").matches) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [selectedTaskId]);
   const [tasks, setTasks] = useState<WaitingTask[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
@@ -590,7 +622,10 @@ export default function WaitingView({ token }: { token: string }) {
             <div className="min-w-0">
               {selectedTask ? (
                 <div>
-                  <button onClick={closeTask} className="mb-4 inline-flex items-center gap-1 text-[14px] font-medium text-accent hover:underline">← Back to your tasks</button>
+                  {/* Mobile gets its own back button inside the fixed shell
+                      (see TaskDetailCard) — this one is desktop-only, where
+                      the card is back to sitting in normal page flow. */}
+                  <button onClick={closeTask} className="mb-4 hidden items-center gap-1 text-[14px] font-medium text-accent hover:underline md:inline-flex">← Back to your tasks</button>
                   <TaskDetailCard
                     task={selectedTask}
                     showProjectName={projects.length > 1}
@@ -603,6 +638,7 @@ export default function WaitingView({ token }: { token: string }) {
                     linkUrl={linkUrl}
                     linkLabel={linkLabel}
                     threadRef={(el) => { threadRefs.current[selectedTask.id] = el; }}
+                    onBack={closeTask}
                     onBody={(body) => updateBody(selectedTask.id, body)}
                     onFiles={(files) => handleFiles(selectedTask.id, files)}
                     onRemoveAttachment={(attId) => removeAttachment(selectedTask.id, attId)}
