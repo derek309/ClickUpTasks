@@ -200,6 +200,11 @@ export interface Client {
   /** yyyy-mm-dd of the last time this client was reviewed — powers the
    * weekly/monthly Review tier reset (see clientUrgencyKey). */
   reviewedAt?: string | null;
+  /** Last time a Playbook (Owner Growth Plan) step was completed for this
+   * client, by either the owner (toggle webhook) or the team (patchTask) —
+   * lets the daily stall-check cron (playbookCheckinsServer.ts) tell "quiet
+   * because it's done" apart from "quiet because it's stuck." */
+  playbookLastProgressAt?: string | null;
   /** Unguessable token backing this client's public "what we're waiting on
    * you for" page (/waiting/[token], see supabase/client-share-token.sql) —
    * lazily generated the first time "Copy client link" is clicked, then
@@ -1078,6 +1083,45 @@ export interface Message {
   bcc: string[];
 }
 
+/** A composed SMS/email held for a future send time — see
+ * supabase/scheduled-messages.sql and src/lib/sendMessageServer.ts (the cron
+ * that fires these). On success it becomes a real Message row; this is only
+ * the pending queue up to that point, fetched/created via /api/messages/schedule. */
+export type ScheduledMessageStatus = "pending" | "sent" | "failed" | "canceled";
+export interface ScheduledMessage {
+  id: string;
+  clientId: string;
+  taskId: string | null;
+  channel: MessageChannel;
+  subject: string | null;
+  body: string;
+  cc: string[];
+  bcc: string[];
+  fromEmail?: string | null;
+  attachments: Attachment[];
+  scheduledAt: string; // ISO
+  status: ScheduledMessageStatus;
+  error?: string | null;
+  createdBy: string;
+  sentMessageId?: string | null;
+  createdAt: string;
+}
+
+/** A synced Granola meeting whose attendees didn't match any known contact —
+ * parked for triage in the Inbox (same shape/pattern as UnmatchedEmail) so
+ * the team can either assign it to an existing client's Journal or dismiss
+ * it. See supabase/granola-sync.sql and src/lib/granolaSyncServer.ts. */
+export interface GranolaUnmatchedMeeting {
+  id: string;
+  granolaNoteId: string;
+  title: string | null;
+  attendees: { email: string }[];
+  summary: string | null;
+  webUrl: string | null;
+  occurredAt: string | null;
+  handled: boolean;
+}
+
 /** An inbound email pulled from Gmail whose sender isn't a known contact —
  * parked for triage in the Inbox so the team can read it and either add the
  * sender as a client or dismiss it. Deleted once acted on. */
@@ -1252,6 +1296,12 @@ export interface Task {
    * null (legacy row, or a path that predates this field). Recurrence clones
    * propagate the original creator rather than stamping a new one. */
   createdBy?: string | null;
+  /** Set when this task is an auto-generated playbook check-in (see
+   * src/lib/playbookCheckinsServer.ts and the owner-toggle route's progress
+   * trigger) — a SEPARATE marker from playbookStepKey, since a check-in must
+   * stay a normal, fully-editable/deletable task, unlike a real Owner Growth
+   * Plan step. */
+  checkinKind?: "playbook_stalled" | "playbook_progress" | null;
 }
 
 /** A custom Kanban-style column for one project's own task board (e.g.

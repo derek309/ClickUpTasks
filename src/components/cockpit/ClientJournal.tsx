@@ -14,13 +14,14 @@
 import { useEffect, useRef, useState } from "react";
 import {
   users, userById, timeAgo, dayLabel, isCompletionEvent, NOTE_TYPE_META, NOTE_TYPE_ORDER, MANUAL_NOTE_TYPES, noteTypeMeta, htmlToText, looksLikeHtml, plainTextToHtml,
-  type ClientNote, type NoteType, type Task, type Comment, type Message, type MessageChannel, type MessageDirection, type Me, type Attachment, type Contact,
+  type ClientNote, type NoteType, type Task, type Comment, type Message, type MessageChannel, type MessageDirection, type Me, type Attachment, type Contact, type ScheduledMessage,
 } from "@/lib/data";
 import { I, Avatar, CollapsibleText, newId } from "./ui";
 import { ConfirmModal, type ConfirmSpec } from "./modals";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 import { RichTextEditor } from "./RichTextEditor";
 import { RecipientField } from "./TaskDrawer";
+import { SchedulePopover } from "./SchedulePopover";
 
 type JournalFilter = "all" | NoteType | "message" | "activity" | "photos" | "links" | "files";
 
@@ -63,7 +64,7 @@ function buildFeedRows(items: JournalItem[]): FeedRow[] {
   return rows;
 }
 
-export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, toContact, ccContacts, sendingMessage, onUploadImage, onOpenFile, canAdmin, canMessage, onToggleCanMessage, onDraftMessage, draftingMessage, onRefreshContact, refreshingContact, onRefreshMessages, refreshingMessages, onWhatsNext, whatsNextBusy, composeIntent }: {
+export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, onScheduleMessage, scheduled, onLoadScheduled, onCancelScheduled, toContact, ccContacts, sendingMessage, onUploadImage, onOpenFile, canAdmin, canMessage, onToggleCanMessage, onDraftMessage, draftingMessage, onRefreshContact, refreshingContact, onRefreshMessages, refreshingMessages, onWhatsNext, whatsNextBusy, composeIntent }: {
   notes: ClientNote[];
   tasks: Task[]; // already scoped by the caller to the current client/project
   messages?: Message[] | null; // null/undefined = no linked GHL contact at this scope, so no Email/SMS
@@ -74,6 +75,10 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   onOpenTask: (taskId: string) => void;
   onOpenMessages?: () => void; // fires once when a message is first visible, to mark them read
   onSendMessage?: (channel: MessageChannel, subject: string, body: string, cc?: string[], bcc?: string[]) => void;
+  onScheduleMessage?: (channel: MessageChannel, subject: string, body: string, scheduledAt: string, cc?: string[], bcc?: string[]) => void;
+  scheduled?: ScheduledMessage[]; // this client's pending scheduled sends
+  onLoadScheduled?: () => void; // refetch `scheduled` — call on mount/client change
+  onCancelScheduled?: (id: string) => void;
   toContact?: Contact | null; // the recipient (client's linked GHL contact), shown as the To line
   ccContacts?: Contact[]; // searchable contacts for the email Cc/Bcc pickers
   sendingMessage?: boolean;
@@ -129,6 +134,12 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [composeIntent?.nonce]);
+  // Pending scheduled sends aren't part of the global data load — fetch them
+  // whenever this client/project's Journal mounts (key={activeProject ??
+  // activeClient} on the caller already remounts this per client, so a plain
+  // mount effect is enough — no dependency array needed beyond that).
+  useEffect(() => { onLoadScheduled?.(); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Free-text instruction for the "Prompt Claude" draft ("check in with them",
   // "let them know it's on hold", etc.). Empty = the default status-update draft.
   const [draftPrompt, setDraftPrompt] = useState("");
@@ -296,6 +307,14 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
     onSendMessage(composeMode, msgSubject, composeMode === "email" ? msgBody : msgBody.trim(), cc, bcc);
     setMsgSubject(""); setMsgBody(""); setMsgCc([]); setMsgBcc([]); setShowCcBcc(false);
     setComposeFocusNonce((n) => n + 1); // fresh empty editor, not the just-sent one lingering
+  };
+  const submitScheduled = (whenIso: string) => {
+    if (!hasComposedBody || !onScheduleMessage || (composeMode !== "email" && composeMode !== "sms")) return;
+    const cc = composeMode === "email" ? msgCc : undefined;
+    const bcc = composeMode === "email" ? msgBcc : undefined;
+    onScheduleMessage(composeMode, msgSubject, composeMode === "email" ? msgBody : msgBody.trim(), whenIso, cc, bcc);
+    setMsgSubject(""); setMsgBody(""); setMsgCc([]); setMsgBcc([]); setShowCcBcc(false);
+    setComposeFocusNonce((n) => n + 1);
   };
   // "Prompt Claude" draft. On success it fills the email/SMS and clears the
   // prompt box (also collapsing the auto-grown textarea back to one line).
@@ -679,9 +698,21 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                     className="h-full min-h-[160px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
                 )}
               </div>
-              <div className="mt-2 flex shrink-0 items-center gap-2">
+              {scheduled && scheduled.length > 0 && (
+                <div className="mb-2 flex shrink-0 flex-col gap-1">
+                  {scheduled.map((s) => (
+                    <div key={s.id} className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-[12px] text-muted">
+                      <I.clock className="h-3.5 w-3.5 shrink-0" />
+                      <span className="min-w-0 flex-1 truncate">Scheduled {s.channel === "sms" ? "text" : "email"}: {new Date(s.scheduledAt).toLocaleString()}</span>
+                      <button onClick={() => onCancelScheduled?.(s.id)} className="shrink-0 font-medium text-accent hover:underline">Cancel</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="mt-2 flex shrink-0 items-center justify-end gap-2">
+                {onScheduleMessage && <SchedulePopover disabled={!hasComposedBody || sendingMessage} onSchedule={submitScheduled} />}
                 <button onClick={submitMessage} disabled={!hasComposedBody || sendingMessage}
-                  className="ml-auto shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send"}</button>
+                  className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send"}</button>
               </div>
             </div>
           )}

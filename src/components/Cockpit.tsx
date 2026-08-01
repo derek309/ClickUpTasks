@@ -51,6 +51,8 @@ import {
   type Comment,
   type Message,
   type MessageChannel,
+  type ScheduledMessage,
+  type GranolaUnmatchedMeeting,
   type Me,
   type Territory,
   type TaskTemplate,
@@ -81,10 +83,10 @@ import {
   normalizeState,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, markMessagesReadDb, reassignMessagesTaskDb, insertMessage, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, markMessagesReadDb, reassignMessagesTaskDb, insertMessage, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact, rowToScheduledMessage, touchPlaybookProgress, markGranolaUnmatchedHandledDb, linkGranolaSyncedNoteDb } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import { Inbox } from "./cockpit/Inbox";
-import SettingsHub from "./SettingsHub";
+import SettingsHub, { type TabKey } from "./SettingsHub";
 import TeamChat from "./TeamChat";
 import AddClientModal from "./AddClientModal";
 import TerritoryPanel from "./TerritoryPanel";
@@ -199,6 +201,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
   const [vaultFolders, setVaultFolders] = useState<VaultFolder[]>([]);
   const [unmatchedEmails, setUnmatchedEmails] = useState<UnmatchedEmail[]>([]);
+  const [granolaUnmatched, setGranolaUnmatched] = useState<GranolaUnmatchedMeeting[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [stages, setStages] = useState<Stage[]>([]);
   const [importingTasks, setImportingTasks] = useState(false);
@@ -259,6 +262,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // (it used to be a fixed-position overlay; Derek asked more than once for
   // it to render in the normal content area instead).
   const [settingsView, setSettingsView] = useState(false);
+  // Lets a deep link (e.g. the "Work with Claude" fallback toast) open
+  // Settings straight to a specific tab instead of always landing on
+  // Integrations — SettingsHub only reads this once per mount, via its own
+  // initialTab prop.
+  const [settingsInitialTab, setSettingsInitialTab] = useState<TabKey>("integrations");
+  const openSettingsTab = (tab: TabKey) => {
+    setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setDirView(null); setTerritoryView(null);
+    setSettingsInitialTab(tab);
+    setSettingsView(true);
+  };
   const [teamMessages, setTeamMessages] = useState<TeamMessage[]>([]);
   const [dmMessages, setDmMessages] = useState<DmMessage[]>([]);
   // Which half of the Team Chat page is showing. Chat leads — per Derek, the
@@ -916,6 +929,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setTeamMessages(d.teamMessages);
         setDmMessages(d.dmMessages);
         setUnmatchedEmails(d.unmatchedEmails);
+        setGranolaUnmatched(d.granolaUnmatched);
       } catch (e) {
         setDbError(e instanceof Error ? e.message : "Failed to load data.");
       } finally {
@@ -936,10 +950,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   // Toasts with an action (undo) linger ~4x longer — 2.8s is not enough time
   // to read what happened and decide to reverse it.
-  const pushToast = (text: string, action?: { label: string; run: () => void }) => {
+  const pushToast = (text: string, action?: { label: string; run: () => void }, secondaryAction?: { label: string; run: () => void }) => {
     const id = newId("toast_");
-    setToasts((t) => [...t, { id, text, action }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), action ? 11000 : 2800);
+    const lifetime = action ? 11000 : 2800;
+    setToasts((t) => [...t, { id, text, action, secondaryAction }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), lifetime);
   };
   const dismissToast = (id: string) => setToasts((t) => t.filter((x) => x.id !== id));
   // Copy a shareable deep link (see buildSearch) to the clipboard.
@@ -1144,11 +1159,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // the older mention-only path (see sendMentionEmail below, which still
   // covers the one case — task-comment mentions — that has a richer,
   // quoted-comment email of its own).
-  const sendNotificationEmail = (recipientMemberId: string, subject: string, link?: string) => {
+  const sendNotificationEmail = (recipientMemberId: string, subject: string, link: string | undefined, kind: NotificationKind) => {
     authedFetch("/api/notifications/email", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ recipientMemberId, subject, link }),
+      body: JSON.stringify({ recipientMemberId, subject, link, kind }),
     }).catch(() => {});
   };
 
@@ -1164,7 +1179,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     insertNotif(n);
     if (!extra?.skipEmail) {
       const link = taskId ? `?task=${encodeURIComponent(taskId)}` : extra?.clientId ? `?client=${encodeURIComponent(extra.clientId)}` : undefined;
-      sendNotificationEmail(recipientId, text, link);
+      sendNotificationEmail(recipientId, text, link, extra?.kind ?? "activity");
     }
   };
 
@@ -1244,6 +1259,23 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     upsertContact(ct);
     await addClientContact(ct); // creates cl_<ct.id>, opens it, brings any conversation over
     dismissUnmatched(u.id);
+  };
+  // Twin of the two above, for a Granola meeting whose attendees didn't
+  // match any known contact — assign it to an existing client's Journal, or
+  // dismiss it.
+  const dismissGranolaUnmatched = (id: string) => {
+    setGranolaUnmatched((gs) => gs.filter((g) => g.id !== id));
+    markGranolaUnmatchedHandledDb(id);
+  };
+  const assignGranolaUnmatched = (g: GranolaUnmatchedMeeting, clientId: string) => {
+    const title = g.title || "Meeting";
+    const summary = g.summary?.trim() || "(no summary)";
+    const link = g.webUrl ? `\n\nView in Granola: ${g.webUrl}` : "";
+    const note: ClientNote = { id: newId("cn_"), clientId, projectId: null, type: "meeting", body: `${title}\n\n${summary}${link}`, authorId: me.id, at: g.occurredAt || new Date().toISOString() };
+    setClientNotes((ns) => [note, ...ns]);
+    upsertClientNote(note);
+    linkGranolaSyncedNoteDb(g.granolaNoteId, clientId, note.id);
+    dismissGranolaUnmatched(g.id);
   };
   // Standalone mark-read — shared with openNotification below, but also
   // exposed on its own so a notification can be dismissed off the unread
@@ -1790,6 +1822,24 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       pushToast("Couldn't copy to clipboard.");
     }
   };
+  // "Work with Claude" hands off to the clickuptasks:// desktop helper
+  // (see claudeLink.ts) — but a browser gives JS no way to detect whether
+  // that custom scheme is actually registered (no prompt, no error, no
+  // resolved/rejected promise). On a computer that never ran the one-time
+  // desktop-helper/install-*.mjs setup, clicking this silently does
+  // nothing observable at all — exactly the bug report this fixes. Rather
+  // than trying to detect success (impossible), always follow up with a
+  // toast a moment later offering both the "Copy for Claude" fallback (keep
+  // working right now, no setup needed) and a direct jump to the install
+  // instructions (API Tokens tab already has the one-time setup command),
+  // same pattern other "open the desktop app" links use (Slack, Zoom, etc.)
+  // since they can't detect success either.
+  const workWithClaude = (scope: { task: string } | { client: string; project?: string | null }, copyFallback: () => void) => {
+    window.location.href = claudeWorkUrl(scope);
+    setTimeout(() => {
+      pushToast("Didn't see Claude open? You may need one-time setup on this computer.", { label: "Copy for Claude instead", run: copyFallback }, { label: "Set up Work with Claude", run: () => openSettingsTab("tokens") });
+    }, 1200);
+  };
   // Vault folder assignment — three different write-back paths since an
   // attachment can live on a task, nested inside one of that task's
   // comments, or on a Chat note, and none of those three has an existing
@@ -2275,6 +2325,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     upsertTask(updated, me.id);
     syncGhlIfLinked(updated, synced);
     if (clone) upsertTask(clone, me.id);
+    // Bumps clients.playbook_last_progress_at whenever a real Owner Growth
+    // Plan step's status changes (done or reopened) — see playbookCheckinsServer.ts's
+    // stall check, which uses this to tell "quiet because it's done" apart
+    // from "quiet because it's stuck." The owner-toggle route bumps this
+    // server-side for its own completion path.
+    if (before.playbookStepKey && synced.status !== undefined && synced.status !== before.status) {
+      touchPlaybookProgress(before.clientId);
+    }
     if (patch.assigneeId && patch.assigneeId !== me.id && patch.assigneeId !== before.assigneeId) {
       notify(patch.assigneeId, `${me.name} assigned you “${before.title}”`, id);
       pushToast(`Notified ${userById(patch.assigneeId)?.name}`);
@@ -2602,6 +2660,47 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       setSendingMessage(false);
     }
   };
+
+  // --- Scheduled sends (send later) ----------------------------------------
+  // Fetched on demand per client (not part of fetchAll's global load — a
+  // pending-send queue is small and only matters while its client's
+  // Journal/composer is open), fired by the /api/cron/send-scheduled cron.
+  const [scheduledMessages, setScheduledMessages] = useState<Record<string, ScheduledMessage[]>>({});
+  const loadScheduledMessages = async (clientId: string) => {
+    try {
+      const res = await authedFetch(`/api/messages/schedule?clientId=${encodeURIComponent(clientId)}`);
+      const j = await res.json();
+      if (!res.ok) return;
+      setScheduledMessages((m) => ({ ...m, [clientId]: (j.scheduled ?? []).map(rowToScheduledMessage).filter((s: ScheduledMessage) => s.status === "pending") }));
+    } catch { /* best-effort; the composer just shows nothing pending */ }
+  };
+  const scheduleMessage = async (clientId: string, channel: MessageChannel, subject: string, body: string, scheduledAt: string, attachments: Attachment[] = [], cc: string[] = [], bcc: string[] = [], taskId: string | null = null, fromEmail?: string) => {
+    if (!body.trim()) return;
+    try {
+      const res = await authedFetch("/api/messages/schedule", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId, taskId, channel, subject, body, cc, bcc, fromEmail, scheduledAt, attachments: attachments.filter((a) => a.path).map((a) => ({ path: a.path, name: a.name })) }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { pushToast(j.error || "Failed to schedule message."); return; }
+      pushToast(`🕐 Scheduled for ${new Date(scheduledAt).toLocaleString()}`);
+      loadScheduledMessages(clientId);
+    } catch {
+      pushToast("Failed to schedule message.");
+    }
+  };
+  const cancelScheduledMessage = async (id: string, clientId: string) => {
+    try {
+      const res = await authedFetch("/api/messages/schedule", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { pushToast(j.error || "Failed to cancel."); return; }
+      setScheduledMessages((m) => ({ ...m, [clientId]: (m[clientId] ?? []).filter((s) => s.id !== id) }));
+      pushToast("Scheduled send canceled");
+    } catch {
+      pushToast("Failed to cancel.");
+    }
+  };
+
   // Pulls a contact's tasks created directly in GoHighLevel (not pushed from
   // here) into local tracked tasks, linked via ghlTaskId so they join the
   // existing two-way sync (see GHL_SYNC_FIELDS/syncGhlIfLinked below) going
@@ -3631,7 +3730,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>✳</span> Copy for Claude</button>
           <button onClick={() => {
               setHeaderMoreOpen(false);
-              window.location.href = claudeWorkUrl({ client: activeClient, project: activeProject });
+              workWithClaude({ client: activeClient, project: activeProject }, copyClientForClaude);
             }}
             title="Resume (or start) this client/project's Claude Code session"
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>▶</span> Work with Claude</button>
@@ -4104,7 +4203,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>✳</span> Copy for Claude</button>
                     <button onClick={() => {
                         setHeaderMoreOpen(false);
-                        window.location.href = claudeWorkUrl({ client: activeClient, project: activeProject });
+                        workWithClaude({ client: activeClient, project: activeProject }, copyClientForClaude);
                       }}
                       title="Resume (or start) this client/project's Claude Code session"
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>▶</span> Work with Claude</button>
@@ -4263,6 +4362,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         {/* content */}
         {settingsView ? (
           <SettingsHub
+            initialTab={settingsInitialTab}
             me={me} canAdmin={canAdmin} hasTerritoryAccess={canAdmin || myTerritories.length > 0}
             subAccounts={subAccounts}
             onSaveClient={(c) => { setClients((cs) => cs.map((x) => (x.id === c.id ? c : x))); markOwnClientWrite(c.id); upsertClient(c); }}
@@ -4331,7 +4431,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 Activity{unread > 0 && <span className="rounded-full bg-accent px-1.5 text-[11px] font-semibold text-white">{unread}</span>}
               </div>
               <Inbox notifications={myNotifs} clientById={clientById} projectById={projectById} onOpen={openNotification} onMarkRead={markNotifRead} onMarkAllRead={markAllNotifsRead} onSyncEmail={canAdmin ? syncEmail : undefined} syncingEmail={syncingEmail} onSyncAppointments={canAdmin ? syncAppointments : undefined} syncingAppointments={syncingAppointments}
-                unmatchedEmails={canAdmin ? unmatchedEmails : []} onAddAsClient={addAsClientFromEmail} onDismissUnmatched={dismissUnmatched} />
+                unmatchedEmails={canAdmin ? unmatchedEmails : []} onAddAsClient={addAsClientFromEmail} onDismissUnmatched={dismissUnmatched}
+                granolaUnmatched={canAdmin ? granolaUnmatched : []} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onAssignGranolaMeeting={assignGranolaUnmatched} onDismissGranolaUnmatched={dismissGranolaUnmatched} />
             </div>
           </div>
         ) : dirView === "clients" ? (
@@ -4368,6 +4469,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onOpenTask={(id) => { setClientTab("tasks"); setOpenTaskId(id); }}
             onOpenMessages={() => { const ct = contactForClient(activeClient); if (ct) { setMessages((ms) => ms.map((m) => (m.contactId === ct.id ? { ...m, read: true } : m))); markMessagesReadDb(ct.id); } }}
             onSendMessage={activeProject || !canMessageClient(activeClient) ? undefined : (channel, subject, body, cc, bcc) => sendMessage(activeClient, channel, subject, body, undefined, cc, bcc)}
+            onScheduleMessage={activeProject || !canMessageClient(activeClient) ? undefined : (channel, subject, body, scheduledAt, cc, bcc) => scheduleMessage(activeClient, channel, subject, body, scheduledAt, undefined, cc, bcc)}
+            scheduled={scheduledMessages[activeClient] ?? []}
+            onLoadScheduled={() => loadScheduledMessages(activeClient)}
+            onCancelScheduled={(id) => cancelScheduledMessage(id, activeClient)}
             toContact={activeProject ? null : contactForClient(activeClient)}
             ccContacts={contacts}
             composeIntent={composeIntent}
@@ -4514,7 +4619,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={navTaskIds.length} navTasks={navTaskIds.map((id) => tasks.find((t) => t.id === id)).filter((t): t is Task => !!t)} onOpenTask={setOpenTaskId} onAddSibling={(title) => addTaskToList(openTask.clientId, openTask.projectId, openTask.private, title)} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(attachments) => addComment(openTask.id, comment, attachments)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { if (openTask.playbookStepKey) { pushToast("Playbook steps can't be moved to a different list."); return; } patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, territory: null, plannerMode: false, plannerWeek: null })} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId)} draftingMessage={draftingMessage} onDraftDescription={draftDescription} draftingDescription={draftingDescription} onRegenerateAiSummary={() => regenerateAiSummary(openTask.clientId)} aiSummaryBusy={aiSummaryBusyId === openTask.clientId} />
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { if (openTask.playbookStepKey) { pushToast("Playbook steps can't be moved to a different list."); return; } patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, territory: null, plannerMode: false, plannerWeek: null })} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} onScheduleTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, scheduledAt, attachments, cc, bcc) => scheduleMessage(openTask.clientId, channel, subject, body, scheduledAt, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId)} draftingMessage={draftingMessage} onDraftDescription={draftDescription} draftingDescription={draftingDescription} onRegenerateAiSummary={() => regenerateAiSummary(openTask.clientId)} aiSummaryBusy={aiSummaryBusyId === openTask.clientId} pushToast={pushToast} onOpenClaudeSetup={() => openSettingsTab("tokens")} />
       )}
 
       {addClientOpen && <AddClientModal subAccounts={subAccounts} contacts={contacts} existingIds={new Set(clients.map((c) => c.id))} onAdd={addClientContact} onClose={() => setAddClientOpen(false)} />}
@@ -4620,7 +4725,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       )}
 
       <div className="pointer-events-none fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 flex-col items-center gap-2">
-        {toasts.map((t) => (<div key={t.id} className="flex items-center gap-3 rounded-lg bg-foreground px-3.5 py-2 text-[15px] font-medium text-[color:var(--surface)] shadow-lg"><span>{t.text}</span>{t.action && (<button onClick={() => { t.action!.run(); dismissToast(t.id); }} className="shrink-0 rounded-md border border-[color:var(--surface)]/35 px-2 py-0.5 text-[14px] font-semibold hover:bg-[color:var(--surface)]/15">{t.action.label}</button>)}</div>))}
+        {toasts.map((t) => (<div key={t.id} className="flex items-center gap-3 rounded-lg bg-foreground px-3.5 py-2 text-[15px] font-medium text-[color:var(--surface)] shadow-lg"><span>{t.text}</span>{t.action && (<button onClick={() => { t.action!.run(); dismissToast(t.id); }} className="shrink-0 rounded-md border border-[color:var(--surface)]/35 px-2 py-0.5 text-[14px] font-semibold hover:bg-[color:var(--surface)]/15">{t.action.label}</button>)}{t.secondaryAction && (<button onClick={() => { t.secondaryAction!.run(); dismissToast(t.id); }} className="shrink-0 rounded-md bg-[color:var(--surface)] px-2 py-0.5 text-[14px] font-semibold text-foreground hover:opacity-90">{t.secondaryAction.label}</button>)}</div>))}
       </div>
     </div>
   );

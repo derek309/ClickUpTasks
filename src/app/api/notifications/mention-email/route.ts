@@ -28,12 +28,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Missing recipientMemberId, taskId, or commentBody." }, { status: 400 });
 
   const [{ data: recipient }, { data: sender }] = await Promise.all([
-    supabaseAdmin.from("profiles").select("email, name").eq("member_id", recipientMemberId).maybeSingle(),
+    supabaseAdmin.from("profiles").select("email, name, email_notify_message").eq("member_id", recipientMemberId).maybeSingle(),
     supabaseAdmin.from("profiles").select("name").eq("id", caller.id).maybeSingle(),
   ]);
   if (!recipient?.email) return NextResponse.json({ error: "Recipient has no email on file." }, { status: 404 });
   if (recipient.email.toLowerCase() === caller.email.toLowerCase())
     return NextResponse.json({ ok: true, skipped: "self-mention" });
+  if (recipient.email_notify_message === false) return NextResponse.json({ ok: true, skipped: "opted-out" });
 
   const senderName = (sender?.name as string | null)?.trim() || undefined;
   const title = (taskTitle || "a task").trim();

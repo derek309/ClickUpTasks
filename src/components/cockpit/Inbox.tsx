@@ -4,7 +4,7 @@
 // comments on your tasks, assignments, delegations, status/due changes),
 // as a proper full-page reading list instead of the small bell popover.
 import { useState } from "react";
-import { timeAgo, dayLabel, type Notification, type Client, type Project, type UnmatchedEmail } from "@/lib/data";
+import { timeAgo, dayLabel, type Notification, type Client, type Project, type UnmatchedEmail, type GranolaUnmatchedMeeting } from "@/lib/data";
 import { I, Avatar } from "./ui";
 
 type InboxFilter = "unread" | "all" | "sms" | "email" | "activity";
@@ -77,7 +77,7 @@ function buildActivityRows(list: Notification[]): ActivityRow[] {
   return rows;
 }
 
-export function Inbox({ notifications, clientById, projectById, onOpen, onMarkRead, onMarkAllRead, onSyncEmail, syncingEmail, onSyncAppointments, syncingAppointments, unmatchedEmails = [], onAddAsClient, onDismissUnmatched }: {
+export function Inbox({ notifications, clientById, projectById, onOpen, onMarkRead, onMarkAllRead, onSyncEmail, syncingEmail, onSyncAppointments, syncingAppointments, unmatchedEmails = [], onAddAsClient, onDismissUnmatched, granolaUnmatched = [], allClients = [], onAssignGranolaMeeting, onDismissGranolaUnmatched }: {
   notifications: Notification[]; // caller's, newest-first
   clientById: (id: string) => Client | null;
   projectById: (id: string) => Project | null;
@@ -91,8 +91,13 @@ export function Inbox({ notifications, clientById, projectById, onOpen, onMarkRe
   unmatchedEmails?: UnmatchedEmail[]; // unknown-sender emails to triage (admin)
   onAddAsClient?: (u: UnmatchedEmail) => void;
   onDismissUnmatched?: (id: string) => void;
+  granolaUnmatched?: GranolaUnmatchedMeeting[]; // Granola meetings whose attendees didn't match a known contact
+  allClients?: Client[]; // for the "assign to client" picker
+  onAssignGranolaMeeting?: (g: GranolaUnmatchedMeeting, clientId: string) => void;
+  onDismissGranolaUnmatched?: (id: string) => void;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [granolaPick, setGranolaPick] = useState<Record<string, string>>({});
   const toggle = (id: string) => setExpanded((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const unreadCount = notifications.filter((n) => !n.read).length;
   // Defaults to Unread — the thing you actually open this page to check —
@@ -148,6 +153,47 @@ export function Inbox({ notifications, clientById, projectById, onOpen, onMarkRe
                     </div>
                   </div>
                   {open && <div className="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap rounded-md border border-amber-400/20 bg-surface p-2.5 text-[14px] leading-relaxed">{u.body || "(no body)"}</div>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {/* Unmatched Granola meetings — same triage shape as unsorted email
+            above, but the resolution is "assign to an existing client" (we
+            already know these are real people, just not a recorded contact
+            email) rather than "add as a new client". */}
+        {granolaUnmatched.length > 0 && (
+          <div className="mb-4 overflow-hidden rounded-xl border border-amber-400/40 bg-amber-50/60">
+            <div className="flex items-center gap-2 border-b border-amber-400/30 px-4 py-2 text-[13px] font-semibold text-amber-800">
+              <I.calendar /> Unmatched meetings · {granolaUnmatched.length}
+              <span className="font-normal text-amber-700/80">— Granola meetings that didn&apos;t match a known contact</span>
+            </div>
+            {granolaUnmatched.map((g) => {
+              const open = expanded.has(g.id);
+              const picked = granolaPick[g.id] ?? "";
+              return (
+                <div key={g.id} className="border-b border-amber-400/20 px-4 py-2.5 last:border-0">
+                  <div className="flex items-start gap-2">
+                    <button onClick={() => setExpanded((s) => { const n = new Set(s); if (n.has(g.id)) n.delete(g.id); else n.add(g.id); return n; })} className="min-w-0 flex-1 text-left">
+                      <div className="truncate text-[15px] font-medium">{g.title || "Meeting"}</div>
+                      <div className="truncate text-[13px] text-muted">{g.attendees.map((a) => a.email).join(", ") || "no attendees on file"}{g.occurredAt ? ` · ${timeAgo(g.occurredAt)}` : ""}</div>
+                    </button>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      {onAssignGranolaMeeting && (
+                        <>
+                          <select value={picked} onChange={(e) => setGranolaPick((p) => ({ ...p, [g.id]: e.target.value }))}
+                            className="rounded-md border bg-surface px-1.5 py-1 text-[13px] outline-none">
+                            <option value="">Assign to…</option>
+                            {allClients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
+                          <button onClick={() => picked && onAssignGranolaMeeting(g, picked)} disabled={!picked}
+                            className="rounded-md border border-accent bg-accent px-2 py-1 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-40">Assign</button>
+                        </>
+                      )}
+                      {onDismissGranolaUnmatched && <button onClick={() => onDismissGranolaUnmatched(g.id)} title="Dismiss" className="rounded-md border px-2 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">Dismiss</button>}
+                    </div>
+                  </div>
+                  {open && <div className="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap rounded-md border border-amber-400/20 bg-surface p-2.5 text-[14px] leading-relaxed">{g.summary || "(no summary)"}</div>}
                 </div>
               );
             })}

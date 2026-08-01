@@ -27,6 +27,19 @@ export async function requireUser(req: NextRequest): Promise<AuthedUser | null> 
   return { id: data.user.id, memberId: profile?.member_id ?? null, email: data.user.email ?? "", role: isAdmin ? "admin" : "va", canSendMessages: isAdmin || !!profile?.can_send_messages };
 }
 
+/** Same two-layer gate inlined in /api/ghl/message and /api/google/send:
+ * a non-admin needs BOTH the global grant (profiles.can_send_messages) AND
+ * this specific client's can_message roster (clients.can_message). Admins
+ * always pass. Returns an error string to surface, or null if allowed. */
+export async function canCallerMessageClient(caller: AuthedUser, clientId: string): Promise<string | null> {
+  if (caller.role === "admin") return null;
+  if (!caller.canSendMessages) return "You don't have permission to send messages. Ask an admin to enable it for you.";
+  const { data: clientRow } = await supabaseAdmin.from("clients").select("can_message").eq("id", clientId).maybeSingle();
+  const allowed = ((clientRow?.can_message as string[] | null) ?? []).includes(caller.memberId ?? "");
+  if (!allowed) return "You don't have permission to message this client. Ask an admin to enable it for you.";
+  return null;
+}
+
 /** Returns the signed-in user only if they are an admin; otherwise null. */
 export async function requireAdmin(req: NextRequest): Promise<AuthedUser | null> {
   const user = await requireUser(req);

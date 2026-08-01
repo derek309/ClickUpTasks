@@ -12,6 +12,7 @@ import { AttachmentThumbs } from "./AttachmentThumbs";
 import { AttachmentTile } from "./AttachmentTile";
 import { InlineAssignee, InlineDue } from "./GroupedList";
 import { RichTextEditor } from "./RichTextEditor";
+import { SchedulePopover } from "./SchedulePopover";
 import { claudeWorkUrl } from "@/lib/claudeLink";
 
 // Status/priority reuse the field's own STATUS_META/PRIORITY_META token (the
@@ -85,7 +86,7 @@ export function RecipientField({ label, value, onChange, contacts }: { label: st
   );
 }
 
-export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onDraftDescription, draftingDescription, onRegenerateAiSummary, aiSummaryBusy }: {
+export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onDraftDescription, draftingDescription, onRegenerateAiSummary, aiSummaryBusy, pushToast, onOpenClaudeSetup }: {
   task: Task; comment: string; setComment: (v: string) => void;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; navTasks: Task[]; onOpenTask: (id: string) => void; onAddSibling: (title: string) => void; onPrev: () => void; onNext: () => void;
@@ -99,6 +100,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   ccContacts?: Contact[]; // searchable contacts for the email Cc/Bcc pickers
   onUploadMessageImage?: (file: File) => Promise<Attachment | null>;
   onSendTaskMessage?: (channel: MessageChannel, subject: string, body: string, attachments?: Attachment[], cc?: string[], bcc?: string[]) => void;
+  onScheduleTaskMessage?: (channel: MessageChannel, subject: string, body: string, scheduledAt: string, attachments?: Attachment[], cc?: string[], bcc?: string[]) => void;
   sendingMessage?: boolean;
   onDraftMessage?: (channel: "email" | "sms", prompt?: string) => Promise<{ subject?: string; body: string } | null>; // Gemini draft, never sends
   draftingMessage?: boolean;
@@ -106,6 +108,8 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   draftingDescription?: boolean;
   onRegenerateAiSummary?: () => void; // AI tab's "Regenerate" — only ever called on click, never automatically
   aiSummaryBusy?: boolean;
+  pushToast: (text: string, action?: { label: string; run: () => void }, secondaryAction?: { label: string; run: () => void }) => void;
+  onOpenClaudeSetup: () => void; // jumps Settings to the API Tokens tab, which has the one-time desktop-helper install command
 }) {
   const client = clientById(task.clientId)!;
   const project = projectById(task.projectId)!;
@@ -180,6 +184,13 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     onSendTaskMessage(rightTab, msgSubject, rightTab === "email" ? msgBody : msgBody.trim(), pendingMsgAtts.length ? pendingMsgAtts : undefined, cc, bcc);
     setMsgSubject(""); setMsgBody(""); setPendingMsgAtts([]); setMsgCc([]); setMsgBcc([]); setShowCcBcc(false);
     setRightTab("activity"); // so the send is immediately visible in the feed
+  };
+  const submitScheduledTaskMessage = (whenIso: string) => {
+    if ((!hasComposedMessage && pendingMsgAtts.length === 0) || !onScheduleTaskMessage || rightTab === "activity" || rightTab === "ai") return;
+    const cc = rightTab === "email" ? msgCc : undefined;
+    const bcc = rightTab === "email" ? msgBcc : undefined;
+    onScheduleTaskMessage(rightTab, msgSubject, rightTab === "email" ? msgBody : msgBody.trim(), whenIso, pendingMsgAtts.length ? pendingMsgAtts : undefined, cc, bcc);
+    setMsgSubject(""); setMsgBody(""); setPendingMsgAtts([]); setMsgCc([]); setMsgBcc([]); setShowCcBcc(false);
   };
   // Switches to Email and pre-fills "Re: subject" — no quoted body, same
   // reasoning as the client Journal's reply: GHL threads it and the
@@ -301,6 +312,18 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch { /* clipboard unavailable */ }
+  };
+  // A browser gives JS no way to detect whether the clickuptasks:// scheme
+  // is actually registered (no prompt, no error, no resolved/rejected
+  // promise) — on a computer that never ran the one-time desktop-helper
+  // install script, clicking this does nothing observable at all. Rather
+  // than trying to detect success (impossible), always follow up with a
+  // toast offering the "Copy for Claude" fallback above.
+  const workWithClaude = () => {
+    window.location.href = claudeWorkUrl({ task: task.id });
+    setTimeout(() => {
+      pushToast("Didn't see Claude open? You may need one-time setup on this computer.", { label: "Copy for Claude instead", run: copyForClaude }, { label: "Set up Work with Claude", run: onOpenClaudeSetup });
+    }, 1200);
   };
   // Pasting an image anywhere in the drawer (title, description, a comment
   // draft — doesn't matter which field has focus) attaches it to the task,
@@ -703,6 +726,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
         <span className="flex items-center gap-1.5">
           {msgAttachButton}
           <button onClick={() => switchRightTab("activity")} className="rounded-lg px-2.5 py-1.5 text-[15px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
+          {onScheduleTaskMessage && <SchedulePopover disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} onSchedule={submitScheduledTaskMessage} />}
           <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg bg-[#22c55e] px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send text"}</button>
         </span>
       </div>
@@ -736,6 +760,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
         <span className="flex items-center gap-1.5">
           {msgAttachButton}
           <button onClick={() => switchRightTab("activity")} className="rounded-lg px-2.5 py-1.5 text-[15px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
+          {onScheduleTaskMessage && <SchedulePopover disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} onSchedule={submitScheduledTaskMessage} />}
           <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg bg-[#3b82f6] px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send email"}</button>
         </span>
       </div>
@@ -1105,7 +1130,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
             <button onClick={copyForClaude} title="Copy this task as a brief to paste into Claude Code" className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
               <span aria-hidden>{copied ? "✓" : "✳"}</span><span className="hidden sm:inline">{copied ? "Copied" : "Copy for Claude"}</span>
             </button>
-            <button onClick={() => { window.location.href = claudeWorkUrl({ task: task.id }); }}
+            <button onClick={workWithClaude}
               title="Resume (or start) this task's Claude Code session" className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
               <span aria-hidden>▶</span><span className="hidden sm:inline">Work with Claude</span>
             </button>

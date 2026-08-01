@@ -22,14 +22,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Your account isn't a Google Workspace sender." }, { status: 501 });
 
   const b = await req.json().catch(() => ({}));
-  const { recipientMemberId, subject, link } = b as { recipientMemberId?: string; subject?: string; link?: string };
+  const { recipientMemberId, subject, link, kind } = b as { recipientMemberId?: string; subject?: string; link?: string; kind?: "activity" | "message" | "dm" };
   if (!recipientMemberId || !subject?.trim())
     return NextResponse.json({ error: "Missing recipientMemberId or subject." }, { status: 400 });
 
-  const { data: recipient } = await supabaseAdmin.from("profiles").select("email").eq("member_id", recipientMemberId).maybeSingle();
+  const { data: recipient } = await supabaseAdmin
+    .from("profiles")
+    .select("email, email_notify_activity, email_notify_message, email_notify_dm")
+    .eq("member_id", recipientMemberId)
+    .maybeSingle();
   if (!recipient?.email) return NextResponse.json({ error: "Recipient has no email on file." }, { status: 404 });
   if (recipient.email.toLowerCase() === caller.email.toLowerCase())
     return NextResponse.json({ ok: true, skipped: "self-notify" });
+  const prefColumn = kind === "message" ? recipient.email_notify_message : kind === "dm" ? recipient.email_notify_dm : recipient.email_notify_activity;
+  if (prefColumn === false) return NextResponse.json({ ok: true, skipped: "opted-out" });
 
   const url = link ? `${APP_URL}/${link}` : APP_URL;
 

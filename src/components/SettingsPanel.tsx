@@ -15,6 +15,9 @@ export default function SettingsPanel({
 }) {
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [tokenLocations, setTokenLocations] = useState<string[]>([]);
+  const [granolaApiKeyConfigured, setGranolaApiKeyConfigured] = useState<boolean | null>(null);
+  const [granolaWebhookConfigured, setGranolaWebhookConfigured] = useState<boolean | null>(null);
+  const [granolaStatus, setGranolaStatus] = useState<{ kind: "idle" | "busy" | "ok" | "err"; msg?: string }>({ kind: "idle" });
   const [locs, setLocs] = useState<Record<string, string>>(() => Object.fromEntries(clients.map((c) => [c.id, c.ghlLocationId || ""])));
   const [status, setStatus] = useState<Record<string, { kind: "idle" | "busy" | "ok" | "err"; msg?: string }>>({});
   const [tokens, setTokens] = useState<Record<string, string>>({});
@@ -25,7 +28,37 @@ export default function SettingsPanel({
 
   useEffect(() => {
     fetch("/api/ghl/status").then((r) => r.json()).then((j) => { setConfigured(!!j.configured); setTokenLocations(j.locations ?? []); }).catch(() => setConfigured(false));
+    fetch("/api/granola/status").then((r) => r.json()).then((j) => { setGranolaApiKeyConfigured(!!j.apiKeyConfigured); setGranolaWebhookConfigured(!!j.webhookConfigured); }).catch(() => { setGranolaApiKeyConfigured(false); setGranolaWebhookConfigured(false); });
   }, []);
+
+  // Registers this deployment's /api/granola/webhook URL with Granola —
+  // returns a signing_secret shown only once. It's surfaced here (not
+  // silently stored) because it still has to be added as
+  // GRANOLA_WEBHOOK_SECRET in the Vercel project env and redeployed before
+  // the webhook route can verify anything.
+  async function connectGranola() {
+    setGranolaStatus({ kind: "busy" });
+    try {
+      const res = await authedFetch("/api/granola/setup-webhook", { method: "POST" });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error ?? "Webhook setup failed");
+      setGranolaStatus({ kind: "ok", msg: `Registered. Signing secret (copy now, shown once): ${j.signingSecret}` });
+    } catch (e) {
+      setGranolaStatus({ kind: "err", msg: e instanceof Error ? e.message : "Webhook setup failed" });
+    }
+  }
+
+  async function syncGranolaNow() {
+    setGranolaStatus({ kind: "busy" });
+    try {
+      const res = await authedFetch("/api/granola/sync", { method: "POST" });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error ?? "Sync failed");
+      setGranolaStatus({ kind: "ok", msg: `Checked ${j.checked} — ${j.created} added, ${j.unmatched} unmatched, ${j.internal} internal-only, ${j.skipped} already synced${j.failed ? `, ${j.failed} failed` : ""}.` });
+    } catch (e) {
+      setGranolaStatus({ kind: "err", msg: e instanceof Error ? e.message : "Sync failed" });
+    }
+  }
 
   function setLoc(clientId: string, v: string) {
     setLocs((s) => ({ ...s, [clientId]: v }));
@@ -136,6 +169,40 @@ export default function SettingsPanel({
                 </div>
               );
             })}
+          </div>
+
+          <div className="mb-3 mt-6 flex items-center gap-2">
+            <span className="text-[15px] font-semibold">Granola</span>
+            {granolaApiKeyConfigured === null ? (
+              <span className="text-[13px] text-muted">checking…</span>
+            ) : !granolaApiKeyConfigured ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[15px] font-medium text-amber-700"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> API key not set</span>
+            ) : granolaWebhookConfigured ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[15px] font-medium text-green-600"><span className="h-1.5 w-1.5 rounded-full bg-green-500" /> Connected</span>
+            ) : (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[15px] font-medium text-amber-700"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> Webhook not registered</span>
+            )}
+          </div>
+          <div className="rounded-lg border bg-background px-3 py-2.5">
+            <p className="text-[13px] text-muted">
+              Meeting notes sync into a client&apos;s Journal automatically once a meeting&apos;s attendees match a known contact.
+              {!granolaWebhookConfigured && granolaApiKeyConfigured && " Click Connect once to register the webhook, then add the returned signing secret as GRANOLA_WEBHOOK_SECRET."}
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {granolaApiKeyConfigured && !granolaWebhookConfigured && (
+                <button onClick={connectGranola} disabled={granolaStatus.kind === "busy"}
+                  className="shrink-0 rounded-md bg-accent px-2.5 py-1 text-[15px] font-medium text-white disabled:opacity-50">
+                  {granolaStatus.kind === "busy" ? "Connecting…" : "Connect"}</button>
+              )}
+              {granolaApiKeyConfigured && (
+                <button onClick={syncGranolaNow} disabled={granolaStatus.kind === "busy"}
+                  className="shrink-0 rounded-md border px-2.5 py-1 text-[15px] font-medium hover:bg-surface disabled:opacity-50">
+                  {granolaStatus.kind === "busy" ? "Syncing…" : "Sync recent meetings"}</button>
+              )}
+            </div>
+            {granolaStatus.kind !== "busy" && granolaStatus.msg && (
+              <div className={`mt-1.5 break-all text-[15px] ${granolaStatus.kind === "ok" ? "text-green-600" : "text-red-500"}`}>{granolaStatus.msg}</div>
+            )}
           </div>
     </div>
   );

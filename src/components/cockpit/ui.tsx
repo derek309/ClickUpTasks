@@ -49,6 +49,7 @@ export const I = {
   code: (p: { className?: string }) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={p.className} width="13" height="13"><path d="M8 6L2 12l6 6M16 6l6 6-6 6"/></svg>),
   key: (p: { className?: string }) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={p.className} width="15" height="15"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.5 12.5L20 3M20 3v5h-5M17 6l-3 3"/></svg>),
   download: (p: { className?: string }) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={p.className} width="13" height="13"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 19h16"/></svg>),
+  clock: (p: { className?: string }) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={p.className} width="14" height="14"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>),
 };
 
 export function Avatar({ id, size = 26 }: { id: string | null; size?: number }) {
@@ -196,4 +197,4 @@ export const COL_WIDTHS: Record<string, string> = { status: "128px", due: "96px"
 // `action` powers undo: a bulk edit hands back a one-click revert instead of
 // leaving someone to re-set every task by hand. Toasts carrying an action
 // stay on screen longer (see pushToast) so there's time to actually hit it.
-export type Toast = { id: string; text: string; action?: { label: string; run: () => void } };
+export type Toast = { id: string; text: string; action?: { label: string; run: () => void }; secondaryAction?: { label: string; run: () => void } };

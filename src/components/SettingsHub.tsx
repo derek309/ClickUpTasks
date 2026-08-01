@@ -22,8 +22,9 @@ import TerritoryPanel from "./TerritoryPanel";
 import TemplatesPanel from "./TemplatesPanel";
 import PlaybooksPanel from "./PlaybooksPanel";
 import ApiTokensPanel from "./ApiTokensPanel";
+import NotificationPrefsPanel from "./NotificationPrefsPanel";
 
-type TabKey = "integrations" | "team" | "territories" | "templates" | "playbooks" | "tokens";
+export type TabKey = "integrations" | "team" | "territories" | "templates" | "playbooks" | "tokens" | "notifications";
 
 export default function SettingsHub({
   initialTab = "integrations",
@@ -83,6 +84,7 @@ export default function SettingsHub({
     { key: "templates", label: "Task templates", icon: "clipboard", visible: canAdmin },
     { key: "playbooks", label: "Playbooks", icon: "bookmark", visible: canAdmin },
     { key: "tokens", label: "API tokens", icon: "key", visible: true },
+    { key: "notifications", label: "Notifications", icon: "bell", visible: true },
   ];
   const visibleTabs = tabs.filter((t) => t.visible);
   const [tab, setTab] = useState<TabKey>(visibleTabs.some((t) => t.key === initialTab) ? initialTab : visibleTabs[0]?.key ?? "tokens");
@@ -117,6 +119,7 @@ export default function SettingsHub({
                 onSave={onSavePlaybook} onDelete={onDeletePlaybook} onLoad={onLoadPlaybook} />
             )}
             {tab === "tokens" && <ApiTokensPanel />}
+            {tab === "notifications" && <NotificationPrefsPanel />}
       </div>
     </div>
   );

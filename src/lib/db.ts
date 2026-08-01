@@ -13,6 +13,7 @@ import {
   type Project,
   type Contact,
   type UnmatchedEmail,
+  type GranolaUnmatchedMeeting,
   type Notification,
   type ClientLink,
   type ClientNote,
@@ -22,6 +23,8 @@ import {
   type NoteType,
   type Comment,
   type Message,
+  type ScheduledMessage,
+  type ScheduledMessageStatus,
   type MessageChannel,
   type MessageDirection,
   type Territory,
@@ -46,8 +49,14 @@ export { titleCase };
 
 // --- mappers ----------------------------------------------------------------
 
+// playbook_last_progress_at deliberately NOT included here: clientToRow feeds
+// the general-purpose upsertClient(), called on nearly every client edit —
+// including it would 400 that entire write path until the migration runs
+// (PostgREST rejects an upsert naming an unknown column). It's written only
+// through the narrow, dedicated touchPlaybookProgress() below, which only
+// fires on an actual playbook-step completion.
 const clientToRow = (c: Client) => ({ id: c.id, name: c.name, color: c.color, ghl_location_id: c.ghlLocationId, status: c.status ?? "lead", type: c.type ?? "client", assigned_to: c.assignedTo ?? [], can_message: c.canMessage ?? [], linked_contact_id: c.linkedContactId ?? null, linked_contact_ids: c.linkedContactIds ?? [], follow_up_at: c.followUpAt ?? null, reviewed_at: c.reviewedAt ?? null, share_token: c.shareToken ?? null });
-export const rowToClient = (r: any): Client => ({ id: r.id, name: titleCase(r.name), color: r.color, ghlLocationId: r.ghl_location_id ?? "", status: (r.status as Client["status"]) ?? "lead", type: (r.type as Client["type"]) ?? "client", assignedTo: r.assigned_to ?? [], canMessage: r.can_message ?? [], linkedContactId: r.linked_contact_id ?? null, linkedContactIds: r.linked_contact_ids ?? [], aiSummary: r.ai_summary ?? null, aiSummaryAt: r.ai_summary_at ?? null, followUpAt: r.follow_up_at ?? null, reviewedAt: r.reviewed_at ?? null, shareToken: r.share_token ?? null });
+export const rowToClient = (r: any): Client => ({ id: r.id, name: titleCase(r.name), color: r.color, ghlLocationId: r.ghl_location_id ?? "", status: (r.status as Client["status"]) ?? "lead", type: (r.type as Client["type"]) ?? "client", assignedTo: r.assigned_to ?? [], canMessage: r.can_message ?? [], linkedContactId: r.linked_contact_id ?? null, linkedContactIds: r.linked_contact_ids ?? [], aiSummary: r.ai_summary ?? null, aiSummaryAt: r.ai_summary_at ?? null, followUpAt: r.follow_up_at ?? null, reviewedAt: r.reviewed_at ?? null, shareToken: r.share_token ?? null, playbookLastProgressAt: r.playbook_last_progress_at ?? null });
 
 const contactToRow = (c: Contact) => ({ id: c.id, client_id: c.clientId, name: c.name, email: c.email, phone: c.phone ?? null, ghl_contact_id: c.ghlContactId, company_name: c.company ?? null, city: c.city ?? null, state: c.state ?? null });
 export const rowToContact = (r: any): Contact => ({ id: r.id, clientId: r.client_id, name: titleCase(r.name), email: r.email ?? "", phone: r.phone ?? "", ghlContactId: r.ghl_contact_id ?? "", company: r.company_name ?? "", city: r.city ?? "", state: r.state ?? "" });
@@ -70,7 +79,7 @@ const taskToRow = (t: Task, updatedBy?: string | null) => ({
   ghl_task_id: t.ghlTaskId, label_ids: t.labelIds, subtasks: t.subtasks,
   attachments: t.attachments, comments: t.comments, updated_by: updatedBy ?? null, is_private: t.private,
   stage_id: t.stageId ?? null, client_response: t.clientResponse ?? null, draft_email: t.draftEmail ?? null,
-  playbook_step_key: t.playbookStepKey ?? null, created_by: t.createdBy ?? null,
+  playbook_step_key: t.playbookStepKey ?? null, created_by: t.createdBy ?? null, checkin_kind: t.checkinKind ?? null,
   // Derived from checklist-item assignees so RLS can let a delegatee see a
   // task delegated to them even when they don't own it or follow the client.
   delegated_to: [...new Set(t.subtasks.map((s) => s.assigneeId).filter((id): id is string => !!id && id !== t.assigneeId))],
@@ -94,6 +103,7 @@ export const rowToTask = (r: any): Task => ({
   draftEmail: r.draft_email ?? null,
   playbookStepKey: r.playbook_step_key ?? null,
   createdBy: r.created_by ?? null,
+  checkinKind: r.checkin_kind ?? null,
 });
 
 const notifToRow = (n: Notification) => ({ id: n.id, recipient_id: n.recipientId, text: n.text, task_id: n.taskId, actor_id: n.actorId ?? null, client_id: n.clientId ?? null, project_id: n.projectId ?? null, at: n.at, read: n.read, kind: n.kind ?? "activity" });
@@ -133,6 +143,15 @@ export const rowToMessage = (r: any): Message => ({
   direction: r.direction as MessageDirection, subject: r.subject ?? null, body: r.body ?? "",
   ghlMessageId: r.ghl_message_id ?? null, gmailMessageId: r.gmail_message_id ?? null, createdBy: r.created_by ?? null, at: r.created_at,
   read: r.read ?? true, attachments: r.attachments ?? [], cc: r.cc ?? [], bcc: r.bcc ?? [],
+});
+
+// Row shape returned by GET /api/messages/schedule (raw column names, not
+// through supabase-js) — same snake->camel mapping idiom as rowToMessage.
+export const rowToScheduledMessage = (r: any): ScheduledMessage => ({
+  id: r.id, clientId: r.client_id, taskId: r.task_id ?? null, channel: (r.channel as MessageChannel) ?? "email",
+  subject: r.subject ?? null, body: r.body ?? "", cc: r.cc ?? [], bcc: r.bcc ?? [], fromEmail: r.from_email ?? null,
+  attachments: r.attachments ?? [], scheduledAt: r.scheduled_at, status: (r.status as ScheduledMessageStatus) ?? "pending",
+  error: r.error ?? null, createdBy: r.created_by, sentMessageId: r.sent_message_id ?? null, createdAt: r.created_at,
 });
 
 // --- load + seed ------------------------------------------------------------
@@ -182,7 +201,7 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true) 
 }
 
 export async function fetchAll() {
-  const [c, ct, p, t, n, cl, cn, m, tr, tt, vf, fd, um, sg, tm, pb, dm] = await Promise.all([
+  const [c, ct, p, t, n, cl, cn, m, tr, tt, vf, fd, um, sg, tm, pb, dm, gu] = await Promise.all([
     fetchAllRows("clients", "created_at"),
     fetchAllRows("contacts"),
     fetchAllRows("projects"),
@@ -203,6 +222,7 @@ export async function fetchAll() {
     fetchAllRows("team_messages", "created_at", false),
     fetchAllRows("playbooks", "created_at"),
     fetchAllRows("dm_messages", "created_at", false),
+    fetchAllRows("granola_unmatched", "created_at", false),
   ]);
   // NB: `projects` stays in the hard-fail set — its new folder_id/position
   // columns are read via `select *`, which tolerates their absence pre-migration
@@ -221,6 +241,7 @@ export async function fetchAll() {
   if (tm.error) console.warn("[db] team_messages unavailable — run supabase/team-chat.sql", tm.error.message);
   if (pb.error) console.warn("[db] playbooks unavailable — run supabase/playbooks.sql", pb.error.message);
   if (dm.error) console.warn("[db] dm_messages unavailable — run supabase/dm-chat.sql", dm.error.message);
+  if (gu.error) console.warn("[db] granola_unmatched unavailable — run supabase/granola-sync.sql", gu.error.message);
   return {
     clients: (c.data ?? []).map(rowToClient),
     contacts: (ct.data ?? []).map(rowToContact),
@@ -239,6 +260,7 @@ export async function fetchAll() {
     teamMessages: tm.error ? [] : (tm.data ?? []).map(rowToTeamMessage),
     playbooks: pb.error ? [] : (pb.data ?? []).map(rowToPlaybook),
     dmMessages: dm.error ? [] : (dm.data ?? []).map(rowToDmMessage),
+    granolaUnmatched: gu.error ? [] : (gu.data ?? []).filter((r: any) => !r.handled).map(rowToGranolaUnmatched),
   };
 }
 
@@ -250,6 +272,23 @@ export async function fetchUnmatchedDb(): Promise<UnmatchedEmail[]> {
   const { data, error } = await supabase.from("inbound_unmatched").select("*").eq("handled", false).order("created_at", { ascending: false });
   return error ? [] : (data ?? []).map(rowToUnmatched);
 }
+
+// Twin of rowToUnmatched/markUnmatchedHandledDb/fetchUnmatchedDb for Granola
+// meetings whose attendees didn't match a known contact (granola-sync.sql).
+export const rowToGranolaUnmatched = (r: any): GranolaUnmatchedMeeting => ({
+  id: r.id, granolaNoteId: r.granola_note_id, title: r.title ?? null, attendees: r.attendees ?? [],
+  summary: r.summary ?? null, webUrl: r.web_url ?? null, occurredAt: r.occurred_at ?? null, handled: r.handled ?? false,
+});
+export const markGranolaUnmatchedHandledDb = (id: string) => supabase.from("granola_unmatched").update({ handled: true }).eq("id", id).then(logErr);
+export async function fetchGranolaUnmatchedDb(): Promise<GranolaUnmatchedMeeting[]> {
+  const { data, error } = await supabase.from("granola_unmatched").select("*").eq("handled", false).order("created_at", { ascending: false });
+  return error ? [] : (data ?? []).map(rowToGranolaUnmatched);
+}
+// Backfills the ledger once an unmatched meeting is manually assigned to a
+// client, so it reads the same as one the automatic matcher found.
+export const linkGranolaSyncedNoteDb = (granolaNoteId: string, clientId: string, clientNoteId: string) =>
+  supabase.from("granola_synced_notes").update({ client_id: clientId, client_note_id: clientNoteId }).eq("granola_note_id", granolaNoteId).then(logErr);
+
 export const upsertContact = (c: Contact) => supabase.from("contacts").upsert(contactToRow(c)).then(logErr);
 
 export async function fetchContacts(): Promise<Contact[]> {
@@ -271,6 +310,10 @@ export const bulkUpsertTasks = (ts: Task[]) => (ts.length ? supabase.from("tasks
 export const appendCommentDb = (taskId: string, comment: Comment) => supabase.rpc("append_comment", { task_id: taskId, comment }).then(logErr);
 export const deleteTaskDb = (id: string) => supabase.from("tasks").delete().eq("id", id).then(logErr);
 export const upsertClient = (c: Client) => supabase.from("clients").upsert(clientToRow(c)).then(logErr);
+// Bumped whenever a Playbook step completes (patchTask here; the owner
+// toggle route has its own server-side twin) — see playbookLastProgressAt's
+// doc comment on Client and playbookCheckinsServer.ts's stall check.
+export const touchPlaybookProgress = (clientId: string) => supabase.from("clients").update({ playbook_last_progress_at: new Date().toISOString() }).eq("id", clientId).then(logErr);
 // One request for many new clients at once (e.g. territory auto-sync creating
 // dozens/hundreds of Lead-stage clients) instead of N separate round trips.
 export const bulkUpsertClients = (cs: Client[]) => (cs.length ? supabase.from("clients").upsert(cs.map(clientToRow)).then(logErr) : Promise.resolve());
