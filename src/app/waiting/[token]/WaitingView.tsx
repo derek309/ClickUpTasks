@@ -321,9 +321,9 @@ export default function WaitingView({ token }: { token: string }) {
         </div>
       </div>
 
-      <div className="mx-auto max-w-[1280px] px-6 pb-16 pt-0 md:px-10">
+      <div className="mx-auto max-w-[1280px] px-6 pb-16 pt-8 md:px-10">
         {error ? (
-          <div className="-mt-4 rounded-lg bg-danger-soft px-3 py-2 text-[15px] text-danger">{error}</div>
+          <div className="rounded-lg bg-danger-soft px-3 py-2 text-[15px] text-danger">{error}</div>
         ) : !tasks ? (
           <div className="py-8 text-center text-[13px] text-muted">Loading…</div>
         ) : (
