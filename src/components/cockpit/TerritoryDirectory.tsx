@@ -425,9 +425,9 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
 
       <div className="overflow-x-auto rounded-xl border bg-surface shadow-soft">
         <div className="hidden items-center gap-2 border-b bg-background/40 px-4 py-2 text-[12px] font-semibold uppercase tracking-wide text-muted sm:grid" style={{ gridTemplateColumns: template }}>
-          <span>Name</span>
-          <span>Category</span>
-          <span>Stage</span>
+          <span className="text-left">Name</span>
+          <span className="text-left">Category</span>
+          <span className="text-left">Stage</span>
         </div>
         <div className="divide-y-8 divide-background">
           {groups.map((g) => {
