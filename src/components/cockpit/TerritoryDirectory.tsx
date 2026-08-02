@@ -99,8 +99,15 @@ export function computeBusinessStage(listing: DirectoryListing, client: Client |
 
 // Name | Category | Stage — "What's left" (progress pills + GHL/Listing
 // links + Feature) gets its own full-width line below this row (see
-// ListingRow) rather than cramped grid columns.
-const TEMPLATE = "minmax(0,1fr) 112px 148px";
+// ListingRow) rather than cramped grid columns. Category's own width is
+// computed per render (see `template` in the component below) from the
+// longest category currently on screen, in `ch` units (character-width,
+// not a raw pixel guess) — a fixed px width was clipping longer categories
+// ("Auto Glass & Windshield Repair" → "Auto Glass & Win…") since every row
+// renders its own independent grid (not one shared table), so this has to
+// be recomputed from the actual data instead of guessed once.
+const CATEGORY_MIN_CH = 10;
+const CATEGORY_MAX_CH = 30;
 
 // Module-scope cache so leaving a city and coming back (or switching tabs)
 // shows the last-known data instantly instead of a loading flash — a lazy
@@ -185,6 +192,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   const [notConfigured, setNotConfigured] = useState(() => warm()?.notConfigured ?? false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggleGroup = (key: string) => setCollapsed((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
+  const expandGroup = (key: string) => setCollapsed((s) => { const n = new Set(s); n.delete(key); return n; });
   const [q, setQ] = useState("");
   // Sort within each stage group — Priority (default: due-for-outreach first,
   // per the Planner's own rotation window, so acquisition work the Planner
@@ -341,6 +349,8 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   const filtered = rows.filter(matchRow);
   const total = filtered.length;
   const nonBusinessCount = noListing.length;
+  const categoryCh = Math.min(CATEGORY_MAX_CH, Math.max(CATEGORY_MIN_CH, ...filtered.map((r) => r.listing.category.length)));
+  const template = `minmax(0,1fr) ${categoryCh}ch 148px`;
 
   if (loading) return <div className="bg-background p-4 py-10 text-center text-[13px] text-muted sm:p-5">Loading directory for {city}…</div>;
 
@@ -354,6 +364,8 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   const groups: Group[] = [];
   if (attentionRows.length) groups.push({ key: "attention", label: ATTENTION_META.label, color: ATTENTION_META.color, hint: ATTENTION_META.hint, rows: attentionRows });
   for (const key of STAGE_ORDER) groups.push({ key, label: STAGE_META[key].label, color: STAGE_META[key].color, hint: STAGE_META[key].hint, rows: stageRows.get(key)! });
+  const allCollapsed = groups.length > 0 && groups.every((g) => collapsed.has(g.key));
+  const toggleAllGroups = () => setCollapsed(allCollapsed ? new Set() : new Set(groups.map((g) => g.key)));
 
   return (
     <div className="pt-1">
@@ -391,10 +403,28 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
               className={`px-2.5 py-1.5 font-medium capitalize ${sort === s ? "bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}>{s}</button>
           ))}
         </span>
+        <button onClick={toggleAllGroups} title={allCollapsed ? "Expand every stage group" : "Collapse every stage group"}
+          className="shrink-0 rounded-lg border bg-surface px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
+          {allCollapsed ? "Expand all" : "Collapse all"}
+        </button>
+      </div>
+
+      {/* Funnel overview — every stage's count at a glance without expanding
+          anything, and a quick-jump: clicking a stat expands just that group
+          (handy after "Collapse all" to open only the one or two you want). */}
+      <div className="mb-2 flex flex-wrap items-center gap-1.5">
+        {groups.map((g) => (
+          <button key={g.key} onClick={() => expandGroup(g.key)} title={g.hint}
+            className="inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[12px] font-medium hover:bg-background"
+            style={{ borderColor: g.color + "40" }}>
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: g.color }} />
+            {g.label} <span className="font-semibold" style={{ color: g.color }}>{g.rows.length}</span>
+          </button>
+        ))}
       </div>
 
       <div className="overflow-x-auto rounded-xl border bg-surface shadow-soft">
-        <div className="hidden items-center gap-2 border-b bg-background/40 px-4 py-2 text-[12px] font-semibold uppercase tracking-wide text-muted sm:grid" style={{ gridTemplateColumns: TEMPLATE }}>
+        <div className="hidden items-center gap-2 border-b bg-background/40 px-4 py-2 text-[12px] font-semibold uppercase tracking-wide text-muted sm:grid" style={{ gridTemplateColumns: template }}>
           <span>Name</span>
           <span>Category</span>
           <span>Stage</span>
@@ -412,7 +442,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                   <span className="truncate text-[12px] font-normal normal-case text-muted">{g.hint}</span>
                 </button>
                 {isOpen && g.rows.map((r) => (
-                  <ListingRow key={g.key + r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient}
+                  <ListingRow key={g.key + r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} template={template}
                     stage={computeBusinessStage(r.listing, r.client, inviteFor(r.listing))}
                     invite={inviteFor(r.listing)}
                     onSetClientStatus={onSetClientStatus} ghlContactUrlFor={ghlContactUrlFor}
@@ -444,10 +474,15 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClientStatus, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, salesTasks, onOpenSales, otherLists, onOpenProject }: {
+function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, onSetClientStatus, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, salesTasks, onOpenSales, otherLists, onOpenProject }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
   onOpenClient: (id: string) => void;
+  // Grid column widths for this render — Category's width is computed by the
+  // parent from the longest category currently on screen (see `template` in
+  // the main component), so every row lines up even though each renders its
+  // own independent grid.
+  template: string;
   // This row's computed funnel position (see computeBusinessStage above).
   stage: BusinessStage;
   // This business's most recent Content Planner invite, if any — undefined
@@ -492,7 +527,7 @@ function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClien
 
   return (
     <div className="border-b text-[15px] transition-colors last:border-0 hover:bg-accent-soft/50">
-      <div className="flex flex-col gap-1.5 px-4 py-2.5 sm:grid sm:min-h-[42px] sm:items-center sm:gap-2 sm:py-1.5" style={{ gridTemplateColumns: TEMPLATE }}>
+      <div className="flex flex-col gap-1.5 px-4 py-2.5 sm:grid sm:min-h-[42px] sm:items-center sm:gap-2 sm:py-1.5" style={{ gridTemplateColumns: template }}>
         {/* Name + invite/outcome/due chips */}
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-1.5">
