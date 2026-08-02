@@ -3872,7 +3872,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             @") but not deleted, just admin-toggled off by default so they're
             one flip away if that changes. */}
         {navVisible.inbox && (
-          <nav className="mt-[7px] shrink-0 space-y-0.5 border-t px-2 pt-[7px]">
+          <nav className="mt-[10px] shrink-0 space-y-0.5 border-t px-2 pt-[10px]">
             <SideItem active={inboxView && dmUserId === null} title="Conversations (press 2)" onClick={openTeamChat}><I.comment className="text-muted" /> <span>Conversations</span>{(teamChatUnread || unread > 0) && (
               // Both indicators, not either/or: notifications accumulate
               // routinely, and an exclusive check meant a real unread chat
@@ -3895,7 +3895,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             still a directory page rather than an inline list (day-to-day
             work happens from Dashboard), and Personal sits last in this
             group rather than up by Dashboard. */}
-        <nav className="mt-[7px] shrink-0 space-y-0.5 border-t px-2 pt-[7px]">
+        <nav className="mt-[10px] shrink-0 space-y-0.5 border-t px-2 pt-[10px]">
           <SideItem active={dirView === "clients"} title="Clients (press 3)" onClick={() => goToView("clients")}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{clientList.length}</span></SideItem>
           {clients.some((c) => c.id === WORKSPACE_CLIENT_ID) && (
             <SideItem active={dirView === "projects"} title="Projects (press 4)" onClick={() => goToView("projects")}><I.folder className="text-muted" /> <span>Projects</span><span className="ml-auto text-[13px] text-muted">{workspaceProjects.length}</span></SideItem>
@@ -3915,7 +3915,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           const pinned = [...starredLists].map((id) => projectById(id)).filter((p): p is Project => !!p);
           if (pinnedClients.length === 0 && pinned.length === 0) return null;
           return (
-            <nav className="mt-[7px] shrink-0 space-y-0.5 border-t px-2 pt-[7px]">
+            <nav className="mt-[10px] shrink-0 space-y-0.5 border-t px-2 pt-[10px]">
               <div className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Pinned</div>
               {pinnedClients.map((c) => {
                 const active = !myWork && !personalView && !inboxView && !settingsView && !dirView && !activeProject && activeClient === c.id;
@@ -3951,7 +3951,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         {/* Territories — cities (city+state) assigned to you; an admin sees all.
             Click a city to work its contacts (claimed vs unclaimed). */}
         {visibleTerritories.length > 0 && (
-          <nav className="mt-[7px] shrink-0 space-y-0.5 border-t px-2 pt-[7px]">
+          <nav className="mt-[10px] shrink-0 space-y-0.5 border-t px-2 pt-[10px]">
             <div className="flex items-center justify-between px-2.5 pb-1">
               <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Territories</span>
               {canAdmin && <button onClick={() => openTerritory("all")} title="Manage territories" className="rounded p-0.5 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>}
@@ -3964,7 +3964,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </nav>
         )}
         {canAdmin && visibleTerritories.length === 0 && (
-          <nav className="mt-[7px] shrink-0 border-t px-2 pt-[7px]">
+          <nav className="mt-[10px] shrink-0 border-t px-2 pt-[10px]">
             <SideItem active={territoryView === "all"} onClick={() => openTerritory("all")}><I.flag className="text-muted" /> <span>Territories</span></SideItem>
           </nav>
         )}
