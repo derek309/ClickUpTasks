@@ -16,7 +16,7 @@
 // When the directory isn't configured (the endpoint 501s before Derek sets the
 // WP env vars) or errors, it degrades to showing every city contact under
 // "Unclaimed" — exactly the pre-directory behavior, just relabeled.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
 import { fetchPlannerWeeks } from "@/lib/db";
 import { latestInviteStatus } from "@/lib/plannerPools";
@@ -52,11 +52,17 @@ export type DirectoryListing = {
 const digits = (s: string | undefined) => (s ?? "").replace(/\D/g, "").slice(-10);
 const lc = (s: string | undefined) => (s ?? "").trim().toLowerCase();
 
-// Invisible guard, not a confirmation step: a double-click or drag to select
-// the row's text (e.g. to copy a business name) still fires a click event on
-// mouseup. Skip acting on it so that doesn't get mistaken for an intentional
-// click — no dialog, no visible difference for a real click.
-const isRealClick = () => !window.getSelection()?.toString();
+// Guards the name click against a drag-to-select gesture ending on this same
+// element (e.g. selecting the business name to copy it) — a mousedown+drag
+// still fires a click on mouseup. Compares mousedown/mouseup position
+// (not ambient page selection state — an earlier version checked
+// window.getSelection() globally, which meant ANY leftover text selection
+// anywhere on the page silently broke every name click on the whole list
+// until it was cleared) so a real single click always works regardless of
+// what's selected elsewhere.
+const DRAG_THRESHOLD_PX = 4;
+const isDragClick = (down: { x: number; y: number } | null, e: { clientX: number; clientY: number }) =>
+  !!down && (Math.abs(e.clientX - down.x) > DRAG_THRESHOLD_PX || Math.abs(e.clientY - down.y) > DRAG_THRESHOLD_PX);
 
 // The funnel every business is walked through, in order. Everyone always sits
 // in exactly one of these — this is the Businesses page's whole reason for
@@ -91,12 +97,10 @@ export function computeBusinessStage(listing: DirectoryListing, client: Client |
   return (client.status as BusinessStage);
 }
 
-// Name | Category | Stage | Links — "What's left" gets its own full-width
-// line below this row (see ListingRow) rather than a cramped grid column;
-// it wraps unpredictably depending on how much progress/next-step text a
-// business has, and squeezed into ~250px it read as an afterthought instead
-// of the primary reason to open the row.
-const TEMPLATE = "minmax(0,1fr) 112px 148px 84px";
+// Name | Category | Stage — "What's left" (progress pills + GHL/Listing
+// links + Feature) gets its own full-width line below this row (see
+// ListingRow) rather than cramped grid columns.
+const TEMPLATE = "minmax(0,1fr) 112px 148px";
 
 // Module-scope cache so leaving a city and coming back (or switching tabs)
 // shows the last-known data instantly instead of a loading flash — a lazy
@@ -112,7 +116,7 @@ const listingsCache = new Map<string, ListingsCacheEntry>();
 // flash of the previous city's invite badges.
 const inviteCache = new Map<string, { byGdPlaceId: Map<number, PlannerInvite>; at: number }>();
 
-export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, salesTasksByClient, onOpenSales, onSetClientStatus, ghlContactUrlFor, territoryId }: {
+export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, salesTasksByClient, onOpenSales, otherListsByClient, onOpenProject, onSetClientStatus, ghlContactUrlFor, territoryId }: {
   city: string;
   state: string;
   contacts: Contact[];   // already scoped to this city/state by the caller
@@ -132,13 +136,19 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   featuredClientIds?: Set<string>;
   onFeature?: (opts: { clientId: string | null; contact: Contact | null; name: string; city: string; state: string }) => void;
   // This business's own tasks (any status, excluding Playbook/Sales
-  // checklist steps), keyed by client id, for the "Tasks X/Y" pill. Optional
-  // so the admin multi-city overview degrades to the read-only list it is today.
+  // checklist steps), keyed by client id — feeds the "needs attention now"
+  // scan below. Optional so the admin multi-city overview degrades to the
+  // read-only list it is today.
   tasksByClient?: Map<string, Task[]>;
   // Owner Growth Plan tasks per business — optional so the admin multi-city
   // overview (which never passes this) degrades to no chip.
   playbookTasksByClient?: Map<string, Task[]>;
   onOpenPlaybook?: (clientId: string) => void;
+  // A business's other (non-Sales/Playbook) lists, pre-computed with their
+  // own done/total counts, and the navigate-to-it handler — one pill per
+  // list on the row instead of one aggregated count.
+  otherListsByClient?: Map<string, { id: string; name: string; done: number; total: number }[]>;
+  onOpenProject?: (clientId: string, projectId: string) => void;
   // Sales checklist tasks per business, and its navigate-to-it handler — same
   // shape as playbookTasksByClient/onOpenPlaybook. ListingRow shows this chip
   // instead of Playbook until the business is a real client on the Growth
@@ -328,7 +338,6 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
           <span>Name</span>
           <span>Category</span>
           <span>Stage</span>
-          <span>Links</span>
         </div>
         <div className="divide-y-8 divide-background">
           {groups.map((g) => {
@@ -350,9 +359,9 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                     featured={!!r.client && !!featuredClientIds?.has(r.client.id)}
                     canFeature={!!(r.client || r.contact)}
                     onFeature={onFeature && ((rr) => onFeature({ clientId: rr.client?.id ?? null, contact: rr.contact, name: rr.listing.name, city, state }))}
-                    tasks={(r.client && tasksByClient?.get(r.client.id)) || []}
                     playbookTasks={(r.client && playbookTasksByClient?.get(r.client.id)) || []} onOpenPlaybook={onOpenPlaybook}
-                    salesTasks={(r.client && salesTasksByClient?.get(r.client.id)) || []} onOpenSales={onOpenSales} />
+                    salesTasks={(r.client && salesTasksByClient?.get(r.client.id)) || []} onOpenSales={onOpenSales}
+                    otherLists={(r.client && otherListsByClient?.get(r.client.id)) || []} onOpenProject={onOpenProject} />
                 ))}
               </div>
             );
@@ -375,7 +384,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClientStatus, ghlContactUrlFor, featured, canFeature, onFeature, tasks, playbookTasks, onOpenPlaybook, salesTasks, onOpenSales }: {
+function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClientStatus, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, salesTasks, onOpenSales, otherLists, onOpenProject }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
   onOpenClient: (id: string) => void;
@@ -396,19 +405,21 @@ function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClien
   // with a reason instead of a button that looks fine and does nothing.
   canFeature: boolean;
   onFeature?: (row: { listing: DirectoryListing; contact: Contact | null; client: Client | null }) => void;
-  // This business's own tasks, any status, excluding Playbook/Sales checklist
-  // steps (those already have their own pill) — empty when it has no client
-  // row yet. Click-through to the client's Tasks view, not an inline list.
-  tasks: Task[];
-  // Owner Growth Plan tasks — same "empty when no client row yet" shape as tasks.
+  // Owner Growth Plan tasks — empty when it has no client row yet.
   playbookTasks: Task[];
   onOpenPlaybook?: (clientId: string) => void;
   // Sales checklist tasks — same shape, shown instead of Playbook until the
   // business is a real client on the Growth Plan (see `stage` below).
   salesTasks: Task[];
   onOpenSales?: (clientId: string) => void;
+  // This business's other (non-Sales/Playbook) lists, pre-computed with
+  // their own done/total counts — one pill per list, click-through to that
+  // list rather than an inline expand. Empty when it has none (or no client yet).
+  otherLists: { id: string; name: string; done: number; total: number }[];
+  onOpenProject?: (clientId: string, projectId: string) => void;
 }) {
   const { listing, contact, client } = row;
+  const nameMouseDown = useRef<{ x: number; y: number } | null>(null);
 
   // Sales (getting them in) runs the funnel up through "claimed" — Playbook
   // (growing them) takes over once a real client status exists beyond
@@ -418,7 +429,6 @@ function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClien
   const playbook = client && onGrowthPlan ? playbookCompletion(client.id, playbookTasks) : null;
   const sales = client && !onGrowthPlan ? salesCompletion(client.id, salesTasks) : null;
   const ghlUrl = client ? ghlContactUrlFor?.(client.id) : null;
-  const tasksDone = tasks.filter((t) => t.status === "done").length;
 
   return (
     <div className="border-b text-[15px] transition-colors last:border-0 hover:bg-accent-soft/50">
@@ -430,14 +440,16 @@ function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClien
               ? <span title="Directory listing claimed" className="shrink-0 text-emerald-500"><I.check /></span>
               : <span title="Unclaimed listing" className="h-2 w-2 shrink-0 rounded-full border border-muted/50" />}
             {client ? (
-              <button onClick={() => { if (isRealClick()) onOpenClient(client.id); }} title="Open this client"
+              <button onMouseDown={(e) => { nameMouseDown.current = { x: e.clientX, y: e.clientY }; }}
+                onClick={(e) => { if (!isDragClick(nameMouseDown.current, e)) onOpenClient(client.id); }} title="Open this client"
                 className="min-w-0 truncate text-left font-medium hover:text-accent hover:underline">{listing.name}</button>
             ) : contact ? (
               // Matched to a real GHL contact but no client yet — clicking
               // opens it immediately (silently creating one as a Lead), same
               // as the "+ Add as client" button. No confirm: being in GHL is
               // enough to work a business from here.
-              <button onClick={() => { if (isRealClick()) onAddContact(contact); }} title="Open this business"
+              <button onMouseDown={(e) => { nameMouseDown.current = { x: e.clientX, y: e.clientY }; }}
+                onClick={(e) => { if (!isDragClick(nameMouseDown.current, e)) onAddContact(contact); }} title="Open this business"
                 className="min-w-0 truncate text-left font-medium hover:text-accent hover:underline">{listing.name}</button>
             ) : (
               <span className="min-w-0 truncate font-medium">{listing.name}</span>
@@ -477,21 +489,16 @@ function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClien
           )}
         </div>
 
-        {/* Links — GHL contact + the public listing page. Clicking the name
-            already opens/creates the client record, so no "+ Add as client"
-            affordance is needed here. */}
-        <div className="flex flex-col items-start gap-0.5 pl-5 text-[11px] font-medium sm:pl-0">
-          {ghlUrl && <a href={ghlUrl} target="_blank" rel="noopener noreferrer" title="Open in GoHighLevel" className="text-muted hover:text-accent hover:underline">GHL ↗</a>}
-          {listing.url && <a href={listing.url} target="_blank" rel="noopener noreferrer" title="View public listing page" className="text-muted hover:text-accent hover:underline">Listing ↗</a>}
-          {!ghlUrl && !listing.url && <span className="text-muted/30">—</span>}
-        </div>
       </div>
 
-      {/* What's left — Playbook/Sales progress + open tasks (the primary
-          reason to open this row), on its own full-width line rather than a
-          cramped grid column — it wraps unpredictably depending on how much
-          progress/next-step text a business has, and needs room to breathe.
-          Journal/Feature stay de-emphasized in a compact icon row beside it. */}
+      {/* What's left — Playbook/Sales progress + this business's other lists
+          (the primary reason to open this row), on its own full-width line
+          rather than a cramped grid column — it wraps unpredictably
+          depending on how much progress/next-step text a business has, and
+          needs room to breathe. GHL/Listing links + Feature are grouped into
+          one small icon cluster on the right — they were scattered before
+          (a separate "Links" column plus a floated Feature icon), which read
+          as clutter rather than one coherent set of secondary actions. */}
       {client && (
         <div className="flex flex-wrap items-center gap-1.5 px-4 pb-2 pl-9 pt-1.5 sm:pl-9">
           {onOpenPlaybook && playbook && (
@@ -509,16 +516,18 @@ function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClien
             </button>
           )}
           {/* Every other list this business has (excluding Playbook/Sales,
-              which get their own pill above) — same X/Y format, click jumps
-              straight to this client's Tasks view rather than expanding
-              anything inline. Hidden when there's nothing outside those two. */}
-          {tasks.length > 0 && (
-            <button onClick={() => onOpenClient(client.id)} title={`${tasksDone}/${tasks.length} tasks — open this business's task list`}
+              which get their own pill above) — one pill per list, same X/Y
+              format, click jumps straight to that list. Hidden entirely when
+              a list has no tasks yet — nothing to jump to. */}
+          {otherLists.map((l) => (
+            <button key={l.id} onClick={() => onOpenProject?.(client.id, l.id)} title={`Open “${l.name}”`}
               className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">
-              Tasks {tasksDone}/{tasks.length}
+              {l.name} {l.done}/{l.total}
             </button>
-          )}
-          <span className="ml-auto flex shrink-0 items-center gap-0.5 text-muted">
+          ))}
+          <span className="ml-auto flex shrink-0 items-center gap-1 text-muted">
+            {ghlUrl && <a href={ghlUrl} target="_blank" rel="noopener noreferrer" title="Open in GoHighLevel" className="shrink-0 rounded p-1 hover:bg-surface hover:text-accent"><I.bolt /></a>}
+            {listing.url && <a href={listing.url} target="_blank" rel="noopener noreferrer" title="View public listing page" className="shrink-0 rounded p-1 hover:bg-surface hover:text-accent"><I.link /></a>}
             {onFeature && (featured
               ? <span title="Already run through the newsletter feature motion" className="shrink-0 rounded p-1 text-emerald-600"><I.star filled /></span>
               : <button onClick={() => onFeature(row)} disabled={!canFeature}

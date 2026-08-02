@@ -38,6 +38,20 @@ const normState = (s: string) => {
   return t.length === 2 ? t : (US_STATES[t] || t);
 };
 
+// WP's title/category fields sometimes come back HTML-entity-encoded (e.g.
+// "Ace Body Shop &amp; Towing") depending on how the listing was saved —
+// decode the common ones here so the app never shows raw entities. No DOM
+// available in this server route, so a small manual table + numeric-entity
+// fallback instead of the browser's textarea trick.
+const HTML_ENTITIES: Record<string, string> = {
+  amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " ", "#039": "'", "#8217": "’", "#8216": "‘", "#8220": "“", "#8221": "”", "#8211": "–", "#8212": "—",
+};
+const decodeEntities = (s: string) => s.replace(/&(#\d+|[a-zA-Z]+);/g, (m, code) => {
+  if (code in HTML_ENTITIES) return HTML_ENTITIES[code];
+  if (code[0] === "#") { const n = parseInt(code.slice(1), 10); return Number.isFinite(n) ? String.fromCharCode(n) : m; }
+  return m;
+});
+
 export async function GET(req: NextRequest) {
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -133,7 +147,7 @@ export async function GET(req: NextRequest) {
     .filter((it) => !wantState || normState(it.region ?? it.state ?? "") === wantState || String(it.region ?? "").trim() === "")
     .map((it) => ({
       id: it.id,
-      name: String(it.title ?? ""),
+      name: decodeEntities(String(it.title ?? "")),
       phone: String(it.phone ?? ""),
       email: String(it.email ?? ""),
       city: String(it.city ?? ""),
@@ -151,7 +165,7 @@ export async function GET(req: NextRequest) {
       // The hydrated /sales payload returns the score as a string ("72") and
       // categories as an array of breadcrumbs ("A › B › Leaf"); normalize both.
       score: (() => { const n = parseInt(String(it.clickuplocal_score ?? ""), 10); return Number.isFinite(n) ? n : null; })(),
-      category: Array.isArray(it.categories) && it.categories.length ? String(it.categories[0]).split("›").pop()!.trim() : String(it.category ?? ""),
+      category: decodeEntities(Array.isArray(it.categories) && it.categories.length ? String(it.categories[0]).split("›").pop()!.trim() : String(it.category ?? "")),
       // Outreach pipeline state (from /sales — the source of truth): last
       // outcome, queued next action, follow-up due date, last-touched. Drive
       // the funnel view + the "log a touch" write path.

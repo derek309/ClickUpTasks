@@ -10,7 +10,7 @@ import { users, clientStatusMeta, normalizeState, playbookCompletion, type Me, t
 import { I, Avatar } from "./cockpit/ui";
 import TerritoryDirectory from "./cockpit/TerritoryDirectory";
 
-export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onDeleteTerritory, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, salesTasksByClient, onOpenSales, onSetClientStatus, ghlContactUrlFor, focusId }: {
+export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onDeleteTerritory, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, salesTasksByClient, onOpenSales, otherListsByClient, onOpenProject, onSetClientStatus, ghlContactUrlFor, focusId }: {
   me: Me; canAdmin: boolean;
   territories: Territory[]; contacts: Contact[]; clients: Client[];
   onAddTerritory: (t: { name: string; city: string; state: string; assignedTo: string[] }) => void;
@@ -37,6 +37,11 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
   // Playbook chip until a business is a real client on the Growth Plan.
   salesTasksByClient?: Map<string, Task[]>;
   onOpenSales?: (clientId: string) => void;
+  // A business's other (non-Sales/Playbook) lists, each pre-computed with
+  // its own done/total count, and the navigate-to-it handler — one pill per
+  // list on the Businesses page instead of one aggregated count.
+  otherListsByClient?: Map<string, { id: string; name: string; done: number; total: number }[]>;
+  onOpenProject?: (clientId: string, projectId: string) => void;
   // Editable Stage dropdown + GHL contact link on the Businesses page.
   // Optional so the admin multi-city overview (below) — a read-only list —
   // degrades gracefully without them.
@@ -194,6 +199,7 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                     tasksByClient={tasksByClient}
                     playbookTasksByClient={playbookTasksByClient} onOpenPlaybook={onOpenPlaybook}
                     salesTasksByClient={salesTasksByClient} onOpenSales={onOpenSales}
+                    otherListsByClient={otherListsByClient} onOpenProject={onOpenProject}
                     onSetClientStatus={onSetClientStatus} ghlContactUrlFor={ghlContactUrlFor} territoryId={focusId} />
                 )}
                 {open && !focusId && (

@@ -1971,10 +1971,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return m;
   })();
   const territoryOpenWorkCount = (territoryId: string) => clientTaskCount(territoryClientId(territoryId));
-  // A business's own tasks for the Businesses page's "Tasks X/Y" pill — ANY
-  // status (unlike territoryTasksByClient above), since this needs a real
-  // done/total fraction, not just an open count. Excludes Playbook/Sales
-  // checklist steps, which already get their own dedicated pill.
+  // A business's own tasks, ANY status, excluding Playbook/Sales checklist
+  // steps (those get their own dedicated pill) — feeds the Businesses page's
+  // "needs attention now" scan (a conversation-priority task can be open
+  // regardless of which list it's in).
   const territoryAllTasksByClient = (() => {
     const m = new Map<string, Task[]>();
     for (const t of scopedTasks) {
@@ -1984,6 +1984,35 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     }
     return m;
   })();
+  // A business's own lists (projects) OTHER than Sales/Playbook, each with
+  // its own done/total count — the Businesses page shows one pill per list
+  // (not one aggregated count) so an ambassador can jump straight into
+  // whichever list actually has the open work, same click-through as the
+  // Sales/Playbook pills. Empty lists (no tasks yet) show no pill — nothing
+  // to jump to.
+  const territoryOtherListsByClient = (() => {
+    const tasksByProject = new Map<string, Task[]>();
+    for (const t of scopedTasks) {
+      if (t.playbookStepKey || t.salesStepKey) continue;
+      const list = tasksByProject.get(t.projectId);
+      if (list) list.push(t); else tasksByProject.set(t.projectId, [t]);
+    }
+    const m = new Map<string, { id: string; name: string; done: number; total: number }[]>();
+    for (const p of projects) {
+      if (p.id === playbookProjectId(p.clientId) || p.id === salesProjectId(p.clientId)) continue;
+      const pTasks = tasksByProject.get(p.id);
+      if (!pTasks?.length) continue;
+      const entry = { id: p.id, name: p.name, done: pTasks.filter((t) => t.status === "done").length, total: pTasks.length };
+      const list = m.get(p.clientId);
+      if (list) list.push(entry); else m.set(p.clientId, [entry]);
+    }
+    return m;
+  })();
+  // Same idea as openClientPlaybook/openClientSales, for a business's other
+  // (non-checklist) lists — no reconciliation needed, it's already a real list.
+  const onOpenProject = (clientId: string, projectId: string) => {
+    setTerritoryView(null); setActiveClient(clientId); setActiveProject(projectId); setClientTab("tasks");
+  };
   // Owner Growth Plan tasks, bucketed by client — same one-pass-not-memoized
   // shape as territoryTasksByClient above, but WITHOUT the status==="done"
   // exclusion (playbookCompletion needs to see done steps too, to count them).
@@ -4573,6 +4602,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               onOpenPlaybook={openClientPlaybook}
               salesTasksByClient={salesTasksByClient}
               onOpenSales={openClientSales}
+              otherListsByClient={territoryOtherListsByClient}
+              onOpenProject={onOpenProject}
               onSetClientStatus={setClientStatus}
               ghlContactUrlFor={ghlContactUrlFor}
               focusId={territoryView === "all" ? undefined : territoryView} />
