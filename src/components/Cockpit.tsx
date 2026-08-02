@@ -85,7 +85,8 @@ import {
   normalizeState,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, markMessagesReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact, rowToScheduledMessage, touchPlaybookProgress, markGranolaUnmatchedHandledDb, linkGranolaSyncedNoteDb, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, markMessagesReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact, rowToScheduledMessage, touchPlaybookProgress, markGranolaUnmatchedHandledDb, linkGranolaSyncedNoteDb, fetchAppSetting, upsertAppSetting, fetchPlannerWeeks } from "@/lib/db";
+import { inviteHistory, featureHistory } from "@/lib/plannerPools";
 import { subscribeRealtime } from "@/lib/realtime";
 import { Inbox } from "./cockpit/Inbox";
 import SettingsHub, { type TabKey } from "./SettingsHub";
@@ -2112,6 +2113,43 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     reconcileSalesTasks(clientId);
     setTerritoryView(null); setActiveClient(clientId); setActiveProject(salesProjectId(clientId)); setClientTab("tasks");
   };
+  // Planner activity for the open client — how many times invited to the
+  // newsletter and how many times actually featured, both already tracked by
+  // the Content Planner (planner_weeks) rather than anything new here. This
+  // is a summary, not a live-editing surface, so it's a plain lazy fetch per
+  // client switch rather than a persisted/cached map like the territory
+  // view's — silently shows nothing if the business's city has no assigned
+  // territory yet, or the directory/planner isn't reachable.
+  const [plannerActivity, setPlannerActivity] = useState<{ clientId: string; inviteCount: number; featureCount: number } | null>(null);
+  useEffect(() => {
+    setPlannerActivity(null);
+    if (!activeClient.startsWith("cl_") || activeClient === WORKSPACE_CLIENT_ID || activeClient.startsWith(TERRITORY_CLIENT_PREFIX)) return;
+    const client = clientById(activeClient);
+    const contact = contactForClient(activeClient);
+    if (!client || !contact?.city || !contact?.state) return;
+    const terr = territories.find((t) => t.city.trim().toLowerCase() === contact.city!.trim().toLowerCase() && normalizeState(t.state) === normalizeState(contact.state!));
+    if (!terr) return;
+    let alive = true;
+    const digits = (s?: string) => (s ?? "").replace(/\D/g, "").slice(-10);
+    const lc = (s?: string) => (s ?? "").trim().toLowerCase();
+    Promise.all([
+      authedFetch(`/api/directory/listings?${new URLSearchParams({ city: contact.city!, state: contact.state! })}`).then((r) => r.json()).catch(() => ({ listings: [] })),
+      fetchPlannerWeeks(terr.id).catch(() => []),
+    ]).then(([listingsBody, weeks]) => {
+      if (!alive) return;
+      const listings: { id: number | string; ghlContactId?: string; phone?: string; email?: string; name?: string }[] = Array.isArray(listingsBody?.listings) ? listingsBody.listings : [];
+      const listing = listings.find((l) =>
+        (contact.ghlContactId && l.ghlContactId === contact.ghlContactId)
+        || (!!digits(contact.phone) && digits(l.phone) === digits(contact.phone))
+        || (!!lc(contact.email) && lc(l.email) === lc(contact.email))
+        || lc(l.name) === lc(client.name));
+      const inviteCount = listing ? (inviteHistory(weeks).get(typeof listing.id === "number" ? listing.id : Number(listing.id))?.invited ?? 0) : 0;
+      const featureCount = featureHistory(weeks).get(lc(client.name))?.count ?? 0;
+      setPlannerActivity({ clientId: activeClient, inviteCount, featureCount });
+    });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeClient]);
   // Not gated by myWorkUser (the admin-only "viewing work for" selector) —
   // RLS never even returns another person's private tasks in `tasks`, so
   // filtering by `me.id` here is correct regardless of who's being viewed.
@@ -4622,6 +4660,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             initialFolderId={initialVaultFolder} />
         ) : (
           <>
+          {/* Planner activity — how many times this business has been
+              invited to the newsletter and actually featured, straight from
+              the Content Planner's own history. Hidden entirely rather than
+              showing "0 invites" clutter on a business the Planner hasn't
+              touched yet (no assigned territory, or genuinely never invited). */}
+          {activeClient !== "all" && !activeProject && plannerActivity?.clientId === activeClient && (plannerActivity.inviteCount > 0 || plannerActivity.featureCount > 0) && (
+            <div className="border-b bg-background/40 px-4 py-1.5 text-[13px] text-muted">
+              Planner: {plannerActivity.inviteCount > 0 && <span>{plannerActivity.inviteCount} newsletter invite{plannerActivity.inviteCount === 1 ? "" : "s"}</span>}
+              {plannerActivity.inviteCount > 0 && plannerActivity.featureCount > 0 && " · "}
+              {plannerActivity.featureCount > 0 && <span>{plannerActivity.featureCount} newsletter feature{plannerActivity.featureCount === 1 ? "" : "s"}</span>}
+            </div>
+          )}
           {activeClient !== "all" && (() => {
             const cf = foldersForClient(activeClient);
             const cl = projectsForClient(activeClient);
