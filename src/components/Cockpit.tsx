@@ -2218,7 +2218,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       priority: groupBy === "priority" && isManuallyAssignable(groupKey as Priority) ? (groupKey as Priority) : "normal",
       assigneeId: me.id,
       contactId: activeClient.slice(3),
-      due: groupBy === "due" && groupKey === "today" ? TODAY : TOMORROW,
+      // Only set a due date when the group itself says so (adding straight
+      // into the "Today"/"Tomorrow" due-date bucket) — anywhere else, no
+      // due date is the correct default. A task with none is meant to
+      // surface in the assignee's own no-due-date review, not get silently
+      // pushed a day out and hidden from it.
+      due: groupBy === "due" && groupKey === "today" ? TODAY : groupBy === "due" && groupKey === "tomorrow" ? TOMORROW : null,
       recurrence: "none", labelIds: [], ghlTaskId: null, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
       createdBy: me.id,
     };
@@ -2274,7 +2279,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       id: newId("t_"), projectId, clientId, title: title.trim(), description: "",
       status: "todo", priority: "normal", assigneeId: me.id,
       contactId: clientId.startsWith("cl_") ? clientId.slice(3) : null,
-      due: TOMORROW, recurrence: "none", labelIds: [], ghlTaskId: null, private: isPrivate, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
+      due: null, recurrence: "none", labelIds: [], ghlTaskId: null, private: isPrivate, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
       createdBy: me.id,
     };
     setTasks((ts) => [...ts, t]);
@@ -2288,7 +2293,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       status: groupBy === "status" ? (groupKey as TaskStatus) : "todo",
       priority: "normal",
       assigneeId: me.id, contactId: null,
-      due: groupBy === "due" && groupKey === "today" ? TODAY : TOMORROW,
+      // See quickAdd's identical comment — no due date outside the
+      // Today/Tomorrow due-bucket context, so a plain new task can surface
+      // in the no-due-date review instead of defaulting a day out.
+      due: groupBy === "due" && groupKey === "today" ? TODAY : groupBy === "due" && groupKey === "tomorrow" ? TOMORROW : null,
       recurrence: "none", labelIds: [], ghlTaskId: null, private: true, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
       createdBy: me.id,
     };
@@ -3095,7 +3103,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       id: newId("t_"), projectId, clientId, title: tpl.name, description: "",
       status: "todo", priority: "normal", assigneeId: me.id,
       contactId: clientId.startsWith("cl_") ? clientId.slice(3) : null,
-      due: TOMORROW, recurrence: "none", labelIds: [], ghlTaskId: null, private: false,
+      due: null, recurrence: "none", labelIds: [], ghlTaskId: null, private: false,
       subtasks: tpl.checklistItems.map((title) => ({ id: newId("s_"), title, done: false })),
       attachments: [], comments: [], createdAt: new Date().toISOString(), createdBy: me.id,
     };

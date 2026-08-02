@@ -21,7 +21,7 @@ export function QuickAddTask({
   const [clientId, setClientId] = useState(defaultClientId);
   const [projectId, setProjectId] = useState<string>(defaultProjectId ?? "");
   const [due, setDue] = useState("");
-  const [priority, setPriority] = useState<Priority>("none");
+  const [priority, setPriority] = useState<Priority>("normal");
   const titleRef = useRef<HTMLInputElement>(null);
   useEffect(() => { titleRef.current?.focus(); }, []);
 
