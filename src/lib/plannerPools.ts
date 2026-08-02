@@ -3,7 +3,7 @@
 // territory's own planner_weeks history) rather than stored anywhere new.
 // The ClickUpTasks equivalent of WordPress's cul_sales_featured_map(),
 // scanning real rows instead of LIKE-matching wp_options.
-import type { PlannerWeek } from "./data";
+import type { PlannerWeek, PlannerInvite } from "./data";
 import { matchesAnyCategory } from "./categoryMatch";
 
 export type PoolListing = { id: number | string; name: string; category: string; claimed: boolean; hasOffer: boolean; score: number | null };
@@ -53,6 +53,24 @@ export function inviteHistory(weeks: PlannerWeek[]): Map<number, InviteHistoryRe
       else if (inv.status === "skipped") rec.skipped += 1;
       if (inv.at > rec.lastAt) rec.lastAt = inv.at;
       map.set(inv.gdPlaceId, rec);
+    }
+  }
+  return map;
+}
+
+// gdPlaceId -> the single most recent invite entry across every week this
+// territory has ever invited that listing in (latest `at` wins) — unlike
+// inviteHistory's cumulative counts above, this is "what's true right now"
+// for a business, e.g. for the territory Businesses tab to show alongside
+// its GHL Stage column. ISO timestamps sort lexicographically, so a plain
+// string comparison is enough to find the latest one regardless of which
+// order `weeks` itself is in.
+export function latestInviteStatus(weeks: PlannerWeek[]): Map<number, PlannerInvite> {
+  const map = new Map<number, PlannerInvite>();
+  for (const w of weeks) {
+    for (const inv of w.invited ?? []) {
+      const prev = map.get(inv.gdPlaceId);
+      if (!prev || inv.at > prev.at) map.set(inv.gdPlaceId, inv);
     }
   }
   return map;

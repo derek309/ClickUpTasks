@@ -20,7 +20,9 @@
 // "No listing" — exactly the pre-directory behavior, just relabeled.
 import { useEffect, useMemo, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
-import { clientStatusMeta, formatDue, isOverdue, STATUS_META, playbookCompletion, type Contact, type Client, type Task } from "@/lib/data";
+import { fetchPlannerWeeks } from "@/lib/db";
+import { latestInviteStatus } from "@/lib/plannerPools";
+import { clientStatusMeta, formatDue, isOverdue, STATUS_META, playbookCompletion, type Contact, type Client, type Task, type PlannerInvite } from "@/lib/data";
 import { I, Avatar } from "./ui";
 
 export type DirectoryListing = {
@@ -126,8 +128,12 @@ export type OppRef = { opportunityId: string; stageId: string };
 // One pipeline for every city (city-tagged, per the SOP), so this cache is
 // module-scope and shared across territories rather than keyed per city.
 let oppCache: { stages: PipelineStage[]; byContact: Record<string, OppRef>; at: number } | null = null;
+// Per-territory, unlike oppCache above (one shared GHL pipeline for every
+// city) — keyed by territoryId so switching cities doesn't show a flash of
+// the previous city's invite badges.
+const inviteCache = new Map<string, { byGdPlaceId: Map<number, PlannerInvite>; at: number }>();
 
-export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, sort, onSetSort, tasksByClient, onAddTask, onOpenTask, playbookTasksByClient, onOpenPlaybook }: {
+export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, sort, onSetSort, tasksByClient, onAddTask, onOpenTask, playbookTasksByClient, onOpenPlaybook, territoryId }: {
   city: string;
   state: string;
   contacts: Contact[];   // already scoped to this city/state by the caller
@@ -164,6 +170,13 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // overview (which never passes this) degrades to no chip.
   playbookTasksByClient?: Map<string, Task[]>;
   onOpenPlaybook?: (clientId: string) => void;
+  // Wires the Content Planner's invite state into this view — a business
+  // that's been invited shows it right next to the GHL Stage column instead
+  // of that only being visible from inside the Planner. Optional, and
+  // undefined outside a single-city page (the admin multi-city overview has
+  // no one territory to scope planner_weeks to), where the badge just never
+  // renders.
+  territoryId?: string;
 }) {
   const cacheKey = `${city}|${state}`;
   const warm = () => listingsCache.get(cacheKey);
@@ -176,6 +189,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   const [q, setQ] = useState("");
   const [stages, setStages] = useState<PipelineStage[]>(() => oppCache?.stages ?? []);
   const [oppByContact, setOppByContact] = useState<Record<string, OppRef>>(() => oppCache?.byContact ?? {});
+  const [inviteByGdPlaceId, setInviteByGdPlaceId] = useState<Map<number, PlannerInvite>>(() => (territoryId && inviteCache.get(territoryId)?.byGdPlaceId) || new Map());
 
   useEffect(() => {
     let alive = true;
@@ -233,6 +247,27 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
     const interval = setInterval(fetchOpps, REFRESH_INTERVAL);
     return () => { alive = false; clearInterval(interval); };
   }, []);
+
+  // Invite status (invited/accepted/skipped) for this territory's own
+  // businesses, from the same planner_weeks rows the Content Planner writes.
+  // No new storage: PlannerInvite.gdPlaceId is the same GeoDirectory id as
+  // DirectoryListing.id, so it joins directly. Undefined territoryId (the
+  // admin multi-city overview) just skips this — no territory to scope to.
+  useEffect(() => {
+    if (!territoryId) return;
+    let alive = true;
+    const fetchInvites = () => {
+      fetchPlannerWeeks(territoryId).then((weeks) => {
+        if (!alive) return;
+        const byGdPlaceId = latestInviteStatus(weeks);
+        inviteCache.set(territoryId, { byGdPlaceId, at: Date.now() });
+        setInviteByGdPlaceId(byGdPlaceId);
+      }).catch(() => { /* fail soft — invite badge just stays hidden */ });
+    };
+    fetchInvites();
+    const interval = setInterval(fetchInvites, REFRESH_INTERVAL);
+    return () => { alive = false; clearInterval(interval); };
+  }, [territoryId]);
 
   // Move a business to a pipeline stage. Optimistic: the select reflects the
   // new stage immediately, and rolls back if GHL rejects it. Creates the
@@ -407,6 +442,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                 {isOpen && (g.key === "unclaimed" ? unclaimed : claimed).map((r) => (
                   <ListingRow key={r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} onPatch={patchListing}
                     stages={stages} opp={oppByContact[r.listing.ghlContactId]} onSetStage={setStageFor}
+                    invite={inviteByGdPlaceId.get(typeof r.listing.id === "number" ? r.listing.id : Number(r.listing.id))}
                     featured={!!r.client && !!featuredClientIds?.has(r.client.id)}
                     canFeature={!!(r.client || r.contact)}
                     onFeature={onFeature && ((rr) => onFeature({ clientId: rr.client?.id ?? null, contact: rr.contact, name: rr.listing.name, city, state }))}
@@ -434,7 +470,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, onPatch, stages, opp, onSetStage, featured, canFeature, onFeature, tasks, onAddTask, onOpenTask, playbookTasks, onOpenPlaybook }: {
+function ListingRow({ row, onAddContact, onOpenClient, onPatch, stages, opp, onSetStage, invite, featured, canFeature, onFeature, tasks, onAddTask, onOpenTask, playbookTasks, onOpenPlaybook }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
   onOpenClient: (id: string) => void;
@@ -445,6 +481,10 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, stages, opp, onS
   stages: PipelineStage[];
   opp?: OppRef;
   onSetStage: (listing: DirectoryListing, stageId: string) => void;
+  // This business's most recent Content Planner invite, if any — undefined
+  // when it's never been invited (or territoryId wasn't passed down, e.g.
+  // the admin multi-city overview).
+  invite?: PlannerInvite;
   // Newsletter feature motion: whether this business has already been run
   // through it, and the trigger that starts the Stage-3 touch sequence.
   featured: boolean;
@@ -569,6 +609,12 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, stages, opp, onS
           </div>
           <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 pl-5 text-[12px] text-muted">
             {listing.category && <span>{listing.category}</span>}
+            {invite && (
+              <span title={`Content Planner invite, ${formatDue(invite.at)}`}
+                className={`rounded px-1.5 py-0.5 font-medium ${invite.status === "accepted" ? "bg-emerald-100 text-emerald-700" : invite.status === "skipped" ? "bg-background text-muted" : "bg-accent-soft text-accent"}`}>
+                {invite.status === "accepted" ? "✅ Accepted" : invite.status === "skipped" ? "⏭ Skipped" : "✉️ Invited"} {formatDue(invite.at)}
+              </span>
+            )}
             {listing.outcomeLabel && <span className="rounded bg-background px-1.5 py-0.5 font-medium">{listing.outcomeLabel}</span>}
             {listing.nextActionLabel && <span className="rounded bg-accent-soft px-1.5 py-0.5 font-medium text-accent">→ {listing.nextActionLabel}</span>}
             {due.label && <span className={due.overdue ? "font-medium text-danger" : ""}>{due.label}</span>}

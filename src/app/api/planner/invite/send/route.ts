@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/serverAuth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { isWithinBusinessHours, OUTSIDE_BUSINESS_HOURS } from "@/lib/businessHours";
+import { advanceInvitedToOutreach } from "@/lib/ghlOpportunities";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -85,6 +86,13 @@ export async function POST(req: NextRequest) {
   // for expected failure cases — pass those through as-is rather than
   // reinterpreting them, per the plan.
   if (!data?.ok) return NextResponse.json({ ok: false, error: data?.error || "Send failed" });
+
+  // Close the gap between the two funnels: this business just got invited
+  // (planner_weeks.picks.__invited), so it should also show as "In Outreach"
+  // in the GHL Prospects pipeline, not just here. See advanceInvitedToOutreach's
+  // doc comment for the forward-only rule. Awaited (not fire-and-forget) since
+  // a serverless function stops running once the response is sent.
+  if (data.ghl_contact_id) await advanceInvitedToOutreach(String(data.ghl_contact_id));
 
   return NextResponse.json({ ok: true, ghlContactId: data.ghl_contact_id ?? null });
 }

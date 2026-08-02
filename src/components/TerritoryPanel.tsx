@@ -194,7 +194,7 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                     onSyncClients={onSyncClients} onOpenClient={onOpenClient}
                     featuredClientIds={featuredClientIds} onFeature={onFeature} sort={sort} onSetSort={setSort}
                     tasksByClient={tasksByClient} onAddTask={onAddTask} onOpenTask={onOpenTask}
-                    playbookTasksByClient={playbookTasksByClient} onOpenPlaybook={onOpenPlaybook} />
+                    playbookTasksByClient={playbookTasksByClient} onOpenPlaybook={onOpenPlaybook} territoryId={focusId} />
                 )}
                 {open && !focusId && (
                   <div className="space-y-1 border-t px-3 py-2">

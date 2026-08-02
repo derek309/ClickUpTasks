@@ -97,3 +97,30 @@ export async function setStage(opts: { contactId: string; stageId: string; name:
 }
 
 export const opportunitiesConfigured = () => Boolean(LOCATION_ID && PIPELINE_ID);
+
+// Bridges the Content Planner's invite-send action into the locked GHL
+// Prospects pipeline: "In Outreach" IS the pipeline's own word for "we've
+// reached out," so sending a Planner invite should land a business there
+// too, instead of the two ever silently disagreeing. Forward-only — a
+// business already further along (Engaged, Claimed, Won, Nurture, Lost, or
+// already In Outreach) is left exactly where it is; this only ever picks up
+// a business still sitting at the pipeline's first ("New") stage, or with no
+// opportunity yet. Matches stage names by substring rather than an exact
+// string/id so a minor rename in GHL doesn't silently break the bridge.
+// Best-effort: swallows its own errors so a GHL hiccup here can never fail
+// the invite send that already succeeded by the time this runs.
+export async function advanceInvitedToOutreach(contactId: string): Promise<void> {
+  try {
+    const [stages, byContact] = await Promise.all([getStages(), getOppsByContact()]);
+    const outreach = stages.find((s) => /outreach/i.test(s.name));
+    if (!outreach) return; // no "In Outreach"-named stage in the pipeline (or GHL not configured) — nothing to bridge to
+    const current = byContact[contactId];
+    if (current) {
+      const currentStage = stages.find((s) => s.id === current.stageId);
+      if (!currentStage || !/new/i.test(currentStage.name)) return;
+    }
+    await setStage({ contactId, stageId: outreach.id, name: "Prospect", opportunityId: current?.opportunityId });
+  } catch {
+    // best-effort — see doc comment above
+  }
+}
