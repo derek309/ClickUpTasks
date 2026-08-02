@@ -132,7 +132,7 @@ type PlannerActivityCacheEntry = {
 };
 const inviteCache = new Map<string, PlannerActivityCacheEntry>();
 
-export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, salesTasksByClient, onOpenSales, otherListsByClient, onOpenProject, onSetClientStatus, ghlContactUrlFor, territoryId }: {
+export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, salesTasksByClient, onOpenSales, otherListsByClient, onOpenProject, onSetClientStatus, canAdmin, ghlContactUrlFor, territoryId }: {
   city: string;
   state: string;
   contacts: Contact[];   // already scoped to this city/state by the caller
@@ -175,6 +175,10 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // writes straight through the client header's own status setter. Optional
   // so the admin multi-city overview degrades to a read-only Stage label.
   onSetClientStatus?: (id: string, status: ClientStatus) => void;
+  // Locked to admins — an ambassador sees the same read-only Stage label a
+  // claimed-but-not-yet-moved business already shows, just never the
+  // dropdown, regardless of onSetClientStatus being wired.
+  canAdmin?: boolean;
   // GHL contact deep link for the Links column. Optional, same reason.
   ghlContactUrlFor?: (clientId: string) => string | null;
   // Wires the Content Planner's invite state into this view — a business
@@ -462,7 +466,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                   <ListingRow key={g.key + r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} template={template}
                     stage={computeBusinessStage(r.listing, r.client, inviteFor(r.listing))}
                     invite={inviteFor(r.listing)}
-                    onSetClientStatus={onSetClientStatus} ghlContactUrlFor={ghlContactUrlFor}
+                    onSetClientStatus={onSetClientStatus} canAdmin={canAdmin} ghlContactUrlFor={ghlContactUrlFor}
                     featured={!!r.client && !!featuredClientIds?.has(r.client.id)}
                     canFeature={!!(r.client || r.contact)}
                     onFeature={onFeature && ((rr) => onFeature({ clientId: rr.client?.id ?? null, contact: rr.contact, name: rr.listing.name, city, state }))}
@@ -491,7 +495,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, onSetClientStatus, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, salesTasks, onOpenSales, otherLists, onOpenProject }: {
+function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, onSetClientStatus, canAdmin, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, salesTasks, onOpenSales, otherLists, onOpenProject }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
   onOpenClient: (id: string) => void;
@@ -506,8 +510,10 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
   // when it's never been invited (or territoryId wasn't passed down, e.g.
   // the admin multi-city overview).
   invite?: PlannerInvite;
-  // Editable Stage dropdown (claimed businesses with a client record only).
+  // Editable Stage dropdown (claimed businesses with a client record only,
+  // and only for admins — canAdmin gates it below).
   onSetClientStatus?: (id: string, status: ClientStatus) => void;
+  canAdmin?: boolean;
   ghlContactUrlFor?: (clientId: string) => string | null;
   // Newsletter feature motion: whether this business has already been run
   // through it, and the trigger that starts the Stage-3 touch sequence.
@@ -601,7 +607,7 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
             everything else (unclaimed, invited, or claimed with no client yet)
             is a plain read-only label. */}
         <div className="pl-5 sm:pl-0">
-          {client && onSetClientStatus && stage !== "unclaimed" && stage !== "invited" ? (
+          {client && onSetClientStatus && canAdmin && stage !== "unclaimed" && stage !== "invited" ? (
             <select value={client.status} onChange={(e) => onSetClientStatus(client.id, e.target.value as ClientStatus)}
               title="Business lifecycle stage" className="w-full max-w-[140px] rounded-md border px-1.5 py-1 text-[12px] font-medium outline-none focus:border-accent bg-accent-soft text-accent">
               {CLIENT_STATUS_ORDER.map((s) => <option key={s} value={s}>{CLIENT_STATUS_META[s].label}</option>)}

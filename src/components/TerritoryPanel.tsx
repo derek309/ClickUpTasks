@@ -200,7 +200,7 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                     playbookTasksByClient={playbookTasksByClient} onOpenPlaybook={onOpenPlaybook}
                     salesTasksByClient={salesTasksByClient} onOpenSales={onOpenSales}
                     otherListsByClient={otherListsByClient} onOpenProject={onOpenProject}
-                    onSetClientStatus={onSetClientStatus} ghlContactUrlFor={ghlContactUrlFor} territoryId={focusId} />
+                    onSetClientStatus={onSetClientStatus} canAdmin={canAdmin} ghlContactUrlFor={ghlContactUrlFor} territoryId={focusId} />
                 )}
                 {open && !focusId && (
                   <div className="space-y-1 border-t px-3 py-2">
