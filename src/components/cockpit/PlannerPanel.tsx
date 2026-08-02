@@ -95,6 +95,13 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
 
   const nextWeekIso = addDaysIso(PLANNER_CURRENT_WEEK, 7);
   const hasWeek = (w: string) => weeks.some((x) => x.week === w);
+  // Lets an ambassador queue up as many future weeks as they want, one click
+  // at a time — always steps forward from whatever the LATEST week already
+  // is (not just "next week"), so repeated clicks build Aug 23, Aug 30, etc.
+  // without ever needing to know today's date. Falls back to nextWeekIso
+  // when there's nothing yet, so it still does something sensible from empty.
+  const latestWeekIso = weeks.length ? [...weeks].map((w) => w.week).sort().at(-1)! : PLANNER_CURRENT_WEEK;
+  const addAnotherWeek = () => createWeek(addDaysIso(latestWeekIso, 7));
 
   const createWeek = async (week: string) => {
     // No theme/categories prefilled here — the calendar's assignment is
@@ -162,6 +169,11 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
         {!hasWeek(nextWeekIso) && (
           <button onClick={() => createWeek(nextWeekIso)} className="inline-flex items-center gap-1.5 rounded-lg border border-dashed px-3 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground"><I.plus /> Next week ({plannerWeekLabel(nextWeekIso)})</button>
         )}
+        {/* Unlike the two above, this never hides — it always steps forward
+            from the latest week that exists, so you can keep clicking to
+            queue up as many future weeks as you want to get ahead. */}
+        <button onClick={addAnotherWeek} title={`Creates ${plannerWeekLabel(addDaysIso(latestWeekIso, 7))}`}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-dashed px-3 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground"><I.plus /> Add another week</button>
       </div>
       <div className="overflow-hidden rounded-xl border bg-surface shadow-soft">
         {sorted.length === 0 && <div className="px-4 py-10 text-center text-[13px] text-muted">No weeks yet for {city} — create this week to get started.</div>}
