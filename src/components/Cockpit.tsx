@@ -83,7 +83,7 @@ import {
   normalizeState,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, markMessagesReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact, rowToScheduledMessage, touchPlaybookProgress, markGranolaUnmatchedHandledDb, linkGranolaSyncedNoteDb } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, markMessagesReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact, rowToScheduledMessage, touchPlaybookProgress, markGranolaUnmatchedHandledDb, linkGranolaSyncedNoteDb, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import { Inbox } from "./cockpit/Inbox";
 import SettingsHub, { type TabKey } from "./SettingsHub";
@@ -93,7 +93,7 @@ import TerritoryPanel from "./TerritoryPanel";
 import { PlannerPanel } from "./cockpit/PlannerPanel";
 
 
-import { I, Avatar, SideItem, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFromName, LIST_COLUMNS, type FilterState, type SortBy, type Toast } from "./cockpit/ui";
+import { I, Avatar, SideItem, Toggle, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFromName, LIST_COLUMNS, type FilterState, type SortBy, type Toast } from "./cockpit/ui";
 import { ConfirmModal, PromptModal, LinkFormModal, MergeTaskModal, MergeClientModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
 import { CommandK } from "./cockpit/CommandK";
 import { GroupedList, InlineDue } from "./cockpit/GroupedList";
@@ -159,11 +159,11 @@ function parseSearch(search: string): NavState {
 // Number-key shortcuts for the top-level views, in sidebar order. Shown as
 // a hint on each sidebar item and handled by the keydown effect below.
 const NAV_KEY_VIEWS: Record<string, "dashboard" | "clients" | "projects" | "personal" | "teamchat"> = {
-  "1": "dashboard",
-  "2": "clients",
-  "3": "projects",
-  "4": "personal",
-  "5": "teamchat",
+  "1": "teamchat",
+  "2": "dashboard",
+  "3": "clients",
+  "4": "projects",
+  "5": "personal",
 };
 
 export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
@@ -291,11 +291,22 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setTeamChatLastRead(now);
     try { localStorage.setItem("cut_teamChatLastRead", now); } catch {}
   };
-  // Which DM thread (if any) is open — the Chat hub's "Team" row and each
-  // teammate's row are mutually exclusive, so a non-null value here means
-  // "showing a DM thread" and null means "showing Team Chat" (see the Team
-  // Chat page's render branch further down).
+  // Which DM thread (if any) is open — the Chat hub's "Conversations" row
+  // and each teammate's row are mutually exclusive, so a non-null value here
+  // means "showing a DM thread" and null means "showing team chat" (see the
+  // Conversations page's render branch further down).
   const [dmUserId, setDmUserId] = useState<string | null>(null);
+  // Shared, admin-controlled — "we don't need DMs for now... make it so we
+  // can turn it on and off in case we want it later" (Derek). Off by
+  // default; see supabase/app-settings.sql. Fails soft to false (DMs hidden)
+  // if that migration hasn't run yet, rather than erroring.
+  const [dmEnabled, setDmEnabledState] = useState(false);
+  useEffect(() => { fetchAppSetting("dm_enabled", false).then(setDmEnabledState); }, []);
+  const setDmEnabled = (v: boolean) => { setDmEnabledState(v); upsertAppSetting("dm_enabled", v); };
+  // If an admin turns DMs off while someone's actually looking at a thread,
+  // don't leave them stranded on a now-hidden feature — same "Conversations"
+  // row openTeamChat already goes to.
+  useEffect(() => { if (!dmEnabled && dmUserId !== null) setDmUserId(null); }, [dmEnabled, dmUserId]);
   // Declared up here rather than down with the other layout state because
   // goToView (just below) closes over it — every navigation also dismisses
   // the mobile sidebar.
@@ -3693,7 +3704,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // duplicated in source. Only one header is ever visible (CSS breakpoint),
   // so the popovers never double-render on screen.
   const territoryTitle = territoryView ? (territoryView === "all" ? "Territories" : (territoryById(territoryView) ? `${territoryById(territoryView)!.city}, ${territoryById(territoryView)!.state}` : "Territory")) : null;
-  const headerTitleText = territoryTitle ?? (settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Team Chat") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? "All Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? "")));
+  const headerTitleText = territoryTitle ?? (settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Conversations") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? "All Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? "")));
   const isClientDetail = !myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && !!clientById(activeClient);
   // Non-null when the open "client" is actually a city's work container —
   // drives the breadcrumb and subtitle so the page reads as city work rather
@@ -3869,11 +3880,40 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <button onClick={onSignOut} title="Sign out" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-red-500"><I.logout /></button>
         </div>
 
-        {/* Dashboard leads — the single place everyone works from (Derek).
-            The Clients/Projects/Personal group follows below it; Chat sits
-            at the very bottom of the sidebar (see below Territories). */}
-        <nav className="shrink-0 space-y-0.5 px-2">
-          {navVisible.work && <SideItem active={myWork} title="Dashboard (press 1)" onClick={() => goToView("dashboard")}><I.grid className="text-muted" /> <span>Dashboard</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
+        {/* Conversations leads the sidebar now (moved up from the bottom,
+            below Territories) — team-wide chat is the primary destination;
+            DMs are parked per Derek's ask ("we don't need DMs for now, just
+            the team — if they want to chat with someone specifically they
+            can use the @") but not deleted, just admin-toggled off by
+            default so they're one flip away if that changes. */}
+        {navVisible.inbox && (
+          <nav className="shrink-0 space-y-0.5 px-2">
+            <div className="flex items-center justify-between px-2.5 pb-1">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Chat</span>
+              {canAdmin && <Toggle on={dmEnabled} onClick={() => setDmEnabled(!dmEnabled)} />}
+            </div>
+            <SideItem active={inboxView && dmUserId === null} title="Conversations (press 1)" onClick={openTeamChat}><I.comment className="text-muted" /> <span>Conversations</span>{(teamChatUnread || unread > 0) && (
+              // Both indicators, not either/or: notifications accumulate
+              // routinely, and an exclusive check meant a real unread chat
+              // message showed nothing at all whenever any notice was pending.
+              <span className="ml-auto flex items-center gap-1.5">
+                {teamChatUnread && <span title="Unread conversations" className="h-2 w-2 rounded-full bg-accent" />}
+                {unread > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{unread}</span>}
+              </span>
+            )}</SideItem>
+            {dmEnabled && users.filter((u) => u.id !== me.id && u.id !== "u_claude").map((u) => (
+              <SideItem key={u.id} active={inboxView && dmUserId === u.id} onClick={() => openDm(u.id)}>
+                <Avatar id={u.id} size={20} /> <span className="min-w-0 flex-1 truncate text-left">{u.name}</span>
+                {dmUnread(u.id) && <span title="Unread messages" className="ml-auto h-2 w-2 rounded-full bg-accent" />}
+              </SideItem>
+            ))}
+          </nav>
+        )}
+
+        {/* Dashboard — the single place everyone works from (Derek). The
+            Clients/Projects/Personal group follows below it. */}
+        <nav className="mt-1.5 shrink-0 space-y-0.5 border-t px-2 pt-1.5">
+          {navVisible.work && <SideItem active={myWork} title="Dashboard (press 2)" onClick={() => goToView("dashboard")}><I.grid className="text-muted" /> <span>Dashboard</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
         </nav>
 
         {/* Clients / Projects / Personal, grouped together — Projects is
@@ -3881,11 +3921,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             work happens from Dashboard), and Personal sits last in this
             group rather than up by Dashboard. */}
         <nav className="mt-1.5 shrink-0 space-y-0.5 border-t px-2 pt-1.5">
-          <SideItem active={dirView === "clients"} title="Clients (press 2)" onClick={() => goToView("clients")}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{clientList.length}</span></SideItem>
+          <SideItem active={dirView === "clients"} title="Clients (press 3)" onClick={() => goToView("clients")}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{clientList.length}</span></SideItem>
           {clients.some((c) => c.id === WORKSPACE_CLIENT_ID) && (
-            <SideItem active={dirView === "projects"} title="Projects (press 3)" onClick={() => goToView("projects")}><I.folder className="text-muted" /> <span>Projects</span><span className="ml-auto text-[13px] text-muted">{workspaceProjects.length}</span></SideItem>
+            <SideItem active={dirView === "projects"} title="Projects (press 4)" onClick={() => goToView("projects")}><I.folder className="text-muted" /> <span>Projects</span><span className="ml-auto text-[13px] text-muted">{workspaceProjects.length}</span></SideItem>
           )}
-          {navVisible.personal && <SideItem active={personalView} title="Personal (press 4)" onClick={() => goToView("personal")}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>}
+          {navVisible.personal && <SideItem active={personalView} title="Personal (press 5)" onClick={() => goToView("personal")}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>}
         </nav>
 
         {/* Pinned — per-user quick access to starred clients + lists. Starring
@@ -3952,36 +3992,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <nav className="mt-2 shrink-0 border-t px-2 pt-2">
             <SideItem active={territoryView === "all"} onClick={() => openTerritory("all")}><I.flag className="text-muted" /> <span>Territories</span></SideItem>
           </nav>
-        )}
-
-        {/* Chat hub: Team Chat + one row per teammate for private DMs, merged
-            into a single section per Derek's ask — "different chat groups...
-            a team chat that's everyone but then we can all private chat with
-            each other." Roster is small (a handful of people), so every
-            teammate gets a row rather than only ones you've messaged before —
-            no extra state to derive, matches how Territories/Pinned already
-            work at this scale. Moved to the bottom of the sidebar (was right
-            below Dashboard) since nobody's using it currently — still one
-            click away, just not competing for the top of the list. */}
-        {navVisible.inbox && (
-          <div className="mt-1.5 shrink-0 space-y-0.5 border-t px-2 pt-1.5">
-            <div className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Chat</div>
-            <SideItem active={inboxView && dmUserId === null} title="Team chat (press 5)" onClick={openTeamChat}><I.comment className="text-muted" /> <span>Team</span>{(teamChatUnread || unread > 0) && (
-              // Both indicators, not either/or: notifications accumulate
-              // routinely, and an exclusive check meant a real unread chat
-              // message showed nothing at all whenever any notice was pending.
-              <span className="ml-auto flex items-center gap-1.5">
-                {teamChatUnread && <span title="Unread team chat" className="h-2 w-2 rounded-full bg-accent" />}
-                {unread > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{unread}</span>}
-              </span>
-            )}</SideItem>
-            {users.filter((u) => u.id !== me.id && u.id !== "u_claude").map((u) => (
-              <SideItem key={u.id} active={inboxView && dmUserId === u.id} onClick={() => openDm(u.id)}>
-                <Avatar id={u.id} size={20} /> <span className="min-w-0 flex-1 truncate text-left">{u.name}</span>
-                {dmUnread(u.id) && <span title="Unread messages" className="ml-auto h-2 w-2 rounded-full bg-accent" />}
-              </SideItem>
-            ))}
-          </div>
         )}
 
       </aside>
@@ -4057,7 +4067,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </p>
             </>) : (<>
               <h1 className="flex items-center gap-2 truncate text-[20px] font-semibold">
-                {territoryTitle ? territoryTitle : settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Team Chat") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? "All Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
+                {territoryTitle ? territoryTitle : settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Conversations") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? "All Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
                 {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
               </h1>
               {/* No subtitle for a territory — it fell through to the

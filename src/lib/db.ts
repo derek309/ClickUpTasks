@@ -521,3 +521,17 @@ export async function fetchThemeCalendar(): Promise<ThemeCalendarEntry[]> {
   if (error) { logErr({ error }); return []; }
   return (data ?? []).map(rowToThemeCalendarEntry);
 }
+
+// Shared, admin-controlled app settings (see supabase/app-settings.sql) — a
+// small key/value table for on/off switches meant to be the same for the
+// whole team, not per-browser (localStorage) or per-user (a profiles
+// column). Starts with just "dm_enabled". Fails soft to `fallback` (no error
+// toast) if the migration hasn't run yet or the row doesn't exist, so an
+// unmigrated environment just keeps today's behavior instead of breaking.
+export async function fetchAppSetting(key: string, fallback: boolean): Promise<boolean> {
+  const { data, error } = await supabase.from("app_settings").select("value").eq("key", key).maybeSingle();
+  if (error || !data) return fallback;
+  return !!data.value;
+}
+export const upsertAppSetting = (key: string, value: boolean) =>
+  supabase.from("app_settings").upsert({ key, value, updated_at: new Date().toISOString() }).then(logErr);

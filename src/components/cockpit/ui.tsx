@@ -108,6 +108,16 @@ export function kindFromName(name: string): Attachment["kind"] {
 export function SideItem({ active, onClick, children, title }: { active: boolean; onClick: () => void; children: React.ReactNode; title?: string }) {
   return (<button onClick={onClick} title={title} className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[15px] transition ${active ? "bg-accent-soft font-medium text-accent" : "text-foreground hover:bg-background"}`}>{children}</button>);
 }
+// Small on/off switch, shared by NotificationPrefsPanel's per-user email
+// toggles and any admin-facing app-wide toggle (e.g. the sidebar's DMs switch).
+export function Toggle({ on, onClick, disabled }: { on: boolean; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} disabled={disabled} onClick={onClick}
+      className={`relative h-6 w-10 shrink-0 rounded-full transition-colors disabled:opacity-40 ${on ? "bg-accent" : "bg-muted/30"}`}>
+      <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${on ? "translate-x-[18px]" : "translate-x-0.5"}`} />
+    </button>
+  );
+}
 export function LabelChips({ ids }: { ids: string[] }) {
   if (ids.length === 0) return null;
   return (<div className="mt-1.5 flex flex-wrap gap-1">{ids.map((id) => { const l = labelById(id); return l ? (<span key={id} className="rounded px-1.5 py-0 text-[13px] font-medium" style={{ background: l.color + "1a", color: l.color }}>{l.name}</span>) : null; })}</div>);

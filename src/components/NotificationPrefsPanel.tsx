@@ -7,6 +7,7 @@
 // of these toggles.
 import { useEffect, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
+import { Toggle } from "./cockpit/ui";
 
 type Prefs = { emailNotifyActivity: boolean; emailNotifyMessage: boolean; emailNotifyDm: boolean };
 
@@ -15,21 +16,6 @@ const ROWS: { key: keyof Prefs; label: string; help: string }[] = [
   { key: "emailNotifyMessage", label: "Messages", help: "@mentions and comments addressed to you." },
   { key: "emailNotifyDm", label: "Direct messages", help: "1:1 chat messages." },
 ];
-
-function Toggle({ on, onClick, disabled }: { on: boolean; onClick: () => void; disabled: boolean }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      disabled={disabled}
-      onClick={onClick}
-      className={`relative h-6 w-10 shrink-0 rounded-full transition-colors disabled:opacity-40 ${on ? "bg-accent" : "bg-muted/30"}`}
-    >
-      <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${on ? "translate-x-[18px]" : "translate-x-0.5"}`} />
-    </button>
-  );
-}
 
 export default function NotificationPrefsPanel() {
   const [prefs, setPrefs] = useState<Prefs | null>(null);

@@ -226,7 +226,7 @@ export default function TeamChat({ me, scope, messages, onSend, onDelete, onPin,
       <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
       <div className="fixed left-1/2 top-1/2 z-50 flex h-[80vh] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border bg-surface shadow-xl">
         <div className="flex items-center justify-between border-b px-5 py-3">
-          <h2 className="flex items-center gap-1.5 text-[16px] font-semibold"><I.comment /> {scope.type === "dm" ? scope.other.name : "Team Chat"}</h2>
+          <h2 className="flex items-center gap-1.5 text-[16px] font-semibold"><I.comment /> {scope.type === "dm" ? scope.other.name : "Conversations"}</h2>
           <button onClick={onClose} className="rounded-md p-1 text-muted hover:bg-background"><I.close /></button>
         </div>
         {inner}
