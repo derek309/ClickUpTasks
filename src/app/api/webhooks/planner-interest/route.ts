@@ -157,7 +157,7 @@ export async function POST(req: NextRequest) {
         ? `${businessName} submitted business info${offerIncluded ? " + offer" : ""} from the invite landing page. Listing is hidden from the directory pending phone verification — call to confirm identity and details, then unhide it to publish.`
         : `${businessName} responded to a newsletter invite. Reach out to move them toward claiming their listing and booking an appointment.`;
       await supabaseAdmin.from("tasks").insert({
-        id: taskId, project_id: projectId, client_id: clientId, title: TASK_TITLE, priority: "urgent",
+        id: taskId, project_id: projectId, client_id: clientId, title: TASK_TITLE, priority: "conversation",
         description, created_by: "client",
         comments: [newComment],
       });

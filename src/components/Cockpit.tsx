@@ -4470,6 +4470,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               onOpenTask={setOpenTaskId}
               playbookTasksByClient={playbookTasksByClient}
               onOpenPlaybook={openClientPlaybook}
+              onSetClientStatus={setClientStatus}
+              ghlContactUrlFor={ghlContactUrlFor}
               focusId={territoryView === "all" ? undefined : territoryView} />
           </div>
         ) : inboxView && dmUserId ? (

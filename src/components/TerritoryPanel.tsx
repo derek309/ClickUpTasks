@@ -6,11 +6,11 @@
 // vs "unclaimed" (still just a raw synced contact). Reuses the existing client
 // status funnel for pipeline stage instead of a second, parallel state.
 import { useState } from "react";
-import { users, clientStatusMeta, normalizeState, playbookCompletion, type Me, type Territory, type Contact, type Client, type Task } from "@/lib/data";
+import { users, clientStatusMeta, normalizeState, playbookCompletion, type Me, type Territory, type Contact, type Client, type ClientStatus, type Task } from "@/lib/data";
 import { I, Avatar } from "./cockpit/ui";
 import TerritoryDirectory from "./cockpit/TerritoryDirectory";
 
-export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onDeleteTerritory, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, onAddTask, onOpenTask, playbookTasksByClient, onOpenPlaybook, focusId }: {
+export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onDeleteTerritory, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, onAddTask, onOpenTask, playbookTasksByClient, onOpenPlaybook, onSetClientStatus, ghlContactUrlFor, focusId }: {
   me: Me; canAdmin: boolean;
   territories: Territory[]; contacts: Contact[]; clients: Client[];
   onAddTerritory: (t: { name: string; city: string; state: string; assignedTo: string[] }) => void;
@@ -34,6 +34,11 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
   // same optional-so-the-admin-overview-degrades-gracefully shape as tasksByClient.
   playbookTasksByClient?: Map<string, Task[]>;
   onOpenPlaybook?: (clientId: string) => void;
+  // Editable Stage dropdown + GHL contact link on the Businesses page.
+  // Optional so the admin multi-city overview (below) — a read-only list —
+  // degrades gracefully without them.
+  onSetClientStatus?: (id: string, status: ClientStatus) => void;
+  ghlContactUrlFor?: (clientId: string) => string | null;
   focusId?: string; // when set, render only this one city, auto-expanded (the sidebar city page)
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(() => (focusId ? new Set([focusId]) : new Set()));
@@ -43,7 +48,6 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
   const [state, setState] = useState("");
   const [assignSet, setAssignSet] = useState<Set<string>>(new Set());
   const [assignMenu, setAssignMenu] = useState<string | null>(null); // territory id whose assignee popover is open
-  const [sort, setSort] = useState<"score" | "name">("score"); // the focused city's business sort — lives here so it can sit on the same header line as the client/contact counts
 
   const scoped = canAdmin ? territories : territories.filter((t) => (t.assignedTo ?? []).includes(me.id));
   const visible = focusId ? scoped.filter((t) => t.id === focusId) : scoped;
@@ -138,15 +142,6 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                     // compact line, not a second stacked title.
                     <span className="min-w-0 flex-1 truncate text-[13px] text-muted">{claimed.length} client{claimed.length === 1 ? "" : "s"} · {unclaimed.length} contact{unclaimed.length === 1 ? "" : "s"}</span>
                   ) : null}
-                  {focusId && (
-                    // The business-list sort control — kept on this same
-                    // header line rather than its own row below.
-                    <span className="inline-flex shrink-0 overflow-hidden rounded-md border text-[12px]" onClick={(e) => e.stopPropagation()}>
-                      {(["score", "name"] as const).map((k) => (
-                        <button key={k} onClick={() => setSort(k)} className={`px-2 py-1 font-medium ${sort === k ? "bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}>{k === "score" ? "Score" : "A–Z"}</button>
-                      ))}
-                    </span>
-                  )}
                   {!focusId && (
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[15px] font-medium">{t.name}</div>
@@ -192,9 +187,10 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                 {open && focusId && (
                   <TerritoryDirectory city={t.city} state={t.state} contacts={matched} clients={clients} onAddContact={onAddContact}
                     onSyncClients={onSyncClients} onOpenClient={onOpenClient}
-                    featuredClientIds={featuredClientIds} onFeature={onFeature} sort={sort} onSetSort={setSort}
+                    featuredClientIds={featuredClientIds} onFeature={onFeature}
                     tasksByClient={tasksByClient} onAddTask={onAddTask} onOpenTask={onOpenTask}
-                    playbookTasksByClient={playbookTasksByClient} onOpenPlaybook={onOpenPlaybook} territoryId={focusId} />
+                    playbookTasksByClient={playbookTasksByClient} onOpenPlaybook={onOpenPlaybook}
+                    onSetClientStatus={onSetClientStatus} ghlContactUrlFor={ghlContactUrlFor} territoryId={focusId} />
                 )}
                 {open && !focusId && (
                   <div className="space-y-1 border-t px-3 py-2">

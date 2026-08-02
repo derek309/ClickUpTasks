@@ -2,13 +2,11 @@
 
 // The /sales-style directory view for a single territory (city). Live-fetches
 // the ClickUpLocal directory (GeoDirectory) listings for the city from the
-// WordPress side via /api/directory/listings and buckets the businesses the
-// way the field-sales tool does:
-//   • Claimed   — the owner has claimed their directory listing
-//   • Unclaimed — a listing nobody has claimed yet (a prospect to call)
-//   • No listing — a GHL contact in this city that matches no directory listing
-// A matched business that we've already onboarded (a tracked client, i.e.
-// clients.id === "cl_"+contactId) gets a ✓ Client badge on top of its bucket.
+// WordPress side via /api/directory/listings, matches each listing to a GHL
+// contact/client, and groups them by where they actually are in the Playbook
+// journey — Unclaimed → Invited → Claimed → Onboarding → Active Client →
+// Nurture/Cancelled/Past Client — so opening this page reads as "here's the
+// whole funnel, here's who needs work today," not a flat list.
 //
 // Rendered as one card matching GroupedList's own chrome (rounded-xl border
 // bg-surface shadow-soft, a column header row, colored collapsible group
@@ -17,12 +15,16 @@
 //
 // When the directory isn't configured (the endpoint 501s before Derek sets the
 // WP env vars) or errors, it degrades to showing every city contact under
-// "No listing" — exactly the pre-directory behavior, just relabeled.
+// "Unclaimed" — exactly the pre-directory behavior, just relabeled.
 import { useEffect, useMemo, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
 import { fetchPlannerWeeks } from "@/lib/db";
 import { latestInviteStatus } from "@/lib/plannerPools";
-import { clientStatusMeta, formatDue, isOverdue, STATUS_META, playbookCompletion, type Contact, type Client, type Task, type PlannerInvite } from "@/lib/data";
+import {
+  formatDue, isOverdue, STATUS_META, playbookCompletion,
+  CLIENT_STATUS_META, CLIENT_STATUS_ORDER,
+  type Contact, type Client, type ClientStatus, type Task, type PlannerInvite,
+} from "@/lib/data";
 import { I, Avatar } from "./ui";
 
 export type DirectoryListing = {
@@ -49,7 +51,7 @@ export type DirectoryListing = {
   followupDue: number;  // unix seconds, 0 = none
   lastTouched: number;  // unix seconds, 0 = never
   rep: string;          // assigned ambassador's name (read-only here)
-  ghlContactId: string; // links to the Prospects-pipeline opportunity
+  ghlContactId: string; // links to the GoHighLevel contact record
   activityLog?: ActivityEntry[]; // loaded on demand / after a touch
 };
 
@@ -95,18 +97,41 @@ const lc = (s: string | undefined) => (s ?? "").trim().toLowerCase();
 // click — no dialog, no visible difference for a real click.
 const isRealClick = () => !window.getSelection()?.toString();
 
-type SortKey = "score" | "name";
+// The funnel every business is walked through, in order. Everyone always sits
+// in exactly one of these — this is the Businesses page's whole reason for
+// being: see where everyone is, and get everyone to Active Client.
+//   Unclaimed  — listing nobody has claimed yet
+//   Invited    — invited to claim it (Content Planner outreach), hasn't yet
+//   Claimed    — claimed the listing, but not yet moved past Lead/Prospect
+//   Onboarding / Active Client / Nurture / Cancelled / Past Client — the
+//   client record's own lifecycle (ClientStatus), once a real client exists.
+export type BusinessStage = "unclaimed" | "invited" | "claimed" | "onboarding" | "active_client" | "nurture" | "cancelled" | "past_client";
+export const STAGE_ORDER: BusinessStage[] = ["unclaimed", "invited", "claimed", "onboarding", "active_client", "nurture", "cancelled", "past_client"];
+export const STAGE_META: Record<BusinessStage, { label: string; color: string; hint: string }> = {
+  unclaimed: { label: "Unclaimed", color: "#f59e0b", hint: "listing nobody has claimed yet — a prospect to invite or call" },
+  invited: { label: "Invited", color: "#0ea5e9", hint: "invited to claim their listing, hasn't yet" },
+  claimed: { label: "Claimed", color: "#10b981", hint: "claimed their listing, not yet moved past Lead/Prospect" },
+  onboarding: { label: CLIENT_STATUS_META.onboarding.label, color: CLIENT_STATUS_META.onboarding.dot, hint: "actively being onboarded" },
+  active_client: { label: CLIENT_STATUS_META.active_client.label, color: CLIENT_STATUS_META.active_client.dot, hint: "up and running — the goal state" },
+  nurture: { label: CLIENT_STATUS_META.nurture.label, color: CLIENT_STATUS_META.nurture.dot, hint: "good standing, nothing actively due" },
+  cancelled: { label: CLIENT_STATUS_META.cancelled.label, color: CLIENT_STATUS_META.cancelled.dot, hint: "cancelled engagement" },
+  past_client: { label: CLIENT_STATUS_META.past_client.label, color: CLIENT_STATUS_META.past_client.dot, hint: "wrapped up" },
+};
+// The override group above the funnel: a business whose client has an open
+// "conversation"-priority task — the exact same signal that bumps a client to
+// the top of the Dashboard (Cockpit.tsx's hasOpenConversationTask). A business
+// here ALSO still appears in its normal stage group below, so per-stage
+// funnel counts stay a truthful pipeline snapshot.
+const ATTENTION_META = { label: "Needs attention now", color: "#8b5cf6", hint: "replied by SMS, email, or newsletter invite — check in before anything else" };
 
-// Group colors, same "colored strip" language GroupedList uses for status/
-// priority groups (g.color + alpha suffix for background/border).
-const BUCKET_META = {
-  unclaimed: { label: "Unclaimed", color: "#f59e0b", hint: "listings nobody has claimed — prospects to call" },
-  claimed: { label: "Claimed", color: "#10b981", hint: "owner has claimed their directory listing" },
-  none: { label: "No listing", color: "#64748b", hint: "contacts in this city with no directory listing" },
-} as const;
+export function computeBusinessStage(listing: DirectoryListing, client: Client | null, invite?: PlannerInvite): BusinessStage {
+  if (!listing.claimed) return invite && invite.status !== "skipped" ? "invited" : "unclaimed";
+  if (!client || client.status === "lead" || client.status === "prospect") return "claimed";
+  return (client.status as BusinessStage);
+}
 
-// Name | Score | Stage | Tasks | Actions | Client
-const TEMPLATE = "minmax(0,1fr) 56px 180px 104px 210px 150px";
+// Name | Category | Stage | What's left | Links
+const TEMPLATE = "minmax(0,1fr) 112px 148px 250px 84px";
 
 // Module-scope cache so leaving a city and coming back (or switching tabs)
 // shows the last-known data instantly instead of a loading flash — a lazy
@@ -118,22 +143,11 @@ const REFRESH_INTERVAL = 60_000;
 type ListingsCacheEntry = { data: DirectoryListing[]; notConfigured: boolean; at: number };
 const listingsCache = new Map<string, ListingsCacheEntry>();
 
-// The GHL Prospects pipeline — the gameplan's locked 9-stage sales funnel
-// (G2 SOP: New – Not Contacted → In Outreach → Engaged / Interested →
-// Listing Claimed → First Visit Booked → In Trial → Won – Active, plus the
-// Nurture and Lost off-ramps). Stages come live from GHL, so this list is
-// whatever the pipeline says it is — never a hardcoded copy that can drift.
-export type PipelineStage = { id: string; name: string };
-export type OppRef = { opportunityId: string; stageId: string };
-// One pipeline for every city (city-tagged, per the SOP), so this cache is
-// module-scope and shared across territories rather than keyed per city.
-let oppCache: { stages: PipelineStage[]; byContact: Record<string, OppRef>; at: number } | null = null;
-// Per-territory, unlike oppCache above (one shared GHL pipeline for every
-// city) — keyed by territoryId so switching cities doesn't show a flash of
-// the previous city's invite badges.
+// Per-territory — keyed by territoryId so switching cities doesn't show a
+// flash of the previous city's invite badges.
 const inviteCache = new Map<string, { byGdPlaceId: Map<number, PlannerInvite>; at: number }>();
 
-export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, sort, onSetSort, tasksByClient, onAddTask, onOpenTask, playbookTasksByClient, onOpenPlaybook, territoryId }: {
+export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, onAddTask, onOpenTask, playbookTasksByClient, onOpenPlaybook, onSetClientStatus, ghlContactUrlFor, territoryId }: {
   city: string;
   state: string;
   contacts: Contact[];   // already scoped to this city/state by the caller
@@ -145,20 +159,13 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // create-and-open (as a Lead) if not.
   onAddContact: (contact: Contact) => void;
   // Bulk auto-sync (see below). Optional so this component still degrades
-  // gracefully if a caller doesn't wire it. Stage editing is NOT here: it
-  // writes to the GHL Prospects pipeline via /api/directory/opportunity,
-  // which this component owns directly (see the effect below).
+  // gracefully if a caller doesn't wire it.
   onSyncClients?: (contacts: Contact[]) => void;
   onOpenClient: (clientId: string) => void;
-  // Newsletter feature motion (G2-SOP Stage 2/3). Optional so the admin
-  // multi-city overview, which has no ambassador context, degrades to a
-  // read-only list.
+  // Newsletter feature motion. Optional so the admin multi-city overview,
+  // which has no ambassador context, degrades to a read-only list.
   featuredClientIds?: Set<string>;
   onFeature?: (opts: { clientId: string | null; contact: Contact | null; name: string; city: string; state: string }) => void;
-  // Owned by the caller (TerritoryPanel) so the sort control can sit on the
-  // same header line as the client/contact counts instead of its own row.
-  sort: SortKey;
-  onSetSort: (k: SortKey) => void;
   // Open tasks per business, keyed by client id. A city's businesses are all
   // clients already (see the bulk sync below), so their work exists — it just
   // wasn't visible from here without opening each one. Optional so the admin
@@ -170,12 +177,17 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // overview (which never passes this) degrades to no chip.
   playbookTasksByClient?: Map<string, Task[]>;
   onOpenPlaybook?: (clientId: string) => void;
+  // Editable Stage dropdown for a claimed business with a client record —
+  // writes straight through the client header's own status setter. Optional
+  // so the admin multi-city overview degrades to a read-only Stage label.
+  onSetClientStatus?: (id: string, status: ClientStatus) => void;
+  // GHL contact deep link for the Links column. Optional, same reason.
+  ghlContactUrlFor?: (clientId: string) => string | null;
   // Wires the Content Planner's invite state into this view — a business
-  // that's been invited shows it right next to the GHL Stage column instead
-  // of that only being visible from inside the Planner. Optional, and
-  // undefined outside a single-city page (the admin multi-city overview has
-  // no one territory to scope planner_weeks to), where the badge just never
-  // renders.
+  // that's been invited shows it as "Invited" in the funnel instead of that
+  // only being visible from inside the Planner. Optional, and undefined
+  // outside a single-city page (the admin multi-city overview has no one
+  // territory to scope planner_weeks to), where invites just never show.
   territoryId?: string;
 }) {
   const cacheKey = `${city}|${state}`;
@@ -187,8 +199,6 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggleGroup = (key: string) => setCollapsed((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
   const [q, setQ] = useState("");
-  const [stages, setStages] = useState<PipelineStage[]>(() => oppCache?.stages ?? []);
-  const [oppByContact, setOppByContact] = useState<Record<string, OppRef>>(() => oppCache?.byContact ?? {});
   const [inviteByGdPlaceId, setInviteByGdPlaceId] = useState<Map<number, PlannerInvite>>(() => (territoryId && inviteCache.get(territoryId)?.byGdPlaceId) || new Map());
 
   useEffect(() => {
@@ -221,33 +231,6 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
     return () => { alive = false; clearInterval(interval); };
   }, [city, state, cacheKey]);
 
-  // The Prospects pipeline (stages + who's in which stage). Deliberately its
-  // own effect rather than folded into the listings fetch: it's one shared
-  // pipeline across all cities, so it neither depends on nor should refetch
-  // per city/state. Fails soft — a 501 (not configured) or an error just
-  // leaves `stages` empty, which hides the Stage control instead of breaking
-  // the whole territory view.
-  useEffect(() => {
-    let alive = true;
-    const fetchOpps = () => {
-      authedFetch("/api/directory/opportunity")
-        .then(async (res) => {
-          if (!res.ok) return;
-          const body = await res.json().catch(() => ({}));
-          if (!alive) return;
-          const s: PipelineStage[] = Array.isArray(body.stages) ? body.stages : [];
-          const b: Record<string, OppRef> = body.byContact ?? {};
-          oppCache = { stages: s, byContact: b, at: Date.now() };
-          setStages(s);
-          setOppByContact(b);
-        })
-        .catch(() => { /* fail soft — Stage column just stays hidden */ });
-    };
-    fetchOpps();
-    const interval = setInterval(fetchOpps, REFRESH_INTERVAL);
-    return () => { alive = false; clearInterval(interval); };
-  }, []);
-
   // Invite status (invited/accepted/skipped) for this territory's own
   // businesses, from the same planner_weeks rows the Content Planner writes.
   // No new storage: PlannerInvite.gdPlaceId is the same GeoDirectory id as
@@ -262,47 +245,12 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
         const byGdPlaceId = latestInviteStatus(weeks);
         inviteCache.set(territoryId, { byGdPlaceId, at: Date.now() });
         setInviteByGdPlaceId(byGdPlaceId);
-      }).catch(() => { /* fail soft — invite badge just stays hidden */ });
+      }).catch(() => { /* fail soft — stays "Unclaimed" instead of "Invited" */ });
     };
     fetchInvites();
     const interval = setInterval(fetchInvites, REFRESH_INTERVAL);
     return () => { alive = false; clearInterval(interval); };
   }, [territoryId]);
-
-  // Move a business to a pipeline stage. Optimistic: the select reflects the
-  // new stage immediately, and rolls back if GHL rejects it. Creates the
-  // opportunity when the business isn't in the pipeline yet, which is how an
-  // ambassador starts the funnel on an untouched listing from the field.
-  const setStageFor = async (listing: DirectoryListing, stageId: string) => {
-    const contactId = listing.ghlContactId;
-    if (!contactId) return;
-    const prev = oppByContact[contactId];
-    const optimistic = { opportunityId: prev?.opportunityId ?? "", stageId };
-    setOppByContact((m) => ({ ...m, [contactId]: optimistic }));
-    try {
-      const res = await authedFetch("/api/directory/opportunity", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contactId, stageId, name: listing.name, opportunityId: prev?.opportunityId }),
-      });
-      if (!res.ok) throw new Error(String(res.status));
-      const body = await res.json().catch(() => ({}));
-      const next: OppRef = { opportunityId: body.opportunityId ?? optimistic.opportunityId, stageId: body.stageId ?? stageId };
-      setOppByContact((m) => {
-        const updated = { ...m, [contactId]: next };
-        if (oppCache) oppCache = { ...oppCache, byContact: updated };
-        return updated;
-      });
-    } catch {
-      // Roll back to whatever GHL last told us, so the UI never claims a
-      // stage change that didn't land.
-      setOppByContact((m) => {
-        const updated = { ...m };
-        if (prev) updated[contactId] = prev; else delete updated[contactId];
-        return updated;
-      });
-    }
-  };
 
   // Patch one listing in place after a logged touch returns the fresh state
   // from /sales — keeps the funnel accurate without a full refetch, and
@@ -353,21 +301,18 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // being worked in this territory — no manual "+ Add as client" step. Syncs
   // in bulk as a Lead the moment it's matched to a real GHL contact; once
   // `clients` reflects that (next render), the filter below is empty and
-  // this settles — it does NOT include the "No listing" bucket (contacts
-  // with no directory listing aren't "in the directory" yet).
+  // this settles.
   useEffect(() => {
     if (!onSyncClients) return;
     const toSync = rows.filter((r) => r.contact && !r.client).map((r) => r.contact!);
     if (toSync.length) onSyncClients(toSync);
   }, [rows, onSyncClients]);
 
-  // "No listing" = city contacts that matched no directory listing.
+  // Contacts in this city that matched no directory listing — not a business
+  // yet, just counted below so nothing feels lost.
   const noListing = useMemo(() => contacts.filter((c) => !matchedContactIds.has(c.id)), [contacts, matchedContactIds]);
 
-  const sortRows = <T extends { listing: DirectoryListing }>(arr: T[]) =>
-    [...arr].sort((a, b) => sort === "name"
-      ? a.listing.name.localeCompare(b.listing.name)
-      : (b.listing.score ?? -1) - (a.listing.score ?? -1) || a.listing.name.localeCompare(b.listing.name));
+  const sortRows = <T extends { listing: DirectoryListing }>(arr: T[]) => [...arr].sort((a, b) => a.listing.name.localeCompare(b.listing.name));
 
   // Free-text filter — by business/contact name, email, phone, or company.
   const ql = q.trim().toLowerCase();
@@ -376,28 +321,32 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
     || lc(r.listing.name).includes(ql)
     || (!!qDigits && digits(r.listing.phone).includes(qDigits))
     || (!!r.contact && (lc(r.contact.name).includes(ql) || lc(r.contact.email).includes(ql) || lc(r.contact.company).includes(ql) || (!!qDigits && digits(r.contact.phone).includes(qDigits))));
-  const claimed = sortRows(rows.filter((r) => r.listing.claimed)).filter(matchRow);
-  const unclaimed = sortRows(rows.filter((r) => !r.listing.claimed)).filter(matchRow);
-  const total = claimed.length + unclaimed.length;
-  // A territory business = a contact on the WordPress directory. Contacts with
-  // no directory listing aren't businesses we prospect here (they're residents
-  // / agency-side contacts), so they're deliberately NOT shown — just counted,
-  // so nothing feels lost. (See noListing = contacts matching no listing.)
+
+  const inviteFor = (listing: DirectoryListing) => inviteByGdPlaceId.get(typeof listing.id === "number" ? listing.id : Number(listing.id));
+  const needsAttention = (r: { client: Client | null }) => !!(r.client && (tasksByClient?.get(r.client.id) ?? []).some((t) => t.status !== "done" && t.priority === "conversation"));
+
+  const filtered = rows.filter(matchRow);
+  const total = filtered.length;
   const nonBusinessCount = noListing.length;
 
   if (loading) return <div className="bg-background p-4 py-10 text-center text-[13px] text-muted sm:p-5">Loading directory for {city}…</div>;
 
-  const groups: { key: keyof typeof BUCKET_META; count: number }[] = [
-    { key: "unclaimed", count: unclaimed.length },
-    { key: "claimed", count: claimed.length },
-  ];
+  const attentionRows = sortRows(filtered.filter(needsAttention));
+  const stageRows = new Map<BusinessStage, typeof filtered>();
+  for (const key of STAGE_ORDER) stageRows.set(key, []);
+  for (const r of filtered) stageRows.get(computeBusinessStage(r.listing, r.client, inviteFor(r.listing)))!.push(r);
+  for (const key of STAGE_ORDER) stageRows.set(key, sortRows(stageRows.get(key)!));
+
+  type Group = { key: string; label: string; color: string; hint: string; rows: typeof filtered };
+  const groups: Group[] = [];
+  if (attentionRows.length) groups.push({ key: "attention", label: ATTENTION_META.label, color: ATTENTION_META.color, hint: ATTENTION_META.hint, rows: attentionRows });
+  for (const key of STAGE_ORDER) groups.push({ key, label: STAGE_META[key].label, color: STAGE_META[key].color, hint: STAGE_META[key].hint, rows: stageRows.get(key)! });
 
   return (
     <div className="pt-1">
       {/* No extra padding here — the parent (TerritoryPanel) already gives
           the page px-5/py-3, so this only needs a small top gap under its
-          header, not a second full padding block. The sort control lives in
-          that same header row now (owned by TerritoryPanel), not here. */}
+          header. */}
 
       {notConfigured && (
         <div className="mb-2 rounded-lg border border-amber-400/40 bg-amber-50/50 px-3 py-2 text-[12px] text-amber-800">
@@ -406,7 +355,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
       )}
       {err && (
         <div className="mb-2 rounded-lg border border-amber-400/40 bg-amber-50/50 px-3 py-2 text-[12px] text-amber-800">
-          Directory listings are unavailable right now, so claimed/unclaimed status can&apos;t be shown — every contact below is grouped under &ldquo;No listing.&rdquo; You can still open and work them; the listing overlay returns once the directory is reachable. <span className="text-amber-800/60">({err})</span>
+          Directory listings are unavailable right now, so claimed/stage status can&apos;t be shown — every contact below is grouped under &ldquo;Unclaimed.&rdquo; You can still open and work them; the listing overlay returns once the directory is reachable. <span className="text-amber-800/60">({err})</span>
         </div>
       )}
 
@@ -420,29 +369,28 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
       <div className="overflow-x-auto rounded-xl border bg-surface shadow-soft">
         <div className="hidden items-center gap-2 border-b bg-background/40 px-4 py-2 text-[12px] font-semibold uppercase tracking-wide text-muted sm:grid" style={{ gridTemplateColumns: TEMPLATE }}>
           <span>Name</span>
-          <span className="text-center">Score</span>
+          <span>Category</span>
           <span>Stage</span>
-          <span>Tasks</span>
-          <span>Actions</span>
-          <span>Client</span>
+          <span>What&apos;s left</span>
+          <span>Links</span>
         </div>
         <div className="divide-y-8 divide-background">
           {groups.map((g) => {
-            const meta = BUCKET_META[g.key];
             const isOpen = !collapsed.has(g.key);
             return (
               <div key={g.key}>
-                <button onClick={() => toggleGroup(g.key)} className="flex w-full items-center gap-2 border-y px-4 py-2 text-left transition" style={{ background: meta.color + "22", borderColor: meta.color + "40" }}>
+                <button onClick={() => toggleGroup(g.key)} className="flex w-full items-center gap-2 border-y px-4 py-2 text-left transition" style={{ background: g.color + "22", borderColor: g.color + "40" }}>
                   <I.chevron className={`text-muted transition ${isOpen ? "-rotate-90" : "rotate-180"}`} />
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: meta.color }} />
-                  <span className="text-[15px] font-bold">{meta.label}</span>
-                  <span className="rounded-full px-1.5 text-[13px] font-semibold normal-case tracking-normal text-white" style={{ background: meta.color }}>{g.count}</span>
-                  <span className="truncate text-[12px] font-normal normal-case text-muted">{meta.hint}</span>
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: g.color }} />
+                  <span className="text-[15px] font-bold">{g.label}</span>
+                  <span className="rounded-full px-1.5 text-[13px] font-semibold normal-case tracking-normal text-white" style={{ background: g.color }}>{g.rows.length}</span>
+                  <span className="truncate text-[12px] font-normal normal-case text-muted">{g.hint}</span>
                 </button>
-                {isOpen && (g.key === "unclaimed" ? unclaimed : claimed).map((r) => (
-                  <ListingRow key={r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} onPatch={patchListing}
-                    stages={stages} opp={oppByContact[r.listing.ghlContactId]} onSetStage={setStageFor}
-                    invite={inviteByGdPlaceId.get(typeof r.listing.id === "number" ? r.listing.id : Number(r.listing.id))}
+                {isOpen && g.rows.map((r) => (
+                  <ListingRow key={g.key + r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} onPatch={patchListing}
+                    stage={computeBusinessStage(r.listing, r.client, inviteFor(r.listing))}
+                    invite={inviteFor(r.listing)}
+                    onSetClientStatus={onSetClientStatus} ghlContactUrlFor={ghlContactUrlFor}
                     featured={!!r.client && !!featuredClientIds?.has(r.client.id)}
                     canFeature={!!(r.client || r.contact)}
                     onFeature={onFeature && ((rr) => onFeature({ clientId: rr.client?.id ?? null, contact: rr.contact, name: rr.listing.name, city, state }))}
@@ -470,21 +418,20 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, onPatch, stages, opp, onSetStage, invite, featured, canFeature, onFeature, tasks, onAddTask, onOpenTask, playbookTasks, onOpenPlaybook }: {
+function ListingRow({ row, onAddContact, onOpenClient, onPatch, stage, invite, onSetClientStatus, ghlContactUrlFor, featured, canFeature, onFeature, tasks, onAddTask, onOpenTask, playbookTasks, onOpenPlaybook }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
   onOpenClient: (id: string) => void;
   onPatch: (id: number | string, next: Partial<DirectoryListing>) => void;
-  // The GHL Prospects pipeline for the Stage column: the ordered stages, this
-  // business's current position (undefined = not in the pipeline yet), and the
-  // mover.
-  stages: PipelineStage[];
-  opp?: OppRef;
-  onSetStage: (listing: DirectoryListing, stageId: string) => void;
+  // This row's computed funnel position (see computeBusinessStage above).
+  stage: BusinessStage;
   // This business's most recent Content Planner invite, if any — undefined
   // when it's never been invited (or territoryId wasn't passed down, e.g.
   // the admin multi-city overview).
   invite?: PlannerInvite;
+  // Editable Stage dropdown (claimed businesses with a client record only).
+  onSetClientStatus?: (id: string, status: ClientStatus) => void;
+  ghlContactUrlFor?: (clientId: string) => string | null;
   // Newsletter feature motion: whether this business has already been run
   // through it, and the trigger that starts the Stage-3 touch sequence.
   featured: boolean;
@@ -502,7 +449,6 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, stages, opp, onS
   onOpenPlaybook?: (clientId: string) => void;
 }) {
   const { listing, contact, client } = row;
-  const meta = client ? clientStatusMeta(client.status) : null;
   const [logOpen, setLogOpen] = useState(false);
   const [outcome, setOutcome] = useState("");
   const [nextAction, setNextAction] = useState("");
@@ -521,6 +467,7 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, stages, opp, onS
   const log = listing.activityLog;
   const playbook = client ? playbookCompletion(client.id, playbookTasks) : null;
   const expanded = logOpen || histOpen || tasksOpen;
+  const ghlUrl = client ? ghlContactUrlFor?.(client.id) : null;
 
   // Soonest due date across this business's open tasks — the one number worth
   // showing in a dense row, since "3 open" alone doesn't say whether anything
@@ -587,7 +534,7 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, stages, opp, onS
   return (
     <div className={`border-b text-[15px] transition-colors last:border-0 hover:bg-accent-soft/50 ${expanded ? "bg-accent-soft/30" : ""}`}>
       <div className="flex flex-col gap-1.5 px-4 py-2.5 sm:grid sm:min-h-[42px] sm:items-center sm:gap-2 sm:py-1.5" style={{ gridTemplateColumns: TEMPLATE }}>
-        {/* Name + category + pipeline state chips */}
+        {/* Name + invite/outcome/due chips */}
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-1.5">
             {listing.claimed
@@ -608,7 +555,6 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, stages, opp, onS
             )}
           </div>
           <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 pl-5 text-[12px] text-muted">
-            {listing.category && <span>{listing.category}</span>}
             {invite && (
               <span title={`Content Planner invite, ${formatDue(invite.at)}`}
                 className={`rounded px-1.5 py-0.5 font-medium ${invite.status === "accepted" ? "bg-emerald-100 text-emerald-700" : invite.status === "skipped" ? "bg-background text-muted" : "bg-accent-soft text-accent"}`}>
@@ -618,78 +564,73 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, stages, opp, onS
             {listing.outcomeLabel && <span className="rounded bg-background px-1.5 py-0.5 font-medium">{listing.outcomeLabel}</span>}
             {listing.nextActionLabel && <span className="rounded bg-accent-soft px-1.5 py-0.5 font-medium text-accent">→ {listing.nextActionLabel}</span>}
             {due.label && <span className={due.overdue ? "font-medium text-danger" : ""}>{due.label}</span>}
-            {playbook?.next && <span className="rounded bg-accent-soft px-1.5 py-0.5 font-medium text-accent">Playbook next: {playbook.next.label}</span>}
             {listing.rep && <span>· {listing.rep}</span>}
-            {callMsg && <span>· {callMsg}</span>}
           </div>
         </div>
 
-        {/* Score */}
-        <div className="pl-5 sm:pl-0 sm:text-center">
-          {typeof listing.score === "number" && <span title="ClickUpLocal score" className="inline-block rounded bg-background px-1.5 py-0.5 text-[11px] font-medium text-muted">{listing.score}</span>}
+        {/* Category */}
+        <div className="pl-5 text-[12px] text-muted sm:pl-0">
+          {listing.category ? <span className="truncate" title={listing.category}>{listing.category}</span> : <span className="text-muted/30">—</span>}
         </div>
 
-        {/* Stage — the GHL Prospects pipeline, i.e. the gameplan's locked
-            9-stage sales funnel (G2 SOP). This is the outreach funnel, NOT
-            the client lifecycle: these rows are directory businesses being
-            worked, and GHL stays the source of truth for sales tracking. The
-            client's own lifecycle (Lead → Active → Past) lives on the client
-            header, where it belongs. Hidden when the pipeline isn't
-            configured or the listing has no GHL contact to attach an
-            opportunity to. */}
+        {/* Stage — a claimed business with a client record gets an editable
+            dropdown over the client lifecycle (Lead → ... → Past Client);
+            everything else (unclaimed, invited, or claimed with no client yet)
+            is a plain read-only label. */}
         <div className="pl-5 sm:pl-0">
-          {stages.length > 0 && listing.ghlContactId ? (
-            <select value={opp?.stageId ?? ""} onChange={(e) => onSetStage(listing, e.target.value)}
-              title="Sales pipeline stage (GoHighLevel)" className="w-full max-w-[170px] rounded-md border px-1.5 py-1 text-[12px] font-medium outline-none focus:border-accent bg-accent-soft text-accent">
-              {/* Not yet in the pipeline — picking any stage creates the
-                  opportunity, so this placeholder is only ever the initial state. */}
-              {!opp && <option value="">— not in pipeline —</option>}
-              {stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          {client && onSetClientStatus ? (
+            <select value={client.status} onChange={(e) => onSetClientStatus(client.id, e.target.value as ClientStatus)}
+              title="Business lifecycle stage" className="w-full max-w-[140px] rounded-md border px-1.5 py-1 text-[12px] font-medium outline-none focus:border-accent bg-accent-soft text-accent">
+              {CLIENT_STATUS_ORDER.map((s) => <option key={s} value={s}>{CLIENT_STATUS_META[s].label}</option>)}
             </select>
-          ) : null}
-        </div>
-
-        {/* Tasks — this business's own open work. Every matched business is
-            already a client behind the scenes, so the tasks exist; this is
-            what makes them visible without opening each business in turn. */}
-        <div className="pl-5 sm:pl-0">
-          {client && onAddTask ? (
-            <button onClick={() => setTasksOpen((o) => !o)} title={openTasks.length ? `${openTasks.length} open task${openTasks.length === 1 ? "" : "s"}` : "No open tasks — click to add one"}
-              className={`w-full rounded-md border px-2 py-1 text-left text-[12px] font-medium ${tasksOpen ? "bg-accent-soft text-accent" : openTasks.length ? "text-foreground hover:bg-surface" : "border-dashed text-muted hover:bg-surface hover:text-foreground"}`}>
-              {openTasks.length ? `${openTasks.length} open` : "+ Task"}
-              {nextDue && <span className={`ml-1 font-normal ${isOverdue(nextDue) ? "text-danger" : "text-muted"}`}>{formatDue(nextDue)}</span>}
-            </button>
-          ) : null}
-        </div>
-
-        {/* Actions */}
-        <div className="flex flex-wrap items-center gap-1.5 pl-5 sm:pl-0">
-          {listing.phone && <button onClick={call} disabled={calling} title={`Bridge-call ${listing.phone}`} className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground disabled:opacity-40">{calling ? "…" : "Call"}</button>}
-          {client && onOpenPlaybook && playbook && (
-            <button onClick={() => onOpenPlaybook(client.id)} title={playbook.next ? `Open Playbook — next: ${playbook.next.label}` : "Open Playbook — all steps complete"}
-              className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">
-              Playbook {playbook.doneCount}/{playbook.total}
-            </button>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-[12px] font-medium" style={{ color: STAGE_META[stage].color }}>
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: STAGE_META[stage].color }} />
+              {STAGE_META[stage].label}
+            </span>
           )}
-          <button onClick={toggleHistory} title="Outreach history" className={`shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium ${histOpen ? "bg-accent-soft text-accent" : "text-muted hover:bg-surface hover:text-foreground"}`}>History</button>
-          <button onClick={() => setLogOpen((o) => !o)} title="Log an outreach touch" className={`shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium ${logOpen ? "bg-accent-soft text-accent" : "text-muted hover:bg-surface hover:text-foreground"}`}>Log</button>
-          {/* The gameplan's opener: featuring the business is the give that
-              earns the conversation, so this generates the whole Stage-3
-              touch sequence rather than just tagging a row. */}
-          {onFeature && (featured
-            ? <span title="Already run through the newsletter feature motion" className="shrink-0 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[12px] font-medium text-emerald-600">★ Featured</span>
-            : <button onClick={() => onFeature(row)} disabled={!canFeature}
-                title={canFeature ? "Feature in the newsletter — creates the Stage-3 outreach sequence" : "No GoHighLevel contact matched to this listing yet, so there's nothing to attach the sequence to"}
-                className="shrink-0 rounded-md border border-dashed px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted">★ Feature</button>)}
         </div>
 
-        {/* Client */}
-        <div className="pl-5 sm:pl-0">
-          {client && meta
-            ? <button onClick={() => onOpenClient(client.id)} className="rounded-md px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent-soft"><span className="mr-1 inline-block h-2 w-2 rounded-full align-middle" style={{ background: meta.dot }} />✓ Client</button>
-            : contact
-              ? <button onClick={() => onAddContact(contact)} className="rounded-md border border-dashed px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent-soft">+ Add as client</button>
-              : <span className="text-[11px] text-muted/60">no contact</span>}
+        {/* What's left — Playbook progress + open tasks (the primary reason
+            to open this row), with Call/History/Log/Feature de-emphasized
+            into a compact icon row underneath. */}
+        <div className="flex flex-col gap-1 pl-5 sm:pl-0">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {client && onOpenPlaybook && playbook && (
+              <button onClick={() => onOpenPlaybook(client.id)} title={playbook.next ? `Playbook — next: ${playbook.next.label}` : "Playbook — all steps complete"}
+                className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">
+                Playbook {playbook.doneCount}/{playbook.total}
+                {playbook.next && <span className="ml-1 font-normal text-accent">· {playbook.next.label}</span>}
+              </button>
+            )}
+            {client && onAddTask ? (
+              <button onClick={() => setTasksOpen((o) => !o)} title={openTasks.length ? `${openTasks.length} open task${openTasks.length === 1 ? "" : "s"}` : "No open tasks — click to add one"}
+                className={`shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium ${tasksOpen ? "bg-accent-soft text-accent" : openTasks.length ? "text-foreground hover:bg-surface" : "border-dashed text-muted hover:bg-surface hover:text-foreground"}`}>
+                {openTasks.length ? `${openTasks.length} task${openTasks.length === 1 ? "" : "s"}` : "+ Task"}
+                {nextDue && <span className={`ml-1 font-normal ${isOverdue(nextDue) ? "text-danger" : "text-muted"}`}>{formatDue(nextDue)}</span>}
+              </button>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap items-center gap-0.5 text-muted">
+            {listing.phone && <button onClick={call} disabled={calling} title={`Bridge-call ${listing.phone}`} className="shrink-0 rounded p-1 hover:bg-surface hover:text-foreground disabled:opacity-40"><I.phone /></button>}
+            <button onClick={toggleHistory} title="Outreach history" className={`shrink-0 rounded p-1 ${histOpen ? "bg-accent-soft text-accent" : "hover:bg-surface hover:text-foreground"}`}><I.clock /></button>
+            <button onClick={() => setLogOpen((o) => !o)} title="Log an outreach touch" className={`shrink-0 rounded p-1 ${logOpen ? "bg-accent-soft text-accent" : "hover:bg-surface hover:text-foreground"}`}><I.pencil /></button>
+            {onFeature && (featured
+              ? <span title="Already run through the newsletter feature motion" className="shrink-0 rounded p-1 text-emerald-600"><I.star filled /></span>
+              : <button onClick={() => onFeature(row)} disabled={!canFeature}
+                  title={canFeature ? "Feature in the newsletter — creates the Stage-3 outreach sequence" : "No GoHighLevel contact matched to this listing yet, so there's nothing to attach the sequence to"}
+                  className="shrink-0 rounded p-1 hover:bg-surface hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"><I.star /></button>)}
+            {callMsg && <span className="text-[11px]">{callMsg}</span>}
+          </div>
+        </div>
+
+        {/* Links — GHL contact + the public listing page. Clicking the name
+            already opens/creates the client record, so no "+ Add as client"
+            affordance is needed here. */}
+        <div className="flex flex-col items-start gap-0.5 pl-5 text-[11px] font-medium sm:pl-0">
+          {ghlUrl && <a href={ghlUrl} target="_blank" rel="noopener noreferrer" title="Open in GoHighLevel" className="text-muted hover:text-accent hover:underline">GHL ↗</a>}
+          {listing.url && <a href={listing.url} target="_blank" rel="noopener noreferrer" title="View public listing page" className="text-muted hover:text-accent hover:underline">Listing ↗</a>}
+          {!ghlUrl && !listing.url && <span className="text-muted/30">—</span>}
         </div>
       </div>
 
