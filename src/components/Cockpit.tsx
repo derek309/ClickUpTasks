@@ -93,7 +93,7 @@ import TerritoryPanel from "./TerritoryPanel";
 import { PlannerPanel } from "./cockpit/PlannerPanel";
 
 
-import { I, Avatar, SideItem, Toggle, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFromName, LIST_COLUMNS, type FilterState, type SortBy, type Toast } from "./cockpit/ui";
+import { I, Avatar, SideItem, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFromName, LIST_COLUMNS, type FilterState, type SortBy, type Toast } from "./cockpit/ui";
 import { ConfirmModal, PromptModal, LinkFormModal, MergeTaskModal, MergeClientModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
 import { CommandK } from "./cockpit/CommandK";
 import { GroupedList, InlineDue } from "./cockpit/GroupedList";
@@ -3894,10 +3894,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             one flip away if that changes. */}
         {navVisible.inbox && (
           <nav className="mt-[7px] shrink-0 space-y-0.5 border-t px-2 pt-[7px]">
-            <div className="flex items-center justify-between px-2.5 pb-1">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Chat</span>
-              {canAdmin && <Toggle on={dmEnabled} onClick={() => setDmEnabled(!dmEnabled)} />}
-            </div>
+            <div className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Chat</div>
             <SideItem active={inboxView && dmUserId === null} title="Conversations (press 2)" onClick={openTeamChat}><I.comment className="text-muted" /> <span>Conversations</span>{(teamChatUnread || unread > 0) && (
               // Both indicators, not either/or: notifications accumulate
               // routinely, and an exclusive check meant a real unread chat
@@ -4467,6 +4464,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             templates={taskTemplates} projects={projects}
             onSaveTemplate={saveTemplate} onDeleteTemplate={deleteTemplate} onUseTemplateAsTask={useTemplateAsTask}
             playbooks={playbooks} onSavePlaybook={savePlaybook} onDeletePlaybook={deletePlaybook} onLoadPlaybook={loadPlaybook}
+            dmEnabled={dmEnabled} onSetDmEnabled={setDmEnabled}
           />
         ) : territoryView && territoryView !== "all" && plannerOpen ? (
           <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">

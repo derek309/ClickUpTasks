@@ -51,6 +51,8 @@ export default function SettingsHub({
   onSavePlaybook,
   onDeletePlaybook,
   onLoadPlaybook,
+  dmEnabled,
+  onSetDmEnabled,
 }: {
   initialTab?: TabKey;
   me: Me;
@@ -76,6 +78,11 @@ export default function SettingsHub({
   onSavePlaybook: (id: string | undefined, spec: { name: string; tasks: PlaybookTask[] }) => void;
   onDeletePlaybook: (id: string) => void;
   onLoadPlaybook: (playbookId: string, clientId: string, projectId: string) => void;
+  // Shared, workspace-wide — whether the sidebar's DM list is on. Lives here
+  // (the admin-only Team tab) rather than in the sidebar itself, where it
+  // used to be a switch right next to the Chat section.
+  dmEnabled: boolean;
+  onSetDmEnabled: (v: boolean) => void;
 }) {
   const tabs: { key: TabKey; label: string; icon: keyof typeof I; visible: boolean }[] = [
     { key: "integrations", label: "Integrations", icon: "gear", visible: canAdmin },
@@ -104,7 +111,7 @@ export default function SettingsHub({
       </nav>
       <div className="min-w-0 flex-1 overflow-y-auto">
             {tab === "integrations" && canAdmin && <SettingsPanel clients={subAccounts} onSaveClient={onSaveClient} onSynced={onSynced} />}
-            {tab === "team" && canAdmin && <TeamPanel me={me} />}
+            {tab === "team" && canAdmin && <TeamPanel me={me} dmEnabled={dmEnabled} onSetDmEnabled={onSetDmEnabled} />}
             {tab === "territories" && hasTerritoryAccess && (
               <TerritoryPanel me={me} canAdmin={canAdmin} territories={territories} contacts={contacts} clients={clients}
                 onAddTerritory={onAddTerritory} onToggleAssignee={onToggleAssignee} onDeleteTerritory={onDeleteTerritory}

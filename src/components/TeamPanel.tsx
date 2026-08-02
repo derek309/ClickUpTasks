@@ -4,11 +4,11 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { type Me } from "@/lib/data";
 import { ConfirmModal, type ConfirmSpec } from "./cockpit/modals";
-import { I } from "./cockpit/ui";
+import { I, Toggle } from "./cockpit/ui";
 
 type Profile = { id: string; email: string; name: string; role: "admin" | "va"; color: string; pending?: boolean; avatar_url?: string | null; can_send_messages?: boolean; send_from_email?: string | null; ghl_user_id?: string | null };
 
-export default function TeamPanel({ me }: { me: Me }) {
+export default function TeamPanel({ me, dmEnabled, onSetDmEnabled }: { me: Me; dmEnabled: boolean; onSetDmEnabled: (v: boolean) => void }) {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -161,6 +161,14 @@ export default function TeamPanel({ me }: { me: Me }) {
 
   return (
     <>
+        <div className="flex items-center justify-between gap-3 border-b px-5 py-3">
+          <div>
+            <div className="text-[15px] font-medium">Direct messages</div>
+            <div className="text-[13px] text-muted">Off for now — everyone still has the team-wide Conversations feed; use @ to address someone specifically. Flip this on to bring back 1:1 DM threads for the whole team.</div>
+          </div>
+          <Toggle on={dmEnabled} onClick={() => onSetDmEnabled(!dmEnabled)} />
+        </div>
+
         <form onSubmit={sendInvite} className="flex flex-wrap items-center gap-2 border-b bg-background/40 px-5 py-3">
           <input value={inviteName} onChange={(e) => setInviteName(e.target.value)} placeholder="Name (optional)" className="w-40 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
           <input value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} type="email" required placeholder="teammate@email.com" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
