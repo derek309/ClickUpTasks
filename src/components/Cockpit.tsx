@@ -159,8 +159,8 @@ function parseSearch(search: string): NavState {
 // Number-key shortcuts for the top-level views, in sidebar order. Shown as
 // a hint on each sidebar item and handled by the keydown effect below.
 const NAV_KEY_VIEWS: Record<string, "dashboard" | "clients" | "projects" | "personal" | "teamchat"> = {
-  "1": "teamchat",
-  "2": "dashboard",
+  "1": "dashboard",
+  "2": "teamchat",
   "3": "clients",
   "4": "projects",
   "5": "personal",
@@ -3880,19 +3880,25 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <button onClick={onSignOut} title="Sign out" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-red-500"><I.logout /></button>
         </div>
 
-        {/* Conversations leads the sidebar now (moved up from the bottom,
-            below Territories) — team-wide chat is the primary destination;
-            DMs are parked per Derek's ask ("we don't need DMs for now, just
-            the team — if they want to chat with someone specifically they
-            can use the @") but not deleted, just admin-toggled off by
-            default so they're one flip away if that changes. */}
+        {/* Dashboard leads — the single place everyone works from (Derek).
+            Conversations follows right below it; the Clients/Projects/
+            Personal group is below that. */}
+        <nav className="shrink-0 space-y-0.5 px-2">
+          {navVisible.work && <SideItem active={myWork} title="Dashboard (press 1)" onClick={() => goToView("dashboard")}><I.grid className="text-muted" /> <span>Dashboard</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
+        </nav>
+
+        {/* Conversations — team-wide chat is the primary destination; DMs are
+            parked per Derek's ask ("we don't need DMs for now, just the team
+            — if they want to chat with someone specifically they can use the
+            @") but not deleted, just admin-toggled off by default so they're
+            one flip away if that changes. */}
         {navVisible.inbox && (
-          <nav className="shrink-0 space-y-0.5 px-2">
+          <nav className="mt-[7px] shrink-0 space-y-0.5 border-t px-2 pt-[7px]">
             <div className="flex items-center justify-between px-2.5 pb-1">
               <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Chat</span>
               {canAdmin && <Toggle on={dmEnabled} onClick={() => setDmEnabled(!dmEnabled)} />}
             </div>
-            <SideItem active={inboxView && dmUserId === null} title="Conversations (press 1)" onClick={openTeamChat}><I.comment className="text-muted" /> <span>Conversations</span>{(teamChatUnread || unread > 0) && (
+            <SideItem active={inboxView && dmUserId === null} title="Conversations (press 2)" onClick={openTeamChat}><I.comment className="text-muted" /> <span>Conversations</span>{(teamChatUnread || unread > 0) && (
               // Both indicators, not either/or: notifications accumulate
               // routinely, and an exclusive check meant a real unread chat
               // message showed nothing at all whenever any notice was pending.
@@ -3910,17 +3916,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </nav>
         )}
 
-        {/* Dashboard — the single place everyone works from (Derek). The
-            Clients/Projects/Personal group follows below it. */}
-        <nav className="mt-1.5 shrink-0 space-y-0.5 border-t px-2 pt-1.5">
-          {navVisible.work && <SideItem active={myWork} title="Dashboard (press 2)" onClick={() => goToView("dashboard")}><I.grid className="text-muted" /> <span>Dashboard</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
-        </nav>
-
         {/* Clients / Projects / Personal, grouped together — Projects is
             still a directory page rather than an inline list (day-to-day
             work happens from Dashboard), and Personal sits last in this
             group rather than up by Dashboard. */}
-        <nav className="mt-1.5 shrink-0 space-y-0.5 border-t px-2 pt-1.5">
+        <nav className="mt-[7px] shrink-0 space-y-0.5 border-t px-2 pt-[7px]">
           <SideItem active={dirView === "clients"} title="Clients (press 3)" onClick={() => goToView("clients")}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{clientList.length}</span></SideItem>
           {clients.some((c) => c.id === WORKSPACE_CLIENT_ID) && (
             <SideItem active={dirView === "projects"} title="Projects (press 4)" onClick={() => goToView("projects")}><I.folder className="text-muted" /> <span>Projects</span><span className="ml-auto text-[13px] text-muted">{workspaceProjects.length}</span></SideItem>
@@ -3940,7 +3940,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           const pinned = [...starredLists].map((id) => projectById(id)).filter((p): p is Project => !!p);
           if (pinnedClients.length === 0 && pinned.length === 0) return null;
           return (
-            <nav className="mt-1.5 shrink-0 space-y-0.5 border-t px-2 pt-1.5">
+            <nav className="mt-[7px] shrink-0 space-y-0.5 border-t px-2 pt-[7px]">
               <div className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Pinned</div>
               {pinnedClients.map((c) => {
                 const active = !myWork && !personalView && !inboxView && !settingsView && !dirView && !activeProject && activeClient === c.id;
@@ -3976,7 +3976,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         {/* Territories — cities (city+state) assigned to you; an admin sees all.
             Click a city to work its contacts (claimed vs unclaimed). */}
         {visibleTerritories.length > 0 && (
-          <nav className="mt-1.5 shrink-0 space-y-0.5 border-t px-2 pt-1.5">
+          <nav className="mt-[7px] shrink-0 space-y-0.5 border-t px-2 pt-[7px]">
             <div className="flex items-center justify-between px-2.5 pb-1">
               <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Territories</span>
               {canAdmin && <button onClick={() => openTerritory("all")} title="Manage territories" className="rounded p-0.5 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>}
@@ -3989,7 +3989,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </nav>
         )}
         {canAdmin && visibleTerritories.length === 0 && (
-          <nav className="mt-2 shrink-0 border-t px-2 pt-2">
+          <nav className="mt-[7px] shrink-0 border-t px-2 pt-[7px]">
             <SideItem active={territoryView === "all"} onClick={() => openTerritory("all")}><I.flag className="text-muted" /> <span>Territories</span></SideItem>
           </nav>
         )}
