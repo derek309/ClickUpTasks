@@ -192,7 +192,16 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   const [notConfigured, setNotConfigured] = useState(() => warm()?.notConfigured ?? false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggleGroup = (key: string) => setCollapsed((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
-  const expandGroup = (key: string) => setCollapsed((s) => { const n = new Set(s); n.delete(key); return n; });
+  // Clicking a stat pill hard-filters to just that stage (not a peek-while-
+  // keeping-the-rest-visible expand) — the funnel-overview bar already shows
+  // every stage's shape, so "drill into this one segment" is the more useful
+  // action than expanding it inline among seven others. Click the same pill
+  // again (or "Show all stages") to clear back to the full funnel.
+  const [stageFilter, setStageFilter] = useState<string | null>(null);
+  const filterToGroup = (key: string) => {
+    setStageFilter((cur) => (cur === key ? null : key));
+    setCollapsed((s) => { const n = new Set(s); n.delete(key); return n; }); // in case "Collapse all" left it closed
+  };
   const [q, setQ] = useState("");
   // Sort within each stage group — Priority (default: due-for-outreach first,
   // per the Planner's own rotation window, so acquisition work the Planner
@@ -409,18 +418,26 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
         </button>
       </div>
 
-      {/* Funnel overview — every stage's count at a glance without expanding
-          anything, and a quick-jump: clicking a stat expands just that group
-          (handy after "Collapse all" to open only the one or two you want). */}
+      {/* Funnel overview — every stage's count at a glance, and a hard
+          filter: clicking a stat drills into just that one segment (hides
+          every other group entirely) rather than peeking at it inline among
+          seven others. Click the same stat again, or "Show all stages", to
+          go back to the full funnel. */}
       <div className="mb-2 flex flex-wrap items-center gap-1.5">
-        {groups.map((g) => (
-          <button key={g.key} onClick={() => expandGroup(g.key)} title={g.hint}
-            className="inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[12px] font-medium hover:bg-background"
-            style={{ borderColor: g.color + "40" }}>
-            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: g.color }} />
-            {g.label} <span className="font-semibold" style={{ color: g.color }}>{g.rows.length}</span>
-          </button>
-        ))}
+        {groups.map((g) => {
+          const active = stageFilter === g.key;
+          return (
+            <button key={g.key} onClick={() => filterToGroup(g.key)} title={active ? "Show all stages" : g.hint}
+              className="inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[12px] font-medium hover:bg-background"
+              style={active ? { background: g.color + "22", borderColor: g.color, color: g.color } : { borderColor: g.color + "40" }}>
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: g.color }} />
+              {g.label} <span className="font-semibold" style={!active ? { color: g.color } : undefined}>{g.rows.length}</span>
+            </button>
+          );
+        })}
+        {stageFilter && (
+          <button onClick={() => setStageFilter(null)} className="text-[12px] font-medium text-muted hover:text-foreground hover:underline">Show all stages</button>
+        )}
       </div>
 
       <div className="overflow-x-auto rounded-xl border bg-surface shadow-soft">
@@ -430,7 +447,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
           <span className="text-left">Stage</span>
         </div>
         <div className="divide-y-8 divide-background">
-          {groups.map((g) => {
+          {groups.filter((g) => !stageFilter || g.key === stageFilter).map((g) => {
             const isOpen = !collapsed.has(g.key);
             return (
               <div key={g.key}>
