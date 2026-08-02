@@ -21,7 +21,7 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
   // single-city page (see TerritoryDirectory), so optional here: the admin
   // multi-city overview below never sets focusId and never needs them.
   onSyncClients?: (contacts: Contact[]) => void;
-  onOpenClient: (clientId: string) => void;
+  onOpenClient: (clientId: string, tab?: "chat") => void;
   // Newsletter feature motion, threaded straight through to the city view.
   featuredClientIds?: Set<string>;
   onFeature?: (opts: { clientId: string | null; contact: Contact | null; name: string; city: string; state: string }) => void;

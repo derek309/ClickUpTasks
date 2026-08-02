@@ -4464,7 +4464,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               onSyncClients={syncTerritoryClients}
               featuredClientIds={featuredClientIds}
               onFeature={featureBusiness}
-              onOpenClient={(id) => { setTerritoryView(null); setActiveClient(id); setActiveProject(null); setClientTab("tasks"); }}
+              onOpenClient={(id, tab) => { setTerritoryView(null); setActiveClient(id); setActiveProject(null); setClientTab(tab ?? "tasks"); }}
               tasksByClient={territoryTasksByClient}
               onAddTask={addTerritoryBusinessTask}
               onOpenTask={setOpenTaskId}

@@ -43,47 +43,8 @@ export type DirectoryListing = {
   url: string; // public listing page — "" if CUL_WP_BASE_URL isn't configured
   score: number | null;
   category: string;
-  // Outreach pipeline (from /sales — source of truth)
-  outcome: string;
-  outcomeLabel: string;
-  nextAction: string;
-  nextActionLabel: string;
-  followupDue: number;  // unix seconds, 0 = none
-  lastTouched: number;  // unix seconds, 0 = never
   rep: string;          // assigned ambassador's name (read-only here)
   ghlContactId: string; // links to the GoHighLevel contact record
-  activityLog?: ActivityEntry[]; // loaded on demand / after a touch
-};
-
-export type ActivityEntry = {
-  id: string;
-  outcomeLabel: string;
-  nextActionLabel: string;
-  dateH: string;
-  tsH: string;
-  user: string;
-  note: string;
-  amountLabel: string;
-};
-
-// Mirrors the /sales vocabulary (cul_sales_outcomes / cul_sales_next_actions).
-export const OUTCOMES: [string, string][] = [
-  ["emailed", "Emailed"], ["called", "Called"], ["sms", "SMS'd"], ["visited", "Visited"],
-  ["presented", "Appointment"], ["posted", "Posted"], ["won", "Won"], ["lost", "Lost"],
-];
-export const NEXT_ACTIONS: [string, string][] = [
-  ["email", "Email"], ["call", "Call"], ["sms", "SMS"], ["visit", "Visit"], ["present", "Appointment"], ["close", "Close"],
-];
-
-// Returns { label, overdue }. Kept a module-scope helper (not computed in the
-// component body) so its Date.now() read doesn't trip react-hooks/purity.
-const fmtDue = (unix: number): { label: string; overdue: boolean } => {
-  if (!unix) return { label: "", overdue: false };
-  const days = Math.round((unix * 1000 - Date.now()) / 86400000);
-  if (days < 0) return { label: `overdue ${-days}d`, overdue: true };
-  if (days === 0) return { label: "due today", overdue: false };
-  if (days === 1) return { label: "due tomorrow", overdue: false };
-  return { label: `due in ${days}d`, overdue: false };
 };
 
 // Last 10 digits — normalizes (555) 123-4567 / +1 555 123 4567 / 5551234567 to
@@ -161,7 +122,8 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // Bulk auto-sync (see below). Optional so this component still degrades
   // gracefully if a caller doesn't wire it.
   onSyncClients?: (contacts: Contact[]) => void;
-  onOpenClient: (clientId: string) => void;
+  // tab="chat" opens straight to the client's Journal tab (see ListingRow).
+  onOpenClient: (clientId: string, tab?: "chat") => void;
   // Newsletter feature motion. Optional so the admin multi-city overview,
   // which has no ambassador context, degrades to a read-only list.
   featuredClientIds?: Set<string>;
@@ -251,17 +213,6 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
     const interval = setInterval(fetchInvites, REFRESH_INTERVAL);
     return () => { alive = false; clearInterval(interval); };
   }, [territoryId]);
-
-  // Patch one listing in place after a logged touch returns the fresh state
-  // from /sales — keeps the funnel accurate without a full refetch, and
-  // writes through to the cache so a revisit within the TTL sees the change.
-  const patchListing = (id: number | string, next: Partial<DirectoryListing>) =>
-    setListings((ls) => {
-      const updated = (ls ?? []).map((l) => (l.id === id ? { ...l, ...next } : l));
-      const cached = listingsCache.get(cacheKey);
-      if (cached) listingsCache.set(cacheKey, { ...cached, data: updated, at: Date.now() });
-      return updated;
-    });
 
   const clientIds = useMemo(() => new Set(clients.map((c) => c.id)), [clients]);
 
@@ -387,7 +338,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                   <span className="truncate text-[12px] font-normal normal-case text-muted">{g.hint}</span>
                 </button>
                 {isOpen && g.rows.map((r) => (
-                  <ListingRow key={g.key + r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} onPatch={patchListing}
+                  <ListingRow key={g.key + r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient}
                     stage={computeBusinessStage(r.listing, r.client, inviteFor(r.listing))}
                     invite={inviteFor(r.listing)}
                     onSetClientStatus={onSetClientStatus} ghlContactUrlFor={ghlContactUrlFor}
@@ -418,11 +369,13 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, onPatch, stage, invite, onSetClientStatus, ghlContactUrlFor, featured, canFeature, onFeature, tasks, onAddTask, onOpenTask, playbookTasks, onOpenPlaybook }: {
+function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClientStatus, ghlContactUrlFor, featured, canFeature, onFeature, tasks, onAddTask, onOpenTask, playbookTasks, onOpenPlaybook }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
-  onOpenClient: (id: string) => void;
-  onPatch: (id: number | string, next: Partial<DirectoryListing>) => void;
+  // tab="chat" opens straight to the client's Journal — the real activity
+  // feed (GHL email/SMS conversation, task activity/completion, team notes)
+  // instead of this page's old manual outreach log.
+  onOpenClient: (id: string, tab?: "chat") => void;
   // This row's computed funnel position (see computeBusinessStage above).
   stage: BusinessStage;
   // This business's most recent Content Planner invite, if any — undefined
@@ -449,24 +402,11 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, stage, invite, o
   onOpenPlaybook?: (clientId: string) => void;
 }) {
   const { listing, contact, client } = row;
-  const [logOpen, setLogOpen] = useState(false);
-  const [outcome, setOutcome] = useState("");
-  const [nextAction, setNextAction] = useState("");
-  const [followupDays, setFollowupDays] = useState("");
-  const [note, setNote] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [calling, setCalling] = useState(false);
-  const [callMsg, setCallMsg] = useState<string | null>(null);
-  const [histOpen, setHistOpen] = useState(false);
-  const [histLoading, setHistLoading] = useState(false);
   const [tasksOpen, setTasksOpen] = useState(false);
   const [newTask, setNewTask] = useState("");
 
-  const due = fmtDue(listing.followupDue);
-  const log = listing.activityLog;
   const playbook = client ? playbookCompletion(client.id, playbookTasks) : null;
-  const expanded = logOpen || histOpen || tasksOpen;
+  const expanded = tasksOpen;
   const ghlUrl = client ? ghlContactUrlFor?.(client.id) : null;
 
   // Soonest due date across this business's open tasks — the one number worth
@@ -480,55 +420,6 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, stage, invite, o
     if (!title || !client || !onAddTask) return;
     onAddTask(client.id, title);
     setNewTask("");
-  };
-
-  const call = async () => {
-    if (!listing.phone) { setCallMsg("No phone on file"); return; }
-    setCalling(true); setCallMsg(null);
-    try {
-      const res = await authedFetch("/api/directory/call", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ listingId: String(listing.id) }) });
-      const data = await res.json().catch(() => ({}));
-      setCallMsg(res.ok && data?.ok ? "Calling… your phone rings first" : (data?.error || `Error ${res.status}`));
-    } catch (e) {
-      setCallMsg(String((e as Error)?.message ?? e));
-    } finally {
-      setCalling(false);
-    }
-  };
-
-  const toggleHistory = async () => {
-    const opening = !histOpen;
-    setHistOpen(opening);
-    if (opening && !log) {
-      setHistLoading(true);
-      try {
-        const res = await authedFetch(`/api/directory/listing?listingId=${listing.id}`);
-        const data = await res.json().catch(() => ({}));
-        onPatch(listing.id, { activityLog: Array.isArray(data.activityLog) ? data.activityLog : [] });
-      } catch { /* leave closed-empty on error */ }
-      finally { setHistLoading(false); }
-    }
-  };
-
-  const submit = async () => {
-    if (!outcome && !nextAction && !followupDays.trim() && !note.trim()) { setLogOpen(false); return; }
-    setSaving(true); setError(null);
-    try {
-      const body: Record<string, unknown> = { listingId: String(listing.id) };
-      if (outcome) body.outcome = outcome;
-      if (nextAction) body.nextAction = nextAction;
-      if (note.trim()) body.note = note.trim();
-      if (followupDays.trim()) body.followupDays = Number(followupDays) || 0;
-      const res = await authedFetch("/api/directory/activity", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) { setError(data?.error || `Error ${res.status}`); return; }
-      onPatch(listing.id, data.listing);
-      setLogOpen(false); setOutcome(""); setNextAction(""); setFollowupDays(""); setNote("");
-    } catch (e) {
-      setError(String((e as Error)?.message ?? e));
-    } finally {
-      setSaving(false);
-    }
   };
 
   return (
@@ -561,9 +452,6 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, stage, invite, o
                 {invite.status === "accepted" ? "✅ Accepted" : invite.status === "skipped" ? "⏭ Skipped" : "✉️ Invited"} {formatDue(invite.at)}
               </span>
             )}
-            {listing.outcomeLabel && <span className="rounded bg-background px-1.5 py-0.5 font-medium">{listing.outcomeLabel}</span>}
-            {listing.nextActionLabel && <span className="rounded bg-accent-soft px-1.5 py-0.5 font-medium text-accent">→ {listing.nextActionLabel}</span>}
-            {due.label && <span className={due.overdue ? "font-medium text-danger" : ""}>{due.label}</span>}
             {listing.rep && <span>· {listing.rep}</span>}
           </div>
         </div>
@@ -592,8 +480,8 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, stage, invite, o
         </div>
 
         {/* What's left — Playbook progress + open tasks (the primary reason
-            to open this row), with Call/History/Log/Feature de-emphasized
-            into a compact icon row underneath. */}
+            to open this row), with Journal/Feature de-emphasized into a
+            compact icon row underneath. */}
         <div className="flex flex-col gap-1 pl-5 sm:pl-0">
           <div className="flex flex-wrap items-center gap-1.5">
             {client && onOpenPlaybook && playbook && (
@@ -612,15 +500,18 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, stage, invite, o
             ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-0.5 text-muted">
-            {listing.phone && <button onClick={call} disabled={calling} title={`Bridge-call ${listing.phone}`} className="shrink-0 rounded p-1 hover:bg-surface hover:text-foreground disabled:opacity-40"><I.phone /></button>}
-            <button onClick={toggleHistory} title="Outreach history" className={`shrink-0 rounded p-1 ${histOpen ? "bg-accent-soft text-accent" : "hover:bg-surface hover:text-foreground"}`}><I.clock /></button>
-            <button onClick={() => setLogOpen((o) => !o)} title="Log an outreach touch" className={`shrink-0 rounded p-1 ${logOpen ? "bg-accent-soft text-accent" : "hover:bg-surface hover:text-foreground"}`}><I.pencil /></button>
+            {/* Real activity (calls/emails/SMS/notes) lives in the client's
+                own Journal now — GHL conversation + task activity, not a
+                manually-entered log — so this just jumps there. */}
+            {client && (
+              <button onClick={() => onOpenClient(client.id, "chat")} title="Open Journal — calls, emails, SMS, and notes for this business"
+                className="shrink-0 rounded p-1 hover:bg-surface hover:text-foreground"><I.clock /></button>
+            )}
             {onFeature && (featured
               ? <span title="Already run through the newsletter feature motion" className="shrink-0 rounded p-1 text-emerald-600"><I.star filled /></span>
               : <button onClick={() => onFeature(row)} disabled={!canFeature}
                   title={canFeature ? "Feature in the newsletter — creates the Stage-3 outreach sequence" : "No GoHighLevel contact matched to this listing yet, so there's nothing to attach the sequence to"}
                   className="shrink-0 rounded p-1 hover:bg-surface hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"><I.star /></button>)}
-            {callMsg && <span className="text-[11px]">{callMsg}</span>}
           </div>
         </div>
 
@@ -654,50 +545,6 @@ function ListingRow({ row, onAddContact, onOpenClient, onPatch, stage, invite, o
               half-typed thought, and committing there creates junk tasks. */}
           <input value={newTask} onChange={(e) => setNewTask(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addTask(); }}
             placeholder="Add a task…  ↵" className="mt-1 w-full rounded-md border bg-surface px-2 py-1 text-[13px] outline-none focus:border-accent" />
-        </div>
-      )}
-
-      {/* Outreach history */}
-      {histOpen && (
-        <div className="space-y-1 border-t bg-background/40 px-4 py-2 pl-9 text-[12px]">
-          {histLoading && <div className="text-muted">Loading history…</div>}
-          {!histLoading && (!log || log.length === 0) && <div className="text-muted">No touches logged yet.</div>}
-          {!histLoading && log && log.map((e) => (
-            <div key={e.id} className="border-b border-border/60 pb-1 last:border-0 last:pb-0">
-              <div className="flex flex-wrap items-center gap-1.5">
-                {e.outcomeLabel && <span className="rounded bg-surface px-1.5 py-0.5 font-medium text-muted">{e.outcomeLabel}</span>}
-                {e.nextActionLabel && <span className="rounded bg-accent-soft px-1.5 py-0.5 font-medium text-accent">→ {e.nextActionLabel}</span>}
-                {e.amountLabel && <span className="font-medium text-emerald-600">{e.amountLabel}</span>}
-                <span className="ml-auto text-muted/70">{e.dateH}{e.user && ` · ${e.user}`}</span>
-              </div>
-              {e.note && <div className="mt-0.5 text-muted">{e.note}</div>}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Log-touch form */}
-      {logOpen && (
-        <div className="space-y-2 border-t bg-background/40 px-4 py-2 pl-9">
-          <div className="flex flex-wrap gap-2">
-            <select value={outcome} onChange={(e) => setOutcome(e.target.value)} className="rounded-md border bg-surface px-2 py-1 text-[13px] outline-none focus:border-accent">
-              <option value="">Outcome…</option>
-              {OUTCOMES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-            <select value={nextAction} onChange={(e) => setNextAction(e.target.value)} className="rounded-md border bg-surface px-2 py-1 text-[13px] outline-none focus:border-accent">
-              <option value="">Next action…</option>
-              {NEXT_ACTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-            <input value={followupDays} onChange={(e) => setFollowupDays(e.target.value.replace(/\D/g, ""))} placeholder="Follow-up (days)" inputMode="numeric"
-              className="w-32 rounded-md border bg-surface px-2 py-1 text-[13px] outline-none focus:border-accent" />
-          </div>
-          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
-            className="w-full rounded-md border bg-surface px-2 py-1 text-[13px] outline-none focus:border-accent" />
-          {error && <div className="text-[12px] text-danger">{error}</div>}
-          <div className="flex justify-end gap-2">
-            <button onClick={() => setLogOpen(false)} className="rounded-md border px-2.5 py-1 text-[13px] font-medium hover:bg-surface">Cancel</button>
-            <button onClick={submit} disabled={saving} className="rounded-md bg-accent px-2.5 py-1 text-[13px] font-medium text-white disabled:opacity-40">{saving ? "Saving…" : "Log touch"}</button>
-          </div>
         </div>
       )}
     </div>
