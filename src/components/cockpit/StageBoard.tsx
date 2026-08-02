@@ -61,7 +61,7 @@ export default function StageBoard({ stages, tasks, canAdmin, onOpenTask, onSetT
   };
 
   return (
-    <div className="flex items-start gap-3 overflow-x-auto pb-2">
+    <div className="flex gap-3 overflow-x-auto p-4 sm:p-5">
       {columns.map((col) => {
         const key = col.id ?? "none";
         return (
@@ -128,7 +128,7 @@ export default function StageBoard({ stages, tasks, canAdmin, onOpenTask, onSetT
         );
       })}
       {canAdmin && (
-        <button onClick={onCreateStage} className="flex h-10 w-40 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-dashed text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
+        <button onClick={onCreateStage} className="flex h-10 w-40 shrink-0 items-center justify-center gap-1.5 self-start rounded-xl border border-dashed text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
           <I.plus /> Add stage
         </button>
       )}
