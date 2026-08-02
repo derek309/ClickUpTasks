@@ -1302,12 +1302,15 @@ export interface Task {
    * null (legacy row, or a path that predates this field). Recurrence clones
    * propagate the original creator rather than stamping a new one. */
   createdBy?: string | null;
-  /** Set when this task is an auto-generated playbook check-in (see
+  /** Set when this task is an auto-generated recurring reminder — a
+   * SEPARATE marker from playbookStepKey/other identity fields, since a
+   * check-in must stay a normal, fully-editable/deletable task, not a
+   * locked system step. "playbook_stalled"/"playbook_progress": see
    * src/lib/playbookCheckinsServer.ts and the owner-toggle route's progress
-   * trigger) — a SEPARATE marker from playbookStepKey, since a check-in must
-   * stay a normal, fully-editable/deletable task, unlike a real Owner Growth
-   * Plan step. */
-  checkinKind?: "playbook_stalled" | "playbook_progress" | null;
+   * trigger. "newsletter_due": see src/lib/newsletterReminderServer.ts —
+   * one per territory per ISO week, deduped on (client_id, checkin_kind,
+   * due) so the daily cron never doubles up. */
+  checkinKind?: "playbook_stalled" | "playbook_progress" | "newsletter_due" | null;
 }
 
 /** A custom Kanban-style column for one project's own task board (e.g.
@@ -1348,6 +1351,10 @@ export const WORKSPACE_CLIENT_ID = "cl_workspace";
 // two territories can collide on the container id.
 export const TERRITORY_CLIENT_PREFIX = "cl_terr_";
 export const territoryClientId = (territoryId: string) => TERRITORY_CLIENT_PREFIX + territoryId.replace(/^terr_/, "");
+// Same "deterministic id, no lookup" idiom as playbookProjectId — the
+// newsletter reminder cron's one list under a territory's own container
+// client, holding the weekly "send the newsletter" task.
+export const newsletterProjectId = (territoryId: string) => "p_newsletter_" + territoryId;
 
 export const STATUS_META: Record<TaskStatus, { label: string; dot: string; chip: string }> = {
   todo: { label: "To do", dot: "#94a3b8", chip: "#f1f5f9" },

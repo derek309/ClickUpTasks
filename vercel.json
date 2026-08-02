@@ -3,6 +3,7 @@
     { "path": "/api/google/poll-replies", "schedule": "0 13 * * *" },
     { "path": "/api/ghl/sync-appointments", "schedule": "0 14 * * *" },
     { "path": "/api/cron/send-scheduled", "schedule": "0 16 * * *" },
-    { "path": "/api/cron/playbook-checkins", "schedule": "0 15 * * *" }
+    { "path": "/api/cron/playbook-checkins", "schedule": "0 15 * * *" },
+    { "path": "/api/cron/newsletter-reminder", "schedule": "30 13 * * *" }
   ]
 }
