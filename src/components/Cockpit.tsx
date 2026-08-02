@@ -3859,20 +3859,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <button onClick={onSignOut} title="Sign out" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-red-500"><I.logout /></button>
         </div>
 
-        {/* Dashboard leads — the single place everyone works from (Derek).
-            Conversations follows right below it; the Clients/Projects/
-            Personal group is below that. */}
+        {/* Dashboard, Conversations, and Clients/Projects/Personal, all one
+            block (Derek: put them together "so they use less space") — no
+            divider/gap between them, just Pinned/Territories below stay
+            their own sections. DMs under Conversations are parked per
+            Derek's ask ("we don't need DMs for now, just the team — if they
+            want to chat with someone specifically they can use the @") but
+            not deleted, just admin-toggled off by default. */}
         <nav className="shrink-0 space-y-0.5 px-2">
           {navVisible.work && <SideItem active={myWork} title="Dashboard (press 1)" onClick={() => goToView("dashboard")}><I.grid className="text-muted" /> <span>Dashboard</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
-        </nav>
-
-        {/* Conversations — team-wide chat is the primary destination; DMs are
-            parked per Derek's ask ("we don't need DMs for now, just the team
-            — if they want to chat with someone specifically they can use the
-            @") but not deleted, just admin-toggled off by default so they're
-            one flip away if that changes. */}
-        {navVisible.inbox && (
-          <nav className="mt-[10px] shrink-0 space-y-0.5 border-t px-2 pt-[10px]">
+          {navVisible.inbox && (<>
             <SideItem active={inboxView && dmUserId === null} title="Conversations (press 2)" onClick={openTeamChat}><I.comment className="text-muted" /> <span>Conversations</span>{(teamChatUnread || unread > 0) && (
               // Both indicators, not either/or: notifications accumulate
               // routinely, and an exclusive check meant a real unread chat
@@ -3888,14 +3884,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 {dmUnread(u.id) && <span title="Unread messages" className="ml-auto h-2 w-2 rounded-full bg-accent" />}
               </SideItem>
             ))}
-          </nav>
-        )}
-
-        {/* Clients / Projects / Personal, grouped together — Projects is
-            still a directory page rather than an inline list (day-to-day
-            work happens from Dashboard), and Personal sits last in this
-            group rather than up by Dashboard. */}
-        <nav className="mt-[10px] shrink-0 space-y-0.5 border-t px-2 pt-[10px]">
+          </>)}
           <SideItem active={dirView === "clients"} title="Clients (press 3)" onClick={() => goToView("clients")}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{clientList.length}</span></SideItem>
           {clients.some((c) => c.id === WORKSPACE_CLIENT_ID) && (
             <SideItem active={dirView === "projects"} title="Projects (press 4)" onClick={() => goToView("projects")}><I.folder className="text-muted" /> <span>Projects</span><span className="ml-auto text-[13px] text-muted">{workspaceProjects.length}</span></SideItem>
