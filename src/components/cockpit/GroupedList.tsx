@@ -394,7 +394,14 @@ export function InlineDue({ value, overdue, recurrence = "none", onChange, onRec
       // Never wider than the viewport (with an 8px gutter each side) so the
       // picker can't run off the right edge of a phone.
       const width = Math.min(440, window.innerWidth - 16);
-      const left = Math.max(8, Math.min(r.right - width, window.innerWidth - width - 8));
+      // Anchor to the trigger's own left edge (same formula as menuPos
+      // below) instead of its right edge minus the popover width — that
+      // right-aligned math went negative for a trigger sitting close to the
+      // left edge of the content area (e.g. the header's follow-up-date
+      // pill right next to the sidebar), clamping to the viewport's 8px
+      // gutter and rendering the popover behind the sidebar instead of
+      // under the button that opened it.
+      const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
       // Prefer opening below the trigger; flip above it if there's no room
       // below, but clamp so a trigger near the top of a short window (a
       // header control, a split/docked browser) never pushes the panel's
