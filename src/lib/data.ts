@@ -1465,7 +1465,7 @@ export function describeRecurrence(rec: Recurrence, interval?: number, unit?: Re
 // array is mutated in place so every module holding a reference sees updates.
 export const users: User[] = [
   { id: "u_derek", name: "Derek Fox", initials: "DF", color: "#a855f7", role: "admin" },
-  { id: "u_claude", name: "Claude", initials: "AI", color: "#f97316", role: "va" },
+  { id: "u_claude", name: "Claude", initials: "AI", color: "#f97316", role: "va", avatarUrl: "/claude-logo.svg" },
 ];
 // Synthetic, non-account roster entries (currently just Claude, the MCP
 // server's identity for notes/comments it posts) — never a real Supabase
