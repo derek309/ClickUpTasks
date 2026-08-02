@@ -574,6 +574,8 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
             ) : (
               <span className="min-w-0 truncate font-medium">{listing.name}</span>
             )}
+            {ghlUrl && <a href={ghlUrl} target="_blank" rel="noopener noreferrer" title="Open in GoHighLevel" className="shrink-0 rounded p-0.5 text-muted hover:bg-surface hover:text-accent"><I.bolt /></a>}
+            {listing.url && <a href={listing.url} target="_blank" rel="noopener noreferrer" title="View public listing page" className="shrink-0 rounded p-0.5 text-muted hover:bg-surface hover:text-accent"><I.link /></a>}
           </div>
           <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 pl-5 text-[12px] text-muted">
             {invite && (
@@ -618,13 +620,10 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
           (the primary reason to open this row), on its own full-width line
           rather than a cramped grid column — it wraps unpredictably
           depending on how much progress/next-step text a business has, and
-          needs room to breathe. GHL/Listing links lead the line (Feature
-          moved up to the name's leading indicator, replacing the old inert
-          unclaimed dot). */}
+          needs room to breathe. GHL/Listing links now sit inline next to the
+          name instead of leading this line. */}
       {client && (
         <div className="flex flex-wrap items-center gap-1.5 px-4 pb-2 pl-9 pt-1.5 sm:pl-9">
-          {ghlUrl && <a href={ghlUrl} target="_blank" rel="noopener noreferrer" title="Open in GoHighLevel" className="shrink-0 rounded p-1 text-muted hover:bg-surface hover:text-accent"><I.bolt /></a>}
-          {listing.url && <a href={listing.url} target="_blank" rel="noopener noreferrer" title="View public listing page" className="shrink-0 rounded p-1 text-muted hover:bg-surface hover:text-accent"><I.link /></a>}
           {onOpenPlaybook && playbook && (
             <button onClick={() => onOpenPlaybook(client.id)} title={playbook.next ? `Playbook — next: ${playbook.next.label}` : "Playbook — all steps complete"}
               className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">
