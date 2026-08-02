@@ -321,19 +321,32 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   const noListing = useMemo(() => contacts.filter((c) => !matchedContactIds.has(c.id)), [contacts, matchedContactIds]);
 
   // This business's most recent Planner touch — an invite send or a
-  // newsletter feature, whichever is later — feeding the Priority sort's
-  // "due for outreach" check below. null = never touched (most urgent).
+  // newsletter feature, whichever is later. null = never touched (most urgent).
   const lastTouchedAt = (listing: DirectoryListing): string | null => {
     const inv = inviteHistoryMap.get(typeof listing.id === "number" ? listing.id : Number(listing.id))?.lastAt ?? null;
     const feat = featureHistoryMap.get(lc(listing.name))?.last ?? null;
     if (inv && feat) return inv > feat ? inv : feat;
     return inv ?? feat;
   };
+  // The Priority sort's single signal, whichever actually applies to this
+  // row's stage: Unclaimed/Invited are Planner's job (due for an outreach
+  // touch, from lastTouchedAt above); Claimed+ are working a checklist —
+  // Sales pre-onboarding, Playbook once onboarding+ — so a business stuck on
+  // the same step for STEP_STALL_DAYS+ (salesLastProgressAt/
+  // playbookLastProgressAt, bumped by patchTask) is just as much "due" as an
+  // unclaimed prospect Planner hasn't touched. Same isDue/todayIso either way.
+  const priorityLastAt = (r: { listing: DirectoryListing; client: Client | null }, stage: BusinessStage): string | null => {
+    if (stage === "unclaimed" || stage === "invited") return lastTouchedAt(r.listing);
+    if (!r.client) return null;
+    return (stage === "claimed" ? r.client.salesLastProgressAt : r.client.playbookLastProgressAt) ?? null;
+  };
   const todayIso = new Date().toISOString();
-  const sortRows = <T extends { listing: DirectoryListing }>(arr: T[]) => [...arr].sort((a, b) => {
+  const sortRows = <T extends { listing: DirectoryListing; client: Client | null }>(arr: T[]) => [...arr].sort((a, b) => {
     if (sort === "priority") {
-      const aLast = lastTouchedAt(a.listing);
-      const bLast = lastTouchedAt(b.listing);
+      const aStage = computeBusinessStage(a.listing, a.client, inviteFor(a.listing));
+      const bStage = computeBusinessStage(b.listing, b.client, inviteFor(b.listing));
+      const aLast = priorityLastAt(a, aStage);
+      const bLast = priorityLastAt(b, bStage);
       const aDue = isDue(aLast, todayIso);
       const bDue = isDue(bLast, todayIso);
       if (aDue !== bDue) return aDue ? -1 : 1;

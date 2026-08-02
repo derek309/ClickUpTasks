@@ -139,6 +139,12 @@ export const CLIENT_STATUS_ORDER: ClientStatus[] = ["lead", "prospect", "onboard
  * them in the Review tier once this long has passed since their last review.
  * Monthly for now (confirmed with Derek/Justin), tunable later. */
 export const NURTURE_CHECK_IN_DAYS = 30;
+/** How many days without a Sales/Playbook step completing before a business
+ * counts as "stalled" — the Playbook stall-check cron
+ * (playbookCheckinsServer.ts) and the Businesses page's Priority sort both
+ * read this single constant, so the daily nudge and the dashboard's ranking
+ * always agree on what "stuck" means. */
+export const STEP_STALL_DAYS = 14;
 /** `clients.status` is plain text with no DB-level CHECK constraint, so a
  * stored value can in principle predate a funnel change (as happened when
  * this went from active/paused/archived to the 6-stage funnel below) — fall
@@ -205,6 +211,12 @@ export interface Client {
    * lets the daily stall-check cron (playbookCheckinsServer.ts) tell "quiet
    * because it's done" apart from "quiet because it's stuck." */
   playbookLastProgressAt?: string | null;
+  /** Same idea as playbookLastProgressAt, for the Sales checklist — bumped
+   * by patchTask whenever a Sales step's status changes. Feeds the
+   * Businesses page's Priority sort (see STEP_STALL_DAYS below) for
+   * claimed-but-not-yet-onboarding businesses, which are still working Sales
+   * rather than Playbook. */
+  salesLastProgressAt?: string | null;
   /** Unguessable token backing this client's public "what we're waiting on
    * you for" page (/waiting/[token], see supabase/client-share-token.sql) —
    * lazily generated the first time "Copy client link" is clicked, then

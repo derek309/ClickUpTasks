@@ -85,7 +85,7 @@ import {
   normalizeState,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, markMessagesReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact, rowToScheduledMessage, touchPlaybookProgress, markGranolaUnmatchedHandledDb, linkGranolaSyncedNoteDb, fetchAppSetting, upsertAppSetting, fetchPlannerWeeks } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, markMessagesReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact, rowToScheduledMessage, touchPlaybookProgress, touchSalesProgress, markGranolaUnmatchedHandledDb, linkGranolaSyncedNoteDb, fetchAppSetting, upsertAppSetting, fetchPlannerWeeks } from "@/lib/db";
 import { inviteHistory, featureHistory } from "@/lib/plannerPools";
 import { subscribeRealtime } from "@/lib/realtime";
 import { Inbox } from "./cockpit/Inbox";
@@ -2484,6 +2484,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // server-side for its own completion path.
     if (before.playbookStepKey && synced.status !== undefined && synced.status !== before.status) {
       touchPlaybookProgress(before.clientId);
+    }
+    // Same idea, for the Sales checklist — feeds the Businesses page's
+    // Priority sort so a business stuck on the same Sales step doesn't go
+    // unnoticed just because it was never re-invited/re-featured.
+    if (before.salesStepKey && synced.status !== undefined && synced.status !== before.status) {
+      touchSalesProgress(before.clientId);
     }
     if (patch.assigneeId && patch.assigneeId !== me.id && patch.assigneeId !== before.assigneeId) {
       notify(patch.assigneeId, `${me.name} assigned you “${before.title}”`, id);

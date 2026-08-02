@@ -49,14 +49,15 @@ export { titleCase };
 
 // --- mappers ----------------------------------------------------------------
 
-// playbook_last_progress_at deliberately NOT included here: clientToRow feeds
-// the general-purpose upsertClient(), called on nearly every client edit —
-// including it would 400 that entire write path until the migration runs
-// (PostgREST rejects an upsert naming an unknown column). It's written only
-// through the narrow, dedicated touchPlaybookProgress() below, which only
-// fires on an actual playbook-step completion.
+// playbook_last_progress_at/sales_last_progress_at deliberately NOT included
+// here: clientToRow feeds the general-purpose upsertClient(), called on
+// nearly every client edit — including them would 400 that entire write path
+// until the migration runs (PostgREST rejects an upsert naming an unknown
+// column). Each is written only through its own narrow, dedicated
+// touchPlaybookProgress()/touchSalesProgress() below, which only fires on an
+// actual step completion.
 const clientToRow = (c: Client) => ({ id: c.id, name: c.name, color: c.color, ghl_location_id: c.ghlLocationId, status: c.status ?? "lead", type: c.type ?? "client", assigned_to: c.assignedTo ?? [], can_message: c.canMessage ?? [], linked_contact_id: c.linkedContactId ?? null, linked_contact_ids: c.linkedContactIds ?? [], follow_up_at: c.followUpAt ?? null, reviewed_at: c.reviewedAt ?? null, share_token: c.shareToken ?? null });
-export const rowToClient = (r: any): Client => ({ id: r.id, name: titleCase(r.name), color: r.color, ghlLocationId: r.ghl_location_id ?? "", status: (r.status as Client["status"]) ?? "lead", type: (r.type as Client["type"]) ?? "client", assignedTo: r.assigned_to ?? [], canMessage: r.can_message ?? [], linkedContactId: r.linked_contact_id ?? null, linkedContactIds: r.linked_contact_ids ?? [], aiSummary: r.ai_summary ?? null, aiSummaryAt: r.ai_summary_at ?? null, followUpAt: r.follow_up_at ?? null, reviewedAt: r.reviewed_at ?? null, shareToken: r.share_token ?? null, playbookLastProgressAt: r.playbook_last_progress_at ?? null });
+export const rowToClient = (r: any): Client => ({ id: r.id, name: titleCase(r.name), color: r.color, ghlLocationId: r.ghl_location_id ?? "", status: (r.status as Client["status"]) ?? "lead", type: (r.type as Client["type"]) ?? "client", assignedTo: r.assigned_to ?? [], canMessage: r.can_message ?? [], linkedContactId: r.linked_contact_id ?? null, linkedContactIds: r.linked_contact_ids ?? [], aiSummary: r.ai_summary ?? null, aiSummaryAt: r.ai_summary_at ?? null, followUpAt: r.follow_up_at ?? null, reviewedAt: r.reviewed_at ?? null, shareToken: r.share_token ?? null, playbookLastProgressAt: r.playbook_last_progress_at ?? null, salesLastProgressAt: r.sales_last_progress_at ?? null });
 
 const contactToRow = (c: Contact) => ({ id: c.id, client_id: c.clientId, name: c.name, email: c.email, phone: c.phone ?? null, ghl_contact_id: c.ghlContactId, company_name: c.company ?? null, city: c.city ?? null, state: c.state ?? null });
 export const rowToContact = (r: any): Contact => ({ id: r.id, clientId: r.client_id, name: titleCase(r.name), email: r.email ?? "", phone: r.phone ?? "", ghlContactId: r.ghl_contact_id ?? "", company: r.company_name ?? "", city: r.city ?? "", state: r.state ?? "" });
@@ -315,6 +316,9 @@ export const upsertClient = (c: Client) => supabase.from("clients").upsert(clien
 // toggle route has its own server-side twin) — see playbookLastProgressAt's
 // doc comment on Client and playbookCheckinsServer.ts's stall check.
 export const touchPlaybookProgress = (clientId: string) => supabase.from("clients").update({ playbook_last_progress_at: new Date().toISOString() }).eq("id", clientId).then(logErr);
+// Same idea as touchPlaybookProgress, for the Sales checklist — see
+// salesLastProgressAt's doc comment on Client.
+export const touchSalesProgress = (clientId: string) => supabase.from("clients").update({ sales_last_progress_at: new Date().toISOString() }).eq("id", clientId).then(logErr);
 // One request for many new clients at once (e.g. territory auto-sync creating
 // dozens/hundreds of Lead-stage clients) instead of N separate round trips.
 export const bulkUpsertClients = (cs: Client[]) => (cs.length ? supabase.from("clients").upsert(cs.map(clientToRow)).then(logErr) : Promise.resolve());

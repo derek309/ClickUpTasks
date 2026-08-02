@@ -7,14 +7,11 @@
 // completion) — this is the other half, catching businesses that have gone
 // quiet. Same "server needs its own copy" reasoning as playbookReconcileServer.ts.
 import { supabaseAdmin } from "./supabaseAdmin";
-import { PLAYBOOK_STEPS, playbookProjectId, todayIso } from "./data";
+import { PLAYBOOK_STEPS, playbookProjectId, todayIso, STEP_STALL_DAYS as STALL_DAYS } from "./data";
 import { reconcilePlaybookTasksServer } from "./playbookReconcileServer";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-// Tunable, not structural — adjust here if real usage shows it's too chatty
-// or too quiet once this has run for a while.
-const STALL_DAYS = 14;
 const SYSTEM_AUTHOR_ID = "u_claude";
 
 export async function runPlaybookStallCheck(): Promise<{ created: number }> {
