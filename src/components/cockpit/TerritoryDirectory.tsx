@@ -177,6 +177,9 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggleGroup = (key: string) => setCollapsed((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
   const [q, setQ] = useState("");
+  // Sort within each stage group — Name (default) or Category, so businesses
+  // in the same category cluster together instead of a straight A–Z list.
+  const [sort, setSort] = useState<"name" | "category">("name");
   const [inviteByGdPlaceId, setInviteByGdPlaceId] = useState<Map<number, PlannerInvite>>(() => (territoryId && inviteCache.get(territoryId)?.byGdPlaceId) || new Map());
 
   useEffect(() => {
@@ -279,7 +282,13 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // yet, just counted below so nothing feels lost.
   const noListing = useMemo(() => contacts.filter((c) => !matchedContactIds.has(c.id)), [contacts, matchedContactIds]);
 
-  const sortRows = <T extends { listing: DirectoryListing }>(arr: T[]) => [...arr].sort((a, b) => a.listing.name.localeCompare(b.listing.name));
+  const sortRows = <T extends { listing: DirectoryListing }>(arr: T[]) => [...arr].sort((a, b) => {
+    if (sort === "category") {
+      const c = a.listing.category.localeCompare(b.listing.category);
+      if (c !== 0) return c;
+    }
+    return a.listing.name.localeCompare(b.listing.name);
+  });
 
   // Free-text filter — by business/contact name, email, phone, or company.
   const ql = q.trim().toLowerCase();
@@ -335,8 +344,8 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
 
       <div className="overflow-x-auto rounded-xl border bg-surface shadow-soft">
         <div className="hidden items-center gap-2 border-b bg-background/40 px-4 py-2 text-[12px] font-semibold uppercase tracking-wide text-muted sm:grid" style={{ gridTemplateColumns: TEMPLATE }}>
-          <span>Name</span>
-          <span>Category</span>
+          <button onClick={() => setSort("name")} title="Sort A–Z" className={`text-left uppercase tracking-wide hover:text-foreground ${sort === "name" ? "text-accent" : ""}`}>Name{sort === "name" && " ▾"}</button>
+          <button onClick={() => setSort("category")} title="Sort by category — groups businesses in the same category together" className={`text-left uppercase tracking-wide hover:text-foreground ${sort === "category" ? "text-accent" : ""}`}>Category{sort === "category" && " ▾"}</button>
           <span>Stage</span>
         </div>
         <div className="divide-y-8 divide-background">
@@ -436,9 +445,17 @@ function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClien
         {/* Name + invite/outcome/due chips */}
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-1.5">
-            {listing.claimed
-              ? <span title="Directory listing claimed" className="shrink-0 text-emerald-500"><I.check /></span>
-              : <span title="Unclaimed listing" className="h-2 w-2 shrink-0 rounded-full border border-muted/50" />}
+            {listing.claimed ? (
+              <span title="Directory listing claimed" className="shrink-0 text-emerald-500"><I.check /></span>
+            ) : onFeature && featured ? (
+              <span title="Already run through the newsletter feature motion" className="shrink-0 text-emerald-600"><I.star filled /></span>
+            ) : onFeature ? (
+              <button onClick={() => onFeature(row)} disabled={!canFeature}
+                title={canFeature ? "Feature in the newsletter — creates the Stage-3 outreach sequence" : "No GoHighLevel contact matched to this listing yet, so there's nothing to attach the sequence to"}
+                className="shrink-0 text-muted hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"><I.star /></button>
+            ) : (
+              <span title="Unclaimed listing" className="h-2 w-2 shrink-0 rounded-full border border-muted/50" />
+            )}
             {client ? (
               <button onMouseDown={(e) => { nameMouseDown.current = { x: e.clientX, y: e.clientY }; }}
                 onClick={(e) => { if (!isDragClick(nameMouseDown.current, e)) onOpenClient(client.id); }} title="Open this client"
@@ -466,9 +483,12 @@ function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClien
           </div>
         </div>
 
-        {/* Category */}
-        <div className="pl-5 text-[12px] text-muted sm:pl-0">
-          {listing.category ? <span className="truncate" title={listing.category}>{listing.category}</span> : <span className="text-muted/30">—</span>}
+        {/* Category — min-w-0 is load-bearing here: a CSS grid item's default
+            min-width is auto (content-based), so without it long category
+            text overflowed into the Stage column instead of truncating,
+            despite the column's own fixed track width. */}
+        <div className="min-w-0 pl-5 text-[12px] text-muted sm:pl-0">
+          {listing.category ? <span className="block truncate" title={listing.category}>{listing.category}</span> : <span className="text-muted/30">—</span>}
         </div>
 
         {/* Stage — a claimed business with a client record gets an editable
@@ -495,12 +515,13 @@ function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClien
           (the primary reason to open this row), on its own full-width line
           rather than a cramped grid column — it wraps unpredictably
           depending on how much progress/next-step text a business has, and
-          needs room to breathe. GHL/Listing links + Feature are grouped into
-          one small icon cluster on the right — they were scattered before
-          (a separate "Links" column plus a floated Feature icon), which read
-          as clutter rather than one coherent set of secondary actions. */}
+          needs room to breathe. GHL/Listing links lead the line (Feature
+          moved up to the name's leading indicator, replacing the old inert
+          unclaimed dot). */}
       {client && (
         <div className="flex flex-wrap items-center gap-1.5 px-4 pb-2 pl-9 pt-1.5 sm:pl-9">
+          {ghlUrl && <a href={ghlUrl} target="_blank" rel="noopener noreferrer" title="Open in GoHighLevel" className="shrink-0 rounded p-1 text-muted hover:bg-surface hover:text-accent"><I.bolt /></a>}
+          {listing.url && <a href={listing.url} target="_blank" rel="noopener noreferrer" title="View public listing page" className="shrink-0 rounded p-1 text-muted hover:bg-surface hover:text-accent"><I.link /></a>}
           {onOpenPlaybook && playbook && (
             <button onClick={() => onOpenPlaybook(client.id)} title={playbook.next ? `Playbook — next: ${playbook.next.label}` : "Playbook — all steps complete"}
               className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">
@@ -525,15 +546,6 @@ function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClien
               {l.name} {l.done}/{l.total}
             </button>
           ))}
-          <span className="ml-auto flex shrink-0 items-center gap-1 text-muted">
-            {ghlUrl && <a href={ghlUrl} target="_blank" rel="noopener noreferrer" title="Open in GoHighLevel" className="shrink-0 rounded p-1 hover:bg-surface hover:text-accent"><I.bolt /></a>}
-            {listing.url && <a href={listing.url} target="_blank" rel="noopener noreferrer" title="View public listing page" className="shrink-0 rounded p-1 hover:bg-surface hover:text-accent"><I.link /></a>}
-            {onFeature && (featured
-              ? <span title="Already run through the newsletter feature motion" className="shrink-0 rounded p-1 text-emerald-600"><I.star filled /></span>
-              : <button onClick={() => onFeature(row)} disabled={!canFeature}
-                  title={canFeature ? "Feature in the newsletter — creates the Stage-3 outreach sequence" : "No GoHighLevel contact matched to this listing yet, so there's nothing to attach the sequence to"}
-                  className="shrink-0 rounded p-1 hover:bg-surface hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"><I.star /></button>)}
-          </span>
         </div>
       )}
     </div>
