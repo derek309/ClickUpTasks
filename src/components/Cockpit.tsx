@@ -237,6 +237,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // shows the directory instead of a client/task view. clearViews() below
   // resets it alongside the others.
   const [dirView, setDirView] = useState<"clients" | "projects" | null>(null);
+  // Dashboard's own Work/Activity split — Activity relocated here from the
+  // old Chat/Activity split on the Conversations page (see the myWork
+  // content branch below).
+  const [dashboardView, setDashboardView] = useState<"work" | "activity">("work");
   // All Tasks defaults to just your own — admins can flip to "all"; for VAs
   // this is inert either way since scopedTasks already fully restricts them.
   const [allTasksScope, setAllTasksScope] = useState<"mine" | "all">("mine");
@@ -337,11 +341,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // header shortcut so there's exactly one home for it.
   const openTeamChat = () => goToView("teamchat");
   const teamChatUnread = teamMessages.some((m) => m.authorId !== me.id && m.at > teamChatLastRead);
-  // Chat is always on screen now (Team Chat page shows Chat + Activity
-  // side by side, not as tabs), so this fires any time you're on that page
-  // at all. Messages arriving while you're already there are already
-  // read — without this the realtime insert lights an unread dot for a
-  // message that's on screen, and it only clears by navigating away and back.
+  // Chat is always on screen now (the whole Conversations page is Chat, full
+  // width), so this fires any time you're on that page at all. Messages
+  // arriving while you're already there are already read — without this the
+  // realtime insert lights an unread dot for a message that's on screen, and
+  // it only clears by navigating away and back.
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { if (inboxView && dmUserId === null && teamChatUnread) markTeamChatRead(); }, [inboxView, dmUserId, teamChatUnread]);
 
@@ -830,31 +834,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [theme, setTheme] = useState<"light" | "dark" | "auto">("light");
   const [sidebarHidden, setSidebarHidden] = useState(false);
-  // Team Chat's Chat/Activity split — Chat's share as a percentage of the
-  // row, Activity gets the rest. Percentage (not a fixed px width like the
-  // task drawer's Activity column) since both sides here are primary
-  // content that should scale with the window, not one fixed-feeling
-  // sidebar next to a flexible main area.
-  const [chatSplit, setChatSplit] = useState(60);
-  useEffect(() => { try { const w = parseInt(localStorage.getItem("cut_chatSplit") ?? "", 10); if (w >= 30 && w <= 80) setChatSplit(w); } catch {} }, []);
-  const chatSplitRef = useRef<HTMLDivElement>(null);
-  const startChatSplitResize = (e: React.MouseEvent) => {
-    e.preventDefault();
-    const container = chatSplitRef.current;
-    if (!container) return;
-    const onMove = (ev: MouseEvent) => {
-      const rect = container.getBoundingClientRect();
-      const pct = Math.round(((ev.clientX - rect.left) / rect.width) * 100);
-      setChatSplit(Math.min(80, Math.max(30, pct)));
-    };
-    const onUp = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      setChatSplit((w) => { try { localStorage.setItem("cut_chatSplit", String(w)); } catch {} return w; });
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  };
   useEffect(() => { try { setSidebarHidden(localStorage.getItem("cut_sidebarHidden") === "1"); } catch {} }, []);
   // Theme: light/dark/auto, persisted as cut_theme. Auto resolves off the
   // clock (dark 19:00–6:59) rather than prefers-color-scheme — there's no
@@ -4030,10 +4009,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </div>
               {clientTab === "tasks" && filterControl}
             </div>
-          ) : myWork && canAdmin ? (
-            <div className="flex items-center gap-2">
-              <span className="shrink-0 text-[13px] text-muted">Work for</span>
-              <select value={myWorkUser} onChange={(e) => setMyWorkUser(e.target.value)} className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1.5 text-[14px] outline-none">{users.map((u) => (<option key={u.id} value={u.id}>{u.name}{u.role === "va" ? " (VA)" : ""}</option>))}</select>
+          ) : myWork ? (
+            <div className="flex flex-col gap-2">
+              <div className="flex rounded-lg bg-background p-0.5">
+                <button onClick={() => setDashboardView("work")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "work" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Work</button>
+                <button onClick={() => setDashboardView("activity")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "activity" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Activity{unread > 0 ? ` · ${unread}` : ""}</button>
+              </div>
+              {dashboardView === "work" && canAdmin && (
+                <div className="flex items-center gap-2">
+                  <span className="shrink-0 text-[13px] text-muted">Work for</span>
+                  <select value={myWorkUser} onChange={(e) => setMyWorkUser(e.target.value)} className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1.5 text-[14px] outline-none">{users.map((u) => (<option key={u.id} value={u.id}>{u.name}{u.role === "va" ? " (VA)" : ""}</option>))}</select>
+                </div>
+              )}
             </div>
           ) : showFilterControl ? (
             <div className="flex items-center gap-2">
@@ -4083,7 +4070,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     <button onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
                     <span>›</span>
                   </>)}
-                  <span>{settingsView ? "Integrations, team, territories, templates, playbooks, and API tokens" : inboxView ? (dmUserId ? "Private — only the two of you can see this" : "Talk to the team, and everything that mentions or notifies you — side by side") : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "Every client and project you're on, grouped by what needs attention first" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : activeTerritoryClient ? `City work for ${activeTerritoryClient.city}, ${activeTerritoryClient.state} — not tied to any one business` : clientCompany(clientById(activeClient))}</span>
+                  <span>{settingsView ? "Integrations, team, territories, templates, playbooks, and API tokens" : inboxView ? (dmUserId ? "Private — only the two of you can see this" : "Talk to the team — everyone's in this one") : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "Every client and project you're on, grouped by what needs attention first" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : activeTerritoryClient ? `City work for ${activeTerritoryClient.city}, ${activeTerritoryClient.state} — not tied to any one business` : clientCompany(clientById(activeClient))}</span>
                 </p>
               )}
             </>)}
@@ -4328,21 +4315,27 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
 
           {territoryView || inboxView || settingsView || dirView ? null : myWork ? (
-            <div className="flex items-center gap-2">
-              {canAdmin ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex overflow-hidden rounded-md border">
+                <button onClick={() => setDashboardView("work")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "work" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Work</button>
+                <button onClick={() => setDashboardView("activity")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "activity" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Activity{unread > 0 ? ` · ${unread}` : ""}</button>
+              </div>
+              {dashboardView === "work" && (canAdmin ? (
                 <label className="flex items-center gap-2"><span className="text-muted">Viewing work for</span>
                   <select value={myWorkUser} onChange={(e) => setMyWorkUser(e.target.value)} className="rounded-md border bg-background px-2 py-1 outline-none">{users.map((u) => (<option key={u.id} value={u.id}>{u.name}{u.role === "va" ? " (VA)" : ""}</option>))}</select>
                 </label>
               ) : (
                 <span className="text-[13px] text-muted">Your assigned clients and projects</span>
-              )}
+              ))}
               {/* De-emphasized on purpose — the Dashboard is meant to be the
                   one place everyone works from; this is just an escape
                   hatch to the flat list, not a peer to it. */}
-              <button onClick={openAllTasks} title="See every task across all clients and projects"
-                className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 text-[13px] text-muted hover:bg-accent-soft hover:text-accent">
-                <I.list className="h-3.5 w-3.5" /> All tasks
-              </button>
+              {dashboardView === "work" && (
+                <button onClick={openAllTasks} title="See every task across all clients and projects"
+                  className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 text-[13px] text-muted hover:bg-accent-soft hover:text-accent">
+                  <I.list className="h-3.5 w-3.5" /> All tasks
+                </button>
+              )}
             </div>
           ) : !personalView && (clientTab === "chat" || clientTab === "vault") ? null : (
             <div className="relative">
@@ -4499,32 +4492,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onSend={(body, attachments, replyToId) => sendDmMessage(dmUserId, body, attachments, replyToId)} onDelete={deleteDmMessage}
             onPin={pinDmMessage} onUploadFile={(file) => uploadOneImage(`dm/${dmConversationId(me.id, dmUserId)}`, file)} onOpenFile={downloadFile} />
         ) : inboxView ? (
-          // Team Chat page — the two halves of "talk to the team" in one
-          // place: the workspace chat, and the task comments/mentions
-          // addressed to you, side by side (default 60/40, drag to resize)
-          // instead of a tab you switch between — see everything in one
-          // shot rather than clicking back and forth. Stacks to
-          // Chat-over-Activity on narrow/mobile widths, where a resizable
-          // column doesn't make sense (also why the drag handle is
-          // sm:block — dragging a horizontal split on a vertical stack has
-          // nothing to resize).
-          <div ref={chatSplitRef} className="flex min-h-0 flex-1 flex-col sm:flex-row">
-            <div className="relative flex min-h-0 min-w-0 flex-col border-b sm:border-b-0 sm:border-r" style={{ flexBasis: `${chatSplit}%` }}>
-              <div onMouseDown={startChatSplitResize} title="Drag to resize"
-                className="absolute inset-y-0 -right-1 z-10 hidden w-2 cursor-col-resize hover:bg-accent/30 active:bg-accent/40 sm:block" />
-              <div className="shrink-0 border-b bg-surface px-4 py-2 text-[13px] font-semibold text-muted">Chat</div>
-              <TeamChat me={me} scope={{ type: "team" }} messages={teamMessages} onSend={sendTeamMessage} onDelete={deleteTeamMessage}
-                onPin={pinTeamMessage} onUploadFile={(file) => uploadOneImage("team-chat", file)} onOpenFile={downloadFile} />
-            </div>
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <div className="flex shrink-0 items-center gap-1.5 border-b bg-surface px-4 py-2 text-[13px] font-semibold text-muted">
-                Activity{unread > 0 && <span className="rounded-full bg-accent px-1.5 text-[11px] font-semibold text-white">{unread}</span>}
-              </div>
-              <Inbox notifications={myNotifs} clientById={clientById} projectById={projectById} onOpen={openNotification} onMarkRead={markNotifRead} onMarkAllRead={markAllNotifsRead} onSyncEmail={canAdmin ? syncEmail : undefined} syncingEmail={syncingEmail} onSyncAppointments={canAdmin ? syncAppointments : undefined} syncingAppointments={syncingAppointments}
-                unmatchedEmails={canAdmin ? unmatchedEmails : []} onAddAsClient={addAsClientFromEmail} onDismissUnmatched={dismissUnmatched}
-                granolaUnmatched={canAdmin ? granolaUnmatched : []} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onAssignGranolaMeeting={assignGranolaUnmatched} onDismissGranolaUnmatched={dismissGranolaUnmatched} />
-            </div>
-          </div>
+          // Team-wide chat, full width — task comments/mentions ("Activity")
+          // moved to its own Dashboard tab (Derek: "everything is wired into
+          // each contact or tasks... it doesn't belong here"), so this is
+          // just the workspace feed now, same footing as a DM thread above.
+          <TeamChat me={me} scope={{ type: "team" }} messages={teamMessages} onSend={sendTeamMessage} onDelete={deleteTeamMessage}
+            onPin={pinTeamMessage} onUploadFile={(file) => uploadOneImage("team-chat", file)} onOpenFile={downloadFile} />
         ) : dirView === "clients" ? (
           <ClientsDirectory clients={sortedClients} clientCompany={(c) => clientCompany(c)} taskCount={clientTaskCount} tasksByClient={territoryTasksByClient} starred={starred} onToggleStar={toggleStar}
             needsReview={(id) => clientNeedsReview(id, me.id)}
@@ -4538,6 +4511,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             starredLists={starredLists} onToggleStarList={toggleStarList} />
         ) : personalView ? (
           <GroupedList groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} colOrder={colOrder} onReorderCols={reorderCols} />
+        ) : myWork && dashboardView === "activity" ? (
+          // Relocated from the old Conversations Chat/Activity split (Derek:
+          // "everything is wired into each contact or tasks... maybe it's a
+          // tab on the dashboard") — same Inbox component, same data, just
+          // reachable from here now instead of always-on next to Chat.
+          <Inbox notifications={myNotifs} clientById={clientById} projectById={projectById} onOpen={openNotification} onMarkRead={markNotifRead} onMarkAllRead={markAllNotifsRead} onSyncEmail={canAdmin ? syncEmail : undefined} syncingEmail={syncingEmail} onSyncAppointments={canAdmin ? syncAppointments : undefined} syncingAppointments={syncingAppointments}
+            unmatchedEmails={canAdmin ? unmatchedEmails : []} onAddAsClient={addAsClientFromEmail} onDismissUnmatched={dismissUnmatched}
+            granolaUnmatched={canAdmin ? granolaUnmatched : []} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onAssignGranolaMeeting={assignGranolaUnmatched} onDismissGranolaUnmatched={dismissGranolaUnmatched} />
         ) : myWork ? (
           <ClientsBoard groups={myWorkGroups} clientTaskCount={clientTaskCount} projectTaskCount={projectTaskCount} hasUnreadMessage={hasUnreadMessage} onOpenTask={setOpenTaskId}
             onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }}
