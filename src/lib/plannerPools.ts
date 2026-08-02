@@ -10,7 +10,11 @@ export type PoolListing = { id: number | string; name: string; category: string;
 export type PoolCandidate = { gdPlaceId: number | null; name: string; cat: string; score: number | null; timesFeatured: number; lastFeatured: string | null; due: boolean };
 
 const FEATURE_SLOTS = ["spotlight", "gem", "gem2", "gem3"] as const;
-const ROTATION_WINDOW_DAYS = 90;
+// Exported so callers outside the pool (the Businesses page's priority sort)
+// can flag a business as "due for outreach" using the exact same rotation
+// window the Planner itself uses to decide who to invite/feature next —
+// keeps the two in lockstep by construction instead of a second, driftable copy.
+export const ROTATION_WINDOW_DAYS = 90;
 
 // name -> { count, last week iso } across every week this territory has ever
 // had picks for, regardless of which slot — mirrors WP's rotation history,
@@ -76,7 +80,7 @@ export function latestInviteStatus(weeks: PlannerWeek[]): Map<number, PlannerInv
   return map;
 }
 
-function isDue(last: string | null, todayIso: string): boolean {
+export function isDue(last: string | null, todayIso: string): boolean {
   if (!last) return true;
   const days = (new Date(todayIso).getTime() - new Date(last).getTime()) / 86400000;
   return days > ROTATION_WINDOW_DAYS;

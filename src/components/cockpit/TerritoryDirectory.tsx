@@ -19,7 +19,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
 import { fetchPlannerWeeks } from "@/lib/db";
-import { latestInviteStatus } from "@/lib/plannerPools";
+import { latestInviteStatus, inviteHistory, featureHistory, isDue } from "@/lib/plannerPools";
 import {
   formatDue, playbookCompletion, salesCompletion,
   CLIENT_STATUS_META, CLIENT_STATUS_ORDER,
@@ -113,8 +113,17 @@ type ListingsCacheEntry = { data: DirectoryListing[]; notConfigured: boolean; at
 const listingsCache = new Map<string, ListingsCacheEntry>();
 
 // Per-territory — keyed by territoryId so switching cities doesn't show a
-// flash of the previous city's invite badges.
-const inviteCache = new Map<string, { byGdPlaceId: Map<number, PlannerInvite>; at: number }>();
+// flash of the previous city's invite badges. Also holds the invite/feature
+// HISTORY (not just latest-invite-status) needed to compute "due for
+// outreach" for the Priority sort — same planner_weeks fetch, just derived
+// two more ways.
+type PlannerActivityCacheEntry = {
+  byGdPlaceId: Map<number, PlannerInvite>;
+  invites: Map<number, { invited: number; accepted: number; skipped: number; lastAt: string }>;
+  features: Map<string, { count: number; last: string }>;
+  at: number;
+};
+const inviteCache = new Map<string, PlannerActivityCacheEntry>();
 
 export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, salesTasksByClient, onOpenSales, otherListsByClient, onOpenProject, onSetClientStatus, ghlContactUrlFor, territoryId }: {
   city: string;
@@ -177,10 +186,14 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggleGroup = (key: string) => setCollapsed((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
   const [q, setQ] = useState("");
-  // Sort within each stage group — Name (default) or Category, so businesses
-  // in the same category cluster together instead of a straight A–Z list.
-  const [sort, setSort] = useState<"name" | "category">("name");
+  // Sort within each stage group — Priority (default: due-for-outreach first,
+  // per the Planner's own rotation window, so acquisition work the Planner
+  // thinks needs a touch floats up without opening the Planner separately),
+  // or Name/Category to browse a different way.
+  const [sort, setSort] = useState<"priority" | "name" | "category">("priority");
   const [inviteByGdPlaceId, setInviteByGdPlaceId] = useState<Map<number, PlannerInvite>>(() => (territoryId && inviteCache.get(territoryId)?.byGdPlaceId) || new Map());
+  const [inviteHistoryMap, setInviteHistoryMap] = useState<Map<number, { invited: number; accepted: number; skipped: number; lastAt: string }>>(() => (territoryId && inviteCache.get(territoryId)?.invites) || new Map());
+  const [featureHistoryMap, setFeatureHistoryMap] = useState<Map<string, { count: number; last: string }>>(() => (territoryId && inviteCache.get(territoryId)?.features) || new Map());
 
   useEffect(() => {
     let alive = true;
@@ -224,9 +237,13 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
       fetchPlannerWeeks(territoryId).then((weeks) => {
         if (!alive) return;
         const byGdPlaceId = latestInviteStatus(weeks);
-        inviteCache.set(territoryId, { byGdPlaceId, at: Date.now() });
+        const invites = inviteHistory(weeks);
+        const features = featureHistory(weeks);
+        inviteCache.set(territoryId, { byGdPlaceId, invites, features, at: Date.now() });
         setInviteByGdPlaceId(byGdPlaceId);
-      }).catch(() => { /* fail soft — stays "Unclaimed" instead of "Invited" */ });
+        setInviteHistoryMap(invites);
+        setFeatureHistoryMap(features);
+      }).catch(() => { /* fail soft — stays "Unclaimed" instead of "Invited", Priority sort just falls back to Name */ });
     };
     fetchInvites();
     const interval = setInterval(fetchInvites, REFRESH_INTERVAL);
@@ -282,8 +299,28 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // yet, just counted below so nothing feels lost.
   const noListing = useMemo(() => contacts.filter((c) => !matchedContactIds.has(c.id)), [contacts, matchedContactIds]);
 
+  // This business's most recent Planner touch — an invite send or a
+  // newsletter feature, whichever is later — feeding the Priority sort's
+  // "due for outreach" check below. null = never touched (most urgent).
+  const lastTouchedAt = (listing: DirectoryListing): string | null => {
+    const inv = inviteHistoryMap.get(typeof listing.id === "number" ? listing.id : Number(listing.id))?.lastAt ?? null;
+    const feat = featureHistoryMap.get(lc(listing.name))?.last ?? null;
+    if (inv && feat) return inv > feat ? inv : feat;
+    return inv ?? feat;
+  };
+  const todayIso = new Date().toISOString();
   const sortRows = <T extends { listing: DirectoryListing }>(arr: T[]) => [...arr].sort((a, b) => {
-    if (sort === "category") {
+    if (sort === "priority") {
+      const aLast = lastTouchedAt(a.listing);
+      const bLast = lastTouchedAt(b.listing);
+      const aDue = isDue(aLast, todayIso);
+      const bDue = isDue(bLast, todayIso);
+      if (aDue !== bDue) return aDue ? -1 : 1;
+      // Both due (or both not) — the longer it's been (or never at all,
+      // which sorts first since "" is the smallest string), the more urgent.
+      const c = (aLast ?? "").localeCompare(bLast ?? "");
+      if (c !== 0) return c;
+    } else if (sort === "category") {
       const c = a.listing.category.localeCompare(b.listing.category);
       if (c !== 0) return c;
     }
@@ -335,17 +372,31 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
         </div>
       )}
 
-      <div className="relative mb-2">
-        <I.search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${city} businesses…`}
-          className="w-full rounded-lg border bg-surface py-1.5 pl-8 pr-8 text-[14px] outline-none focus:border-accent" />
-        {q && <button onClick={() => setQ("")} title="Clear" className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted hover:text-foreground"><I.close /></button>}
+      <div className="mb-2 flex items-center gap-2">
+        <div className="relative flex-1">
+          <I.search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${city} businesses…`}
+            className="w-full rounded-lg border bg-surface py-1.5 pl-8 pr-8 text-[14px] outline-none focus:border-accent" />
+          {q && <button onClick={() => setQ("")} title="Clear" className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted hover:text-foreground"><I.close /></button>}
+        </div>
+        {/* Priority (default) surfaces who's due for a Planner touch first —
+            same 90-day rotation the Planner itself uses to rank who to
+            invite/feature next — so acquisition work shows up here without
+            opening the Planner separately. Name/Category are just other ways
+            to browse the same list. */}
+        <span className="inline-flex shrink-0 overflow-hidden rounded-lg border text-[13px]">
+          {(["priority", "name", "category"] as const).map((s) => (
+            <button key={s} onClick={() => setSort(s)}
+              title={s === "priority" ? "Sort by priority — due for outreach first" : s === "name" ? "Sort A–Z" : "Sort by category — groups businesses in the same category together"}
+              className={`px-2.5 py-1.5 font-medium capitalize ${sort === s ? "bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}>{s}</button>
+          ))}
+        </span>
       </div>
 
       <div className="overflow-x-auto rounded-xl border bg-surface shadow-soft">
         <div className="hidden items-center gap-2 border-b bg-background/40 px-4 py-2 text-[12px] font-semibold uppercase tracking-wide text-muted sm:grid" style={{ gridTemplateColumns: TEMPLATE }}>
-          <button onClick={() => setSort("name")} title="Sort A–Z" className={`text-left uppercase tracking-wide hover:text-foreground ${sort === "name" ? "text-accent" : ""}`}>Name{sort === "name" && " ▾"}</button>
-          <button onClick={() => setSort("category")} title="Sort by category — groups businesses in the same category together" className={`text-left uppercase tracking-wide hover:text-foreground ${sort === "category" ? "text-accent" : ""}`}>Category{sort === "category" && " ▾"}</button>
+          <span>Name</span>
+          <span>Category</span>
           <span>Stage</span>
         </div>
         <div className="divide-y-8 divide-background">
