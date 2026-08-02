@@ -3894,7 +3894,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             one flip away if that changes. */}
         {navVisible.inbox && (
           <nav className="mt-[7px] shrink-0 space-y-0.5 border-t px-2 pt-[7px]">
-            <div className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Chat</div>
             <SideItem active={inboxView && dmUserId === null} title="Conversations (press 2)" onClick={openTeamChat}><I.comment className="text-muted" /> <span>Conversations</span>{(teamChatUnread || unread > 0) && (
               // Both indicators, not either/or: notifications accumulate
               // routinely, and an exclusive check meant a real unread chat
