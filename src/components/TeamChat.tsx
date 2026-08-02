@@ -21,7 +21,7 @@
 //     obvious shape for a future quick-peek from another view.
 import { useEffect, useRef, useState } from "react";
 import { type Me, type User, type Attachment, type TeamMessage, type DmMessage, users, userById, timeAgo } from "@/lib/data";
-import { I, Avatar, renderRichText } from "./cockpit/ui";
+import { I, Avatar, renderRichText, useStickyBottom, JumpToLatestButton } from "./cockpit/ui";
 import { AttachmentThumbs } from "./cockpit/AttachmentThumbs";
 
 type Scope = { type: "team" } | { type: "dm"; other: User };
@@ -39,7 +39,7 @@ export default function TeamChat({ me, scope, messages, onSend, onDelete, onPin,
   onClose?: () => void; // omit to embed inline instead of as an overlay
 }) {
   const [draft, setDraft] = useState("");
-  const feedRef = useRef<HTMLDivElement>(null);
+  const { ref: feedRef, atBottom, checkAtBottom, scrollToBottom, followIfAtBottom } = useStickyBottom<HTMLDivElement>();
   const sorted = [...messages].sort((a, b) => a.at.localeCompare(b.at));
   // Resolves a replyToId to its original message regardless of the pinned
   // filter below — a reply should still show what it's replying to even
@@ -49,8 +49,11 @@ export default function TeamChat({ me, scope, messages, onSend, onDelete, onPin,
   const [showPinnedOnly, setShowPinnedOnly] = useState(false);
   const visible = showPinnedOnly ? pinnedMessages : sorted;
 
-  // Auto-scroll to the newest message on open and whenever a new one arrives.
-  useEffect(() => { feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight }); }, [sorted.length]);
+  // Auto-follow the newest message on open and whenever one arrives — but
+  // only while already at the bottom, so scrolling up to read history isn't
+  // fought by an incoming message (see the "Jump to latest" button below).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { followIfAtBottom(); }, [sorted.length]);
 
   // A reply-in-progress and staged attachments both live above the composer,
   // cleared together on send — same "stage, then send" shape as TaskDrawer's
@@ -116,7 +119,8 @@ export default function TeamChat({ me, scope, messages, onSend, onDelete, onPin,
             </button>
           </div>
         )}
-        <div ref={feedRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
+        <div className="relative min-h-0 flex-1">
+        <div ref={feedRef} onScroll={checkAtBottom} className="h-full space-y-3 overflow-y-auto px-5 py-4">
           {visible.length === 0 && (
             <div className="py-10 text-center text-[13px] text-muted">
               {scope.type === "dm" ? `No messages yet — say hi to ${scope.other.name} 👋` : "No messages yet — say hi 👋"}
@@ -160,6 +164,8 @@ export default function TeamChat({ me, scope, messages, onSend, onDelete, onPin,
               </div>
             );
           })}
+        </div>
+        <JumpToLatestButton show={!atBottom && visible.length > 0} onClick={() => scrollToBottom()} />
         </div>
 
         <div className="relative border-t p-3">

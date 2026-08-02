@@ -2,7 +2,7 @@
 
 // Shared UI primitives for the Cockpit: the icon set, Avatar, misc formatting
 // helpers, and the list-view column definitions. Split out of Cockpit.tsx.
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { users, userById, labelById, type Attachment, type TaskStatus, type Priority } from "@/lib/data";
 
 // --- tiny inline icons ------------------------------------------------------
@@ -118,6 +118,49 @@ export function Toggle({ on, onClick, disabled }: { on: boolean; onClick: () => 
     </button>
   );
 }
+// "Sticky scroll to latest" for a message feed — shared by TeamChat (team +
+// DMs) and ClientJournal (notes/email/SMS feed). Auto-follows new messages
+// only while already scrolled to the bottom, so reading older history isn't
+// yanked away by an incoming message; also exposes what a "Jump to latest"
+// button needs. Wire the scroll container's ref + onScroll to this, and
+// call followIfAtBottom from an effect keyed on the feed's length.
+export function useStickyBottom<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null);
+  // Mirrors `atBottom` in a ref too: followIfAtBottom is called from an
+  // effect keyed only on the feed's length, so it needs the CURRENT value
+  // without the effect re-running every time atBottom itself changes.
+  const atBottomRef = useRef(true);
+  const [atBottom, setAtBottom] = useState(true);
+  const checkAtBottom = () => {
+    const el = ref.current;
+    if (!el) return;
+    const next = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    atBottomRef.current = next;
+    setAtBottom(next);
+  };
+  const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
+    const el = ref.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior });
+    atBottomRef.current = true;
+    setAtBottom(true);
+  };
+  // "auto" (no animation) — a burst of several messages arriving at once
+  // shouldn't each trigger their own smooth-scroll animation.
+  const followIfAtBottom = () => { if (atBottomRef.current) scrollToBottom("auto"); };
+  return { ref, atBottom, checkAtBottom, scrollToBottom, followIfAtBottom };
+}
+
+export function JumpToLatestButton({ show, onClick }: { show: boolean; onClick: () => void }) {
+  if (!show) return null;
+  return (
+    <button onClick={onClick} title="Jump to the latest message"
+      className="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-[13px] font-medium text-white shadow-soft-md hover:opacity-90">
+      <I.chevron className="rotate-90" /> Jump to latest
+    </button>
+  );
+}
+
 export function LabelChips({ ids }: { ids: string[] }) {
   if (ids.length === 0) return null;
   return (<div className="mt-1.5 flex flex-wrap gap-1">{ids.map((id) => { const l = labelById(id); return l ? (<span key={id} className="rounded px-1.5 py-0 text-[13px] font-medium" style={{ background: l.color + "1a", color: l.color }}>{l.name}</span>) : null; })}</div>);

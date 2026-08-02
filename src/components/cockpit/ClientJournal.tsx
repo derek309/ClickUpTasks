@@ -16,7 +16,7 @@ import {
   users, userById, timeAgo, dayLabel, isCompletionEvent, NOTE_TYPE_META, NOTE_TYPE_ORDER, MANUAL_NOTE_TYPES, noteTypeMeta, htmlToText, looksLikeHtml, plainTextToHtml,
   type ClientNote, type NoteType, type Task, type Comment, type Message, type MessageChannel, type MessageDirection, type Me, type Attachment, type Contact, type ScheduledMessage,
 } from "@/lib/data";
-import { I, Avatar, CollapsibleText, newId } from "./ui";
+import { I, Avatar, CollapsibleText, newId, useStickyBottom, JumpToLatestButton } from "./ui";
 import { ConfirmModal, type ConfirmSpec } from "./modals";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 import { RichTextEditor } from "./RichTextEditor";
@@ -112,7 +112,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editBody, setEditBody] = useState("");
   const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
-  const feedEndRef = useRef<HTMLDivElement>(null);
+  const { ref: feedRef, atBottom, checkAtBottom, scrollToBottom, followIfAtBottom } = useStickyBottom<HTMLDivElement>();
   const msgBodyRef = useRef<HTMLTextAreaElement>(null);
   const draftPromptRef = useRef<HTMLTextAreaElement>(null);
   const [msgSubject, setMsgSubject] = useState("");
@@ -229,7 +229,11 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   const mentionMatch = /@([\w]*)$/.exec(draft);
   const mentionCands = mentionMatch ? users.filter((u) => u.name.toLowerCase().includes(mentionMatch[1].toLowerCase())) : [];
 
-  useEffect(() => { feedEndRef.current?.scrollIntoView({ block: "end" }); }, [journalItems.length]);
+  // Auto-follow the newest entry — but only while already at the bottom, so
+  // scrolling up to read history isn't fought by a new note/message/comment
+  // (see the "Jump to latest" button below).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { followIfAtBottom(); }, [journalItems.length]);
   useEffect(() => { if ((messages?.length ?? 0) > 0) onOpenMessages?.(); }, [messages?.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = () => {
@@ -414,7 +418,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
 
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <div className="relative min-h-0 flex-1 overflow-hidden">
-        <div className="h-full overflow-y-auto px-4 py-4 sm:px-5">
+        <div ref={feedRef} onScroll={checkAtBottom} className="h-full overflow-y-auto px-4 py-4 sm:px-5">
           <div className="mx-auto max-w-3xl space-y-3">
             {pinnedRecap && (
               <div className="rounded-xl border border-accent/40 bg-accent-soft/40 p-3.5 shadow-soft">
@@ -567,15 +571,9 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                 </button>
               );
             })}
-            <div ref={feedEndRef} />
           </div>
         </div>
-        {filteredItems.length > 0 && (
-          <button onClick={() => feedEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })} title="Scroll to latest"
-            className="absolute bottom-4 right-4 z-10 flex h-9 w-9 items-center justify-center rounded-full border bg-surface text-muted shadow-soft-md hover:text-foreground">
-            <I.chevron className="-rotate-90" />
-          </button>
-        )}
+        <JumpToLatestButton show={!atBottom && filteredItems.length > 0} onClick={() => scrollToBottom()} />
         </div>
 
         {/* Full-width and stacked under the feed on mobile; fixed, resizable
