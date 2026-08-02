@@ -91,8 +91,12 @@ export function computeBusinessStage(listing: DirectoryListing, client: Client |
   return (client.status as BusinessStage);
 }
 
-// Name | Category | Stage | What's left | Links
-const TEMPLATE = "minmax(0,1fr) 112px 148px 250px 84px";
+// Name | Category | Stage | Links — "What's left" gets its own full-width
+// line below this row (see ListingRow) rather than a cramped grid column;
+// it wraps unpredictably depending on how much progress/next-step text a
+// business has, and squeezed into ~250px it read as an afterthought instead
+// of the primary reason to open the row.
+const TEMPLATE = "minmax(0,1fr) 112px 148px 84px";
 
 // Module-scope cache so leaving a city and coming back (or switching tabs)
 // shows the last-known data instantly instead of a loading flash — a lazy
@@ -328,7 +332,6 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
           <span>Name</span>
           <span>Category</span>
           <span>Stage</span>
-          <span>What&apos;s left</span>
           <span>Links</span>
         </div>
         <div className="divide-y-8 divide-background">
@@ -496,49 +499,6 @@ function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClien
           )}
         </div>
 
-        {/* What's left — Playbook progress + open tasks (the primary reason
-            to open this row), with Journal/Feature de-emphasized into a
-            compact icon row underneath. */}
-        <div className="flex flex-col gap-1 pl-5 sm:pl-0">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {client && onOpenPlaybook && playbook && (
-              <button onClick={() => onOpenPlaybook(client.id)} title={playbook.next ? `Playbook — next: ${playbook.next.label}` : "Playbook — all steps complete"}
-                className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">
-                Playbook {playbook.doneCount}/{playbook.total}
-                {playbook.next && <span className="ml-1 font-normal text-accent">· {playbook.next.label}</span>}
-              </button>
-            )}
-            {client && onOpenSales && sales && (
-              <button onClick={() => onOpenSales(client.id)} title={sales.next ? `Sales — next: ${sales.next.label}` : "Sales — all steps complete"}
-                className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">
-                Sales {sales.doneCount}/{sales.total}
-                {sales.next && <span className="ml-1 font-normal text-accent">· {sales.next.label}</span>}
-              </button>
-            )}
-            {client && onAddTask ? (
-              <button onClick={() => setTasksOpen((o) => !o)} title={openTasks.length ? `${openTasks.length} open task${openTasks.length === 1 ? "" : "s"}` : "No open tasks — click to add one"}
-                className={`shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium ${tasksOpen ? "bg-accent-soft text-accent" : openTasks.length ? "text-foreground hover:bg-surface" : "border-dashed text-muted hover:bg-surface hover:text-foreground"}`}>
-                {openTasks.length ? `${openTasks.length} task${openTasks.length === 1 ? "" : "s"}` : "+ Task"}
-                {nextDue && <span className={`ml-1 font-normal ${isOverdue(nextDue) ? "text-danger" : "text-muted"}`}>{formatDue(nextDue)}</span>}
-              </button>
-            ) : null}
-          </div>
-          <div className="flex flex-wrap items-center gap-0.5 text-muted">
-            {/* Real activity (calls/emails/SMS/notes) lives in the client's
-                own Journal now — GHL conversation + task activity, not a
-                manually-entered log — so this just jumps there. */}
-            {client && (
-              <button onClick={() => onOpenClient(client.id, "chat")} title="Open Journal — calls, emails, SMS, and notes for this business"
-                className="shrink-0 rounded p-1 hover:bg-surface hover:text-foreground"><I.clock /></button>
-            )}
-            {onFeature && (featured
-              ? <span title="Already run through the newsletter feature motion" className="shrink-0 rounded p-1 text-emerald-600"><I.star filled /></span>
-              : <button onClick={() => onFeature(row)} disabled={!canFeature}
-                  title={canFeature ? "Feature in the newsletter — creates the Stage-3 outreach sequence" : "No GoHighLevel contact matched to this listing yet, so there's nothing to attach the sequence to"}
-                  className="shrink-0 rounded p-1 hover:bg-surface hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"><I.star /></button>)}
-          </div>
-        </div>
-
         {/* Links — GHL contact + the public listing page. Clicking the name
             already opens/creates the client record, so no "+ Add as client"
             affordance is needed here. */}
@@ -548,6 +508,49 @@ function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClien
           {!ghlUrl && !listing.url && <span className="text-muted/30">—</span>}
         </div>
       </div>
+
+      {/* What's left — Playbook/Sales progress + open tasks (the primary
+          reason to open this row), on its own full-width line rather than a
+          cramped grid column — it wraps unpredictably depending on how much
+          progress/next-step text a business has, and needs room to breathe.
+          Journal/Feature stay de-emphasized in a compact icon row beside it. */}
+      {client && (
+        <div className="flex flex-wrap items-center gap-1.5 border-t px-4 pb-2 pl-9 pt-1.5 sm:pl-9">
+          {onOpenPlaybook && playbook && (
+            <button onClick={() => onOpenPlaybook(client.id)} title={playbook.next ? `Playbook — next: ${playbook.next.label}` : "Playbook — all steps complete"}
+              className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">
+              Playbook {playbook.doneCount}/{playbook.total}
+              {playbook.next && <span className="ml-1 font-normal text-accent">· {playbook.next.label}</span>}
+            </button>
+          )}
+          {onOpenSales && sales && (
+            <button onClick={() => onOpenSales(client.id)} title={sales.next ? `Sales — next: ${sales.next.label}` : "Sales — all steps complete"}
+              className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">
+              Sales {sales.doneCount}/{sales.total}
+              {sales.next && <span className="ml-1 font-normal text-accent">· {sales.next.label}</span>}
+            </button>
+          )}
+          {onAddTask ? (
+            <button onClick={() => setTasksOpen((o) => !o)} title={openTasks.length ? `${openTasks.length} open task${openTasks.length === 1 ? "" : "s"}` : "No open tasks — click to add one"}
+              className={`shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium ${tasksOpen ? "bg-accent-soft text-accent" : openTasks.length ? "text-foreground hover:bg-surface" : "border-dashed text-muted hover:bg-surface hover:text-foreground"}`}>
+              {openTasks.length ? `${openTasks.length} task${openTasks.length === 1 ? "" : "s"}` : "+ Task"}
+              {nextDue && <span className={`ml-1 font-normal ${isOverdue(nextDue) ? "text-danger" : "text-muted"}`}>{formatDue(nextDue)}</span>}
+            </button>
+          ) : null}
+          <span className="ml-auto flex shrink-0 items-center gap-0.5 text-muted">
+            {/* Real activity (calls/emails/SMS/notes) lives in the client's
+                own Journal now — GHL conversation + task activity, not a
+                manually-entered log — so this just jumps there. */}
+            <button onClick={() => onOpenClient(client.id, "chat")} title="Open Journal — calls, emails, SMS, and notes for this business"
+              className="shrink-0 rounded p-1 hover:bg-surface hover:text-foreground"><I.clock /></button>
+            {onFeature && (featured
+              ? <span title="Already run through the newsletter feature motion" className="shrink-0 rounded p-1 text-emerald-600"><I.star filled /></span>
+              : <button onClick={() => onFeature(row)} disabled={!canFeature}
+                  title={canFeature ? "Feature in the newsletter — creates the Stage-3 outreach sequence" : "No GoHighLevel contact matched to this listing yet, so there's nothing to attach the sequence to"}
+                  className="shrink-0 rounded p-1 hover:bg-surface hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"><I.star /></button>)}
+          </span>
+        </div>
+      )}
 
       {/* This business's open tasks + one-line quick-add. Deliberately a
           read-and-add surface only — editing (assignee, due, checklist,
