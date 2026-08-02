@@ -69,6 +69,8 @@ import {
   PLAYBOOK_ALWAYS_RUNNING,
   PLAYBOOK_FINISH_LINE,
   playbookProjectId,
+  SALES_STEPS,
+  salesProjectId,
   type VaultFolder,
   type Folder,
   type Stage,
@@ -2039,14 +2041,63 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Same exclusion as clientList's own real-business filter — the Workspace
   // container and per-territory city-work buckets are pseudo-clients (no real
   // GHL contact behind them), not businesses on the Owner Growth Plan.
+  // Sales checklist tasks, bucketed by client — same shape as
+  // playbookTasksByClient above.
+  const salesTasksByClient = (() => {
+    const m = new Map<string, Task[]>();
+    for (const t of tasks) {
+      if (!t.salesStepKey) continue;
+      const list = m.get(t.clientId);
+      if (list) list.push(t); else m.set(t.clientId, [t]);
+    }
+    return m;
+  })();
+  // The Sales checklist — same create/retitle reconciliation as
+  // reconcilePlaybookTasks above, just against SALES_STEPS/salesProjectId/
+  // Task.salesStepKey instead. Deliberately NOT gated on client type/status
+  // (Playbook's eager triggers wait for a "promotion" to onboarding/active) —
+  // Sales covers the work that happens BEFORE that promotion, so it needs to
+  // start the moment a business has a client record at all, however it got
+  // one (territory bulk sync, a single add, anything).
+  const reconcileSalesTasks = (clientId: string) => {
+    const salesProjId = salesProjectId(clientId);
+    let projectWrite: PromiseLike<unknown> | null = null;
+    if (!projects.some((p) => p.id === salesProjId)) {
+      const p: Project = { id: salesProjId, clientId, name: "Sales", description: "" };
+      setProjects((ps) => [...ps, p]);
+      projectWrite = upsertProject(p);
+    }
+    const byKey = new Map(tasks.filter((t) => t.clientId === clientId && t.salesStepKey).map((t) => [t.salesStepKey as string, t]));
+    const toWrite: Task[] = [];
+    for (const step of SALES_STEPS) {
+      const existing = byKey.get(step.key);
+      if (!existing) {
+        toWrite.push({
+          id: newId("t_"), projectId: salesProjId, clientId, title: step.label, description: "",
+          status: "todo", priority: "none", assigneeId: null, contactId: clientId.slice(3), due: null,
+          recurrence: "none", labelIds: [], ghlTaskId: null, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
+          salesStepKey: step.key, createdBy: null,
+        });
+      } else if (existing.title !== step.label) {
+        toWrite.push({ ...existing, title: step.label });
+      }
+    }
+    if (!toWrite.length) return;
+    const writeIds = new Set(toWrite.map((t) => t.id));
+    setTasks((ts) => [...ts.filter((t) => !writeIds.has(t.id)), ...toWrite]);
+    if (projectWrite) projectWrite.then(() => bulkUpsertTasks(toWrite));
+    else bulkUpsertTasks(toWrite);
+  };
   useEffect(() => {
     if (activeClient.startsWith("cl_") && activeClient !== WORKSPACE_CLIENT_ID && !activeClient.startsWith(TERRITORY_CLIENT_PREFIX)) {
       reconcilePlaybookTasks(activeClient);
+      reconcileSalesTasks(activeClient);
     }
-    // reconcilePlaybookTasks intentionally excluded — it's redefined every
-    // render (closes over live `tasks`/`projects`), and including it here
-    // would refire this effect every render instead of only on a real
-    // client switch, which is the only time re-reconciling is meaningful.
+    // reconcilePlaybookTasks/reconcileSalesTasks intentionally excluded —
+    // they're redefined every render (close over live `tasks`/`projects`),
+    // and including them here would refire this effect every render instead
+    // of only on a real client switch, which is the only time re-reconciling
+    // is meaningful.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeClient]);
   // Opens a business's Playbook the same way onOpenClient opens its Tasks —
@@ -2055,6 +2106,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const openClientPlaybook = (clientId: string) => {
     reconcilePlaybookTasks(clientId);
     setTerritoryView(null); setActiveClient(clientId); setActiveProject(playbookProjectId(clientId)); setClientTab("tasks");
+  };
+  // Same idea as openClientPlaybook, for the Sales checklist.
+  const openClientSales = (clientId: string) => {
+    reconcileSalesTasks(clientId);
+    setTerritoryView(null); setActiveClient(clientId); setActiveProject(salesProjectId(clientId)); setClientTab("tasks");
   };
   // Not gated by myWorkUser (the admin-only "viewing work for" selector) —
   // RLS never even returns another person's private tasks in `tasks`, so
@@ -4470,6 +4526,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               onOpenTask={setOpenTaskId}
               playbookTasksByClient={playbookTasksByClient}
               onOpenPlaybook={openClientPlaybook}
+              salesTasksByClient={salesTasksByClient}
+              onOpenSales={openClientSales}
               onSetClientStatus={setClientStatus}
               ghlContactUrlFor={ghlContactUrlFor}
               focusId={territoryView === "all" ? undefined : territoryView} />

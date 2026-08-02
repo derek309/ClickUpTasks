@@ -21,7 +21,7 @@ import { authedFetch } from "@/lib/supabase";
 import { fetchPlannerWeeks } from "@/lib/db";
 import { latestInviteStatus } from "@/lib/plannerPools";
 import {
-  formatDue, isOverdue, STATUS_META, playbookCompletion,
+  formatDue, isOverdue, STATUS_META, playbookCompletion, salesCompletion,
   CLIENT_STATUS_META, CLIENT_STATUS_ORDER,
   type Contact, type Client, type ClientStatus, type Task, type PlannerInvite,
 } from "@/lib/data";
@@ -108,7 +108,7 @@ const listingsCache = new Map<string, ListingsCacheEntry>();
 // flash of the previous city's invite badges.
 const inviteCache = new Map<string, { byGdPlaceId: Map<number, PlannerInvite>; at: number }>();
 
-export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, onAddTask, onOpenTask, playbookTasksByClient, onOpenPlaybook, onSetClientStatus, ghlContactUrlFor, territoryId }: {
+export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, onAddTask, onOpenTask, playbookTasksByClient, onOpenPlaybook, salesTasksByClient, onOpenSales, onSetClientStatus, ghlContactUrlFor, territoryId }: {
   city: string;
   state: string;
   contacts: Contact[];   // already scoped to this city/state by the caller
@@ -139,6 +139,12 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // overview (which never passes this) degrades to no chip.
   playbookTasksByClient?: Map<string, Task[]>;
   onOpenPlaybook?: (clientId: string) => void;
+  // Sales checklist tasks per business, and its navigate-to-it handler — same
+  // shape as playbookTasksByClient/onOpenPlaybook. ListingRow shows this chip
+  // instead of Playbook until the business is a real client on the Growth
+  // Plan (stage past "claimed" — see the chip choice in ListingRow below).
+  salesTasksByClient?: Map<string, Task[]>;
+  onOpenSales?: (clientId: string) => void;
   // Editable Stage dropdown for a claimed business with a client record —
   // writes straight through the client header's own status setter. Optional
   // so the admin multi-city overview degrades to a read-only Stage label.
@@ -346,7 +352,8 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                     canFeature={!!(r.client || r.contact)}
                     onFeature={onFeature && ((rr) => onFeature({ clientId: rr.client?.id ?? null, contact: rr.contact, name: rr.listing.name, city, state }))}
                     tasks={(r.client && tasksByClient?.get(r.client.id)) || []} onAddTask={onAddTask} onOpenTask={onOpenTask}
-                    playbookTasks={(r.client && playbookTasksByClient?.get(r.client.id)) || []} onOpenPlaybook={onOpenPlaybook} />
+                    playbookTasks={(r.client && playbookTasksByClient?.get(r.client.id)) || []} onOpenPlaybook={onOpenPlaybook}
+                    salesTasks={(r.client && salesTasksByClient?.get(r.client.id)) || []} onOpenSales={onOpenSales} />
                 ))}
               </div>
             );
@@ -369,7 +376,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClientStatus, ghlContactUrlFor, featured, canFeature, onFeature, tasks, onAddTask, onOpenTask, playbookTasks, onOpenPlaybook }: {
+function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClientStatus, ghlContactUrlFor, featured, canFeature, onFeature, tasks, onAddTask, onOpenTask, playbookTasks, onOpenPlaybook, salesTasks, onOpenSales }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
   // tab="chat" opens straight to the client's Journal — the real activity
@@ -400,12 +407,22 @@ function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClien
   // Owner Growth Plan tasks — same "empty when no client row yet" shape as tasks.
   playbookTasks: Task[];
   onOpenPlaybook?: (clientId: string) => void;
+  // Sales checklist tasks — same shape, shown instead of Playbook until the
+  // business is a real client on the Growth Plan (see `stage` below).
+  salesTasks: Task[];
+  onOpenSales?: (clientId: string) => void;
 }) {
   const { listing, contact, client } = row;
   const [tasksOpen, setTasksOpen] = useState(false);
   const [newTask, setNewTask] = useState("");
 
-  const playbook = client ? playbookCompletion(client.id, playbookTasks) : null;
+  // Sales (getting them in) runs the funnel up through "claimed" — Playbook
+  // (growing them) takes over once a real client status exists beyond
+  // Lead/Prospect. Mirrors computeBusinessStage's own claimed-but-no-real-
+  // status-yet logic, so the chip swap lines up exactly with the Stage cell.
+  const onGrowthPlan = stage !== "unclaimed" && stage !== "invited" && stage !== "claimed";
+  const playbook = client && onGrowthPlan ? playbookCompletion(client.id, playbookTasks) : null;
+  const sales = client && !onGrowthPlan ? salesCompletion(client.id, salesTasks) : null;
   const expanded = tasksOpen;
   const ghlUrl = client ? ghlContactUrlFor?.(client.id) : null;
 
@@ -489,6 +506,13 @@ function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClien
                 className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">
                 Playbook {playbook.doneCount}/{playbook.total}
                 {playbook.next && <span className="ml-1 font-normal text-accent">· {playbook.next.label}</span>}
+              </button>
+            )}
+            {client && onOpenSales && sales && (
+              <button onClick={() => onOpenSales(client.id)} title={sales.next ? `Sales — next: ${sales.next.label}` : "Sales — all steps complete"}
+                className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">
+                Sales {sales.doneCount}/{sales.total}
+                {sales.next && <span className="ml-1 font-normal text-accent">· {sales.next.label}</span>}
               </button>
             )}
             {client && onAddTask ? (

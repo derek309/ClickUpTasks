@@ -79,7 +79,7 @@ const taskToRow = (t: Task, updatedBy?: string | null) => ({
   ghl_task_id: t.ghlTaskId, label_ids: t.labelIds, subtasks: t.subtasks,
   attachments: t.attachments, comments: t.comments, updated_by: updatedBy ?? null, is_private: t.private,
   stage_id: t.stageId ?? null, client_response: t.clientResponse ?? null, draft_email: t.draftEmail ?? null,
-  playbook_step_key: t.playbookStepKey ?? null, created_by: t.createdBy ?? null, checkin_kind: t.checkinKind ?? null,
+  playbook_step_key: t.playbookStepKey ?? null, sales_step_key: t.salesStepKey ?? null, created_by: t.createdBy ?? null, checkin_kind: t.checkinKind ?? null,
   // Derived from checklist-item assignees so RLS can let a delegatee see a
   // task delegated to them even when they don't own it or follow the client.
   delegated_to: [...new Set(t.subtasks.map((s) => s.assigneeId).filter((id): id is string => !!id && id !== t.assigneeId))],
@@ -102,6 +102,7 @@ export const rowToTask = (r: any): Task => ({
   clientResponse: r.client_response ?? null,
   draftEmail: r.draft_email ?? null,
   playbookStepKey: r.playbook_step_key ?? null,
+  salesStepKey: r.sales_step_key ?? null,
   createdBy: r.created_by ?? null,
   checkinKind: r.checkin_kind ?? null,
 });

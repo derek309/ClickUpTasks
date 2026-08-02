@@ -10,7 +10,7 @@ import { users, clientStatusMeta, normalizeState, playbookCompletion, type Me, t
 import { I, Avatar } from "./cockpit/ui";
 import TerritoryDirectory from "./cockpit/TerritoryDirectory";
 
-export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onDeleteTerritory, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, onAddTask, onOpenTask, playbookTasksByClient, onOpenPlaybook, onSetClientStatus, ghlContactUrlFor, focusId }: {
+export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onDeleteTerritory, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, onAddTask, onOpenTask, playbookTasksByClient, onOpenPlaybook, salesTasksByClient, onOpenSales, onSetClientStatus, ghlContactUrlFor, focusId }: {
   me: Me; canAdmin: boolean;
   territories: Territory[]; contacts: Contact[]; clients: Client[];
   onAddTerritory: (t: { name: string; city: string; state: string; assignedTo: string[] }) => void;
@@ -34,6 +34,11 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
   // same optional-so-the-admin-overview-degrades-gracefully shape as tasksByClient.
   playbookTasksByClient?: Map<string, Task[]>;
   onOpenPlaybook?: (clientId: string) => void;
+  // Sales checklist tasks per business, and its navigate-to-it handler — same
+  // shape as playbookTasksByClient/onOpenPlaybook, shown instead of the
+  // Playbook chip until a business is a real client on the Growth Plan.
+  salesTasksByClient?: Map<string, Task[]>;
+  onOpenSales?: (clientId: string) => void;
   // Editable Stage dropdown + GHL contact link on the Businesses page.
   // Optional so the admin multi-city overview (below) — a read-only list —
   // degrades gracefully without them.
@@ -190,6 +195,7 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                     featuredClientIds={featuredClientIds} onFeature={onFeature}
                     tasksByClient={tasksByClient} onAddTask={onAddTask} onOpenTask={onOpenTask}
                     playbookTasksByClient={playbookTasksByClient} onOpenPlaybook={onOpenPlaybook}
+                    salesTasksByClient={salesTasksByClient} onOpenSales={onOpenSales}
                     onSetClientStatus={onSetClientStatus} ghlContactUrlFor={ghlContactUrlFor} territoryId={focusId} />
                 )}
                 {open && !focusId && (
