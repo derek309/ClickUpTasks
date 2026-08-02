@@ -1971,10 +1971,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return m;
   })();
   const territoryOpenWorkCount = (territoryId: string) => clientTaskCount(territoryClientId(territoryId));
-  // Quick-add straight from a business row in the city view. Reuses the same
-  // creation path as the ⌘-quick-add dialog (default project resolution
-  // included) so a task added here is identical to one added anywhere else.
-  const addTerritoryBusinessTask = (clientId: string, title: string) => createQuickTask(clientId, null, title, null, "normal");
+  // A business's own tasks for the Businesses page's "Tasks X/Y" pill — ANY
+  // status (unlike territoryTasksByClient above), since this needs a real
+  // done/total fraction, not just an open count. Excludes Playbook/Sales
+  // checklist steps, which already get their own dedicated pill.
+  const territoryAllTasksByClient = (() => {
+    const m = new Map<string, Task[]>();
+    for (const t of scopedTasks) {
+      if (t.playbookStepKey || t.salesStepKey) continue;
+      const list = m.get(t.clientId);
+      if (list) list.push(t); else m.set(t.clientId, [t]);
+    }
+    return m;
+  })();
   // Owner Growth Plan tasks, bucketed by client — same one-pass-not-memoized
   // shape as territoryTasksByClient above, but WITHOUT the status==="done"
   // exclusion (playbookCompletion needs to see done steps too, to count them).
@@ -4558,10 +4567,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               onSyncClients={syncTerritoryClients}
               featuredClientIds={featuredClientIds}
               onFeature={featureBusiness}
-              onOpenClient={(id, tab) => { setTerritoryView(null); setActiveClient(id); setActiveProject(null); setClientTab(tab ?? "tasks"); }}
-              tasksByClient={territoryTasksByClient}
-              onAddTask={addTerritoryBusinessTask}
-              onOpenTask={setOpenTaskId}
+              onOpenClient={(id) => { setTerritoryView(null); setActiveClient(id); setActiveProject(null); setClientTab("tasks"); }}
+              tasksByClient={territoryAllTasksByClient}
               playbookTasksByClient={playbookTasksByClient}
               onOpenPlaybook={openClientPlaybook}
               salesTasksByClient={salesTasksByClient}

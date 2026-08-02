@@ -21,11 +21,11 @@ import { authedFetch } from "@/lib/supabase";
 import { fetchPlannerWeeks } from "@/lib/db";
 import { latestInviteStatus } from "@/lib/plannerPools";
 import {
-  formatDue, isOverdue, STATUS_META, playbookCompletion, salesCompletion,
+  formatDue, playbookCompletion, salesCompletion,
   CLIENT_STATUS_META, CLIENT_STATUS_ORDER,
   type Contact, type Client, type ClientStatus, type Task, type PlannerInvite,
 } from "@/lib/data";
-import { I, Avatar } from "./ui";
+import { I } from "./ui";
 
 export type DirectoryListing = {
   id: number | string;
@@ -112,7 +112,7 @@ const listingsCache = new Map<string, ListingsCacheEntry>();
 // flash of the previous city's invite badges.
 const inviteCache = new Map<string, { byGdPlaceId: Map<number, PlannerInvite>; at: number }>();
 
-export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, onAddTask, onOpenTask, playbookTasksByClient, onOpenPlaybook, salesTasksByClient, onOpenSales, onSetClientStatus, ghlContactUrlFor, territoryId }: {
+export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, salesTasksByClient, onOpenSales, onSetClientStatus, ghlContactUrlFor, territoryId }: {
   city: string;
   state: string;
   contacts: Contact[];   // already scoped to this city/state by the caller
@@ -126,19 +126,15 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // Bulk auto-sync (see below). Optional so this component still degrades
   // gracefully if a caller doesn't wire it.
   onSyncClients?: (contacts: Contact[]) => void;
-  // tab="chat" opens straight to the client's Journal tab (see ListingRow).
-  onOpenClient: (clientId: string, tab?: "chat") => void;
+  onOpenClient: (clientId: string) => void;
   // Newsletter feature motion. Optional so the admin multi-city overview,
   // which has no ambassador context, degrades to a read-only list.
   featuredClientIds?: Set<string>;
   onFeature?: (opts: { clientId: string | null; contact: Contact | null; name: string; city: string; state: string }) => void;
-  // Open tasks per business, keyed by client id. A city's businesses are all
-  // clients already (see the bulk sync below), so their work exists — it just
-  // wasn't visible from here without opening each one. Optional so the admin
-  // multi-city overview degrades to the read-only list it is today.
+  // This business's own tasks (any status, excluding Playbook/Sales
+  // checklist steps), keyed by client id, for the "Tasks X/Y" pill. Optional
+  // so the admin multi-city overview degrades to the read-only list it is today.
   tasksByClient?: Map<string, Task[]>;
-  onAddTask?: (clientId: string, title: string) => void;
-  onOpenTask?: (taskId: string) => void;
   // Owner Growth Plan tasks per business — optional so the admin multi-city
   // overview (which never passes this) degrades to no chip.
   playbookTasksByClient?: Map<string, Task[]>;
@@ -354,7 +350,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                     featured={!!r.client && !!featuredClientIds?.has(r.client.id)}
                     canFeature={!!(r.client || r.contact)}
                     onFeature={onFeature && ((rr) => onFeature({ clientId: rr.client?.id ?? null, contact: rr.contact, name: rr.listing.name, city, state }))}
-                    tasks={(r.client && tasksByClient?.get(r.client.id)) || []} onAddTask={onAddTask} onOpenTask={onOpenTask}
+                    tasks={(r.client && tasksByClient?.get(r.client.id)) || []}
                     playbookTasks={(r.client && playbookTasksByClient?.get(r.client.id)) || []} onOpenPlaybook={onOpenPlaybook}
                     salesTasks={(r.client && salesTasksByClient?.get(r.client.id)) || []} onOpenSales={onOpenSales} />
                 ))}
@@ -379,13 +375,10 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClientStatus, ghlContactUrlFor, featured, canFeature, onFeature, tasks, onAddTask, onOpenTask, playbookTasks, onOpenPlaybook, salesTasks, onOpenSales }: {
+function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClientStatus, ghlContactUrlFor, featured, canFeature, onFeature, tasks, playbookTasks, onOpenPlaybook, salesTasks, onOpenSales }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
-  // tab="chat" opens straight to the client's Journal — the real activity
-  // feed (GHL email/SMS conversation, task activity/completion, team notes)
-  // instead of this page's old manual outreach log.
-  onOpenClient: (id: string, tab?: "chat") => void;
+  onOpenClient: (id: string) => void;
   // This row's computed funnel position (see computeBusinessStage above).
   stage: BusinessStage;
   // This business's most recent Content Planner invite, if any — undefined
@@ -403,10 +396,10 @@ function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClien
   // with a reason instead of a button that looks fine and does nothing.
   canFeature: boolean;
   onFeature?: (row: { listing: DirectoryListing; contact: Contact | null; client: Client | null }) => void;
-  // This business's own open tasks (empty when it has no client row yet).
+  // This business's own tasks, any status, excluding Playbook/Sales checklist
+  // steps (those already have their own pill) — empty when it has no client
+  // row yet. Click-through to the client's Tasks view, not an inline list.
   tasks: Task[];
-  onAddTask?: (clientId: string, title: string) => void;
-  onOpenTask?: (taskId: string) => void;
   // Owner Growth Plan tasks — same "empty when no client row yet" shape as tasks.
   playbookTasks: Task[];
   onOpenPlaybook?: (clientId: string) => void;
@@ -416,8 +409,6 @@ function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClien
   onOpenSales?: (clientId: string) => void;
 }) {
   const { listing, contact, client } = row;
-  const [tasksOpen, setTasksOpen] = useState(false);
-  const [newTask, setNewTask] = useState("");
 
   // Sales (getting them in) runs the funnel up through "claimed" — Playbook
   // (growing them) takes over once a real client status exists beyond
@@ -426,24 +417,11 @@ function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClien
   const onGrowthPlan = stage !== "unclaimed" && stage !== "invited" && stage !== "claimed";
   const playbook = client && onGrowthPlan ? playbookCompletion(client.id, playbookTasks) : null;
   const sales = client && !onGrowthPlan ? salesCompletion(client.id, salesTasks) : null;
-  const expanded = tasksOpen;
   const ghlUrl = client ? ghlContactUrlFor?.(client.id) : null;
-
-  // Soonest due date across this business's open tasks — the one number worth
-  // showing in a dense row, since "3 open" alone doesn't say whether anything
-  // is late. Tasks with no due date never win the comparison.
-  const openTasks = tasks.filter((t) => t.status !== "done");
-  const nextDue = openTasks.reduce<string | null>((soonest, t) => (t.due && (!soonest || t.due < soonest) ? t.due : soonest), null);
-
-  const addTask = () => {
-    const title = newTask.trim();
-    if (!title || !client || !onAddTask) return;
-    onAddTask(client.id, title);
-    setNewTask("");
-  };
+  const tasksDone = tasks.filter((t) => t.status === "done").length;
 
   return (
-    <div className={`border-b text-[15px] transition-colors last:border-0 hover:bg-accent-soft/50 ${expanded ? "bg-accent-soft/30" : ""}`}>
+    <div className="border-b text-[15px] transition-colors last:border-0 hover:bg-accent-soft/50">
       <div className="flex flex-col gap-1.5 px-4 py-2.5 sm:grid sm:min-h-[42px] sm:items-center sm:gap-2 sm:py-1.5" style={{ gridTemplateColumns: TEMPLATE }}>
         {/* Name + invite/outcome/due chips */}
         <div className="min-w-0">
@@ -486,7 +464,7 @@ function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClien
             everything else (unclaimed, invited, or claimed with no client yet)
             is a plain read-only label. */}
         <div className="pl-5 sm:pl-0">
-          {client && onSetClientStatus ? (
+          {client && onSetClientStatus && stage !== "unclaimed" && stage !== "invited" ? (
             <select value={client.status} onChange={(e) => onSetClientStatus(client.id, e.target.value as ClientStatus)}
               title="Business lifecycle stage" className="w-full max-w-[140px] rounded-md border px-1.5 py-1 text-[12px] font-medium outline-none focus:border-accent bg-accent-soft text-accent">
               {CLIENT_STATUS_ORDER.map((s) => <option key={s} value={s}>{CLIENT_STATUS_META[s].label}</option>)}
@@ -515,7 +493,7 @@ function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClien
           progress/next-step text a business has, and needs room to breathe.
           Journal/Feature stay de-emphasized in a compact icon row beside it. */}
       {client && (
-        <div className="flex flex-wrap items-center gap-1.5 border-t px-4 pb-2 pl-9 pt-1.5 sm:pl-9">
+        <div className="flex flex-wrap items-center gap-1.5 px-4 pb-2 pl-9 pt-1.5 sm:pl-9">
           {onOpenPlaybook && playbook && (
             <button onClick={() => onOpenPlaybook(client.id)} title={playbook.next ? `Playbook — next: ${playbook.next.label}` : "Playbook — all steps complete"}
               className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">
@@ -530,48 +508,23 @@ function ListingRow({ row, onAddContact, onOpenClient, stage, invite, onSetClien
               {sales.next && <span className="ml-1 font-normal text-accent">· {sales.next.label}</span>}
             </button>
           )}
-          {onAddTask ? (
-            <button onClick={() => setTasksOpen((o) => !o)} title={openTasks.length ? `${openTasks.length} open task${openTasks.length === 1 ? "" : "s"}` : "No open tasks — click to add one"}
-              className={`shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium ${tasksOpen ? "bg-accent-soft text-accent" : openTasks.length ? "text-foreground hover:bg-surface" : "border-dashed text-muted hover:bg-surface hover:text-foreground"}`}>
-              {openTasks.length ? `${openTasks.length} task${openTasks.length === 1 ? "" : "s"}` : "+ Task"}
-              {nextDue && <span className={`ml-1 font-normal ${isOverdue(nextDue) ? "text-danger" : "text-muted"}`}>{formatDue(nextDue)}</span>}
+          {/* Every other list this business has (excluding Playbook/Sales,
+              which get their own pill above) — same X/Y format, click jumps
+              straight to this client's Tasks view rather than expanding
+              anything inline. Hidden when there's nothing outside those two. */}
+          {tasks.length > 0 && (
+            <button onClick={() => onOpenClient(client.id)} title={`${tasksDone}/${tasks.length} tasks — open this business's task list`}
+              className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">
+              Tasks {tasksDone}/{tasks.length}
             </button>
-          ) : null}
+          )}
           <span className="ml-auto flex shrink-0 items-center gap-0.5 text-muted">
-            {/* Real activity (calls/emails/SMS/notes) lives in the client's
-                own Journal now — GHL conversation + task activity, not a
-                manually-entered log — so this just jumps there. */}
-            <button onClick={() => onOpenClient(client.id, "chat")} title="Open Journal — calls, emails, SMS, and notes for this business"
-              className="shrink-0 rounded p-1 hover:bg-surface hover:text-foreground"><I.clock /></button>
             {onFeature && (featured
               ? <span title="Already run through the newsletter feature motion" className="shrink-0 rounded p-1 text-emerald-600"><I.star filled /></span>
               : <button onClick={() => onFeature(row)} disabled={!canFeature}
                   title={canFeature ? "Feature in the newsletter — creates the Stage-3 outreach sequence" : "No GoHighLevel contact matched to this listing yet, so there's nothing to attach the sequence to"}
                   className="shrink-0 rounded p-1 hover:bg-surface hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"><I.star /></button>)}
           </span>
-        </div>
-      )}
-
-      {/* This business's open tasks + one-line quick-add. Deliberately a
-          read-and-add surface only — editing (assignee, due, checklist,
-          comments) happens in the task itself, one click away, rather than
-          rebuilding the task drawer inside a directory row. */}
-      {tasksOpen && client && (
-        <div className="space-y-1 border-t bg-background/40 px-4 py-2 pl-9 text-[13px]">
-          {openTasks.length === 0 && <div className="text-[12px] text-muted">No open tasks for {listing.name} yet.</div>}
-          {openTasks.map((t) => (
-            <button key={t.id} onClick={() => onOpenTask?.(t.id)} className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-surface">
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: STATUS_META[t.status].dot }} />
-              <span className="min-w-0 flex-1 truncate">{t.title}</span>
-              {t.due && <span className={`shrink-0 text-[12px] ${isOverdue(t.due) ? "font-medium text-danger" : "text-muted"}`}>{formatDue(t.due)}</span>}
-              {t.assigneeId && <Avatar id={t.assigneeId} size={18} />}
-            </button>
-          ))}
-          {/* Enter commits; deliberately NOT onBlur — these rows sit in a
-              dense list where clicking away is the normal way to abandon a
-              half-typed thought, and committing there creates junk tasks. */}
-          <input value={newTask} onChange={(e) => setNewTask(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addTask(); }}
-            placeholder="Add a task…  ↵" className="mt-1 w-full rounded-md border bg-surface px-2 py-1 text-[13px] outline-none focus:border-accent" />
         </div>
       )}
     </div>

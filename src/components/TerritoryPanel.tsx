@@ -10,7 +10,7 @@ import { users, clientStatusMeta, normalizeState, playbookCompletion, type Me, t
 import { I, Avatar } from "./cockpit/ui";
 import TerritoryDirectory from "./cockpit/TerritoryDirectory";
 
-export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onDeleteTerritory, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, onAddTask, onOpenTask, playbookTasksByClient, onOpenPlaybook, salesTasksByClient, onOpenSales, onSetClientStatus, ghlContactUrlFor, focusId }: {
+export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onDeleteTerritory, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, salesTasksByClient, onOpenSales, onSetClientStatus, ghlContactUrlFor, focusId }: {
   me: Me; canAdmin: boolean;
   territories: Territory[]; contacts: Contact[]; clients: Client[];
   onAddTerritory: (t: { name: string; city: string; state: string; assignedTo: string[] }) => void;
@@ -21,15 +21,13 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
   // single-city page (see TerritoryDirectory), so optional here: the admin
   // multi-city overview below never sets focusId and never needs them.
   onSyncClients?: (contacts: Contact[]) => void;
-  onOpenClient: (clientId: string, tab?: "chat") => void;
+  onOpenClient: (clientId: string) => void;
   // Newsletter feature motion, threaded straight through to the city view.
   featuredClientIds?: Set<string>;
   onFeature?: (opts: { clientId: string | null; contact: Contact | null; name: string; city: string; state: string }) => void;
   // Per-business work, surfaced inline on each listing row so you can see
   // what's open across a city without opening every business in turn.
   tasksByClient?: Map<string, Task[]>;
-  onAddTask?: (clientId: string, title: string) => void;
-  onOpenTask?: (taskId: string) => void;
   // Owner Growth Plan tasks per business, and the navigate-to-it handler —
   // same optional-so-the-admin-overview-degrades-gracefully shape as tasksByClient.
   playbookTasksByClient?: Map<string, Task[]>;
@@ -193,7 +191,7 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                   <TerritoryDirectory city={t.city} state={t.state} contacts={matched} clients={clients} onAddContact={onAddContact}
                     onSyncClients={onSyncClients} onOpenClient={onOpenClient}
                     featuredClientIds={featuredClientIds} onFeature={onFeature}
-                    tasksByClient={tasksByClient} onAddTask={onAddTask} onOpenTask={onOpenTask}
+                    tasksByClient={tasksByClient}
                     playbookTasksByClient={playbookTasksByClient} onOpenPlaybook={onOpenPlaybook}
                     salesTasksByClient={salesTasksByClient} onOpenSales={onOpenSales}
                     onSetClientStatus={onSetClientStatus} ghlContactUrlFor={ghlContactUrlFor} territoryId={focusId} />
