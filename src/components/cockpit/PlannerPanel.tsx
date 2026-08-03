@@ -48,7 +48,7 @@ const SECTION_PRESETS = ["Hidden Gem", "The Story", "New In Town", "Ask Your Con
 // data worth syncing across devices.
 const DRAFT_CACHE_PREFIX = "cut_plannerDraft_";
 
-export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekChange, clients, tasks }: {
+export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekChange, clients, tasks, dailyInviteCap }: {
   territoryId: string; city: string; state: string;
   // Deep-link support (Cockpit's URL sync) — initialWeekId seeds which week
   // opens on mount, onWeekChange mirrors every change back up so the URL
@@ -59,6 +59,10 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
   // component still works standalone; when omitted, that queue just falls
   // back to its underlying first-accepted order.
   clients?: Client[]; tasks?: Task[];
+  // This territory's auto-invite setting (Territories admin panel) — lets
+  // the current week preview exactly who the daily cron would send to next.
+  // null/0 = auto-invite is off.
+  dailyInviteCap?: number | null;
 }) {
   const [weeks, setWeeks] = useState<PlannerWeek[]>([]);
   const [loading, setLoading] = useState(true);
@@ -146,7 +150,7 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
   if (openWeek) {
     return (
       <WeekWorkspace week={openWeek} weeks={weeks} listings={listings} cityName={city} state={state} onBack={() => setOpenWeekId(null)}
-        onPatch={(patch) => patchWeek(openWeek.id, patch)} onDelete={() => deleteWeek(openWeek.id)} clients={clients} tasks={tasks} />
+        onPatch={(patch) => patchWeek(openWeek.id, patch)} onDelete={() => deleteWeek(openWeek.id)} clients={clients} tasks={tasks} dailyInviteCap={dailyInviteCap} />
     );
   }
 
@@ -249,7 +253,7 @@ function SaveConfirmButton() {
   );
 }
 
-function WeekWorkspace({ week, weeks, listings, cityName, state, onBack, onPatch, onDelete, clients, tasks }: {
+function WeekWorkspace({ week, weeks, listings, cityName, state, onBack, onPatch, onDelete, clients, tasks, dailyInviteCap }: {
   week: PlannerWeek;
   weeks: PlannerWeek[]; // the territory's full week history, for rotation "due" status
   listings: DirectoryListing[];
@@ -261,6 +265,7 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, onBack, onPatch
   // The full roster — used only to rank the "ready to feature" queue by
   // Playbook completion (see acceptedUnassigned below).
   clients?: Client[]; tasks?: Task[];
+  dailyInviteCap?: number | null;
 }) {
   const [pickerSlot, setPickerSlot] = useState<PlannerSlot | null>(null);
   const [slPickerOpen, setSlPickerOpen] = useState(false);
@@ -419,6 +424,20 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, onBack, onPatch
       return a.name.localeCompare(b.name);
     });
   }, [listings, week.categories, inviteCounts, today]);
+  // Exactly what runPlannerAutoInvite (plannerAutoInviteServer.ts) would pick
+  // next: unclaimed only (the auto-invite is "come claim your listing," not
+  // a feature invite), due for a touch, most-overdue first, capped at this
+  // territory's daily_invite_cap — a preview so a rep can see the actual
+  // batch before/instead of digging through categoryMatches by eye.
+  const autoInviteQueue = useMemo(() => {
+    if (!dailyInviteCap || dailyInviteCap <= 0) return [];
+    return categoryMatches
+      .filter((l) => !l.claimed)
+      .map((l) => { const id = toGdPlaceId(l.id); return { listing: l, lastAt: id != null ? (inviteCounts.get(id)?.lastAt ?? null) : null }; })
+      .filter((c) => isDue(c.lastAt, today))
+      .sort((a, b) => (a.lastAt ?? "").localeCompare(b.lastAt ?? ""))
+      .slice(0, dailyInviteCap);
+  }, [categoryMatches, inviteCounts, today, dailyInviteCap]);
   // Grouped by the listing's own real GD category (not the theme's category
   // tags — a different vocabulary, see categoryMatch.ts) so it's obvious how
   // many of each you actually have, not just a flat count. Biggest groups
@@ -836,6 +855,31 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, onBack, onPatch
           <textarea value={week.notes} onChange={(e) => onPatch({ notes: e.target.value })} placeholder="Notes for this week…" rows={2}
             className="w-full resize-y rounded-lg border bg-surface px-3 py-1.5 text-[13px] outline-none placeholder:text-muted focus:border-accent" />
         </div>
+
+        {/* Only meaningful on the current week — the auto-invite cron always
+            acts on THIS week (plannerWeekOf(todayIso())) regardless of which
+            week is open here, so a preview on any other week would be
+            misleading. */}
+        {week.week === PLANNER_CURRENT_WEEK && (
+          dailyInviteCap && dailyInviteCap > 0 ? (
+            <div className="border-b bg-accent-soft/40 px-4 py-3">
+              <div className="mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-accent">Next auto-invite batch — {autoInviteQueue.length} of {dailyInviteCap} slots</div>
+              {autoInviteQueue.length === 0 ? (
+                <div className="text-[13px] text-muted">Nothing due right now — nobody unclaimed is overdue for a touch.</div>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {autoInviteQueue.map((c) => (
+                    <span key={c.listing.id} title={c.lastAt ? `Last invited ${c.lastAt.slice(0, 10)}` : "Never invited"} className="rounded-full border border-accent/40 bg-surface px-2 py-0.5 text-[12px] font-medium">
+                      {c.listing.name}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="border-b bg-background/40 px-4 py-2 text-[12px] text-muted">Auto-invite is off for {cityName} — set a daily cap in Settings → Territories to turn it on.</div>
+          )
+        )}
 
         {/* Always on now — a theme used to be required for this whole
             invite/feature surface to even appear, which is exactly what
