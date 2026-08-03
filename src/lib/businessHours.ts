@@ -27,10 +27,26 @@ function zonedWeekdayHour(at: Date, timeZone: string): { weekday: string; hour: 
   return { weekday, hour };
 }
 
-export function isWithinBusinessHours(at: Date, timeZone: string = BUSINESS_TZ): boolean {
+export function isWithinBusinessHours(at: Date, timeZone: string = BUSINESS_TZ, startHour: number = BUSINESS_START_HOUR, endHour: number = BUSINESS_END_HOUR): boolean {
   const { weekday, hour } = zonedWeekdayHour(at, timeZone);
   if (!BUSINESS_DAYS.has(weekday)) return false;
-  return hour >= BUSINESS_START_HOUR && hour < BUSINESS_END_HOUR;
+  return hour >= startHour && hour < endHour;
+}
+
+// The auto-invite cron's own, narrower pacing window — "one per hour, 9 to
+// 5" (Derek) — distinct from the general 8am-6pm politeness guard above,
+// which still governs manual sends.
+export const AUTO_INVITE_START_HOUR = 9; // 9am, inclusive
+export const AUTO_INVITE_END_HOUR = 17; // 5pm, exclusive — last tick fires at 4pm
+export function isAutoInviteHour(at: Date, timeZone: string = BUSINESS_TZ): boolean {
+  return isWithinBusinessHours(at, timeZone, AUTO_INVITE_START_HOUR, AUTO_INVITE_END_HOUR);
+}
+
+// yyyy-mm-dd as it reads on a clock in `timeZone` — used to bucket "how many
+// sent today" by the same local day the 9-5 window itself is evaluated in,
+// not the server's UTC day.
+export function zonedDateString(at: Date, timeZone: string = BUSINESS_TZ): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone }).format(at);
 }
 
 // Shown to the rep when a send is blocked.

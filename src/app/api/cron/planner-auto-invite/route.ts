@@ -3,10 +3,11 @@ import { adminConfigured } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/serverAuth";
 import { runPlannerAutoInvite } from "@/lib/plannerAutoInviteServer";
 
-// Daily auto-invite for the Content Planner — see plannerAutoInviteServer.ts.
-// Same 3-way cron auth as the other crons. WordPress sends can take a few
-// seconds each across several territories, so this gets a longer ceiling
-// than the other crons' default.
+// Hourly-paced auto-invite for the Content Planner — see
+// plannerAutoInviteServer.ts (fires every hour, sends at most one invite per
+// territory per tick, 9am-5pm Pacific). Same 3-way cron auth as the other
+// crons. WordPress sends can take a few seconds each across several
+// territories, so this gets a longer ceiling than the other crons' default.
 export const maxDuration = 300;
 
 export async function GET(req: NextRequest) {

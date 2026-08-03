@@ -5,6 +5,6 @@
     { "path": "/api/cron/send-scheduled", "schedule": "0 16 * * *" },
     { "path": "/api/cron/playbook-checkins", "schedule": "0 15 * * *" },
     { "path": "/api/cron/newsletter-reminder", "schedule": "30 13 * * *" },
-    { "path": "/api/cron/planner-auto-invite", "schedule": "0 17 * * *" }
+    { "path": "/api/cron/planner-auto-invite", "schedule": "0 * * * *" }
   ]
 }
