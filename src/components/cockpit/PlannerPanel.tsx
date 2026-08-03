@@ -13,16 +13,15 @@ import {
   fetchPlannerSections, upsertPlannerSection, deletePlannerSectionDb,
   fetchPlannerEvents, upsertPlannerEvent, deletePlannerEventDb, fetchRecentPlannerEvents,
   fetchNewsletterItems, upsertNewsletterItem, deleteNewsletterItemDb,
-  fetchThemeCalendar,
 } from "@/lib/db";
 import {
-  PLANNER_CURRENT_WEEK, plannerWeekLabel, addDaysIso, todayIso, PLANNER_CONTENT_SLOTS, PLANNER_BUSINESS_SLOTS, themeForWeek, playbookCompletion,
-  type PlannerWeek, type PlannerSlot, type PlannerBiz, type PlannerSection, type PlannerEvent, type NewsletterItem, type ThemeCalendarEntry, type PlannerInvite, type Client, type Task,
+  PLANNER_CURRENT_WEEK, plannerWeekLabel, addDaysIso, todayIso, PLANNER_CONTENT_SLOTS, PLANNER_BUSINESS_SLOTS, playbookCompletion,
+  type PlannerWeek, type PlannerSlot, type PlannerBiz, type PlannerSection, type PlannerEvent, type NewsletterItem, type PlannerInvite, type Client, type Task,
 } from "@/lib/data";
 import { generatePlannerBrief } from "@/lib/plannerBrief";
 import { pushPlannerWeek } from "@/lib/plannerPush";
 import { featureHistory, inviteHistory, isDue } from "@/lib/plannerPools";
-import { categoriesMatch, matchesAnyCategory } from "@/lib/categoryMatch";
+import { matchesAnyCategory } from "@/lib/categoryMatch";
 import { I, newId } from "./ui";
 import { type DirectoryListing } from "./TerritoryDirectory";
 
@@ -42,7 +41,6 @@ type PlannerWeekPatch = Partial<PlannerWeek> | ((w: PlannerWeek) => Partial<Plan
 // Sections already carry an attached business and flow into the brief under
 // their own heading, so an extra gem needs no new slot machinery.
 const SECTION_PRESETS = ["Hidden Gem", "The Story", "New In Town", "Ask Your Concierge", "Last Call"];
-const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 // A batch of live-search suggestions is a paid, ~10-60s Gemini call — losing
 // it to an accidental refresh mid-review means paying for it again. Cached
 // per week in localStorage (same cut_-prefixed, try/catch convention used
@@ -65,15 +63,11 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
   const [weeks, setWeeks] = useState<PlannerWeek[]>([]);
   const [loading, setLoading] = useState(true);
   const [openWeekId, setOpenWeekId] = useState<string | null>(initialWeekId ?? null);
-  const [calendarOpen, setCalendarOpen] = useState(false);
   useEffect(() => { onWeekChange?.(openWeekId); }, [openWeekId, onWeekChange]);
   // Business typeahead source for slot/section/event picks — the same city
   // fetch TerritoryDirectory already uses, cached here independently since
   // this view can be open without the Businesses tab ever having loaded it.
   const [listings, setListings] = useState<DirectoryListing[]>([]);
-  // The theme calendar is shared across every city, so it's fetched once
-  // here rather than per-territory like weeks/listings.
-  const [themeCalendar, setThemeCalendar] = useState<ThemeCalendarEntry[]>([]);
 
   useEffect(() => {
     let alive = true;
@@ -82,12 +76,6 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
     fetchPlannerWeeks(territoryId).then((ws) => { if (alive) { setWeeks(ws); setLoading(false); } });
     return () => { alive = false; };
   }, [territoryId]);
-
-  useEffect(() => {
-    let alive = true;
-    fetchThemeCalendar().then((c) => { if (alive) setThemeCalendar(c); });
-    return () => { alive = false; };
-  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -109,11 +97,10 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
   const addAnotherWeek = () => createWeek(addDaysIso(latestWeekIso, 7));
 
   const createWeek = async (week: string) => {
-    // No theme/categories prefilled here — the calendar's assignment is
-    // only ever offered as a suggestion (it's fed to "Suggest themes" as
-    // context), never written to the week until the user actually picks
-    // one. A prefilled theme reads as already-decided and skews the
-    // Spotlight/Hidden Gem pools before anyone chose anything.
+    // themeOverride/categories stay empty — the theme model is gone (Aug 3
+    // Derek/Justin call), so a new week has nothing to fill in up top before
+    // working the auto-cycling queue below. The fields remain on PlannerWeek
+    // for older weeks and for generatePlannerBrief, just unset going forward.
     const w: PlannerWeek = {
       id: newId("pw_"), territoryId, week, themeOverride: "", themeDescription: "", categories: [], notes: "", weatherNote: "",
       picks: {}, dismissed: [], invited: [], supportLocalExcluded: [], supportLocalAdded: [], archived: false, sentDate: null, wpPushedAt: null, createdAt: new Date().toISOString(),
@@ -158,7 +145,7 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
 
   if (openWeek) {
     return (
-      <WeekWorkspace week={openWeek} weeks={weeks} listings={listings} cityName={city} state={state} themeCalendar={themeCalendar} onBack={() => setOpenWeekId(null)}
+      <WeekWorkspace week={openWeek} weeks={weeks} listings={listings} cityName={city} state={state} onBack={() => setOpenWeekId(null)}
         onPatch={(patch) => patchWeek(openWeek.id, patch)} onDelete={() => deleteWeek(openWeek.id)} clients={clients} tasks={tasks} />
     );
   }
@@ -194,47 +181,13 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
                   {w.sentDate && <span className="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-600">Sent</span>}
                   {w.archived && <span className="rounded-full bg-background px-1.5 py-0.5 text-[11px] font-semibold text-muted">Archived</span>}
                 </span>
-                <span className="mt-0.5 block truncate text-[13px] text-muted">{w.themeOverride || "No theme yet"} · {filled}/{PLANNER_CONTENT_SLOTS.length} slots filled</span>
+                <span className="mt-0.5 block truncate text-[13px] text-muted">{filled}/{PLANNER_CONTENT_SLOTS.length} slots filled</span>
               </span>
               <I.chevron className="shrink-0 -rotate-90 text-muted" />
             </button>
           );
         })}
       </div>
-
-      {/* The full year's seasonal theme plan (planner_theme_calendar) — read
-          only here; a new week's theme/categories are pre-filled from this
-          via themeForWeek, but the calendar itself isn't edited in-app. */}
-      {themeCalendar.length > 0 && (
-        <div className="mt-3 overflow-hidden rounded-xl border bg-surface shadow-soft">
-          <button onClick={() => setCalendarOpen((o) => !o)} className="flex w-full items-center justify-between px-4 py-2.5 text-left">
-            <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Theme calendar</span>
-            <I.chevron className={`text-muted transition-transform ${calendarOpen ? "" : "-rotate-90"}`} />
-          </button>
-          {calendarOpen && (
-            <div className="divide-y border-t">
-              {MONTH_NAMES.map((name, i) => {
-                const entries = themeCalendar.filter((c) => c.month === i + 1).sort((a, b) => a.weekOfMonth - b.weekOfMonth);
-                if (!entries.length) return null;
-                return (
-                  <div key={name} className="px-4 py-2.5">
-                    <div className="mb-1 text-[12px] font-semibold text-foreground">{name}</div>
-                    <div className="space-y-0.5">
-                      {entries.map((e) => (
-                        <div key={e.id} className="flex flex-wrap items-baseline gap-x-2 text-[13px]">
-                          <span className="text-muted">Week {e.weekOfMonth}</span>
-                          <span className="font-medium">{e.title}</span>
-                          {e.categories.length > 0 && <span className="text-[12px] text-muted">· {e.categories.join(", ")}</span>}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -296,13 +249,12 @@ function SaveConfirmButton() {
   );
 }
 
-function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, onBack, onPatch, onDelete, clients, tasks }: {
+function WeekWorkspace({ week, weeks, listings, cityName, state, onBack, onPatch, onDelete, clients, tasks }: {
   week: PlannerWeek;
   weeks: PlannerWeek[]; // the territory's full week history, for rotation "due" status
   listings: DirectoryListing[];
   cityName: string;
   state: string;
-  themeCalendar: ThemeCalendarEntry[];
   onBack: () => void;
   onPatch: (patch: PlannerWeekPatch) => void;
   onDelete: () => void;
@@ -312,13 +264,6 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
 }) {
   const [pickerSlot, setPickerSlot] = useState<PlannerSlot | null>(null);
   const [slPickerOpen, setSlPickerOpen] = useState(false);
-  const [catInput, setCatInput] = useState("");
-  const [themeOptions, setThemeOptions] = useState<{ title: string; description: string }[] | null>(null);
-  const [themeLoading, setThemeLoading] = useState(false);
-  const [themeError, setThemeError] = useState<string | null>(null);
-  const [categorySuggestions, setCategorySuggestions] = useState<string[] | null>(null);
-  const [categoriesLoading, setCategoriesLoading] = useState(false);
-  const [categoriesError, setCategoriesError] = useState<string | null>(null);
   const [sections, setSections] = useState<PlannerSection[]>([]);
   const [events, setEvents] = useState<PlannerEvent[]>([]);
   // Mirror the two lists so patchSection/patchEvent can build each whole-row
@@ -382,39 +327,6 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     if (biz) picks[slot] = biz; else delete picks[slot];
     onPatch({ picks });
     setPickerSlot(null);
-  };
-
-  const addCategory = () => {
-    const c = catInput.trim();
-    if (!c || week.categories.includes(c)) { setCatInput(""); return; }
-    onPatch({ categories: [...week.categories, c] });
-    setCatInput("");
-  };
-  const removeCategory = (c: string) => onPatch({ categories: week.categories.filter((x) => x !== c) });
-  // Real GD categories that actually have listings behind them, with counts
-  // — typing (or AI-suggesting) a category name in different wording from
-  // the directory's own taxonomy is exactly what produced zero-match
-  // categories live ("Indoor Recreation and Arcades", "Museums and Cultural
-  // Centers" — neither shares a word with any real Lincoln category).
-  // Picking straight from this list guarantees at least one match.
-  const categoryOptions = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const l of listings) {
-      const c = (l.category || "").trim();
-      if (c) counts.set(c, (counts.get(c) ?? 0) + 1);
-    }
-    return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  }, [listings]);
-  const [catDropdownOpen, setCatDropdownOpen] = useState(false);
-  const filteredCategoryOptions = useMemo(() => {
-    const q = catInput.trim().toLowerCase();
-    const opts = q ? categoryOptions.filter(([c]) => c.toLowerCase().includes(q)) : categoryOptions;
-    return opts.filter(([c]) => !week.categories.includes(c)).slice(0, 12);
-  }, [categoryOptions, catInput, week.categories]);
-  const pickCategoryOption = (c: string) => {
-    if (!week.categories.includes(c)) onPatch({ categories: [...week.categories, c] });
-    setCatInput("");
-    setCatDropdownOpen(false);
   };
 
   const addSection = (type: string) => {
@@ -507,16 +419,6 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
       return a.name.localeCompare(b.name);
     });
   }, [listings, week.categories, inviteCounts, today]);
-  // Per-pill match count — how many listings THIS specific theme category
-  // matches on its own (unlike categoryMatches above, which is the union
-  // across every selected category). Lets a zero-match pill (wrong
-  // vocabulary, see categoryOptions above) be spotted at a glance instead
-  // of only showing up as "the total didn't grow."
-  const categoryPillCounts = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const c of week.categories) map.set(c, listings.filter((l) => categoriesMatch(c, l.category ?? "")).length);
-    return map;
-  }, [week.categories, listings]);
   // Grouped by the listing's own real GD category (not the theme's category
   // tags — a different vocabulary, see categoryMatch.ts) so it's obvious how
   // many of each you actually have, not just a flat count. Biggest groups
@@ -860,8 +762,6 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
       const raw = localStorage.getItem(DRAFT_CACHE_PREFIX + week.id);
       if (!raw) return;
       const d = JSON.parse(raw);
-      if (d.themeOptions) setThemeOptions(d.themeOptions);
-      if (d.categorySuggestions) setCategorySuggestions(d.categorySuggestions);
       if (d.storySuggestions) setStorySuggestions(d.storySuggestions);
       if (d.eventsSuggestions) setEventsSuggestions(d.eventsSuggestions);
       if (d.weatherSuggestion) setWeatherSuggestion(d.weatherSuggestion);
@@ -871,24 +771,21 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     if (skipNextDraftPersist.current) { skipNextDraftPersist.current = false; return; }
     try {
       const key = DRAFT_CACHE_PREFIX + week.id;
-      const isEmpty = !themeOptions && !categorySuggestions && !storySuggestions && !eventsSuggestions && !weatherSuggestion;
+      const isEmpty = !storySuggestions && !eventsSuggestions && !weatherSuggestion;
       if (isEmpty) localStorage.removeItem(key);
-      else localStorage.setItem(key, JSON.stringify({ themeOptions, categorySuggestions, storySuggestions, eventsSuggestions, weatherSuggestion }));
+      else localStorage.setItem(key, JSON.stringify({ storySuggestions, eventsSuggestions, weatherSuggestion }));
     } catch {}
-  }, [week.id, themeOptions, categorySuggestions, storySuggestions, eventsSuggestions, weatherSuggestion]);
+  }, [week.id, storySuggestions, eventsSuggestions, weatherSuggestion]);
 
   // "Draft this week" — fires every applicable suggest_* call in parallel for
   // whatever's still empty, so a rep reviews one batch of suggestions
   // instead of clicking each Suggest button in turn. Never auto-accepts
   // anything — same guiding/reviewing shape as every other suggest here,
-  // just kicked off together. Respects whatever's already set (a pre-filled
-  // calendar theme, a manually-typed note) rather than overwriting it.
+  // just kicked off together.
   const [draftLoading, setDraftLoading] = useState(false);
   const draftWeek = async () => {
     setDraftLoading(true);
     const tasks: Promise<unknown>[] = [];
-    if (!week.themeOverride.trim()) tasks.push(suggestThemes());
-    else if (!categorySuggestions) tasks.push(suggestCategoriesFor(week.themeOverride, week.themeDescription || undefined));
     // Spotlight/Hidden Gem no longer auto-draft here — filling those is now
     // the category business list's job (invite → accept → assign to slot),
     // not an AI guess.
@@ -897,66 +794,6 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     if (!week.weatherNote) tasks.push(suggestWeather());
     await Promise.allSettled(tasks);
     setDraftLoading(false);
-  };
-
-  // The theme calendar's raw assignment for this week — a seed for
-  // suggest_theme, not something written to the week until a rep picks it.
-  const assignedTheme = useMemo(() => themeForWeek(week.week, themeCalendar), [week.week, themeCalendar]);
-
-  const suggestThemes = async () => {
-    setThemeLoading(true); setThemeOptions(null); setThemeError(null); setCategorySuggestions(null);
-    try {
-      const [, m, d] = week.week.split("-").map(Number);
-      const weekIndex = Math.min(5, Math.max(1, Math.ceil(d / 7)));
-      const res = await authedFetch("/api/ai/planner-workshop", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "suggest_theme", cityName, state, month: m, weekIndex, assignedTitle: assignedTheme?.title, assignedCategories: assignedTheme?.categories }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (res.ok && Array.isArray(j.options)) setThemeOptions(j.options);
-      else setThemeError(j.error || "Theme suggestion failed.");
-    } catch (e) {
-      setThemeError(e instanceof Error ? e.message : "Theme suggestion failed.");
-    } finally {
-      setThemeLoading(false);
-    }
-  };
-
-  const chooseTheme = (opt: { title: string; description: string }) => {
-    onPatch({ themeOverride: opt.title, themeDescription: opt.description });
-    setThemeOptions(null);
-    suggestCategoriesFor(opt.title, opt.description);
-  };
-
-  const suggestCategoriesFor = async (theme: string, themeDescription?: string) => {
-    setCategoriesLoading(true); setCategorySuggestions(null); setCategoriesError(null);
-    try {
-      const res = await authedFetch("/api/ai/planner-workshop", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        // Send the city's real GD categories (with counts) so the model
-        // picks from what actually exists instead of inventing plausible
-        // directory-sounding phrases. Unconstrained, it produced things like
-        // "Indoor Recreation and Arcades" and "Museums and Cultural Centers"
-        // for Lincoln — reasonable English, zero matching businesses, so the
-        // list below just stayed empty and looked broken.
-        body: JSON.stringify({
-          mode: "suggest_categories", cityName, theme, themeDescription,
-          availableCategories: categoryOptions.map(([c, n]) => `${c} (${n})`),
-        }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (res.ok && Array.isArray(j.categories)) setCategorySuggestions(j.categories);
-      else setCategoriesError(j.error || "Category suggestion failed.");
-    } catch (e) {
-      setCategoriesError(e instanceof Error ? e.message : "Category suggestion failed.");
-    } finally {
-      setCategoriesLoading(false);
-    }
-  };
-
-  const acceptCategorySuggestion = (c: string) => {
-    if (!week.categories.includes(c)) onPatch({ categories: [...week.categories, c] });
-    setCategorySuggestions((cs) => (cs ? cs.filter((x) => x !== c) : cs));
   };
 
   const weekItems = items.filter((it) => it.weekId === week.id);
@@ -996,70 +833,6 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
               onClick={() => { if (window.confirm(`Delete "${plannerWeekLabel(week.week)}"? This can't be undone.`)) onDelete(); }}
               title="Delete this week" className="rounded-md p-1.5 text-muted hover:bg-background hover:text-danger"><I.trash /></button>
           </div>
-          <div className="mb-2 flex items-center gap-1.5">
-            <input value={week.themeOverride} onChange={(e) => onPatch({ themeOverride: e.target.value })} placeholder="Theme (e.g. “Foodie favorites”)"
-              className="min-w-0 flex-1 rounded-lg border bg-surface px-3 py-1.5 text-[14px] font-medium outline-none placeholder:text-muted focus:border-accent" />
-            <button onClick={suggestThemes} disabled={themeLoading} title="Suggest themes for this week" className="shrink-0 rounded-lg border px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-40">{themeLoading ? "Thinking…" : "✨ Suggest themes"}</button>
-          </div>
-          <textarea value={week.themeDescription} onChange={(e) => onPatch({ themeDescription: e.target.value })} rows={2}
-            placeholder="What this week's theme is about — the goal, who to feature, what kind of stories/events to look for…"
-            className="mb-2 w-full resize-y rounded-lg border bg-surface px-3 py-1.5 text-[13px] outline-none placeholder:text-muted focus:border-accent" />
-          {themeError && <div className="mb-2 text-[12px] text-danger">{themeError}</div>}
-          {themeOptions && (
-            <div className="mb-2 space-y-1">
-              {themeOptions.map((opt) => (
-                <button key={opt.title} onClick={() => chooseTheme(opt)} className="block w-full rounded-md border bg-background px-2.5 py-1.5 text-left hover:bg-accent-soft/50">
-                  <span className="block text-[13px] font-medium">{opt.title}</span>
-                  <span className="block text-[12px] text-muted">{opt.description}</span>
-                </button>
-              ))}
-              <button onClick={() => setThemeOptions(null)} className="text-[12px] font-medium text-muted hover:text-foreground">Dismiss</button>
-            </div>
-          )}
-          <div className="mb-1 flex flex-wrap items-center gap-1.5">
-            {week.categories.map((c) => {
-              const n = categoryPillCounts.get(c) ?? 0;
-              return (
-                <span key={c} title={`${n} matching listing${n === 1 ? "" : "s"}`}
-                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium ${n === 0 ? "bg-danger/10 text-danger" : "bg-accent-soft text-accent"}`}>
-                  {c}
-                  <span className="opacity-70">· {n}</span>
-                  <button onClick={() => removeCategory(c)} className="hover:opacity-70"><I.close className="h-3 w-3" /></button>
-                </span>
-              );
-            })}
-            <div className="relative min-w-[120px] flex-1">
-              <input value={catInput} onChange={(e) => setCatInput(e.target.value)} onFocus={() => setCatDropdownOpen(true)}
-                onBlur={() => setTimeout(() => setCatDropdownOpen(false), 150)}
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCategory(); setCatDropdownOpen(false); } }}
-                placeholder="+ Theme category" className="w-full rounded-md border-transparent bg-transparent px-1.5 py-0.5 text-[12px] outline-none placeholder:text-muted focus:border-accent focus:bg-surface" />
-              {catDropdownOpen && filteredCategoryOptions.length > 0 && (
-                <div className="absolute left-0 top-full z-10 mt-1 max-h-56 w-64 overflow-y-auto rounded-lg border bg-surface shadow-soft-md">
-                  <div className="border-b px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">Real categories with listings</div>
-                  {filteredCategoryOptions.map(([c, n]) => (
-                    <button key={c} onMouseDown={(e) => e.preventDefault()} onClick={() => pickCategoryOption(c)}
-                      className="flex w-full items-center justify-between px-2.5 py-1.5 text-left text-[13px] hover:bg-background">
-                      <span className="truncate">{c}</span>
-                      <span className="shrink-0 pl-2 text-[11px] text-muted">{n}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            {!categoriesLoading && !categorySuggestions && (
-              <button onClick={() => suggestCategoriesFor(week.themeOverride)} disabled={!week.themeOverride.trim()} title="Suggest categories for this theme" className="shrink-0 text-[12px] font-medium text-accent hover:underline disabled:opacity-40 disabled:hover:no-underline">✨ Suggest categories</button>
-            )}
-            {categoriesLoading && <span className="text-[12px] text-muted">Thinking…</span>}
-          </div>
-          {categoriesError && <div className="mb-2 text-[12px] text-danger">{categoriesError}</div>}
-          {categorySuggestions && categorySuggestions.length > 0 && (
-            <div className="mb-2 flex flex-wrap items-center gap-1.5">
-              {categorySuggestions.map((c) => (
-                <button key={c} onClick={() => acceptCategorySuggestion(c)} className="inline-flex items-center gap-1 rounded-full border border-dashed border-accent px-2 py-0.5 text-[12px] font-medium text-accent hover:bg-accent-soft"><I.plus className="h-3 w-3" /> {c}</button>
-              ))}
-              <button onClick={() => setCategorySuggestions(null)} className="text-[12px] font-medium text-muted hover:text-foreground">Dismiss</button>
-            </div>
-          )}
           <textarea value={week.notes} onChange={(e) => onPatch({ notes: e.target.value })} placeholder="Notes for this week…" rows={2}
             className="w-full resize-y rounded-lg border bg-surface px-3 py-1.5 text-[13px] outline-none placeholder:text-muted focus:border-accent" />
         </div>
