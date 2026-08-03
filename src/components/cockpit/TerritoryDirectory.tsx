@@ -19,7 +19,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
 import { fetchPlannerWeeks, upsertPlannerWeek } from "@/lib/db";
-import { latestInviteStatus, inviteHistory, featureHistory, isDue } from "@/lib/plannerPools";
+import { latestInviteStatus, inviteHistory, featureHistory, isDue, allInvitesByGdPlaceId } from "@/lib/plannerPools";
 import {
   formatDue, playbookCompletion, salesCompletion, plannerWeekOf, todayIso as todayIsoDate,
   CLIENT_STATUS_META, CLIENT_STATUS_ORDER,
@@ -509,6 +509,40 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   const inviteFor = (listing: DirectoryListing) => inviteByGdPlaceId.get(typeof listing.id === "number" ? listing.id : Number(listing.id));
   const needsAttention = (r: { client: Client | null }) => !!(r.client && (tasksByClient?.get(r.client.id) ?? []).some((t) => t.status !== "done" && t.priority === "conversation"));
 
+  // Full invite history — every send this territory has ever made, not just
+  // the latest per business (that's inviteByGdPlaceId above). Feeds the
+  // per-row "show history" expand and the city-wide log below.
+  const invitesByGdPlaceId = useMemo(() => allInvitesByGdPlaceId(plannerWeeks), [plannerWeeks]);
+  const nameByGdPlaceId = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const l of listings ?? []) {
+      const id = typeof l.id === "number" ? l.id : parseInt(String(l.id), 10);
+      if (Number.isFinite(id)) m.set(id, l.name);
+    }
+    return m;
+  }, [listings]);
+  // City-wide log, grouped by the day each batch went out — newest first,
+  // each day's sends newest-first within it. Capped to the most recent 20
+  // days by default (see `logDaysShown` below) so a territory with months of
+  // history doesn't render a huge list up front.
+  const inviteLogByDay = useMemo(() => {
+    const byDay = new Map<string, { gdPlaceId: number; name: string; status: PlannerInvite["status"]; by: PlannerInvite["by"] }[]>();
+    for (const [gdPlaceId, invites] of invitesByGdPlaceId) {
+      const name = nameByGdPlaceId.get(gdPlaceId) ?? `#${gdPlaceId}`;
+      for (const inv of invites) {
+        const day = inv.at.slice(0, 10);
+        const list = byDay.get(day) ?? [];
+        list.push({ gdPlaceId, name, status: inv.status, by: inv.by });
+        byDay.set(day, list);
+      }
+    }
+    return Array.from(byDay.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([day, entries]) => ({ day, entries: entries.sort((a, b) => a.name.localeCompare(b.name)) }));
+  }, [invitesByGdPlaceId, nameByGdPlaceId]);
+  const [logOpen, setLogOpen] = useState(false);
+  const [logDaysShown, setLogDaysShown] = useState(20);
+
   const filtered = rows.filter(matchRow);
   const total = filtered.length;
   const nonBusinessCount = noListing.length;
@@ -569,6 +603,39 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
         ) : canAdmin ? (
           <div className="mb-2 rounded-lg border bg-background/40 px-3 py-2 text-[12px] text-muted">Auto-invite is off for {city} — set a daily cap in Settings → Territories to turn it on.</div>
         ) : null
+      )}
+
+      {/* Every invite this territory has ever sent, grouped by day — "will
+          there be a history of invites sent" (Derek, Aug 3). Collapsed by
+          default; a business's own row also shows its individual history
+          (see ListingRow's invite chip below). */}
+      {territoryId && inviteLogByDay.length > 0 && (
+        <div className="mb-2 rounded-lg border bg-surface">
+          <button onClick={() => setLogOpen((v) => !v)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] font-medium text-muted hover:text-foreground">
+            <I.chevron className={`shrink-0 transition ${logOpen ? "-rotate-90" : "rotate-90"}`} />
+            Invite history — {inviteLogByDay.reduce((n, d) => n + d.entries.length, 0)} sent total
+          </button>
+          {logOpen && (
+            <div className="max-h-96 overflow-y-auto border-t px-3 py-2">
+              {inviteLogByDay.slice(0, logDaysShown).map(({ day, entries }) => (
+                <div key={day} className="mb-2.5 last:mb-0">
+                  <div className="mb-1 text-[12px] font-semibold text-foreground">{formatDue(day)} <span className="font-normal text-muted">— {entries.length} sent</span></div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {entries.map((e, i) => (
+                      <span key={e.gdPlaceId + "-" + i} title={e.by === "auto" ? "Auto-sent" : "Sent manually"}
+                        className={`rounded-full border px-2 py-0.5 text-[12px] font-medium ${e.status === "accepted" ? "border-emerald-300 bg-emerald-50 text-emerald-700" : e.status === "skipped" ? "border-border bg-background text-muted" : "border-accent/30 bg-accent-soft/40 text-accent"}`}>
+                        {e.name}{e.by === "auto" && " ⚙️"}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {inviteLogByDay.length > logDaysShown && (
+                <button onClick={() => setLogDaysShown((n) => n + 20)} className="mt-1 text-[12px] font-medium text-accent hover:underline">Show older days</button>
+              )}
+            </div>
+          )}
+        </div>
       )}
 
       <div className="mb-2 flex items-center gap-2">
@@ -659,6 +726,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                     <ListingRow key={g.key + r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} template={template}
                       stage={computeBusinessStage(r.listing, r.client, inviteFor(r.listing))}
                       invite={inviteFor(r.listing)}
+                      inviteHistoryList={gdPlaceId != null ? invitesByGdPlaceId.get(gdPlaceId) ?? [] : []}
                       onSetClientStatus={onSetClientStatus} canAdmin={canAdmin} ghlContactUrlFor={ghlContactUrlFor}
                       featured={!!r.client && !!featuredClientIds?.has(r.client.id)}
                       canFeature={!!(r.client || r.contact)}
@@ -690,7 +758,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, onSetClientStatus, canAdmin, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, salesTasks, onOpenSales, otherLists, onOpenProject, inviteActions }: {
+function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, inviteHistoryList, onSetClientStatus, canAdmin, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, salesTasks, onOpenSales, otherLists, onOpenProject, inviteActions }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
   onOpenClient: (id: string) => void;
@@ -705,6 +773,10 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
   // when it's never been invited (or territoryId wasn't passed down, e.g.
   // the admin multi-city overview).
   invite?: PlannerInvite;
+  // Every invite ever sent to this business, newest first (invite above is
+  // just the first entry of this same list) — click-to-expand full history.
+  // Empty when never invited or no valid listing id.
+  inviteHistoryList: PlannerInvite[];
   // Editable Stage dropdown (claimed businesses with a client record only,
   // and only for admins — canAdmin gates it below).
   onSetClientStatus?: (id: string, status: ClientStatus) => void;
@@ -748,6 +820,7 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
 }) {
   const { listing, contact, client } = row;
   const nameMouseDown = useRef<{ x: number; y: number } | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   // Sales (getting them in) runs the funnel up through the interview stages —
   // Playbook (growing them) takes over once onboarding starts. Mirrors
@@ -795,13 +868,32 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
           </div>
           <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 pl-5 text-[12px] text-muted">
             {invite && (
-              <span title={`Content Planner invite, ${formatDue(invite.at)}`}
-                className={`rounded px-1.5 py-0.5 font-medium ${invite.status === "accepted" ? "bg-emerald-100 text-emerald-700" : invite.status === "skipped" ? "bg-background text-muted" : "bg-accent-soft text-accent"}`}>
-                {invite.status === "accepted" ? "✅ Accepted" : invite.status === "skipped" ? "⏭ Skipped" : "✉️ Invited"} {formatDue(invite.at)}
-              </span>
+              inviteHistoryList.length > 1 ? (
+                <button onClick={() => setHistoryOpen((v) => !v)}
+                  title={`Sent ${inviteHistoryList.length} times — click to see every send`}
+                  className={`rounded px-1.5 py-0.5 font-medium hover:underline ${invite.status === "accepted" ? "bg-emerald-100 text-emerald-700" : invite.status === "skipped" ? "bg-background text-muted" : "bg-accent-soft text-accent"}`}>
+                  {invite.status === "accepted" ? "✅ Accepted" : invite.status === "skipped" ? "⏭ Skipped" : "✉️ Invited"} {formatDue(invite.at)} · {inviteHistoryList.length}×
+                </button>
+              ) : (
+                <span title={`Content Planner invite, ${formatDue(invite.at)}`}
+                  className={`rounded px-1.5 py-0.5 font-medium ${invite.status === "accepted" ? "bg-emerald-100 text-emerald-700" : invite.status === "skipped" ? "bg-background text-muted" : "bg-accent-soft text-accent"}`}>
+                  {invite.status === "accepted" ? "✅ Accepted" : invite.status === "skipped" ? "⏭ Skipped" : "✉️ Invited"} {formatDue(invite.at)}
+                </span>
+              )
             )}
             {listing.rep && <span>· {listing.rep}</span>}
           </div>
+          {historyOpen && inviteHistoryList.length > 1 && (
+            <div className="ml-5 mt-1 space-y-0.5 rounded-md border bg-background/60 px-2 py-1.5 text-[12px]">
+              {inviteHistoryList.map((h, i) => (
+                <div key={i} className="flex items-center gap-1.5 text-muted">
+                  <span className="font-medium text-foreground">{formatDue(h.at)}</span>
+                  <span>{h.status === "accepted" ? "✅ Accepted" : h.status === "skipped" ? "⏭ Skipped" : "✉️ Invited"}</span>
+                  {h.by === "auto" && <span title="Auto-sent">⚙️ Auto</span>}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Category — min-w-0 is load-bearing here: a CSS grid item's default

@@ -80,6 +80,24 @@ export function latestInviteStatus(weeks: PlannerWeek[]): Map<number, PlannerInv
   return map;
 }
 
+// Every invite send this territory has ever made, grouped by the business it
+// went to — unlike latestInviteStatus above (which keeps only the single
+// most recent entry per business), this keeps the full list so a business
+// invited more than once shows every past send, not just the latest. Sorted
+// newest-first per business.
+export function allInvitesByGdPlaceId(weeks: PlannerWeek[]): Map<number, PlannerInvite[]> {
+  const map = new Map<number, PlannerInvite[]>();
+  for (const w of weeks) {
+    for (const inv of w.invited ?? []) {
+      const list = map.get(inv.gdPlaceId) ?? [];
+      list.push(inv);
+      map.set(inv.gdPlaceId, list);
+    }
+  }
+  for (const list of map.values()) list.sort((a, b) => b.at.localeCompare(a.at));
+  return map;
+}
+
 export function isDue(last: string | null, todayIso: string): boolean {
   if (!last) return true;
   const days = (new Date(todayIso).getTime() - new Date(last).getTime()) / 86400000;

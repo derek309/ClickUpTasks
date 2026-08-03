@@ -402,6 +402,10 @@ export type PlannerInvite = {
   status?: "invited" | "accepted" | "skipped";
   respondedAt?: string;
   responseEvent?: string;
+  // Set to "auto" when this send came from the daily auto-invite cron
+  // (plannerAutoInviteServer.ts) rather than a rep clicking Invite — lets
+  // the invite history distinguish the two. Omitted for manual sends.
+  by?: "auto";
 };
 
 export interface PlannerSection {

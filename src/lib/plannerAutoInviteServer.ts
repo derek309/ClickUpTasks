@@ -88,7 +88,7 @@ export async function runPlannerAutoInvite(): Promise<{ ran: boolean; reason?: s
       const newEntries: PlannerWeek["invited"] = [];
       for (const c of candidates) {
         const r = await sendPlannerInviteServer(t.id, week.week, c.gdPlaceId, week.themeDescription);
-        if (r.ok) newEntries.push({ gdPlaceId: c.gdPlaceId, at: new Date().toISOString(), status: "invited" });
+        if (r.ok) newEntries.push({ gdPlaceId: c.gdPlaceId, at: new Date().toISOString(), status: "invited", by: "auto" });
         // A hard config error stops the rest of this territory's batch
         // rather than burning through every remaining candidate on a
         // failure that won't resolve.
