@@ -2554,6 +2554,38 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       },
     });
   };
+  // Same confirm-then-undo-toast shape as bulkPatch above, but a real delete
+  // has no undo — the toast just reports what happened, it doesn't offer one.
+  // Locked checklist steps (Playbook/Sales) are silently skipped rather than
+  // blocking the whole batch, same "defense in depth" reasoning as deleteTask
+  // below; the confirm message says how many were skipped so it's never a
+  // silent surprise.
+  const bulkDelete = () => {
+    const ids = [...selectedTaskIds];
+    if (!ids.length) return;
+    const deletable = ids.filter((id) => { const t = tasksRef.current.find((x) => x.id === id); return !!t && !t.playbookStepKey && !t.salesStepKey; });
+    const skipped = ids.length - deletable.length;
+    if (!deletable.length) { pushToast("Playbook/Sales steps can't be deleted."); return; }
+    const n = deletable.length;
+    setConfirmDialog({
+      title: `Delete ${n} task${n === 1 ? "" : "s"}?`,
+      message: `This can't be undone.${skipped ? ` ${skipped} selected Playbook/Sales step${skipped === 1 ? "" : "s"} will be skipped.` : ""}`,
+      confirmLabel: `Delete ${n} task${n === 1 ? "" : "s"}`,
+      onConfirm: () => {
+        setConfirmDialog(null);
+        deletable.forEach((id) => {
+          const t = tasksRef.current.find((x) => x.id === id);
+          if (t?.ghlTaskId) ghlCall("delete", t);
+        });
+        const idSet = new Set(deletable);
+        setTasks((ts) => ts.filter((t) => !idSet.has(t.id)));
+        if (openTaskId && idSet.has(openTaskId)) setOpenTaskId(null);
+        deletable.forEach((id) => deleteTaskDb(id));
+        clearSelection();
+        pushToast(`${n} task${n === 1 ? "" : "s"} deleted`);
+      },
+    });
+  };
   // Backs the follow-up pill's own edit — "we're waiting longer than
   // planned, snooze whatever's actually blocking it" — only tasks due
   // today or already overdue jump to the new date (anything due later is
@@ -2578,10 +2610,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     pushToast(`Moved ${blocking.length} overdue task${blocking.length === 1 ? "" : "s"} to ${formatDue(newDate)}.`);
   };
   const deleteTask = (id: string) => {
-    // Owner Growth Plan steps are a fixed template every business gets —
-    // defense in depth alongside the hidden delete button in TaskDrawer, in
-    // case some other path ever calls this directly.
-    if (tasksRef.current.find((x) => x.id === id)?.playbookStepKey) { pushToast("Playbook steps can't be deleted."); return; }
+    // Owner Growth Plan/Sales checklist steps are a fixed template every
+    // business gets — defense in depth alongside the hidden delete button in
+    // TaskDrawer, in case some other path ever calls this directly.
+    const lockedStep = tasksRef.current.find((x) => x.id === id);
+    if (lockedStep?.playbookStepKey || lockedStep?.salesStepKey) { pushToast("Playbook/Sales steps can't be deleted."); return; }
     setConfirmDialog({
       title: "Delete this task?", message: "This can't be undone.", confirmLabel: "Delete",
       onConfirm: () => {
@@ -4824,6 +4857,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 className="rounded-md border px-2.5 py-1 text-[15px] font-medium hover:bg-background">Merge</button>
             );
           })()}
+          <button onClick={bulkDelete} title="Delete selected tasks" className="rounded-md border border-danger/40 px-2.5 py-1 text-[15px] font-medium text-danger hover:bg-danger/10">Delete</button>
           <button onClick={clearSelection} className="rounded-md border px-2.5 py-1 text-[15px] font-medium hover:bg-background">Clear</button>
         </div>
       )}
