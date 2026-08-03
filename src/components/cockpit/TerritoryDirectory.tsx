@@ -91,6 +91,12 @@ export const STAGE_META: Record<BusinessStage, { label: string; color: string; h
 // here ALSO still appears in its normal stage group below, so per-stage
 // funnel counts stay a truthful pipeline snapshot.
 const ATTENTION_META = { label: "Needs attention now", color: "#8b5cf6", hint: "replied by SMS, email, or newsletter invite — check in before anything else" };
+// A second override group, purely from invite read-receipts (openedAt/
+// clickedAt on the latest invite — see PlannerInvite) — NOT tasks, so it
+// never touches the Dashboard ("that's for active clients," Derek, Aug 3).
+// Read the invite but didn't click through to claim — worth a call or a
+// drive-by visit while the prospecting is fresh in their mind.
+const OPENED_META = { label: "Opened invite, hasn't claimed", color: "#0891b2", hint: "read (or clicked) the invite but hasn't claimed yet — worth a call or a visit" };
 
 export function computeBusinessStage(listing: DirectoryListing, client: Client | null, invite?: PlannerInvite): BusinessStage {
   if (!listing.claimed) return invite && invite.status !== "skipped" ? "invited" : "unclaimed";
@@ -552,6 +558,14 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   if (loading) return <div className="bg-background p-4 py-10 text-center text-[13px] text-muted sm:p-5">Loading directory for {city}…</div>;
 
   const attentionRows = sortRows(filtered.filter(needsAttention));
+  // Read (or clicked) the invite but hasn't claimed — already accepted
+  // ("I'm interested") is excluded, that's already its own visible green
+  // badge; this is specifically the softer, previously-invisible signal.
+  const openedNotClaimed = (r: { listing: DirectoryListing }) => {
+    const inv = inviteFor(r.listing);
+    return !r.listing.claimed && !!inv && inv.status !== "accepted" && !!(inv.openedAt || inv.clickedAt);
+  };
+  const openedRows = sortRows(filtered.filter(openedNotClaimed));
   const stageRows = new Map<BusinessStage, typeof filtered>();
   for (const key of STAGE_ORDER) stageRows.set(key, []);
   for (const r of filtered) stageRows.get(computeBusinessStage(r.listing, r.client, inviteFor(r.listing)))!.push(r);
@@ -560,6 +574,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   type Group = { key: string; label: string; color: string; hint: string; rows: typeof filtered };
   const groups: Group[] = [];
   if (attentionRows.length) groups.push({ key: "attention", label: ATTENTION_META.label, color: ATTENTION_META.color, hint: ATTENTION_META.hint, rows: attentionRows });
+  if (openedRows.length) groups.push({ key: "opened", label: OPENED_META.label, color: OPENED_META.color, hint: OPENED_META.hint, rows: openedRows });
   for (const key of STAGE_ORDER) groups.push({ key, label: STAGE_META[key].label, color: STAGE_META[key].color, hint: STAGE_META[key].hint, rows: stageRows.get(key)! });
   const allCollapsed = groups.length > 0 && groups.every((g) => collapsed.has(g.key));
   const toggleAllGroups = () => setCollapsed(allCollapsed ? new Set() : new Set(groups.map((g) => g.key)));
@@ -880,6 +895,12 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
                   {invite.status === "accepted" ? "✅ Accepted" : invite.status === "skipped" ? "⏭ Skipped" : "✉️ Invited"} {formatDue(invite.at)}
                 </span>
               )
+            )}
+            {invite && invite.status !== "accepted" && (invite.clickedAt || invite.openedAt) && (
+              <span title={invite.clickedAt ? `Clicked the invite link ${formatDue(invite.clickedAt)}` : `Opened the invite email ${formatDue(invite.openedAt!)}`}
+                className="rounded bg-cyan-100 px-1.5 py-0.5 font-medium text-cyan-700">
+                {invite.clickedAt ? "🖱️ Clicked" : "👀 Opened"}
+              </span>
             )}
             {listing.rep && <span>· {listing.rep}</span>}
           </div>

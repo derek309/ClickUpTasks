@@ -406,6 +406,13 @@ export type PlannerInvite = {
   // (plannerAutoInviteServer.ts) rather than a rep clicking Invite — lets
   // the invite history distinguish the two. Omitted for manual sends.
   by?: "auto";
+  // Set by a GHL "Email Events" workflow (Opened/Clicked) relayed through
+  // /api/ghl/webhook — a business that read (or clicked) the invite but
+  // hasn't claimed is a call/visit signal (Derek, Aug 3), distinct from
+  // `status` above (which tracks the "I'm interested" click-through, not
+  // read receipts).
+  openedAt?: string;
+  clickedAt?: string;
 };
 
 export interface PlannerSection {
