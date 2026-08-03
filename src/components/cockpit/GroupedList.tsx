@@ -7,6 +7,7 @@ import {
   users, formatDue, isOverdue, TODAY, timeAgo, userById, clientInitials,
   PRIORITY_META, manualPriorityOptions,
   STATUS_META, STATUS_ORDER, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence,
+  PLAYBOOK_STEP_BY_KEY,
   type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, LabelChips, CollapsibleText, COL_WIDTHS, LIST_COLUMNS } from "./ui";
@@ -158,6 +159,10 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
   const overdue = isOverdue(task.due) && task.status !== "done";
   const doneSubs = task.subtasks.filter((x) => x.done).length;
   const crumb = project && project.name !== "Tasks" ? project.name : "";
+  // The payoff for this Playbook step, surfaced right on the row — so an
+  // ambassador scanning the list before walking into a business sees "if
+  // they do this, they get that" without opening every task individually.
+  const playbookStep = task.playbookStepKey ? PLAYBOOK_STEP_BY_KEY.get(task.playbookStepKey) : undefined;
   const cell = (key: string) => {
     if (key === "status") return <InlineStatus value={task.status} onChange={(s) => onPatch(task.id, { status: s })} />;
     if (key === "priority") return <InlinePriority value={task.priority} onChange={(p) => onPatch(task.id, { priority: p })} />;
@@ -196,6 +201,9 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
               {task.attachments.length > 0 && <I.clip className="shrink-0 text-muted" />}
               {task.subtasks.length > 0 && <span className="inline-flex shrink-0 items-center gap-0.5 text-[11px] text-muted"><I.check />{doneSubs}/{task.subtasks.length}</span>}
             </span>
+            {playbookStep?.youGet && task.status !== "done" && (
+              <span className="block truncate text-[12px] text-muted" title={playbookStep.youGet}>📈 {playbookStep.youGet}</span>
+            )}
           </button>
         </div>
         {/* On mobile these wrap into a chip row under the title (indented past

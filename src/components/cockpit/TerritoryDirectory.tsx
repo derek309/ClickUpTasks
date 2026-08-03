@@ -4,9 +4,10 @@
 // the ClickUpLocal directory (GeoDirectory) listings for the city from the
 // WordPress side via /api/directory/listings, matches each listing to a GHL
 // contact/client, and groups them by where they actually are in the Playbook
-// journey — Unclaimed → Invited → Claimed → Onboarding → Active Client →
-// Nurture/Cancelled/Past Client — so opening this page reads as "here's the
-// whole funnel, here's who needs work today," not a flat list.
+// journey — Unclaimed → Invited → Claimed → Interview Scheduled →
+// Interviewed → Onboarding → Active Client → Nurture/Cancelled/Past Client —
+// so opening this page reads as "here's the whole funnel, here's who needs
+// work today," not a flat list.
 //
 // Rendered as one card matching GroupedList's own chrome (rounded-xl border
 // bg-surface shadow-soft, a column header row, colored collapsible group
@@ -72,12 +73,14 @@ const isDragClick = (down: { x: number; y: number } | null, e: { clientX: number
 //   Claimed    — claimed the listing, but not yet moved past Lead/Prospect
 //   Onboarding / Active Client / Nurture / Cancelled / Past Client — the
 //   client record's own lifecycle (ClientStatus), once a real client exists.
-export type BusinessStage = "unclaimed" | "invited" | "claimed" | "onboarding" | "active_client" | "nurture" | "cancelled" | "past_client";
-export const STAGE_ORDER: BusinessStage[] = ["unclaimed", "invited", "claimed", "onboarding", "active_client", "nurture", "cancelled", "past_client"];
+export type BusinessStage = "unclaimed" | "invited" | "claimed" | "interview_scheduled" | "interviewed" | "onboarding" | "active_client" | "nurture" | "cancelled" | "past_client";
+export const STAGE_ORDER: BusinessStage[] = ["unclaimed", "invited", "claimed", "interview_scheduled", "interviewed", "onboarding", "active_client", "nurture", "cancelled", "past_client"];
 export const STAGE_META: Record<BusinessStage, { label: string; color: string; hint: string }> = {
   unclaimed: { label: "Unclaimed", color: "#f59e0b", hint: "listing nobody has claimed yet — a prospect to invite or call" },
   invited: { label: "Invited", color: "#0ea5e9", hint: "invited to claim their listing, hasn't yet" },
   claimed: { label: "Claimed", color: "#10b981", hint: "claimed their listing, not yet moved past Lead/Prospect" },
+  interview_scheduled: { label: CLIENT_STATUS_META.interview_scheduled.label, color: CLIENT_STATUS_META.interview_scheduled.dot, hint: "phone/Zoom interview booked — doubles as verification" },
+  interviewed: { label: CLIENT_STATUS_META.interviewed.label, color: CLIENT_STATUS_META.interviewed.dot, hint: "interview done — book the in-person visit to finalize their profile" },
   onboarding: { label: CLIENT_STATUS_META.onboarding.label, color: CLIENT_STATUS_META.onboarding.dot, hint: "actively being onboarded" },
   active_client: { label: CLIENT_STATUS_META.active_client.label, color: CLIENT_STATUS_META.active_client.dot, hint: "up and running — the goal state" },
   nurture: { label: CLIENT_STATUS_META.nurture.label, color: CLIENT_STATUS_META.nurture.dot, hint: "good standing, nothing actively due" },
@@ -338,7 +341,10 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   const priorityLastAt = (r: { listing: DirectoryListing; client: Client | null }, stage: BusinessStage): string | null => {
     if (stage === "unclaimed" || stage === "invited") return lastTouchedAt(r.listing);
     if (!r.client) return null;
-    return (stage === "claimed" ? r.client.salesLastProgressAt : r.client.playbookLastProgressAt) ?? null;
+    // Still working the Sales checklist through the interview stages — the
+    // Playbook (Growth Plan) doesn't start until onboarding.
+    const onSales = stage === "claimed" || stage === "interview_scheduled" || stage === "interviewed";
+    return (onSales ? r.client.salesLastProgressAt : r.client.playbookLastProgressAt) ?? null;
   };
   const todayIso = new Date().toISOString();
   const sortRows = <T extends { listing: DirectoryListing; client: Client | null }>(arr: T[]) => [...arr].sort((a, b) => {
@@ -552,11 +558,11 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
   const { listing, contact, client } = row;
   const nameMouseDown = useRef<{ x: number; y: number } | null>(null);
 
-  // Sales (getting them in) runs the funnel up through "claimed" — Playbook
-  // (growing them) takes over once a real client status exists beyond
-  // Lead/Prospect. Mirrors computeBusinessStage's own claimed-but-no-real-
-  // status-yet logic, so the chip swap lines up exactly with the Stage cell.
-  const onGrowthPlan = stage !== "unclaimed" && stage !== "invited" && stage !== "claimed";
+  // Sales (getting them in) runs the funnel up through the interview stages —
+  // Playbook (growing them) takes over once onboarding starts. Mirrors
+  // computeBusinessStage's own claimed-but-no-real-status-yet logic, so the
+  // chip swap lines up exactly with the Stage cell.
+  const onGrowthPlan = stage !== "unclaimed" && stage !== "invited" && stage !== "claimed" && stage !== "interview_scheduled" && stage !== "interviewed";
   const playbook = client && onGrowthPlan ? playbookCompletion(client.id, playbookTasks) : null;
   const sales = client && !onGrowthPlan ? salesCompletion(client.id, salesTasks) : null;
   const ghlUrl = client ? ghlContactUrlFor?.(client.id) : null;

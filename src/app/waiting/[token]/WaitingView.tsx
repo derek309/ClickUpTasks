@@ -143,6 +143,7 @@ function AttachmentGallery({ items }: { items: WaitingAttachment[] }) {
 function TaskDetailBody({
   task: t, showProjectName, projectName, draft, sending, uploading, sendError, linkOpen, linkUrl, linkLabel, threadRef,
   onBody, onFiles, onRemoveAttachment, onToggleLink, onLinkUrl, onLinkLabel, onAddLink, onSend,
+  onSetStatus, statusBusy,
 }: {
   task: WaitingTask;
   showProjectName: boolean;
@@ -163,6 +164,11 @@ function TaskDetailBody({
   onLinkLabel: (v: string) => void;
   onAddLink: () => void;
   onSend: () => void;
+  // "What do you think?" — lets the client mark a task Needs changes/Approved
+  // right from the chat instead of writing a message and waiting on the team
+  // to reclassify it (see /api/waiting/[token]/status/route.ts).
+  onSetStatus: (status: "changes_requested" | "done") => void;
+  statusBusy: boolean;
 }) {
   const isDone = t.status === "done";
   const [dragOver, setDragOver] = useState(false);
@@ -306,6 +312,20 @@ function TaskDetailBody({
         )}
       </div>
 
+      {!isDone && (
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-t bg-background/40 px-6 py-2.5 md:px-10">
+          <span className="text-[13px] font-medium text-muted">What do you think?</span>
+          <button onClick={() => onSetStatus("changes_requested")} disabled={statusBusy}
+            className={`rounded-full border px-3 py-1 text-[13px] font-semibold transition disabled:opacity-40 ${t.status === "changes_requested" ? "border-danger bg-danger-soft text-danger" : "border-border bg-surface text-muted hover:text-foreground"}`}>
+            Needs changes
+          </button>
+          <button onClick={() => onSetStatus("done")} disabled={statusBusy}
+            className="rounded-full border border-success bg-success-soft px-3 py-1 text-[13px] font-semibold text-success transition hover:opacity-90 disabled:opacity-40">
+            ✓ Approved
+          </button>
+        </div>
+      )}
+
       <div className="shrink-0 border-t bg-surface px-6 py-4 md:px-10">{composer}</div>
     </>
   );
@@ -360,6 +380,7 @@ export default function WaitingView({ token }: { token: string }) {
   const [sendingIds, setSendingIds] = useState<Set<string>>(new Set());
   const [uploadingIds, setUploadingIds] = useState<Set<string>>(new Set());
   const [sendErrors, setSendErrors] = useState<Record<string, string>>({});
+  const [statusBusyIds, setStatusBusyIds] = useState<Set<string>>(new Set());
 
   // A separate "need something else?" composer — raises a brand-new task
   // rather than replying to one already waiting on the client.
@@ -553,6 +574,19 @@ export default function WaitingView({ token }: { token: string }) {
     }
   };
 
+  const setTaskStatus = async (taskId: string, status: "changes_requested" | "done") => {
+    setStatusBusyIds((s) => new Set(s).add(taskId));
+    try {
+      await fetch(`/api/waiting/${token}/status`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId, status }),
+      });
+      await load();
+    } finally {
+      setStatusBusyIds((s) => { const n = new Set(s); n.delete(taskId); return n; });
+    }
+  };
+
   const handleNewFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setNewUploading(true);
@@ -690,6 +724,8 @@ export default function WaitingView({ token }: { token: string }) {
           onLinkLabel={setLinkLabel}
           onAddLink={() => addLinkAttachment(selectedTask.id)}
           onSend={() => sendChatMessage(selectedTask.id)}
+          onSetStatus={(status) => setTaskStatus(selectedTask.id, status)}
+          statusBusy={statusBusyIds.has(selectedTask.id)}
         />
       ) : (
       <div className="px-6 pb-10 pt-6 md:px-10">

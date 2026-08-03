@@ -120,10 +120,15 @@ export interface User {
 // set — that couldn't represent anything before "actively engaged" (lead,
 // prospect, onboarding) or the difference between cancelling mid-engagement
 // vs. simply wrapping up (cancelled vs. past client).
-export type ClientStatus = "lead" | "prospect" | "onboarding" | "active_client" | "nurture" | "cancelled" | "past_client";
+// interview_scheduled/interviewed capture the two-step in-person pitch (Aug 3
+// Derek/Justin call): a phone/Zoom interview doubles as verification, then an
+// in-person follow-up finalizes the profile before onboarding starts.
+export type ClientStatus = "lead" | "prospect" | "interview_scheduled" | "interviewed" | "onboarding" | "active_client" | "nurture" | "cancelled" | "past_client";
 export const CLIENT_STATUS_META: Record<ClientStatus, { label: string; dot: string }> = {
   lead: { label: "Lead", dot: "#94a3b8" },
   prospect: { label: "Prospect", dot: "#3b82f6" },
+  interview_scheduled: { label: "Interview Scheduled", dot: "#06b6d4" },
+  interviewed: { label: "Interviewed", dot: "#f97316" },
   onboarding: { label: "Onboarding", dot: "#a855f7" },
   active_client: { label: "Active Client", dot: "#22c55e" },
   // "Nurture" = a good-standing client with nothing actively due; drives the
@@ -134,7 +139,7 @@ export const CLIENT_STATUS_META: Record<ClientStatus, { label: string; dot: stri
   cancelled: { label: "Cancelled", dot: "#ef4444" },
   past_client: { label: "Past Client", dot: "#64748b" },
 };
-export const CLIENT_STATUS_ORDER: ClientStatus[] = ["lead", "prospect", "onboarding", "active_client", "nurture", "cancelled", "past_client"];
+export const CLIENT_STATUS_ORDER: ClientStatus[] = ["lead", "prospect", "interview_scheduled", "interviewed", "onboarding", "active_client", "nurture", "cancelled", "past_client"];
 /** How many days between automatic check-ins for a "nurture" client — surfaces
  * them in the Review tier once this long has passed since their last review.
  * Monthly for now (confirmed with Derek/Justin), tunable later. */

@@ -16,8 +16,8 @@ import {
   fetchThemeCalendar,
 } from "@/lib/db";
 import {
-  PLANNER_CURRENT_WEEK, plannerWeekLabel, addDaysIso, todayIso, PLANNER_CONTENT_SLOTS, PLANNER_BUSINESS_SLOTS, themeForWeek,
-  type PlannerWeek, type PlannerSlot, type PlannerBiz, type PlannerSection, type PlannerEvent, type NewsletterItem, type ThemeCalendarEntry, type PlannerInvite,
+  PLANNER_CURRENT_WEEK, plannerWeekLabel, addDaysIso, todayIso, PLANNER_CONTENT_SLOTS, PLANNER_BUSINESS_SLOTS, themeForWeek, playbookCompletion,
+  type PlannerWeek, type PlannerSlot, type PlannerBiz, type PlannerSection, type PlannerEvent, type NewsletterItem, type ThemeCalendarEntry, type PlannerInvite, type Client, type Task,
 } from "@/lib/data";
 import { generatePlannerBrief } from "@/lib/plannerBrief";
 import { pushPlannerWeek } from "@/lib/plannerPush";
@@ -50,12 +50,17 @@ const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "Ju
 // data worth syncing across devices.
 const DRAFT_CACHE_PREFIX = "cut_plannerDraft_";
 
-export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekChange }: {
+export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekChange, clients, tasks }: {
   territoryId: string; city: string; state: string;
   // Deep-link support (Cockpit's URL sync) — initialWeekId seeds which week
   // opens on mount, onWeekChange mirrors every change back up so the URL
   // stays in sync. Both optional so this component still works standalone.
   initialWeekId?: string | null; onWeekChange?: (id: string | null) => void;
+  // The full roster — used only to rank the "ready to feature" queue by
+  // Playbook completion (see acceptedUnassigned below). Optional so this
+  // component still works standalone; when omitted, that queue just falls
+  // back to its underlying first-accepted order.
+  clients?: Client[]; tasks?: Task[];
 }) {
   const [weeks, setWeeks] = useState<PlannerWeek[]>([]);
   const [loading, setLoading] = useState(true);
@@ -154,7 +159,7 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
   if (openWeek) {
     return (
       <WeekWorkspace week={openWeek} weeks={weeks} listings={listings} cityName={city} state={state} themeCalendar={themeCalendar} onBack={() => setOpenWeekId(null)}
-        onPatch={(patch) => patchWeek(openWeek.id, patch)} onDelete={() => deleteWeek(openWeek.id)} />
+        onPatch={(patch) => patchWeek(openWeek.id, patch)} onDelete={() => deleteWeek(openWeek.id)} clients={clients} tasks={tasks} />
     );
   }
 
@@ -291,7 +296,7 @@ function SaveConfirmButton() {
   );
 }
 
-function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, onBack, onPatch, onDelete }: {
+function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, onBack, onPatch, onDelete, clients, tasks }: {
   week: PlannerWeek;
   weeks: PlannerWeek[]; // the territory's full week history, for rotation "due" status
   listings: DirectoryListing[];
@@ -301,6 +306,9 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
   onBack: () => void;
   onPatch: (patch: PlannerWeekPatch) => void;
   onDelete: () => void;
+  // The full roster — used only to rank the "ready to feature" queue by
+  // Playbook completion (see acceptedUnassigned below).
+  clients?: Client[]; tasks?: Task[];
 }) {
   const [pickerSlot, setPickerSlot] = useState<PlannerSlot | null>(null);
   const [slPickerOpen, setSlPickerOpen] = useState(false);
@@ -591,22 +599,45 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     const gdPlaceId = toGdPlaceId(l.id);
     setSlot(slot, { clientId: null, gdPlaceId, name: l.name, url: l.url ?? "", cat: l.category ?? "", note: "" });
   };
+  // A listing's client, found by its ghlContactId — either the id-derived
+  // contact (Client.id === "cl_" + contactId) or an explicit
+  // linkedContactId/linkedContactIds override (see Client's own doc comment
+  // in data.ts). Used only to look up Playbook progress for the featured
+  // queue below.
+  const clientByContactId = useMemo(() => {
+    const m = new Map<string, Client>();
+    for (const c of clients ?? []) {
+      if (c.id.startsWith("cl_")) m.set(c.id.slice(3), c);
+      if (c.linkedContactId) m.set(c.linkedContactId, c);
+      for (const id of c.linkedContactIds ?? []) m.set(id, c);
+    }
+    return m;
+  }, [clients]);
+
   // Accepted-but-not-yet-in-a-slot — the "decide who to feature" shortlist,
   // separate from the full category list so responses don't get lost among
   // everyone who hasn't replied yet. Excludes anyone already placed in a
-  // business slot this week (nothing to decide on there anymore).
+  // business slot this week (nothing to decide on there anymore). Gamified
+  // per the Aug 3 Derek/Justin call: the further a claimed business has
+  // progressed through the Playbook, the higher it jumps in line for the
+  // featured spotlight — on top of the underlying first-accepted order.
   const acceptedUnassigned = useMemo(() => {
     const placedIds = new Set(
       (["spotlight", "gem", "gem2", "gem3"] as const).map((s) => week.picks[s]?.gdPlaceId).filter((id): id is number => id != null)
     );
-    return categoryMatches.filter((l) => {
+    const candidates = categoryMatches.filter((l) => {
       const gdPlaceId = toGdPlaceId(l.id);
       if (gdPlaceId == null || placedIds.has(gdPlaceId)) return false;
       let latestStatus: string | undefined;
       for (const inv of week.invited) if (inv.gdPlaceId === gdPlaceId) latestStatus = inv.status;
       return latestStatus === "accepted";
     });
-  }, [categoryMatches, week.picks, week.invited]);
+    const pctFor = (l: DirectoryListing) => {
+      const client = l.ghlContactId ? clientByContactId.get(l.ghlContactId) : undefined;
+      return client ? playbookCompletion(client.id, tasks ?? []).pct : 0;
+    };
+    return [...candidates].sort((a, b) => pctFor(b) - pctFor(a));
+  }, [categoryMatches, week.picks, week.invited, clientByContactId, tasks]);
 
   // Cross-week dedupe for Story/Events suggestions — a recurring event (a
   // weekly farmers market, say) has no "due" rotation logic like the
@@ -1054,13 +1085,20 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
                   <div className="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2.5">
                     <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Accepted — ready to feature ({acceptedUnassigned.length})</div>
                     <div className="space-y-1">
-                      {acceptedUnassigned.map((l) => (
-                        <div key={l.id} className="flex flex-wrap items-center gap-2 rounded-md border bg-background px-2 py-1.5">
-                          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{l.name}</span>
-                          <button onClick={() => assignListingToSlot(l, "spotlight")} className="shrink-0 rounded-md border border-accent px-2 py-1 text-[11px] font-semibold text-accent hover:bg-accent-soft">→ Spotlight</button>
-                          <button onClick={() => assignListingToSlot(l, "gem")} className="shrink-0 rounded-md border border-accent px-2 py-1 text-[11px] font-semibold text-accent hover:bg-accent-soft">→ Hidden Gem</button>
-                        </div>
-                      ))}
+                      {acceptedUnassigned.map((l) => {
+                        const client = l.ghlContactId ? clientByContactId.get(l.ghlContactId) : undefined;
+                        const pct = client ? playbookCompletion(client.id, tasks ?? []).pct : null;
+                        return (
+                          <div key={l.id} className="flex flex-wrap items-center gap-2 rounded-md border bg-background px-2 py-1.5">
+                            <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{l.name}</span>
+                            {pct != null && pct > 0 && (
+                              <span title="Playbook completion — further along jumps the featured queue" className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700">🚀 {pct}%</span>
+                            )}
+                            <button onClick={() => assignListingToSlot(l, "spotlight")} className="shrink-0 rounded-md border border-accent px-2 py-1 text-[11px] font-semibold text-accent hover:bg-accent-soft">→ Spotlight</button>
+                            <button onClick={() => assignListingToSlot(l, "gem")} className="shrink-0 rounded-md border border-accent px-2 py-1 text-[11px] font-semibold text-accent hover:bg-accent-soft">→ Hidden Gem</button>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
