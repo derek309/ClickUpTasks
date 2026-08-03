@@ -40,6 +40,7 @@ export default function SettingsHub({
   onAddTerritory,
   onToggleAssignee,
   onDeleteTerritory,
+  onSetDailyInviteCap,
   onAddContact,
   onOpenClient,
   templates,
@@ -67,6 +68,7 @@ export default function SettingsHub({
   onAddTerritory: (t: { name: string; city: string; state: string; assignedTo: string[] }) => void;
   onToggleAssignee: (id: string, memberId: string) => void;
   onDeleteTerritory: (id: string) => void;
+  onSetDailyInviteCap?: (id: string, cap: number | null) => void;
   onAddContact: (contact: Contact) => void;
   onOpenClient: (clientId: string) => void;
   templates: TaskTemplate[];
@@ -114,7 +116,7 @@ export default function SettingsHub({
             {tab === "team" && canAdmin && <TeamPanel me={me} dmEnabled={dmEnabled} onSetDmEnabled={onSetDmEnabled} />}
             {tab === "territories" && hasTerritoryAccess && (
               <TerritoryPanel me={me} canAdmin={canAdmin} territories={territories} contacts={contacts} clients={clients}
-                onAddTerritory={onAddTerritory} onToggleAssignee={onToggleAssignee} onDeleteTerritory={onDeleteTerritory}
+                onAddTerritory={onAddTerritory} onToggleAssignee={onToggleAssignee} onDeleteTerritory={onDeleteTerritory} onSetDailyInviteCap={onSetDailyInviteCap}
                 onAddContact={onAddContact} onOpenClient={onOpenClient} />
             )}
             {tab === "templates" && canAdmin && (

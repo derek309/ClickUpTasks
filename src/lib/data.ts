@@ -323,6 +323,11 @@ export interface Territory {
   // silently drifting from a JS re-derivation on punctuation/spelling edge
   // cases. Null = derive it the simple way (see planner push route).
   wpCitySlug: string | null;
+  // How many prospecting invites the auto-invite cron sends per weekday for
+  // this territory (most-overdue-first, unclaimed businesses only) — see
+  // runPlannerAutoInvite in plannerAutoInviteServer.ts. null/0 = off; a rep
+  // still sends manually from the Planner queue either way.
+  dailyInviteCap: number | null;
 }
 
 // --- Content Planner (the per-city weekly newsletter workflow) -------------

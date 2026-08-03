@@ -3214,7 +3214,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return { id, ready: upsertClient(nc) };
   };
   const addTerritory = (spec: { name: string; city: string; state: string; assignedTo: string[] }) => {
-    const t: Territory = { id: newId("terr_"), wpCitySlug: null, ...spec };
+    const t: Territory = { id: newId("terr_"), wpCitySlug: null, dailyInviteCap: null, ...spec };
     setTerritories((ts) => [...ts, t]);
     upsertTerritory(t);
     ensureTerritoryClient(t);
@@ -3234,6 +3234,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const deleteTerritory = (id: string) => {
     setTerritories((ts) => ts.filter((t) => t.id !== id));
     deleteTerritoryDb(id);
+  };
+  // null/0 = the auto-invite cron skips this territory entirely — see
+  // runPlannerAutoInvite (plannerAutoInviteServer.ts).
+  const setTerritoryDailyInviteCap = (id: string, cap: number | null) => {
+    const t = territories.find((x) => x.id === id);
+    if (!t) return;
+    const nt = { ...t, dailyInviteCap: cap };
+    setTerritories((ts) => ts.map((x) => (x.id === id ? nt : x)));
+    upsertTerritory(nt);
   };
   const saveTemplate = (id: string | undefined, spec: { name: string; checklistItems: string[] }) => {
     const t: TaskTemplate = { id: id ?? newId("tmpl_"), ...spec };
@@ -4611,6 +4620,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onSynced={async () => { try { setContacts(await fetchContacts()); pushToast("Contacts updated from GoHighLevel"); } catch { /* ignore */ } }}
             territories={territories} contacts={contacts} clients={clients}
             onAddTerritory={addTerritory} onToggleAssignee={toggleTerritoryAssignee} onDeleteTerritory={deleteTerritory}
+            onSetDailyInviteCap={setTerritoryDailyInviteCap}
             onAddContact={(contact) => addClientContact(contact)}
             onOpenClient={(id) => { setSettingsView(false); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); }}
             templates={taskTemplates} projects={projects}
@@ -4627,6 +4637,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <div className="flex-1 overflow-auto bg-background py-2">
             <TerritoryPanel me={me} canAdmin={canAdmin} territories={territories} contacts={contacts} clients={clients}
               onAddTerritory={addTerritory} onToggleAssignee={toggleTerritoryAssignee} onDeleteTerritory={(id) => { deleteTerritory(id); if (territoryView === id) setTerritoryView("all"); }}
+              onSetDailyInviteCap={setTerritoryDailyInviteCap}
               // Territory is a working view over what's already in GHL — no
               // "become a client" ceremony before you can open/journal a
               // business. Clicking the name is the same immediate action as

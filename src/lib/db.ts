@@ -126,8 +126,8 @@ export const rowToDmMessage = (r: any): DmMessage => ({ id: r.id, conversationId
 const vaultFolderToRow = (f: VaultFolder) => ({ id: f.id, client_id: f.clientId, project_id: f.projectId, name: f.name, created_at: f.createdAt });
 const rowToVaultFolder = (r: any): VaultFolder => ({ id: r.id, clientId: r.client_id, projectId: r.project_id ?? null, name: r.name, createdAt: r.created_at });
 
-const territoryToRow = (t: Territory) => ({ id: t.id, name: t.name, city: t.city, state: t.state, assigned_to: t.assignedTo ?? [], wp_city_slug: t.wpCitySlug ?? null });
-const rowToTerritory = (r: any): Territory => ({ id: r.id, name: r.name, city: r.city, state: r.state, assignedTo: Array.isArray(r.assigned_to) ? r.assigned_to : (r.member_id ? [r.member_id] : []), wpCitySlug: r.wp_city_slug ?? null });
+const territoryToRow = (t: Territory) => ({ id: t.id, name: t.name, city: t.city, state: t.state, assigned_to: t.assignedTo ?? [], wp_city_slug: t.wpCitySlug ?? null, daily_invite_cap: t.dailyInviteCap ?? null });
+const rowToTerritory = (r: any): Territory => ({ id: r.id, name: r.name, city: r.city, state: r.state, assignedTo: Array.isArray(r.assigned_to) ? r.assigned_to : (r.member_id ? [r.member_id] : []), wpCitySlug: r.wp_city_slug ?? null, dailyInviteCap: typeof r.daily_invite_cap === "number" ? r.daily_invite_cap : null });
 
 const taskTemplateToRow = (t: TaskTemplate) => ({ id: t.id, name: t.name, checklist_items: t.checklistItems });
 const rowToTaskTemplate = (r: any): TaskTemplate => ({ id: r.id, name: r.name, checklistItems: r.checklist_items ?? [] });
@@ -437,7 +437,7 @@ const jsonToBiz = (v: any): PlannerBiz | null => (v && typeof v === "object" && 
 // split apart here so PlannerWeek keeps them as separate, typed fields.
 // __themeDesc/__weather (added alongside __dismissed/__cats) are the same
 // trick: new week-level fields with no migration, just another reserved key.
-const plannerWeekToRow = (w: PlannerWeek) => ({
+export const plannerWeekToRow = (w: PlannerWeek) => ({
   id: w.id, territory_id: w.territoryId, week: w.week,
   theme_override: w.themeOverride ?? "", notes: w.notes ?? "",
   picks: {

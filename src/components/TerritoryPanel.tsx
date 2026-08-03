@@ -10,12 +10,17 @@ import { users, clientStatusMeta, normalizeState, playbookCompletion, type Me, t
 import { I, Avatar } from "./cockpit/ui";
 import TerritoryDirectory from "./cockpit/TerritoryDirectory";
 
-export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onDeleteTerritory, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, salesTasksByClient, onOpenSales, otherListsByClient, onOpenProject, onSetClientStatus, ghlContactUrlFor, focusId }: {
+export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onDeleteTerritory, onSetDailyInviteCap, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, salesTasksByClient, onOpenSales, otherListsByClient, onOpenProject, onSetClientStatus, ghlContactUrlFor, focusId }: {
   me: Me; canAdmin: boolean;
   territories: Territory[]; contacts: Contact[]; clients: Client[];
   onAddTerritory: (t: { name: string; city: string; state: string; assignedTo: string[] }) => void;
   onToggleAssignee: (id: string, memberId: string) => void; // toggle a teammate on/off a city
   onDeleteTerritory: (id: string) => void;
+  // How many prospecting invites the auto-invite cron sends per weekday for
+  // this city (null/0 = off) — see runPlannerAutoInvite. Optional so the
+  // focused single-city page (which never renders this admin-only control)
+  // doesn't need to pass it.
+  onSetDailyInviteCap?: (id: string, cap: number | null) => void;
   onAddContact: (contact: Contact) => void; // open (existing) or immediately create+open (new) — no confirm
   // Auto-sync + inline stage editing — only reachable via the focused
   // single-city page (see TerritoryDirectory), so optional here: the admin
@@ -185,6 +190,14 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                       </>
                     )}
                   </span>
+                  {canAdmin && onSetDailyInviteCap && (
+                    <span onClick={(e) => e.stopPropagation()} title="Auto-send this many prospecting invites per weekday, most-overdue first — blank/0 = off" className="flex shrink-0 items-center gap-1">
+                      <input type="number" min={0} value={t.dailyInviteCap ?? ""} placeholder="0"
+                        onChange={(e) => { const n = e.target.value === "" ? null : Math.max(0, parseInt(e.target.value, 10) || 0); onSetDailyInviteCap(t.id, n); }}
+                        className="w-12 rounded-md border bg-background px-1.5 py-1 text-center text-[13px] outline-none focus:border-accent" />
+                      <span className="text-[11px] text-muted">invites/day</span>
+                    </span>
+                  )}
                   {canAdmin && (
                     <span onClick={(e) => { e.stopPropagation(); onDeleteTerritory(t.id); }} title="Delete territory" className="shrink-0 rounded p-1 text-muted hover:bg-background hover:text-danger"><I.trash /></span>
                   )}
