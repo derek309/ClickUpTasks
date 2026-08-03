@@ -191,7 +191,7 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                     )}
                   </span>
                   {canAdmin && onSetDailyInviteCap && (
-                    <span onClick={(e) => e.stopPropagation()} title="Auto-send up to this many prospecting invites per weekday, most-overdue first, paced one per hour 9am-5pm Pacific — blank/0 = off" className="flex shrink-0 items-center gap-1">
+                    <span onClick={(e) => e.stopPropagation()} title="Auto-send this many prospecting invites at 9am Pacific, weekdays only, most-overdue first — blank/0 = off" className="flex shrink-0 items-center gap-1">
                       <input type="number" min={0} value={t.dailyInviteCap ?? ""} placeholder="0"
                         onChange={(e) => { const n = e.target.value === "" ? null : Math.max(0, parseInt(e.target.value, 10) || 0); onSetDailyInviteCap(t.id, n); }}
                         className="w-12 rounded-md border bg-background px-1.5 py-1 text-center text-[13px] outline-none focus:border-accent" />
