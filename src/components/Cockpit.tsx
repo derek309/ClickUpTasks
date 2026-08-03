@@ -4631,8 +4631,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         ) : territoryView && territoryView !== "all" && plannerOpen ? (
           <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">
             <PlannerPanel territoryId={territoryView} city={territoryById(territoryView)?.city ?? ""} state={territoryById(territoryView)?.state ?? ""}
-              initialWeekId={plannerWeekId} onWeekChange={setPlannerWeekId} clients={clients} tasks={tasks}
-              dailyInviteCap={territoryById(territoryView)?.dailyInviteCap ?? null} />
+              initialWeekId={plannerWeekId} onWeekChange={setPlannerWeekId} clients={clients} tasks={tasks} />
           </div>
         ) : territoryView ? (
           <div className="flex-1 overflow-auto bg-background py-2">

@@ -18,12 +18,12 @@
 // "Unclaimed" — exactly the pre-directory behavior, just relabeled.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
-import { fetchPlannerWeeks } from "@/lib/db";
+import { fetchPlannerWeeks, upsertPlannerWeek } from "@/lib/db";
 import { latestInviteStatus, inviteHistory, featureHistory, isDue } from "@/lib/plannerPools";
 import {
-  formatDue, playbookCompletion, salesCompletion,
+  formatDue, playbookCompletion, salesCompletion, plannerWeekOf, todayIso as todayIsoDate,
   CLIENT_STATUS_META, CLIENT_STATUS_ORDER,
-  type Contact, type Client, type ClientStatus, type Task, type PlannerInvite,
+  type Contact, type Client, type ClientStatus, type Task, type PlannerInvite, type PlannerWeek,
 } from "@/lib/data";
 import { I } from "./ui";
 
@@ -129,11 +129,14 @@ type PlannerActivityCacheEntry = {
   byGdPlaceId: Map<number, PlannerInvite>;
   invites: Map<number, { invited: number; accepted: number; skipped: number; lastAt: string }>;
   features: Map<string, { count: number; last: string }>;
+  // The raw rows too (not just derived maps) — the invite queue below needs
+  // to read/write "this week"'s own invited/dismissed arrays directly.
+  weeks: PlannerWeek[];
   at: number;
 };
 const inviteCache = new Map<string, PlannerActivityCacheEntry>();
 
-export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, salesTasksByClient, onOpenSales, otherListsByClient, onOpenProject, onSetClientStatus, canAdmin, ghlContactUrlFor, territoryId }: {
+export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, salesTasksByClient, onOpenSales, otherListsByClient, onOpenProject, onSetClientStatus, canAdmin, ghlContactUrlFor, territoryId, dailyInviteCap }: {
   city: string;
   state: string;
   contacts: Contact[];   // already scoped to this city/state by the caller
@@ -188,6 +191,11 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // outside a single-city page (the admin multi-city overview has no one
   // territory to scope planner_weeks to), where invites just never show.
   territoryId?: string;
+  // This territory's auto-invite setting (Territories admin panel) — lets
+  // this page preview exactly who the daily cron would send to next.
+  // null/0 = auto-invite is off. Optional so the admin multi-city overview
+  // (which has no one territory) just skips the preview.
+  dailyInviteCap?: number | null;
 }) {
   const cacheKey = `${city}|${state}`;
   const warm = () => listingsCache.get(cacheKey);
@@ -216,6 +224,14 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   const [inviteByGdPlaceId, setInviteByGdPlaceId] = useState<Map<number, PlannerInvite>>(() => (territoryId && inviteCache.get(territoryId)?.byGdPlaceId) || new Map());
   const [inviteHistoryMap, setInviteHistoryMap] = useState<Map<number, { invited: number; accepted: number; skipped: number; lastAt: string }>>(() => (territoryId && inviteCache.get(territoryId)?.invites) || new Map());
   const [featureHistoryMap, setFeatureHistoryMap] = useState<Map<string, { count: number; last: string }>>(() => (territoryId && inviteCache.get(territoryId)?.features) || new Map());
+  const [plannerWeeks, setPlannerWeeks] = useState<PlannerWeek[]>(() => (territoryId && inviteCache.get(territoryId)?.weeks) || []);
+  // Same "build every write from the latest row, not a stale render's
+  // snapshot" reasoning as PlannerPanel's own weeksRef — two invite actions
+  // in a row (e.g. Skip then Invite on a different row) would otherwise each
+  // start from the same pre-render weeks array and the second write would
+  // clobber the first.
+  const plannerWeeksRef = useRef<PlannerWeek[]>(plannerWeeks);
+  useEffect(() => { plannerWeeksRef.current = plannerWeeks; }, [plannerWeeks]);
 
   useEffect(() => {
     let alive = true;
@@ -261,16 +277,119 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
         const byGdPlaceId = latestInviteStatus(weeks);
         const invites = inviteHistory(weeks);
         const features = featureHistory(weeks);
-        inviteCache.set(territoryId, { byGdPlaceId, invites, features, at: Date.now() });
+        inviteCache.set(territoryId, { byGdPlaceId, invites, features, weeks, at: Date.now() });
         setInviteByGdPlaceId(byGdPlaceId);
         setInviteHistoryMap(invites);
         setFeatureHistoryMap(features);
+        setPlannerWeeks(weeks);
       }).catch(() => { /* fail soft — stays "Unclaimed" instead of "Invited", Priority sort just falls back to Name */ });
     };
     fetchInvites();
     const interval = setInterval(fetchInvites, REFRESH_INTERVAL);
     return () => { alive = false; clearInterval(interval); };
   }, [territoryId]);
+
+  // Invite/skip actions always target THIS week (auto-created if it doesn't
+  // exist yet) — same anchor runPlannerAutoInvite uses server-side, so a
+  // manual send here and an automatic one land in the identical place.
+  // Invites aren't really a weekly concept, but the underlying storage
+  // (planner_weeks.picks.__invited) still is, and a bigger schema change to
+  // move invite history off weeks entirely is a separate piece of work.
+  const todayWeekIso = plannerWeekOf(todayIsoDate());
+  const ensureThisWeek = async (): Promise<PlannerWeek> => {
+    const existing = plannerWeeksRef.current.find((w) => w.week === todayWeekIso);
+    if (existing) return existing;
+    const w: PlannerWeek = {
+      id: "pw_" + crypto.randomUUID(), territoryId: territoryId!, week: todayWeekIso, themeOverride: "", themeDescription: "", categories: [], notes: "", weatherNote: "",
+      picks: {}, dismissed: [], invited: [], supportLocalExcluded: [], supportLocalAdded: [], archived: false, sentDate: null, wpPushedAt: null, createdAt: new Date().toISOString(),
+    };
+    plannerWeeksRef.current = [w, ...plannerWeeksRef.current];
+    setPlannerWeeks(plannerWeeksRef.current);
+    await upsertPlannerWeek(w);
+    return w;
+  };
+  const patchThisWeek = async (patch: Partial<PlannerWeek> | ((w: PlannerWeek) => Partial<PlannerWeek>)) => {
+    const w = await ensureThisWeek();
+    const merged: PlannerWeek = { ...w, ...(typeof patch === "function" ? patch(w) : patch) };
+    plannerWeeksRef.current = plannerWeeksRef.current.map((x) => (x.id === w.id ? merged : x));
+    setPlannerWeeks(plannerWeeksRef.current);
+    await upsertPlannerWeek(merged);
+  };
+  // "Not interested this round" — works whether or not they've been invited
+  // yet, and is always reversible. Mirrors PlannerPanel's old skip/bring-back
+  // pair exactly, just scoped to "this week" instead of whichever week was open.
+  const skipBusiness = async (gdPlaceId: number) => {
+    const w = await ensureThisWeek();
+    let idx = -1;
+    w.invited.forEach((inv, i) => { if (inv.gdPlaceId === gdPlaceId) idx = i; });
+    if (idx !== -1) await patchThisWeek((cur) => ({ invited: cur.invited.map((inv, i) => (i === idx ? { ...inv, status: "skipped" as const } : inv)) }));
+    else if (!w.dismissed.includes(gdPlaceId)) await patchThisWeek((cur) => ({ dismissed: [...cur.dismissed, gdPlaceId] }));
+  };
+  const bringBackBusiness = async (gdPlaceId: number) => {
+    const w = await ensureThisWeek();
+    let idx = -1;
+    w.invited.forEach((inv, i) => { if (inv.gdPlaceId === gdPlaceId) idx = i; });
+    if (idx !== -1 && w.invited[idx].status === "skipped") await patchThisWeek((cur) => ({ invited: cur.invited.map((inv, i) => (i === idx ? { ...inv, status: "invited" as const } : inv)) }));
+    else if (w.dismissed.includes(gdPlaceId)) await patchThisWeek((cur) => ({ dismissed: cur.dismissed.filter((id) => id !== gdPlaceId) }));
+  };
+  // Sending again is allowed — a business might miss the first email, or a
+  // rep might want to follow up. Every send appends its own {gdPlaceId, at}
+  // entry (not deduped), so week.invited also doubles as a send count.
+  const [inviteState, setInviteState] = useState<Partial<Record<number, "sending" | string>>>({});
+  const [inviteArmed, setInviteArmed] = useState<number | null>(null);
+  const humanizeInviteError = (err: string | undefined) =>
+    err === "no_email" ? "No email on file for this listing."
+    : err === "ghl_not_connected" ? "GoHighLevel isn't connected for this city yet."
+    : err === "outside_business_hours" ? "Outside business hours (8am–6pm Mon–Fri) — nothing was sent, try again in the morning."
+    : err || "Invite failed.";
+  const sendInvite = async (gdPlaceId: number) => {
+    setInviteArmed(null);
+    setInviteState((m) => ({ ...m, [gdPlaceId]: "sending" }));
+    try {
+      const w = await ensureThisWeek();
+      const res = await authedFetch("/api/planner/invite/send", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ territoryId, week: w.week, gdPlaceId, themeDescription: "" }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (res.ok && j.ok) {
+        setInviteState((m) => { const n = { ...m }; delete n[gdPlaceId]; return n; });
+        await patchThisWeek((cur) => ({ invited: [...cur.invited, { gdPlaceId, at: new Date().toISOString(), status: "invited" as const }] }));
+        return;
+      }
+      setInviteState((m) => ({ ...m, [gdPlaceId]: humanizeInviteError(j.error) }));
+    } catch (e) {
+      setInviteState((m) => ({ ...m, [gdPlaceId]: e instanceof Error ? e.message : "Invite failed." }));
+    }
+  };
+  // The public "I'm interested" link per business — the same page the invite
+  // email points at, so a rep can hand it over directly (text it, read it out
+  // on a call) instead of only being able to trigger an email. Fetched for
+  // every unclaimed/invited business at once, same as the old Planner queue.
+  const [inviteLinks, setInviteLinks] = useState<Record<string, string>>({});
+  const [copiedLinkId, setCopiedLinkId] = useState<number | null>(null);
+  useEffect(() => {
+    if (!territoryId || !listings) return;
+    const ids = listings.filter((l) => !l.claimed).map((l) => (typeof l.id === "number" ? l.id : parseInt(String(l.id), 10))).filter((id) => Number.isFinite(id));
+    if (ids.length === 0) return;
+    let alive = true;
+    authedFetch("/api/planner/invite/links", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ territoryId, week: todayWeekIso, gdPlaceIds: ids }),
+    })
+      .then((r) => r.json())
+      .then((j) => { if (alive && j?.links) setInviteLinks(j.links); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [territoryId, listings, todayWeekIso]);
+  const copyInviteLink = (gdPlaceId: number) => {
+    const url = inviteLinks[String(gdPlaceId)];
+    if (!url) return;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedLinkId(gdPlaceId);
+      setTimeout(() => setCopiedLinkId((c) => (c === gdPlaceId ? null : c)), 2000);
+    }).catch(() => {});
+  };
 
   const clientIds = useMemo(() => new Set(clients.map((c) => c.id)), [clients]);
 
@@ -345,6 +464,20 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
     return (onSales ? r.client.salesLastProgressAt : r.client.playbookLastProgressAt) ?? null;
   };
   const todayIso = new Date().toISOString();
+  // Exactly what runPlannerAutoInvite (plannerAutoInviteServer.ts) would pick
+  // next: unclaimed only (the auto-invite is "come claim your listing," not
+  // a feature invite), due for a touch, most-overdue first, capped at this
+  // territory's daily_invite_cap.
+  const autoInviteQueue = useMemo(() => {
+    if (!dailyInviteCap || dailyInviteCap <= 0 || !listings) return [];
+    return listings
+      .filter((l) => !l.claimed)
+      .map((l) => ({ listing: l, lastAt: lastTouchedAt(l) }))
+      .filter((c) => isDue(c.lastAt, todayIso))
+      .sort((a, b) => (a.lastAt ?? "").localeCompare(b.lastAt ?? ""))
+      .slice(0, dailyInviteCap);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listings, inviteHistoryMap, featureHistoryMap, dailyInviteCap, todayIso]);
   const sortRows = <T extends { listing: DirectoryListing; client: Client | null }>(arr: T[]) => [...arr].sort((a, b) => {
     if (sort === "priority") {
       const aStage = computeBusinessStage(a.listing, a.client, inviteFor(a.listing));
@@ -414,6 +547,30 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
         </div>
       )}
 
+      {/* The invite queue itself lives in the Unclaimed/Invited stage groups
+          below (Invite/Skip/Copy-link on each row) — this is just the daily
+          preview of what the auto-invite cron sends on its own. */}
+      {territoryId && (
+        dailyInviteCap && dailyInviteCap > 0 ? (
+          <div className="mb-2 rounded-lg border border-accent/30 bg-accent-soft/40 px-3 py-2.5">
+            <div className="mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-accent">Next auto-invite batch — {autoInviteQueue.length} of {dailyInviteCap} slots</div>
+            {autoInviteQueue.length === 0 ? (
+              <div className="text-[13px] text-muted">Nothing due right now — nobody unclaimed is overdue for a touch.</div>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {autoInviteQueue.map((c) => (
+                  <span key={c.listing.id} title={c.lastAt ? `Last invited ${c.lastAt.slice(0, 10)}` : "Never invited"} className="rounded-full border border-accent/40 bg-surface px-2 py-0.5 text-[12px] font-medium">
+                    {c.listing.name}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : canAdmin ? (
+          <div className="mb-2 rounded-lg border bg-background/40 px-3 py-2 text-[12px] text-muted">Auto-invite is off for {city} — set a daily cap in Settings → Territories to turn it on.</div>
+        ) : null
+      )}
+
       <div className="mb-2 flex items-center gap-2">
         <div className="relative flex-1">
           <I.search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
@@ -479,18 +636,39 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                   <span className="rounded-full px-1.5 text-[13px] font-semibold normal-case tracking-normal text-white" style={{ background: g.color }}>{g.rows.length}</span>
                   <span className="truncate text-[12px] font-normal normal-case text-muted">{g.hint}</span>
                 </button>
-                {isOpen && g.rows.map((r) => (
-                  <ListingRow key={g.key + r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} template={template}
-                    stage={computeBusinessStage(r.listing, r.client, inviteFor(r.listing))}
-                    invite={inviteFor(r.listing)}
-                    onSetClientStatus={onSetClientStatus} canAdmin={canAdmin} ghlContactUrlFor={ghlContactUrlFor}
-                    featured={!!r.client && !!featuredClientIds?.has(r.client.id)}
-                    canFeature={!!(r.client || r.contact)}
-                    onFeature={onFeature && ((rr) => onFeature({ clientId: rr.client?.id ?? null, contact: rr.contact, name: rr.listing.name, city, state }))}
-                    playbookTasks={(r.client && playbookTasksByClient?.get(r.client.id)) || []} onOpenPlaybook={onOpenPlaybook}
-                    salesTasks={(r.client && salesTasksByClient?.get(r.client.id)) || []} onOpenSales={onOpenSales}
-                    otherLists={(r.client && otherListsByClient?.get(r.client.id)) || []} onOpenProject={onOpenProject} />
-                ))}
+                {isOpen && g.rows.map((r) => {
+                  const rawId = typeof r.listing.id === "number" ? r.listing.id : parseInt(String(r.listing.id), 10);
+                  const gdPlaceId = Number.isFinite(rawId) ? rawId : null;
+                  // Invite/Skip/Copy-link only make sense for a real listing
+                  // id, scoped to a single territory — the admin multi-city
+                  // overview (no territoryId) stays a read-only list.
+                  const inviteActions = gdPlaceId != null && territoryId ? {
+                    gdPlaceId,
+                    state: inviteState[gdPlaceId],
+                    armed: inviteArmed === gdPlaceId,
+                    onArm: () => setInviteArmed(gdPlaceId),
+                    onSend: () => sendInvite(gdPlaceId),
+                    onDismissError: () => setInviteState((m) => { const n = { ...m }; delete n[gdPlaceId]; return n; }),
+                    onSkip: () => skipBusiness(gdPlaceId),
+                    onBringBack: () => bringBackBusiness(gdPlaceId),
+                    link: inviteLinks[String(gdPlaceId)],
+                    onCopyLink: () => copyInviteLink(gdPlaceId),
+                    copied: copiedLinkId === gdPlaceId,
+                  } : null;
+                  return (
+                    <ListingRow key={g.key + r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} template={template}
+                      stage={computeBusinessStage(r.listing, r.client, inviteFor(r.listing))}
+                      invite={inviteFor(r.listing)}
+                      onSetClientStatus={onSetClientStatus} canAdmin={canAdmin} ghlContactUrlFor={ghlContactUrlFor}
+                      featured={!!r.client && !!featuredClientIds?.has(r.client.id)}
+                      canFeature={!!(r.client || r.contact)}
+                      onFeature={onFeature && ((rr) => onFeature({ clientId: rr.client?.id ?? null, contact: rr.contact, name: rr.listing.name, city, state }))}
+                      playbookTasks={(r.client && playbookTasksByClient?.get(r.client.id)) || []} onOpenPlaybook={onOpenPlaybook}
+                      salesTasks={(r.client && salesTasksByClient?.get(r.client.id)) || []} onOpenSales={onOpenSales}
+                      otherLists={(r.client && otherListsByClient?.get(r.client.id)) || []} onOpenProject={onOpenProject}
+                      inviteActions={inviteActions} />
+                  );
+                })}
               </div>
             );
           })}
@@ -512,7 +690,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, onSetClientStatus, canAdmin, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, salesTasks, onOpenSales, otherLists, onOpenProject }: {
+function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, onSetClientStatus, canAdmin, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, salesTasks, onOpenSales, otherLists, onOpenProject, inviteActions }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
   onOpenClient: (id: string) => void;
@@ -552,6 +730,21 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
   // list rather than an inline expand. Empty when it has none (or no client yet).
   otherLists: { id: string; name: string; done: number; total: number }[];
   onOpenProject?: (clientId: string, projectId: string) => void;
+  // Invite/Skip/Copy-link for this row — null when there's no valid listing
+  // id or no territory to scope the send to (the admin multi-city overview).
+  inviteActions?: {
+    gdPlaceId: number;
+    state: "sending" | string | undefined;
+    armed: boolean;
+    onArm: () => void;
+    onSend: () => void;
+    onDismissError: () => void;
+    onSkip: () => void;
+    onBringBack: () => void;
+    link: string | undefined;
+    onCopyLink: () => void;
+    copied: boolean;
+  } | null;
 }) {
   const { listing, contact, client } = row;
   const nameMouseDown = useRef<{ x: number; y: number } | null>(null);
@@ -671,6 +864,43 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
               {l.name} {l.done}/{l.total}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* The invite queue's own actions — Skip/Bring-back, Copy-link, and a
+          two-click Invite/Confirm (mirrors WP's own caution around a button
+          that sends a real email) — only for the two stages it applies to.
+          Once claimed, this business's "what's left" is Sales/Playbook
+          progress above, not invite state. */}
+      {inviteActions && (stage === "unclaimed" || stage === "invited") && (
+        <div className="flex flex-wrap items-center gap-1.5 px-4 pb-2 pl-9 pt-1.5 sm:pl-9">
+          {invite?.status === "skipped" ? (
+            <button onClick={inviteActions.onBringBack} className="shrink-0 text-[12px] font-semibold text-accent hover:underline">↺ Bring back</button>
+          ) : (
+            <>
+              {invite?.status === "accepted" && <span className="shrink-0 rounded-md bg-emerald-100 px-2 py-1 text-[12px] font-semibold text-emerald-700">Accepted</span>}
+              {invite?.status !== "accepted" && (
+                <button onClick={inviteActions.onSkip} className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">Skip</button>
+              )}
+              {inviteActions.link && (
+                <button onClick={inviteActions.onCopyLink} title={inviteActions.link} className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">
+                  {inviteActions.copied ? "Copied ✓" : "🔗 Copy link"}
+                </button>
+              )}
+              {inviteActions.state === "sending" ? (
+                <span className="shrink-0 text-[12px] text-muted">Sending…</span>
+              ) : inviteActions.state ? (
+                <span className="flex shrink-0 items-center gap-1.5 text-[12px]">
+                  <span className="text-danger">{inviteActions.state}</span>
+                  <button onClick={inviteActions.onDismissError} className="font-medium text-muted hover:text-foreground">Dismiss</button>
+                </span>
+              ) : inviteActions.armed ? (
+                <button onClick={inviteActions.onSend} className="shrink-0 rounded-md border border-danger px-2 py-1 text-[12px] font-semibold text-danger hover:bg-danger/10">Confirm{invite ? " resend" : ""}?</button>
+              ) : (
+                <button onClick={inviteActions.onArm} className="shrink-0 rounded-md border border-accent px-2 py-1 text-[12px] font-semibold text-accent hover:bg-accent-soft">✉️ {invite ? "Invite again" : "Invite"}</button>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>

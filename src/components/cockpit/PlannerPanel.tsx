@@ -16,12 +16,10 @@ import {
 } from "@/lib/db";
 import {
   PLANNER_CURRENT_WEEK, plannerWeekLabel, addDaysIso, todayIso, PLANNER_CONTENT_SLOTS, PLANNER_BUSINESS_SLOTS, playbookCompletion,
-  type PlannerWeek, type PlannerSlot, type PlannerBiz, type PlannerSection, type PlannerEvent, type NewsletterItem, type PlannerInvite, type Client, type Task,
+  type PlannerWeek, type PlannerSlot, type PlannerBiz, type PlannerSection, type PlannerEvent, type NewsletterItem, type Client, type Task,
 } from "@/lib/data";
 import { generatePlannerBrief } from "@/lib/plannerBrief";
 import { pushPlannerWeek } from "@/lib/plannerPush";
-import { featureHistory, inviteHistory, isDue } from "@/lib/plannerPools";
-import { matchesAnyCategory } from "@/lib/categoryMatch";
 import { I, newId } from "./ui";
 import { type DirectoryListing } from "./TerritoryDirectory";
 
@@ -48,7 +46,7 @@ const SECTION_PRESETS = ["Hidden Gem", "The Story", "New In Town", "Ask Your Con
 // data worth syncing across devices.
 const DRAFT_CACHE_PREFIX = "cut_plannerDraft_";
 
-export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekChange, clients, tasks, dailyInviteCap }: {
+export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekChange, clients, tasks }: {
   territoryId: string; city: string; state: string;
   // Deep-link support (Cockpit's URL sync) — initialWeekId seeds which week
   // opens on mount, onWeekChange mirrors every change back up so the URL
@@ -59,10 +57,6 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
   // component still works standalone; when omitted, that queue just falls
   // back to its underlying first-accepted order.
   clients?: Client[]; tasks?: Task[];
-  // This territory's auto-invite setting (Territories admin panel) — lets
-  // the current week preview exactly who the daily cron would send to next.
-  // null/0 = auto-invite is off.
-  dailyInviteCap?: number | null;
 }) {
   const [weeks, setWeeks] = useState<PlannerWeek[]>([]);
   const [loading, setLoading] = useState(true);
@@ -126,8 +120,8 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
 
   // `patch` may be a function so callers appending to an array (invited,
   // dismissed, categories) derive from the current row instead of a `week`
-  // prop captured before an await — see sendInvite, where the GHL send takes
-  // seconds and two overlapping invites would otherwise drop one.
+  // prop captured before an await — see SlotInviteButton's onSent, where the
+  // GHL send takes seconds and two overlapping sends would otherwise drop one.
   const patchWeek = (id: string, patch: PlannerWeekPatch) => {
     const cur = weeksRef.current.find((w) => w.id === id);
     if (!cur) return;
@@ -150,7 +144,7 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
   if (openWeek) {
     return (
       <WeekWorkspace week={openWeek} weeks={weeks} listings={listings} cityName={city} state={state} onBack={() => setOpenWeekId(null)}
-        onPatch={(patch) => patchWeek(openWeek.id, patch)} onDelete={() => deleteWeek(openWeek.id)} clients={clients} tasks={tasks} dailyInviteCap={dailyInviteCap} />
+        onPatch={(patch) => patchWeek(openWeek.id, patch)} onDelete={() => deleteWeek(openWeek.id)} clients={clients} tasks={tasks} />
     );
   }
 
@@ -253,7 +247,48 @@ function SaveConfirmButton() {
   );
 }
 
-function WeekWorkspace({ week, weeks, listings, cityName, state, onBack, onPatch, onDelete, clients, tasks, dailyInviteCap }: {
+// Notifying a business that's already been picked for a slot is a separate
+// action from picking them ("picking them for the issue and letting them
+// know are two separate things" — a rep may want to invite/notify a
+// business even after already slotting them in). Self-contained (not the
+// shared queue machinery that moved to the Businesses page) since this only
+// ever fires for the one business currently in a given slot.
+function SlotInviteButton({ territoryId, week, gdPlaceId, count, onSent }: {
+  territoryId: string; week: string; gdPlaceId: number; count: number; onSent: () => void;
+}) {
+  const [state, setState] = useState<"idle" | "armed" | "sending" | string>("idle");
+  const send = async () => {
+    setState("sending");
+    try {
+      const res = await authedFetch("/api/planner/invite/send", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ territoryId, week, gdPlaceId, themeDescription: "" }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (res.ok && j.ok) { setState("idle"); onSent(); }
+      else setState(j.error === "outside_business_hours" ? "Outside business hours (8am–6pm Mon–Fri)." : j.error || "Invite failed.");
+    } catch (e) {
+      setState(e instanceof Error ? e.message : "Invite failed.");
+    }
+  };
+  if (state === "sending") return <span className="text-[12px] text-muted">Sending…</span>;
+  if (state !== "idle" && state !== "armed") return (
+    <span className="flex items-center gap-1.5 text-[12px]">
+      <span className="text-danger">{state}</span>
+      <button onClick={() => setState("idle")} className="font-medium text-muted hover:text-foreground">Dismiss</button>
+    </span>
+  );
+  return (
+    <span className="flex items-center gap-1.5 text-[12px]">
+      {count > 0 && <span className="font-medium text-emerald-600">Invited {count}×</span>}
+      {state === "armed"
+        ? <button onClick={send} className="font-medium text-danger hover:underline">Confirm{count > 0 ? " resend" : ""}?</button>
+        : <button onClick={() => setState("armed")} className="font-medium text-accent hover:underline">{count > 0 ? "✉️ Let them know again" : "✉️ Let them know"}</button>}
+    </span>
+  );
+}
+
+function WeekWorkspace({ week, weeks, listings, cityName, state, onBack, onPatch, onDelete, clients, tasks }: {
   week: PlannerWeek;
   weeks: PlannerWeek[]; // the territory's full week history, for rotation "due" status
   listings: DirectoryListing[];
@@ -265,7 +300,6 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, onBack, onPatch
   // The full roster — used only to rank the "ready to feature" queue by
   // Playbook completion (see acceptedUnassigned below).
   clients?: Client[]; tasks?: Task[];
-  dailyInviteCap?: number | null;
 }) {
   const [pickerSlot, setPickerSlot] = useState<PlannerSlot | null>(null);
   const [slPickerOpen, setSlPickerOpen] = useState(false);
@@ -397,125 +431,12 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, onBack, onPatch
   };
 
   // Same rotation history the old Spotlight/Hidden Gem pool used, keyed by
-  // name/gdPlaceId — moved up above categoryMatches (was declared further
-  // down) since the auto-cycling queue's ranking needs it.
-  const featureCounts = useMemo(() => featureHistory(weeks), [weeks]);
-  const inviteCounts = useMemo(() => inviteHistory(weeks), [weeks]);
-  // The invitation queue "runs itself" (Business Journal, Aug 3 2026) — every
-  // directory listing, no theme/categories required (categories are now an
-  // optional narrowing filter, not a gate: this used to return [] with no
-  // theme set, which meant the entire invite surface disappeared the moment
-  // themes went away). Ranked by rotation due-ness first (never-invited or
-  // longest since the last one — same ROTATION_WINDOW_DAYS the Businesses
-  // page's Priority sort uses, via inviteCounts above), not hand-picked or
-  // alphabetical, so the ambassador always works top-down from whoever
-  // actually needs a touch instead of curating a list themselves.
-  const today = todayIso();
-  const categoryMatches = useMemo(() => {
-    const base = week.categories.length === 0 ? listings : listings.filter((l) => matchesAnyCategory(l.category ?? "", week.categories));
-    const lastInviteAt = (l: DirectoryListing) => { const id = toGdPlaceId(l.id); return id != null ? (inviteCounts.get(id)?.lastAt ?? null) : null; };
-    return [...base].sort((a, b) => {
-      const aDue = isDue(lastInviteAt(a), today);
-      const bDue = isDue(lastInviteAt(b), today);
-      if (aDue !== bDue) return aDue ? -1 : 1;
-      const aLast = lastInviteAt(a) ?? "";
-      const bLast = lastInviteAt(b) ?? "";
-      if (aLast !== bLast) return aLast.localeCompare(bLast); // never-invited ("") first, then oldest
-      return a.name.localeCompare(b.name);
-    });
-  }, [listings, week.categories, inviteCounts, today]);
-  // Exactly what runPlannerAutoInvite (plannerAutoInviteServer.ts) would pick
-  // next: unclaimed only (the auto-invite is "come claim your listing," not
-  // a feature invite), due for a touch, most-overdue first, capped at this
-  // territory's daily_invite_cap — a preview so a rep can see the actual
-  // batch before/instead of digging through categoryMatches by eye.
-  const autoInviteQueue = useMemo(() => {
-    if (!dailyInviteCap || dailyInviteCap <= 0) return [];
-    return categoryMatches
-      .filter((l) => !l.claimed)
-      .map((l) => { const id = toGdPlaceId(l.id); return { listing: l, lastAt: id != null ? (inviteCounts.get(id)?.lastAt ?? null) : null }; })
-      .filter((c) => isDue(c.lastAt, today))
-      .sort((a, b) => (a.lastAt ?? "").localeCompare(b.lastAt ?? ""))
-      .slice(0, dailyInviteCap);
-  }, [categoryMatches, inviteCounts, today, dailyInviteCap]);
-  // Grouped by the listing's own real GD category (not the theme's category
-  // tags — a different vocabulary, see categoryMatch.ts) so it's obvious how
-  // many of each you actually have, not just a flat count. Biggest groups
-  // first, alphabetical among ties.
-  // The public "I'm interested" link per business — the same page the invite
-  // email points at, so a rep can hand it over directly (text it, read it out
-  // on a call) instead of only being able to trigger an email. Fetched for
-  // the whole visible set at once when the week or its categories change, so
-  // the URL is already in hand when the copy button is clicked: awaiting a
-  // fetch inside the click handler first would trip Safari's user-gesture
-  // rule and silently fail to write the clipboard.
-  const [inviteLinks, setInviteLinks] = useState<Record<string, string>>({});
-  const [copiedLinkId, setCopiedLinkId] = useState<number | null>(null);
-  useEffect(() => {
-    const ids = categoryMatches.map((l) => toGdPlaceId(l.id)).filter((id): id is number => id != null);
-    if (ids.length === 0) return;
-    let alive = true;
-    authedFetch("/api/planner/invite/links", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ territoryId: week.territoryId, week: week.week, gdPlaceIds: ids }),
-    })
-      .then((r) => r.json())
-      .then((j) => { if (alive && j?.links) setInviteLinks(j.links); })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, [categoryMatches, week.territoryId, week.week]);
-  const copyInviteLink = (gdPlaceId: number) => {
-    const url = inviteLinks[String(gdPlaceId)];
-    if (!url) return;
-    navigator.clipboard.writeText(url).then(() => {
-      setCopiedLinkId(gdPlaceId);
-      setTimeout(() => setCopiedLinkId((c) => (c === gdPlaceId ? null : c)), 2000);
-    }).catch(() => {});
-  };
-
-  const categoryGroups = useMemo(() => {
-    const map = new Map<string, DirectoryListing[]>();
-    for (const l of categoryMatches) {
-      const key = l.category || "Uncategorized";
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(l);
-    }
-    return Array.from(map.entries()).sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
-  }, [categoryMatches]);
-  // Selection for bulk-invite on the category business list below — cleared
-  // implicitly on every week switch since WeekWorkspace fully unmounts then
-  // (PlannerPanel only ever renders it when a week is open, never keyed
-  // across different weeks).
-  const [selectedForInvite, setSelectedForInvite] = useState<Set<number>>(new Set());
-  const [bulkInviting, setBulkInviting] = useState(false);
-  const toggleSelectedForInvite = (gdPlaceId: number) =>
-    setSelectedForInvite((s) => { const n = new Set(s); if (n.has(gdPlaceId)) n.delete(gdPlaceId); else n.add(gdPlaceId); return n; });
-  // Most recent invited-entry for a listing in THIS week — mirrors the
-  // "latest send wins" logic the webhook write-back uses server-side.
-  const latestInviteFor = (gdPlaceId: number): PlannerInvite | null => {
-    let latest: PlannerInvite | null = null;
-    for (const inv of week.invited) if (inv.gdPlaceId === gdPlaceId) latest = inv;
-    return latest;
-  };
-  // "Not using this business in this week's newsletter" — works whether or
-  // not they've been invited yet, and is always reversible. Already-invited
-  // businesses flip their invited entry's status (no dismissed-list entry
-  // needed); never-invited ones go on `week.dismissed` — that field is
-  // otherwise unused now that the AI candidate pool is gone, so it's a clean
-  // fit rather than inventing a new one. A business is never in both states
-  // at once, so these two branches never collide.
-  const skipBusiness = (gdPlaceId: number) => {
-    let idx = -1;
-    week.invited.forEach((inv, i) => { if (inv.gdPlaceId === gdPlaceId) idx = i; });
-    if (idx !== -1) onPatch({ invited: week.invited.map((inv, i) => (i === idx ? { ...inv, status: "skipped" as const } : inv)) });
-    else if (!week.dismissed.includes(gdPlaceId)) onPatch({ dismissed: [...week.dismissed, gdPlaceId] });
-  };
-  const bringBackBusiness = (gdPlaceId: number) => {
-    let idx = -1;
-    week.invited.forEach((inv, i) => { if (inv.gdPlaceId === gdPlaceId) idx = i; });
-    if (idx !== -1 && week.invited[idx].status === "skipped") onPatch({ invited: week.invited.map((inv, i) => (i === idx ? { ...inv, status: "invited" as const } : inv)) });
-    else if (week.dismissed.includes(gdPlaceId)) onPatch({ dismissed: week.dismissed.filter((id) => id !== gdPlaceId) });
-  };
+  // name/gdPlaceId — used only by the Spotlight/Hidden Gem "ready to
+  // feature" shortlist below now; the invite queue itself (sending,
+  // skipping, copy-link, the auto-invite preview) moved to the Businesses
+  // page (TerritoryDirectory.tsx) — it's a continuous prospecting concern,
+  // not a per-week newsletter one, and the funnel/stage grouping it belongs
+  // next to already lives there.
   const assignListingToSlot = (l: DirectoryListing, slot: PlannerSlot) => {
     const gdPlaceId = toGdPlaceId(l.id);
     setSlot(slot, { clientId: null, gdPlaceId, name: l.name, url: l.url ?? "", cat: l.category ?? "", note: "" });
@@ -536,17 +457,17 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, onBack, onPatch
   }, [clients]);
 
   // Accepted-but-not-yet-in-a-slot — the "decide who to feature" shortlist,
-  // separate from the full category list so responses don't get lost among
-  // everyone who hasn't replied yet. Excludes anyone already placed in a
-  // business slot this week (nothing to decide on there anymore). Gamified
-  // per the Aug 3 Derek/Justin call: the further a claimed business has
-  // progressed through the Playbook, the higher it jumps in line for the
-  // featured spotlight — on top of the underlying first-accepted order.
+  // the one place invites still touch the Planner: once a business accepts
+  // (tracked on week.invited by the Businesses-page invite queue), it
+  // graduates here to be assigned a slot. Gamified per the Aug 3
+  // Derek/Justin call: the further a claimed business has progressed
+  // through the Playbook, the higher it jumps in line for the featured
+  // spotlight — on top of the underlying first-accepted order.
   const acceptedUnassigned = useMemo(() => {
     const placedIds = new Set(
       (["spotlight", "gem", "gem2", "gem3"] as const).map((s) => week.picks[s]?.gdPlaceId).filter((id): id is number => id != null)
     );
-    const candidates = categoryMatches.filter((l) => {
+    const candidates = listings.filter((l) => {
       const gdPlaceId = toGdPlaceId(l.id);
       if (gdPlaceId == null || placedIds.has(gdPlaceId)) return false;
       let latestStatus: string | undefined;
@@ -558,7 +479,7 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, onBack, onPatch
       return client ? playbookCompletion(client.id, tasks ?? []).pct : 0;
     };
     return [...candidates].sort((a, b) => pctFor(b) - pctFor(a));
-  }, [categoryMatches, week.picks, week.invited, clientByContactId, tasks]);
+  }, [listings, week.picks, week.invited, clientByContactId, tasks]);
 
   // Cross-week dedupe for Story/Events suggestions — a recurring event (a
   // weekly farmers market, say) has no "due" rotation logic like the
@@ -574,97 +495,6 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, onBack, onPatch
   }, [weeks]);
   const recentEventTitles = useMemo(() => [...new Set(recentEvents.map((e) => e.text.split("\n")[0]?.trim()).filter(Boolean))], [recentEvents]);
   const recentStoryHeadlines = useMemo(() => [...new Set(weeks.map((w) => w.picks.story?.name).filter((n): n is string => !!n))], [weeks]);
-
-  // Invite-to-be-featured — proxies WordPress's own outreach/send action
-  // (real GHL email, real contact upsert, logged on WP's own outreach
-  // record). ClickUpTasks is just the trigger; nothing here is persisted
-  // locally beyond this session's own feedback. gdPlaceId-only: WordPress
-  // resolves the invite email from the GeoDirectory listing itself, so a
-  // free-text pick with no listing has nothing to invite.
-  const [inviteState, setInviteState] = useState<Partial<Record<number, "sending" | string>>>({});
-  const [inviteArmed, setInviteArmed] = useState<number | null>(null);
-  const humanizeInviteError = (err: string | undefined) =>
-    err === "no_email" ? "No email on file for this listing."
-    : err === "ghl_not_connected" ? "GoHighLevel isn't connected for this city yet."
-    : err === "outside_business_hours" ? "Outside business hours (8am–6pm Mon–Fri) — nothing was sent, try again in the morning."
-    : err || "Invite failed.";
-  // Sending again is allowed — a business might miss the first email, or a
-  // rep might want to follow up. Every send appends its own {gdPlaceId, at}
-  // entry (not deduped), so week.invited also doubles as a send count.
-  // Split from the onPatch call so bulk-invite (below) can send several ids
-  // in a row. Both callers append via onPatch's FUNCTION form, which derives
-  // from the current row rather than the `week` prop captured before the
-  // send — a real GHL email round-trip takes seconds, and two overlapping
-  // invites (or a single invite landing mid-bulk) would otherwise each write
-  // an `invited` array built without the other's entry, silently dropping a
-  // send that actually went out.
-  const postInvite = async (gdPlaceId: number): Promise<PlannerInvite | null> => {
-    setInviteArmed(null);
-    setInviteState((m) => ({ ...m, [gdPlaceId]: "sending" }));
-    try {
-      const res = await authedFetch("/api/planner/invite/send", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ territoryId: week.territoryId, week: week.week, gdPlaceId, themeDescription: week.themeDescription }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (res.ok && j.ok) {
-        setInviteState((m) => { const n = { ...m }; delete n[gdPlaceId]; return n; });
-        return { gdPlaceId, at: new Date().toISOString(), status: "invited" };
-      }
-      setInviteState((m) => ({ ...m, [gdPlaceId]: humanizeInviteError(j.error) }));
-      return null;
-    } catch (e) {
-      setInviteState((m) => ({ ...m, [gdPlaceId]: e instanceof Error ? e.message : "Invite failed." }));
-      return null;
-    }
-  };
-  const sendInvite = async (gdPlaceId: number) => {
-    const entry = await postInvite(gdPlaceId);
-    if (entry) onPatch((w) => ({ invited: [...w.invited, entry] }));
-  };
-  // Bulk version — sends selected ids one at a time (a short stagger avoids
-  // hammering the WP endpoint) and applies a single combined patch at the end.
-  const inviteSelected = async () => {
-    const ids = Array.from(selectedForInvite);
-    if (ids.length === 0) return;
-    setBulkInviting(true);
-    const newEntries: PlannerInvite[] = [];
-    for (const gdPlaceId of ids) {
-      const entry = await postInvite(gdPlaceId);
-      if (entry) newEntries.push(entry);
-      await new Promise((r) => setTimeout(r, 250));
-    }
-    if (newEntries.length > 0) onPatch((w) => ({ invited: [...w.invited, ...newEntries] }));
-    setBulkInviting(false);
-    setSelectedForInvite(new Set());
-  };
-  // Two-click arm/confirm — mirrors WP's own caution around a button that
-  // sends a real email, not just an in-app action. The button never
-  // disappears after a successful send — only the persisted count (and the
-  // label, "Invite" vs "Invite again") changes — so following up is just
-  // clicking it again.
-  const renderInvite = (gdPlaceId: number | null) => {
-    if (gdPlaceId == null) return null;
-    const state = inviteState[gdPlaceId];
-    const count = week.invited.filter((x) => x.gdPlaceId === gdPlaceId).length;
-    const countLabel = count > 0 ? <span className="text-[11px] font-medium text-emerald-600">Invited {count}×</span> : null;
-    if (state === "sending") return <span className="flex shrink-0 items-center gap-1.5">{countLabel}<span className="text-[12px] text-muted">Sending…</span></span>;
-    if (state) return (
-      <span className="flex shrink-0 items-center gap-1.5">
-        {countLabel}
-        <span className="text-[11px] text-danger">{state}</span>
-        <button onClick={() => setInviteState((m) => { const n = { ...m }; delete n[gdPlaceId]; return n; })} className="text-[12px] font-medium text-muted hover:text-foreground">Dismiss</button>
-      </span>
-    );
-    return (
-      <span className="flex shrink-0 items-center gap-1.5">
-        {countLabel}
-        {inviteArmed === gdPlaceId
-          ? <button onClick={() => sendInvite(gdPlaceId)} className="text-[12px] font-medium text-danger hover:underline">Confirm{count > 0 ? " resend" : ""}?</button>
-          : <button onClick={() => setInviteArmed(gdPlaceId)} className="text-[12px] font-medium text-accent hover:underline">{count > 0 ? "✉️ Invite again" : "✉️ Invite"}</button>}
-      </span>
-    );
-  };
 
   // Story + Events: real, live web search (Gemini google_search grounding),
   // not the deterministic pool above — genuinely new content this territory
@@ -856,145 +686,34 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, onBack, onPatch
             className="w-full resize-y rounded-lg border bg-surface px-3 py-1.5 text-[13px] outline-none placeholder:text-muted focus:border-accent" />
         </div>
 
-        {/* Only meaningful on the current week — the auto-invite cron always
-            acts on THIS week (plannerWeekOf(todayIso())) regardless of which
-            week is open here, so a preview on any other week would be
-            misleading. */}
-        {week.week === PLANNER_CURRENT_WEEK && (
-          dailyInviteCap && dailyInviteCap > 0 ? (
-            <div className="border-b bg-accent-soft/40 px-4 py-3">
-              <div className="mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-accent">Next auto-invite batch — {autoInviteQueue.length} of {dailyInviteCap} slots</div>
-              {autoInviteQueue.length === 0 ? (
-                <div className="text-[13px] text-muted">Nothing due right now — nobody unclaimed is overdue for a touch.</div>
-              ) : (
-                <div className="flex flex-wrap gap-1.5">
-                  {autoInviteQueue.map((c) => (
-                    <span key={c.listing.id} title={c.lastAt ? `Last invited ${c.lastAt.slice(0, 10)}` : "Never invited"} className="rounded-full border border-accent/40 bg-surface px-2 py-0.5 text-[12px] font-medium">
-                      {c.listing.name}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="border-b bg-background/40 px-4 py-2 text-[12px] text-muted">Auto-invite is off for {cityName} — set a daily cap in Settings → Territories to turn it on.</div>
-          )
-        )}
-
-        {/* Always on now — a theme used to be required for this whole
-            invite/feature surface to even appear, which is exactly what
-            made it feel manually curated instead of a queue that runs
-            itself. week.categories is now an optional narrowing filter, not
-            a gate. */}
+        {/* The invite queue itself (sending, skipping, copy-link, the
+            auto-invite preview) lives on the Businesses page now — it's a
+            continuous prospecting concern tied to the funnel/stage
+            grouping there, not a per-week newsletter decision. This is just
+            the graduation point: once a business accepts, it shows up here
+            to be assigned a slot. */}
         <div className="border-b bg-background/40 p-4">
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">{week.categories.length > 0 ? `Businesses in these categories (${categoryMatches.length})` : `Invite queue — every business, most overdue first (${categoryMatches.length})`}</span>
-              <span className="flex items-center gap-3 text-[11px] text-muted">
-                <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> Claimed</span>
-                <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-500" /> Unclaimed</span>
-              </span>
+          <div className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-muted">Accepted — ready to feature ({acceptedUnassigned.length})</div>
+          {acceptedUnassigned.length === 0 ? (
+            <div className="text-[13px] text-muted">Nobody&apos;s accepted an invite yet — send and track invites from the Businesses page.</div>
+          ) : (
+            <div className="space-y-1">
+              {acceptedUnassigned.map((l) => {
+                const client = l.ghlContactId ? clientByContactId.get(l.ghlContactId) : undefined;
+                const pct = client ? playbookCompletion(client.id, tasks ?? []).pct : null;
+                return (
+                  <div key={l.id} className="flex flex-wrap items-center gap-2 rounded-md border bg-background px-2 py-1.5">
+                    <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{l.name}</span>
+                    {pct != null && pct > 0 && (
+                      <span title="Playbook completion — further along jumps the featured queue" className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700">🚀 {pct}%</span>
+                    )}
+                    <button onClick={() => assignListingToSlot(l, "spotlight")} className="shrink-0 rounded-md border border-accent px-2 py-1 text-[11px] font-semibold text-accent hover:bg-accent-soft">→ Spotlight</button>
+                    <button onClick={() => assignListingToSlot(l, "gem")} className="shrink-0 rounded-md border border-accent px-2 py-1 text-[11px] font-semibold text-accent hover:bg-accent-soft">→ Hidden Gem</button>
+                  </div>
+                );
+              })}
             </div>
-            {categoryMatches.length === 0 ? (
-              <div className="text-[13px] text-muted">{week.categories.length > 0 ? "No directory listings match these categories yet." : "No directory listings for this city yet."}</div>
-            ) : (
-              <>
-                {acceptedUnassigned.length > 0 && (
-                  <div className="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2.5">
-                    <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Accepted — ready to feature ({acceptedUnassigned.length})</div>
-                    <div className="space-y-1">
-                      {acceptedUnassigned.map((l) => {
-                        const client = l.ghlContactId ? clientByContactId.get(l.ghlContactId) : undefined;
-                        const pct = client ? playbookCompletion(client.id, tasks ?? []).pct : null;
-                        return (
-                          <div key={l.id} className="flex flex-wrap items-center gap-2 rounded-md border bg-background px-2 py-1.5">
-                            <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{l.name}</span>
-                            {pct != null && pct > 0 && (
-                              <span title="Playbook completion — further along jumps the featured queue" className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700">🚀 {pct}%</span>
-                            )}
-                            <button onClick={() => assignListingToSlot(l, "spotlight")} className="shrink-0 rounded-md border border-accent px-2 py-1 text-[11px] font-semibold text-accent hover:bg-accent-soft">→ Spotlight</button>
-                            <button onClick={() => assignListingToSlot(l, "gem")} className="shrink-0 rounded-md border border-accent px-2 py-1 text-[11px] font-semibold text-accent hover:bg-accent-soft">→ Hidden Gem</button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-                <div className="space-y-3">
-                  {categoryGroups.map(([category, group]) => (
-                    <div key={category}>
-                      <div className="mb-1 text-[11px] font-semibold text-muted">{category} ({group.length})</div>
-                      <div className="space-y-1">
-                        {group.map((l) => {
-                          const gdPlaceId = toGdPlaceId(l.id);
-                          const featured = featureCounts.get(l.name.toLowerCase().trim());
-                          const allTime = gdPlaceId != null ? inviteCounts.get(gdPlaceId) : undefined;
-                          const thisWeek = gdPlaceId != null ? week.invited.filter((x) => x.gdPlaceId === gdPlaceId).length : 0;
-                          const latest = gdPlaceId != null ? latestInviteFor(gdPlaceId) : null;
-                          const status = latest ? (latest.status ?? "invited") : null;
-                          const dismissedFlag = gdPlaceId != null && week.dismissed.includes(gdPlaceId);
-                          const skipped = status === "skipped" || dismissedFlag;
-                          const selected = gdPlaceId != null && selectedForInvite.has(gdPlaceId);
-                          const statsLine = `this week ${thisWeek}× · all-time ${allTime?.invited ?? 0}× · accepted ${allTime?.accepted ?? 0} · skipped ${allTime?.skipped ?? 0} · featured ${featured?.count ?? 0}×`;
-                          if (skipped) {
-                            return (
-                              <div key={l.id} className="flex flex-wrap items-center gap-2 rounded-md border bg-background px-2 py-1.5 opacity-50">
-                                <span className="min-w-0 flex-1 truncate text-[13px] font-medium line-through">{l.name}</span>
-                                <span className="shrink-0 text-[11px] font-medium">Skipped — not used this newsletter</span>
-                                {gdPlaceId != null && (
-                                  <button onClick={() => bringBackBusiness(gdPlaceId)} className="shrink-0 text-[11px] font-semibold text-accent opacity-100 hover:underline">↺ Bring back</button>
-                                )}
-                              </div>
-                            );
-                          }
-                          return (
-                            <div key={l.id} className="flex flex-wrap items-center gap-2 rounded-md border bg-background px-2 py-1.5">
-                              {gdPlaceId != null && (
-                                <button onClick={() => toggleSelectedForInvite(gdPlaceId)} title="Select for bulk invite"
-                                  className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition ${selected ? "border-accent bg-accent text-white" : "border-border"}`}>
-                                  {selected && <I.check />}
-                                </button>
-                              )}
-                              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${l.claimed ? "bg-emerald-500" : "bg-amber-500"}`} title={l.claimed ? "Claimed" : "Unclaimed"} />
-                              <span className="min-w-0 flex-1">
-                                {l.url
-                                  ? <a href={l.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="block truncate text-[13px] font-medium text-accent hover:underline">{l.name}</a>
-                                  : <span className="block truncate text-[13px] font-medium">{l.name}</span>}
-                                <span title={statsLine} className="block truncate text-[11px] text-muted">{statsLine}</span>
-                              </span>
-                              <span title={l.hasActiveEvents ? "Active event listing" : "No active event listing"} className={`shrink-0 ${l.hasActiveEvents ? "text-accent" : "text-muted/30"}`}><I.calendar /></span>
-                              <span title={l.hasRecentPost ? "Recent blog post" : "No recent blog post"} className={`shrink-0 text-[13px] ${l.hasRecentPost ? "" : "opacity-25 grayscale"}`}>📝</span>
-                              {status === "accepted" && <span className="shrink-0 text-[11px] font-semibold text-emerald-600">Accepted</span>}
-                              <span className="flex shrink-0 items-center gap-1">
-                                <button onClick={() => assignListingToSlot(l, "spotlight")} className="text-[11px] font-medium text-accent hover:underline">→ Spotlight</button>
-                                <button onClick={() => assignListingToSlot(l, "gem")} className="text-[11px] font-medium text-accent hover:underline">→ Hidden Gem</button>
-                              </span>
-                              {status !== "accepted" && gdPlaceId != null && (
-                                <button onClick={() => skipBusiness(gdPlaceId)} className="shrink-0 text-[11px] font-medium text-muted hover:text-foreground">Skip</button>
-                              )}
-                              {gdPlaceId != null && inviteLinks[String(gdPlaceId)] && (
-                                <button onClick={() => copyInviteLink(gdPlaceId)} title={inviteLinks[String(gdPlaceId)]}
-                                  className="shrink-0 text-[11px] font-medium text-muted hover:text-foreground">
-                                  {copiedLinkId === gdPlaceId ? "Copied ✓" : "🔗 Copy link"}
-                                </button>
-                              )}
-                              {renderInvite(gdPlaceId)}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                {selectedForInvite.size > 0 && (
-                  <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-accent/40 bg-accent-soft/50 px-2.5 py-1.5">
-                    <span className="text-[12px] font-medium">{selectedForInvite.size} selected</span>
-                    <button onClick={inviteSelected} disabled={bulkInviting}
-                      className="rounded-md border border-accent px-2 py-1 text-[12px] font-semibold text-accent hover:bg-accent-soft disabled:opacity-40">{bulkInviting ? "Inviting…" : "✉️ Invite selected"}</button>
-                    <button onClick={() => setSelectedForInvite(new Set())} className="text-[12px] font-medium text-muted hover:text-foreground">Clear</button>
-                  </div>
-                )}
-              </>
-            )}
+          )}
         </div>
 
         {brief && (
@@ -1035,7 +754,13 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, onBack, onPatch
                       {/* Picking them for the issue and letting them know are two
                           separate things — a rep may want to invite/notify a
                           business even after already slotting them in. */}
-                      {PLANNER_BUSINESS_SLOTS.includes(slot) && <div className="mt-1.5">{renderInvite(biz.gdPlaceId)}</div>}
+                      {PLANNER_BUSINESS_SLOTS.includes(slot) && biz.gdPlaceId != null && (
+                        <div className="mt-1.5">
+                          <SlotInviteButton territoryId={week.territoryId} week={week.week} gdPlaceId={biz.gdPlaceId}
+                            count={week.invited.filter((x) => x.gdPlaceId === biz.gdPlaceId).length}
+                            onSent={() => onPatch((w) => ({ invited: [...w.invited, { gdPlaceId: biz.gdPlaceId!, at: new Date().toISOString(), status: "invited" as const }] }))} />
+                        </div>
+                      )}
                     </div>
                     <button onClick={() => setSlot(slot, null)} title="Clear" className="shrink-0 rounded-md p-1 text-muted hover:bg-surface hover:text-danger"><I.close /></button>
                   </div>
