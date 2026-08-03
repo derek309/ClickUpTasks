@@ -21,7 +21,7 @@ import {
 } from "@/lib/data";
 import { generatePlannerBrief } from "@/lib/plannerBrief";
 import { pushPlannerWeek } from "@/lib/plannerPush";
-import { featureHistory, inviteHistory } from "@/lib/plannerPools";
+import { featureHistory, inviteHistory, isDue } from "@/lib/plannerPools";
 import { categoriesMatch, matchesAnyCategory } from "@/lib/categoryMatch";
 import { I, newId } from "./ui";
 import { type DirectoryListing } from "./TerritoryDirectory";
@@ -471,15 +471,34 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     URL.revokeObjectURL(url);
   };
 
-  // Every directory listing matching the week's theme categories, claimed or
-  // not — the actual "who to invite" surface. Filling Spotlight/Hidden Gem
-  // happens by inviting from this list and assigning accepted responses,
-  // not from a separate AI-suggested candidate pool.
-  const categoryMatches = useMemo(
-    () => (week.categories.length === 0 ? [] : listings.filter((l) => matchesAnyCategory(l.category ?? "", week.categories))
-      .sort((a, b) => (a.claimed === b.claimed ? a.name.localeCompare(b.name) : a.claimed ? 1 : -1))),
-    [listings, week.categories]
-  );
+  // Same rotation history the old Spotlight/Hidden Gem pool used, keyed by
+  // name/gdPlaceId — moved up above categoryMatches (was declared further
+  // down) since the auto-cycling queue's ranking needs it.
+  const featureCounts = useMemo(() => featureHistory(weeks), [weeks]);
+  const inviteCounts = useMemo(() => inviteHistory(weeks), [weeks]);
+  // The invitation queue "runs itself" (Business Journal, Aug 3 2026) — every
+  // directory listing, no theme/categories required (categories are now an
+  // optional narrowing filter, not a gate: this used to return [] with no
+  // theme set, which meant the entire invite surface disappeared the moment
+  // themes went away). Ranked by rotation due-ness first (never-invited or
+  // longest since the last one — same ROTATION_WINDOW_DAYS the Businesses
+  // page's Priority sort uses, via inviteCounts above), not hand-picked or
+  // alphabetical, so the ambassador always works top-down from whoever
+  // actually needs a touch instead of curating a list themselves.
+  const today = todayIso();
+  const categoryMatches = useMemo(() => {
+    const base = week.categories.length === 0 ? listings : listings.filter((l) => matchesAnyCategory(l.category ?? "", week.categories));
+    const lastInviteAt = (l: DirectoryListing) => { const id = toGdPlaceId(l.id); return id != null ? (inviteCounts.get(id)?.lastAt ?? null) : null; };
+    return [...base].sort((a, b) => {
+      const aDue = isDue(lastInviteAt(a), today);
+      const bDue = isDue(lastInviteAt(b), today);
+      if (aDue !== bDue) return aDue ? -1 : 1;
+      const aLast = lastInviteAt(a) ?? "";
+      const bLast = lastInviteAt(b) ?? "";
+      if (aLast !== bLast) return aLast.localeCompare(bLast); // never-invited ("") first, then oldest
+      return a.name.localeCompare(b.name);
+    });
+  }, [listings, week.categories, inviteCounts, today]);
   // Per-pill match count — how many listings THIS specific theme category
   // matches on its own (unlike categoryMatches above, which is the union
   // across every selected category). Lets a zero-match pill (wrong
@@ -534,10 +553,6 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
     }
     return Array.from(map.entries()).sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
   }, [categoryMatches]);
-  // Same rotation history the Spotlight/Hidden Gem pool uses, keyed by name
-  // — reused here to show "how many times featured" on the full list too.
-  const featureCounts = useMemo(() => featureHistory(weeks), [weeks]);
-  const inviteCounts = useMemo(() => inviteHistory(weeks), [weeks]);
   // Selection for bulk-invite on the category business list below — cleared
   // implicitly on every week switch since WeekWorkspace fully unmounts then
   // (PlannerPanel only ever renders it when a week is open, never keyed
@@ -1018,17 +1033,21 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
             className="w-full resize-y rounded-lg border bg-surface px-3 py-1.5 text-[13px] outline-none placeholder:text-muted focus:border-accent" />
         </div>
 
-        {week.categories.length > 0 && (
-          <div className="border-b bg-background/40 p-4">
+        {/* Always on now — a theme used to be required for this whole
+            invite/feature surface to even appear, which is exactly what
+            made it feel manually curated instead of a queue that runs
+            itself. week.categories is now an optional narrowing filter, not
+            a gate. */}
+        <div className="border-b bg-background/40 p-4">
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Businesses in these categories ({categoryMatches.length})</span>
+              <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">{week.categories.length > 0 ? `Businesses in these categories (${categoryMatches.length})` : `Invite queue — every business, most overdue first (${categoryMatches.length})`}</span>
               <span className="flex items-center gap-3 text-[11px] text-muted">
                 <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> Claimed</span>
                 <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-500" /> Unclaimed</span>
               </span>
             </div>
             {categoryMatches.length === 0 ? (
-              <div className="text-[13px] text-muted">No directory listings match these categories yet.</div>
+              <div className="text-[13px] text-muted">{week.categories.length > 0 ? "No directory listings match these categories yet." : "No directory listings for this city yet."}</div>
             ) : (
               <>
                 {acceptedUnassigned.length > 0 && (
@@ -1121,8 +1140,7 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, themeCalendar, 
                 )}
               </>
             )}
-          </div>
-        )}
+        </div>
 
         {brief && (
           <div className="border-b bg-background/40 px-4 py-3">
