@@ -9,7 +9,7 @@ import { tokenForLocation } from "@/lib/ghlTokens";
 // extension's "+ Add as contact" button, when match-client found nothing to
 // auto-select) — the one write path in the app that creates a GHL contact
 // rather than only ever syncing one in. Also promotes it straight to a
-// tracked Client (status: "lead"), mirroring addClientContact in Cockpit.tsx,
+// tracked Client (status: "claimed"), mirroring addClientContact in Cockpit.tsx,
 // so it's immediately selectable in the extension's client picker for task
 // creation in the same session.
 //
@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
   if (contactErr) return NextResponse.json({ error: `Contact created in GoHighLevel but failed to save locally: ${contactErr.message}` }, { status: 500 });
 
   const { error: clientErr } = await supabaseAdmin.from("clients").upsert({
-    id: clientId, name: cleanName, color: "#a855f7", ghl_location_id: "", status: "lead", type: "client", assigned_to: [],
+    id: clientId, name: cleanName, color: "#a855f7", ghl_location_id: "", status: "claimed", type: "client", assigned_to: [],
   });
   if (clientErr) return NextResponse.json({ error: `Contact saved but couldn't be promoted to a client: ${clientErr.message}` }, { status: 500 });
 

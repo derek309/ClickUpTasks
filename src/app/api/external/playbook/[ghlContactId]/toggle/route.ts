@@ -45,7 +45,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ ghl
     const { data: existing } = await supabaseAdmin.from("clients").select("id").eq("id", clientId).maybeSingle();
     if (!existing) {
       const { error } = await supabaseAdmin.from("clients").insert({
-        id: clientId, name: businessName, color: "#a855f7", ghl_location_id: "", status: "lead", type: "prospect", assigned_to: [],
+        id: clientId, name: businessName, color: "#a855f7", ghl_location_id: "", status: "claimed", type: "prospect", assigned_to: [],
       });
       // A concurrent toggle for the same never-before-seen contact can lose
       // this insert race — fall back to whatever's resolvable now rather

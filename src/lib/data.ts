@@ -124,10 +124,15 @@ export interface User {
 // interview doubles as verification, then an in-person follow-up finalizes
 // the profile before onboarding starts — one stage covers both, the two
 // steps live as checklist detail underneath it, not as separate stages.
-export type ClientStatus = "lead" | "prospect" | "interview" | "onboarding" | "active_client" | "nurture" | "cancelled" | "past_client";
+export type ClientStatus = "claimed" | "interview" | "onboarding" | "active_client" | "nurture" | "cancelled" | "past_client";
 export const CLIENT_STATUS_META: Record<ClientStatus, { label: string; dot: string }> = {
-  lead: { label: "Lead", dot: "#94a3b8" },
-  prospect: { label: "Prospect", dot: "#3b82f6" },
+  // Lead and Prospect used to be separate stages here, but nothing in the
+  // app ever treated them differently and they don't correspond to any real
+  // step in moving a business through the pipeline — merged into one
+  // (Derek, Aug 4). Matches the Businesses page's own "Claimed" funnel-stage
+  // key exactly, so computeBusinessStage no longer needs a lead/prospect
+  // special case (see TerritoryDirectory.tsx).
+  claimed: { label: "Claimed", dot: "#94a3b8" },
   interview: { label: "Interview", dot: "#06b6d4" },
   onboarding: { label: "Onboarding", dot: "#a855f7" },
   active_client: { label: "Active Client", dot: "#22c55e" },
@@ -139,7 +144,7 @@ export const CLIENT_STATUS_META: Record<ClientStatus, { label: string; dot: stri
   cancelled: { label: "Cancelled", dot: "#ef4444" },
   past_client: { label: "Past Client", dot: "#64748b" },
 };
-export const CLIENT_STATUS_ORDER: ClientStatus[] = ["lead", "prospect", "interview", "onboarding", "active_client", "nurture", "cancelled", "past_client"];
+export const CLIENT_STATUS_ORDER: ClientStatus[] = ["claimed", "interview", "onboarding", "active_client", "nurture", "cancelled", "past_client"];
 /** How many days between automatic check-ins for a "nurture" client — surfaces
  * them in the Review tier once this long has passed since their last review.
  * Monthly for now (confirmed with Derek/Justin), tunable later. */
@@ -152,9 +157,13 @@ export const NURTURE_CHECK_IN_DAYS = 30;
 export const STEP_STALL_DAYS = 14;
 /** `clients.status` is plain text with no DB-level CHECK constraint, so a
  * stored value can in principle predate a funnel change (as happened when
- * this went from active/paused/archived to the 6-stage funnel below) — fall
- * back instead of letting an unrecognized value throw on `.label`/`.dot`. */
+ * this went from active/paused/archived to the 6-stage funnel below, and
+ * again when lead/prospect merged into claimed) — fall back instead of
+ * letting an unrecognized value throw on `.label`/`.dot`. Old rows still
+ * literally storing "lead"/"prospect" map straight to Claimed rather than
+ * falling through to the generic Unknown fallback. */
 export function clientStatusMeta(status: string): { label: string; dot: string } {
+  if (status === "lead" || status === "prospect") return CLIENT_STATUS_META.claimed;
   return CLIENT_STATUS_META[status as ClientStatus] ?? { label: status || "Unknown", dot: "#94a3b8" };
 }
 

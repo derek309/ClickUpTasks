@@ -24,7 +24,7 @@ export async function resolveTrackedClientId(contactId: string, fallback: string
 // contact's activity filed under the sub-account — a real inbound
 // message/call/appointment is exactly the kind of signal that should surface
 // them as an actual client, not require someone to notice and add them by
-// hand. Same "lead"/"prospect" convention Cockpit.tsx's syncTerritoryClients
+// hand. Same "claimed"/"prospect" convention Cockpit.tsx's syncTerritoryClients
 // and the newsletter invite-response webhook already use for this. Also
 // repoints the contact's own client_id so future lookups resolve directly
 // without re-triggering this promotion every time.
@@ -36,7 +36,7 @@ export async function resolveOrPromoteTrackedClient(contact: { id: string; name:
   const { data: existing } = await supabaseAdmin.from("clients").select("id").eq("id", trackedId).maybeSingle();
   if (!existing) {
     const { error } = await supabaseAdmin.from("clients").insert({
-      id: trackedId, name: contact.name, color: "#a855f7", ghl_location_id: "", status: "lead", type: "prospect", assigned_to: [],
+      id: trackedId, name: contact.name, color: "#a855f7", ghl_location_id: "", status: "claimed", type: "prospect", assigned_to: [],
     });
     if (error) {
       // Insert failed (race with a concurrent promotion, or a real error) —

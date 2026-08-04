@@ -116,7 +116,7 @@ export async function POST(req: NextRequest) {
       // businesses (Cockpit.tsx).
       const { data: existingClient } = await supabaseAdmin.from("clients").select("id").eq("id", clientId).maybeSingle();
       if (!existingClient) {
-        await supabaseAdmin.from("clients").insert({ id: clientId, name: businessName, color: "#a855f7", ghl_location_id: "", status: "lead", type: "prospect", assigned_to: [] });
+        await supabaseAdmin.from("clients").insert({ id: clientId, name: businessName, color: "#a855f7", ghl_location_id: "", status: "claimed", type: "prospect", assigned_to: [] });
       }
     }
   }

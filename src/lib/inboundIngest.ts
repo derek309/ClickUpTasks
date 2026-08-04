@@ -41,7 +41,7 @@ async function resolveOrPromoteTrackedClient(contact: Contact): Promise<string> 
   const { data: existing } = await supabaseAdmin.from("clients").select("id").eq("id", trackedId).maybeSingle();
   if (!existing) {
     const { error } = await supabaseAdmin.from("clients").insert({
-      id: trackedId, name: contact.name, color: "#a855f7", ghl_location_id: "", status: "lead", type: "prospect", assigned_to: [],
+      id: trackedId, name: contact.name, color: "#a855f7", ghl_location_id: "", status: "claimed", type: "prospect", assigned_to: [],
     });
     if (error) {
       console.error("[inboundIngest] resolveOrPromoteTrackedClient: client insert failed", error);

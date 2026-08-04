@@ -3033,7 +3033,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       return;
     }
     const sub = subAccounts.find((s) => s.id === contact.clientId);
-    const c: Client = { id, name: contact.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "lead", type, assignedTo: [] };
+    const c: Client = { id, name: contact.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "claimed", type, assignedTo: [] };
     setClients((cs) => [...cs, c]);
     markOwnClientWrite(c.id);
     upsertClient(c);
@@ -3110,7 +3110,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       // buried the real clients. A prospect keeps its full record (tasks,
       // projects, journal) and is worked from the territory; setClientStatus
       // promotes it to 'client' the moment it reaches onboarding.
-      return { id: "cl_" + c.id, name: c.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "lead", type: "prospect", assignedTo: [] };
+      return { id: "cl_" + c.id, name: c.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "claimed", type: "prospect", assignedTo: [] };
     });
     setClients((cs) => [...cs, ...newClients]);
     newClients.forEach((c) => markOwnClientWrite(c.id));
@@ -3145,7 +3145,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       // Same reasoning as syncTerritoryClients: featuring a business is still
       // prospecting (per the SOP the feature invite IS the opener), so it
       // starts as a prospect rather than entering the client roster.
-      const nc: Client = { id: "cl_" + c.id, name: c.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "lead", type: "prospect", assignedTo: [] };
+      const nc: Client = { id: "cl_" + c.id, name: c.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "claimed", type: "prospect", assignedTo: [] };
       setClients((cs) => (cs.some((x) => x.id === nc.id) ? cs : [...cs, nc]));
       markOwnClientWrite(nc.id);
       bulkUpsertClients([nc]);

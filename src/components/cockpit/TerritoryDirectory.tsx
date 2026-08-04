@@ -77,7 +77,7 @@ export const STAGE_ORDER: BusinessStage[] = ["unclaimed", "invited", "claimed", 
 export const STAGE_META: Record<BusinessStage, { label: string; color: string; hint: string }> = {
   unclaimed: { label: "Unclaimed", color: "#f59e0b", hint: "listing nobody has claimed yet — a prospect to invite or call" },
   invited: { label: "Invited", color: "#0ea5e9", hint: "invited to claim their listing, hasn't yet" },
-  claimed: { label: "Claimed", color: "#10b981", hint: "claimed their listing, not yet moved past Lead/Prospect" },
+  claimed: { label: CLIENT_STATUS_META.claimed.label, color: "#10b981", hint: "claimed their listing — work the Playbook with them" },
   interview: { label: CLIENT_STATUS_META.interview.label, color: CLIENT_STATUS_META.interview.dot, hint: "phone/Zoom interview (doubles as verification), then the in-person visit to finalize their profile" },
   onboarding: { label: CLIENT_STATUS_META.onboarding.label, color: CLIENT_STATUS_META.onboarding.dot, hint: "actively being onboarded" },
   active_client: { label: CLIENT_STATUS_META.active_client.label, color: CLIENT_STATUS_META.active_client.dot, hint: "up and running — the goal state" },
@@ -106,7 +106,7 @@ const OPENED_META = { label: "Opened, hasn't clicked", color: "#0891b2", hint: "
 
 export function computeBusinessStage(listing: DirectoryListing, client: Client | null, invite?: PlannerInvite): BusinessStage {
   if (!listing.claimed) return invite && invite.status !== "skipped" ? "invited" : "unclaimed";
-  if (!client || client.status === "lead" || client.status === "prospect") return "claimed";
+  if (!client) return "claimed";
   return (client.status as BusinessStage);
 }
 
