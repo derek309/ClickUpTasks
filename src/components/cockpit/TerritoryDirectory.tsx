@@ -21,7 +21,7 @@ import { authedFetch } from "@/lib/supabase";
 import { fetchPlannerWeeks, upsertPlannerWeek } from "@/lib/db";
 import { latestInviteStatus, inviteHistory, featureHistory, isDue, allInvitesByGdPlaceId } from "@/lib/plannerPools";
 import {
-  formatDue, playbookCompletion, salesCompletion, plannerWeekOf, todayIso as todayIsoDate,
+  formatDue, playbookCompletion, plannerWeekOf, todayIso as todayIsoDate,
   CLIENT_STATUS_META, CLIENT_STATUS_ORDER,
   type Contact, type Client, type ClientStatus, type Task, type PlannerInvite, type PlannerWeek,
 } from "@/lib/data";
@@ -148,7 +148,7 @@ type PlannerActivityCacheEntry = {
 };
 const inviteCache = new Map<string, PlannerActivityCacheEntry>();
 
-export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, salesTasksByClient, onOpenSales, otherListsByClient, onOpenProject, onSetClientStatus, canAdmin, ghlContactUrlFor, territoryId, dailyInviteCap }: {
+export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, otherListsByClient, onOpenProject, onSetClientStatus, canAdmin, ghlContactUrlFor, territoryId, dailyInviteCap }: {
   city: string;
   state: string;
   contacts: Contact[];   // already scoped to this city/state by the caller
@@ -181,12 +181,6 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // list on the row instead of one aggregated count.
   otherListsByClient?: Map<string, { id: string; name: string; done: number; total: number }[]>;
   onOpenProject?: (clientId: string, projectId: string) => void;
-  // Sales checklist tasks per business, and its navigate-to-it handler — same
-  // shape as playbookTasksByClient/onOpenPlaybook. ListingRow shows this chip
-  // instead of Playbook until the business is a real client on the Growth
-  // Plan (stage past "claimed" — see the chip choice in ListingRow below).
-  salesTasksByClient?: Map<string, Task[]>;
-  onOpenSales?: (clientId: string) => void;
   // Editable Stage dropdown for a claimed business with a client record —
   // writes straight through the client header's own status setter. Optional
   // so the admin multi-city overview degrades to a read-only Stage label.
@@ -462,18 +456,16 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   };
   // The Priority sort's single signal, whichever actually applies to this
   // row's stage: Unclaimed/Invited are Planner's job (due for an outreach
-  // touch, from lastTouchedAt above); Claimed+ are working a checklist —
-  // Sales pre-onboarding, Playbook once onboarding+ — so a business stuck on
-  // the same step for STEP_STALL_DAYS+ (salesLastProgressAt/
-  // playbookLastProgressAt, bumped by patchTask) is just as much "due" as an
-  // unclaimed prospect Planner hasn't touched. Same isDue/todayIso either way.
+  // touch, from lastTouchedAt above); Claimed+ are working the Playbook
+  // (starts right at claim, not Onboarding — see computeBusinessStage/
+  // ListingRow's onGrowthPlan) — so a business stuck on the same step for
+  // STEP_STALL_DAYS+ (playbookLastProgressAt, bumped by patchTask) is just
+  // as much "due" as an unclaimed prospect Planner hasn't touched. Same
+  // isDue/todayIso either way.
   const priorityLastAt = (r: { listing: DirectoryListing; client: Client | null }, stage: BusinessStage): string | null => {
     if (stage === "unclaimed" || stage === "invited") return lastTouchedAt(r.listing);
     if (!r.client) return null;
-    // Still working the Sales checklist through the interview stages — the
-    // Playbook (Growth Plan) doesn't start until onboarding.
-    const onSales = stage === "claimed" || stage === "interview";
-    return (onSales ? r.client.salesLastProgressAt : r.client.playbookLastProgressAt) ?? null;
+    return r.client.playbookLastProgressAt ?? null;
   };
   const todayIso = new Date().toISOString();
   // Exactly what runPlannerAutoInvite (plannerAutoInviteServer.ts) would pick
@@ -763,7 +755,6 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                       canFeature={!!(r.client || r.contact)}
                       onFeature={onFeature && ((rr) => onFeature({ clientId: rr.client?.id ?? null, contact: rr.contact, name: rr.listing.name, city, state }))}
                       playbookTasks={(r.client && playbookTasksByClient?.get(r.client.id)) || []} onOpenPlaybook={onOpenPlaybook}
-                      salesTasks={(r.client && salesTasksByClient?.get(r.client.id)) || []} onOpenSales={onOpenSales}
                       otherLists={(r.client && otherListsByClient?.get(r.client.id)) || []} onOpenProject={onOpenProject}
                       inviteActions={inviteActions} />
                   );
@@ -789,7 +780,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, inviteHistoryList, onSetClientStatus, canAdmin, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, salesTasks, onOpenSales, otherLists, onOpenProject, inviteActions }: {
+function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, inviteHistoryList, onSetClientStatus, canAdmin, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, otherLists, onOpenProject, inviteActions }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
   onOpenClient: (id: string) => void;
@@ -824,11 +815,7 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
   // Owner Growth Plan tasks — empty when it has no client row yet.
   playbookTasks: Task[];
   onOpenPlaybook?: (clientId: string) => void;
-  // Sales checklist tasks — same shape, shown instead of Playbook until the
-  // business is a real client on the Growth Plan (see `stage` below).
-  salesTasks: Task[];
-  onOpenSales?: (clientId: string) => void;
-  // This business's other (non-Sales/Playbook) lists, pre-computed with
+  // This business's other (non-Playbook) lists, pre-computed with
   // their own done/total counts — one pill per list, click-through to that
   // list rather than an inline expand. Empty when it has none (or no client yet).
   otherLists: { id: string; name: string; done: number; total: number }[];
@@ -853,14 +840,11 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
   const nameMouseDown = useRef<{ x: number; y: number } | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
 
-  // Sales (getting them in) runs up through claiming the listing — the
-  // moment they've claimed it, the whole point of this page is working
-  // through the Playbook with them (Derek, Aug 4), not waiting for
-  // Onboarding to formally start. So the handoff is exactly at "claimed,"
-  // not two stages later.
+  // The whole point of this page once a business claims is working through
+  // the Playbook with them (Derek, Aug 4) — the Sales checklist that used to
+  // run pre-claim is retired, so Playbook shows for any claimed+ business.
   const onGrowthPlan = stage !== "unclaimed" && stage !== "invited";
   const playbook = client && onGrowthPlan ? playbookCompletion(client.id, playbookTasks) : null;
-  const sales = client && !onGrowthPlan ? salesCompletion(client.id, salesTasks) : null;
   const ghlUrl = client ? ghlContactUrlFor?.(client.id) : null;
 
   return (
@@ -977,15 +961,8 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
               {playbook.next && <span className="ml-1 font-normal text-accent">· {playbook.next.label}</span>}
             </button>
           )}
-          {onOpenSales && sales && (
-            <button onClick={() => onOpenSales(client.id)} title={sales.next ? `Sales — next: ${sales.next.label}` : "Sales — all steps complete"}
-              className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">
-              Sales {sales.doneCount}/{sales.total}
-              {sales.next && <span className="ml-1 font-normal text-accent">· {sales.next.label}</span>}
-            </button>
-          )}
-          {/* Every other list this business has (excluding Playbook/Sales,
-              which get their own pill above) — one pill per list, same X/Y
+          {/* Every other list this business has (excluding Playbook, which
+              gets its own pill above) — one pill per list, same X/Y
               format, click jumps straight to that list. Hidden entirely when
               a list has no tasks yet — nothing to jump to. */}
           {otherLists.map((l) => (

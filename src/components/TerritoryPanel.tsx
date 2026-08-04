@@ -10,7 +10,7 @@ import { users, clientStatusMeta, normalizeState, playbookCompletion, type Me, t
 import { I, Avatar } from "./cockpit/ui";
 import TerritoryDirectory from "./cockpit/TerritoryDirectory";
 
-export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onDeleteTerritory, onSetDailyInviteCap, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, salesTasksByClient, onOpenSales, otherListsByClient, onOpenProject, onSetClientStatus, ghlContactUrlFor, focusId }: {
+export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onDeleteTerritory, onSetDailyInviteCap, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, otherListsByClient, onOpenProject, onSetClientStatus, ghlContactUrlFor, focusId }: {
   me: Me; canAdmin: boolean;
   territories: Territory[]; contacts: Contact[]; clients: Client[];
   onAddTerritory: (t: { name: string; city: string; state: string; assignedTo: string[] }) => void;
@@ -37,12 +37,7 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
   // same optional-so-the-admin-overview-degrades-gracefully shape as tasksByClient.
   playbookTasksByClient?: Map<string, Task[]>;
   onOpenPlaybook?: (clientId: string) => void;
-  // Sales checklist tasks per business, and its navigate-to-it handler — same
-  // shape as playbookTasksByClient/onOpenPlaybook, shown instead of the
-  // Playbook chip until a business is a real client on the Growth Plan.
-  salesTasksByClient?: Map<string, Task[]>;
-  onOpenSales?: (clientId: string) => void;
-  // A business's other (non-Sales/Playbook) lists, each pre-computed with
+  // A business's other (non-Playbook) lists, each pre-computed with
   // its own done/total count, and the navigate-to-it handler — one pill per
   // list on the Businesses page instead of one aggregated count.
   otherListsByClient?: Map<string, { id: string; name: string; done: number; total: number }[]>;
@@ -211,7 +206,6 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                     featuredClientIds={featuredClientIds} onFeature={onFeature}
                     tasksByClient={tasksByClient}
                     playbookTasksByClient={playbookTasksByClient} onOpenPlaybook={onOpenPlaybook}
-                    salesTasksByClient={salesTasksByClient} onOpenSales={onOpenSales}
                     otherListsByClient={otherListsByClient} onOpenProject={onOpenProject}
                     onSetClientStatus={onSetClientStatus} canAdmin={canAdmin} ghlContactUrlFor={ghlContactUrlFor} territoryId={focusId} dailyInviteCap={t.dailyInviteCap} />
                 )}

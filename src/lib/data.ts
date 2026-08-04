@@ -225,12 +225,6 @@ export interface Client {
    * lets the daily stall-check cron (playbookCheckinsServer.ts) tell "quiet
    * because it's done" apart from "quiet because it's stuck." */
   playbookLastProgressAt?: string | null;
-  /** Same idea as playbookLastProgressAt, for the Sales checklist — bumped
-   * by patchTask whenever a Sales step's status changes. Feeds the
-   * Businesses page's Priority sort (see STEP_STALL_DAYS below) for
-   * claimed-but-not-yet-onboarding businesses, which are still working Sales
-   * rather than Playbook. */
-  salesLastProgressAt?: string | null;
   /** Unguessable token backing this client's public "what we're waiting on
    * you for" page (/waiting/[token], see supabase/client-share-token.sql) —
    * lazily generated the first time "Copy client link" is clicked, then
@@ -1025,39 +1019,12 @@ export const PLAYBOOK_ALWAYS_RUNNING: string[] = [
 export const PLAYBOOK_FINISH_LINE =
   "When the plan is complete, you're the go-to business in town: found everywhere, chosen for your reputation, marketing that runs itself, and a customer list that's yours forever. Your ClickUpLocal Score is as high as your effort makes it — and it keeps climbing. What's next: you've mastered the foundation. Guide 2 unlocks the advanced tools for businesses like yours — online booking, an AI assistant, memberships & loyalty, and more. We'll invite you when you're ready.";
 
-// The Sales checklist — everything that happens BEFORE a business is a real
-// client working the Owner Growth Plan above: getting them into the
-// directory, inviting them, claiming, their first offer, verification,
-// subaccount setup, the in-person pitch, and closing. Internal/ambassador-
-// facing (unlike Playbook, there's no owner-facing guide content), flat (no
-// phases), and undated by design — this tracks WHETHER each step happened,
-// not WHEN it's due. Tracked the same mechanical way as Playbook (a fixed
-// catalog + locked Task rows via Task.salesStepKey, reconciled by
-// reconcileSalesTasks() in Cockpit.tsx), but starts the moment a business
-// has a GHL contact (client record) rather than waiting for onboarding.
-export type SalesStepDef = { key: string; label: string };
-export const SALES_STEPS: SalesStepDef[] = [
-  { key: "add_to_directory", label: "Add to the directory" },
-  { key: "invite_to_newsletter", label: "Invite to the newsletter" },
-  { key: "help_claim_listing", label: "Help them claim their listing" },
-  { key: "help_create_offer", label: "Help them create an offer" },
-  { key: "verification_appointment", label: "Verification appointment" },
-  { key: "complete_listing_setup", label: "Set up their business listing" },
-  { key: "setup_subaccount", label: "Set up their GoHighLevel subaccount" },
-  { key: "in_person_presentation", label: "In-person presentation" },
-  { key: "close_deal", label: "Close the deal" },
-];
-export const SALES_STEP_BY_KEY: Map<string, SalesStepDef> = new Map(SALES_STEPS.map((s) => [s.key, s]));
-/** Deterministic id for a client's one Sales project — same "found by id,
- * never by name" reasoning as playbookProjectId. */
+/** Deterministic id for a client's (retired) Sales project — kept only so
+ * FolderRail.tsx can still recognize and lock a pre-existing Sales list from
+ * before the checklist was retired (Derek, Aug 4). Nothing creates a new one
+ * anymore; this exists purely to not orphan historical ones into the
+ * generic rename/delete/move-to-folder list. */
 export const salesProjectId = (clientId: string) => "p_sales_" + clientId;
-export function salesCompletion(clientId: string, tasks: Task[]) {
-  const stepTasks = tasks.filter((t) => t.clientId === clientId && t.salesStepKey);
-  const done = new Set(stepTasks.filter((t) => t.status === "done").map((t) => t.salesStepKey as string));
-  const total = SALES_STEPS.length;
-  const next = SALES_STEPS.find((s) => !done.has(s.key)) ?? null;
-  return { done, doneCount: done.size, total, pct: Math.round((done.size / total) * 100), next };
-}
 
 /** Reads completion straight off real Task rows (Task.playbookStepKey) — no
  * separate progress table. `total` is always the *current* catalog length,
@@ -1372,15 +1339,11 @@ export interface Task {
    * customer-facing Playbook (on the business's public listing) will match
    * against — never match on the editable title. */
   playbookStepKey?: string | null;
-  /** Set when this task IS one of the fixed Sales checklist steps (matches a
-   * SALES_STEPS key, looked up via SALES_STEP_BY_KEY) — reconcileSalesTasks()
-   * keeps its title synced to the catalog and it can't be deleted or
-   * retitled by hand (see TaskDrawer.tsx), same locking as playbookStepKey.
-   * Sales and Playbook are deliberately separate keys/projects: Sales covers
-   * everything before a business is a real client on the Owner Growth Plan
-   * (listing, invite, claim, offer, verification, subaccount, presentation,
-   * close), so it starts the moment a business has a GHL contact, well
-   * before Playbook's own trigger. */
+  /** Set on a task from the (retired, Aug 4) Sales checklist — kept only so
+   * TaskDrawer.tsx still locks a pre-existing Sales step from being deleted
+   * or retitled by hand, same as playbookStepKey. Nothing creates a new one
+   * anymore; the Businesses page + Playbook (starting right at claim) cover
+   * everything Sales used to track. */
   salesStepKey?: string | null;
   /** Who (or what) created this task — a roster member id, "u_claude" (fully
    * automated system creation, matching the sentinel already used for

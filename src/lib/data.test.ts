@@ -16,8 +16,6 @@ import {
   normalizeState,
   playbookCompletionByCategory,
   PLAYBOOK_ALL_STEPS,
-  salesCompletion,
-  SALES_STEPS,
   applyWaitingStatusSync,
   TODAY,
   type User,
@@ -302,33 +300,6 @@ describe("playbookCompletionByCategory", () => {
     ];
     const cats = playbookCompletionByCategory("cl_a", tasks);
     expect(cats.reputation.done).toBe(0);
-  });
-});
-
-describe("salesCompletion", () => {
-  it("starts at 0 of the full catalog with no tasks", () => {
-    const c = salesCompletion("cl_a", []);
-    expect(c.total).toBe(SALES_STEPS.length);
-    expect(c.doneCount).toBe(0);
-    expect(c.next).toEqual(SALES_STEPS[0]);
-  });
-
-  it("counts only done steps for this client, and finds the first not-done step as next", () => {
-    const tasks = [
-      mkTask({ clientId: "cl_a", status: "done", salesStepKey: SALES_STEPS[0].key }),
-      mkTask({ clientId: "cl_a", status: "todo", salesStepKey: SALES_STEPS[1].key }),
-      mkTask({ clientId: "cl_other", status: "done", salesStepKey: SALES_STEPS[2].key }),
-    ];
-    const c = salesCompletion("cl_a", tasks);
-    expect(c.doneCount).toBe(1);
-    expect(c.done.has(SALES_STEPS[0].key)).toBe(true);
-    expect(c.next).toEqual(SALES_STEPS[1]);
-  });
-
-  it("ignores non-sales tasks", () => {
-    const tasks = [mkTask({ clientId: "cl_a", status: "done", salesStepKey: null })];
-    const c = salesCompletion("cl_a", tasks);
-    expect(c.doneCount).toBe(0);
   });
 });
 

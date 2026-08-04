@@ -69,8 +69,6 @@ import {
   PLAYBOOK_ALWAYS_RUNNING,
   PLAYBOOK_FINISH_LINE,
   playbookProjectId,
-  SALES_STEPS,
-  salesProjectId,
   type VaultFolder,
   type Folder,
   type Stage,
@@ -85,7 +83,7 @@ import {
   normalizeState,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, markMessagesReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact, rowToScheduledMessage, touchPlaybookProgress, touchSalesProgress, markGranolaUnmatchedHandledDb, linkGranolaSyncedNoteDb, fetchAppSetting, upsertAppSetting, fetchPlannerWeeks } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, markMessagesReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact, rowToScheduledMessage, touchPlaybookProgress, markGranolaUnmatchedHandledDb, linkGranolaSyncedNoteDb, fetchAppSetting, upsertAppSetting, fetchPlannerWeeks } from "@/lib/db";
 import { inviteHistory, featureHistory } from "@/lib/plannerPools";
 import { subscribeRealtime } from "@/lib/realtime";
 import { Inbox } from "./cockpit/Inbox";
@@ -1978,28 +1976,28 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const territoryAllTasksByClient = (() => {
     const m = new Map<string, Task[]>();
     for (const t of scopedTasks) {
-      if (t.playbookStepKey || t.salesStepKey) continue;
+      if (t.playbookStepKey) continue;
       const list = m.get(t.clientId);
       if (list) list.push(t); else m.set(t.clientId, [t]);
     }
     return m;
   })();
-  // A business's own lists (projects) OTHER than Sales/Playbook, each with
+  // A business's own lists (projects) OTHER than Playbook, each with
   // its own done/total count — the Businesses page shows one pill per list
   // (not one aggregated count) so an ambassador can jump straight into
   // whichever list actually has the open work, same click-through as the
-  // Sales/Playbook pills. Empty lists (no tasks yet) show no pill — nothing
+  // Playbook pill. Empty lists (no tasks yet) show no pill — nothing
   // to jump to.
   const territoryOtherListsByClient = (() => {
     const tasksByProject = new Map<string, Task[]>();
     for (const t of scopedTasks) {
-      if (t.playbookStepKey || t.salesStepKey) continue;
+      if (t.playbookStepKey) continue;
       const list = tasksByProject.get(t.projectId);
       if (list) list.push(t); else tasksByProject.set(t.projectId, [t]);
     }
     const m = new Map<string, { id: string; name: string; done: number; total: number }[]>();
     for (const p of projects) {
-      if (p.id === playbookProjectId(p.clientId) || p.id === salesProjectId(p.clientId)) continue;
+      if (p.id === playbookProjectId(p.clientId)) continue;
       const pTasks = tasksByProject.get(p.id);
       if (!pTasks?.length) continue;
       const entry = { id: p.id, name: p.name, done: pTasks.filter((t) => t.status === "done").length, total: pTasks.length };
@@ -2077,66 +2075,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // through some other path entirely) self-heals the first time anyone
   // actually looks at them, same lazy philosophy as the territory rollout,
   // just with no special-cased entry point required anymore.
-  // Same exclusion as clientList's own real-business filter — the Workspace
-  // container and per-territory city-work buckets are pseudo-clients (no real
-  // GHL contact behind them), not businesses on the Owner Growth Plan.
-  // Sales checklist tasks, bucketed by client — same shape as
-  // playbookTasksByClient above.
-  const salesTasksByClient = (() => {
-    const m = new Map<string, Task[]>();
-    for (const t of tasks) {
-      if (!t.salesStepKey) continue;
-      const list = m.get(t.clientId);
-      if (list) list.push(t); else m.set(t.clientId, [t]);
-    }
-    return m;
-  })();
-  // The Sales checklist — same create/retitle reconciliation as
-  // reconcilePlaybookTasks above, just against SALES_STEPS/salesProjectId/
-  // Task.salesStepKey instead. Deliberately NOT gated on client type/status
-  // (Playbook's eager triggers wait for a "promotion" to onboarding/active) —
-  // Sales covers the work that happens BEFORE that promotion, so it needs to
-  // start the moment a business has a client record at all, however it got
-  // one (territory bulk sync, a single add, anything).
-  const reconcileSalesTasks = (clientId: string) => {
-    const salesProjId = salesProjectId(clientId);
-    let projectWrite: PromiseLike<unknown> | null = null;
-    if (!projects.some((p) => p.id === salesProjId)) {
-      const p: Project = { id: salesProjId, clientId, name: "Sales", description: "" };
-      setProjects((ps) => [...ps, p]);
-      projectWrite = upsertProject(p);
-    }
-    const byKey = new Map(tasks.filter((t) => t.clientId === clientId && t.salesStepKey).map((t) => [t.salesStepKey as string, t]));
-    const toWrite: Task[] = [];
-    for (const step of SALES_STEPS) {
-      const existing = byKey.get(step.key);
-      if (!existing) {
-        toWrite.push({
-          id: newId("t_"), projectId: salesProjId, clientId, title: step.label, description: "",
-          status: "todo", priority: "none", assigneeId: null, contactId: clientId.slice(3), due: null,
-          recurrence: "none", labelIds: [], ghlTaskId: null, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
-          salesStepKey: step.key, createdBy: null,
-        });
-      } else if (existing.title !== step.label) {
-        toWrite.push({ ...existing, title: step.label });
-      }
-    }
-    if (!toWrite.length) return;
-    const writeIds = new Set(toWrite.map((t) => t.id));
-    setTasks((ts) => [...ts.filter((t) => !writeIds.has(t.id)), ...toWrite]);
-    if (projectWrite) projectWrite.then(() => bulkUpsertTasks(toWrite));
-    else bulkUpsertTasks(toWrite);
-  };
   useEffect(() => {
     if (activeClient.startsWith("cl_") && activeClient !== WORKSPACE_CLIENT_ID && !activeClient.startsWith(TERRITORY_CLIENT_PREFIX)) {
       reconcilePlaybookTasks(activeClient);
-      reconcileSalesTasks(activeClient);
     }
-    // reconcilePlaybookTasks/reconcileSalesTasks intentionally excluded —
-    // they're redefined every render (close over live `tasks`/`projects`),
-    // and including them here would refire this effect every render instead
-    // of only on a real client switch, which is the only time re-reconciling
-    // is meaningful.
+    // reconcilePlaybookTasks intentionally excluded — it's redefined every
+    // render (closes over live `tasks`/`projects`), and including it here
+    // would refire this effect every render instead of only on a real
+    // client switch, which is the only time re-reconciling is meaningful.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeClient]);
   // Opens a business's Playbook the same way onOpenClient opens its Tasks —
@@ -2145,11 +2091,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const openClientPlaybook = (clientId: string) => {
     reconcilePlaybookTasks(clientId);
     setTerritoryView(null); setActiveClient(clientId); setActiveProject(playbookProjectId(clientId)); setClientTab("tasks");
-  };
-  // Same idea as openClientPlaybook, for the Sales checklist.
-  const openClientSales = (clientId: string) => {
-    reconcileSalesTasks(clientId);
-    setTerritoryView(null); setActiveClient(clientId); setActiveProject(salesProjectId(clientId)); setClientTab("tasks");
   };
   // Planner activity for the open client — how many times invited to the
   // newsletter and how many times actually featured, both already tracked by
@@ -2485,12 +2426,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (before.playbookStepKey && synced.status !== undefined && synced.status !== before.status) {
       touchPlaybookProgress(before.clientId);
     }
-    // Same idea, for the Sales checklist — feeds the Businesses page's
-    // Priority sort so a business stuck on the same Sales step doesn't go
-    // unnoticed just because it was never re-invited/re-featured.
-    if (before.salesStepKey && synced.status !== undefined && synced.status !== before.status) {
-      touchSalesProgress(before.clientId);
-    }
     if (patch.assigneeId && patch.assigneeId !== me.id && patch.assigneeId !== before.assigneeId) {
       notify(patch.assigneeId, `${me.name} assigned you “${before.title}”`, id);
       pushToast(`Notified ${userById(patch.assigneeId)?.name}`);
@@ -2563,7 +2498,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const bulkDelete = () => {
     const ids = [...selectedTaskIds];
     if (!ids.length) return;
-    const deletable = ids.filter((id) => { const t = tasksRef.current.find((x) => x.id === id); return !!t && !t.playbookStepKey && !t.salesStepKey; });
+    const deletable = ids.filter((id) => { const t = tasksRef.current.find((x) => x.id === id); return !!t && !t.playbookStepKey; });
     const skipped = ids.length - deletable.length;
     if (!deletable.length) { pushToast("Playbook/Sales steps can't be deleted."); return; }
     const n = deletable.length;
@@ -2614,7 +2549,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // business gets — defense in depth alongside the hidden delete button in
     // TaskDrawer, in case some other path ever calls this directly.
     const lockedStep = tasksRef.current.find((x) => x.id === id);
-    if (lockedStep?.playbookStepKey || lockedStep?.salesStepKey) { pushToast("Playbook/Sales steps can't be deleted."); return; }
+    if (lockedStep?.playbookStepKey) { pushToast("Playbook steps can't be deleted."); return; }
     setConfirmDialog({
       title: "Delete this task?", message: "This can't be undone.", confirmLabel: "Delete",
       onConfirm: () => {
@@ -4650,8 +4585,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               tasksByClient={territoryAllTasksByClient}
               playbookTasksByClient={playbookTasksByClient}
               onOpenPlaybook={openClientPlaybook}
-              salesTasksByClient={salesTasksByClient}
-              onOpenSales={openClientSales}
               otherListsByClient={territoryOtherListsByClient}
               onOpenProject={onOpenProject}
               onSetClientStatus={setClientStatus}
