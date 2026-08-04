@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { type Client } from "@/lib/data";
-import { authedFetch } from "@/lib/supabase";
+import { authedFetch, supabase } from "@/lib/supabase";
 
 export default function SettingsPanel({
   clients,
@@ -25,6 +25,34 @@ export default function SettingsPanel({
   // Sync button — showing both a live token field and Connect+Sync side by
   // side for an already-connected account was the confusing part.
   const [editing, setEditing] = useState<Record<string, boolean>>({});
+
+  // The Sales checklist was retired Aug 4, 2026 — superseded by the new
+  // "Free Marketing Package" section at the top of the Playbook. This is a
+  // one-time cleanup for the leftover p_sales_* projects/tasks it left
+  // behind; nothing creates new ones anymore. Count-then-confirm-then-delete
+  // so a stray click can't silently wipe data.
+  const [salesCleanup, setSalesCleanup] = useState<
+    { kind: "idle" } | { kind: "counting" } | { kind: "confirm"; tasks: number; projects: number } | { kind: "busy" } | { kind: "done"; tasks: number; projects: number } | { kind: "err"; msg: string }
+  >({ kind: "idle" });
+
+  async function countSalesLists() {
+    setSalesCleanup({ kind: "counting" });
+    const [{ count: taskCount, error: taskErr }, { count: projectCount, error: projErr }] = await Promise.all([
+      supabase.from("tasks").select("id", { count: "exact", head: true }).not("sales_step_key", "is", null),
+      supabase.from("projects").select("id", { count: "exact", head: true }).like("id", "p_sales_%"),
+    ]);
+    if (taskErr || projErr) { setSalesCleanup({ kind: "err", msg: (taskErr ?? projErr)!.message }); return; }
+    setSalesCleanup({ kind: "confirm", tasks: taskCount ?? 0, projects: projectCount ?? 0 });
+  }
+
+  async function deleteSalesLists() {
+    setSalesCleanup({ kind: "busy" });
+    const { error: taskErr, count: tasksDeleted } = await supabase.from("tasks").delete({ count: "exact" }).not("sales_step_key", "is", null);
+    if (taskErr) { setSalesCleanup({ kind: "err", msg: taskErr.message }); return; }
+    const { error: projErr, count: projectsDeleted } = await supabase.from("projects").delete({ count: "exact" }).like("id", "p_sales_%");
+    if (projErr) { setSalesCleanup({ kind: "err", msg: projErr.message }); return; }
+    setSalesCleanup({ kind: "done", tasks: tasksDeleted ?? 0, projects: projectsDeleted ?? 0 });
+  }
 
   useEffect(() => {
     fetch("/api/ghl/status").then((r) => r.json()).then((j) => { setConfigured(!!j.configured); setTokenLocations(j.locations ?? []); }).catch(() => setConfigured(false));
@@ -202,6 +230,39 @@ export default function SettingsPanel({
             </div>
             {granolaStatus.kind !== "busy" && granolaStatus.msg && (
               <div className={`mt-1.5 break-all text-[15px] ${granolaStatus.kind === "ok" ? "text-green-600" : "text-red-500"}`}>{granolaStatus.msg}</div>
+            )}
+          </div>
+
+          <div className="mb-3 mt-6 flex items-center gap-2">
+            <span className="text-[15px] font-semibold">Data cleanup</span>
+          </div>
+          <div className="rounded-lg border bg-background px-3 py-2.5">
+            <p className="text-[13px] text-muted">
+              The old Sales checklist was retired — every business now works through the Free Marketing Package section at the top of its Playbook instead. This permanently deletes the leftover Sales lists it left behind on existing clients.
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {salesCleanup.kind === "confirm" ? (
+                <>
+                  <span className="text-[15px] font-medium text-amber-700">
+                    Delete {salesCleanup.projects} Sales list{salesCleanup.projects === 1 ? "" : "s"} and {salesCleanup.tasks} task{salesCleanup.tasks === 1 ? "" : "s"}? This can&apos;t be undone.
+                  </span>
+                  <button onClick={deleteSalesLists} className="shrink-0 rounded-md bg-red-600 px-2.5 py-1 text-[15px] font-medium text-white hover:bg-red-700">
+                    Yes, delete them
+                  </button>
+                  <button onClick={() => setSalesCleanup({ kind: "idle" })} className="shrink-0 text-[13px] text-muted hover:text-foreground">Cancel</button>
+                </>
+              ) : (
+                <button onClick={countSalesLists} disabled={salesCleanup.kind === "counting" || salesCleanup.kind === "busy"}
+                  className="shrink-0 rounded-md border px-2.5 py-1 text-[15px] font-medium hover:bg-surface disabled:opacity-50">
+                  {salesCleanup.kind === "counting" ? "Checking…" : salesCleanup.kind === "busy" ? "Deleting…" : "Clean up retired Sales lists"}
+                </button>
+              )}
+            </div>
+            {salesCleanup.kind === "done" && (
+              <div className="mt-1.5 text-[15px] text-green-600">Deleted {salesCleanup.projects} list{salesCleanup.projects === 1 ? "" : "s"} and {salesCleanup.tasks} task{salesCleanup.tasks === 1 ? "" : "s"}.</div>
+            )}
+            {salesCleanup.kind === "err" && (
+              <div className="mt-1.5 text-[15px] text-red-500">{salesCleanup.msg}</div>
             )}
           </div>
     </div>

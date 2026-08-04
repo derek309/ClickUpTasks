@@ -442,9 +442,9 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   // ambassador rename one here would just get silently reverted next time,
   // so it's read-only instead, with a title explaining why.
   const titleBlock = (
-    <textarea value={task.title} onChange={(e) => onPatch({ title: e.target.value })} readOnly={!!(task.playbookStepKey || task.salesStepKey)}
-      title={task.playbookStepKey ? "Synced from the Owner Growth Plan — always the same for every business" : task.salesStepKey ? "Synced from the Sales checklist — always the same for every business" : undefined}
-      rows={1} className={`-mx-1 w-full resize-none rounded-md bg-transparent px-1 font-semibold leading-snug outline-none [field-sizing:content] transition focus:bg-background ${full ? "text-[28px]" : "text-[18px]"} ${task.playbookStepKey || task.salesStepKey ? "cursor-default" : ""}`} />
+    <textarea value={task.title} onChange={(e) => onPatch({ title: e.target.value })} readOnly={!!task.playbookStepKey}
+      title={task.playbookStepKey ? "Synced from the Owner Growth Plan — always the same for every business" : undefined}
+      rows={1} className={`-mx-1 w-full resize-none rounded-md bg-transparent px-1 font-semibold leading-snug outline-none [field-sizing:content] transition focus:bg-background ${full ? "text-[28px]" : "text-[18px]"} ${task.playbookStepKey ? "cursor-default" : ""}`} />
   );
   // Comment/event timestamps already cover every field-change and message —
   // the latest one is a true "last updated", not just a metadata guess.
@@ -524,17 +524,16 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       </Row>
       <Row label="Priority" icon={<I.flag />}><select value={task.priority} onChange={(e) => onPatch({ priority: e.target.value as Priority })} className="rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background" style={{ color: PRIORITY_META[task.priority].color }}>{manualPriorityOptions(task.priority).map((p) => (<option key={p} value={p}>{PRIORITY_META[p].label}</option>))}</select></Row>
       <Row label="Assignee" icon={<I.user />}><select value={task.waitingOnClient ? "__waiting__" : (task.assigneeId ?? "")} onChange={(e) => { const v = e.target.value; if (v === "__waiting__") onPatch({ waitingOnClient: true, assigneeId: null }); else onPatch({ assigneeId: v || null, waitingOnClient: false }); }} className="rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background"><option value="__waiting__">⏳ {client ? `Waiting on ${client.name}` : "Waiting on client"}</option><option value="">Unassigned</option>{users.map((u) => (<option key={u.id} value={u.id}>{u.name} {u.role === "va" ? "(VA)" : "(Admin)"}</option>))}</select></Row>
-      {/* Owner Growth Plan and Sales checklist steps stay put — moving one to
-          a different client or list would pull it out of that business's
-          checklist (and its fixed position) entirely, which
-          reconcilePlaybookTasks/reconcileSalesTasks would just quietly patch
-          over by recreating the step, orphaning the moved task.
+      {/* Owner Growth Plan steps stay put — moving one to a different client or
+          list would pull it out of that business's checklist (and its fixed
+          position) entirely, which reconcilePlaybookTasks would just quietly
+          patch over by recreating the step, orphaning the moved task.
           Status/priority/due/assignee above are untouched — only the
           checklist's shape is locked. */}
-      {task.playbookStepKey || task.salesStepKey ? (
+      {task.playbookStepKey ? (
         <>
-          <Row label="Client" icon={<I.folder />}><span title={task.playbookStepKey ? "Part of the Owner Growth Plan — can't be moved" : "Part of the Sales checklist — can't be moved"} className="px-2 py-1 text-[14px] text-muted">{client?.name ?? "—"}</span></Row>
-          <Row label="Project" icon={<I.list />}><span title={task.playbookStepKey ? "Part of the Owner Growth Plan — can't be moved" : "Part of the Sales checklist — can't be moved"} className="px-2 py-1 text-[14px] text-muted">{project?.name ?? "—"}</span></Row>
+          <Row label="Client" icon={<I.folder />}><span title="Part of the Owner Growth Plan — can't be moved" className="px-2 py-1 text-[14px] text-muted">{client?.name ?? "—"}</span></Row>
+          <Row label="Project" icon={<I.list />}><span title="Part of the Owner Growth Plan — can't be moved" className="px-2 py-1 text-[14px] text-muted">{project?.name ?? "—"}</span></Row>
         </>
       ) : (
         <>
@@ -1337,7 +1336,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               </button>
             )}
             <button onClick={onToggleFull} title={full ? "Collapse to sidebar" : "Expand to full page"} className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground">{full ? <I.minimize /> : <I.expand />}</button>
-            {!task.playbookStepKey && !task.salesStepKey && (
+            {!task.playbookStepKey && (
               <button onClick={onDelete} title="Delete task" className="rounded-md p-1 text-muted hover:bg-background hover:text-danger"><I.trash /></button>
             )}
             <button onClick={onClose} className="rounded-md p-1 text-muted hover:bg-background"><I.close /></button>

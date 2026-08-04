@@ -5,7 +5,7 @@
 // list to that folder's lists (grouped by list); selecting a standalone list
 // scopes to just it. Admin chips carry a ⋮ menu (rename/delete/move).
 import { useState } from "react";
-import { type Folder, type Project, playbookProjectId, salesProjectId } from "@/lib/data";
+import { type Folder, type Project, playbookProjectId } from "@/lib/data";
 import { I } from "./ui";
 
 export function FolderRail({
@@ -37,16 +37,13 @@ export function FolderRail({
   const [menu, setMenu] = useState<string | null>(null); // "folder:<id>" | "list:<id>"
   const [dragFolder, setDragFolder] = useState<string | null>(null);
   const [dragList, setDragList] = useState<string | null>(null);
-  // Playbook and Sales are both pulled out of the normal standalone/drag-sort/
-  // menu machinery entirely — rendered first, unconditionally (Sales before
-  // Playbook — getting them in, then growing them), with no rename/delete/
+  // Playbook is pulled out of the normal standalone/drag-sort/menu machinery
+  // entirely — rendered first, unconditionally, with no rename/delete/
   // move-to-folder affordance and not draggable, matching the same "static,
-  // always there" lock already applied to their tasks (no delete/retitle/move).
+  // always there" lock already applied to its tasks (no delete/retitle/move).
   const isPlaybookList = (l: Project) => l.id === playbookProjectId(l.clientId);
-  const isSalesList = (l: Project) => l.id === salesProjectId(l.clientId);
   const playbookList = lists.find(isPlaybookList);
-  const salesList = lists.find(isSalesList);
-  const standalone = lists.filter((l) => !l.folderId && !isPlaybookList(l) && !isSalesList(l)).sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+  const standalone = lists.filter((l) => !l.folderId && !isPlaybookList(l)).sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
   const allActive = !activeFolder && !activeProject;
 
   // Drag-sort helpers — same splice-before-target idiom as QuickLinksBar.
@@ -89,15 +86,6 @@ export function FolderRail({
   return (
     <div className="no-scrollbar flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b bg-background/40 px-4 py-2 lg:flex-wrap lg:overflow-visible">
       {chip("All", allActive, onSelectAll)}
-      {salesList && (
-        <span className="relative inline-flex shrink-0">
-          <button onClick={() => onSelectList(salesList.id)}
-            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] font-medium ${activeProject === salesList.id ? "border-white ring-2 ring-white/50" : "border-transparent"}`}
-            style={{ background: "#5b3a8f", color: "#fff" }}>
-            {salesList.name}
-          </button>
-        </span>
-      )}
       {playbookList && (
         <span className="relative inline-flex shrink-0">
           <button onClick={() => onSelectList(playbookList.id)}

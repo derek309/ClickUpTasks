@@ -544,9 +544,13 @@ export interface Playbook {
 // keeps every client's real Task rows (Task.playbookStepKey) in sync with
 // whatever's defined here, so editing a step's wording here is the only way
 // it ever changes — no client ever has its own frozen copy. Content mirrors
-// THE-OWNER-GROWTH-PLAN-DRAFT.md's step order.
+// THE-OWNER-GROWTH-PLAN-DRAFT.md's step order, except the "package" phase
+// (interview_chat/claim_listing/blog_written/posted_on_social/newsletter_spotlight)
+// prepended 2026-08-04, which supersedes the old Sales checklist rather than
+// coming from that doc — see Business Journal/2026-08.md, Aug 4 entry.
 export type PlaybookPhase = { key: string; label: string };
 export const PLAYBOOK_PHASES: PlaybookPhase[] = [
+  { key: "package", label: "Your free marketing package" },
   { key: "map", label: "Get on the map" },
   { key: "reputation", label: "Jumpstart your reputation" },
   { key: "list", label: "Build your list" },
@@ -580,7 +584,20 @@ export type PlaybookStepDef = {
 };
 export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
   {
-    key: "claim_listing", phase: "map", label: "Claim listing", category: "presence",
+    key: "interview_chat", phase: "package", label: "Complete the interview chat", category: "branding",
+    timeEstimate: "~10 min",
+    whyItMatters: "This is where we get to know your business: how you started, what you're known for, what's coming up. Everything else in your free package, the blog post, the social posts, the newsletter spotlight, gets written from your real answers instead of a generic template.",
+    howTo: [
+      "Answer the chat's questions: how the business got started, what makes it different, your favorite product or service, any local sponsorships, anything new coming up.",
+      "Book your short phone interview at the end so we can go deeper live.",
+    ],
+    commonMistake: "Rushing through with one word answers. The more specific you are, the better your blog post and spotlight turn out.",
+    weGive: "We turn your answers into a written blog post, social posts, and a newsletter spotlight, no extra work from you.",
+    youGet: "Real content about your business, written for you, from a ten minute conversation.",
+    scoreImpact: "medium",
+  },
+  {
+    key: "claim_listing", phase: "package", label: "Claim your listing", category: "presence",
     timeEstimate: "~5 min",
     whyItMatters: "Claiming unlocks your My Business dashboard, where everything else lives. Your Score was already calculated when we built your profile — claiming lets you start improving it.",
     howTo: [
@@ -592,6 +609,40 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     weGive: "We open your dashboard and mark you a verified local owner.",
     youGet: "Control of your directory presence, free.",
     scoreImpact: "low",
+  },
+  {
+    key: "blog_written", phase: "package", label: "Blog post written about your business", category: "branding",
+    timeEstimate: "Done for you",
+    whyItMatters: "A real blog post about your business gives you a piece of content you can point people to, and it's one more page that helps you get found.",
+    howTo: [
+      "Nothing to do here — we write it from your interview chat answers.",
+      "Once it's live we'll send it to you to review and share.",
+    ],
+    weGive: "A written blog post about your business, published on the ClickUpLocal site.",
+    youGet: "Free content you can share on your own site and socials.",
+    scoreImpact: "low",
+  },
+  {
+    key: "posted_on_social", phase: "package", label: "Posted on ClickUpLocal social", category: "branding",
+    timeEstimate: "Done for you",
+    whyItMatters: "Gets your business in front of the ClickUpLocal audience on social media, not just the directory.",
+    howTo: [
+      "Nothing to do here — we post it for you using your blog post and photos.",
+    ],
+    weGive: "A social post about your business on our channels.",
+    youGet: "Free exposure to residents who follow us on social.",
+    scoreImpact: "low",
+  },
+  {
+    key: "newsletter_spotlight", phase: "package", label: "Featured in the newsletter spotlight", category: "presence",
+    timeEstimate: "Done for you",
+    whyItMatters: "The newsletter goes straight to residents' inboxes — the spotlight is the single most visible placement in it.",
+    howTo: [
+      "Nothing to do here — we queue you for the next available spotlight.",
+    ],
+    weGive: "A featured spotlight write up in the weekly newsletter.",
+    youGet: "Direct visibility to every resident on the list.",
+    scoreImpact: "medium",
   },
   {
     key: "upload_photos", phase: "map", label: "Upload your logo + photos", category: "branding",
@@ -882,7 +933,7 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
 // A2P (texting registration) — real, trackable steps, but deliberately a
 // SEPARATE catalog from PLAYBOOK_STEPS, not a 7th phase: the source doc
 // frames it as "not part of the main path, do it early" (folding it into the
-// phase loop would put it last, the opposite of that), the app's "X of 18"
+// phase loop would put it last, the opposite of that), the app's "X of 26"
 // progress math is a real doc-verified number that shouldn't silently become
 // 22, and the source material never Score-weights A2P the way the main 18
 // are. Still real Task rows via reconcilePlaybookTasks — just excluded from
@@ -953,7 +1004,7 @@ export const PLAYBOOK_EMAIL_DOMAIN_STEPS: PlaybookStepDef[] = [
 // The standing ambassador-side retention task — NOT a one-time owner action
 // like the rest of the catalog, so it's created with recurrence: "monthly"
 // (see reconcilePlaybookTasks) instead of "none". Excluded from
-// playbookCompletion()'s "X of 18" the same way A2P/email-domain are, just by
+// playbookCompletion()'s "X of 26" the same way A2P/email-domain are, just by
 // virtue of living outside PLAYBOOK_STEPS.
 export const PLAYBOOK_ONGOING_PHASE: PlaybookPhase = { key: "ongoing", label: "Monthly retention (ambassador)" };
 export const PLAYBOOK_ONGOING_STEPS: PlaybookStepDef[] = [
@@ -1019,13 +1070,6 @@ export const PLAYBOOK_ALWAYS_RUNNING: string[] = [
 export const PLAYBOOK_FINISH_LINE =
   "When the plan is complete, you're the go-to business in town: found everywhere, chosen for your reputation, marketing that runs itself, and a customer list that's yours forever. Your ClickUpLocal Score is as high as your effort makes it — and it keeps climbing. What's next: you've mastered the foundation. Guide 2 unlocks the advanced tools for businesses like yours — online booking, an AI assistant, memberships & loyalty, and more. We'll invite you when you're ready.";
 
-/** Deterministic id for a client's (retired) Sales project — kept only so
- * FolderRail.tsx can still recognize and lock a pre-existing Sales list from
- * before the checklist was retired (Derek, Aug 4). Nothing creates a new one
- * anymore; this exists purely to not orphan historical ones into the
- * generic rename/delete/move-to-folder list. */
-export const salesProjectId = (clientId: string) => "p_sales_" + clientId;
-
 /** Reads completion straight off real Task rows (Task.playbookStepKey) — no
  * separate progress table. `total` is always the *current* catalog length,
  * not however many step-tasks happen to exist yet for this client, so the
@@ -1043,7 +1087,7 @@ export function playbookCompletion(clientId: string, tasks: Task[]) {
 }
 
 /** Owner-facing dashboard progress bars (branding/reputation/presence/income) —
- * unlike playbookCompletion()'s "X of 22" (which only counts PLAYBOOK_STEPS,
+ * unlike playbookCompletion()'s "X of 26" (which only counts PLAYBOOK_STEPS,
  * the main path), this tallies every entry in PLAYBOOK_ALL_STEPS, since a
  * category bar shouldn't silently exclude an owner's A2P/email-domain/ongoing
  * progress just because those steps live outside the main phase ordering. */
@@ -1339,12 +1383,6 @@ export interface Task {
    * customer-facing Playbook (on the business's public listing) will match
    * against — never match on the editable title. */
   playbookStepKey?: string | null;
-  /** Set on a task from the (retired, Aug 4) Sales checklist — kept only so
-   * TaskDrawer.tsx still locks a pre-existing Sales step from being deleted
-   * or retitled by hand, same as playbookStepKey. Nothing creates a new one
-   * anymore; the Businesses page + Playbook (starting right at claim) cover
-   * everything Sales used to track. */
-  salesStepKey?: string | null;
   /** Who (or what) created this task — a roster member id, "u_claude" (fully
    * automated system creation, matching the sentinel already used for
    * automated comments), "client" (raised from the public waiting page), or

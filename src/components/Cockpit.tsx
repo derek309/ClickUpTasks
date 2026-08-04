@@ -2200,15 +2200,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       tasks: list.filter((t) => t.playbookStepKey && stepPhase.get(t.playbookStepKey) === phase.key)
         .sort((a, b) => (stepOrder.get(a.playbookStepKey!) ?? 0) - (stepOrder.get(b.playbookStepKey!) ?? 0)),
     });
-    // A2P + email-domain sit right after "Get on the map" (PLAYBOOK_PHASES[0])
-    // — "do it early," per both source docs — not folded into the phase array
-    // itself so playbookCompletion()'s "X of 18" total never counts them.
+    // A2P + email-domain sit right after "Get on the map" (PLAYBOOK_PHASES[1] —
+    // [0] is the new "package" phase, which runs first) — "do it early," per
+    // both source docs — not folded into the phase array itself so
+    // playbookCompletion()'s "X of 26" total never counts them.
     // Monthly retention sits at the very end — an ongoing duty, not something
     // to front-load, and distinct from the fully-passive PLAYBOOK_ALWAYS_RUNNING
     // banner since it needs an ambassador to actually act on it each month.
     const byPhase = [
-      groupFor(PLAYBOOK_PHASES[0]), groupFor(PLAYBOOK_A2P_PHASE), groupFor(PLAYBOOK_EMAIL_DOMAIN_PHASE),
-      ...PLAYBOOK_PHASES.slice(1).map(groupFor),
+      groupFor(PLAYBOOK_PHASES[0]), groupFor(PLAYBOOK_PHASES[1]), groupFor(PLAYBOOK_A2P_PHASE), groupFor(PLAYBOOK_EMAIL_DOMAIN_PHASE),
+      ...PLAYBOOK_PHASES.slice(2).map(groupFor),
       groupFor(PLAYBOOK_ONGOING_PHASE),
     ];
     const extra = list.filter((t) => !t.playbookStepKey);
