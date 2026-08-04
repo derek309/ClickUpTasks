@@ -321,16 +321,6 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
     setPlannerWeeks(plannerWeeksRef.current);
     await upsertPlannerWeek(merged);
   };
-  // "Not interested this round" — works whether or not they've been invited
-  // yet, and is always reversible. Mirrors PlannerPanel's old skip/bring-back
-  // pair exactly, just scoped to "this week" instead of whichever week was open.
-  const skipBusiness = async (gdPlaceId: number) => {
-    const w = await ensureThisWeek();
-    let idx = -1;
-    w.invited.forEach((inv, i) => { if (inv.gdPlaceId === gdPlaceId) idx = i; });
-    if (idx !== -1) await patchThisWeek((cur) => ({ invited: cur.invited.map((inv, i) => (i === idx ? { ...inv, status: "skipped" as const } : inv)) }));
-    else if (!w.dismissed.includes(gdPlaceId)) await patchThisWeek((cur) => ({ dismissed: [...cur.dismissed, gdPlaceId] }));
-  };
   const bringBackBusiness = async (gdPlaceId: number) => {
     const w = await ensureThisWeek();
     let idx = -1;
@@ -739,7 +729,6 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                     onArm: () => setInviteArmed(gdPlaceId),
                     onSend: () => sendInvite(gdPlaceId),
                     onDismissError: () => setInviteState((m) => { const n = { ...m }; delete n[gdPlaceId]; return n; }),
-                    onSkip: () => skipBusiness(gdPlaceId),
                     onBringBack: () => bringBackBusiness(gdPlaceId),
                     link: inviteLinks[String(gdPlaceId)],
                     onCopyLink: () => copyInviteLink(gdPlaceId),
@@ -829,7 +818,6 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
     onArm: () => void;
     onSend: () => void;
     onDismissError: () => void;
-    onSkip: () => void;
     onBringBack: () => void;
     link: string | undefined;
     onCopyLink: () => void;
@@ -974,11 +962,12 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
         </div>
       )}
 
-      {/* The invite queue's own actions — Skip/Bring-back, Copy-link, and a
-          two-click Invite/Confirm (mirrors WP's own caution around a button
-          that sends a real email) — only for the two stages it applies to.
-          Once claimed, this business's "what's left" is Sales/Playbook
-          progress above, not invite state. */}
+      {/* The invite queue's own actions — Copy-link and a two-click
+          Invite/Confirm (mirrors WP's own caution around a button that sends
+          a real email) — only for the two stages it applies to. Skip is
+          retired (Derek, Aug 4); "↺ Bring back" stays only to un-stick any
+          business skipped before that. Once claimed, this business's "what's
+          left" is Playbook progress above, not invite state. */}
       {inviteActions && (stage === "unclaimed" || stage === "invited") && (
         <div className="flex flex-wrap items-center gap-1.5 px-4 pb-2 pl-9 pt-1.5 sm:pl-9">
           {invite?.status === "skipped" ? (
@@ -986,9 +975,6 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
           ) : (
             <>
               {invite?.status === "accepted" && <span className="shrink-0 rounded-md bg-emerald-100 px-2 py-1 text-[12px] font-semibold text-emerald-700">Accepted</span>}
-              {invite?.status !== "accepted" && (
-                <button onClick={inviteActions.onSkip} className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">Skip</button>
-              )}
               {inviteActions.link && (
                 <button onClick={inviteActions.onCopyLink} title={inviteActions.link} className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">
                   {inviteActions.copied ? "Copied ✓" : "🔗 Copy link"}
