@@ -7,15 +7,31 @@
 // notes.sql — the Chat tab, so a teammate's message shows up live), and
 // team_messages (supabase/team-chat.sql — Team Chat is pointless without live updates),
 // and dm_messages (supabase/dm-chat.sql — same reasoning, for private 1:1 DMs).
+//
+// All 7 tables share ONE channel (one `.on()` binding each, one `.subscribe()`
+// call) instead of 7 independent channels — each subscribed channel counts as
+// its own connection against Supabase's Realtime quota, and every open tab
+// was paying that 7x multiplier continuously (join + periodic heartbeat per
+// channel) for as long as it stayed open. Found after "Peak Concurrent
+// Connections" and "Realtime Messages" both blew well past the free-tier
+// quota with only 4 monthly active users (Derek, Aug 3). One channel error
+// now affects all 7 tables' live updates together, not just one — an
+// acceptable tradeoff since they're the same underlying connection either way.
 import { supabase } from "./supabase";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 
 export type Payload = RealtimePostgresChangesPayload<Record<string, unknown>>;
 
-// supabase-js does not auto-resubscribe a channel after CHANNEL_ERROR/
-// TIMED_OUT — this reconnects with exponential backoff (1s→15s cap),
-// independently per table so one channel's trouble doesn't tear down others.
-function subscribeOne(table: string, onEvent: (p: Payload) => void, onStatus?: (s: string) => void) {
+export function subscribeRealtime(handlers: {
+  onTask: (p: Payload) => void;
+  onClient: (p: Payload) => void;
+  onNotification: (p: Payload) => void;
+  onMessage: (p: Payload) => void;
+  onClientNote: (p: Payload) => void;
+  onTeamMessage: (p: Payload) => void;
+  onDmMessage: (p: Payload) => void;
+  onStatusChange?: (status: string) => void;
+}): () => void {
   let channel: ReturnType<typeof supabase.channel> | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let retries = 0;
@@ -23,10 +39,16 @@ function subscribeOne(table: string, onEvent: (p: Payload) => void, onStatus?: (
 
   const connect = () => {
     channel = supabase
-      .channel(`rt:${table}`)
-      .on("postgres_changes", { event: "*", schema: "public", table }, onEvent)
+      .channel("rt:app")
+      .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, handlers.onTask)
+      .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, handlers.onClient)
+      .on("postgres_changes", { event: "*", schema: "public", table: "notifications" }, handlers.onNotification)
+      .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, handlers.onMessage)
+      .on("postgres_changes", { event: "*", schema: "public", table: "client_notes" }, handlers.onClientNote)
+      .on("postgres_changes", { event: "*", schema: "public", table: "team_messages" }, handlers.onTeamMessage)
+      .on("postgres_changes", { event: "*", schema: "public", table: "dm_messages" }, handlers.onDmMessage)
       .subscribe((status) => {
-        onStatus?.(status);
+        handlers.onStatusChange?.(status);
         if (status === "SUBSCRIBED") retries = 0;
         if ((status === "CHANNEL_ERROR" || status === "TIMED_OUT") && !torn) {
           retries += 1;
@@ -45,26 +67,4 @@ function subscribeOne(table: string, onEvent: (p: Payload) => void, onStatus?: (
     if (retryTimer) clearTimeout(retryTimer);
     if (channel) supabase.removeChannel(channel);
   };
-}
-
-export function subscribeRealtime(handlers: {
-  onTask: (p: Payload) => void;
-  onClient: (p: Payload) => void;
-  onNotification: (p: Payload) => void;
-  onMessage: (p: Payload) => void;
-  onClientNote: (p: Payload) => void;
-  onTeamMessage: (p: Payload) => void;
-  onDmMessage: (p: Payload) => void;
-  onStatusChange?: (status: string) => void;
-}): () => void {
-  const unsubs = [
-    subscribeOne("tasks", handlers.onTask, handlers.onStatusChange),
-    subscribeOne("clients", handlers.onClient),
-    subscribeOne("notifications", handlers.onNotification),
-    subscribeOne("messages", handlers.onMessage),
-    subscribeOne("client_notes", handlers.onClientNote),
-    subscribeOne("team_messages", handlers.onTeamMessage),
-    subscribeOne("dm_messages", handlers.onDmMessage),
-  ];
-  return () => unsubs.forEach((u) => u());
 }
