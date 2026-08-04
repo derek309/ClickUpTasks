@@ -91,12 +91,18 @@ export const STAGE_META: Record<BusinessStage, { label: string; color: string; h
 // here ALSO still appears in its normal stage group below, so per-stage
 // funnel counts stay a truthful pipeline snapshot.
 const ATTENTION_META = { label: "Needs attention now", color: "#8b5cf6", hint: "replied by SMS, email, or newsletter invite — check in before anything else" };
-// A second override group, purely from invite read-receipts (openedAt/
-// clickedAt on the latest invite — see PlannerInvite) — NOT tasks, so it
-// never touches the Dashboard ("that's for active clients," Derek, Aug 3).
-// Read the invite but didn't click through to claim — worth a call or a
-// drive-by visit while the prospecting is fresh in their mind.
-const OPENED_META = { label: "Opened invite, hasn't claimed", color: "#0891b2", hint: "read (or clicked) the invite but hasn't claimed yet — worth a call or a visit" };
+// Three more override groups, purely from invite engagement (status/openedAt/
+// clickedAt on the latest invite — see PlannerInvite) — NOT tasks, so none of
+// these ever touch the Dashboard ("that's for active clients," Derek, Aug 3).
+// A daily call/visit ladder ranked by how strong the signal is: answered the
+// 3 questions (real intent) is hotter than a link click, which is hotter than
+// just opening the email. Each business sits in exactly ONE of these three —
+// the strongest tier it qualifies for — so the page reads as "who to work
+// today," not the same names stacked three times (Derek, Aug 4: "bring the
+// important things to the top so we can focus on the right businesses").
+const ACCEPTED_META = { label: "Accepted, hasn't claimed", color: "#059669", hint: "answered the intake questions — the hottest lead that hasn't claimed yet, call or visit today" };
+const CLICKED_META = { label: "Clicked, hasn't answered", color: "#2563eb", hint: "clicked the invite link but didn't finish the questions — a nudge might close it" };
+const OPENED_META = { label: "Opened, hasn't clicked", color: "#0891b2", hint: "read the invite but hasn't clicked through yet — worth a call or a visit" };
 
 export function computeBusinessStage(listing: DirectoryListing, client: Client | null, invite?: PlannerInvite): BusinessStage {
   if (!listing.claimed) return invite && invite.status !== "skipped" ? "invited" : "unclaimed";
@@ -558,14 +564,22 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   if (loading) return <div className="bg-background p-4 py-10 text-center text-[13px] text-muted sm:p-5">Loading directory for {city}…</div>;
 
   const attentionRows = sortRows(filtered.filter(needsAttention));
-  // Read (or clicked) the invite but hasn't claimed — already accepted
-  // ("I'm interested") is excluded, that's already its own visible green
-  // badge; this is specifically the softer, previously-invisible signal.
-  const openedNotClaimed = (r: { listing: DirectoryListing }) => {
+  // The engagement ladder — each business sits in exactly the strongest tier
+  // it qualifies for (accepted > clicked > opened), never more than one, so
+  // these three groups partition the unclaimed/invited pool instead of
+  // overlapping.
+  const acceptedNotClaimed = (r: { listing: DirectoryListing }) => !r.listing.claimed && inviteFor(r.listing)?.status === "accepted";
+  const clickedNotAnswered = (r: { listing: DirectoryListing }) => {
     const inv = inviteFor(r.listing);
-    return !r.listing.claimed && !!inv && inv.status !== "accepted" && !!(inv.openedAt || inv.clickedAt);
+    return !r.listing.claimed && !!inv && inv.status !== "accepted" && !!inv.clickedAt;
   };
-  const openedRows = sortRows(filtered.filter(openedNotClaimed));
+  const openedNotClicked = (r: { listing: DirectoryListing }) => {
+    const inv = inviteFor(r.listing);
+    return !r.listing.claimed && !!inv && inv.status !== "accepted" && !inv.clickedAt && !!inv.openedAt;
+  };
+  const acceptedRows = sortRows(filtered.filter(acceptedNotClaimed));
+  const clickedRows = sortRows(filtered.filter(clickedNotAnswered));
+  const openedRows = sortRows(filtered.filter(openedNotClicked));
   const stageRows = new Map<BusinessStage, typeof filtered>();
   for (const key of STAGE_ORDER) stageRows.set(key, []);
   for (const r of filtered) stageRows.get(computeBusinessStage(r.listing, r.client, inviteFor(r.listing)))!.push(r);
@@ -574,6 +588,8 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   type Group = { key: string; label: string; color: string; hint: string; rows: typeof filtered };
   const groups: Group[] = [];
   if (attentionRows.length) groups.push({ key: "attention", label: ATTENTION_META.label, color: ATTENTION_META.color, hint: ATTENTION_META.hint, rows: attentionRows });
+  if (acceptedRows.length) groups.push({ key: "accepted", label: ACCEPTED_META.label, color: ACCEPTED_META.color, hint: ACCEPTED_META.hint, rows: acceptedRows });
+  if (clickedRows.length) groups.push({ key: "clicked", label: CLICKED_META.label, color: CLICKED_META.color, hint: CLICKED_META.hint, rows: clickedRows });
   if (openedRows.length) groups.push({ key: "opened", label: OPENED_META.label, color: OPENED_META.color, hint: OPENED_META.hint, rows: openedRows });
   for (const key of STAGE_ORDER) groups.push({ key, label: STAGE_META[key].label, color: STAGE_META[key].color, hint: STAGE_META[key].hint, rows: stageRows.get(key)! });
   const allCollapsed = groups.length > 0 && groups.every((g) => collapsed.has(g.key));
@@ -837,11 +853,12 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
   const nameMouseDown = useRef<{ x: number; y: number } | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
 
-  // Sales (getting them in) runs the funnel up through the interview stages —
-  // Playbook (growing them) takes over once onboarding starts. Mirrors
-  // computeBusinessStage's own claimed-but-no-real-status-yet logic, so the
-  // chip swap lines up exactly with the Stage cell.
-  const onGrowthPlan = stage !== "unclaimed" && stage !== "invited" && stage !== "claimed" && stage !== "interview";
+  // Sales (getting them in) runs up through claiming the listing — the
+  // moment they've claimed it, the whole point of this page is working
+  // through the Playbook with them (Derek, Aug 4), not waiting for
+  // Onboarding to formally start. So the handoff is exactly at "claimed,"
+  // not two stages later.
+  const onGrowthPlan = stage !== "unclaimed" && stage !== "invited";
   const playbook = client && onGrowthPlan ? playbookCompletion(client.id, playbookTasks) : null;
   const sales = client && !onGrowthPlan ? salesCompletion(client.id, salesTasks) : null;
   const ghlUrl = client ? ghlContactUrlFor?.(client.id) : null;
