@@ -4108,7 +4108,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 </span>
               );
             })()}
-            {bellControl}
+            {!(inboxView && !dmUserId) && bellControl}
             {isClientDetail && overflowControl}
           </div>
           {isClientDetail ? (
@@ -4520,6 +4520,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             </div>
           )}
 
+          {/* Hidden on the Conversations page (team chat) — the bell's own
+              notifications already surface everything relevant elsewhere,
+              and it was redundant/unwanted floating over a page that's
+              already a live feed (Derek, Aug 4). Still shown on DMs,
+              Dashboard, client pages, etc. */}
+          {!(inboxView && !dmUserId) && (
           <div className="flex items-center gap-2">
             <div className="relative">
               <button onClick={() => { const opening = !bellOpen; setBellOpen(opening); if (opening) { setNotifications((ns) => ns.map((n) => (n.recipientId === me.id ? { ...n, read: true } : n))); markNotifsReadDb(me.id); } }} className="relative rounded-lg border bg-background p-2 text-muted hover:text-foreground">
@@ -4538,6 +4544,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </>)}
             </div>
           </div>
+          )}
           </div>
         </header>
 
