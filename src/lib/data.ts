@@ -134,7 +134,7 @@ export const CLIENT_STATUS_META: Record<ClientStatus, { label: string; dot: stri
   // special case (see TerritoryDirectory.tsx).
   claimed: { label: "Claimed", dot: "#94a3b8" },
   interview: { label: "Interview", dot: "#06b6d4" },
-  onboarding: { label: "Onboarding", dot: "#a855f7" },
+  onboarding: { label: "Listing Launch", dot: "#a855f7" },
   active_client: { label: "Active Client", dot: "#22c55e" },
   // "Nurture" = a good-standing client with nothing actively due; drives the
   // monthly Review/Check-in cadence (see clientUrgencyKey's review logic) so
