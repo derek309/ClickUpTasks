@@ -260,7 +260,11 @@ async function handleCall(body: any, custom: any) {
 // re-derives it the same way the Businesses page does client-side: contact's
 // city/state -> that territory's directory listings -> match by
 // ghlContactId, then phone, then email (same fallback chain, see
-// TerritoryDirectory.tsx's own comment on why the chain exists).
+// TerritoryDirectory.tsx's own comment on why the chain exists). A contact's
+// city/state can be missing (internal/test contacts, or a sync gap) even
+// when the underlying listing is real, so this checks every configured
+// territory rather than bailing when city/state is absent — cheap with only
+// a couple territories, and more robust than trusting one field to be set.
 async function handleEmailEngagement(event: "email_opened" | "email_clicked", custom: any) {
   const ghlContactId: string | null = custom?.contactId ?? null;
   if (!ghlContactId) return NextResponse.json({ ok: true, skipped: "missing contactId" });
@@ -270,27 +274,38 @@ async function handleEmailEngagement(event: "email_opened" | "email_clicked", cu
     .select("ghl_contact_id, phone, email, city, state")
     .eq("ghl_contact_id", ghlContactId)
     .maybeSingle();
-  if (!contact?.city || !contact?.state) return NextResponse.json({ ok: true, skipped: "no contact / no city-state on file" });
+  if (!contact) return NextResponse.json({ ok: true, skipped: "no contact for that ghlContactId" });
 
   const { data: territoryRows } = await supabaseAdmin.from("territories").select("id, city, state");
-  const wantState = normalizeState(contact.state);
-  const territory = (territoryRows ?? []).find(
-    (t: any) => String(t.city ?? "").trim().toLowerCase() === contact.city.trim().toLowerCase() && normalizeState(t.state ?? "") === wantState
-  );
-  if (!territory) return NextResponse.json({ ok: true, skipped: "no territory for that city/state" });
+  const territories = (territoryRows ?? []) as { id: string; city: string; state: string }[];
+  if (!territories.length) return NextResponse.json({ ok: true, skipped: "no territories configured" });
 
-  const listingsResult = await fetchDirectoryListingsServer(contact.city, contact.state);
-  if ("error" in listingsResult) return NextResponse.json({ ok: true, skipped: listingsResult.error });
+  // Try the contact's own city/state first when set (skips straight to the
+  // right territory), then every other territory as a fallback.
+  const wantState = contact.state ? normalizeState(contact.state) : null;
+  const cityMatches = (t: { city: string; state: string }) =>
+    !!contact.city && !!wantState && t.city.trim().toLowerCase() === contact.city.trim().toLowerCase() && normalizeState(t.state) === wantState;
+  const ordered = [...territories.filter(cityMatches), ...territories.filter((t) => !cityMatches(t))];
 
   const digits = (s: string | undefined) => (s ?? "").replace(/\D/g, "").slice(-10);
   const lc = (s: string | undefined) => (s ?? "").trim().toLowerCase();
-  const listing =
-    listingsResult.listings.find((l) => l.ghlContactId && l.ghlContactId === ghlContactId) ??
-    (digits(contact.phone) ? listingsResult.listings.find((l) => digits(l.phone) === digits(contact.phone)) : undefined) ??
-    (contact.email ? listingsResult.listings.find((l) => lc(l.email) === lc(contact.email)) : undefined);
-  if (!listing) return NextResponse.json({ ok: true, skipped: "no listing matched to that contact" });
-  const gdPlaceId = typeof listing.id === "number" ? listing.id : parseInt(String(listing.id), 10);
-  if (!Number.isFinite(gdPlaceId)) return NextResponse.json({ ok: true, skipped: "listing has no usable id" });
+
+  let territory: { id: string; city: string; state: string } | null = null;
+  let gdPlaceId: number | null = null;
+  for (const t of ordered) {
+    const listingsResult = await fetchDirectoryListingsServer(t.city, t.state);
+    if ("error" in listingsResult) continue;
+    const listing =
+      listingsResult.listings.find((l) => l.ghlContactId && l.ghlContactId === ghlContactId) ??
+      (digits(contact.phone) ? listingsResult.listings.find((l) => digits(l.phone) === digits(contact.phone)) : undefined) ??
+      (contact.email ? listingsResult.listings.find((l) => lc(l.email) === lc(contact.email)) : undefined);
+    if (!listing) continue;
+    const id = typeof listing.id === "number" ? listing.id : parseInt(String(listing.id), 10);
+    if (!Number.isFinite(id)) continue;
+    territory = t; gdPlaceId = id;
+    break;
+  }
+  if (!territory || gdPlaceId === null) return NextResponse.json({ ok: true, skipped: "no listing matched to that contact in any territory" });
 
   const { data: weekRows } = await supabaseAdmin.from("planner_weeks").select("*").eq("territory_id", territory.id);
   const weeks: PlannerWeek[] = (weekRows ?? []).map(rowToPlannerWeek);
