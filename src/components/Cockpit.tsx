@@ -3991,14 +3991,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         <nav className="shrink-0 space-y-0.5 px-2">
           {navVisible.work && <SideItem active={myWork} title="Dashboard (press 1)" onClick={() => goToView("dashboard")}><I.grid className="text-muted" /> <span>Dashboard</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
           {navVisible.inbox && (<>
-            <SideItem active={inboxView && dmUserId === null} title="Conversations (press 2)" onClick={openTeamChat}><I.comment className="text-muted" /> <span>Conversations</span>{(teamChatUnread || unread > 0) && (
-              // Both indicators, not either/or: notifications accumulate
-              // routinely, and an exclusive check meant a real unread chat
-              // message showed nothing at all whenever any notice was pending.
-              <span className="ml-auto flex items-center gap-1.5">
-                {teamChatUnread && <span title="Unread conversations" className="h-2 w-2 rounded-full bg-accent" />}
-                {unread > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{unread}</span>}
-              </span>
+            <SideItem active={inboxView && dmUserId === null} title="Conversations (press 2)" onClick={openTeamChat}><I.comment className="text-muted" /> <span>Conversations</span>{teamChatUnread && (
+              // Literal unread team-chat messages only — general notifications
+              // (task assignments, client replies, etc.) have their own home
+              // on the bell, not this nav item (Derek, Aug 4).
+              <span title="Unread conversations" className="ml-auto h-2 w-2 rounded-full bg-accent" />
             )}</SideItem>
             {dmEnabled && users.filter((u) => u.id !== me.id && u.id !== "u_claude").map((u) => (
               <SideItem key={u.id} active={inboxView && dmUserId === u.id} onClick={() => openDm(u.id)}>
