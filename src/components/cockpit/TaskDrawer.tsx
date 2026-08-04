@@ -86,7 +86,7 @@ export function RecipientField({ label, value, onChange, contacts }: { label: st
   );
 }
 
-export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, onRegenerateAiSummary, aiSummaryBusy, pushToast, onOpenClaudeSetup }: {
+export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, onRegenerateAiSummary, aiSummaryBusy, pushToast, onOpenClaudeSetup }: {
   task: Task; comment: string; setComment: (v: string) => void;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; navTasks: Task[]; onOpenTask: (id: string) => void; onAddSibling: (title: string) => void; onPrev: () => void; onNext: () => void;
@@ -96,6 +96,10 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   onCopyAttachmentLink: (path: string) => void;
   onGetSignedUrl: (path: string) => Promise<string | null>;
   messages?: Message[] | null; // this task's own email/SMS (composed from here, or an inbound reply matched to this Conversation task), merged into the Activity feed
+  // Clears the unread dot on a Chat/Email/SMS tab — called the moment that
+  // tab is opened. Optional so a caller that doesn't track read state (none
+  // today) just never shows the dot.
+  onMarkChannelRead?: (channel: MessageChannel) => void;
   linkedContactInfo?: Contact | null; // authoritative send target (matches what onSendTaskMessage actually resolves) — shown as "Sending to" in the SMS/Email composer
   ccContacts?: Contact[]; // searchable contacts for the email Cc/Bcc pickers
   onUploadMessageImage?: (file: File) => Promise<Attachment | null>;
@@ -188,6 +192,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const switchRightTab = (tab: "activity" | "chat" | "sms" | "email" | "ai") => {
     if (tab === "email" && !looksLikeHtml(msgBody)) { setMsgBody((b) => plainTextToHtml(b)); setEmailFocusNonce((n) => n + 1); }
     else if ((tab === "sms" || tab === "chat") && looksLikeHtml(msgBody)) setMsgBody((b) => htmlToText(b));
+    if (tab === "chat" || tab === "sms" || tab === "email") onMarkChannelRead?.(tab);
     setRightTab(tab);
   };
   const hasComposedMessage = rightTab === "email" ? !!htmlToText(msgBody).trim() : !!msgBody.trim();
@@ -862,6 +867,12 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const chatMsgCount = (messages ?? []).filter((m) => m.channel === "chat").length;
   const emailMsgCount = (messages ?? []).filter((m) => m.channel === "email").length;
   const smsMsgCount = (messages ?? []).filter((m) => m.channel === "sms").length;
+  // A new inbound message on a channel tab you haven't opened yet — cleared
+  // by switchRightTab's onMarkChannelRead the moment you click into it.
+  const chatUnread = (messages ?? []).some((m) => m.channel === "chat" && m.direction === "inbound" && !m.read);
+  const emailUnread = (messages ?? []).some((m) => m.channel === "email" && m.direction === "inbound" && !m.read);
+  const smsUnread = (messages ?? []).some((m) => m.channel === "sms" && m.direction === "inbound" && !m.read);
+  const unreadDot = (color: string) => <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color }} />;
   // Same colors the message feed already uses per channel (dotColor in
   // commentsFeed) and the composers' own top border — reused here so the
   // tab itself, and the whole panel while it's active, both say which
@@ -887,13 +898,13 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     <div className="flex flex-wrap items-center gap-1">
       <button onClick={() => switchRightTab("activity")} title="Team chat (internal only)" {...tabBtnStyle("activity")}><I.comment /> Team · {commentCount}</button>
       {hasMessaging && (
-        <button onClick={() => switchRightTab("chat")} title="Client chat" {...tabBtnStyle("chat")}><I.chatBubbles /> Chat{chatMsgCount > 0 ? ` · ${chatMsgCount}` : ""}</button>
+        <button onClick={() => switchRightTab("chat")} title={chatUnread ? "Client chat — new message" : "Client chat"} {...tabBtnStyle("chat")}><I.chatBubbles /> Chat{chatMsgCount > 0 ? ` · ${chatMsgCount}` : ""} {chatUnread && unreadDot(tabColors.chat)}</button>
       )}
       {hasMessaging && (
-        <button onClick={() => switchRightTab("email")} title="Email" {...tabBtnStyle("email")}><I.mail /> Email{emailMsgCount > 0 ? ` · ${emailMsgCount}` : ""}</button>
+        <button onClick={() => switchRightTab("email")} title={emailUnread ? "Email — new message" : "Email"} {...tabBtnStyle("email")}><I.mail /> Email{emailMsgCount > 0 ? ` · ${emailMsgCount}` : ""} {emailUnread && unreadDot(tabColors.email)}</button>
       )}
       {hasMessaging && (
-        <button onClick={() => switchRightTab("sms")} title="Text message" {...tabBtnStyle("sms")}><I.phone /> SMS{smsMsgCount > 0 ? ` · ${smsMsgCount}` : ""}</button>
+        <button onClick={() => switchRightTab("sms")} title={smsUnread ? "Text message — new message" : "Text message"} {...tabBtnStyle("sms")}><I.phone /> SMS{smsMsgCount > 0 ? ` · ${smsMsgCount}` : ""} {smsUnread && unreadDot(tabColors.sms)}</button>
       )}
       {onRegenerateAiSummary && (
         <button onClick={() => switchRightTab("ai")} className={aiTabClass}>AI</button>

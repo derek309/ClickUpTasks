@@ -367,6 +367,11 @@ export const insertMessage = (m: Message) => supabase.from("messages").insert(me
 // inbound row for that contact in a single UPDATE.
 export const markMessagesReadDb = (contactId: string) =>
   supabase.from("messages").update({ read: true }).eq("contact_id", contactId).eq("read", false).then(logErr);
+// Narrower than markMessagesReadDb above — one task's messages on one
+// channel, for the TaskDrawer's per-tab unread dot (Chat/Email/SMS), which
+// needs to clear just the tab you opened, not every message for the contact.
+export const markTaskChannelReadDb = (taskId: string, channel: MessageChannel) =>
+  supabase.from("messages").update({ read: true }).eq("task_id", taskId).eq("channel", channel).eq("read", false).then(logErr);
 // Admin-only per messages_delete RLS (see supabase/message-delete-policy.sql)
 // — a wrongly sent client-facing email/sms/chat message, not something any
 // assignee should be able to erase on their own.
