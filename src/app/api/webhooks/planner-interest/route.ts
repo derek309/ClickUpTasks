@@ -60,12 +60,20 @@ export async function POST(req: NextRequest) {
   const territory = (territories ?? []).find((t: any) => (t.wp_city_slug || slugify(String(t.city ?? ""))) === city) ?? null;
 
   // Flip the matching week.invited entry's status to "accepted" so the
-  // Planner can show real response state instead of just "sent". Every
-  // event this route accepts (interested/intake/approved/info_submitted) is
-  // a positive response — WordPress has no "declined" event to send, so
-  // there's nothing to write for a no. Independent of the client/task work
-  // below; a listing invited before this shipped, or an invite link with no
-  // matching week row, just means nothing to update — not an error.
+  // Planner can show real response state instead of just "sent" — but only
+  // once they've actually engaged, not the instant the landing page loads.
+  // "interested" fires automatically on page load (the join page auto-POSTs
+  // it before showing the intake questions — sales-outreach.php's Step 1
+  // skip), so on its own it's not a real signal of interest, just that the
+  // link was opened. "intake" (answered the 3 questions), "approved"
+  // (already-claimed, approved outright), and "info_submitted" (completed
+  // the claim funnel) are the real engagement signals (Derek, Aug 3) — only
+  // those flip status. "interested" still records respondedAt/responseEvent
+  // for the audit trail, just leaves status as "invited" until a stronger
+  // signal arrives. WordPress has no "declined" event to send, so there's
+  // nothing to write for a no. Independent of the client/task work below; a
+  // listing invited before this shipped, or an invite link with no matching
+  // week row, just means nothing to update — not an error.
   const gdPlaceId = Number(body?.listing_id);
   if (territory?.id && Number.isFinite(gdPlaceId)) {
     const { data: weekRow } = await supabaseAdmin.from("planner_weeks").select("id, picks").eq("territory_id", territory.id).eq("week", week).maybeSingle();
@@ -78,7 +86,9 @@ export async function POST(req: NextRequest) {
       let latestIdx = -1;
       for (let i = 0; i < invited.length; i++) if (invited[i]?.gdPlaceId === gdPlaceId) latestIdx = i;
       if (latestIdx !== -1) {
-        invited[latestIdx] = { ...invited[latestIdx], status: "accepted", respondedAt: new Date().toISOString(), responseEvent: event };
+        const patch: any = { respondedAt: new Date().toISOString(), responseEvent: event };
+        if (event !== "interested") patch.status = "accepted";
+        invited[latestIdx] = { ...invited[latestIdx], ...patch };
         await supabaseAdmin.from("planner_weeks").update({ picks: { ...picks, __invited: invited } }).eq("id", weekRow.id);
       }
     }
