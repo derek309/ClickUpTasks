@@ -155,6 +155,11 @@ export const NURTURE_CHECK_IN_DAYS = 30;
  * read this single constant, so the daily nudge and the dashboard's ranking
  * always agree on what "stuck" means. */
 export const STEP_STALL_DAYS = 14;
+/** How long a newly won business's trial runs, in days — the window that
+ * opens the moment the deal actually closes (card on file), and the source
+ * of Client.trialEndsAt. One constant so the length is changed in one
+ * place if the offer ever changes. */
+export const TRIAL_DAYS = 14;
 /** `clients.status` is plain text with no DB-level CHECK constraint, so a
  * stored value can in principle predate a funnel change (as happened when
  * this went from active/paused/archived to the 6-stage funnel below, and
@@ -241,6 +246,28 @@ export interface Client {
    * courtesy, the column is the gate. Optional (like canMessage) so existing
    * clientsSeed literals don't need editing; read as `=== true` everywhere. */
   canRequestNewTasks?: boolean;
+  /** Whether this business is inside its 14-day trial, and the day that
+   * window closes. Deliberately a SEPARATE axis from `status`: status is a
+   * fulfillment stage (where the work has got to), while this is a sales
+   * moment (the deal actually closed, card on file, clock running). Before
+   * this existed a won-but-still-in-trial business and a long-settled one
+   * were indistinguishable, because "onboarding"/"active_client" only ever
+   * described delivery. Set once, at the transition that promotes a prospect
+   * onto the roster (see setClientStatus in Cockpit.tsx) — never re-stamped
+   * by a later save, so the window can't silently slide forward.
+   * trialEndsAt is a plain ISO date string, same type/comparison semantics as
+   * followUpAt and tasks.due. */
+  inTrial?: boolean;
+  trialEndsAt?: string | null;
+  /** Whether this business actually does SMS marketing, which is what gates
+   * creating the A2P registration steps and the dedicated email domain step
+   * at all (see reconcilePlaybookTasks). Plenty of businesses never text
+   * their list, and handing every one of them five setup tasks they'll never
+   * do buries the steps that matter. Off unless someone says otherwise, so
+   * the extra work is opted into rather than issued by default. Optional
+   * (like canMessage) so existing clientsSeed literals don't need editing;
+   * read as `=== true` everywhere. */
+  doesA2P?: boolean;
 }
 
 /** A quick-access link on a client's page (live site, WP admin, etc.), stored
@@ -1044,6 +1071,17 @@ export const PLAYBOOK_ALL_STEPS: PlaybookStepDef[] = [
 export const PLAYBOOK_STEP_BY_KEY: Map<string, PlaybookStepDef> = new Map(
   PLAYBOOK_ALL_STEPS.map((s) => [s.key, s])
 );
+
+/** Which steps a given business actually gets REAL task rows for. Distinct
+ * from PLAYBOOK_ALL_STEPS, which stays the full lookup so a task created
+ * under an older rule still resolves its guide panel. The A2P registration
+ * and dedicated email domain steps only apply to a business that texts its
+ * list (Client.doesA2P) — everything else is universal. Shared by both
+ * reconcilers (Cockpit.tsx's and playbookReconcileServer.ts's) so the two
+ * can't drift on what a business is owed. */
+export function playbookStepsForClient(doesA2P: boolean): PlaybookStepDef[] {
+  return doesA2P ? PLAYBOOK_ALL_STEPS : [...PLAYBOOK_STEPS, ...PLAYBOOK_ONGOING_STEPS];
+}
 
 // Non-task, purely informational content from the source doc — rendered as
 // read-only banners around the Playbook task list (Cockpit.tsx), never

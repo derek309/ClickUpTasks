@@ -7,7 +7,7 @@
 // read/write from the WordPress bridge so a business that's never had its
 // Playbook opened in the app yet still gets a complete row set first.
 import { supabaseAdmin } from "./supabaseAdmin";
-import { PLAYBOOK_ALL_STEPS, playbookProjectId } from "./data";
+import { playbookStepsForClient, playbookProjectId } from "./data";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -25,9 +25,15 @@ export async function reconcilePlaybookTasksServer(clientId: string): Promise<vo
     .not("playbook_step_key", "is", null);
   const byKey = new Map((existingTasks ?? []).map((t: any) => [t.playbook_step_key as string, t]));
 
+  // Same A2P/email-domain gate as the browser copy — without it this route
+  // would quietly re-create, on the next WordPress bridge call, exactly the
+  // rows the app just stopped making.
+  const { data: clientRow } = await supabaseAdmin.from("clients").select("does_a2p").eq("id", clientId).maybeSingle();
+  const steps = playbookStepsForClient((clientRow as any)?.does_a2p === true);
+
   const toInsert: Record<string, unknown>[] = [];
   const toRetitle: { id: string; title: string }[] = [];
-  for (const step of PLAYBOOK_ALL_STEPS) {
+  for (const step of steps) {
     const existing = byKey.get(step.key);
     if (!existing) {
       toInsert.push({

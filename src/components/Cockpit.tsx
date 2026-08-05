@@ -21,6 +21,7 @@ import {
   NEXT_WEEK_END,
   THIS_MONTH_END,
   NURTURE_CHECK_IN_DAYS,
+  TRIAL_DAYS,
   STATUS_META,
   STATUS_ORDER,
   applyWaitingStatusSync,
@@ -65,6 +66,7 @@ import {
   PLAYBOOK_EMAIL_DOMAIN_PHASE,
   PLAYBOOK_ONGOING_PHASE,
   PLAYBOOK_ALL_STEPS,
+  playbookStepsForClient,
   PLAYBOOK_INTRO,
   PLAYBOOK_MILESTONE,
   PLAYBOOK_ALWAYS_RUNNING,
@@ -493,13 +495,32 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const setClientStatus = (id: string, status: ClientStatus) => {
     const c = clientById(id);
     if (!c || c.status === status) return;
-    // Conversion moment: a territory prospect that reaches onboarding (or
-    // straight to active) has stopped being a prospect, so it joins the real
-    // client roster here. One-way on purpose — moving a client back to an
-    // earlier stage is a lifecycle correction, not a reason to hide it from
-    // the sidebar again.
-    const promoted = c.type === "prospect" && (status === "onboarding" || status === "active_client");
-    const nc: Client = { ...c, status, ...(promoted ? { type: "client" as const } : {}) };
+    // Conversion moment: a territory prospect that reaches active_client has
+    // stopped being a prospect, so it joins the real client roster here.
+    // One-way on purpose — moving a client back to an earlier stage is a
+    // lifecycle correction, not a reason to hide it from the sidebar again.
+    //
+    // "onboarding" (Listing Launch) used to promote too, and that was the
+    // bug: it fires a full step BEFORE the business is actually won and
+    // paying, so unclosed deals landed on the main dashboard alongside real
+    // clients. active_client is now the sole trigger — and it's a deliberate,
+    // temporary anchor, not the right long-term signal. The real "won" moment
+    // is the pitch meeting closing with a card on file, which is a sales
+    // stage transition, and the sales stage catalog doesn't exist yet. When
+    // it ships, this condition (and the trial stamp below) moves to key off
+    // that transition instead of a fulfillment stage. Everything the seam
+    // needs is right here — no other place promotes out of prospect.
+    const promoted = c.type === "prospect" && status === "active_client";
+    // The 14-day trial starts at that same moment, and only ever once: a
+    // client already carrying inTrial (or reaching active_client a second
+    // time, or already type "client") keeps its original window, so a
+    // routine re-save can't push the end date out.
+    const startsTrial = promoted && c.inTrial !== true;
+    const nc: Client = {
+      ...c, status,
+      ...(promoted ? { type: "client" as const } : {}),
+      ...(startsTrial ? { inTrial: true, trialEndsAt: addDaysIso(TODAY, TRIAL_DAYS) } : {}),
+    };
     setClients((cs) => cs.map((x) => (x.id === id ? nc : x)));
     markOwnClientWrite(nc.id);
     upsertClient(nc);
@@ -549,6 +570,26 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     markOwnClientWrite(nc.id);
     upsertClient(nc);
     pushToast(on ? `${c.name} can now add their own requests.` : `${c.name} can no longer add their own requests.`);
+  };
+  // Whether this client's Playbook includes the A2P texting setup steps and
+  // the dedicated email domain step. Off by default (see
+  // playbookStepsForClient in data.ts): not every business does SMS
+  // marketing, and creating those tasks unconditionally for everyone used to
+  // be a real bug. Admin only, same reasoning as the toggle above.
+  const toggleClientDoesA2P = (clientId: string) => {
+    const c = clientById(clientId);
+    if (!c) return;
+    const on = c.doesA2P !== true;
+    const nc = { ...c, doesA2P: on };
+    setClients((cs) => cs.map((x) => (x.id === clientId ? nc : x)));
+    markOwnClientWrite(nc.id);
+    upsertClient(nc);
+    // The page-view effect only reconciles on a client switch, so without
+    // this the new A2P steps wouldn't appear until you navigated away and
+    // back. Turning it off intentionally does NOT remove anything already
+    // created, same as every other reconcile call in this file.
+    if (on) reconcilePlaybookTasks(clientId);
+    pushToast(on ? `${c.name} now gets the A2P setup steps.` : `${c.name} no longer gets the A2P setup steps.`);
   };
   // "Follow" a project directly — same idea as toggleClientAssignment, just
   // scoped to one project instead of the whole client. App-level only (no
@@ -2139,8 +2180,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // A2P/email-domain/ongoing ride the same reconciliation as the main 18
     // (same project, same create/retitle logic) — they're just excluded from
     // playbookCompletion()'s total and rendered as their own groups
-    // (buildPlaybookGroups below).
-    for (const step of PLAYBOOK_ALL_STEPS) {
+    // (buildPlaybookGroups below). A2P and email-domain additionally only
+    // apply to a business that texts its list, hence playbookStepsForClient:
+    // every other business was being handed five setup tasks it would never
+    // do. Narrowing the catalog only affects what this loop CREATES (and
+    // retitles): an A2P row already written for a business that turns out
+    // not to text is simply left alone — never deleted, never hidden, still
+    // in its group and still resolving its guide panel through
+    // PLAYBOOK_STEP_BY_KEY, which stays the full catalog.
+    const steps = playbookStepsForClient(clientById(clientId)?.doesA2P === true);
+    for (const step of steps) {
       const existing = byKey.get(step.key);
       if (!existing) {
         toWrite.push({
@@ -2299,8 +2348,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // Monthly retention sits at the very end — an ongoing duty, not something
     // to front-load, and distinct from the fully-passive PLAYBOOK_ALWAYS_RUNNING
     // banner since it needs an ambassador to actually act on it each month.
+    // Those two side quests are the only groups that can legitimately be
+    // empty now that they're gated on Client.doesA2P — this list renders with
+    // hideEmpty off (so a phase you've cleared still shows its heading), which
+    // would otherwise leave a business that doesn't text staring at two
+    // permanently blank sections. Dropped only when empty, so a client who
+    // already has A2P rows from before the gate keeps seeing them.
+    const sideQuest = [groupFor(PLAYBOOK_A2P_PHASE), groupFor(PLAYBOOK_EMAIL_DOMAIN_PHASE)].filter((g) => g.tasks.length > 0);
     const byPhase = [
-      groupFor(PLAYBOOK_PHASES[0]), groupFor(PLAYBOOK_PHASES[1]), groupFor(PLAYBOOK_A2P_PHASE), groupFor(PLAYBOOK_EMAIL_DOMAIN_PHASE),
+      groupFor(PLAYBOOK_PHASES[0]), groupFor(PLAYBOOK_PHASES[1]), ...sideQuest,
       ...PLAYBOOK_PHASES.slice(2).map(groupFor),
       groupFor(PLAYBOOK_ONGOING_PHASE),
     ];
@@ -4042,6 +4098,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               Client can add requests
             </button>
           )}
+          {/* Not every business does SMS marketing, so the A2P setup steps
+              and the email domain step are opt in rather than created for
+              everyone (see playbookStepsForClient in data.ts). Sits here
+              because it's the same kind of per client Playbook decision. */}
+          {canAdmin && activeClient !== "all" && !activeProject && clientById(activeClient) && (
+            <button onClick={() => toggleClientDoesA2P(activeClient)}
+              title="Include the A2P texting setup steps in this client's Playbook"
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background">
+              <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${clientById(activeClient)?.doesA2P ? "border-accent bg-accent text-white" : "border-border"}`}>{clientById(activeClient)?.doesA2P && <I.check />}</span>
+              Client does A2P texting
+            </button>
+          )}
           {activeClient !== "all" && activeProject && projectById(activeProject) && (
             <button onClick={() => { setHeaderMoreOpen(false); copyClientShareLink(activeClient, activeProject); }} title="Same public link, opened straight to this list — a client with more than one list still only has the one link to keep"
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy list link</button>
@@ -4456,7 +4524,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               {!activeProject && canAdmin && (() => {
                 const c = clientById(activeClient)!;
                 const meta = clientStatusMeta(c.status);
-                return (
+                return (<>
                   <span className="inline-flex items-center gap-1.5 rounded-md border pl-2 pr-1 py-1" title="Client status">
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: meta.dot }} />
                     <select value={c.status} onChange={(e) => { setClientStatus(c.id, e.target.value as ClientStatus); }}
@@ -4464,7 +4532,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                       {CLIENT_STATUS_ORDER.map((s) => <option key={s} value={s}>{CLIENT_STATUS_META[s].label}</option>)}
                     </select>
                   </span>
-                );
+                  {/* Trial window, stamped when the deal closed (see
+                      setClientStatus). Read-only on purpose: the stage
+                      dropdown next to it says where the work has got to,
+                      this says how long the clock has left, and they're
+                      genuinely different questions. Nothing to click. */}
+                  {c.trialEndsAt && (
+                    <span className="inline-flex items-center rounded-md border px-2 py-1 text-[13px] font-medium text-muted" title="14 day trial window, set when this deal closed">
+                      Trial ends {formatDue(c.trialEndsAt)}
+                    </span>
+                  )}
+                </>);
               })()}
               {/* Review controls — only when the open scope currently needs a
                   review. "Reviewed" clears it (stamps reviewedAt=today); "Next"
@@ -4517,6 +4595,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                         className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background">
                         <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${clientById(activeClient)?.canRequestNewTasks ? "border-accent bg-accent text-white" : "border-border"}`}>{clientById(activeClient)?.canRequestNewTasks && <I.check />}</span>
                         Client can add requests
+                      </button>
+                    )}
+                    {canAdmin && activeClient !== "all" && !activeProject && clientById(activeClient) && (
+                      <button onClick={() => toggleClientDoesA2P(activeClient)}
+                        title="Include the A2P texting setup steps in this client's Playbook"
+                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background">
+                        <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${clientById(activeClient)?.doesA2P ? "border-accent bg-accent text-white" : "border-border"}`}>{clientById(activeClient)?.doesA2P && <I.check />}</span>
+                        Client does A2P texting
                       </button>
                     )}
                     <button onClick={() => { setHeaderMoreOpen(false); copyClientForClaude(); }}
