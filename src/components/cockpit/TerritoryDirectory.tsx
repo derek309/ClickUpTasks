@@ -51,6 +51,22 @@ export type DirectoryListing = {
 
 // Last 10 digits — normalizes (555) 123-4567 / +1 555 123 4567 / 5551234567 to
 // the same key so a listing and a GHL contact match despite formatting.
+// WordPress stores the weekly invite email as one blob per (city, week) whose
+// first line is "Subject: ...". Split/join here are presentation only — a
+// human editing subject and body as two fields, not a storage format change —
+// so anything else that reads the saved value (the send path, the Sales tool)
+// keeps working untouched. joinTemplate(...splitTemplate(t)) === t whenever t
+// already follows that convention, since split keeps the body's exact bytes
+// (including a leading blank line, if the generator wrote one) and join only
+// ever prepends the subject line back onto it.
+function splitTemplate(text: string): [string, string] {
+  const m = text.match(/^Subject:[ \t]*(.*)\r?\n?/);
+  if (!m) return ["", text];
+  return [m[1], text.slice(m[0].length)];
+}
+function joinTemplate(subject: string, body: string): string {
+  return `Subject: ${subject}\n${body}`;
+}
 const digits = (s: string | undefined) => (s ?? "").replace(/\D/g, "").slice(-10);
 const lc = (s: string | undefined) => (s ?? "").trim().toLowerCase();
 
@@ -666,8 +682,10 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   const [tplOpen, setTplOpen] = useState(false);
   const [tplLoading, setTplLoading] = useState(false);
   const [tplErr, setTplErr] = useState<string | null>(null);
-  const [tplSaved, setTplSaved] = useState("");   // last value the server confirmed
-  const [tplDraft, setTplDraft] = useState("");   // what's in the textarea now
+  const [tplSaved, setTplSaved] = useState("");   // last value the server confirmed, joined
+  const [tplSubject, setTplSubject] = useState(""); // the two fields shown to a human
+  const [tplBody, setTplBody] = useState("");
+  const tplDraft = joinTemplate(tplSubject, tplBody); // what actually gets saved/compared
   const [tplBusy, setTplBusy] = useState<"saving" | "generating" | null>(null);
   // Loaded once per week, not on every expand — collapsing the panel with
   // unsaved edits and reopening it shouldn't silently throw them away.
@@ -685,7 +703,9 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
         if (!r.ok) { setTplErr(j?.error || `Couldn't load this week's email (${r.status}).`); return; }
         tplLoadedWeek.current = todayWeekIso;
         setTplSaved(j.email ?? "");
-        setTplDraft(j.email ?? "");
+        const [subj, body] = splitTemplate(j.email ?? "");
+        setTplSubject(subj);
+        setTplBody(body);
       })
       .catch((e) => { if (alive) setTplErr(String(e?.message ?? e)); })
       .finally(() => { if (alive) setTplLoading(false); });
@@ -722,7 +742,9 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j.ok || !j.text) { setTplErr(j?.error || `Couldn't draft a new email (${res.status}).`); return; }
-      setTplDraft(j.text);
+      const [subj, body] = splitTemplate(j.text);
+      setTplSubject(subj);
+      setTplBody(body);
     } catch (e) {
       setTplErr(e instanceof Error ? e.message : "Couldn't draft a new email.");
     } finally {
@@ -908,10 +930,12 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
 
       {/* This week's invite email — the copy every business in the city
           receives. WordPress stores it as ONE blob per (city, week) whose
-          first line is the subject, so it's edited here as one textarea
-          rather than split into fields that would just be re-joined on save.
-          Same week the panels above use; there's deliberately no week picker.
-          Admin only, matching the daily invite cap control. */}
+          first line is "Subject: ...", but a human editing it wants two
+          fields, not one box with the subject buried in line one — split for
+          display, rejoined into that same one-blob format on save (see
+          splitTemplate/joinTemplate above). Same week the panels above use;
+          there's deliberately no week picker. Admin only, matching the daily
+          invite cap control. */}
       {territoryId && canAdmin && (
         <div className="mb-2 rounded-lg border bg-surface">
           <button onClick={() => setTplOpen((v) => !v)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] font-medium text-muted hover:text-foreground">
@@ -926,7 +950,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
               ) : (
                 <>
                   <div className="mb-1.5 text-[12px] text-muted">
-                    First line is the subject, written as <code>Subject: …</code>. Keep the placeholders below intact; each one is filled in per business when the email sends.
+                    Keep the placeholders below intact; each one is filled in per business when the email sends.
                   </div>
                   <div className="mb-1.5 flex flex-wrap gap-1.5 text-[12px]">
                     {[
@@ -940,9 +964,18 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                       </span>
                     ))}
                   </div>
-                  <textarea value={tplDraft} onChange={(e) => setTplDraft(e.target.value)} rows={14} spellCheck
-                    placeholder={"Subject: A free feature for {{business}}\n\nHi there,\n…"}
-                    className="w-full rounded-lg border bg-background px-2.5 py-2 font-mono text-[13px] leading-relaxed outline-none focus:border-accent" />
+                  <label className="mb-2 block">
+                    <span className="mb-1 block text-[12px] font-medium text-muted">Subject</span>
+                    <input value={tplSubject} onChange={(e) => setTplSubject(e.target.value)} spellCheck
+                      placeholder="A free feature for {{business}}"
+                      className="w-full rounded-lg border bg-background px-2.5 py-1.5 text-[13px] outline-none focus:border-accent" />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-[12px] font-medium text-muted">Body</span>
+                    <textarea value={tplBody} onChange={(e) => setTplBody(e.target.value)} rows={13} spellCheck
+                      placeholder={"Hi there,\n…"}
+                      className="w-full rounded-lg border bg-background px-2.5 py-2 font-mono text-[13px] leading-relaxed outline-none focus:border-accent" />
+                  </label>
                   <div className="mt-1.5 flex flex-wrap items-center gap-2">
                     <button onClick={saveTemplate} disabled={tplDraft === tplSaved || tplBusy !== null}
                       title={tplDraft === tplSaved ? "Nothing to save yet" : "Save this copy for the week"}
