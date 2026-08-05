@@ -1187,6 +1187,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // richer, quoted-comment email (sendMentionEmail, task-comment mentions) —
   // every other notification gets this plain generic email automatically.
   const notify = (recipientId: string, text: string, taskId: string | null, extra?: { clientId?: string | null; projectId?: string | null; kind?: NotificationKind; skipEmail?: boolean }) => {
+    // A private task's title must never leave its owner. RLS keeps the task row
+    // itself unreadable, but notification text is plain and unprotected, and it
+    // doubles as the EMAIL SUBJECT — so without this, marking a personal task
+    // done mailed its title to every admin, who then couldn't open the task the
+    // mail pointed at. Guarding here rather than at each call site so no future
+    // notify() can reintroduce it. Optional chaining is deliberate: a taskId we
+    // can't resolve locally is treated as not-private, not as private.
+    const nt = taskId ? tasksRef.current.find((x) => x.id === taskId) : null;
+    if (nt?.private && recipientId !== nt.assigneeId) return;
     const n: Notification = { id: newId("n_"), recipientId, text, taskId, actorId: me.id, clientId: extra?.clientId ?? null, projectId: extra?.projectId ?? null, at: new Date().toISOString(), read: false, kind: extra?.kind ?? "activity" };
     setNotifications((ns) => [n, ...ns]);
     insertNotif(n);
@@ -1383,7 +1392,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const soonestByClient = new Map<string, string>();
     const soonestByProject = new Map<string, string>();
     for (const t of tasks) {
-      if (t.status === "done" || !t.due) continue;
+      // Playbook steps are excluded for the same reason baseTasks hides them:
+      // they're the Owner Growth Plan, not the business's regular work. Leaving
+      // them in pinned follow-up dates to a task nobody could see in the Tasks
+      // tab, and the date couldn't be moved off it either — alignOverdueTasksTo
+      // only shifts tasks assigned to you, and playbook steps are unassigned,
+      // so this effect just wrote the old date straight back. monthly_proof_report
+      // recurs monthly, so it re-pinned every client to a 1st-of-month date.
+      if (t.status === "done" || !t.due || t.playbookStepKey) continue;
       const pc = soonestByClient.get(t.clientId);
       if (!pc || t.due < pc) soonestByClient.set(t.clientId, t.due);
       if (t.projectId) {
@@ -4217,7 +4233,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             // instead of hunting down every task blocking it by hand. VAs
             // keep the old read-only display — tasks_update RLS would
             // reject them writing a teammate's task anyway.
-            const autoTracked = tasks.some((t) => t.status !== "done" && !!t.due && (scopedProject ? t.projectId === scopedProject.id : t.clientId === activeClient));
+            // Playbook steps excluded to match the recompute effect above: they
+            // aren't visible in the Tasks tab, so claiming "auto-tracked" from
+            // one told you the date was following a task you couldn't find.
+            const autoTracked = tasks.some((t) => t.status !== "done" && !!t.due && !t.playbookStepKey && (scopedProject ? t.projectId === scopedProject.id : t.clientId === activeClient));
             const editable = !autoTracked || canAdmin;
             return (
               <div title={autoTracked ? (canAdmin ? "Follow-up date — click to move it, and it'll pull anything due today or overdue up to match" : "Follow-up date — auto-tracked to the next task due date") : "Follow-up date — when to next check in on this"}

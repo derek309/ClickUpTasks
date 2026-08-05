@@ -693,6 +693,22 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   // a proper subject-then-body layout. Sending flips back to the Activity
   // tab (see submitTaskMessage) so the send is visible immediately.
   const hasMessaging = !!(linkedContact && onSendTaskMessage);
+  // A "Reply to X" task exists BECAUSE something came in, so opening it on the
+  // generic Activity tab buried the actual email or text one click away. The
+  // reply task row itself stores no channel, but the inbound message does
+  // (messages.channel, back-tagged with this task's id on ingest), so the most
+  // recent inbound message decides which tab opens. Keyed on task.id because
+  // the drawer is NOT remounted between tasks — without the reset, prev/next
+  // would carry one task's channel onto the next. A "call" has no compose tab,
+  // so it stays on Activity.
+  useEffect(() => {
+    if (!hasMessaging) return;
+    const inbound = (messages ?? []).filter((m) => m.direction === "inbound");
+    if (!inbound.length) return;
+    const newest = inbound.reduce((a, b) => (b.at > a.at ? b : a));
+    if (newest.channel === "sms" || newest.channel === "email" || newest.channel === "chat") setRightTab(newest.channel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task.id, hasMessaging]);
   // Claude (via the MCP server's draft_email tool) staged an outbound email
   // on this task for a human to review — never sent automatically. "Review"
   // loads it straight into the real Email composer (same rich-text editor,
