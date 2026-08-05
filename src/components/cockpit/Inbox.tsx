@@ -5,7 +5,7 @@
 // as a proper full-page reading list instead of the small bell popover.
 import { useState } from "react";
 import { timeAgo, dayLabel, type Notification, type Client, type Project, type UnmatchedEmail, type GranolaUnmatchedMeeting } from "@/lib/data";
-import { I, Avatar } from "./ui";
+import { I, Avatar, SearchableSelect } from "./ui";
 
 type InboxFilter = "unread" | "all" | "sms" | "email" | "activity";
 
@@ -181,11 +181,12 @@ export function Inbox({ notifications, clientById, projectById, onOpen, onMarkRe
                     <div className="flex shrink-0 items-center gap-1.5">
                       {onAssignGranolaMeeting && (
                         <>
-                          <select value={picked} onChange={(e) => setGranolaPick((p) => ({ ...p, [g.id]: e.target.value }))}
-                            className="rounded-md border bg-surface px-1.5 py-1 text-[13px] outline-none">
-                            <option value="">Assign to…</option>
-                            {allClients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                          </select>
+                          <div className="w-40">
+                            <SearchableSelect value={picked} onChange={(v) => setGranolaPick((p) => ({ ...p, [g.id]: v }))}
+                              options={allClients.map((c) => ({ value: c.id, label: c.name }))}
+                              placeholder="Assign to…" searchPlaceholder="Search clients…"
+                              className="rounded-md border bg-surface px-1.5 py-1 text-[13px]" />
+                          </div>
                           <button onClick={() => picked && onAssignGranolaMeeting(g, picked)} disabled={!picked}
                             className="rounded-md border border-accent bg-accent px-2 py-1 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-40">Assign</button>
                         </>
