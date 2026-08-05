@@ -65,7 +65,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ ghl
   const eventBody = done ? "owner marked this done from their business dashboard" : "owner reopened this from their business dashboard";
   const comment = { id: "cm_" + crypto.randomUUID(), authorId: SYSTEM_AUTHOR_ID, body: eventBody, at: new Date().toISOString(), kind: "event" };
   await supabaseAdmin.rpc("append_comment", { task_id: task.id, comment });
-  await supabaseAdmin.from("tasks").update({ status: newStatus }).eq("id", task.id);
+  await supabaseAdmin.from("tasks").update({ status: newStatus, updated_by: null }).eq("id", task.id);
 
   // Only the single monthly_proof_report step is ever recurring — cheap to
   // check unconditionally rather than special-case the key.

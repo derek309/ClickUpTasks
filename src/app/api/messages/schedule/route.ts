@@ -16,6 +16,8 @@ export async function GET(req: NextRequest) {
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const clientId = req.nextUrl.searchParams.get("clientId");
   if (!clientId) return NextResponse.json({ error: "clientId is required." }, { status: 400 });
+  const denied = await canCallerMessageClient(caller, clientId);
+  if (denied) return NextResponse.json({ error: denied }, { status: 403 });
   const { data, error } = await supabaseAdmin
     .from("scheduled_messages")
     .select("id, client_id, task_id, channel, subject, body, cc, bcc, from_email, attachments, scheduled_at, status, error, created_by, sent_message_id, created_at")

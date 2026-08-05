@@ -135,7 +135,7 @@ export async function upsertConversationTask(
       const next = withMeetingLocation(openTasks[0].attachments ?? [], opts.location);
       if (next !== null) patch.attachments = next; // null = location unchanged, don't churn the attachment
     }
-    await supabaseAdmin.from("tasks").update(patch).eq("id", openTasks[0].id);
+    await supabaseAdmin.from("tasks").update({ ...patch, updated_by: null }).eq("id", openTasks[0].id);
     return openTasks[0].id;
   }
 

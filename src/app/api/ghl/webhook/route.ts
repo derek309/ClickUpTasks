@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
   if (completed === true && row.status !== "done") patch.status = "done";
   if (Object.keys(patch).length === 0) return NextResponse.json({ ok: true, skipped: "nothing to update" });
 
-  const { error } = await supabaseAdmin.from("tasks").update(patch).eq("id", row.id);
+  const { error } = await supabaseAdmin.from("tasks").update({ ...patch, updated_by: null }).eq("id", row.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true, updated: Object.keys(patch) });
 }

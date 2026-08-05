@@ -1036,6 +1036,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           return;
         }
         const row = p.new;
+        // Every server-side write (client portal response, inbound email/SMS,
+        // owner Playbook completion) must send updated_by: null. Without it
+        // this stays pinned to whichever rep last touched the row from the
+        // browser, so a real client reply gets silently dropped by this check
+        // as if it were an echo of that rep's own edit — and their next save
+        // then overwrites the reply that was never applied locally.
         if (row.updated_by && row.updated_by === me.id) return; // server-confirmed own write
         const t = rowToTask(row);
         setTasks((ts) => (ts.some((x) => x.id === t.id) ? ts.map((x) => (x.id === t.id ? t : x)) : [...ts, t]));

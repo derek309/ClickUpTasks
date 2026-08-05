@@ -41,5 +41,5 @@ export async function reconcilePlaybookTasksServer(clientId: string): Promise<vo
   }
 
   if (toInsert.length) await supabaseAdmin.from("tasks").insert(toInsert);
-  for (const r of toRetitle) await supabaseAdmin.from("tasks").update({ title: r.title }).eq("id", r.id);
+  for (const r of toRetitle) await supabaseAdmin.from("tasks").update({ title: r.title, updated_by: null }).eq("id", r.id);
 }

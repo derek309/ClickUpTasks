@@ -79,7 +79,7 @@ async function upsertConversationTask(contact: Contact, ghlContactId: string | n
   const { data: openTasks } = await supabaseAdmin
     .from("tasks").select("id").eq("contact_id", contact.id).eq("priority", "conversation").neq("status", "done").limit(1);
   if (openTasks && openTasks.length > 0) {
-    await supabaseAdmin.from("tasks").update({ due: today }).eq("id", openTasks[0].id);
+    await supabaseAdmin.from("tasks").update({ due: today, updated_by: null }).eq("id", openTasks[0].id);
     return openTasks[0].id;
   }
   let projectId: string | undefined = (
@@ -253,7 +253,7 @@ export async function ingestInboundMessage(opts: {
   // resurfaces; only a thread with no such history falls back to the
   // generic per-contact Conversation task.
   let taskId = await resolveTaskForThread(contact.id, opts.gmailThreadId);
-  if (taskId) await supabaseAdmin.from("tasks").update({ due: todayPacific() }).eq("id", taskId);
+  if (taskId) await supabaseAdmin.from("tasks").update({ due: todayPacific(), updated_by: null }).eq("id", taskId);
   else taskId = await upsertConversationTask(contact, opts.ghlContactId ?? null);
   if (taskId) await supabaseAdmin.from("messages").update({ task_id: taskId }).eq("id", messageId);
   const snippet = body.replace(/\s+/g, " ").trim().slice(0, 80);

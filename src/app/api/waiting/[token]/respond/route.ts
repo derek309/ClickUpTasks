@@ -69,7 +69,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   if (synced.assigneeId !== undefined) patch.assignee_id = synced.assigneeId;
   if (dueToday) patch.due = todayIso();
 
-  const { error } = await supabaseAdmin.from("tasks").update(patch).eq("id", taskId);
+  const { error } = await supabaseAdmin.from("tasks").update({ ...patch, updated_by: null }).eq("id", taskId);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
   if (notifyRecipient) {
