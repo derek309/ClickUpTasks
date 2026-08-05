@@ -11,6 +11,7 @@ import {
   isOverdue,
   timeAgo,
   htmlToText,
+  plainTextToHtml,
   TODAY,
   TOMORROW,
   addDaysIso,
@@ -166,6 +167,14 @@ const NAV_KEY_VIEWS: Record<string, "dashboard" | "clients" | "projects" | "pers
   "4": "projects",
   "5": "personal",
 };
+
+// Titles longer than this get quietly rewritten by AI after the task is
+// created (see maybeCleanupTaskTitle). 80 characters is roughly two typical
+// sentences: a genuine task title almost never runs that long, so anything
+// past it is a sign the whole thought got typed into the title box. It also
+// matches the "under 80 characters" title the Gmail extension's enrich prompt
+// already asks Gemini for, so both paths agree on what a good title looks like.
+const LONG_TITLE_THRESHOLD = 80;
 
 export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [clients, setClients] = useState<Client[]>([]);
@@ -657,6 +666,44 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     } finally {
       setDraftingDescription(false);
     }
+  };
+  // Background tidy-up for a title someone typed as a whole paragraph. Fired
+  // and forgotten right after a task is created, never awaited: task creation
+  // is a straight client to Supabase write with no server round trip, and it
+  // stays that way. The task is already on screen before this even starts.
+  //
+  // Deliberately silent on every failure path. Nobody asked for this and
+  // nobody is waiting on it, so a Gemini timeout, a parse miss, or a title
+  // that came back unchanged all end with the task exactly as typed. The one
+  // thing worth a toast is success, because a title rewriting itself a second
+  // after you hit enter looks like a bug unless something says otherwise.
+  const maybeCleanupTaskTitle = (taskId: string, title: string, description: string) => {
+    if (title.trim().length <= LONG_TITLE_THRESHOLD) return;
+    void (async () => {
+      try {
+        const res = await authedFetch("/api/ai/cleanup-task-title", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, description }) });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || j.error) return;
+        const cleaned = typeof j.title === "string" ? j.title.trim() : "";
+        if (!cleaned || cleaned === title.trim()) return;
+        // Re-read the task rather than trusting the values we sent: the user
+        // has had a few seconds with it and may have renamed it, written a
+        // description, or deleted it outright. Any of those means our answer
+        // is stale, so leave their version alone.
+        const current = tasksRef.current.find((t) => t.id === taskId);
+        if (!current || current.title !== title) return;
+        const extracted = typeof j.description === "string" ? j.description.trim() : "";
+        const patch: Partial<Task> = { title: cleaned };
+        // Append, never overwrite — the extracted detail is an addition to
+        // whatever description the task already has, not a replacement for it.
+        if (extracted) patch.description = current.description + plainTextToHtml(extracted);
+        patchTask(taskId, patch);
+        pushToast("Cleaned up a long title");
+      } catch {
+        // Network dropped mid-request. Same as every other failure here: the
+        // task keeps the title as typed and the user hears nothing about it.
+      }
+    })();
   };
   // Re-pulls one contact's info from GHL on demand — the bulk sync re-syncs
   // a whole sub-account (~30 sequential API calls for a big location), way
@@ -2339,6 +2386,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setTasks((ts) => [...ts, t]);
     if (projectWrite) projectWrite.then(() => upsertTask(t, me.id));
     else upsertTask(t, me.id);
+    maybeCleanupTaskTitle(t.id, t.title, t.description);
   };
 
   // Quick-add-task FAB: create a task for an explicitly-chosen client/list
@@ -2364,6 +2412,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setTasks((ts) => [...ts, t]);
     if (projectWrite) projectWrite.then(() => upsertTask(t, me.id));
     else upsertTask(t, me.id);
+    maybeCleanupTaskTitle(t.id, t.title, t.description);
     pushToast(`Task added to ${clientById(clientId)?.name ?? "client"}.`);
   };
 
@@ -2393,6 +2442,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     };
     setTasks((ts) => [...ts, t]);
     upsertTask(t, me.id);
+    maybeCleanupTaskTitle(t.id, t.title, t.description);
   };
 
   const quickAddPersonal = (groupKey: string, title: string) => {
@@ -2411,6 +2461,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     };
     setTasks((ts) => [...ts, t]);
     upsertTask(t, me.id);
+    maybeCleanupTaskTitle(t.id, t.title, t.description);
   };
 
   // --- mutations ------------------------------------------------------------
@@ -3585,8 +3636,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     };
     setTasks((ts) => [...ts, t]);
     upsertTask(t, me.id);
+    maybeCleanupTaskTitle(t.id, t.title, t.description);
   };
-  const moveTaskToNewProject = (taskId: string, clientId: string) => {
+  const moveTaskToNewProject =(taskId: string, clientId: string) => {
     setPromptDialog({ title: "New project", placeholder: "Project name", confirmLabel: "Create & move", onSubmit: (name) => {
       setPromptDialog(null);
       const p: Project = { id: newId("p_"), clientId, name, description: "" };
