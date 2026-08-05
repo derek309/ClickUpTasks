@@ -569,6 +569,32 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   const scheduledTimeLabel = formatHour12(AUTO_INVITE_START_HOUR);
   const scheduledTimePassed = parseInt(new Intl.DateTimeFormat("en-US", { timeZone: BUSINESS_TZ, hour: "2-digit", hour12: false }).format(new Date()), 10) % 24 >= AUTO_INVITE_START_HOUR;
   const [autoSendState, setAutoSendState] = useState<"sending" | string | null>(null);
+  // The send response already carries exactly which entries it just wrote
+  // (runPlannerAutoInvite's `entries` field) — merging those into local state
+  // directly updates both status boxes the instant the send finishes, with no
+  // extra fetchPlannerWeeks round trip (what refreshInviteHistory needs a
+  // network call for) standing between "done sending" and "UI shows it."
+  const mergeSentEntriesLocally = (entries: PlannerWeek["invited"]) => {
+    if (!territoryId || !entries.length) return;
+    const existing = plannerWeeksRef.current.find((w) => w.week === todayWeekIso);
+    const merged: PlannerWeek = existing
+      ? { ...existing, invited: [...existing.invited, ...entries] }
+      : { id: "pw_" + crypto.randomUUID(), territoryId, week: todayWeekIso, themeOverride: "", themeDescription: "", categories: [], notes: "", weatherNote: "", picks: {}, dismissed: [], invited: entries, supportLocalExcluded: [], supportLocalAdded: [], archived: false, sentDate: null, wpPushedAt: null, createdAt: new Date().toISOString() };
+    const weeks = existing ? plannerWeeksRef.current.map((w) => (w.id === existing.id ? merged : w)) : [merged, ...plannerWeeksRef.current];
+    plannerWeeksRef.current = weeks;
+    setPlannerWeeks(weeks);
+    // Same derivations refreshInviteHistory pulls from a fresh fetch — run
+    // here on the already-merged local weeks so due-ness (autoInviteQueue)
+    // and invite status update in lockstep with the sent-today record above,
+    // not a refresh cycle behind it.
+    const byGdPlaceId = latestInviteStatus(weeks);
+    const invites = inviteHistory(weeks);
+    const features = featureHistory(weeks);
+    inviteCache.set(territoryId, { byGdPlaceId, invites, features, weeks, at: Date.now() });
+    setInviteByGdPlaceId(byGdPlaceId);
+    setInviteHistoryMap(invites);
+    setFeatureHistoryMap(features);
+  };
   const sendAutoBatchNow = async () => {
     if (!territoryId) return;
     setAutoSendState("sending");
@@ -583,7 +609,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
       const mine = (j?.territories ?? []).find((t: { territoryId: string }) => t.territoryId === territoryId);
       if (mine?.error) { setAutoSendState(humanizeInviteError(mine.error)); return; }
       setAutoSendState(null);
-      await refreshInviteHistory();
+      mergeSentEntriesLocally(mine?.entries ?? []);
     } catch (e) {
       setAutoSendState(e instanceof Error ? e.message : "Send failed.");
     }

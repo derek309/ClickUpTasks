@@ -38,7 +38,9 @@ async function findOrCreateTodayWeek(territoryId: string, weekIso: string): Prom
   return w;
 }
 
-export async function runPlannerAutoInvite(opts?: { force?: boolean; territoryId?: string }): Promise<{ ran: boolean; reason?: string; territories: { territoryId: string; city: string; sent: number; error?: string }[] }> {
+type TerritoryResult = { territoryId: string; city: string; sent: number; error?: string; entries?: PlannerWeek["invited"] };
+
+export async function runPlannerAutoInvite(opts?: { force?: boolean; territoryId?: string }): Promise<{ ran: boolean; reason?: string; territories: TerritoryResult[] }> {
   // One check for the whole run — every territory below is gated by the
   // same window anyway, so failing each one individually to discover this
   // would just be noise. The cron fires once daily at 9am Pacific; this
@@ -62,7 +64,7 @@ export async function runPlannerAutoInvite(opts?: { force?: boolean; territoryId
 
   const todayWeekIso = plannerWeekOf(todayIso());
   const todayLocal = zonedDateString(now, BUSINESS_TZ);
-  const results: { territoryId: string; city: string; sent: number; error?: string }[] = [];
+  const results: TerritoryResult[] = [];
 
   for (const t of territories) {
     const cap = t.daily_invite_cap ?? 0;
@@ -110,7 +112,11 @@ export async function runPlannerAutoInvite(opts?: { force?: boolean; territoryId
         const current = fresh.data ? rowToPlannerWeek(fresh.data) : week;
         await supabaseAdmin.from("planner_weeks").upsert(plannerWeekToRow({ ...current, invited: [...current.invited, ...newEntries] }));
       }
-      results.push({ territoryId: t.id, city: t.city, sent: newEntries.length });
+      // entries (not just the count) let a manual "Send now" caller merge the
+      // result straight into its local state instead of re-fetching the
+      // territory's planner_weeks over the network — see sendAutoBatchNow in
+      // TerritoryDirectory.tsx, which is the only current reader of this field.
+      results.push({ territoryId: t.id, city: t.city, sent: newEntries.length, entries: newEntries });
     } catch (e) {
       results.push({ territoryId: t.id, city: t.city, sent: 0, error: e instanceof Error ? e.message : String(e) });
     }
