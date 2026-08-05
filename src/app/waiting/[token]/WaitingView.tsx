@@ -164,10 +164,11 @@ function TaskDetailBody({
   onLinkLabel: (v: string) => void;
   onAddLink: () => void;
   onSend: () => void;
-  // "What do you think?" — lets the client mark a task Needs changes/Approved
-  // right from the chat instead of writing a message and waiting on the team
-  // to reclassify it (see /api/waiting/[token]/status/route.ts).
-  onSetStatus: (status: "changes_requested" | "done") => void;
+  // "What do you think?" — lets the client mark a task Needs attention/Needs
+  // changes/Approved right from the chat instead of writing a message and
+  // waiting on the team to reclassify it (see
+  // /api/waiting/[token]/status/route.ts, which allows exactly these three).
+  onSetStatus: (status: "changes_requested" | "review" | "done") => void;
   statusBusy: boolean;
 }) {
   const isDone = t.status === "done";
@@ -315,6 +316,15 @@ function TaskDetailBody({
       {!isDone && (
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-t bg-background/40 px-6 py-2.5 md:px-10">
           <span className="text-[13px] font-medium text-muted">What do you think?</span>
+          {/* Softest of the three: no specific edit asked for, just "put
+              this back in front of someone." Maps to the internal Review
+              status, whose amber sits between Changes and Done on the board
+              too, so the pressed state borrows the same warm token the
+              "Needs your input" chip above already uses. */}
+          <button onClick={() => onSetStatus("review")} disabled={statusBusy}
+            className={`rounded-full border px-3 py-1 text-[13px] font-semibold transition disabled:opacity-40 ${t.status === "review" ? "border-highlight bg-highlight-soft text-highlight" : "border-border bg-surface text-muted hover:text-foreground"}`}>
+            Needs attention
+          </button>
           <button onClick={() => onSetStatus("changes_requested")} disabled={statusBusy}
             className={`rounded-full border px-3 py-1 text-[13px] font-semibold transition disabled:opacity-40 ${t.status === "changes_requested" ? "border-danger bg-danger-soft text-danger" : "border-border bg-surface text-muted hover:text-foreground"}`}>
             Needs changes
@@ -333,6 +343,9 @@ function TaskDetailBody({
 
 export default function WaitingView({ token }: { token: string }) {
   const [clientName, setClientName] = useState<string | null>(null);
+  // Off until the API says otherwise, so a slow/failed load never flashes an
+  // "Add Something" button at a client who isn't allowed to use it.
+  const [canRequestNewTasks, setCanRequestNewTasks] = useState(false);
   const [projects, setProjects] = useState<WaitingProject[]>([]);
   // The list is grouped by project (section headers) rather than filtered
   // by a tab switcher, so there's no "current list" state to hold — but a
@@ -439,6 +452,7 @@ export default function WaitingView({ token }: { token: string }) {
       if (!res.ok) { if (!hasLoadedRef.current) setError(j.error || "This link isn't valid."); return; }
       hasLoadedRef.current = true;
       setClientName(j.clientName ?? null);
+      setCanRequestNewTasks(j.canRequestNewTasks === true);
       setProjects(Array.isArray(j.projects) ? j.projects : []);
       const list: WaitingTask[] = Array.isArray(j.tasks) ? j.tasks : [];
       setTasks(list);
@@ -583,7 +597,7 @@ export default function WaitingView({ token }: { token: string }) {
     }
   };
 
-  const setTaskStatus = async (taskId: string, status: "changes_requested" | "done") => {
+  const setTaskStatus = async (taskId: string, status: "changes_requested" | "review" | "done") => {
     setStatusBusyIds((s) => new Set(s).add(taskId));
     try {
       await fetch(`/api/waiting/${token}/status`, {
@@ -744,7 +758,13 @@ export default function WaitingView({ token }: { token: string }) {
           <div className="py-8 text-center text-[13px] text-muted">Loading…</div>
         ) : (
             <div className="min-w-0">
-              {addElseOpen ? (
+              {/* Raising a brand-new task is per client and off by default
+                  (clients.can_request_new_tasks) — for everyone else this
+                  page is reply-only, so the composer and its button aren't
+                  offered at all rather than shown and then refused. The
+                  request route checks the same flag itself; this is only so
+                  nobody is invited to press something that would fail. */}
+              {canRequestNewTasks && (addElseOpen ? (
                 <div className="mb-5 rounded-xl border bg-surface p-4 shadow-[var(--shadow-sm)]">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
@@ -824,7 +844,7 @@ export default function WaitingView({ token }: { token: string }) {
                   </button>
                   <p className="mt-1 text-center text-[12px] text-muted">One request per task, please. It&apos;s easier for us to track.</p>
                 </div>
-              )}
+              ))}
 
               {isEmpty ? emptyState : (
                 <div className="space-y-5">

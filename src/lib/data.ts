@@ -232,6 +232,15 @@ export interface Client {
    * more like a Google Docs share link than an API key). Grants read-only
    * visibility into that one client's open waitingOnClient tasks only. */
   shareToken?: string | null;
+  /** Whether this client may raise brand-new tasks from that public page's
+   * "Add Something" composer (see /api/waiting/[token]/request), as opposed
+   * to only replying on work we already put in front of them. Off unless an
+   * admin turns it on, so the open request box is something we hand out
+   * deliberately rather than the default for everyone holding a link. The
+   * request route re-checks this server-side — hiding the button is the
+   * courtesy, the column is the gate. Optional (like canMessage) so existing
+   * clientsSeed literals don't need editing; read as `=== true` everywhere. */
+  canRequestNewTasks?: boolean;
 }
 
 /** A quick-access link on a client's page (live site, WP admin, etc.), stored

@@ -8,9 +8,13 @@ import { resolveNotifyRecipient } from "@/lib/waitingNotify";
 // Public, token-gated — lets the client set a task's review outcome directly
 // (Aug 3 Derek/Justin call: "needs changes" or "approved," right in the chat,
 // instead of writing a message and waiting on the team to reclassify it).
-// Only these two values are ever accepted from an unauthenticated caller —
+// "review" joined them as the client-facing "Needs attention": softer than
+// asking for specific changes, it just puts the task back in front of the
+// team. It reuses the existing internal Review status (STATUS_META.review),
+// so the board needs no new column or code to show it.
+// Only these three values are ever accepted from an unauthenticated caller —
 // every other TaskStatus stays internal-only.
-const ALLOWED_STATUSES = new Set(["changes_requested", "done"]);
+const ALLOWED_STATUSES = new Set(["changes_requested", "review", "done"]);
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   if (!adminConfigured) return NextResponse.json({ error: "Not configured" }, { status: 501 });
@@ -59,7 +63,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     await supabaseAdmin.from("notifications").insert({
       id: "n_" + randomUUID(),
       recipient_id: notifyRecipient,
-      text: status === "done" ? `${client.name} approved "${task.title}".` : `${client.name} requested changes on "${task.title}".`,
+      text: status === "done"
+        ? `${client.name} approved "${task.title}".`
+        : status === "review"
+          ? `${client.name} flagged "${task.title}" for a closer look.`
+          : `${client.name} requested changes on "${task.title}".`,
       task_id: taskId,
       actor_id: null,
       client_id: client.id,

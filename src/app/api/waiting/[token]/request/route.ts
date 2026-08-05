@@ -19,6 +19,13 @@ import { resolveNotifyRecipient, notifyTeamOfClientActivity } from "@/lib/waitin
 // messages table the chat feature reads. Lands as a normal status:"todo"
 // task (not a distinct pipeline stage) — the highlighted client_response
 // panel is what flags it as needing a look, same as everywhere else here.
+//
+// Unlike replying (./messages, ./respond), raising a task is NOT something
+// every share link can do — it's per client, off by default, and switched on
+// by an admin (clients.can_request_new_tasks, see
+// supabase/client-request-new-tasks.sql). The page hides the composer when
+// it's off, but that's only the courtesy; the check below is the gate, since
+// the token alone is all a direct POST would need.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   if (!adminConfigured) return NextResponse.json({ error: "Not configured" }, { status: 501 });
   const { token } = await params;
@@ -26,8 +33,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   const limited = await rateLimit(req, token, "request");
   if (limited) return limited;
 
-  const { data: client } = await supabaseAdmin.from("clients").select("id, name, assigned_to").eq("share_token", token).maybeSingle();
+  const { data: client } = await supabaseAdmin.from("clients").select("id, name, assigned_to, can_request_new_tasks").eq("share_token", token).maybeSingle();
   if (!client) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Deliberately a plain "not for you" and not a 404: the link is valid and
+  // the rest of the page still works, so the message says what to do instead
+  // rather than implying the whole link is broken.
+  if (client.can_request_new_tasks !== true) {
+    return NextResponse.json({ error: "This isn't available for your account yet. Reply on one of your existing tasks, or reach out to us directly." }, { status: 403 });
+  }
 
   const payload = await req.json().catch(() => null) as { body?: string; attachments?: Attachment[]; projectId?: string } | null;
   const text = (payload?.body ?? "").slice(0, 10000).trim();

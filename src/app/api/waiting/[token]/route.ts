@@ -23,7 +23,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   const limited = await rateLimit(req, token, "read");
   if (limited) return limited;
 
-  const { data: client } = await supabaseAdmin.from("clients").select("id, name").eq("share_token", token).maybeSingle();
+  const { data: client } = await supabaseAdmin.from("clients").select("id, name, can_request_new_tasks").eq("share_token", token).maybeSingle();
   if (!client) return NextResponse.json({ error: "Not found" }, { status: 404 });
   // "personal" is the pseudo-client every teammate's private tasks share, not
   // a real client — a token on it would publish all of them here. Minting one
@@ -140,5 +140,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     };
   }));
 
-  return NextResponse.json({ clientName: client.name, projects, tasks, deepLinkTaskId: deepLinkTaskId || null });
+  // Whether this client may raise brand-new tasks here at all — the page uses
+  // it to show or hide the "Add Something" composer. Not a permission the
+  // page enforces: ./request/route.ts re-checks the same column before it
+  // writes anything, so this is purely so the client isn't offered a button
+  // that would only refuse them (see supabase/client-request-new-tasks.sql).
+  return NextResponse.json({ clientName: client.name, canRequestNewTasks: client.can_request_new_tasks === true, projects, tasks, deepLinkTaskId: deepLinkTaskId || null });
 }

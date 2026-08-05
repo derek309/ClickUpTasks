@@ -524,6 +524,23 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     markOwnClientWrite(nc.id);
     upsertClient(nc);
   };
+  // Whether this client's public page (/waiting/[token]) offers the "Add
+  // Something" composer that raises a brand-new task, or stays reply-only.
+  // Off by default, and admin-only for the same reason as
+  // toggleClientMessagePermission above: clients_write RLS is already
+  // is_admin(), so a VA calling this directly gets a silently-ignored write.
+  // /api/waiting/[token]/request re-reads the column before it writes
+  // anything, so this toggle is the decision, never the enforcement.
+  const toggleClientCanRequestNewTasks = (clientId: string) => {
+    const c = clientById(clientId);
+    if (!c) return;
+    const on = c.canRequestNewTasks !== true;
+    const nc = { ...c, canRequestNewTasks: on };
+    setClients((cs) => cs.map((x) => (x.id === clientId ? nc : x)));
+    markOwnClientWrite(nc.id);
+    upsertClient(nc);
+    pushToast(on ? `${c.name} can now add their own requests.` : `${c.name} can no longer add their own requests.`);
+  };
   // "Follow" a project directly — same idea as toggleClientAssignment, just
   // scoped to one project instead of the whole client. App-level only (no
   // RLS change, no realtime subscription on `projects` to echo-suppress).
@@ -3962,6 +3979,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <button onClick={() => { setHeaderMoreOpen(false); copyClientShareLink(activeClient); }} title="A public, no-login link showing this client what we're waiting on them for"
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy client link</button>
           )}
+          {/* Sits with "Copy client link" because it's a setting about that
+              same link. Left open on click (like the Columns toggles) so the
+              checkbox visibly flips instead of the menu vanishing. */}
+          {canAdmin && activeClient !== "all" && !activeProject && clientById(activeClient) && (
+            <button onClick={() => toggleClientCanRequestNewTasks(activeClient)}
+              title="Let this client add their own requests from their client link, instead of only replying to what we send them"
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background">
+              <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${clientById(activeClient)?.canRequestNewTasks ? "border-accent bg-accent text-white" : "border-border"}`}>{clientById(activeClient)?.canRequestNewTasks && <I.check />}</span>
+              Client can add requests
+            </button>
+          )}
           {activeClient !== "all" && activeProject && projectById(activeProject) && (
             <button onClick={() => { setHeaderMoreOpen(false); copyClientShareLink(activeClient, activeProject); }} title="Same public link, opened straight to this list — a client with more than one list still only has the one link to keep"
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy list link</button>
@@ -4430,6 +4458,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     {activeClient !== "all" && !activeProject && clientById(activeClient) && (
                       <button onClick={() => { setHeaderMoreOpen(false); copyClientShareLink(activeClient); }} title="A public, no-login link showing this client what we're waiting on them for"
                         className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy client link</button>
+                    )}
+                    {canAdmin && activeClient !== "all" && !activeProject && clientById(activeClient) && (
+                      <button onClick={() => toggleClientCanRequestNewTasks(activeClient)}
+                        title="Let this client add their own requests from their client link, instead of only replying to what we send them"
+                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background">
+                        <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${clientById(activeClient)?.canRequestNewTasks ? "border-accent bg-accent text-white" : "border-border"}`}>{clientById(activeClient)?.canRequestNewTasks && <I.check />}</span>
+                        Client can add requests
+                      </button>
                     )}
                     <button onClick={() => { setHeaderMoreOpen(false); copyClientForClaude(); }}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>✳</span> Copy for Claude</button>
