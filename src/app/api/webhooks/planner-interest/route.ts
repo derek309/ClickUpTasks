@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { resolveTrackedClientId, SAFE_CONTACT_ID } from "@/lib/ghlConversationTask";
+import { completePlaybookStepServer } from "@/lib/playbookReconcileServer";
 import { plannerWeekLabel } from "@/lib/data";
 import { verifyClickUpTasksKey } from "@/lib/verifyBridgeKey";
 // slugify only, not citySlugForTerritory: this direction goes the other way —
@@ -123,6 +124,14 @@ export async function POST(req: NextRequest) {
         await supabaseAdmin.from("clients").insert({ id: clientId, name: businessName, color: "#a855f7", ghl_location_id: "", status: "claimed", type: "prospect", assigned_to: [] });
       }
     }
+  }
+
+  // Sales pipeline automation: the same real-engagement gate as the
+  // status:"accepted" flip above (event !== "interested" — a page-load auto
+  // fire isn't a real response, see the comment on that block). A genuine
+  // reply is exactly "Engaged / interested," SALES_STAGE_STEPS' second stage.
+  if (clientId && event !== "interested") {
+    await completePlaybookStepServer(clientId, "sales_engaged", `Automatically completed, replied to the newsletter invite ("${event}").`);
   }
 
   // Reuse the client's existing project, else create a "Tasks" fallback —
