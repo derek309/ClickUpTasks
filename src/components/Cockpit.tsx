@@ -66,6 +66,7 @@ import {
   PLAYBOOK_EMAIL_DOMAIN_PHASE,
   PLAYBOOK_ONGOING_PHASE,
   PLAYBOOK_ALL_STEPS,
+  SALES_STAGE_STEPS,
   playbookStepsForClient,
   PLAYBOOK_INTRO,
   PLAYBOOK_MILESTONE,
@@ -506,10 +507,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // clients. active_client is now the sole trigger — and it's a deliberate,
     // temporary anchor, not the right long-term signal. The real "won" moment
     // is the pitch meeting closing with a card on file, which is a sales
-    // stage transition, and the sales stage catalog doesn't exist yet. When
-    // it ships, this condition (and the trial stamp below) moves to key off
-    // that transition instead of a fulfillment stage. Everything the seam
-    // needs is right here — no other place promotes out of prospect.
+    // stage transition: SALES_STAGE_STEPS (data.ts) now defines those stages,
+    // but nothing advances them automatically yet — a rep checks them off by
+    // hand, so there is still no transition to key off. When that wiring
+    // ships, this condition (and the trial stamp below) moves to the
+    // sales_pitch_meeting_booked / sales_won_active step completing instead
+    // of a fulfillment stage changing. Everything the seam needs is right
+    // here — no other place promotes out of prospect.
     const promoted = c.type === "prospect" && status === "active_client";
     // The 14-day trial starts at that same moment, and only ever once: a
     // client already carrying inTrial (or reaching active_client a second
@@ -2177,7 +2181,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     }
     const byKey = new Map(tasks.filter((t) => t.clientId === clientId && t.playbookStepKey).map((t) => [t.playbookStepKey as string, t]));
     const toWrite: Task[] = [];
-    // A2P/email-domain/ongoing ride the same reconciliation as the main 18
+    // The sales pipeline stages and the A2P/email-domain/ongoing side quests
+    // all ride the same reconciliation as the main growth plan
     // (same project, same create/retitle logic) — they're just excluded from
     // playbookCompletion()'s total and rendered as their own groups
     // (buildPlaybookGroups below). A2P and email-domain additionally only
@@ -2332,19 +2337,30 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // in the app. Any non-step task that ends up in the Playbook project (a
   // one-off note an ambassador quick-added) still shows, under "Other", so
   // nothing silently disappears.
-  const stepPhase = new Map(PLAYBOOK_ALL_STEPS.map((s) => [s.key, s.phase]));
-  const stepOrder = new Map(PLAYBOOK_ALL_STEPS.map((s, i) => [s.key, i]));
-  const sideQuestColor: Record<string, string> = { a2p: "#a855f7", email_domain: "#a855f7", ongoing: "#0ea5e9" };
+  // Sales stages first, so both maps below carry them: they're real step-tasks
+  // in the same Playbook project, just kept out of the owner-facing
+  // PLAYBOOK_ALL_STEPS (see SALES_STAGE_STEPS in data.ts). Without them here a
+  // sales task would fall through to the "Other" bucket at the bottom.
+  const playbookOrderedSteps = [...SALES_STAGE_STEPS, ...PLAYBOOK_ALL_STEPS];
+  const stepPhase = new Map(playbookOrderedSteps.map((s) => [s.key, s.phase]));
+  const stepOrder = new Map(playbookOrderedSteps.map((s, i) => [s.key, i]));
+  // Every phase that isn't part of the owner's main growth-plan sequence gets
+  // its own color, so a rep can tell the pipeline and the side quests apart
+  // from the plan itself at a glance.
+  const phaseColor: Record<string, string> = { sales: "#f59e0b", a2p: "#a855f7", email_domain: "#a855f7", ongoing: "#0ea5e9" };
   const buildPlaybookGroups = (list: Task[]): Grp[] => {
     const groupFor = (phase: { key: string; label: string }) => ({
-      key: phase.key, label: phase.label, color: sideQuestColor[phase.key] ?? "#5c8ac4",
+      key: phase.key, label: phase.label, color: phaseColor[phase.key] ?? "#5c8ac4",
       tasks: list.filter((t) => t.playbookStepKey && stepPhase.get(t.playbookStepKey) === phase.key)
         .sort((a, b) => (stepOrder.get(a.playbookStepKey!) ?? 0) - (stepOrder.get(b.playbookStepKey!) ?? 0)),
     });
-    // A2P + email-domain sit right after "Get on the map" (PLAYBOOK_PHASES[1] —
-    // [0] is the new "package" phase, which runs first) — "do it early," per
-    // both source docs — not folded into the phase array itself so
-    // playbookCompletion()'s "X of 26" total never counts them.
+    // A2P + email-domain sit right after "Get on the map" (PLAYBOOK_PHASES[2] —
+    // [0] is the sales pipeline, which runs first, then [1] "package") — "do
+    // it early," per both source docs — not folded into the phase array itself
+    // so playbookCompletion()'s "X of 26" total never counts them. The sales
+    // stages DO live in PLAYBOOK_PHASES (they're core to the funnel, not
+    // optional side work) but still stay out of that total, by living outside
+    // PLAYBOOK_STEPS instead — see SALES_STAGE_STEPS in data.ts.
     // Monthly retention sits at the very end — an ongoing duty, not something
     // to front-load, and distinct from the fully-passive PLAYBOOK_ALWAYS_RUNNING
     // banner since it needs an ambassador to actually act on it each month.
@@ -2356,8 +2372,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // already has A2P rows from before the gate keeps seeing them.
     const sideQuest = [groupFor(PLAYBOOK_A2P_PHASE), groupFor(PLAYBOOK_EMAIL_DOMAIN_PHASE)].filter((g) => g.tasks.length > 0);
     const byPhase = [
-      groupFor(PLAYBOOK_PHASES[0]), groupFor(PLAYBOOK_PHASES[1]), ...sideQuest,
-      ...PLAYBOOK_PHASES.slice(2).map(groupFor),
+      groupFor(PLAYBOOK_PHASES[0]), groupFor(PLAYBOOK_PHASES[1]), groupFor(PLAYBOOK_PHASES[2]), ...sideQuest,
+      ...PLAYBOOK_PHASES.slice(3).map(groupFor),
       groupFor(PLAYBOOK_ONGOING_PHASE),
     ];
     const extra = list.filter((t) => !t.playbookStepKey);

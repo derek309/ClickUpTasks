@@ -586,6 +586,14 @@ export interface Playbook {
 // coming from that doc — see Business Journal/2026-08.md, Aug 4 entry.
 export type PlaybookPhase = { key: string; label: string };
 export const PLAYBOOK_PHASES: PlaybookPhase[] = [
+  // The canonical sales pipeline (SALES_STAGE_STEPS below), rendered first
+  // because it's how a business arrives, not optional side work — hence a
+  // real entry here rather than the standalone-PlaybookPhase treatment the
+  // A2P/email-domain/ongoing side quests get. Its steps deliberately live in
+  // their own catalog and NOT in PLAYBOOK_STEPS: the growth plan's "X of 26"
+  // is a real owner-facing number for owner work, and a rep's pipeline
+  // stages aren't owner work. See SALES_STAGE_STEPS for the full reasoning.
+  { key: "sales", label: "Win the business" },
   { key: "package", label: "Your free marketing package" },
   { key: "map", label: "Get on the map" },
   { key: "reputation", label: "Jumpstart your reputation" },
@@ -966,6 +974,156 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
   },
 ];
 
+// The canonical 10-stage sales pipeline (02-SOP-Sales-Process.md), as the
+// first phase of the Playbook — stages 1 through 8 only. Stages 9 (Nurture)
+// and 10 (Lost) are exit ramps off the path, not steps a business works
+// through on the way in, and they already have a home in ClientStatus
+// ("nurture" / "cancelled") — nothing new is invented for them here.
+//
+// Its own catalog rather than eight more entries in PLAYBOOK_STEPS, for the
+// same reason the side quests are separate but with the opposite ordering:
+// PLAYBOOK_STEPS is the OWNER's growth plan, counted as "X of 26" on the
+// owner-facing dashboard (playbookCompletion) and enumerated wholesale to
+// the business's own /my-business/ page (PLAYBOOK_ALL_STEPS, via
+// api/external/playbook). These eight are the REP's pipeline — an owner has
+// no business reading "Pitch meeting booked" on their own dashboard, and
+// folding them in would silently restate every owner's progress as X of 34.
+// So: its own phase in PLAYBOOK_PHASES (it's core to the funnel, and renders
+// first), real Task rows like everything else (playbookStepsForClient), and
+// resolvable in PLAYBOOK_STEP_BY_KEY so the guide panel works — but out of
+// PLAYBOOK_ALL_STEPS, which stays the owner-facing catalog.
+//
+// Two fields are read slightly differently here than in the growth plan,
+// since the audience is the rep working the deal rather than the owner:
+// weGive is what ClickUpLocal has already done for you by this stage, youGet
+// is what clearing the stage gets you. scoreImpact is how far the stage
+// moves the DEAL, not the owner's ClickUpLocal Score (these stages don't
+// touch it) — it's the guide panel's ⚡ weight either way. category is
+// required by PlaybookStepDef but inert for this catalog: every stage is a
+// step toward revenue, and none of them feed the owner's four category bars
+// (playbookCompletionByCategory reads PLAYBOOK_ALL_STEPS, which excludes
+// these), so all eight are simply "income" rather than arbitrarily split.
+//
+// Nothing advances these automatically yet. They're created inert and a rep
+// checks them off by hand, exactly like the other 26 — wiring claim/invite/
+// inbound signals to advance them is a separate, later change.
+export const SALES_STAGE_STEPS: PlaybookStepDef[] = [
+  {
+    key: "sales_new_not_contacted", phase: "sales", label: "New, not contacted", category: "income",
+    timeEstimate: "~2 min",
+    whyItMatters: "Their listing is already live in the directory and their Score is already calculated, so the work is done before the first hello. Marking this stage is what puts a business on the board as a real name someone is working, instead of one more row in the territory.",
+    howTo: [
+      "Confirm the listing is live in the directory and reads correctly.",
+      "Check the contact details we have on file: owner name, phone, email.",
+      "Leave it here until real outreach actually goes out.",
+    ],
+    commonMistake: "Sitting on a full territory because nobody has picked up the names. A business nobody has claimed is a business nobody is working.",
+    weGive: "We build the listing and calculate the Score before anyone reaches out, so you always open with something already done for them.",
+    youGet: "A warm opening instead of a cold one.",
+    scoreImpact: "low",
+  },
+  {
+    key: "sales_in_outreach", phase: "sales", label: "In outreach", category: "income",
+    timeEstimate: "~10 min to start",
+    whyItMatters: "The first real touch: the invite email, the text, the call, or the walk in. Nothing moves until the owner knows we exist, and running it as a sequence is what keeps the follow up from depending on anyone's memory.",
+    howTo: [
+      "Start the outreach sequence from the Businesses page (invite, call, or visit).",
+      "Log every touch, so whoever picks this up next can see what has already been tried.",
+      "Keep going. A first no answer is not a no.",
+    ],
+    commonMistake: "One touch and moving on. Most owners answer on the third or fourth try, not the first.",
+    weGive: "We send the invite and keep the sequence running, so no business quietly falls off the list.",
+    youGet: "A pipeline that keeps working while you are somewhere else.",
+    scoreImpact: "low",
+  },
+  {
+    key: "sales_engaged", phase: "sales", label: "Engaged / interested", category: "income",
+    timeEstimate: "Varies",
+    whyItMatters: "The owner answered. That is the first moment this is a conversation rather than a campaign, and it changes how you work them: a real reply gets a person, not another automated send.",
+    howTo: [
+      "Reply the same day. Speed is most of what separates a live conversation from a dead one.",
+      "Ask what they are trying to fix before you say anything about the package.",
+      "Set the next step before the conversation ends, even if it is only a call time.",
+    ],
+    commonMistake: "Pitching the moment they say hello. Find out what they actually want first, or the pitch lands on nothing.",
+    weGive: "We surface every reply at the top of the Businesses page, so a live conversation never sits unanswered.",
+    youGet: "A real conversation you can work, instead of a list you can only send to.",
+    scoreImpact: "medium",
+  },
+  {
+    key: "sales_listing_claimed", phase: "sales", label: "Listing claimed", category: "income",
+    timeEstimate: "~15 min with the owner",
+    whyItMatters: "Claiming is where the give first move actually lands: the profile gets completed, the offer goes on, and the listing goes hidden until you publish it together. It is the first thing the owner does rather than something done to them, which is why the ones who claim are the ones who close.",
+    howTo: [
+      "Walk them through claiming their listing, or claim it with them while you have them on the phone.",
+      "Complete the profile and add their first offer while you still have their attention.",
+      "Confirm the listing is hidden, and tell them you will publish it live together at the pitch meeting.",
+    ],
+    commonMistake: "Letting the listing go public at claim time. Publishing is the moment you save for the pitch meeting, and giving it away early costs you the reason to meet.",
+    weGive: "We hold the listing hidden until the pitch, so the publish moment stays yours to give.",
+    youGet: "A committed owner and a reason to get in the room.",
+    scoreImpact: "high",
+  },
+  {
+    key: "sales_verification_call_booked", phase: "sales", label: "Verification call booked", category: "income",
+    timeEstimate: "~5 min to book, ~20 min on the call",
+    whyItMatters: "The verification call is a real business interview that doubles as proof they are who they say they are. It is also where you learn enough about the business to make the pitch obvious later. The listing stays hidden through this whole stage.",
+    howTo: [
+      "Book the phone interview while you still have them on the line.",
+      "Ask about the business itself: how it started, what they are known for, what is coming up.",
+      "Confirm the listing is still hidden, and set the pitch meeting date before you hang up.",
+    ],
+    commonMistake: "Treating it as a formality. Everything you learn here is what makes the pitch feel personal instead of scripted.",
+    weGive: "We turn the interview answers into their blog post, social post, and newsletter spotlight, so the call pays for itself either way.",
+    youGet: "Everything you need to make the pitch about them.",
+    scoreImpact: "medium",
+  },
+  {
+    key: "sales_pitch_meeting_booked", phase: "sales", label: "Pitch meeting booked", category: "income",
+    timeEstimate: "~45 min, in person or on Zoom",
+    whyItMatters: "This is the close. You publish the listing live in front of them, they watch their own business go public, and the card goes on file. The trial starts the moment that happens, so this one stage is where a prospect becomes a business we are responsible for.",
+    howTo: [
+      "Meet in person if you can, Zoom if you cannot.",
+      "Publish the listing live while they watch, so the value is something they see rather than something they are told.",
+      "Take the card on file and start the 14 day trial.",
+      "Set expectations for the first two weeks before you leave.",
+    ],
+    commonMistake: "Publishing before the meeting. The live moment is the close, and spending it early leaves you pitching a feature list.",
+    weGive: "We have the listing, the offer, the blog post, and the spotlight all staged and ready the second you hit publish.",
+    youGet: "A close built on something real happening in the room.",
+    scoreImpact: "high",
+  },
+  {
+    key: "sales_in_trial", phase: "sales", label: "In trial", category: "income",
+    timeEstimate: "14 days",
+    whyItMatters: "The trial is the only two weeks where the business decides whether any of this was real. What they see in that window is what they renew on, which makes the growth plan work below this phase matter more here than anywhere else in the relationship.",
+    howTo: [
+      "Get their first offer live and promoted inside the first few days.",
+      "Work the Playbook with them rather than waiting for them to work it alone.",
+      "Check in before the window closes, not after.",
+    ],
+    commonMistake: "Going quiet during the trial and hoping it holds. A silent two weeks is the most common reason a won deal does not stick.",
+    weGive: "We promote them across the newsletter, our social, and the app from day one, so there is something to point at inside the first week.",
+    youGet: "A business that has already seen a result before the first full payment.",
+    scoreImpact: "medium",
+  },
+  {
+    key: "sales_won_active", phase: "sales", label: "Won, active $197", category: "income",
+    timeEstimate: "~15 min to hand off",
+    whyItMatters: "The deal is closed and the business is on the roster at $197 a month. This is the handoff, and it only works cleanly if everything you learned on the way through goes with it: the sale is finished, but fulfillment onboarding is only starting.",
+    howTo: [
+      "Move the business to Active Client so it joins the roster.",
+      "Hand off what you learned in the interview and the pitch: what they care about, what they were promised, what is already live.",
+      "Make sure the growth plan below is actually being worked, not just created.",
+      "Ask for a referral once they have seen their first strong month.",
+    ],
+    commonMistake: "Closing and walking away. What you promised in the room is what fulfillment has to deliver, and nobody else was there to hear it.",
+    weGive: "We keep promoting them every month and send a proof of results report, so renewal is never a question.",
+    youGet: "A business that stays, and a neighbor who refers the next one.",
+    scoreImpact: "high",
+  },
+];
+
 // A2P (texting registration) — real, trackable steps, but deliberately a
 // SEPARATE catalog from PLAYBOOK_STEPS, not a 7th phase: the source doc
 // frames it as "not part of the main path, do it early" (folding it into the
@@ -1063,24 +1221,43 @@ export const PLAYBOOK_ONGOING_STEPS: PlaybookStepDef[] = [
   },
 ];
 
-// Combined lookup so the TaskDrawer guide panel can resolve a task's
-// playbookStepKey regardless of which catalog it came from.
+/** Every OWNER-facing catalog, combined — the growth plan plus its side
+ * quests. This is what the business's own /my-business/ dashboard reads
+ * (api/external/playbook) and what the four owner category bars tally
+ * (playbookCompletionByCategory), so SALES_STAGE_STEPS is deliberately NOT
+ * in here: those are the rep's pipeline stages, not the owner's work. */
 export const PLAYBOOK_ALL_STEPS: PlaybookStepDef[] = [
   ...PLAYBOOK_STEPS, ...PLAYBOOK_A2P_STEPS, ...PLAYBOOK_EMAIL_DOMAIN_STEPS, ...PLAYBOOK_ONGOING_STEPS,
 ];
+/** Lookup for a task's playbookStepKey regardless of which catalog it came
+ * from — including the sales stages, since they're real step-tasks too and
+ * need their guide panel (TaskDrawer.tsx) and youGet row hint
+ * (GroupedList.tsx) to resolve like any other step. Strictly a superset of
+ * PLAYBOOK_ALL_STEPS: resolving a key is not the same as publishing it to
+ * the owner, which is what PLAYBOOK_ALL_STEPS alone governs. */
 export const PLAYBOOK_STEP_BY_KEY: Map<string, PlaybookStepDef> = new Map(
-  PLAYBOOK_ALL_STEPS.map((s) => [s.key, s])
+  [...SALES_STAGE_STEPS, ...PLAYBOOK_ALL_STEPS].map((s) => [s.key, s])
 );
 
 /** Which steps a given business actually gets REAL task rows for. Distinct
- * from PLAYBOOK_ALL_STEPS, which stays the full lookup so a task created
+ * from PLAYBOOK_STEP_BY_KEY, which stays the full lookup so a task created
  * under an older rule still resolves its guide panel. The A2P registration
  * and dedicated email domain steps only apply to a business that texts its
  * list (Client.doesA2P) — everything else is universal. Shared by both
  * reconcilers (Cockpit.tsx's and playbookReconcileServer.ts's) so the two
- * can't drift on what a business is owed. */
+ * can't drift on what a business is owed.
+ *
+ * The sales stages lead, matching the render order, and are created for
+ * every client unconditionally rather than gated on Client.type. A prospect
+ * obviously needs them; a business that has already converted keeps them
+ * because the record of how it got here shouldn't vanish the moment it does,
+ * and because every one of them is checked off by then anyway, so the phase
+ * simply reads as finished. Gating would also mean a business promoted
+ * before these existed could never get them at all, since reconcile only
+ * ever adds. */
 export function playbookStepsForClient(doesA2P: boolean): PlaybookStepDef[] {
-  return doesA2P ? PLAYBOOK_ALL_STEPS : [...PLAYBOOK_STEPS, ...PLAYBOOK_ONGOING_STEPS];
+  const growthPlan = doesA2P ? PLAYBOOK_ALL_STEPS : [...PLAYBOOK_STEPS, ...PLAYBOOK_ONGOING_STEPS];
+  return [...SALES_STAGE_STEPS, ...growthPlan];
 }
 
 // Non-task, purely informational content from the source doc — rendered as
@@ -1121,7 +1298,9 @@ export const PLAYBOOK_FINISH_LINE =
  * separate progress table. `total` is always the *current* catalog length,
  * not however many step-tasks happen to exist yet for this client, so the
  * fraction stays honest even before reconcilePlaybookTasks() has caught a
- * client up to a newly-added step. */
+ * client up to a newly-added step. Counts PLAYBOOK_STEPS only — the side
+ * quests and the sales stages both have their own step-tasks and both stay
+ * out of this number, so "X of 26" keeps meaning owner growth plan work. */
 /** Deterministic id for a client's one Playbook project — found by id, never
  * by name, so it can't collide with an ambassador's own manually-named list. */
 export const playbookProjectId = (clientId: string) => "p_playbook_" + clientId;

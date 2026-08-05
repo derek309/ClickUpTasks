@@ -3,7 +3,7 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { resolveTrackedClientId, SAFE_CONTACT_ID } from "@/lib/ghlConversationTask";
 import { reconcilePlaybookTasksServer } from "@/lib/playbookReconcileServer";
 import { verifyClickUpTasksKey } from "@/lib/verifyBridgeKey";
-import { PLAYBOOK_STEP_BY_KEY, PLAYBOOK_STEPS, PLAYBOOK_PHASES, playbookProjectId, advanceDue, todayIso } from "@/lib/data";
+import { PLAYBOOK_ALL_STEPS, PLAYBOOK_STEP_BY_KEY, PLAYBOOK_STEPS, PLAYBOOK_PHASES, playbookProjectId, advanceDue, todayIso } from "@/lib/data";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -41,6 +41,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ ghl
   const businessName: string = String(body?.businessName ?? "").trim() || "Unknown business";
   const step = PLAYBOOK_STEP_BY_KEY.get(stepKey);
   if (!stepKey || !step) return NextResponse.json({ error: "Unknown stepKey" }, { status: 400 });
+  // Only steps the GET twin actually publishes to the owner's dashboard are
+  // togglable from it. PLAYBOOK_STEP_BY_KEY is a superset now that it also
+  // resolves the internal sales pipeline stages (SALES_STAGE_STEPS) — an
+  // owner has no surface that shows those and no business flipping "Won,
+  // active $197" on themselves, so the write side is pinned to the same
+  // catalog the read side enumerates.
+  if (!PLAYBOOK_ALL_STEPS.some((s) => s.key === stepKey)) return NextResponse.json({ error: "Unknown stepKey" }, { status: 400 });
 
   const fallback = "cl_" + ghlContactId;
   let clientId = await resolveTrackedClientId(ghlContactId, fallback);
