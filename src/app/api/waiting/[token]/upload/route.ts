@@ -44,7 +44,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   // Confirm the task actually belongs to this token's own client before
   // writing anywhere — same boundary the respond route enforces.
   if (typeof taskId === "string" && taskId) {
-    const { data: task } = await supabaseAdmin.from("tasks").select("id, client_id").eq("id", taskId).maybeSingle();
+    const { data: task } = await supabaseAdmin.from("tasks").select("id, client_id").eq("id", taskId).eq("is_private", false).maybeSingle();
     if (!task || task.client_id !== client.id) return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 

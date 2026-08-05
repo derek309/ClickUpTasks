@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
-import { htmlToText, initialsOf, type Attachment } from "@/lib/data";
+import { htmlToText, initialsOf, PERSONAL_CLIENT_ID, type Attachment } from "@/lib/data";
 import { TASK_FILES_BUCKET } from "@/lib/db";
 import { rateLimit } from "@/lib/rateLimit";
 
@@ -25,6 +25,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
 
   const { data: client } = await supabaseAdmin.from("clients").select("id, name").eq("share_token", token).maybeSingle();
   if (!client) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // "personal" is the pseudo-client every teammate's private tasks share, not
+  // a real client — a token on it would publish all of them here. Minting one
+  // is refused upstream; this is the serve-side half of the same guard, so a
+  // token written before that guard existed (or by hand) still can't be used.
+  if (client.id === PERSONAL_CLIENT_ID) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   // A link composed from one specific task (see the task drawer's email
   // composer) carries ?task=<id> so that task shows up here even when it's
@@ -45,14 +50,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     attachments: Attachment[] | null;
   };
   const cols = "id, project_id, title, due, description, status, waiting_on_client, client_response, attachments";
+  // is_private tasks never reach a public page, whatever client they're filed
+  // under — RLS protects them from other teammates, but this route reads with
+  // the service role, so the filter has to be explicit here.
   const [{ data: waiting }, { data: responded }, { data: deepLinked }] = await Promise.all([
-    supabaseAdmin.from("tasks").select(cols).eq("client_id", client.id).eq("waiting_on_client", true),
-    supabaseAdmin.from("tasks").select(cols).eq("client_id", client.id).not("client_response", "is", null),
+    supabaseAdmin.from("tasks").select(cols).eq("client_id", client.id).eq("is_private", false).eq("waiting_on_client", true),
+    supabaseAdmin.from("tasks").select(cols).eq("client_id", client.id).eq("is_private", false).not("client_response", "is", null),
     // Proven to belong to this client (same eq("client_id", ...) as the two
     // queries above) before it's allowed to appear — a task id is not itself
     // a secret, so this must never trust deepLinkTaskId alone.
     deepLinkTaskId
-      ? supabaseAdmin.from("tasks").select(cols).eq("client_id", client.id).eq("id", deepLinkTaskId)
+      ? supabaseAdmin.from("tasks").select(cols).eq("client_id", client.id).eq("is_private", false).eq("id", deepLinkTaskId)
       : Promise.resolve({ data: [] as Row[] }),
   ]);
   const byId = new Map<string, Row>();

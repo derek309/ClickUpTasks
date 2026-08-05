@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
-import { resolveTrackedClientId } from "@/lib/ghlConversationTask";
+import { resolveTrackedClientId, SAFE_CONTACT_ID } from "@/lib/ghlConversationTask";
 import { reconcilePlaybookTasksServer } from "@/lib/playbookReconcileServer";
 import { verifyClickUpTasksKey } from "@/lib/verifyBridgeKey";
 import { PLAYBOOK_ALL_STEPS } from "@/lib/data";
@@ -29,6 +29,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ ghlC
 
   const { ghlContactId } = await params;
   if (!ghlContactId) return NextResponse.json({ error: "Missing ghlContactId" }, { status: 400 });
+  // This value reaches a PostgREST .or() filter string (resolveTrackedClientId)
+  // and is interpolated into a client id — rejected here, at the edge, before
+  // either happens, rather than relying on the downstream guard alone.
+  if (!SAFE_CONTACT_ID.test(ghlContactId)) return NextResponse.json({ error: "Invalid ghlContactId" }, { status: 400 });
 
   const fallback = "cl_" + ghlContactId;
   const clientId = await resolveTrackedClientId(ghlContactId, fallback);

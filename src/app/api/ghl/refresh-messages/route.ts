@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { tokenForLocation } from "@/lib/ghlTokens";
 import { requireUser } from "@/lib/serverAuth";
+import { isClientVisible } from "@/lib/extensionApi";
+import { resolveTrackedClientId } from "@/lib/ghlConversationTask";
 import { normalizeBody, DEDUP_WINDOW_MS } from "@/lib/inboundIngest";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -36,6 +38,31 @@ export async function POST(req: NextRequest) {
   const { clientId, contactId, locationId, ghlContactId } = await req.json().catch(() => ({} as any));
   if (!clientId || !contactId || !locationId || !ghlContactId)
     return NextResponse.json({ error: "Missing clientId, contactId, locationId, or ghlContactId." }, { status: 400 });
+
+  // All four ids are caller-supplied and, until now, mutually unrelated: this
+  // route fetches a conversation out of GHL by ghlContactId/locationId and
+  // INSERTS the result under whatever client_id/contact_id the caller named.
+  // Two independent things have to hold, so both are checked.
+  //
+  // 1. The local contact must actually BE that GHL contact. Without this,
+  //    someone could pull another client's entire message history out of GHL
+  //    and have it written into a client they can see — a cross-client
+  //    exfiltration, not just an unauthorized read. Enforced for admins too:
+  //    it's a data-integrity binding (rows must be filed under the right
+  //    contact), not only a permission check.
+  const { data: contactRow } = await supabaseAdmin.from("contacts").select("id, client_id, ghl_contact_id").eq("id", contactId).maybeSingle();
+  if (!contactRow || contactRow.ghl_contact_id !== ghlContactId)
+    return NextResponse.json({ error: "That contact doesn't match this GoHighLevel contact." }, { status: 403 });
+  // 2. ...and that contact must belong to the client the rows get filed under
+  //    — either as the tracked client representing it (cl_<contactId>, a
+  //    linked_contact_id, or a merge absorption) or as its own GHL
+  //    sub-account, the two shapes the Journal actually passes.
+  const trackedClientId = await resolveTrackedClientId(contactRow.id as string, contactRow.client_id as string);
+  if (trackedClientId !== clientId && contactRow.client_id !== clientId)
+    return NextResponse.json({ error: "That contact doesn't belong to this client." }, { status: 403 });
+  // 3. And the caller must be able to see that client at all (admins pass).
+  if (!(await isClientVisible(caller, clientId)))
+    return NextResponse.json({ error: "Unknown or inaccessible client." }, { status: 403 });
 
   // Wrap the whole GHL/DB flow so a thrown error (network blip, unexpected
   // response) surfaces its real message to the toast instead of an opaque 500.

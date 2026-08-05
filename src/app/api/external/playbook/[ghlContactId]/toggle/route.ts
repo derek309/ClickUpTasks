@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
-import { resolveTrackedClientId } from "@/lib/ghlConversationTask";
+import { resolveTrackedClientId, SAFE_CONTACT_ID } from "@/lib/ghlConversationTask";
 import { reconcilePlaybookTasksServer } from "@/lib/playbookReconcileServer";
 import { verifyClickUpTasksKey } from "@/lib/verifyBridgeKey";
 import { PLAYBOOK_STEP_BY_KEY, PLAYBOOK_STEPS, PLAYBOOK_PHASES, playbookProjectId, advanceDue, todayIso } from "@/lib/data";
@@ -31,6 +31,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ ghl
 
   const { ghlContactId } = await params;
   if (!ghlContactId) return NextResponse.json({ error: "Missing ghlContactId" }, { status: 400 });
+  // Same edge validation as the GET twin: this value reaches a PostgREST
+  // .or() filter string and is interpolated into a client id it then CREATES.
+  if (!SAFE_CONTACT_ID.test(ghlContactId)) return NextResponse.json({ error: "Invalid ghlContactId" }, { status: 400 });
 
   const body = await req.json().catch(() => ({} as any));
   const stepKey: string = String(body?.stepKey ?? "").trim();

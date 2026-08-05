@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
-import { resolveTrackedClientId } from "@/lib/ghlConversationTask";
+import { resolveTrackedClientId, SAFE_CONTACT_ID } from "@/lib/ghlConversationTask";
 import { plannerWeekLabel } from "@/lib/data";
 import { verifyClickUpTasksKey } from "@/lib/verifyBridgeKey";
 // slugify only, not citySlugForTerritory: this direction goes the other way —
@@ -46,6 +46,13 @@ export async function POST(req: NextRequest) {
   const KNOWN_EVENTS = ["interested", "intake", "approved", "info_submitted"];
   if (!city || !week || !KNOWN_EVENTS.includes(event)) {
     return NextResponse.json({ error: "Missing city/week or unknown event" }, { status: 400 });
+  }
+  // Third entry point that feeds a caller-supplied GHL contact id into a
+  // PostgREST .or() filter string (via resolveTrackedClientId below, keyed on
+  // `ct_ghl_${ghlContactId}`) and into ids it creates — validated at the edge,
+  // same shape as api/external/playbook/[ghlContactId].
+  if (ghlContactId && !SAFE_CONTACT_ID.test(ghlContactId)) {
+    return NextResponse.json({ error: "Invalid ghl_contact_id" }, { status: 400 });
   }
 
   // wp_city_slug is an optional per-territory override, null on every

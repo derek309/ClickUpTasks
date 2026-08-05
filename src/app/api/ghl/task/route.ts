@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { tokenForLocation } from "@/lib/ghlTokens";
 import { requireUser } from "@/lib/serverAuth";
+import { isGhlContactVisible } from "@/lib/extensionApi";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -22,7 +23,8 @@ function toGhlDate(due: string | null | undefined): string {
 }
 
 export async function POST(req: NextRequest) {
-  if (!(await requireUser(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const caller = await requireUser(req);
+  if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const b = await req.json().catch(() => ({} as any));
   const { op, locationId, ghlContactId, ghlTaskId, title, body, due, completed } = b as {
     op: "create" | "update" | "complete" | "delete";
@@ -37,6 +39,13 @@ export async function POST(req: NextRequest) {
 
   if (!op || !locationId || !ghlContactId)
     return NextResponse.json({ error: "Missing op, locationId, or ghlContactId." }, { status: 400 });
+
+  // Both locationId and ghlContactId are caller-supplied, so requireUser alone
+  // meant any signed-in VA could create/edit/DELETE native GHL tasks on any
+  // sub-account's contact. Gate on the tracked client the contact actually
+  // belongs to (admins pass through unrestricted).
+  if (!(await isGhlContactVisible(caller, ghlContactId)))
+    return NextResponse.json({ error: "Unknown or inaccessible contact." }, { status: 403 });
 
   const token = await tokenForLocation(locationId);
   if (!token)

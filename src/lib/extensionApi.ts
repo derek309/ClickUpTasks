@@ -1,6 +1,8 @@
-// Shared helpers for the /api/extension/* routes (Gmail Chrome extension).
+// Shared helpers for the /api/extension/* routes (Gmail Chrome extension),
+// plus the caller-visibility gate the /api/ai/* and /api/ghl/* routes reuse.
 import { supabaseAdmin } from "./supabaseAdmin";
 import { type AuthedUser } from "./serverAuth";
+import { resolveTrackedClientId } from "./ghlConversationTask";
 import { WORKSPACE_CLIENT_ID } from "./data";
 
 /** Same visibility rule as visibleClients in Cockpit.tsx: admin sees every
@@ -24,4 +26,25 @@ export async function visibleClientIds(caller: AuthedUser): Promise<"all" | Set<
 export async function isClientVisible(caller: AuthedUser, clientId: string): Promise<boolean> {
   const visible = await visibleClientIds(caller);
   return visible === "all" || visible.has(clientId);
+}
+
+/** Same rule as isClientVisible, but for the /api/ghl/* proxy routes, which
+ * receive a caller-supplied `ghlContactId` (+ locationId) and nothing else —
+ * so without this a signed-in VA could point them at ANY sub-account's
+ * contact and read or write that client's GoHighLevel data. Resolves the
+ * local contact the GHL id belongs to, maps it to the tracked client that
+ * represents it (the same cl_<contactId> / linked_contact_id / merged
+ * resolution every inbound path already uses), then applies the ordinary
+ * visibility rule.
+ *
+ * Admins short-circuit to true, matching how /api/ghl/message already skips
+ * its contact-ownership check for them: they may act on any client, and on a
+ * contact that hasn't synced into `contacts` yet. For everyone else an
+ * unknown ghlContactId is a denial, not a pass — fail closed. */
+export async function isGhlContactVisible(caller: AuthedUser, ghlContactId: string): Promise<boolean> {
+  if (caller.role === "admin") return true;
+  const { data: contact } = await supabaseAdmin.from("contacts").select("id, client_id").eq("ghl_contact_id", ghlContactId).maybeSingle();
+  if (!contact) return false;
+  const clientId = await resolveTrackedClientId(contact.id as string, contact.client_id as string);
+  return isClientVisible(caller, clientId);
 }

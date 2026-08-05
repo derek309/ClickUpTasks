@@ -7,6 +7,7 @@
 // webhook (which stays untouched) — same behavior, different entry point.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { titleCase } from "@/lib/data";
+import { SAFE_CONTACT_ID } from "@/lib/ghlConversationTask";
 import { sendGmailAs, googleConfigured } from "@/lib/googleMail";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -21,6 +22,10 @@ function todayPacific(): string {
 // a client linked via linked_contact_id) — a contact's own client_id points at
 // the GHL sub-account it was imported from, not the client's page.
 async function resolveTrackedClientId(contactId: string, fallback: string): Promise<string> {
+  // Same PostgREST filter-injection guard as the twin in ghlConversationTask —
+  // the .or() string is parsed, so an id carrying filter syntax would widen
+  // the match instead of failing. See SAFE_CONTACT_ID there for the reasoning.
+  if (!SAFE_CONTACT_ID.test(contactId)) return fallback;
   const { data } = await supabaseAdmin.from("clients").select("id").or(`id.eq.cl_${contactId},linked_contact_id.eq.${contactId}`).limit(1);
   if (data?.[0]) return data[0].id;
   // Absorbed-by-merge fallback (jsonb array containment) — see the twin of

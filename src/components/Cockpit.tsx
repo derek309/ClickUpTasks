@@ -977,6 +977,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const getClientShareUrl = (clientId: string, opts?: { projectId?: string; taskId?: string }): string | null => {
     const c = clientById(clientId);
     if (!c) return null;
+    // "Personal" is a pseudo-client every teammate's private tasks share (see
+    // PERSONAL_CLIENT_ID) — minting a share token for it would publish every
+    // teammate's private list on the public waiting page, since that page
+    // selects tasks by client_id. There is no legitimate client to hand this
+    // link to, so it's refused outright rather than gated on admin.
+    if (clientId === PERSONAL_CLIENT_ID) { pushToast("Personal tasks can't be shared."); return null; }
     if (!c.shareToken && !canAdmin) { pushToast("Ask an admin to create this client's share link first."); return null; }
     const token = c.shareToken ?? crypto.randomUUID().replace(/-/g, "");
     if (!c.shareToken) {

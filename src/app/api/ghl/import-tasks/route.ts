@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { tokenForLocation } from "@/lib/ghlTokens";
 import { requireUser } from "@/lib/serverAuth";
+import { isGhlContactVisible } from "@/lib/extensionApi";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -27,11 +28,18 @@ function stripHtml(html: string): string {
 }
 
 export async function GET(req: NextRequest) {
-  if (!(await requireUser(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const caller = await requireUser(req);
+  if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { searchParams } = new URL(req.url);
   const locationId = searchParams.get("locationId");
   const ghlContactId = searchParams.get("ghlContactId");
   if (!locationId || !ghlContactId) return NextResponse.json({ error: "Missing locationId or ghlContactId." }, { status: 400 });
+
+  // Both ids are caller-supplied, so requireUser alone let any signed-in VA
+  // read the full task list (titles + bodies) off any sub-account's contact.
+  // Same gate as ../task/route.ts; admins pass through unrestricted.
+  if (!(await isGhlContactVisible(caller, ghlContactId)))
+    return NextResponse.json({ error: "Unknown or inaccessible contact." }, { status: 403 });
 
   const token = await tokenForLocation(locationId);
   if (!token) return NextResponse.json({ error: "No GoHighLevel token configured for this sub-account yet." }, { status: 501 });

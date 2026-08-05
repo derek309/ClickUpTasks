@@ -30,7 +30,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   if (!taskId) return NextResponse.json({ error: "Missing taskId." }, { status: 400 });
   if (!text && attachments.length === 0) return NextResponse.json({ error: "Add a note or attachment before saving." }, { status: 400 });
 
-  const { data: task } = await supabaseAdmin.from("tasks").select("id, client_id, project_id, title, waiting_on_client, status").eq("id", taskId).maybeSingle();
+  const { data: task } = await supabaseAdmin.from("tasks").select("id, client_id, project_id, title, waiting_on_client, status").eq("id", taskId).eq("is_private", false).maybeSingle();
   if (!task || task.client_id !== client.id) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (task.status === "done") return NextResponse.json({ error: "This item has already been completed." }, { status: 400 });
 

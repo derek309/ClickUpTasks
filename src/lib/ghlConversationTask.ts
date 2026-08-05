@@ -3,12 +3,22 @@
 import { supabaseAdmin } from "./supabaseAdmin";
 import { titleCase } from "./data";
 
+// PostgREST PARSES the `.or()` string below — a value carrying its own filter
+// syntax (comma, dot, parens) widens the match to arbitrary rows rather than
+// erroring out. Real contact ids are alphanumeric plus dash/underscore, so
+// anything else is refused. The public entry points that feed this a
+// caller-controlled id validate against the same shape and 400 early (see
+// api/external/playbook/[ghlContactId]); this is the last line of defence for
+// any future caller that forgets.
+export const SAFE_CONTACT_ID = /^[A-Za-z0-9_-]+$/;
+
 // Map a contact to the tracked client that represents it — the client whose
 // id is cl_<contactId>, one manually linked via linked_contact_id, or one that
 // absorbed this contact in a client merge (linked_contact_ids) — falling back
 // to the passed value (the sub-account) when the contact isn't a tracked
-// client. Contact ids are alphanumeric + underscore, safe to interpolate.
+// client.
 export async function resolveTrackedClientId(contactId: string, fallback: string): Promise<string> {
+  if (!SAFE_CONTACT_ID.test(contactId)) return fallback;
   const { data } = await supabaseAdmin.from("clients").select("id").or(`id.eq.cl_${contactId},linked_contact_id.eq.${contactId}`).limit(1);
   if (data?.[0]) return data[0].id;
   // Absorbed-by-merge fallback (jsonb array containment) — kept as a second

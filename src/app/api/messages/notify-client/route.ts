@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { requireUser } from "@/lib/serverAuth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { sendGmailAs, googleConfigured } from "@/lib/googleMail";
+import { PERSONAL_CLIENT_ID } from "@/lib/data";
 
 const APP_URL = "https://clickuptasks.vercel.app";
 const SEND_DOMAIN = "clickuplocal.com";
@@ -27,6 +28,12 @@ export async function POST(req: NextRequest) {
   const b = await req.json().catch(() => null) as { clientId?: string; taskId?: string } | null;
   const { clientId, taskId } = b ?? {};
   if (!clientId || !taskId) return NextResponse.json({ error: "Missing clientId or taskId." }, { status: 400 });
+  // Never mint a share token for the "personal" pseudo-client — every
+  // teammate's private tasks carry that client_id, and the waiting page
+  // selects by client_id, so one token would publish all of them. Refused
+  // here as well as in the UI (Cockpit's getClientShareUrl) because this
+  // route mints with the service role regardless of the caller's rights.
+  if (clientId === PERSONAL_CLIENT_ID) return NextResponse.json({ error: "Personal tasks can't be shared." }, { status: 403 });
 
   if (caller.role !== "admin") {
     if (!caller.canSendMessages) return NextResponse.json({ error: "You don't have permission to send messages." }, { status: 403 });
