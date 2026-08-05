@@ -3,15 +3,12 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { resolveTrackedClientId } from "@/lib/ghlConversationTask";
 import { plannerWeekLabel } from "@/lib/data";
 import { verifyClickUpTasksKey } from "@/lib/verifyBridgeKey";
+// slugify only, not citySlugForTerritory: this direction goes the other way —
+// it reverse-matches an inbound city slug against every territory, so it needs
+// the raw function, not a lookup by territory id.
+import { slugify } from "@/lib/wpCitySlug";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-
-// Rough JS approximation of WordPress's PHP sanitize_title() — same
-// fallback /api/planner/push/route.ts and /api/planner/invite/send/route.ts
-// already use (each keeps its own copy rather than sharing one).
-function slugify(s: string): string {
-  return s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-}
 
 // Inbound webhook: WordPress -> ClickUpTasks, fired the instant a business
 // responds to a Content Planner "invite to be featured" (see

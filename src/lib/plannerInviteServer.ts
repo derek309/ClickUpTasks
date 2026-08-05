@@ -5,18 +5,16 @@
 import { supabaseAdmin } from "./supabaseAdmin";
 import { isWithinBusinessHours, OUTSIDE_BUSINESS_HOURS } from "./businessHours";
 import { advanceInvitedToOutreach } from "./ghlOpportunities";
+// slugify only, not citySlugForTerritory: the select below already pulls
+// assigned_to off the same territory row, so resolving the slug through the
+// shared helper would cost a second round trip per invite send for nothing.
+import { slugify } from "./wpCitySlug";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 const WP_BASE = process.env.CUL_WP_BASE_URL || "";
 const WP_KEY = process.env.CLICKUPTASKS_API_KEY || "";
 export const plannerInviteConfigured = Boolean(WP_BASE && WP_KEY);
-
-// Rough JS approximation of WordPress's PHP sanitize_title() — same fallback
-// /api/planner/push/route.ts uses when a territory has no wp_city_slug override.
-function slugify(s: string): string {
-  return s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-}
 
 export type PlannerInviteResult = { ok: true; ghlContactId: string | null } | { ok: false; error: string };
 

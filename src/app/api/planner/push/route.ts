@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/serverAuth";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { citySlugForTerritory } from "@/lib/wpCitySlug";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -17,14 +17,6 @@ const WP_BASE = process.env.CUL_WP_BASE_URL || "";
 const WP_KEY = process.env.CLICKUPTASKS_API_KEY || "";
 const configured = Boolean(WP_BASE && WP_KEY);
 
-// Rough JS approximation of WordPress's PHP sanitize_title() — good enough
-// as a fallback when a territory has no explicit wp_city_slug override.
-// Punctuation/diacritic edge cases can still drift; that's exactly what the
-// override column is for.
-function slugify(s: string): string {
-  return s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-}
-
 export async function POST(req: NextRequest) {
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -38,10 +30,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "territoryId, week (yyyy-mm-dd), and picks are required" }, { status: 400 });
   }
 
-  const { data: territory } = await supabaseAdmin.from("territories").select("city, wp_city_slug").eq("id", territoryId).maybeSingle();
-  if (!territory) return NextResponse.json({ error: "Territory not found" }, { status: 404 });
-  const citySlug = (territory.wp_city_slug as string | null) || slugify(String(territory.city ?? ""));
-  if (!citySlug) return NextResponse.json({ error: "This territory has no city name or wp_city_slug to push to." }, { status: 400 });
+  // One 400 for both "no such territory" and "no slug to build from" — the UI
+  // surfaces either as the same error string, so the shared helper collapses
+  // them rather than making every caller re-split the two cases.
+  const citySlug = await citySlugForTerritory(territoryId);
+  if (!citySlug) return NextResponse.json({ error: "Territory not found, or it has no city name or wp_city_slug to push to." }, { status: 400 });
 
   const url = `${WP_BASE.replace(/\/$/, "")}/wp-json/cul/v1/sales/planner-push`;
   let res: Response;

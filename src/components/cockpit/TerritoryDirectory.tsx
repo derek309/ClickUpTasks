@@ -26,6 +26,8 @@ import {
   type Contact, type Client, type ClientStatus, type Task, type PlannerInvite, type PlannerWeek,
 } from "@/lib/data";
 import { I } from "./ui";
+// Types only (erased at build) — the lib itself is server-only.
+import type { JoinFunnelStep, JoinFunnelEntry } from "@/lib/joinFunnelServer";
 
 export type DirectoryListing = {
   id: number | string;
@@ -148,6 +150,12 @@ type PlannerActivityCacheEntry = {
 };
 const inviteCache = new Map<string, PlannerActivityCacheEntry>();
 
+// Same treatment for the invite chat funnel (WordPress's own per business step
+// tracking, proxied through /api/directory/funnel) — keyed by territoryId so
+// switching cities never shows the previous city's funnel.
+type FunnelCacheEntry = { steps: JoinFunnelStep[]; byGdPlaceId: Record<number, JoinFunnelEntry>; at: number };
+const funnelCache = new Map<string, FunnelCacheEntry>();
+
 export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, otherListsByClient, onOpenProject, onSetClientStatus, canAdmin, ghlContactUrlFor, territoryId, dailyInviteCap }: {
   city: string;
   state: string;
@@ -231,6 +239,8 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   const [inviteHistoryMap, setInviteHistoryMap] = useState<Map<number, { invited: number; accepted: number; skipped: number; lastAt: string }>>(() => (territoryId && inviteCache.get(territoryId)?.invites) || new Map());
   const [featureHistoryMap, setFeatureHistoryMap] = useState<Map<string, { count: number; last: string }>>(() => (territoryId && inviteCache.get(territoryId)?.features) || new Map());
   const [plannerWeeks, setPlannerWeeks] = useState<PlannerWeek[]>(() => (territoryId && inviteCache.get(territoryId)?.weeks) || []);
+  const [funnelSteps, setFunnelSteps] = useState<JoinFunnelStep[]>(() => (territoryId && funnelCache.get(territoryId)?.steps) || []);
+  const [funnelByGdPlaceId, setFunnelByGdPlaceId] = useState<Record<number, JoinFunnelEntry>>(() => (territoryId && funnelCache.get(territoryId)?.byGdPlaceId) || {});
   // Same "build every write from the latest row, not a stale render's
   // snapshot" reasoning as PlannerPanel's own weeksRef — two invite actions
   // in a row (e.g. Skip then Invite on a different row) would otherwise each
@@ -292,6 +302,36 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
     };
     fetchInvites();
     const interval = setInterval(fetchInvites, REFRESH_INTERVAL);
+    return () => { alive = false; clearInterval(interval); };
+  }, [territoryId]);
+
+  // The invite chat funnel for this city — how far each business got through
+  // the /join conversation, straight from WordPress's own step tracking (it
+  // already resolves one furthest step per business across every week, so
+  // nothing is re-derived here). Same 60s refresh and same fail-soft rule as
+  // the invites fetch above: an error leaves this empty, which hides the panel
+  // entirely. A funnel panel must never blank the page.
+  useEffect(() => {
+    if (!territoryId) return;
+    let alive = true;
+    const fetchFunnel = () => {
+      authedFetch(`/api/directory/funnel?territoryId=${encodeURIComponent(territoryId)}`)
+        .then((r) => r.json())
+        .then((j) => {
+          // A 401/501/502 body carries steps: [] — falling through here on an
+          // empty steps array covers "not configured" and "errored" alike,
+          // and keeps whatever was already on screen.
+          if (!alive || !Array.isArray(j?.steps) || j.steps.length === 0) return;
+          const steps = j.steps as JoinFunnelStep[];
+          const byGdPlaceId = (j.byGdPlaceId ?? {}) as Record<number, JoinFunnelEntry>;
+          funnelCache.set(territoryId, { steps, byGdPlaceId, at: Date.now() });
+          setFunnelSteps(steps);
+          setFunnelByGdPlaceId(byGdPlaceId);
+        })
+        .catch(() => {});
+    };
+    fetchFunnel();
+    const interval = setInterval(fetchFunnel, REFRESH_INTERVAL);
     return () => { alive = false; clearInterval(interval); };
   }, [territoryId]);
 
@@ -501,6 +541,9 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
     || (!!r.contact && (lc(r.contact.name).includes(ql) || lc(r.contact.email).includes(ql) || lc(r.contact.company).includes(ql) || (!!qDigits && digits(r.contact.phone).includes(qDigits))));
 
   const inviteFor = (listing: DirectoryListing) => inviteByGdPlaceId.get(typeof listing.id === "number" ? listing.id : Number(listing.id));
+  // Same id coercion as inviteFor — the GeoDirectory place id is the join key
+  // on both sides. Undefined when this business never started the chat.
+  const funnelFor = (listing: DirectoryListing) => funnelByGdPlaceId[typeof listing.id === "number" ? listing.id : Number(listing.id)];
   const needsAttention = (r: { client: Client | null }) => !!(r.client && (tasksByClient?.get(r.client.id) ?? []).some((t) => t.status !== "done" && t.priority === "conversation"));
 
   // Full invite history — every send this territory has ever made, not just
@@ -536,6 +579,103 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   }, [invitesByGdPlaceId, nameByGdPlaceId]);
   const [logOpen, setLogOpen] = useState(false);
   const [logDaysShown, setLogDaysShown] = useState(20);
+
+  // How many businesses this territory has ever invited. NOTE: this comes from
+  // planner_weeks — this app's own invite log — so it counts only invites sent
+  // from here and misses any sent from WordPress's own outreach board. It's
+  // the top of the funnel below, which is why the "never opened it" number
+  // there is clamped at zero rather than trusted to be exact.
+  const invitedCount = useMemo(() => {
+    let n = 0;
+    for (const rec of inviteHistoryMap.values()) if (rec.invited > 0) n += 1;
+    return n;
+  }, [inviteHistoryMap]);
+  // One row per chat step, in WordPress's own order (that order IS the funnel
+  // order). `stopped` = businesses whose furthest step is exactly this one;
+  // `reached` = the suffix sum, i.e. everyone who got at least this far.
+  const funnelRows = useMemo(() => {
+    const stoppedByStep = new Map<string, number>();
+    for (const e of Object.values(funnelByGdPlaceId)) stoppedByStep.set(e.step, (stoppedByStep.get(e.step) ?? 0) + 1);
+    const out = funnelSteps.map((s) => ({ value: s.value, label: s.label, stopped: stoppedByStep.get(s.value) ?? 0, reached: 0 }));
+    let running = 0;
+    for (let i = out.length - 1; i >= 0; i--) { running += out[i].stopped; out[i].reached = running; }
+    return out;
+  }, [funnelSteps, funnelByGdPlaceId]);
+  const funnelTracked = funnelRows[0]?.reached ?? 0;
+  // Bars are proportional to the top of the funnel, so every step reads as a
+  // share of everyone who was invited (not of whoever happened to open).
+  const funnelBase = Math.max(invitedCount, funnelTracked);
+  const neverOpened = Math.max(0, invitedCount - funnelTracked);
+
+  // This week's invite email — the actual copy that goes out to every business
+  // in the city, stored by WordPress as one blob per (city, week) whose first
+  // line is the subject. Admin only, same bar as the daily invite cap control.
+  const [tplOpen, setTplOpen] = useState(false);
+  const [tplLoading, setTplLoading] = useState(false);
+  const [tplErr, setTplErr] = useState<string | null>(null);
+  const [tplSaved, setTplSaved] = useState("");   // last value the server confirmed
+  const [tplDraft, setTplDraft] = useState("");   // what's in the textarea now
+  const [tplBusy, setTplBusy] = useState<"saving" | "generating" | null>(null);
+  // Loaded once per week, not on every expand — collapsing the panel with
+  // unsaved edits and reopening it shouldn't silently throw them away.
+  const tplLoadedWeek = useRef<string | null>(null);
+  useEffect(() => {
+    if (!tplOpen || !territoryId || !canAdmin) return;
+    if (tplLoadedWeek.current === todayWeekIso) return;
+    let alive = true;
+    setTplLoading(true);
+    setTplErr(null);
+    authedFetch(`/api/planner/template?territoryId=${encodeURIComponent(territoryId)}&week=${todayWeekIso}`)
+      .then(async (r) => {
+        const j = await r.json().catch(() => ({}));
+        if (!alive) return;
+        if (!r.ok) { setTplErr(j?.error || `Couldn't load this week's email (${r.status}).`); return; }
+        tplLoadedWeek.current = todayWeekIso;
+        setTplSaved(j.email ?? "");
+        setTplDraft(j.email ?? "");
+      })
+      .catch((e) => { if (alive) setTplErr(String(e?.message ?? e)); })
+      .finally(() => { if (alive) setTplLoading(false); });
+    return () => { alive = false; };
+  }, [tplOpen, territoryId, canAdmin, todayWeekIso]);
+  const saveTemplate = async () => {
+    if (!territoryId) return;
+    setTplBusy("saving");
+    setTplErr(null);
+    try {
+      const res = await authedFetch("/api/planner/template", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ territoryId, week: todayWeekIso, value: tplDraft }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.ok) { setTplErr(j?.error || `Save failed (${res.status}).`); return; }
+      setTplSaved(tplDraft);
+    } catch (e) {
+      setTplErr(e instanceof Error ? e.message : "Save failed.");
+    } finally {
+      setTplBusy(null);
+    }
+  };
+  // Replaces the textarea contents only — nothing is written until Save, so a
+  // regenerate that comes back worse is one undo (reload) away.
+  const regenerateTemplate = async () => {
+    if (!territoryId) return;
+    setTplBusy("generating");
+    setTplErr(null);
+    try {
+      const res = await authedFetch("/api/planner/template/generate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ territoryId, week: todayWeekIso }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.ok || !j.text) { setTplErr(j?.error || `Couldn't draft a new email (${res.status}).`); return; }
+      setTplDraft(j.text);
+    } catch (e) {
+      setTplErr(e instanceof Error ? e.message : "Couldn't draft a new email.");
+    } finally {
+      setTplBusy(null);
+    }
+  };
 
   const filtered = rows.filter(matchRow);
   const total = filtered.length;
@@ -618,6 +758,55 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
         ) : null
       )}
 
+      {/* Invite chat funnel — of everyone invited, how far they got through
+          the /join conversation. "Stopped here" carries the visual weight on
+          purpose: it's the number that answers "which chat screen do I fix
+          next". Hidden entirely when WordPress isn't reachable or isn't
+          configured (funnelRows stays empty), never an error state. */}
+      {territoryId && funnelRows.length > 0 && (
+        <div className="mb-2 rounded-lg border bg-surface px-3 py-2.5">
+          <div className="text-[12px] font-semibold uppercase tracking-wide text-muted">Invite chat funnel — where {city} businesses stop</div>
+          <div className="mb-2 text-[12px] text-muted">Reached counts everyone who got at least this far. Stopped here is the screen they never got past.</div>
+          <div className="mb-1 grid gap-2 text-[12px] font-semibold uppercase tracking-wide text-muted" style={{ gridTemplateColumns: "minmax(0,1fr) 84px" }}>
+            <span>Step</span>
+            <span className="text-right">Stopped here</span>
+          </div>
+          <div className="space-y-1.5">
+            {/* Top of the funnel, from this app's own invite log rather than
+                WordPress's step tracking — see invitedCount above. */}
+            <div className="grid items-center gap-2 border-b pb-1.5" style={{ gridTemplateColumns: "minmax(0,1fr) 84px" }}>
+              <div className="flex min-w-0 items-baseline gap-1.5 text-[12px]">
+                <span className="truncate font-medium text-foreground">Invited</span>
+                <span className="shrink-0 text-muted">{invitedCount} sent</span>
+              </div>
+              <div className="text-right" title="Invited but never opened the chat. Counted from invites sent here, so an invite sent from the WordPress board isn't in it.">
+                <span className={`text-[13px] font-bold ${neverOpened > 0 ? "text-amber-600" : "text-muted"}`}>{neverOpened}</span>
+                <span className="ml-1 text-[12px] text-muted">never opened</span>
+              </div>
+            </div>
+            {funnelRows.map((s) => (
+              <div key={s.value} className="grid items-center gap-2" style={{ gridTemplateColumns: "minmax(0,1fr) 84px" }}>
+                <div className="min-w-0">
+                  <div className="mb-0.5 flex min-w-0 items-baseline gap-1.5 text-[12px]">
+                    <span className="truncate font-medium text-foreground">{s.label}</span>
+                    <span className="shrink-0 text-muted">{s.reached} reached</span>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-background">
+                    <div className="h-full rounded-full bg-accent/70" style={{ width: `${funnelBase ? (s.reached / funnelBase) * 100 : 0}%` }} />
+                  </div>
+                </div>
+                <div className="text-right text-[13px]">
+                  <span className={s.stopped > 0 ? "font-bold text-amber-600" : "text-muted"}>{s.stopped}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          {funnelTracked === 0 && (
+            <div className="mt-2 text-[12px] text-muted">No chat steps recorded yet — step tracking only just went live, so this fills in as businesses open their invites.</div>
+          )}
+        </div>
+      )}
+
       {/* Every invite this territory has ever sent, grouped by day — "will
           there be a history of invites sent" (Derek, Aug 3). Collapsed by
           default; a business's own row also shows its individual history
@@ -645,6 +834,65 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
               ))}
               {inviteLogByDay.length > logDaysShown && (
                 <button onClick={() => setLogDaysShown((n) => n + 20)} className="mt-1 text-[12px] font-medium text-accent hover:underline">Show older days</button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* This week's invite email — the copy every business in the city
+          receives. WordPress stores it as ONE blob per (city, week) whose
+          first line is the subject, so it's edited here as one textarea
+          rather than split into fields that would just be re-joined on save.
+          Same week the panels above use; there's deliberately no week picker.
+          Admin only, matching the daily invite cap control. */}
+      {territoryId && canAdmin && (
+        <div className="mb-2 rounded-lg border bg-surface">
+          <button onClick={() => setTplOpen((v) => !v)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] font-medium text-muted hover:text-foreground">
+            <I.chevron className={`shrink-0 transition ${tplOpen ? "-rotate-90" : "rotate-90"}`} />
+            This week&apos;s invite email — the copy every {city} business gets
+          </button>
+          {tplOpen && (
+            <div className="border-t px-3 py-2.5">
+              {tplErr && <div className="mb-2 rounded-md border border-amber-400/40 bg-amber-50/50 px-2 py-1.5 text-[12px] text-amber-800">{tplErr}</div>}
+              {tplLoading ? (
+                <div className="py-4 text-center text-[13px] text-muted">Loading this week&apos;s email…</div>
+              ) : (
+                <>
+                  <div className="mb-1.5 text-[12px] text-muted">
+                    First line is the subject, written as <code>Subject: …</code>. Keep the placeholders below intact; each one is filled in per business when the email sends.
+                  </div>
+                  <div className="mb-1.5 flex flex-wrap gap-1.5 text-[12px]">
+                    {[
+                      { tag: "{{business}}", what: "the business name" },
+                      { tag: "{{invite_link}}", what: "their own chat link" },
+                      { tag: "{{listing_link}}", what: "their public listing page" },
+                      { tag: "{{user.email_signature}}", what: "the ambassador's signature" },
+                    ].map((p) => (
+                      <span key={p.tag} title={p.what} className="rounded border bg-background px-1.5 py-0.5 font-medium text-muted">
+                        <code>{p.tag}</code> <span className="font-normal">{p.what}</span>
+                      </span>
+                    ))}
+                  </div>
+                  <textarea value={tplDraft} onChange={(e) => setTplDraft(e.target.value)} rows={14} spellCheck
+                    placeholder={"Subject: A free feature for {{business}}\n\nHi there,\n…"}
+                    className="w-full rounded-lg border bg-background px-2.5 py-2 font-mono text-[13px] leading-relaxed outline-none focus:border-accent" />
+                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                    <button onClick={saveTemplate} disabled={tplDraft === tplSaved || tplBusy !== null}
+                      title={tplDraft === tplSaved ? "Nothing to save yet" : "Save this copy for the week"}
+                      className="rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40">
+                      {tplBusy === "saving" ? "Saving…" : "Save"}
+                    </button>
+                    <button onClick={regenerateTemplate} disabled={tplBusy !== null}
+                      title="Draft a fresh email from this week's theme — replaces what's in the box, saves nothing until you click Save"
+                      className="rounded-lg border bg-surface px-3 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40">
+                      {tplBusy === "generating" ? "Drafting…" : "Regenerate"}
+                    </button>
+                    <span className="text-[12px] text-muted">
+                      {tplDraft !== tplSaved ? "Unsaved changes" : tplSaved ? "Saved" : "Nothing saved yet — an email is drafted automatically at send time until you write one."}
+                    </span>
+                  </div>
+                </>
               )}
             </div>
           )}
@@ -738,6 +986,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                     <ListingRow key={g.key + r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} template={template}
                       stage={computeBusinessStage(r.listing, r.client, inviteFor(r.listing))}
                       invite={inviteFor(r.listing)}
+                      funnelStep={funnelFor(r.listing)}
                       inviteHistoryList={gdPlaceId != null ? invitesByGdPlaceId.get(gdPlaceId) ?? [] : []}
                       onSetClientStatus={onSetClientStatus} canAdmin={canAdmin} ghlContactUrlFor={ghlContactUrlFor}
                       featured={!!r.client && !!featuredClientIds?.has(r.client.id)}
@@ -769,7 +1018,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, inviteHistoryList, onSetClientStatus, canAdmin, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, otherLists, onOpenProject, inviteActions }: {
+function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, funnelStep, inviteHistoryList, onSetClientStatus, canAdmin, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, otherLists, onOpenProject, inviteActions }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
   onOpenClient: (id: string) => void;
@@ -784,6 +1033,12 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
   // when it's never been invited (or territoryId wasn't passed down, e.g.
   // the admin multi-city overview).
   invite?: PlannerInvite;
+  // The furthest step this business ever reached in the invite chat, from
+  // WordPress's own tracking. Undefined when it never started the chat (or
+  // the funnel isn't reachable) — no chip in that case. Lives on the sub-line
+  // with the other engagement chips rather than in a grid column: that grid
+  // is a computed three-track template whose width math is already fragile.
+  funnelStep?: JoinFunnelEntry;
   // Every invite ever sent to this business, newest first (invite above is
   // just the first entry of this same list) — click-to-expand full history.
   // Empty when never invited or no valid listing id.
@@ -889,6 +1144,12 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
               <span title={invite.clickedAt ? `Clicked the invite link ${formatDue(invite.clickedAt)}` : `Opened the invite email ${formatDue(invite.openedAt!)}`}
                 className="rounded bg-cyan-100 px-1.5 py-0.5 font-medium text-cyan-700">
                 {invite.clickedAt ? "🖱️ Clicked" : "👀 Opened"}
+              </span>
+            )}
+            {funnelStep && (
+              <span title={`Furthest step in the invite chat${funnelStep.at ? `, ${formatDue(new Date(funnelStep.at * 1000).toISOString())}` : ""}`}
+                className="rounded bg-violet-100 px-1.5 py-0.5 font-medium text-violet-700">
+                💬 {funnelStep.label}
               </span>
             )}
             {listing.rep && <span>· {listing.rep}</span>}
