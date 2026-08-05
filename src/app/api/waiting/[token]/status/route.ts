@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { todayIso } from "@/lib/data";
-import { isRateLimited } from "@/lib/rateLimit";
+import { rateLimit } from "@/lib/rateLimit";
 import { resolveNotifyRecipient, notifyTeamOfClientActivity } from "@/lib/waitingNotify";
 
 // Public, token-gated — lets the client set a task's review outcome directly
@@ -15,7 +15,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   if (!adminConfigured) return NextResponse.json({ error: "Not configured" }, { status: 501 });
   const { token } = await params;
   if (!token || token.length < 16) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  if (await isRateLimited(req, token)) return NextResponse.json({ error: "Too many requests." }, { status: 429 });
+  const limited = await rateLimit(req, token, "status");
+  if (limited) return limited;
 
   const { data: client } = await supabaseAdmin.from("clients").select("id, name, assigned_to").eq("share_token", token).maybeSingle();
   if (!client) return NextResponse.json({ error: "Not found" }, { status: 404 });

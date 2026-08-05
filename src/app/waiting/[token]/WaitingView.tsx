@@ -424,11 +424,20 @@ export default function WaitingView({ token }: { token: string }) {
     setLinkUrl(""); setLinkLabel(""); setLinkForId(null);
   };
 
+  // Set once the page has successfully rendered real data. After that point
+  // a failed refresh (a 429 from the rate limiter, a dropped connection, a
+  // blip) must NOT swap the client's whole page out for an error screen —
+  // the last good render is far more useful than "This link isn't valid",
+  // which reads as "your link is broken" for what is only a transient hiccup.
+  // Errors before the first successful load still surface normally.
+  const hasLoadedRef = useRef(false);
+
   const load = async () => {
     try {
       const res = await fetch(`/api/waiting/${token}${deepLinkTaskId ? `?task=${encodeURIComponent(deepLinkTaskId)}` : ""}`);
       const j = await res.json().catch(() => ({}));
-      if (!res.ok) { setError(j.error || "This link isn't valid."); return; }
+      if (!res.ok) { if (!hasLoadedRef.current) setError(j.error || "This link isn't valid."); return; }
+      hasLoadedRef.current = true;
       setClientName(j.clientName ?? null);
       setProjects(Array.isArray(j.projects) ? j.projects : []);
       const list: WaitingTask[] = Array.isArray(j.tasks) ? j.tasks : [];
@@ -445,7 +454,7 @@ export default function WaitingView({ token }: { token: string }) {
         return next;
       });
     } catch {
-      setError("Couldn't load this page — check your connection and try again.");
+      if (!hasLoadedRef.current) setError("Couldn't load this page — check your connection and try again.");
     }
   };
 

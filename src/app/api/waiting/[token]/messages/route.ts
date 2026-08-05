@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { type Attachment } from "@/lib/data";
 import { sanitizeWaitingAttachments } from "@/lib/waitingAttachments";
-import { isRateLimited } from "@/lib/rateLimit";
+import { rateLimit } from "@/lib/rateLimit";
 import { resolveNotifyRecipient, notifyTeamOfClientActivity } from "@/lib/waitingNotify";
 
 // Public, token-gated — the client sends one message in a running, per-task
@@ -16,7 +16,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   if (!adminConfigured) return NextResponse.json({ error: "Not configured" }, { status: 501 });
   const { token } = await params;
   if (!token || token.length < 16) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  if (await isRateLimited(req, token)) return NextResponse.json({ error: "Too many requests." }, { status: 429 });
+  const limited = await rateLimit(req, token, "message");
+  if (limited) return limited;
 
   const { data: client } = await supabaseAdmin.from("clients").select("id, name, assigned_to, linked_contact_id").eq("share_token", token).maybeSingle();
   if (!client) return NextResponse.json({ error: "Not found" }, { status: 404 });
