@@ -22,11 +22,20 @@ async function run(req: NextRequest) {
   const authHeader = req.headers.get("authorization") ?? "";
   const cronOk = !!process.env.CRON_SECRET && authHeader === `Bearer ${process.env.CRON_SECRET}`;
   const secretOk = !!process.env.GHL_WEBHOOK_SECRET && req.nextUrl.searchParams.get("secret") === process.env.GHL_WEBHOOK_SECRET;
+  let manualAdmin = false;
   if (!cronOk && !secretOk) {
     const caller = await requireUser(req);
     if (!caller || caller.role !== "admin") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    manualAdmin = true;
   }
 
-  const result = await runPlannerAutoInvite();
+  // force/territoryId only ever come from an authenticated admin's own
+  // "Send now" click (Businesses page) — the cron and the webhook-secret
+  // path stay exactly what they were, the full unattended daily run.
+  const body = manualAdmin ? await req.json().catch(() => null) : null;
+  const territoryId = typeof body?.territoryId === "string" ? body.territoryId : undefined;
+  const force = body?.force === true;
+
+  const result = await runPlannerAutoInvite({ force, territoryId });
   return NextResponse.json(result);
 }

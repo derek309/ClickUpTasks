@@ -16,10 +16,11 @@
 // When the directory isn't configured (the endpoint 501s before Derek sets the
 // WP env vars) or errors, it degrades to showing every city contact under
 // "Unclaimed" — exactly the pre-directory behavior, just relabeled.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
 import { fetchPlannerWeeks, upsertPlannerWeek } from "@/lib/db";
 import { latestInviteStatus, inviteHistory, featureHistory, isDue, allInvitesByGdPlaceId } from "@/lib/plannerPools";
+import { zonedDateString, BUSINESS_TZ, AUTO_INVITE_START_HOUR } from "@/lib/businessHours";
 import {
   formatDue, playbookCompletion, plannerWeekOf, todayIso as todayIsoDate,
   CLIENT_STATUS_META, CLIENT_STATUS_ORDER,
@@ -313,26 +314,30 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // No new storage: PlannerInvite.gdPlaceId is the same GeoDirectory id as
   // DirectoryListing.id, so it joins directly. Undefined territoryId (the
   // admin multi-city overview) just skips this — no territory to scope to.
+  // Pulled out to a stable callback (not just an effect-local closure) so the
+  // "Send now" auto-invite action below can force an immediate refresh after
+  // it posts, instead of waiting up to REFRESH_INTERVAL to see its own result.
+  const refreshInviteHistory = useCallback(() => {
+    if (!territoryId) return Promise.resolve();
+    return fetchPlannerWeeks(territoryId).then((weeks) => {
+      const byGdPlaceId = latestInviteStatus(weeks);
+      const invites = inviteHistory(weeks);
+      const features = featureHistory(weeks);
+      inviteCache.set(territoryId, { byGdPlaceId, invites, features, weeks, at: Date.now() });
+      setInviteByGdPlaceId(byGdPlaceId);
+      setInviteHistoryMap(invites);
+      setFeatureHistoryMap(features);
+      setPlannerWeeks(weeks);
+    }).catch(() => { /* fail soft — stays "Unclaimed" instead of "Invited", Priority sort just falls back to Name */ });
+  }, [territoryId]);
   useEffect(() => {
     if (!territoryId) return;
     let alive = true;
-    const fetchInvites = () => {
-      fetchPlannerWeeks(territoryId).then((weeks) => {
-        if (!alive) return;
-        const byGdPlaceId = latestInviteStatus(weeks);
-        const invites = inviteHistory(weeks);
-        const features = featureHistory(weeks);
-        inviteCache.set(territoryId, { byGdPlaceId, invites, features, weeks, at: Date.now() });
-        setInviteByGdPlaceId(byGdPlaceId);
-        setInviteHistoryMap(invites);
-        setFeatureHistoryMap(features);
-        setPlannerWeeks(weeks);
-      }).catch(() => { /* fail soft — stays "Unclaimed" instead of "Invited", Priority sort just falls back to Name */ });
-    };
-    fetchInvites();
-    const interval = setInterval(fetchInvites, REFRESH_INTERVAL);
+    const tick = () => { if (alive) refreshInviteHistory(); };
+    tick();
+    const interval = setInterval(tick, REFRESH_INTERVAL);
     return () => { alive = false; clearInterval(interval); };
-  }, [territoryId]);
+  }, [territoryId, refreshInviteHistory]);
 
   // The invite chat funnel for this city — how far each business got through
   // the /join conversation, straight from WordPress's own step tracking (it
@@ -541,6 +546,48 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
       .slice(0, dailyInviteCap);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listings, inviteHistoryMap, featureHistoryMap, dailyInviteCap, todayIso]);
+  // Auto-invite status strip — the cron only ever gets one shot a day (Vercel
+  // Hobby only allows a daily schedule, see plannerAutoInviteServer.ts), so
+  // when that one run misses (a deploy mid-window, a transient error) there's
+  // no retry and nothing goes out. This surfaces whether today's batch has
+  // actually sent, and gives an admin a manual way to force it.
+  const listingNameByGdPlaceId = useMemo(() => {
+    const m = new Map<number, string>();
+    (listings ?? []).forEach((l) => {
+      const id = typeof l.id === "number" ? l.id : parseInt(String(l.id), 10);
+      if (Number.isFinite(id)) m.set(id, l.name);
+    });
+    return m;
+  }, [listings]);
+  const todayLocalDate = zonedDateString(new Date(), BUSINESS_TZ);
+  const todayWeekEntry = useMemo(() => plannerWeeks.find((w) => w.week === todayWeekIso) ?? null, [plannerWeeks, todayWeekIso]);
+  const sentAutoToday = useMemo(() => (todayWeekEntry?.invited ?? [])
+    .filter((inv) => inv.by === "auto" && zonedDateString(new Date(inv.at), BUSINESS_TZ) === todayLocalDate)
+    .sort((a, b) => a.at.localeCompare(b.at)), [todayWeekEntry, todayLocalDate]);
+  const formatSendTime = (iso: string) => new Intl.DateTimeFormat("en-US", { timeZone: BUSINESS_TZ, hour: "numeric", minute: "2-digit" }).format(new Date(iso));
+  const formatHour12 = (h: number) => `${h % 12 === 0 ? 12 : h % 12}:00 ${h >= 12 ? "PM" : "AM"}`;
+  const scheduledTimeLabel = formatHour12(AUTO_INVITE_START_HOUR);
+  const scheduledTimePassed = parseInt(new Intl.DateTimeFormat("en-US", { timeZone: BUSINESS_TZ, hour: "2-digit", hour12: false }).format(new Date()), 10) % 24 >= AUTO_INVITE_START_HOUR;
+  const [autoSendState, setAutoSendState] = useState<"sending" | string | null>(null);
+  const sendAutoBatchNow = async () => {
+    if (!territoryId) return;
+    setAutoSendState("sending");
+    try {
+      const res = await authedFetch("/api/cron/planner-auto-invite", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ territoryId, force: true }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { setAutoSendState(j?.error || `Send failed (${res.status}).`); return; }
+      if (j?.ran === false) { setAutoSendState("Nothing to send."); return; }
+      const mine = (j?.territories ?? []).find((t: { territoryId: string }) => t.territoryId === territoryId);
+      if (mine?.error) { setAutoSendState(humanizeInviteError(mine.error)); return; }
+      setAutoSendState(null);
+      await refreshInviteHistory();
+    } catch (e) {
+      setAutoSendState(e instanceof Error ? e.message : "Send failed.");
+    }
+  };
   const sortRows = <T extends { listing: DirectoryListing; client: Client | null }>(arr: T[]) => [...arr].sort((a, b) => {
     if (sort === "priority") {
       const aStage = computeBusinessStage(a.listing, a.client, inviteFor(a.listing));
@@ -841,13 +888,66 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
         </div>
       )}
 
+      {/* Auto-invite status strip — did today's 9am Pacific run actually go
+          out? It only gets one shot a day with no retry (see
+          plannerAutoInviteServer.ts), so this is the "did it happen, and if
+          not, make it happen" surface: once any auto sends land today it
+          holds up here as a record of who got sent and when, rather than
+          disappearing back into the queue box below. */}
+      {territoryId && dailyInviteCap && dailyInviteCap > 0 && (sentAutoToday.length > 0 || autoInviteQueue.length > 0) && (
+        <div className="mb-2 rounded-lg border border-accent/30 bg-accent-soft/40 px-3 py-2.5">
+          {sentAutoToday.length > 0 && (
+            <div className={autoInviteQueue.length > 0 ? "mb-2 border-b border-accent/20 pb-2" : ""}>
+              <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                <div className="text-[12px] font-semibold uppercase tracking-wide text-emerald-700">Today&apos;s auto-invite batch, sent</div>
+                <div className="text-[12px] font-medium text-emerald-700">{sentAutoToday.length} invite{sentAutoToday.length === 1 ? "" : "s"} at {formatSendTime(sentAutoToday[0].at)}</div>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {sentAutoToday.map((inv, i) => (
+                  <span key={inv.gdPlaceId + "-" + i} className="rounded-full border border-emerald-400/40 bg-surface px-2 py-0.5 text-[12px] font-medium text-emerald-800">
+                    {listingNameByGdPlaceId.get(inv.gdPlaceId) ?? `#${inv.gdPlaceId}`}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {autoInviteQueue.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-[12px] font-semibold uppercase tracking-wide text-accent">
+                {sentAutoToday.length > 0 ? `${autoInviteQueue.length} more ready to send` : `${autoInviteQueue.length} of ${dailyInviteCap} slots ready`}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`text-[12px] font-medium ${scheduledTimePassed && sentAutoToday.length === 0 ? "text-amber-700" : "text-muted"}`}>
+                  {scheduledTimePassed && sentAutoToday.length === 0 ? "Didn't send automatically, scheduled for " : "Scheduled for "}{scheduledTimeLabel} Pacific
+                </span>
+                {canAdmin && (
+                  <button
+                    onClick={sendAutoBatchNow}
+                    disabled={autoSendState === "sending"}
+                    className="rounded-md border border-accent/40 bg-surface px-2 py-1 text-[12px] font-semibold text-accent hover:bg-accent-soft disabled:opacity-60"
+                  >
+                    {autoSendState === "sending" ? "Sending…" : "Send now"}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+          {autoSendState && autoSendState !== "sending" && (
+            <div className="mt-1.5 text-[12px] text-red-600">{autoSendState}</div>
+          )}
+        </div>
+      )}
+
       {/* The invite queue itself lives in the Unclaimed/Invited stage groups
-          below (Invite/Skip/Copy-link on each row) — this is just the daily
-          preview of what the auto-invite cron sends on its own. */}
+          below (Invite/Skip/Copy-link on each row) — this secondary box is
+          just the standing preview of who is queued for the next auto-invite
+          run, independent of whether today's batch above has already sent:
+          before it sends, this is the same list; after, it is whoever is
+          next in line (the just-sent businesses are no longer due). */}
       {territoryId && (
         dailyInviteCap && dailyInviteCap > 0 ? (
-          <div className="mb-2 rounded-lg border border-accent/30 bg-accent-soft/40 px-3 py-2.5">
-            <div className="mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-accent">Next auto-invite batch — {autoInviteQueue.length} of {dailyInviteCap} slots</div>
+          <div className="mb-2 rounded-lg border bg-surface px-3 py-2.5">
+            <div className="mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-muted">Next auto-invite batch, {autoInviteQueue.length} of {dailyInviteCap} slots</div>
             {autoInviteQueue.length === 0 ? (
               <div className="text-[13px] text-muted">Nothing due right now — nobody unclaimed is overdue for a touch.</div>
             ) : (

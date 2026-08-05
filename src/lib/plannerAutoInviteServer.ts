@@ -38,16 +38,25 @@ async function findOrCreateTodayWeek(territoryId: string, weekIso: string): Prom
   return w;
 }
 
-export async function runPlannerAutoInvite(): Promise<{ ran: boolean; reason?: string; territories: { territoryId: string; city: string; sent: number; error?: string }[] }> {
+export async function runPlannerAutoInvite(opts?: { force?: boolean; territoryId?: string }): Promise<{ ran: boolean; reason?: string; territories: { territoryId: string; city: string; sent: number; error?: string }[] }> {
   // One check for the whole run — every territory below is gated by the
   // same window anyway, so failing each one individually to discover this
   // would just be noise. The cron fires once daily at 9am Pacific; this
   // gate is what keeps it a no-op on weekends (see BUSINESS_DAYS) and if
   // the schedule ever drifts outside 9am-5pm across a DST change.
+  //
+  // opts.force skips this gate — an admin manually clicking "Send now" on
+  // the Businesses page because the 9am run missed its one daily shot (no
+  // retry exists) is a deliberate, in-the-moment action, not the
+  // unattended send this window exists to pace. The real anti-2am-email
+  // guard is the wider 8am-6pm check inside sendPlannerInviteServer, which
+  // still applies to every send below regardless of force.
   const now = new Date();
-  if (!isAutoInviteHour(now)) return { ran: false, reason: "outside_auto_invite_hours", territories: [] };
+  if (!opts?.force && !isAutoInviteHour(now)) return { ran: false, reason: "outside_auto_invite_hours", territories: [] };
 
-  const { data: territoryRows } = await supabaseAdmin.from("territories").select("id, city, state, daily_invite_cap").not("daily_invite_cap", "is", null).gt("daily_invite_cap", 0);
+  let territoryQuery = supabaseAdmin.from("territories").select("id, city, state, daily_invite_cap").not("daily_invite_cap", "is", null).gt("daily_invite_cap", 0);
+  if (opts?.territoryId) territoryQuery = territoryQuery.eq("id", opts.territoryId);
+  const { data: territoryRows } = await territoryQuery;
   const territories = (territoryRows ?? []) as TerritoryRow[];
   if (!territories.length) return { ran: true, reason: "no_territories_configured", territories: [] };
 
