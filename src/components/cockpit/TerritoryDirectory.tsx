@@ -93,6 +93,15 @@ export const STAGE_META: Record<BusinessStage, { label: string; color: string; h
 // here ALSO still appears in its normal stage group below, so per-stage
 // funnel counts stay a truthful pipeline snapshot.
 const ATTENTION_META = { label: "Needs attention now", color: "#8b5cf6", hint: "replied by SMS, email, or newsletter invite — check in before anything else" };
+// The other half of that same group: a business someone has already reached
+// out to (walk-in, call, email) and is now waiting to hear back from. Same
+// open conversation task, just with its due date pushed out by the Followed
+// up button below — so it reads as worked, not cold, until that date comes
+// around and it drops back into "Needs attention now" on its own. Deliberately
+// a calm slate rather than another hot color: the whole point is that a rep
+// scanning this page can see at a glance which of these still need a first
+// touch.
+const FOLLOWED_UP_META = { label: "Followed up, waiting to hear back", color: "#64748b", hint: "someone already reached out, so we check back in if nothing comes of it" };
 // Three more override groups, purely from invite engagement (status/openedAt/
 // clickedAt on the latest invite — see PlannerInvite) — NOT tasks, so none of
 // these ever touch the Dashboard ("that's for active clients," Derek, Aug 3).
@@ -544,7 +553,51 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // Same id coercion as inviteFor — the GeoDirectory place id is the join key
   // on both sides. Undefined when this business never started the chat.
   const funnelFor = (listing: DirectoryListing) => funnelByGdPlaceId[typeof listing.id === "number" ? listing.id : Number(listing.id)];
-  const needsAttention = (r: { client: Client | null }) => !!(r.client && (tasksByClient?.get(r.client.id) ?? []).some((t) => t.status !== "done" && t.priority === "conversation"));
+  // The open Conversation-priority task that puts a business in the attention
+  // group — the same scan needsAttention has always run, just returning the
+  // task itself so its due date can sub-bucket the row (see attentionRows
+  // below) and its id can be handed to the Followed up action.
+  const conversationTaskFor = (r: { client: Client | null }) =>
+    (r.client && (tasksByClient?.get(r.client.id) ?? []).find((t) => t.status !== "done" && t.priority === "conversation")) || null;
+  const needsAttention = (r: { client: Client | null }) => !!conversationTaskFor(r);
+  // "We reached out, now we're waiting to hear back." Keyed by conversation
+  // task id: the date the server just set, held locally so the row moves to
+  // the followed-up bucket the moment the call returns instead of waiting on
+  // the Realtime echo of the task row and the parent re-deriving
+  // tasksByClient from it. `from` is the due date the task showed when the
+  // button was clicked — the optimistic value applies only while the row
+  // still shows that, so the instant it catches up (our own write echoing
+  // back, or an inbound reply bumping due to today, see
+  // upsertConversationTask) the task's own date takes over again and a
+  // snooze can never mask a business that has since answered. Same shape as
+  // inviteState above for the busy/error half: "saving", or an error string
+  // to show inline with a Dismiss.
+  const [followUpDue, setFollowUpDue] = useState<Record<string, { from: string | null; to: string }>>({});
+  const [followUpState, setFollowUpState] = useState<Record<string, "saving" | string>>({});
+  const nextCheckInFor = (r: { client: Client | null }) => {
+    const t = conversationTaskFor(r);
+    if (!t) return null;
+    const pending = followUpDue[t.id];
+    return pending && t.due === pending.from ? pending.to : t.due;
+  };
+  const markFollowedUp = async (taskId: string, from: string | null) => {
+    setFollowUpState((m) => ({ ...m, [taskId]: "saving" }));
+    try {
+      const res = await authedFetch("/api/tasks/follow-up", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (res.ok && j.ok && j.due) {
+        setFollowUpDue((m) => ({ ...m, [taskId]: { from, to: j.due } }));
+        setFollowUpState((m) => { const n = { ...m }; delete n[taskId]; return n; });
+        return;
+      }
+      setFollowUpState((m) => ({ ...m, [taskId]: j.error || `Couldn't save that follow up (${res.status}).` }));
+    } catch (e) {
+      setFollowUpState((m) => ({ ...m, [taskId]: e instanceof Error ? e.message : "Couldn't save that follow up." }));
+    }
+  };
 
   // Full invite history — every send this territory has ever made, not just
   // the latest per business (that's inviteByGdPlaceId above). Feeds the
@@ -685,7 +738,19 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
 
   if (loading) return <div className="bg-background p-4 py-10 text-center text-[13px] text-muted sm:p-5">Loading directory for {city}…</div>;
 
-  const attentionRows = sortRows(filtered.filter(needsAttention));
+  // The attention group splits in two on its own conversation task's due
+  // date, which on these tasks doubles as "last touched" (see
+  // upsertConversationTask): no due date, or one that's today or older, means
+  // nobody has reached out yet — or the follow-up window ran out and it's
+  // gone cold again — so it needs a first touch today. A due date still in
+  // the future means a rep already reached out (the Followed up button set
+  // it) and is waiting to hear back, which is worked, not urgent. Every
+  // business here lands in exactly one of the two, same as the engagement
+  // ladder below.
+  const todayDate = todayIsoDate();
+  const attentionAll = filtered.filter(needsAttention);
+  const attentionRows = sortRows(attentionAll.filter((r) => { const d = nextCheckInFor(r); return !d || d <= todayDate; }));
+  const followedUpRows = sortRows(attentionAll.filter((r) => { const d = nextCheckInFor(r); return !!d && d > todayDate; }));
   // The engagement ladder — each business sits in exactly the strongest tier
   // it qualifies for (accepted > clicked > opened), never more than one, so
   // these three groups partition the unclaimed/invited pool instead of
@@ -710,6 +775,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   type Group = { key: string; label: string; color: string; hint: string; rows: typeof filtered };
   const groups: Group[] = [];
   if (attentionRows.length) groups.push({ key: "attention", label: ATTENTION_META.label, color: ATTENTION_META.color, hint: ATTENTION_META.hint, rows: attentionRows });
+  if (followedUpRows.length) groups.push({ key: "followed_up", label: FOLLOWED_UP_META.label, color: FOLLOWED_UP_META.color, hint: FOLLOWED_UP_META.hint, rows: followedUpRows });
   if (acceptedRows.length) groups.push({ key: "accepted", label: ACCEPTED_META.label, color: ACCEPTED_META.color, hint: ACCEPTED_META.hint, rows: acceptedRows });
   if (clickedRows.length) groups.push({ key: "clicked", label: CLICKED_META.label, color: CLICKED_META.color, hint: CLICKED_META.hint, rows: clickedRows });
   if (openedRows.length) groups.push({ key: "opened", label: OPENED_META.label, color: OPENED_META.color, hint: OPENED_META.hint, rows: openedRows });
@@ -982,6 +1048,23 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                     onCopyLink: () => copyInviteLink(gdPlaceId),
                     copied: copiedLinkId === gdPlaceId,
                   } : null;
+                  // Only in the two attention groups, the same way the
+                  // invite actions above only render for the two stages they
+                  // apply to — an attention row also appears in its normal
+                  // stage group below, and the button belongs where a rep is
+                  // actually working the replies, not on both copies.
+                  const convoTask = g.key === "attention" || g.key === "followed_up" ? conversationTaskFor(r) : null;
+                  const convoDue = convoTask ? nextCheckInFor(r) : null;
+                  const followUp = convoTask ? {
+                    // Only a date still ahead of us is a live "we're waiting
+                    // on them" promise — a lapsed one is why this row is back
+                    // in "Needs attention now", so it says nothing useful on
+                    // the row and the history stays in the task's comments.
+                    nextCheckIn: convoDue && convoDue > todayDate ? convoDue : null,
+                    state: followUpState[convoTask.id],
+                    onFollowUp: () => markFollowedUp(convoTask.id, convoTask.due),
+                    onDismissError: () => setFollowUpState((m) => { const n = { ...m }; delete n[convoTask.id]; return n; }),
+                  } : null;
                   return (
                     <ListingRow key={g.key + r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} template={template}
                       stage={computeBusinessStage(r.listing, r.client, inviteFor(r.listing))}
@@ -994,7 +1077,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                       onFeature={onFeature && ((rr) => onFeature({ clientId: rr.client?.id ?? null, contact: rr.contact, name: rr.listing.name, city, state }))}
                       playbookTasks={(r.client && playbookTasksByClient?.get(r.client.id)) || []} onOpenPlaybook={onOpenPlaybook}
                       otherLists={(r.client && otherListsByClient?.get(r.client.id)) || []} onOpenProject={onOpenProject}
-                      inviteActions={inviteActions} />
+                      inviteActions={inviteActions} followUp={followUp} />
                   );
                 })}
               </div>
@@ -1018,7 +1101,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, funnelStep, inviteHistoryList, onSetClientStatus, canAdmin, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, otherLists, onOpenProject, inviteActions }: {
+function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, funnelStep, inviteHistoryList, onSetClientStatus, canAdmin, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, otherLists, onOpenProject, inviteActions, followUp }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
   onOpenClient: (id: string) => void;
@@ -1077,6 +1160,17 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
     link: string | undefined;
     onCopyLink: () => void;
     copied: boolean;
+  } | null;
+  // "Followed up" for this row's open conversation task — null everywhere
+  // except the two attention groups (nothing to snooze anywhere else).
+  // nextCheckIn is that task's due date, i.e. when this business comes back
+  // to "Needs attention now" if nothing has happened by then; null when
+  // nobody has followed up yet.
+  followUp?: {
+    nextCheckIn: string | null;
+    state: "saving" | string | undefined;
+    onFollowUp: () => void;
+    onDismissError: () => void;
   } | null;
 }) {
   const { listing, contact, client } = row;
@@ -1220,6 +1314,39 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
               {l.name} {l.done}/{l.total}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* "Followed up" — the one action for a business that replied. It does
+          NOT close the conversation task (closing is what already existed,
+          and it throws away the fact that we're still waiting on an answer):
+          it pushes the task's due date out three days, which moves this row
+          into "Followed up, waiting to hear back" until that date passes and
+          it resurfaces on its own. Available in both attention groups, so a
+          second touch on a business that still hasn't answered buys another
+          three days rather than needing the row closed. */}
+      {followUp && (
+        <div className="flex flex-wrap items-center gap-1.5 px-4 pb-2 pl-9 pt-1.5 sm:pl-9">
+          {followUp.state === "saving" ? (
+            <span className="shrink-0 text-[12px] text-muted">Saving…</span>
+          ) : followUp.state ? (
+            <span className="flex shrink-0 items-center gap-1.5 text-[12px]">
+              <span className="text-danger">{followUp.state}</span>
+              <button onClick={followUp.onDismissError} className="font-medium text-muted hover:text-foreground">Dismiss</button>
+            </span>
+          ) : (
+            <button onClick={followUp.onFollowUp}
+              title="Record that you reached out. This business moves out of the way for three days, then comes back if nothing happens."
+              className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">
+              ↩ Followed up
+            </button>
+          )}
+          {followUp.nextCheckIn && (
+            <span title="When this business comes back to “Needs attention now” if we still haven’t heard back"
+              className="shrink-0 rounded-md bg-background px-2 py-1 text-[12px] font-medium text-muted">
+              Check back {formatDue(followUp.nextCheckIn)}
+            </span>
+          )}
         </div>
       )}
 
