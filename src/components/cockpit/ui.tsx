@@ -2,7 +2,7 @@
 
 // Shared UI primitives for the Cockpit: the icon set, Avatar, misc formatting
 // helpers, and the list-view column definitions. Split out of Cockpit.tsx.
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { users, userById, labelById, type Attachment, type TaskStatus, type Priority } from "@/lib/data";
 
 // --- tiny inline icons ------------------------------------------------------
@@ -118,6 +118,94 @@ export function Toggle({ on, onClick, disabled }: { on: boolean; onClick: () => 
     </button>
   );
 }
+// A drop-in replacement for a <select> whose option list got long enough that
+// scanning it is the slow part — the client pickers especially, where the list
+// runs to dozens of names. Closed, it looks and sits exactly like the plain
+// select it replaces. Open, it puts a filter box above the options: typing
+// narrows the list, Up/Down move the highlight, Enter picks, Escape closes
+// (and stops there, so it never also closes the modal the picker lives in).
+export type SearchOption = { value: string; label: string; sub?: string };
+
+export function SearchableSelect({
+  value, options, onChange, placeholder = "Select…", searchPlaceholder = "Type to filter…",
+  className = "", disabled, title, emptyLabel = "No matches",
+}: {
+  value: string;
+  options: SearchOption[];
+  onChange: (value: string) => void;
+  placeholder?: string;
+  searchPlaceholder?: string;
+  className?: string;
+  disabled?: boolean;
+  title?: string;
+  emptyLabel?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const [idx, setIdx] = useState(0);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const selected = options.find((o) => o.value === value);
+  const ql = q.trim().toLowerCase();
+  const shown = ql
+    ? options.filter((o) => o.label.toLowerCase().includes(ql) || (o.sub ?? "").toLowerCase().includes(ql))
+    : options;
+
+  // The popover is absolutely positioned, so a click anywhere else has to
+  // dismiss it or it hangs over unrelated UI.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => { if (!wrapRef.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+  // Keep the highlighted row on screen while arrowing through a long list.
+  useEffect(() => {
+    if (!open) return;
+    listRef.current?.querySelector<HTMLElement>(`[data-i="${idx}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [idx, open]);
+
+  const close = () => { setOpen(false); setQ(""); setIdx(0); };
+  const pick = (v: string) => { onChange(v); close(); };
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); setIdx((i) => Math.min(i + 1, shown.length - 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setIdx((i) => Math.max(i - 1, 0)); }
+    else if (e.key === "Enter") { e.preventDefault(); if (shown[idx]) pick(shown[idx].value); }
+    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
+  };
+
+  return (
+    <div ref={wrapRef} className="relative min-w-0">
+      <button type="button" disabled={disabled} title={title}
+        onClick={() => { if (open) close(); else { setOpen(true); setIdx(0); } }}
+        className={`flex w-full items-center gap-1.5 text-left outline-none disabled:opacity-50 ${className}`}>
+        <span className={`min-w-0 flex-1 truncate ${selected ? "" : "text-muted"}`}>{selected?.label ?? placeholder}</span>
+        <I.chevron className="shrink-0 -rotate-90 text-muted" />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-50 mt-1 w-full min-w-[220px] overflow-hidden rounded-lg border bg-surface shadow-soft-md">
+          <div className="flex items-center gap-1.5 border-b px-2.5 py-2">
+            <I.search className="shrink-0 text-muted" />
+            <input autoFocus value={q} onChange={(e) => { setQ(e.target.value); setIdx(0); }} onKeyDown={onKey}
+              placeholder={searchPlaceholder}
+              className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted" />
+          </div>
+          <div ref={listRef} className="max-h-64 overflow-y-auto p-1">
+            {shown.length === 0 && <div className="px-2.5 py-4 text-center text-[13px] text-muted">{emptyLabel}</div>}
+            {shown.map((o, i) => (
+              <button key={o.value} type="button" data-i={i} onMouseEnter={() => setIdx(i)} onClick={() => pick(o.value)}
+                className={`flex w-full flex-col items-start rounded-md px-2.5 py-1.5 text-left ${i === idx ? "bg-background" : ""} ${o.value === value ? "text-accent" : ""}`}>
+                <span className="w-full truncate text-[13px]">{o.label}</span>
+                {o.sub && <span className="w-full truncate text-[12px] text-muted">{o.sub}</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // "Sticky scroll to latest" for a message feed — shared by TeamChat (team +
 // DMs) and ClientJournal (notes/email/SMS feed). Auto-follows new messages
 // only while already scrolled to the bottom, so reading older history isn't

@@ -42,7 +42,10 @@ export function RichTextEditor({ value, onChange, placeholder, autoFocus }: { va
     autofocus: autoFocus ? "end" : false,
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
     editorProps: {
-      attributes: { class: "rte-content min-h-[80px] text-[15px] outline-none" },
+      // 16px, not the 15px the surrounding chrome uses: this is body copy
+      // people read, and at 15px descriptions were coming back as hard to
+      // read. The label/row scale around it is unchanged.
+      attributes: { class: "rte-content min-h-[80px] text-[16px] text-foreground outline-none" },
       // Plain click still just positions the cursor (the surface is always
       // editable, never a separate read mode) — Cmd/Ctrl-click follows the
       // link instead, same convention as Notion/most rich editors.

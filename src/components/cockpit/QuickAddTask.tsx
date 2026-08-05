@@ -5,6 +5,7 @@
 // via the same path as the inline grouped-list quick-add (assignee = you).
 import { useEffect, useRef, useState } from "react";
 import { type Client, type Project, type Priority, PRIORITY_ORDER, PRIORITY_META, isManuallyAssignable } from "@/lib/data";
+import { SearchableSelect } from "./ui";
 
 export function QuickAddTask({
   clients, projectsFor, companyFor, defaultClientId, defaultProjectId, onCreate, onClose,
@@ -26,6 +27,11 @@ export function QuickAddTask({
   useEffect(() => { titleRef.current?.focus(); }, []);
 
   const lists = clientId ? projectsFor(clientId) : [];
+  // The business name rides along as `sub` so it's both visible and
+  // searchable — two clients can share a first name, the company never does.
+  const clientOptions = [...clients]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((c) => ({ value: c.id, label: c.name, sub: companyFor(c.id) }));
   const priorities = PRIORITY_ORDER.filter(isManuallyAssignable);
   const canCreate = !!title.trim() && !!clientId;
 
@@ -48,17 +54,14 @@ export function QuickAddTask({
           className="mt-3 w-full rounded-md border bg-background px-3 py-2 text-[15px] outline-none focus:border-accent" />
 
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <label className="block">
+          {/* A plain div, not a <label>: a <button> is labelable, so wrapping
+              the searchable picker in one would re-fire its click. */}
+          <div className="block">
             <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted">Client</span>
-            <select value={clientId} onChange={(e) => { setClientId(e.target.value); setProjectId(""); }}
-              className="w-full rounded-md border bg-background px-2 py-2 text-[15px] outline-none focus:border-accent">
-              <option value="">Select a client…</option>
-              {[...clients].sort((a, b) => a.name.localeCompare(b.name)).map((c) => {
-                const co = companyFor(c.id);
-                return <option key={c.id} value={c.id}>{c.name}{co ? ` — ${co}` : ""}</option>;
-              })}
-            </select>
-          </label>
+            <SearchableSelect value={clientId} onChange={(v) => { setClientId(v); setProjectId(""); }}
+              options={clientOptions} placeholder="Select a client…" searchPlaceholder="Search clients…"
+              className="w-full rounded-md border bg-background px-2 py-2 text-[15px] focus:border-accent" />
+          </div>
 
           <label className="block">
             <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted">List</span>

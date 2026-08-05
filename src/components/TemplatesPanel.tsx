@@ -8,7 +8,7 @@
 // tasks.
 import { useState } from "react";
 import { type TaskTemplate, type Client, type Project } from "@/lib/data";
-import { I } from "./cockpit/ui";
+import { I, SearchableSelect } from "./cockpit/ui";
 
 export default function TemplatesPanel({ templates, clients, projects, onSave, onDelete, onUseAsTask }: {
   templates: TaskTemplate[];
@@ -27,6 +27,7 @@ export default function TemplatesPanel({ templates, clients, projects, onSave, o
   const [useProjectId, setUseProjectId] = useState("");
 
   const usableClients = clients.filter((c) => c.id.startsWith("cl_"));
+  const clientOptions = usableClients.map((c) => ({ value: c.id, label: c.name }));
 
   const startAdd = () => { setEditId(null); setName(""); setItemsText(""); setAddOpen(true); };
   const startEdit = (t: TaskTemplate) => { setEditId(t.id); setName(t.name); setItemsText(t.checklistItems.join("\n")); setAddOpen(true); };
@@ -88,10 +89,9 @@ export default function TemplatesPanel({ templates, clients, projects, onSave, o
               </div>
               {useOpenId === t.id && (
                 <div className="flex flex-wrap items-center gap-2 border-t bg-background/40 px-3 py-2.5">
-                  <select value={useClientId} onChange={(e) => { setUseClientId(e.target.value); setUseProjectId(""); }} className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent">
-                    <option value="">Pick a client…</option>
-                    {usableClients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
+                  <div className="min-w-0 flex-1"><SearchableSelect value={useClientId} onChange={(v) => { setUseClientId(v); setUseProjectId(""); }}
+                    options={clientOptions} placeholder="Pick a client…" searchPlaceholder="Search clients…"
+                    className="rounded-md border bg-surface px-2.5 py-1.5 text-[15px] focus:border-accent" /></div>
                   <select value={useProjectId} onChange={(e) => setUseProjectId(e.target.value)} disabled={!useClientId} className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent disabled:opacity-50">
                     <option value="">Pick a project…</option>
                     {projects.filter((p) => p.clientId === useClientId).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}

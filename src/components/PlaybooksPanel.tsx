@@ -8,7 +8,7 @@
 // stage, but that trigger doesn't exist yet.
 import { useState } from "react";
 import { PRIORITY_META, PRIORITY_ORDER, type Playbook, type PlaybookTask, type Priority, type Client, type Project } from "@/lib/data";
-import { I } from "./cockpit/ui";
+import { I, SearchableSelect } from "./cockpit/ui";
 
 // Playbook tasks are only ever manually assigned in the editor UI — never
 // "conversation", which is reserved/auto-created only.
@@ -34,6 +34,7 @@ export default function PlaybooksPanel({ playbooks, clients, projects, onSave, o
   const [loadProjectId, setLoadProjectId] = useState("");
 
   const usableClients = clients.filter((c) => c.id.startsWith("cl_"));
+  const clientOptions = usableClients.map((c) => ({ value: c.id, label: c.name }));
 
   const startAdd = () => { setEditId(null); setName(""); setDraftTasks([emptyDraftTask()]); setAddOpen(true); };
   const startEdit = (p: Playbook) => {
@@ -128,10 +129,9 @@ export default function PlaybooksPanel({ playbooks, clients, projects, onSave, o
               </div>
               {loadOpenId === p.id && (
                 <div className="flex flex-wrap items-center gap-2 border-t bg-background/40 px-3 py-2.5">
-                  <select value={loadClientId} onChange={(e) => { setLoadClientId(e.target.value); setLoadProjectId(""); }} className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent">
-                    <option value="">Pick a client…</option>
-                    {usableClients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
+                  <div className="min-w-0 flex-1"><SearchableSelect value={loadClientId} onChange={(v) => { setLoadClientId(v); setLoadProjectId(""); }}
+                    options={clientOptions} placeholder="Pick a client…" searchPlaceholder="Search clients…"
+                    className="rounded-md border bg-surface px-2.5 py-1.5 text-[15px] focus:border-accent" /></div>
                   <select value={loadProjectId} onChange={(e) => setLoadProjectId(e.target.value)} disabled={!loadClientId} className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent disabled:opacity-50">
                     <option value="">Pick a project…</option>
                     {projects.filter((pr) => pr.clientId === loadClientId).map((pr) => <option key={pr.id} value={pr.id}>{pr.name}</option>)}

@@ -101,6 +101,10 @@ body {
    ships no CSS of its own, so block/list/quote/code spacing and the empty-
    state placeholder live here, keyed off the same color tokens as the rest
    of the app rather than a Tailwind Typography plugin. */
+/* Descriptions are the one place in the app people actually read a
+   paragraph rather than scan a row, so the body copy gets real line height
+   instead of the tight default the rest of the UI runs on. */
+.rte-content { line-height: 1.6; }
 .rte-content p { margin: 0.75em 0; }
 .rte-content p:first-child { margin-top: 0; }
 .rte-content p:last-child { margin-bottom: 0; }
@@ -113,8 +117,17 @@ body {
 }
 .rte-content h2 { font-size: 1.15em; font-weight: 600; margin: 0.6em 0 0.3em; }
 .rte-content h3 { font-size: 1.05em; font-weight: 600; margin: 0.5em 0 0.25em; }
-.rte-content ul, .rte-content ol { margin: 0.3em 0; padding-left: 1.4em; }
+/* Tailwind's preflight strips list-style off every ul/ol, so bullet and
+   numbered lists typed into a description rendered as flat, unmarked lines.
+   Put the markers back explicitly — preflight is global and there is no
+   Typography plugin in this app to undo it. */
+.rte-content ul, .rte-content ol { margin: 0.3em 0; padding-left: 1.4em; list-style-position: outside; }
+.rte-content ul { list-style-type: disc; }
+.rte-content ul ul { list-style-type: circle; }
+.rte-content ul ul ul { list-style-type: square; }
+.rte-content ol { list-style-type: decimal; }
 .rte-content li { margin: 0.15em 0; }
+.rte-content li::marker { color: var(--muted); }
 .rte-content ul[data-type="taskList"] { list-style: none; padding-left: 0; }
 .rte-content ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 0.4em; }
 .rte-content ul[data-type="taskList"] li > label { margin-top: 0.2em; }

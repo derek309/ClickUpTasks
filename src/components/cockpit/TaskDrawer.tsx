@@ -7,7 +7,7 @@ import {
   STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseEventDiff, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message,
 } from "@/lib/data";
-import { I, Avatar, Row, CollapsibleText, newId } from "./ui";
+import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId } from "./ui";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 import { AttachmentTile } from "./AttachmentTile";
 import { InlineAssignee, InlineDue } from "./GroupedList";
@@ -126,6 +126,13 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
 }) {
   const client = clientById(task.clientId)!;
   const project = projectById(task.projectId)!;
+  // The task's own client is appended when it isn't in `allClients` (an
+  // archived or otherwise filtered-out one), so the field still shows where
+  // the task actually lives instead of falling back to the placeholder.
+  const clientSelectOptions = [
+    ...allClients.map((c) => ({ value: c.id, label: c.name })),
+    ...(allClients.some((c) => c.id === task.clientId) ? [] : [{ value: task.clientId, label: client?.name ?? "—" }]),
+  ];
   const linkedContact = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId);
   const messageDest = linkedContactInfo ?? linkedContact;
   const ghlSub = linkedContact ? clientById(linkedContact.clientId) : null;
@@ -537,7 +544,10 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
         </>
       ) : (
         <>
-          <Row label="Client" icon={<I.folder />}><select value={task.clientId} onChange={(e) => onMoveClient(e.target.value)} className="max-w-[200px] rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background">{allClients.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}{allClients.every((c) => c.id !== task.clientId) && <option value={task.clientId}>{client?.name ?? "—"}</option>}</select></Row>
+          {/* Type-to-filter rather than a plain select: this list is every
+              client on the account, which is far past the point where
+              scrolling a native dropdown is the fast way to find one. */}
+          <Row label="Client" icon={<I.folder />}><div className="w-[200px]"><SearchableSelect value={task.clientId} onChange={onMoveClient} options={clientSelectOptions} searchPlaceholder="Search clients…" className="rounded-md border border-transparent px-2 py-1 text-[14px] transition hover:border-border hover:bg-background" /></div></Row>
           <Row label="Project" icon={<I.list />}><select value={task.projectId} onChange={(e) => { if (e.target.value === "__new") onNewProject(); else onSetProject(e.target.value); }} className="max-w-[200px] rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background">{clientProjects.map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}{clientProjects.every((p) => p.id !== task.projectId) && <option value={task.projectId}>{project?.name ?? "—"}</option>}<option value="__new">+ New project…</option></select></Row>
         </>
       )}
@@ -669,15 +679,20 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       <div className="mb-2 text-[15px] font-semibold">Description</div>
       <RichTextEditor key={`task-desc-${task.id}-${descFocusNonce}`} value={task.description} onChange={(html) => onPatch({ description: html })} placeholder="Add a description…" />
       {onDraftDescription && (
-        <div className="mt-2 flex shrink-0 items-center gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
-          <span aria-hidden className="pl-1 text-[13px]">✨</span>
-          <input value={descDraftPrompt} onChange={(e) => setDescDraftPrompt(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); runDraftDescription(); } }}
-            placeholder="Tell Claude what to write… (e.g. “describe the redesign scope”)"
-            className="min-w-0 flex-1 bg-transparent px-1 text-[13px] outline-none placeholder:text-muted" />
+        <div className="mt-2 flex shrink-0 items-start gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
+          <span aria-hidden className="pt-1 pl-1 text-[13px]">✨</span>
+          {/* A textarea that grows with the text rather than an input that
+              scrolls it sideways — a real instruction runs past one line, and
+              you can't check what you asked for if you can't see it. Enter
+              still writes, Shift+Enter now gets a new line. */}
+          <textarea value={descDraftPrompt} rows={1}
+            onChange={(e) => { setDescDraftPrompt(e.target.value); e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`; }}
+            onKeyDown={(e) => { if (e.key !== "Enter" || e.shiftKey || draftingDescription) return; e.preventDefault(); runDraftDescription(); }}
+            placeholder="Tell Claude what to write… (Enter to write, Shift+Enter for a new line)"
+            className="max-h-[200px] min-w-0 flex-1 resize-none self-center overflow-y-auto bg-transparent px-1 py-1 text-[13px] leading-snug outline-none placeholder:text-muted" />
           <button onClick={runDraftDescription} disabled={draftingDescription}
             title={descDraftPrompt.trim() ? "Draft this with Claude" : "Draft a description from the task title"}
-            className="shrink-0 rounded-md border border-accent/40 bg-surface px-2.5 py-1 text-[13px] font-medium text-accent disabled:opacity-40">
+            className="mt-0.5 shrink-0 rounded-md border border-accent/40 bg-surface px-2.5 py-1 text-[13px] font-medium text-accent disabled:opacity-40">
             {draftingDescription ? "Drafting…" : descDraftPrompt.trim() ? "Write it" : "Draft it"}
           </button>
         </div>
@@ -777,15 +792,19 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     }
   };
   const promptClaudeBlock = (channel: "email" | "sms") => onDraftMessage ? (
-    <div className="mb-2 flex shrink-0 items-center gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
-      <span aria-hidden className="pl-1 text-[13px]">✨</span>
-      <input value={draftPrompt} onChange={(e) => setDraftPrompt(e.target.value)}
-        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); runDraft(channel); } }}
-        placeholder="Tell Claude what to say… (e.g. “send them an update”)"
-        className="min-w-0 flex-1 bg-transparent px-1 text-[13px] outline-none placeholder:text-muted" />
+    <div className="mb-2 flex shrink-0 items-start gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
+      <span aria-hidden className="pt-1 pl-1 text-[13px]">✨</span>
+      {/* Same auto-growing box as the description prompt above and the one in
+          ClientJournal's composer: wraps onto new lines up to 200px, then
+          scrolls. Enter writes, Shift+Enter gets a new line. */}
+      <textarea value={draftPrompt} rows={1}
+        onChange={(e) => { setDraftPrompt(e.target.value); e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`; }}
+        onKeyDown={(e) => { if (e.key !== "Enter" || e.shiftKey || draftingMessage) return; e.preventDefault(); runDraft(channel); }}
+        placeholder="Tell Claude what to say… (Enter to write, Shift+Enter for a new line)"
+        className="max-h-[200px] min-w-0 flex-1 resize-none self-center overflow-y-auto bg-transparent px-1 py-1 text-[13px] leading-snug outline-none placeholder:text-muted" />
       <button onClick={() => runDraft(channel)} disabled={draftingMessage}
         title={draftPrompt.trim() ? "Draft this with Claude" : "Draft a status update from recent activity"}
-        className="shrink-0 rounded-md border border-accent/40 bg-surface px-2.5 py-1 text-[13px] font-medium text-accent disabled:opacity-40">
+        className="mt-0.5 shrink-0 rounded-md border border-accent/40 bg-surface px-2.5 py-1 text-[13px] font-medium text-accent disabled:opacity-40">
         {draftingMessage ? "Drafting…" : draftPrompt.trim() ? "Write it" : "Status update"}
       </button>
     </div>
