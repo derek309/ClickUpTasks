@@ -92,6 +92,10 @@ const isDragClick = (down: { x: number; y: number } | null, e: { clientX: number
 //   client record's own lifecycle (ClientStatus), once a real client exists.
 export type BusinessStage = "unclaimed" | "invited" | "claimed" | "interview" | "onboarding" | "active_client" | "nurture" | "cancelled" | "past_client";
 export const STAGE_ORDER: BusinessStage[] = ["unclaimed", "invited", "claimed", "interview", "onboarding", "active_client", "nurture", "cancelled", "past_client"];
+// Same nine keys as a lookup — the group loop below has to tell a real funnel
+// group apart from an override group (attention/followed up/engagement ladder)
+// by key alone, and does it once per row.
+const STAGE_KEYS = new Set<string>(STAGE_ORDER);
 export const STAGE_META: Record<BusinessStage, { label: string; color: string; hint: string }> = {
   unclaimed: { label: "Unclaimed", color: "#f59e0b", hint: "listing nobody has claimed yet — a prospect to invite or call" },
   invited: { label: "Claim Your Free Marketing Package", color: "#0ea5e9", hint: "invited to claim their listing, hasn't yet" },
@@ -576,6 +580,21 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   const conversationTaskFor = (r: { client: Client | null }) =>
     (r.client && (tasksByClient?.get(r.client.id) ?? []).find((t) => t.status !== "done" && t.priority === "conversation")) || null;
   const needsAttention = (r: { client: Client | null }) => !!conversationTaskFor(r);
+  // The few words a flag row carries next to the business name: why this one
+  // is up here at all. Strongest real signal first — how far it actually got
+  // through the invite chat (WordPress's own step label), then plain invite
+  // engagement, and only then the generic fact that it replied, which is what
+  // put it in the group in the first place (see ATTENTION_META). Never a
+  // placeholder: a rep scanning the group is deciding who to call from this
+  // line alone.
+  const flagReasonFor = (r: { listing: DirectoryListing }) => {
+    const step = funnelFor(r.listing);
+    if (step?.label) return step.label;
+    const inv = inviteFor(r.listing);
+    if (inv?.clickedAt) return "Clicked the invite";
+    if (inv?.openedAt) return "Opened the invite";
+    return "Replied";
+  };
   // "We reached out, now we're waiting to hear back." Keyed by conversation
   // task id: the date the server just set, held locally so the row moves to
   // the followed-up bucket the moment the call returns instead of waiting on
@@ -1081,12 +1100,20 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                     onCopyLink: () => copyInviteLink(gdPlaceId),
                     copied: copiedLinkId === gdPlaceId,
                   } : null;
+                  // The two attention groups are flags pointing down at a real
+                  // listing, not a second copy of it: they render a one line
+                  // FlagRow instead of the full card, and the real row in the
+                  // business's own stage group carries a small "flagged above"
+                  // tag back up to them. Everything else (the engagement
+                  // ladder, every funnel stage) renders exactly as before.
+                  const isFlagGroup = g.key === "attention" || g.key === "followed_up";
+                  const convo = conversationTaskFor(r);
                   // Only in the two attention groups, the same way the
                   // invite actions above only render for the two stages they
                   // apply to — an attention row also appears in its normal
                   // stage group below, and the button belongs where a rep is
                   // actually working the replies, not on both copies.
-                  const convoTask = g.key === "attention" || g.key === "followed_up" ? conversationTaskFor(r) : null;
+                  const convoTask = isFlagGroup ? convo : null;
                   const convoDue = convoTask ? nextCheckInFor(r) : null;
                   const followUp = convoTask ? {
                     // Only a date still ahead of us is a live "we're waiting
@@ -1098,9 +1125,22 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                     onFollowUp: () => markFollowedUp(convoTask.id, convoTask.due),
                     onDismissError: () => setFollowUpState((m) => { const n = { ...m }; delete n[convoTask.id]; return n; }),
                   } : null;
+                  const stage = computeBusinessStage(r.listing, r.client, inviteFor(r.listing));
+                  if (isFlagGroup) {
+                    return (
+                      <FlagRow key={g.key + r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient}
+                        stage={stage}
+                        // Followed up already reached out, so the date it comes
+                        // back is the headline and the button steps aside.
+                        waiting={g.key === "followed_up"}
+                        reason={g.key === "followed_up" ? null : flagReasonFor(r)}
+                        followUp={followUp} />
+                    );
+                  }
                   return (
                     <ListingRow key={g.key + r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} template={template}
-                      stage={computeBusinessStage(r.listing, r.client, inviteFor(r.listing))}
+                      stage={stage}
+                      flaggedAbove={STAGE_KEYS.has(g.key) && !!convo}
                       invite={inviteFor(r.listing)}
                       funnelStep={funnelFor(r.listing)}
                       inviteHistoryList={gdPlaceId != null ? invitesByGdPlaceId.get(gdPlaceId) ?? [] : []}
@@ -1134,7 +1174,105 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, funnelStep, inviteHistoryList, onSetClientStatus, canAdmin, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, otherLists, onOpenProject, inviteActions, followUp }: {
+// The connector from a flag down to the real listing it points at — a stem
+// with an arrowhead rather than a bare chevron, so the line reads as a thread
+// between two places on the page instead of a collapse toggle.
+const ThreadArrow = () => (
+  <svg width="10" height="14" viewBox="0 0 10 14" fill="none" aria-hidden className="shrink-0 text-border">
+    <path d="M5 0V10M5 10L1 6M5 10L9 6" stroke="currentColor" strokeWidth="1.4" />
+  </svg>
+);
+
+// One line in "Needs attention now" / "Followed up, waiting to hear back".
+// These two groups are the only ones whose rows are not really listings: the
+// same business always renders again in its own funnel stage below, so a full
+// ListingRow here (icons, chips, a stack of buttons) read as an accidental
+// duplicate rather than as what it is — a pin on one real listing. So: a pin,
+// the name, why it's flagged, one action, and a thread naming the stage the
+// real row is sitting in. Everything else about that business stays on the
+// real row; this is a pointer, not a card.
+function FlagRow({ row, onAddContact, onOpenClient, stage, reason, waiting, followUp }: {
+  row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
+  onAddContact: (c: Contact) => void;
+  onOpenClient: (id: string) => void;
+  // Where the real row lives, so the thread below can name it.
+  stage: BusinessStage;
+  // Why this business is flagged, in a few words (see flagReasonFor). null in
+  // the followed up group, where the group header already says it and the
+  // check back date is the point of the row.
+  reason: string | null;
+  // Followed up bucket: somebody already reached out, so the row is
+  // informational. The check back date leads and the button stays available
+  // but quiet, since clicking it again just buys another few days.
+  waiting: boolean;
+  // Same wiring the full row uses — see ListingRow's own followUp prop.
+  followUp?: {
+    nextCheckIn: string | null;
+    state: "saving" | string | undefined;
+    onFollowUp: () => void;
+    onDismissError: () => void;
+  } | null;
+}) {
+  const { listing, contact, client } = row;
+  const nameMouseDown = useRef<{ x: number; y: number } | null>(null);
+  const openThis = client ? () => onOpenClient(client.id) : contact ? () => onAddContact(contact) : null;
+
+  return (
+    <div className="border-b last:border-0">
+      <div className="grid items-center gap-2.5 px-4 py-2 transition-colors hover:bg-accent-soft/50" style={{ gridTemplateColumns: "16px minmax(0,1fr) auto" }}>
+        <span title="Flagged from its listing below" className="text-[13px] leading-none">📌</span>
+        <div className="min-w-0 truncate text-[13px]">
+          {openThis ? (
+            <button onMouseDown={(e) => { nameMouseDown.current = { x: e.clientX, y: e.clientY }; }}
+              onClick={(e) => { if (!isDragClick(nameMouseDown.current, e)) openThis(); }} title="Open this business"
+              className="text-left font-semibold hover:text-accent hover:underline">{listing.name}</button>
+          ) : (
+            <span className="font-semibold">{listing.name}</span>
+          )}
+          {reason && <span className="text-muted"> · <span className="font-medium text-foreground">{reason}</span></span>}
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {followUp && (
+            followUp.state === "saving" ? (
+              <span className="text-[12px] text-muted">Saving…</span>
+            ) : followUp.state ? (
+              <span className="flex items-center gap-1.5 text-[12px]">
+                <span className="text-danger">{followUp.state}</span>
+                <button onClick={followUp.onDismissError} className="font-medium text-muted hover:text-foreground">Dismiss</button>
+              </span>
+            ) : waiting ? (
+              <>
+                {followUp.nextCheckIn && (
+                  <span title="When this business comes back to “Needs attention now” if we still haven’t heard back"
+                    className="rounded-md bg-background px-2 py-1 text-[12px] font-medium text-muted">
+                    Check back {formatDue(followUp.nextCheckIn)}
+                  </span>
+                )}
+                <button onClick={followUp.onFollowUp}
+                  title="Reached out again? This pushes the check back date out another three days."
+                  className="text-[12px] font-medium text-muted hover:text-foreground hover:underline">
+                  ↩ Followed up
+                </button>
+              </>
+            ) : (
+              <button onClick={followUp.onFollowUp}
+                title="Record that you reached out. This business moves out of the way for three days, then comes back if nothing happens."
+                className="rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">
+                ↩ Followed up
+              </button>
+            )
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-1.5 bg-background/40 px-4 py-1 pl-[42px] text-[12px] text-muted">
+        <ThreadArrow />
+        full listing is below, in {STAGE_META[stage].label}
+      </div>
+    </div>
+  );
+}
+
+function ListingRow({ row, onAddContact, onOpenClient, template, stage, flaggedAbove, invite, funnelStep, inviteHistoryList, onSetClientStatus, canAdmin, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, otherLists, onOpenProject, inviteActions, followUp }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
   onOpenClient: (id: string) => void;
@@ -1145,6 +1283,12 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
   template: string;
   // This row's computed funnel position (see computeBusinessStage above).
   stage: BusinessStage;
+  // True when this business is also flagged up top (it has an open
+  // conversation task, so a FlagRow points down at this row) — shows a quiet
+  // tag saying so, since scrolling straight past the top groups shouldn't
+  // hide that somebody is mid conversation with them. Only ever set on the
+  // real stage row: inside the flag groups the row already IS the flag.
+  flaggedAbove?: boolean;
   // This business's most recent Content Planner invite, if any — undefined
   // when it's never been invited (or territoryId wasn't passed down, e.g.
   // the admin multi-city overview).
@@ -1253,6 +1397,12 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
             {listing.url && <a href={listing.url} target="_blank" rel="noopener noreferrer" title="View public listing page" className="shrink-0 rounded p-0.5 text-muted hover:bg-surface hover:text-accent"><I.link /></a>}
           </div>
           <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 pl-5 text-[12px] text-muted">
+            {flaggedAbove && (
+              <span title="Someone replied, so this business is also flagged in the group at the top of the page"
+                className="rounded bg-violet-100 px-1.5 py-0.5 font-medium text-violet-700">
+                📌 flagged above
+              </span>
+            )}
             {invite && (
               inviteHistoryList.length > 1 ? (
                 <button onClick={() => setHistoryOpen((v) => !v)}
