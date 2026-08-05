@@ -1,0 +1,22 @@
+-- ClickUpTasks — per-client cooldown for the "a client replied" email that
+-- fires when an inbound message arrives by REAL email or SMS (see
+-- sendInboundReplyEmail in src/lib/inboundIngest.ts, used by both the Gmail
+-- poller and /api/ghl/webhook's handleMessageReply).
+-- Run once.
+--
+-- Why a NEW column instead of reusing clients.last_chat_notified_at: that one
+-- throttles mail going OUT to the client ("you have a new message on your
+-- account", /api/messages/notify-client). Sharing a single timestamp would
+-- make the two directions throttle each other — a client texting in would
+-- silently suppress the client's own new-message email for the next 20
+-- minutes, and an admin's chat reply would suppress the team's alert for the
+-- client's next text. The two flows have nothing to do with each other and
+-- need independent windows.
+--
+-- Why per-CLIENT and not per-client-per-channel: a client who sends four
+-- texts, or a text and then an email, in the same few minutes is one
+-- conversation and should produce one alert. A per-channel key would also
+-- fail to collapse the case where the same reply reaches us through both
+-- ingest paths (Gmail poll and the GHL webhook). Every individual message
+-- still gets its own in-app bell row either way — this only caps the email.
+alter table clients add column if not exists last_inbound_notified_at timestamptz;

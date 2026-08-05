@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { todayIso } from "@/lib/data";
 import { rateLimit } from "@/lib/rateLimit";
-import { resolveNotifyRecipient, notifyTeamOfClientActivity } from "@/lib/waitingNotify";
+import { resolveNotifyRecipient } from "@/lib/waitingNotify";
 
 // Public, token-gated — lets the client set a task's review outcome directly
 // (Aug 3 Derek/Justin call: "needs changes" or "approved," right in the chat,
@@ -45,10 +46,27 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
   if (notifyRecipient) {
-    await notifyTeamOfClientActivity({
-      notifyRecipient, clientId: client.id, taskId, projectId: task.project_id ?? null,
-      clientName: client.name, taskTitle: task.title,
-      notifText: status === "done" ? `${client.name} approved "${task.title}".` : `${client.name} requested changes on "${task.title}".`,
+    // Bell only, no companion email. Setting a review outcome is a status
+    // event — the board already shows it, and it fired on every approval,
+    // which is noise. A client actually WRITING something still emails (see
+    // waiting/[token]/messages and waiting/[token]/respond, both untouched).
+    //
+    // Written inline rather than through notifyTeamOfClientActivity because
+    // that helper always sends its email, and sends it under the subject
+    // `X replied on "<task>"` — wording that was wrong here in the first
+    // place: nobody replied, a status was set. The bell text below says what
+    // actually happened. Reverting is a one-line swap back to the helper.
+    await supabaseAdmin.from("notifications").insert({
+      id: "n_" + randomUUID(),
+      recipient_id: notifyRecipient,
+      text: status === "done" ? `${client.name} approved "${task.title}".` : `${client.name} requested changes on "${task.title}".`,
+      task_id: taskId,
+      actor_id: null,
+      client_id: client.id,
+      project_id: task.project_id ?? null,
+      at: new Date().toISOString(),
+      read: false,
+      kind: "activity",
     });
   }
 

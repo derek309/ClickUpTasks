@@ -2448,9 +2448,21 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       pushToast(`Notified ${userById(patch.assigneeId)?.name}`);
     }
     // Finishing work is worth surfacing to the rest of the team, not just silence.
+    // The bell/Inbox row still fires for everyone here exactly as before — only
+    // the companion EMAIL is suppressed. This branch fans out to every admin on
+    // every Kanban drag, which made it the single loudest source of notification
+    // mail; a status move is already visible on the board.
+    //
+    // PENDING DEREK'S DECISION: "Changes requested" is split out and still
+    // emails the ASSIGNEE, on the theory that having your own work kicked back
+    // is worth an inbox hit even though the rest of this branch isn't. The
+    // admin fan-out is skipped for that status too. If he decides changes
+    // requested shouldn't mail either, delete `keepEmail` and pass a flat
+    // `{ skipEmail: true }`.
     if (synced.status && (synced.status === "review" || synced.status === "changes_requested" || synced.status === "done") && synced.status !== before.status) {
       users.filter((u) => u.id !== me.id && (u.role === "admin" || before.assigneeId === u.id)).forEach((u) => {
-        notify(u.id, `${me.name} moved “${before.title}” to ${STATUS_META[synced.status as TaskStatus].label}`, id);
+        const keepEmail = synced.status === "changes_requested" && u.id === before.assigneeId;
+        notify(u.id, `${me.name} moved “${before.title}” to ${STATUS_META[synced.status as TaskStatus].label}`, id, { skipEmail: !keepEmail });
       });
     }
     // A due-date change is easy for the assignee to miss otherwise.
@@ -2961,7 +2973,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const nowDone = s ? !s.done : false;
     update(taskId, { subtasks: t.subtasks.map((x) => (x.id === subId ? { ...x, done: !x.done } : x)) });
     // Completing a delegated item pings the task owner so they know it's handled.
-    if (nowDone && s?.assigneeId && t.assigneeId && t.assigneeId !== me.id) notify(t.assigneeId, `${me.name} completed "${s.title}" on ${t.title}`, taskId);
+    // Bell only — a checked-off checklist row is progress on work the owner is
+    // already watching, not something that needs to interrupt their inbox.
+    // Delegating an item TO someone (see patchSub) still emails, since that one
+    // is a direct ask.
+    if (nowDone && s?.assigneeId && t.assigneeId && t.assigneeId !== me.id) notify(t.assigneeId, `${me.name} completed "${s.title}" on ${t.title}`, taskId, { skipEmail: true });
   };
   const addSub = (taskId: string, title: string) => { const t = tasks.find((x) => x.id === taskId); if (t && title.trim()) update(taskId, { subtasks: [...t.subtasks, { id: newId("s_"), title: title.trim(), done: false }] }); };
   const renameSub = (taskId: string, subId: string, title: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, title } : s)) }); };

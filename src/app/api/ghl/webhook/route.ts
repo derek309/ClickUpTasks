@@ -5,6 +5,7 @@ import { titleCase, normalizeState, type PlannerWeek } from "@/lib/data";
 import { plannerWeekToRow, rowToPlannerWeek } from "@/lib/db";
 import { resolveOrPromoteTrackedClient, upsertConversationTask } from "@/lib/ghlConversationTask";
 import { fetchDirectoryListingsServer } from "@/lib/directoryListingsServer";
+import { sendInboundReplyEmail } from "@/lib/inboundIngest";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -162,7 +163,18 @@ async function handleMessageReply(body: any, custom: any) {
   const notifText = channel === "sms"
     ? `${titleCase(contact.name)} sent a text: ${snippet}`
     : `${titleCase(contact.name)} sent an email${typeof custom?.subject === "string" && custom.subject.trim() ? `: ${custom.subject.trim()}` : `: ${snippet}`}`;
-  await notifyInbound(contact, taskId, notifText);
+  const recipients = await notifyInbound(contact, taskId, notifText);
+  // The bell has always fired here; the email had not. "Notify me when a
+  // client replies" only ever mailed for client-PORTAL replies, so a real
+  // text or email coming through GHL rang the bell and stopped there. Shared
+  // with the Gmail-poller path (inboundIngest) so both channels get the same
+  // per-client rate limit and the same wording; it swallows its own failures,
+  // so a Gmail outage can't turn into a non-2xx and a webhook retry storm.
+  await sendInboundReplyEmail({
+    clientId: contact.client_id, contactName: contact.name, channel,
+    subject: typeof custom?.subject === "string" ? custom.subject : null,
+    body: text, taskId, recipientIds: recipients,
+  });
   return NextResponse.json({ ok: true });
 }
 
@@ -173,7 +185,9 @@ async function handleMessageReply(body: any, custom: any) {
 // "message" so the Inbox "Messages" filter catches it; deep-links to the
 // Conversation task when there is one, else to the client. notifications is in
 // the realtime publication, so this lights the bell live for open sessions.
-async function notifyInbound(contact: { id: string; name: string; client_id: string }, taskId: string | null, text: string) {
+// Returns the recipient list so handleMessageReply can hand it straight to
+// sendInboundReplyEmail without recomputing followers + admins.
+async function notifyInbound(contact: { id: string; name: string; client_id: string }, taskId: string | null, text: string): Promise<string[]> {
   const [{ data: client }, { data: admins }] = await Promise.all([
     supabaseAdmin.from("clients").select("assigned_to").eq("id", contact.client_id).maybeSingle(),
     supabaseAdmin.from("profiles").select("member_id").eq("role", "admin"),
@@ -181,7 +195,7 @@ async function notifyInbound(contact: { id: string; name: string; client_id: str
   const followers: string[] = Array.isArray(client?.assigned_to) ? (client!.assigned_to as string[]) : [];
   const adminIds: string[] = (admins ?? []).map((a: any) => a.member_id).filter((m: any): m is string => typeof m === "string" && !!m);
   const recipients = Array.from(new Set([...followers, ...adminIds]));
-  if (recipients.length === 0) return;
+  if (recipients.length === 0) return recipients;
   const nowIso = new Date().toISOString();
   const rows = recipients.map((rid) => ({
     id: "n_" + crypto.randomUUID(), recipient_id: rid, text, task_id: taskId,
@@ -189,6 +203,7 @@ async function notifyInbound(contact: { id: string; name: string; client_id: str
   }));
   const { error } = await supabaseAdmin.from("notifications").insert(rows);
   if (error) console.error("[webhook] notifyInbound insert failed", error);
+  return recipients;
 }
 
 // A GHL call event. Configure a "Call"/"Missed Call" workflow → Webhook action

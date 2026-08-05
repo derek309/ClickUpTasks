@@ -7,6 +7,7 @@
 // webhook (which stays untouched) — same behavior, different entry point.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { titleCase } from "@/lib/data";
+import { sendGmailAs, googleConfigured } from "@/lib/googleMail";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -102,7 +103,9 @@ async function upsertConversationTask(contact: Contact, ghlContactId: string | n
   return newTaskId;
 }
 
-async function notifyInbound(contact: Contact, taskId: string | null, text: string) {
+// Returns the recipient list so the caller can hand it straight to
+// sendInboundReplyEmail without recomputing followers + admins.
+async function notifyInbound(contact: Contact, taskId: string | null, text: string): Promise<string[]> {
   const [{ data: client }, { data: admins }] = await Promise.all([
     supabaseAdmin.from("clients").select("assigned_to").eq("id", contact.client_id).maybeSingle(),
     supabaseAdmin.from("profiles").select("member_id").eq("role", "admin"),
@@ -110,13 +113,116 @@ async function notifyInbound(contact: Contact, taskId: string | null, text: stri
   const followers: string[] = Array.isArray(client?.assigned_to) ? (client!.assigned_to as string[]) : [];
   const adminIds: string[] = (admins ?? []).map((a: any) => a.member_id).filter((m: any): m is string => typeof m === "string" && !!m);
   const recipients = Array.from(new Set([...followers, ...adminIds]));
-  if (recipients.length === 0) return;
+  if (recipients.length === 0) return recipients;
   const nowIso = new Date().toISOString();
   const rows = recipients.map((rid) => ({
     id: "n_" + crypto.randomUUID(), recipient_id: rid, text, task_id: taskId,
     actor_id: null, client_id: contact.client_id, project_id: null, at: nowIso, read: false, kind: "message",
   }));
   await supabaseAdmin.from("notifications").insert(rows);
+  return recipients;
+}
+
+const APP_URL = "https://clickuptasks.vercel.app";
+const SEND_DOMAIN = "clickuplocal.com";
+// One inbound-reply email per CLIENT per window, however many messages they
+// fire off inside it — a client sending four texts in a row is one
+// conversation, not four alerts. Same 20-minute figure and same
+// read-the-timestamp shape as the client-facing chat nudge
+// (/api/messages/notify-client), but deliberately its OWN column: sharing
+// clients.last_chat_notified_at would let an inbound text silently suppress
+// the client's own "you have a new message" email, and vice versa. Those two
+// are opposite directions of traffic and must not throttle each other.
+// See supabase/inbound-reply-notify-cooldown.sql.
+//
+// Keyed on the client, NOT client+channel: a client who texts and then emails
+// in the same five minutes is still one conversation, and the two ingest
+// paths (Gmail poller and the GHL webhook) can both see the same message,
+// which a per-channel key would not collapse. The channel still appears in
+// the subject of whichever alert wins the window, and every message keeps its
+// own bell row regardless.
+const INBOUND_EMAIL_COOLDOWN_MS = 20 * 60 * 1000;
+const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+// The email half of "notify me when a client replies", for replies that
+// arrive by REAL email or SMS rather than through the client portal (the
+// portal's own routes have had this since day one via waitingNotify). Shared
+// by both inbound entry points — this file's ingestInboundMessage (Gmail
+// poller) and /api/ghl/webhook's handleMessageReply.
+//
+// No logged-in caller exists on either path, so, exactly like waitingNotify,
+// the mail is sent self-to-self (each recipient's own Workspace address as
+// both From and To) through domain-wide delegation — hence the explicit
+// do-not-reply line, since hitting Reply would just email yourself.
+//
+// Entirely best effort: the bell row has already been written by the time
+// this runs, and every failure path here returns quietly. Ingestion must
+// never fail because Gmail did.
+export async function sendInboundReplyEmail(opts: {
+  clientId: string;
+  contactName: string;
+  channel: "email" | "sms";
+  subject?: string | null;
+  body: string;
+  taskId: string | null;
+  recipientIds: string[];
+}): Promise<void> {
+  if (!googleConfigured || opts.recipientIds.length === 0) return;
+  try {
+    const { data: client } = await supabaseAdmin
+      .from("clients").select("name, last_inbound_notified_at").eq("id", opts.clientId).maybeSingle();
+    // Also the guard for "the migration hasn't been run yet" — an unknown
+    // column makes this select error, data comes back null, and we quietly
+    // send nothing rather than throwing inside message ingestion.
+    if (!client) return;
+
+    const lastAt = client.last_inbound_notified_at ? new Date(client.last_inbound_notified_at as string).getTime() : 0;
+    if (Date.now() - lastAt < INBOUND_EMAIL_COOLDOWN_MS) return;
+    // Claim the window BEFORE sending, not after: two messages landing at
+    // once (the poller and the webhook can both see the same reply) would
+    // otherwise both read a stale timestamp and both send. A send that then
+    // fails costs one missed alert, which is the cheaper mistake.
+    await supabaseAdmin.from("clients").update({ last_inbound_notified_at: new Date().toISOString() }).eq("id", opts.clientId);
+
+    const { data: profiles } = await supabaseAdmin
+      .from("profiles").select("member_id, email, email_notify_message").in("member_id", opts.recipientIds);
+    // Same two gates the in-app notification email route applies: honor the
+    // per-user "message" email opt-out, and only send to addresses this
+    // Workspace can actually send as.
+    const targets = (profiles ?? []).filter((p: any) =>
+      p.email_notify_message !== false && typeof p.email === "string" && p.email.trim().toLowerCase().endsWith(`@${SEND_DOMAIN}`));
+    if (targets.length === 0) return;
+
+    const who = titleCase(opts.contactName) || (client.name as string) || "A client";
+    const flat = opts.body.replace(/\s+/g, " ").trim();
+    const trimmedSubject = opts.subject?.trim();
+    // Enough of the message to judge whether it needs answering now, without
+    // dragging a paragraph into the subject line. An email with a real
+    // subject line leads with that; a text has only its body.
+    const headline = opts.channel === "sms" ? flat.slice(0, 90) : (trimmedSubject || flat.slice(0, 90));
+    const subject = `${who} replied by ${opts.channel === "sms" ? "text" : "email"}${headline ? `: ${headline}` : ""}`.slice(0, 200);
+
+    const link = opts.taskId ? `${APP_URL}/?task=${encodeURIComponent(opts.taskId)}` : `${APP_URL}/?client=${encodeURIComponent(opts.clientId)}`;
+    const html = [
+      `<p style="margin:0">${escapeHtml(who)} replied by ${opts.channel === "sms" ? "text" : "email"}.</p>`,
+      trimmedSubject && opts.channel !== "sms" ? `<p style="margin:16px 0 0"><strong>${escapeHtml(trimmedSubject)}</strong></p>` : "",
+      `<p style="margin:8px 0 0;padding:10px 12px;background:#f6f9fd;border-radius:8px;white-space:pre-wrap">${escapeHtml(opts.body.slice(0, 1500))}</p>`,
+      `<p style="margin:18px 0"><a href="${link}" style="display:inline-block;background:#1b3a5c;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600">Open in ClickUpTasks</a></p>`,
+      `<p style="margin:0;color:#6b7280;font-size:13px"><strong>This is a notification only. Do not reply to this email.</strong> Replying goes nowhere. Click the button above to answer ${escapeHtml(who)}.</p>`,
+    ].join("");
+
+    // Per-recipient try/catch — one bad mailbox must not cost everyone else
+    // their alert, and the window has already been claimed either way.
+    await Promise.all(targets.map(async (p: any) => {
+      try {
+        await sendGmailAs(p.email.trim(), { to: p.email.trim(), subject, body: html, isHtml: true });
+      } catch (e) {
+        console.error("[inboundIngest] sendInboundReplyEmail: send failed", p.member_id, e);
+      }
+    }));
+  } catch (e) {
+    console.error("[inboundIngest] sendInboundReplyEmail failed", e);
+  }
 }
 
 // Ingest one inbound message. Deduped on gmail_message_id — a message already
@@ -154,7 +260,15 @@ export async function ingestInboundMessage(opts: {
   const text = channel === "sms"
     ? `${titleCase(contact.name)} sent a text: ${snippet}`
     : `${titleCase(contact.name)} sent an email${subject?.trim() ? `: ${subject.trim()}` : `: ${snippet}`}`;
-  await notifyInbound(contact, taskId, text);
+  const recipients = await notifyInbound(contact, taskId, text);
+  // The bell above is what this path has always done; the email is the half
+  // that was missing — "notify me when a client replies" only ever mailed for
+  // portal replies, never for a real email or text. Rate-limited per client
+  // inside the helper, and swallows its own failures.
+  await sendInboundReplyEmail({
+    clientId: contact.client_id, contactName: contact.name, channel,
+    subject: subject ?? null, body, taskId, recipientIds: recipients,
+  });
   return true;
 }
 
