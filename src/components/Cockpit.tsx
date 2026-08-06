@@ -1748,7 +1748,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // scopedTasks already means "everything, for an admin; just mine,
   // otherwise" (see its own definition), so this reads as "open client
   // replies I'm actually responsible for" without any extra scoping here.
-  const openConversationCount = scopedTasks.filter((t) => t.status !== "done" && t.priority === "conversation").length;
+  // Must match baseTasks' filter exactly (clientId prefix + playbookStepKey)
+  // or the badge count and the list it opens into disagree — personal/private
+  // tasks (PERSONAL_CLIENT_ID = "personal") aren't "cl_"-prefixed and are
+  // correctly excluded from the client-replies list, so they're excluded here too.
+  const openConversationCount = scopedTasks.filter((t) => t.clientId.startsWith("cl_") && !t.playbookStepKey && t.status !== "done" && t.priority === "conversation").length;
   // The Review/Check-in tier (Derek + Justin, Jul 17): a client with open work
   // but nothing actually dated silently sinks to the bottom and gets
   // forgotten. This surfaces it at the very top instead — but resets, so it
