@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import {
-  htmlToText, initialsOf, PERSONAL_CLIENT_ID, playbookCompletion,
+  htmlToText, initialsOf, playbookCompletion,
   PLAYBOOK_ALL_STEPS, PLAYBOOK_PHASES, PLAYBOOK_A2P_PHASE, PLAYBOOK_EMAIL_DOMAIN_PHASE, PLAYBOOK_ONGOING_PHASE,
   type Attachment,
 } from "@/lib/data";
 import { reconcilePlaybookTasksServer } from "@/lib/playbookReconcileServer";
 import { TASK_FILES_BUCKET } from "@/lib/db";
 import { rateLimit } from "@/lib/rateLimit";
+import { resolveWaitingToken } from "@/lib/waitingToken";
 
 // Phase section headers, written for the business reading them rather than
 // the rep — the internal labels ("— side quest," "(ambassador)") are correct
@@ -42,19 +43,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   const limited = await rateLimit(req, token, "read");
   if (limited) return limited;
 
-  const { data: client } = await supabaseAdmin.from("clients").select("id, name, can_request_new_tasks").eq("share_token", token).maybeSingle();
-  if (!client) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  // "personal" is the pseudo-client every teammate's private tasks share, not
-  // a real client — a token on it would publish all of them here. Minting one
-  // is refused upstream; this is the serve-side half of the same guard, so a
-  // token written before that guard existed (or by hand) still can't be used.
-  if (client.id === PERSONAL_CLIENT_ID) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const scope = await resolveWaitingToken(token);
+  if (!scope) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   // Ensures this client's Playbook step tasks exist even if no rep has ever
   // opened their Businesses page entry — the first thing that touches a
   // client (an invite reply, a claim, or just this page loading) shouldn't
-  // be a prerequisite for seeing accurate progress below.
-  await reconcilePlaybookTasksServer(client.id);
+  // be a prerequisite for seeing accurate progress below. Skipped for a
+  // project-scoped token — Playbook is a whole-client concept and isn't
+  // returned below anyway (see the playbook section further down).
+  if (!scope.projectId) await reconcilePlaybookTasksServer(scope.clientId);
 
   // A link composed from one specific task (see the task drawer's email
   // composer) carries ?task=<id> so that task shows up here even when it's
@@ -66,7 +64,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   // The client's own project list — lets the page group tasks by list and
   // offer a switcher when there's more than one, instead of one flat pile.
   // Only id/name leave this route; nothing else about a project is public.
-  const { data: projectRows } = await supabaseAdmin.from("projects").select("id, name").eq("client_id", client.id).order("position", { ascending: true });
+  // A project-scoped token additionally filters this down to its own id, so
+  // there is exactly one project here and the page's own switcher never
+  // renders (same `projects.length > 1` check it already uses).
+  let projectQuery = supabaseAdmin.from("projects").select("id, name").eq("client_id", scope.clientId).order("position", { ascending: true });
+  if (scope.projectId) projectQuery = projectQuery.eq("id", scope.projectId);
+  const { data: projectRows } = await projectQuery;
   const projects = (projectRows ?? []).map((p) => ({ id: p.id as string, name: p.name as string }));
 
   type Row = {
@@ -77,15 +80,23 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   const cols = "id, project_id, title, due, description, status, waiting_on_client, client_response, attachments";
   // is_private tasks never reach a public page, whatever client they're filed
   // under — RLS protects them from other teammates, but this route reads with
-  // the service role, so the filter has to be explicit here.
+  // the service role, so the filter has to be explicit here. A project-scoped
+  // token adds project_id to every one of these — the entire reason a list
+  // token exists is that nothing outside that one project should ever be
+  // reachable through it, regardless of what a caller passes as ?task=.
+  const scopedTaskQuery = () => {
+    let q = supabaseAdmin.from("tasks").select(cols).eq("client_id", scope.clientId).eq("is_private", false);
+    if (scope.projectId) q = q.eq("project_id", scope.projectId);
+    return q;
+  };
   const [{ data: waiting }, { data: responded }, { data: deepLinked }] = await Promise.all([
-    supabaseAdmin.from("tasks").select(cols).eq("client_id", client.id).eq("is_private", false).eq("waiting_on_client", true),
-    supabaseAdmin.from("tasks").select(cols).eq("client_id", client.id).eq("is_private", false).not("client_response", "is", null),
-    // Proven to belong to this client (same eq("client_id", ...) as the two
-    // queries above) before it's allowed to appear — a task id is not itself
-    // a secret, so this must never trust deepLinkTaskId alone.
+    scopedTaskQuery().eq("waiting_on_client", true),
+    scopedTaskQuery().not("client_response", "is", null),
+    // Proven to belong to this client (and this project, if scoped) before
+    // it's allowed to appear — a task id is not itself a secret, so this
+    // must never trust deepLinkTaskId alone.
     deepLinkTaskId
-      ? supabaseAdmin.from("tasks").select(cols).eq("client_id", client.id).eq("is_private", false).eq("id", deepLinkTaskId)
+      ? scopedTaskQuery().eq("id", deepLinkTaskId)
       : Promise.resolve({ data: [] as Row[] }),
   ]);
   const byId = new Map<string, Row>();
@@ -109,7 +120,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   const taskIds = rows.map((t) => t.id);
   const { data: messageRows } = taskIds.length
     ? await supabaseAdmin.from("messages").select("id, task_id, direction, body, created_at, attachments, created_by")
-        .eq("client_id", client.id).in("task_id", taskIds).order("created_at", { ascending: true })
+        .eq("client_id", scope.clientId).in("task_id", taskIds).order("created_at", { ascending: true })
     : { data: [] as MessageRow[] };
   const threadByTask = new Map<string, MessageRow[]>();
   for (const m of (messageRows ?? []) as MessageRow[]) {
@@ -170,42 +181,48 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   // dashboard), so this page never tells a business something different from
   // what a rep sees internally about the same account. SALES_STAGE_STEPS is
   // never imported here — those are the rep's own pipeline stages, not
-  // something a business should see about its own account.
-  const { data: pbTaskRows } = await supabaseAdmin.from("tasks").select("playbook_step_key, status").eq("client_id", client.id).not("playbook_step_key", "is", null);
-  const pbRows = (pbTaskRows ?? []) as { playbook_step_key: string; status: string }[];
-  const doneKeys = new Set(pbRows.filter((t) => t.status === "done").map((t) => t.playbook_step_key));
-  const existingKeys = new Set(pbRows.map((t) => t.playbook_step_key));
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const completion = playbookCompletion(client.id, pbRows.map((t) => ({ clientId: client.id, playbookStepKey: t.playbook_step_key, status: t.status })) as any);
+  // something a business should see about its own account. Skipped entirely
+  // for a project-scoped token: Playbook is whole-client progress, out of
+  // scope for a "just this one list" link even as read-only context.
+  let playbook: { doneCount: number; total: number; pct: number; next: { key: string; label: string } | null; phases: unknown[] } | null = null;
+  if (!scope.projectId) {
+    const { data: pbTaskRows } = await supabaseAdmin.from("tasks").select("playbook_step_key, status").eq("client_id", scope.clientId).not("playbook_step_key", "is", null);
+    const pbRows = (pbTaskRows ?? []) as { playbook_step_key: string; status: string }[];
+    const doneKeys = new Set(pbRows.filter((t) => t.status === "done").map((t) => t.playbook_step_key));
+    const existingKeys = new Set(pbRows.map((t) => t.playbook_step_key));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const completion = playbookCompletion(scope.clientId, pbRows.map((t) => ({ clientId: scope.clientId, playbookStepKey: t.playbook_step_key, status: t.status })) as any);
 
-  // Display order: same as Cockpit's buildPlaybookGroups — A2P/email-domain
-  // spliced right after "Get on the map" ("do it early," per the source
-  // docs), monthly retention at the very end. PLAYBOOK_PHASES[0] is "sales"
-  // (the internal pipeline) — filtered out, never reaches this response.
-  const orderedPhases = PLAYBOOK_PHASES.filter((p) => p.key !== "sales");
-  const mapIdx = orderedPhases.findIndex((p) => p.key === "map");
-  orderedPhases.splice(mapIdx + 1, 0, PLAYBOOK_A2P_PHASE, PLAYBOOK_EMAIL_DOMAIN_PHASE);
-  orderedPhases.push(PLAYBOOK_ONGOING_PHASE);
+    // Display order: same as Cockpit's buildPlaybookGroups — A2P/email-domain
+    // spliced right after "Get on the map" ("do it early," per the source
+    // docs), monthly retention at the very end. PLAYBOOK_PHASES[0] is "sales"
+    // (the internal pipeline) — filtered out, never reaches this response.
+    const orderedPhases = PLAYBOOK_PHASES.filter((p) => p.key !== "sales");
+    const mapIdx = orderedPhases.findIndex((p) => p.key === "map");
+    orderedPhases.splice(mapIdx + 1, 0, PLAYBOOK_A2P_PHASE, PLAYBOOK_EMAIL_DOMAIN_PHASE);
+    orderedPhases.push(PLAYBOOK_ONGOING_PHASE);
 
-  const stepsByPhase = new Map<string, { key: string; label: string; done: boolean }[]>();
-  for (const step of PLAYBOOK_ALL_STEPS) {
-    if (!existingKeys.has(step.key)) continue; // e.g. A2P steps for a client who doesn't text
-    const list = stepsByPhase.get(step.phase) ?? [];
-    list.push({ key: step.key, label: step.label, done: doneKeys.has(step.key) });
-    stepsByPhase.set(step.phase, list);
+    const stepsByPhase = new Map<string, { key: string; label: string; done: boolean }[]>();
+    for (const step of PLAYBOOK_ALL_STEPS) {
+      if (!existingKeys.has(step.key)) continue; // e.g. A2P steps for a client who doesn't text
+      const list = stepsByPhase.get(step.phase) ?? [];
+      list.push({ key: step.key, label: step.label, done: doneKeys.has(step.key) });
+      stepsByPhase.set(step.phase, list);
+    }
+    playbook = {
+      doneCount: completion.doneCount, total: completion.total, pct: completion.pct,
+      next: completion.next ? { key: completion.next.key, label: completion.next.label } : null,
+      phases: orderedPhases
+        .map((p) => ({ key: p.key, label: CLIENT_PHASE_LABEL[p.key] ?? p.label, steps: stepsByPhase.get(p.key) ?? [] }))
+        .filter((p) => p.steps.length > 0),
+    };
   }
-  const playbook = {
-    doneCount: completion.doneCount, total: completion.total, pct: completion.pct,
-    next: completion.next ? { key: completion.next.key, label: completion.next.label } : null,
-    phases: orderedPhases
-      .map((p) => ({ key: p.key, label: CLIENT_PHASE_LABEL[p.key] ?? p.label, steps: stepsByPhase.get(p.key) ?? [] }))
-      .filter((p) => p.steps.length > 0),
-  };
 
   // Whether this client may raise brand-new tasks here at all — the page uses
   // it to show or hide the "Add Something" composer. Not a permission the
   // page enforces: ./request/route.ts re-checks the same column before it
   // writes anything, so this is purely so the client isn't offered a button
   // that would only refuse them (see supabase/client-request-new-tasks.sql).
-  return NextResponse.json({ clientName: client.name, canRequestNewTasks: client.can_request_new_tasks === true, projects, tasks, playbook, deepLinkTaskId: deepLinkTaskId || null });
+  // Always false for a project-scoped token (see resolveWaitingToken).
+  return NextResponse.json({ clientName: scope.clientName, canRequestNewTasks: scope.canRequestNewTasks, projects, tasks, playbook, deepLinkTaskId: deepLinkTaskId || null });
 }

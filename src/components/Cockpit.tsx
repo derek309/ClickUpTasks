@@ -1178,6 +1178,35 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       () => pushToast("⚠️ Couldn't copy link"),
     );
   };
+  // Real per-project link (see supabase/project-share-token.sql) — a
+  // DIFFERENT token from the client's own, not a query param on it. Every
+  // /api/waiting/[token]/* lookup scopes to this project's id the moment it
+  // resolves the token, so there is nothing else for the recipient to reach
+  // regardless of what they click or edit in the URL — unlike
+  // copyClientShareLink(clientId, projectId) above, whose ?project= is only
+  // a starting view within the full client link. Same mint-once-reuse shape
+  // as getClientShareUrl (Derek: emailing a list link to outside reviewers
+  // was leaking every other list on the client).
+  const getProjectShareUrl = (projectId: string): string | null => {
+    const p = projectById(projectId);
+    if (!p) return null;
+    if (!p.shareToken && !canAdmin) { pushToast("Ask an admin to create this list's share link first."); return null; }
+    const token = p.shareToken ?? crypto.randomUUID().replace(/-/g, "");
+    if (!p.shareToken) {
+      const np = { ...p, shareToken: token };
+      setProjects((ps) => ps.map((x) => (x.id === projectId ? np : x)));
+      upsertProject(np);
+    }
+    return `${window.location.origin}/waiting/${token}`;
+  };
+  const copyProjectShareLink = (projectId: string) => {
+    const url = getProjectShareUrl(projectId);
+    if (!url) return;
+    navigator.clipboard?.writeText(url).then(
+      () => pushToast("🔗 List link copied — only this list, nothing else on the client"),
+      () => pushToast("⚠️ Couldn't copy link"),
+    );
+  };
   // Surfaces every failed background save (see db.ts logErr) so a dropped
   // connection is never silent — was previously console.error-only.
   useEffect(() => {
@@ -4209,7 +4238,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             </button>
           )}
           {activeClient !== "all" && activeProject && projectById(activeProject) && (
-            <button onClick={() => { setHeaderMoreOpen(false); copyClientShareLink(activeClient, activeProject); }} title="Same public link, opened straight to this list — a client with more than one list still only has the one link to keep"
+            <button onClick={() => { setHeaderMoreOpen(false); copyProjectShareLink(activeProject); }} title="A separate public link scoped to only this list — nothing else on the client is reachable from it"
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy list link</button>
           )}
           <button onClick={() => { setHeaderMoreOpen(false); copyClientForClaude(); }}

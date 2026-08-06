@@ -1501,6 +1501,11 @@ export interface Project {
   followUpAt?: string | null;
   /** Last-reviewed date (yyyy-mm-dd) for the weekly Review tier. */
   reviewedAt?: string | null;
+  /** Public share token for this ONE list — see supabase/project-share-token.sql.
+   * Unlike Client.shareToken's ?project= param (a starting view you can navigate
+   * away from), a project token scopes every /api/waiting/[token]/* query to
+   * this project_id, so there is nothing else in the response to reach. */
+  shareToken?: string | null;
 }
 
 export interface Label {

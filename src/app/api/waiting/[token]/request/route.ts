@@ -5,6 +5,7 @@ import { todayIso, type Attachment } from "@/lib/data";
 import { sanitizeWaitingAttachments } from "@/lib/waitingAttachments";
 import { rateLimit } from "@/lib/rateLimit";
 import { resolveNotifyRecipient, notifyTeamOfClientActivity } from "@/lib/waitingNotify";
+import { resolveWaitingToken } from "@/lib/waitingToken";
 
 // Public, token-gated — lets the client raise a brand-new task themselves
 // ("need something else?"), not just reply to something we're already
@@ -33,12 +34,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   const limited = await rateLimit(req, token, "request");
   if (limited) return limited;
 
-  const { data: client } = await supabaseAdmin.from("clients").select("id, name, assigned_to, can_request_new_tasks").eq("share_token", token).maybeSingle();
-  if (!client) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const scope = await resolveWaitingToken(token);
+  if (!scope) return NextResponse.json({ error: "Not found" }, { status: 404 });
   // Deliberately a plain "not for you" and not a 404: the link is valid and
   // the rest of the page still works, so the message says what to do instead
-  // rather than implying the whole link is broken.
-  if (client.can_request_new_tasks !== true) {
+  // rather than implying the whole link is broken. A project-scoped token
+  // always fails this — canRequestNewTasks is forced false for one by
+  // resolveWaitingToken, since there's no single project a list link should
+  // be trusted to name freely (see the projectId trust-check further down,
+  // which this same route already applies to a CLIENT token's request).
+  if (!scope.canRequestNewTasks) {
     return NextResponse.json({ error: "This isn't available for your account yet. Reply on one of your existing tasks, or reach out to us directly." }, { status: 403 });
   }
 
@@ -46,7 +51,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   const text = (payload?.body ?? "").slice(0, 10000).trim();
   // Never trust the caller's attachment objects — rebuild each from a storage
   // path we can prove belongs to this client (see sanitizeWaitingAttachments).
-  const attachments = sanitizeWaitingAttachments(payload?.attachments, client.id);
+  const attachments = sanitizeWaitingAttachments(payload?.attachments, scope.clientId);
   if (!text && attachments.length === 0) return NextResponse.json({ error: "Add a note or attachment before sending." }, { status: 400 });
 
   // The client can name which of their own lists this is for (the page
@@ -56,31 +61,31 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   // request can't land a task under a different client's list.
   let projectId: string | null = null;
   if (payload?.projectId) {
-    const { data: owned } = await supabaseAdmin.from("projects").select("id").eq("id", payload.projectId).eq("client_id", client.id).maybeSingle();
+    const { data: owned } = await supabaseAdmin.from("projects").select("id").eq("id", payload.projectId).eq("client_id", scope.clientId).maybeSingle();
     if (owned) projectId = owned.id;
   }
   // No (valid) project named — reuse (or create) the client's default
   // "Tasks" list, same find-or-create idiom mcp/server.mjs's create_task
   // and the GHL webhook already use.
   if (!projectId) {
-    const { data: existingProjects } = await supabaseAdmin.from("projects").select("id").eq("client_id", client.id).limit(1);
+    const { data: existingProjects } = await supabaseAdmin.from("projects").select("id").eq("client_id", scope.clientId).limit(1);
     if (existingProjects?.length) {
       projectId = existingProjects[0].id;
     } else {
       projectId = "p_" + randomUUID();
-      const { error: projErr } = await supabaseAdmin.from("projects").insert({ id: projectId, client_id: client.id, name: "Tasks", description: "" });
+      const { error: projErr } = await supabaseAdmin.from("projects").insert({ id: projectId, client_id: scope.clientId, name: "Tasks", description: "" });
       if (projErr) return NextResponse.json({ error: projErr.message }, { status: 400 });
     }
   }
 
-  const assignee = await resolveNotifyRecipient(client.assigned_to as string[] | null);
-  const contactId = client.id.startsWith("cl_") ? client.id.slice(3) : null;
+  const assignee = await resolveNotifyRecipient(scope.assignedTo);
+  const contactId = scope.clientId.startsWith("cl_") ? scope.clientId.slice(3) : null;
 
   const title = text ? (text.length > 80 ? text.slice(0, 77) + "…" : text) : "New request";
   const taskId = "t_" + randomUUID();
   const nowIso = new Date().toISOString();
   const { error } = await supabaseAdmin.from("tasks").insert({
-    id: taskId, project_id: projectId, client_id: client.id, title, description: "",
+    id: taskId, project_id: projectId, client_id: scope.clientId, title, description: "",
     status: "todo", priority: "none", assignee_id: assignee,
     contact_id: contactId,
     due: todayIso(),
@@ -91,7 +96,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
 
   if (contactId) {
     await supabaseAdmin.from("messages").insert({
-      id: "msg_" + randomUUID(), contact_id: contactId, client_id: client.id, task_id: taskId,
+      id: "msg_" + randomUUID(), contact_id: contactId, client_id: scope.clientId, task_id: taskId,
       channel: "chat", direction: "inbound", subject: null, body: text, attachments,
       created_by: null, created_at: nowIso,
     });
@@ -99,9 +104,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
 
   if (assignee) {
     await notifyTeamOfClientActivity({
-      notifyRecipient: assignee, clientId: client.id, taskId, projectId,
-      clientName: client.name, taskTitle: title,
-      notifText: `${client.name} requested a new task: "${title}".`,
+      notifyRecipient: assignee, clientId: scope.clientId, taskId, projectId,
+      clientName: scope.clientName, taskTitle: title,
+      notifText: `${scope.clientName} requested a new task: "${title}".`,
       previewText: text || null,
       kind: "message",
     });
