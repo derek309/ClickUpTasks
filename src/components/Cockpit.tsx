@@ -95,6 +95,7 @@ import SettingsHub, { type TabKey } from "./SettingsHub";
 import TeamChat from "./TeamChat";
 import AddClientModal from "./AddClientModal";
 import TerritoryPanel from "./TerritoryPanel";
+import { TerritoryDashboard } from "./TerritoryDashboard";
 import { PlannerPanel } from "./cockpit/PlannerPanel";
 
 
@@ -1656,6 +1657,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setActiveClient("all"); setActiveProject(null); setOpenTaskId(null); setSidebarOpen(false);
     setPlannerOpen(false); setPlannerWeekId(null);
     setTerritoryView(id);
+  };
+  // The territory-work landing view — same territoryView sentinel idiom as
+  // "all" (the territory picker), just routed to TerritoryDashboard instead
+  // of TerritoryPanel below. Reuses every existing mutual-exclusion guard
+  // that already keys off "is territoryView set" rather than needing its own
+  // new top-level view flag threaded through the whole file.
+  const openTerritoryDashboard = () => {
+    setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null);
+    setActiveClient("all"); setActiveProject(null); setOpenTaskId(null); setSidebarOpen(false);
+    setPlannerOpen(false); setPlannerWeekId(null);
+    setTerritoryView("dashboard");
   };
   // Same city, Content Planner mode instead of the Businesses list. Always
   // starts at the week index — setPlannerWeekId(null) so re-opening the
@@ -4062,7 +4074,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // mobile header below so the bell / filter / overflow popovers aren't
   // duplicated in source. Only one header is ever visible (CSS breakpoint),
   // so the popovers never double-render on screen.
-  const territoryTitle = territoryView ? (territoryView === "all" ? "Territories" : (territoryById(territoryView) ? `${territoryById(territoryView)!.city}, ${territoryById(territoryView)!.state}` : "Territory")) : null;
+  const territoryTitle = territoryView ? (territoryView === "dashboard" ? "Territory Dashboard" : territoryView === "all" ? "Territories" : (territoryById(territoryView) ? `${territoryById(territoryView)!.city}, ${territoryById(territoryView)!.state}` : "Territory")) : null;
   const headerTitleText = territoryTitle ?? (settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Conversations") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? (conversationsOnly ? "Client replies" : "All Tasks") : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? "")));
   const isClientDetail = !myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && !!clientById(activeClient);
   // Non-null when the open "client" is actually a city's work container —
@@ -4358,6 +4370,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Territories</span>
               {canAdmin && <button onClick={() => openTerritory("all")} title="Manage territories" className="rounded p-0.5 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>}
             </div>
+            {/* Landing view across every assigned territory — who to follow
+                up with today, same spirit as Dashboard but for prospecting
+                work instead of active clients. Sits above the per-city list
+                since it's the "log in and know what to work on" entry
+                point, not a drill-down into one city. */}
+            <SideItem active={territoryView === "dashboard"} title="Territory Dashboard" onClick={openTerritoryDashboard}><I.grid className="text-muted" /> <span>Territory dashboard</span></SideItem>
             {visibleTerritories.map((t) => (
               <SideItem key={t.id} active={territoryView === t.id} onClick={() => openTerritory(t.id)}>
                 <I.flag className="shrink-0 text-muted" /> <span className="min-w-0 flex-1 truncate text-left">{t.city}, {t.state}</span>
@@ -4897,6 +4915,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             playbooks={playbooks} onSavePlaybook={savePlaybook} onDeletePlaybook={deletePlaybook} onLoadPlaybook={loadPlaybook}
             dmEnabled={dmEnabled} onSetDmEnabled={setDmEnabled}
           />
+        ) : territoryView === "dashboard" ? (
+          <TerritoryDashboard me={me} canAdmin={canAdmin} territories={territories} contacts={contacts} clients={clients} tasks={tasks}
+            onOpenClient={(id) => { setTerritoryView(null); setActiveClient(id); setActiveProject(null); setClientTab("tasks"); }}
+            onOpenPlaybook={openClientPlaybook} />
         ) : territoryView && territoryView !== "all" && plannerOpen ? (
           <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">
             <PlannerPanel territoryId={territoryView} city={territoryById(territoryView)?.city ?? ""} state={territoryById(territoryView)?.state ?? ""}
