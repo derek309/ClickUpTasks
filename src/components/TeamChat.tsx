@@ -105,6 +105,21 @@ export default function TeamChat({ me, scope, messages, onSend, onDelete, onPin,
     e.preventDefault();
     attachFiles(files);
   };
+  // Drop anywhere in the pane, not just the composer — the feed itself is
+  // most of the visible area, and that's where a dragged file naturally
+  // lands. Wraps the whole embedded/overlay container below rather than
+  // just the textarea, same file-type check as TaskDrawer's own drop zones
+  // (dataTransfer.types, so dragging a link or a bit of text doesn't
+  // register as a file drop and steal the pointer).
+  const [dragOver, setDragOver] = useState(false);
+  const handleDragOver = (e: React.DragEvent) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setDragOver(true); } };
+  const handleDragLeave = (e: React.DragEvent) => { if (e.currentTarget === e.target) setDragOver(false); };
+  const handleDrop = (e: React.DragEvent) => {
+    if (!e.dataTransfer.files.length) return;
+    e.preventDefault();
+    setDragOver(false);
+    attachFiles(e.dataTransfer.files);
+  };
 
   const submit = () => {
     if (!draft.trim() && pendingAtts.length === 0) return;
@@ -252,19 +267,34 @@ export default function TeamChat({ me, scope, messages, onSend, onDelete, onPin,
     </>
   );
 
+  // Shown over the whole pane while dragging a file — pointer-events-none so
+  // it never steals the drop itself, just confirms where it'll land.
+  const dropOverlay = dragOver && (
+    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-2xl border-2 border-dashed border-accent bg-accent-soft/40">
+      <span className="rounded-lg bg-surface px-3 py-1.5 text-[13px] font-medium text-accent shadow-[var(--shadow-sm)]">Drop to attach</span>
+    </div>
+  );
+
   // Embedded: fill the pane. No backdrop, and no title bar — the Team Chat
   // page already has its own header and tabs, so repeating it would be noise.
-  if (!onClose) return <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface">{inner}</div>;
+  if (!onClose) return (
+    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-surface" onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
+      {inner}
+      {dropOverlay}
+    </div>
+  );
 
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
-      <div className="fixed left-1/2 top-1/2 z-50 flex h-[80vh] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border bg-surface shadow-xl">
+      <div className="fixed left-1/2 top-1/2 z-50 flex h-[80vh] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border bg-surface shadow-xl"
+        onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
         <div className="flex items-center justify-between border-b px-5 py-3">
           <h2 className="flex items-center gap-1.5 text-[16px] font-semibold"><I.comment /> {scope.type === "dm" ? scope.other.name : "Conversations"}</h2>
           <button onClick={onClose} className="rounded-md p-1 text-muted hover:bg-background"><I.close /></button>
         </div>
         {inner}
+        {dropOverlay}
       </div>
     </>
   );
