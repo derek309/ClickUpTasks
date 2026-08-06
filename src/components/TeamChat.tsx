@@ -86,12 +86,18 @@ export default function TeamChat({ me, scope, messages, onSend, onDelete, onPin,
   const attachFiles = async (files: FileList | File[]) => {
     setUploadingAtt(true);
     // onUploadFile (uploadOneImage) already toasts + returns null on an
-    // oversized/failed upload — nothing more to check here.
-    for (const f of Array.from(files)) {
-      const att = await onUploadFile(f);
-      if (att) setPendingAtts((a) => [...a, att]);
+    // oversized/failed upload, an ordinary rejected upload never reaches
+    // here. try/finally is only for the genuinely unexpected case (a thrown
+    // network error) — without it, "Uploading…" was stuck on forever, since
+    // nothing after a throw in the loop below ever ran.
+    try {
+      for (const f of Array.from(files)) {
+        const att = await onUploadFile(f);
+        if (att) setPendingAtts((a) => [...a, att]);
+      }
+    } finally {
+      setUploadingAtt(false);
     }
-    setUploadingAtt(false);
   };
   const handlePaste = (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
