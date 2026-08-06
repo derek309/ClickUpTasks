@@ -1124,6 +1124,22 @@ export const SALES_STAGE_STEPS: PlaybookStepDef[] = [
   },
 ];
 
+// Which sales stages a ClientStatus transition implies are already done,
+// walking SALES_STAGE_STEPS forward from the start. Shared source of truth
+// for Cockpit.tsx's cascadeSalesStageCompletion (fires on a Stage dropdown
+// change or on opening a client's page) and any server-side/one-off script
+// that needs the identical mapping — duplicating this in two places risked
+// exactly the kind of drift this reconciliation exists to prevent.
+// nurture/cancelled/past_client aren't listed — they're exit ramps, not
+// forward progress, and imply nothing about the sales pipeline.
+export const SALES_STAGE_ORDER: string[] = SALES_STAGE_STEPS.map((s) => s.key);
+export const STATUS_IMPLIES_SALES_STAGE: Partial<Record<ClientStatus, string>> = {
+  claimed: "sales_listing_claimed",
+  interview: "sales_verification_call_booked",
+  onboarding: "sales_in_trial",
+  active_client: "sales_won_active",
+};
+
 // A2P (texting registration) — real, trackable steps, but deliberately a
 // SEPARATE catalog from PLAYBOOK_STEPS, not a 7th phase: the source doc
 // frames it as "not part of the main path, do it early" (folding it into the

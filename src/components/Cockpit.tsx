@@ -66,7 +66,7 @@ import {
   PLAYBOOK_EMAIL_DOMAIN_PHASE,
   PLAYBOOK_ONGOING_PHASE,
   PLAYBOOK_ALL_STEPS,
-  SALES_STAGE_STEPS,
+  SALES_STAGE_STEPS, SALES_STAGE_ORDER, STATUS_IMPLIES_SALES_STAGE,
   playbookStepsForClient,
   PLAYBOOK_INTRO,
   PLAYBOOK_MILESTONE,
@@ -497,23 +497,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // — no supabaseAdmin here, this goes through patchTask like any other
   // status change a rep makes, so it gets the same comment/history and the
   // same playbook_last_progress_at bump every other completion gets.
-  //
-  // Which sales stages a ClientStatus transition implies are already done,
-  // walking SALES_STAGE_STEPS forward from the start. Unlike the claim/
-  // invite-reply webhooks (narrow, single-step, event-driven — a self-claim
-  // skipping outreach is a real path per the SOP, not something to paper
-  // over), a rep moving the Stage dropdown to "Interview" is a deliberate
-  // confirmation that everything up through the verification call already
-  // happened in the real world, so catching every earlier step up too is
-  // the accurate read, not overreach. nurture/cancelled/past_client aren't
-  // listed — they're exit ramps, not forward progress, and complete nothing.
-  const SALES_STAGE_ORDER = SALES_STAGE_STEPS.map((s) => s.key);
-  const STATUS_IMPLIES_SALES_STAGE: Partial<Record<ClientStatus, string>> = {
-    claimed: "sales_listing_claimed",
-    interview: "sales_verification_call_booked",
-    onboarding: "sales_in_trial",
-    active_client: "sales_won_active",
-  };
+  // SALES_STAGE_ORDER/STATUS_IMPLIES_SALES_STAGE live in data.ts as the
+  // shared source of truth (also used by the one-off bulk-backfill script),
+  // rather than duplicated here.
   const cascadeSalesStageCompletion = (clientId: string, status: ClientStatus) => {
     const throughKey = STATUS_IMPLIES_SALES_STAGE[status];
     const throughIdx = throughKey ? SALES_STAGE_ORDER.indexOf(throughKey) : -1;
