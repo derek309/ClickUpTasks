@@ -69,9 +69,22 @@ export async function POST(req: NextRequest) {
     if (openTask) {
       task = openTask;
     } else {
-      const { data: contact } = await supabaseAdmin.from("contacts").select("id, name, client_id, ghl_contact_id").eq("client_id", clientId).limit(1).maybeSingle();
-      if (!contact) return NextResponse.json({ error: "This business has no linked contact to log a follow-up against." }, { status: 400 });
-      const newTaskId = await upsertConversationTask({ id: contact.id, name: contact.name, client_id: contact.client_id }, contact.ghl_contact_id ?? "");
+      // Contacts.client_id can't be trusted here: GHL-synced contacts sit in
+      // a shared "c_directory" bucket on that field, never backfilled to the
+      // real per-business client once one exists (same lesson
+      // TerritoryDashboard.tsx's own row-matching already learned). The
+      // reliable link for those is the id convention every other territory
+      // view uses — client.id === "cl_" + contact.id — so try that first and
+      // fall back to the client_id field for clients that were never
+      // GHL-directory-synced (e.g. hand-created ones) and so rely on it
+      // being set correctly.
+      const contactId = clientId.startsWith("cl_") ? clientId.slice(3) : null;
+      const { data: contact } = contactId
+        ? await supabaseAdmin.from("contacts").select("id, name, client_id, ghl_contact_id").eq("id", contactId).maybeSingle()
+        : { data: null };
+      const resolved = contact ?? (await supabaseAdmin.from("contacts").select("id, name, client_id, ghl_contact_id").eq("client_id", clientId).limit(1).maybeSingle()).data;
+      if (!resolved) return NextResponse.json({ error: "This business has no linked contact to log a follow-up against." }, { status: 400 });
+      const newTaskId = await upsertConversationTask({ id: resolved.id, name: resolved.name, client_id: clientId }, resolved.ghl_contact_id ?? "");
       if (!newTaskId) return NextResponse.json({ error: "Couldn't create a follow-up task." }, { status: 500 });
       task = { id: newTaskId, client_id: clientId, status: "todo", priority: "conversation" };
     }
