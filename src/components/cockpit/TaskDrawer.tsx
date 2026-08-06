@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, formatDue, htmlToText, looksLikeHtml, plainTextToHtml, clientStatusMeta,
   STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseEventDiff, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY,
-  type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message,
+  type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId } from "./ui";
 import { AttachmentThumbs } from "./AttachmentThumbs";
@@ -463,31 +463,12 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const metaLine = (
     <div className="-mt-0.5 mb-1 text-[13px] text-muted">Created {new Date(task.createdAt).toLocaleDateString()}{creatorName ? ` by ${creatorName}` : ""} · Updated {timeAgo(lastActivityAt)}</div>
   );
-  const statusBlock = (
-    <div className="mt-4 grid grid-cols-3 overflow-hidden rounded-lg border sm:grid-cols-6">
-      {STATUS_ORDER.map((s) => {
-        const m = STATUS_META[s];
-        const on = task.status === s;
-        // Each icon has its own native size (check=13px, search=16px,
-        // repeat=12px) — h-3 w-3 pins all four to the same rendered size
-        // (CSS width/height on the <svg> wins over its own attrs), and full-
-        // opacity color (not dimmed to 50%) keeps the outline circle for "To
-        // do" actually visible instead of nearly invisible at small size.
-        const iconCls = `h-3 w-3 shrink-0 ${on ? "text-white" : ""}`;
-        return (
-          <button key={s} onClick={() => onPatch({ status: s })} className={`flex items-center justify-center gap-1.5 border-r px-2 py-2.5 text-[13px] font-medium transition [&:nth-of-type(3n)]:border-r-0 sm:[&:nth-of-type(3n)]:border-r sm:last:border-r-0 ${on ? "text-white" : "text-muted hover:bg-background"}`} style={on ? { background: m.dot, borderColor: m.dot } : {}}>
-            {s === "done" ? <I.check className={iconCls} />
-              : s === "changes_requested" ? <I.flag className={iconCls} />
-              : s === "waiting" ? <I.user className={iconCls} />
-              : s === "review" ? <I.search className={iconCls} />
-              : s === "in_progress" ? <I.repeat className={iconCls} />
-              : <span className={`block h-3 w-3 shrink-0 rounded-full border-2 ${on ? "border-white" : ""}`} style={!on ? { borderColor: m.dot } : {}} />}
-            {m.label}
-          </button>
-        );
-      })}
-    </div>
-  );
+  // Used to be its own 6-button grid, wrapping to two cramped, hard-to-read
+  // rows in the drawer's narrow (non-full) width — the exact thing that
+  // looked broken. Folded into the same Task Details list as Priority,
+  // Assignee, and everything else below now, same dropdown treatment (a
+  // colored label, no chrome until you touch it), so Status stops being the
+  // one field styled like a different app.
   // Prominent warning, not just the compact badge buried in the properties
   // grid below — a client with no linked GHL contact/location is a real
   // gap (this task can never sync), worth catching at a glance.
@@ -501,6 +482,11 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     <div className="mt-4 rounded-xl border bg-surface p-4">
     <div className="mb-3 text-[15px] font-semibold">Task Details</div>
     <dl className={full ? "grid grid-cols-1 gap-x-12 gap-y-1.5 lg:grid-cols-2" : "space-y-2"}>
+      <Row label="Status" icon={<I.check />}>
+        <select value={task.status} onChange={(e) => onPatch({ status: e.target.value as TaskStatus })} className="rounded-md border border-transparent px-2 py-1 text-[14px] font-medium outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background" style={{ color: STATUS_META[task.status].dot }}>
+          {STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
+        </select>
+      </Row>
       <Row label="Due date" icon={<I.calendar />}>
         <span className="inline-flex flex-wrap items-center gap-1.5">
           <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} />
@@ -1404,7 +1390,6 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               <div className="mx-auto w-full max-w-4xl">
                 {titleBlock}
                 {metaLine}
-                {statusBlock}
                 {ghlWarningBanner}
                 <div className="my-4 border-t" />
                 {propsBlock}
@@ -1433,7 +1418,6 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               <div className="mx-auto w-full max-w-4xl">
                 {titleBlock}
                 {metaLine}
-                {statusBlock}
                 {ghlWarningBanner}
                 <div className="my-4 border-t" />
                 {propsBlock}
@@ -1495,7 +1479,6 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
             <div className="flex-1 overflow-y-auto bg-background px-5 py-4">
               {titleBlock}
               {metaLine}
-              {statusBlock}
               {ghlWarningBanner}
               <div className="mt-5">{propsBlock}</div>
               {draftEmailBlock}
