@@ -14,9 +14,20 @@
 // match (see their doc comments in data.ts), so which territory a claimed
 // business belongs to is derivable entirely from data already loaded
 // app-wide (clients/contacts/tasks) — no new network call on login.
+//
+// Contact -> Client linkage deliberately mirrors TerritoryPanel.tsx/
+// TerritoryDirectory.tsx's own `clientIds.has("cl_" + c.id)` convention
+// rather than reading Contact.clientId: GHL-synced contacts sit in a shared
+// "c_directory" bucket on that field (never backfilled to the real
+// per-business client once one exists), so it can't be trusted here either —
+// same lesson Claytown CrossFit already taught the id-matching in
+// TerritoryDirectory. And the city/state match itself needs normalizeState()
+// on both sides — GHL returns state as "CA", "California", or "ca"
+// interchangeably for the same territory, so a raw string compare silently
+// drops every contact synced with the long form.
 import { useMemo, useState } from "react";
 import {
-  users, userById, playbookCompletion, CLIENT_STATUS_META, STEP_STALL_DAYS, todayIso as todayIsoDate,
+  users, userById, playbookCompletion, normalizeState, CLIENT_STATUS_META, STEP_STALL_DAYS, todayIso as todayIsoDate,
   type Client, type Contact, type Task, type Territory, type ClientStatus,
 } from "@/lib/data";
 import { isDue } from "@/lib/plannerPools";
@@ -80,15 +91,15 @@ export function TerritoryDashboard({ me, canAdmin, territories, contacts, client
   };
 
   const rows: BusinessRow[] = useMemo(() => {
-    const territorySet = new Set(myTerritories.map((t) => `${t.city.toLowerCase()}|${t.state.toLowerCase()}`));
-    const contactByClientId = new Map(contacts.map((c) => [c.clientId, c] as const));
+    const territorySet = new Set(myTerritories.map((t) => `${t.city.toLowerCase()}|${normalizeState(t.state)}`));
+    const clientById = new Map(clients.map((c) => [c.id, c] as const));
     const todayDate = todayIsoDate();
-    return clients
-      .filter((c) => DASHBOARD_STATUSES.includes(c.status))
-      .map((c): BusinessRow | null => {
-        const contact = contactByClientId.get(c.id);
-        if (!contact?.city || !contact.state) return null;
-        if (!territorySet.has(`${contact.city.toLowerCase()}|${contact.state.toLowerCase()}`)) return null;
+    return contacts
+      .map((contact): BusinessRow | null => {
+        if (!contact.city || !contact.state) return null;
+        if (!territorySet.has(`${contact.city.trim().toLowerCase()}|${normalizeState(contact.state)}`)) return null;
+        const c = clientById.get("cl_" + contact.id);
+        if (!c || !DASHBOARD_STATUSES.includes(c.status)) return null;
         const convo = conversationTaskFor(c.id);
         const attention = needsAttention(c);
         const nextCheckIn = nextCheckInFor(c);
