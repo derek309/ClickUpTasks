@@ -113,7 +113,7 @@ export interface TaskMessagingProps {
   client: Client;
   comment: string; setComment: (v: string) => void;
   onPatch: (patch: Partial<Task>) => void;
-  onAddComment: (attachments?: Attachment[]) => void;
+  onAddComment: (body: string, attachments?: Attachment[]) => void;
   onUploadCommentImage: (file: File) => Promise<Attachment | null>;
   onDownloadFile: (path: string) => void;
   onDownloadFileAs: (path: string, filename: string) => void;
@@ -427,7 +427,8 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
   };
   const submitComment = () => {
     if (!comment.trim() && pendingCommentAtts.length === 0) return;
-    onAddComment(pendingCommentAtts.length ? pendingCommentAtts : undefined);
+    onAddComment(comment, pendingCommentAtts.length ? pendingCommentAtts : undefined);
+    setComment("");
     setPendingCommentAtts([]);
   };
   const mentionMatch = /@([\w]*)$/.exec(comment);

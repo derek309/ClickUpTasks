@@ -1,7 +1,7 @@
 "use client";
 
 // The task detail window (sidebar or full-page "document" view).
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, formatDue, htmlToText, plainTextToHtml, clientStatusMeta,
   STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY,
@@ -14,11 +14,42 @@ import { RichTextEditor } from "./RichTextEditor";
 import { claudeWorkUrl } from "@/lib/claudeLink";
 import { useTaskMessaging } from "./TaskMessaging";
 
-export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, onRegenerateAiSummary, aiSummaryBusy, pushToast, onOpenClaudeSetup }: {
-  task: Task; comment: string; setComment: (v: string) => void;
+// Title/description onChange used to call onPatch on every keystroke, which
+// writes through Cockpit.tsx's top-level `tasks` state (a full-array clone +
+// re-render of the whole unmemoized app tree, on a client with thousands of
+// tasks) AND fires a Supabase write, per character typed — the cause of the
+// multi-second-per-keystroke lag reported live (screenshot: 5-10s to see
+// typed text appear, on task titles specifically). Debouncing the commit
+// keeps the field itself instant (it's driven by local/editor-internal state,
+// not the patched value) while the expensive save only fires once typing
+// pauses. The commit closure is captured fresh at schedule() time (not read
+// from a ref later), so it stays bound to whichever task was open when the
+// keystroke happened even if the drawer has since switched to a different
+// task by the time the timer fires — no cross-task write-to-the-wrong-task
+// risk from debouncing.
+function useDebouncedCommit(delayMs = 600) {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingRef = useRef<(() => void) | null>(null);
+  const flush = useCallback(() => {
+    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+    const commit = pendingRef.current;
+    pendingRef.current = null;
+    if (commit) commit();
+  }, []);
+  const schedule = useCallback((commit: () => void) => {
+    pendingRef.current = commit;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(flush, delayMs);
+  }, [flush, delayMs]);
+  useEffect(() => flush, [flush]); // flush on unmount rather than drop a trailing edit
+  return { schedule, flush };
+}
+
+export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, onRegenerateAiSummary, aiSummaryBusy, pushToast, onOpenClaudeSetup }: {
+  task: Task;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; navTasks: Task[]; onOpenTask: (id: string) => void; onAddSibling: (title: string) => void; onPrev: () => void; onNext: () => void;
-  onClose: () => void; onPatch: (patch: Partial<Task>) => void; onDelete: () => void; onAddComment: (attachments?: Attachment[]) => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onDownloadFileAs: (path: string, filename: string) => void; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; onPushGhl: () => void; ghlBusy: boolean; ghlLinkable: boolean; onUnlinkGhl: () => void; allClients: Client[]; onMoveClient: (clientId: string) => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onRenameProject: () => void; onToggleSub: (sid: string) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onDeleteSub: (sid: string) => void; onPatchSub: (sid: string, patch: Partial<Subtask>) => void; onToggleLabel: (lid: string) => void; onCopyLink: () => void; onOpenMerge: () => void; onOpenClientList: () => void;
+  onClose: () => void; onPatch: (patch: Partial<Task>) => void; onDelete: () => void; onAddComment: (body: string, attachments?: Attachment[]) => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onDownloadFileAs: (path: string, filename: string) => void; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; onPushGhl: () => void; ghlBusy: boolean; ghlLinkable: boolean; onUnlinkGhl: () => void; allClients: Client[]; onMoveClient: (clientId: string) => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onRenameProject: () => void; onToggleSub: (sid: string) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onDeleteSub: (sid: string) => void; onPatchSub: (sid: string, patch: Partial<Subtask>) => void; onToggleLabel: (lid: string) => void; onCopyLink: () => void; onOpenMerge: () => void; onOpenClientList: () => void;
   templates: TaskTemplate[]; onApplyTemplate: (templateId: string) => void;
   onUploadCommentImage: (file: File) => Promise<Attachment | null>;
   onCopyAttachmentLink: (path: string) => void;
@@ -67,6 +98,22 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const ghlContactUrl = linkedContact && ghlSub?.ghlLocationId ? `https://app.gohighlevel.com/v2/location/${ghlSub.ghlLocationId}/contacts/detail/${linkedContact.ghlContactId}` : null;
   const [subDraft, setSubDraft] = useState("");
   const [siblingDraft, setSiblingDraft] = useState("");
+  // Team-chat draft — lives here (not lifted to Cockpit.tsx) so typing it
+  // only re-renders this drawer, not the whole app; see useDebouncedCommit's
+  // comment above for the sibling title/description fix to the same root
+  // cause. Reset per task the same way openSections is (this drawer isn't
+  // remounted per task), so switching tasks doesn't leak a draft between them.
+  const [comment, setComment] = useState("");
+  const [commentTaskId, setCommentTaskId] = useState(task.id);
+  if (commentTaskId !== task.id) { setCommentTaskId(task.id); setComment(""); }
+  // Title textarea is fully controlled, so it needs its own local draft (the
+  // description field below doesn't — RichTextEditor already treats `value`
+  // as boot-time-only content, see its own comment).
+  const [titleDraft, setTitleDraft] = useState(task.title);
+  const [titleDraftTaskId, setTitleDraftTaskId] = useState(task.id);
+  if (titleDraftTaskId !== task.id) { setTitleDraftTaskId(task.id); setTitleDraft(task.title); }
+  const titleCommit = useDebouncedCommit();
+  const descriptionCommit = useDebouncedCommit();
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
   const [linkLabel, setLinkLabel] = useState("");
@@ -233,7 +280,9 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   // ambassador rename one here would just get silently reverted next time,
   // so it's read-only instead, with a title explaining why.
   const titleBlock = (
-    <textarea value={task.title} onChange={(e) => onPatch({ title: e.target.value })} readOnly={!!task.playbookStepKey}
+    <textarea value={titleDraft} readOnly={!!task.playbookStepKey}
+      onChange={(e) => { const v = e.target.value; setTitleDraft(v); titleCommit.schedule(() => onPatch({ title: v })); }}
+      onBlur={titleCommit.flush}
       title={task.playbookStepKey ? "Synced from the Owner Growth Plan — always the same for every business" : undefined}
       rows={1} className={`-mx-1 w-full resize-none rounded-md bg-transparent px-1 font-semibold leading-snug outline-none [field-sizing:content] transition focus:bg-background ${full ? "text-[28px]" : "text-[18px]"} ${task.playbookStepKey ? "cursor-default" : ""}`} />
   );
@@ -447,7 +496,7 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const descriptionBlock = !showDescription ? null : (
     <div className="mt-4 rounded-xl border bg-surface p-4">
       <div className="mb-2 text-[15px] font-semibold">Description</div>
-      <RichTextEditor key={`task-desc-${task.id}-${descFocusNonce}`} value={task.description} onChange={(html) => onPatch({ description: html })} placeholder="Add a description…" />
+      <RichTextEditor key={`task-desc-${task.id}-${descFocusNonce}`} value={task.description} onChange={(html) => descriptionCommit.schedule(() => onPatch({ description: html }))} placeholder="Add a description…" />
       {onDraftDescription && (
         <div className="mt-2 flex shrink-0 items-start gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
           <span aria-hidden className="pt-1 pl-1 text-[13px]">✨</span>
