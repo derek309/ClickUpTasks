@@ -3,88 +3,16 @@
 // The task detail window (sidebar or full-page "document" view).
 import { useEffect, useRef, useState } from "react";
 import {
-  users, labels, userById, labelById, timeAgo, isOverdue, formatDue, htmlToText, looksLikeHtml, plainTextToHtml, clientStatusMeta,
-  STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseEventDiff, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY,
+  users, labels, userById, labelById, timeAgo, isOverdue, formatDue, htmlToText, plainTextToHtml, clientStatusMeta,
+  STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId } from "./ui";
-import { AttachmentThumbs } from "./AttachmentThumbs";
 import { AttachmentTile } from "./AttachmentTile";
 import { InlineAssignee, InlineDue } from "./GroupedList";
 import { RichTextEditor } from "./RichTextEditor";
-import { SchedulePopover } from "./SchedulePopover";
 import { claudeWorkUrl } from "@/lib/claudeLink";
-
-// Status/priority reuse the field's own STATUS_META/PRIORITY_META token (the
-// diff's "to" value is already the rendered label, so match it back against
-// the meta table rather than re-deriving from the raw enum) — a status
-// change to Done reads green, to Change Requests reads red, same colors
-// those values already carry everywhere else in the app. Assignee/due date
-// have no natural per-value color, so they get one fixed neutral accent
-// each, just enough to tell field types apart at a glance.
-function eventAccentColor(diff: { field: string; to: string }): string {
-  if (diff.field === "status") return Object.values(STATUS_META).find((m) => m.label === diff.to)?.dot ?? "#94a3b8";
-  if (diff.field === "priority") return Object.values(PRIORITY_META).find((m) => m.label === diff.to)?.color ?? "#94a3b8";
-  if (diff.field === "assignee") return "#14b8a6";
-  if (diff.field === "due date") return "#f59e0b";
-  return "#94a3b8";
-}
-function EventDiffCard({ diff }: { diff: { field: string; from: string | null; to: string } }) {
-  const color = eventAccentColor(diff);
-  return (
-    <div className="mt-1 inline-block rounded-lg border-l-[3px] bg-background px-2.5 py-1.5" style={{ borderLeftColor: color, background: color + "0d" }}>
-      <div className="mb-0.5 text-[11px] font-medium capitalize" style={{ color }}>{diff.field}</div>
-      <div className="flex items-center gap-1.5 text-[13px]">
-        {diff.from && <span className="text-muted line-through">{diff.from}</span>}
-        {diff.from && <span className="text-muted">→</span>}
-        <span className="font-medium text-foreground">{diff.to}</span>
-      </div>
-    </div>
-  );
-}
-
-const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-// A chip-style multi-recipient input for email Cc/Bcc — type to search the
-// synced contact list by name or email, or type a raw address and hit Enter.
-// Stores plain email strings (that's what GHL's emailCc/emailBcc expect).
-export function RecipientField({ label, value, onChange, contacts }: { label: string; value: string[]; onChange: (next: string[]) => void; contacts: Contact[] }) {
-  const [q, setQ] = useState("");
-  const ql = q.trim().toLowerCase();
-  const matches = ql
-    ? contacts.filter((c) => c.email && !value.includes(c.email) && (c.name.toLowerCase().includes(ql) || c.email.toLowerCase().includes(ql))).slice(0, 6)
-    : [];
-  const add = (email: string) => { const e = email.trim(); if (e && !value.includes(e)) onChange([...value, e]); setQ(""); };
-  const remove = (email: string) => onChange(value.filter((x) => x !== email));
-  return (
-    <div className="relative">
-      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border bg-background px-2 py-1.5 focus-within:border-accent">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</span>
-        {value.map((e) => (
-          <span key={e} className="inline-flex items-center gap-1 rounded bg-accent-soft px-1.5 py-0.5 text-[12px] text-accent">
-            {e}<button onClick={() => remove(e)} title="Remove" className="hover:text-foreground">×</button>
-          </span>
-        ))}
-        <input value={q} onChange={(e) => setQ(e.target.value)}
-          onKeyDown={(e) => {
-            if ((e.key === "Enter" || e.key === ",") && EMAIL_RE.test(q.trim())) { e.preventDefault(); add(q); }
-            else if (e.key === "Backspace" && !q && value.length) { remove(value[value.length - 1]); }
-          }}
-          placeholder={value.length ? "" : "Search contacts or type an email…"}
-          className="min-w-[150px] flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted" />
-      </div>
-      {matches.length > 0 && (
-        <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-lg border bg-surface shadow-soft-md">
-          {matches.map((c) => (
-            <button key={c.id} onClick={() => add(c.email)} className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left hover:bg-background">
-              <span className="truncate text-[13px] font-medium">{c.name}</span>
-              <span className="shrink-0 truncate text-[12px] text-muted">{c.email}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+import { useTaskMessaging } from "./TaskMessaging";
 
 export function TaskDrawer({ task, comment, setComment, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, onRegenerateAiSummary, aiSummaryBusy, pushToast, onOpenClaudeSetup }: {
   task: Task; comment: string; setComment: (v: string) => void;
@@ -152,9 +80,6 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   const [labelOpen, setLabelOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [msgSubject, setMsgSubject] = useState("");
-  const [msgBody, setMsgBody] = useState("");
-  const [draftPrompt, setDraftPrompt] = useState("");
   const [descDraftPrompt, setDescDraftPrompt] = useState("");
   // RichTextEditor only takes `value` as its boot-time content and never
   // re-syncs from props after mount (see its own comment) — a caller that
@@ -162,111 +87,6 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   // force a remount via a changing `key`, same as the email composer's
   // emailFocusNonce.
   const [descFocusNonce, setDescFocusNonce] = useState(0);
-  const [msgCc, setMsgCc] = useState<string[]>([]);
-  const [msgBcc, setMsgBcc] = useState<string[]>([]);
-  const [showCcBcc, setShowCcBcc] = useState(false);
-  const [pendingMsgAtts, setPendingMsgAtts] = useState<Attachment[]>([]);
-  const [uploadingMsgAtt, setUploadingMsgAtt] = useState(false);
-  const handleMsgPaste = async (e: React.ClipboardEvent) => {
-    if (!onUploadMessageImage) return;
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    const images: File[] = [];
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      if (item.kind === "file" && item.type.startsWith("image/")) { const f = item.getAsFile(); if (f) images.push(f); }
-    }
-    if (images.length === 0) return;
-    e.preventDefault();
-    setUploadingMsgAtt(true);
-    for (const f of images) { const att = await onUploadMessageImage(f); if (att) setPendingMsgAtts((a) => [...a, att]); }
-    setUploadingMsgAtt(false);
-  };
-  // Merged into the Activity panel as a tabbed switcher rather than its own
-  // block in the document body — messaging the contact and the internal
-  // comment thread are both "activity on this task", just different
-  // channels. The channel is just whichever tab is active, not separate
-  // state, so there's one source of truth for what Send will do.
-  const [rightTab, setRightTab] = useState<"activity" | "chat" | "sms" | "email" | "ai">("activity");
-  // Forces the email RichTextEditor to remount (see its `key` below), same
-  // reasoning as the Journal composer's identical nonce: TipTap needs a
-  // remount to pick up a programmatic content change or to refocus.
-  const [emailFocusNonce, setEmailFocusNonce] = useState(0);
-  // Switching sms/chat<->email converts msgBody in whichever direction is
-  // needed — email's is real HTML, sms/chat's is plain — so no composer
-  // ever shows raw tags or a collapsed run-on line. Activity/AI aren't
-  // compose channels, so they pass through untouched.
-  const switchRightTab = (tab: "activity" | "chat" | "sms" | "email" | "ai") => {
-    if (tab === "email" && !looksLikeHtml(msgBody)) { setMsgBody((b) => plainTextToHtml(b)); setEmailFocusNonce((n) => n + 1); }
-    else if ((tab === "sms" || tab === "chat") && looksLikeHtml(msgBody)) setMsgBody((b) => htmlToText(b));
-    if (tab === "chat" || tab === "sms" || tab === "email") onMarkChannelRead?.(tab);
-    setRightTab(tab);
-  };
-  const hasComposedMessage = rightTab === "email" ? !!htmlToText(msgBody).trim() : !!msgBody.trim();
-  const submitTaskMessage = () => {
-    if ((!hasComposedMessage && pendingMsgAtts.length === 0) || !onSendTaskMessage || rightTab === "activity" || rightTab === "ai") return;
-    // Cc/Bcc ride along only on real email; SMS/chat ignore them (Cockpit also guards this).
-    const cc = rightTab === "email" ? msgCc : undefined;
-    const bcc = rightTab === "email" ? msgBcc : undefined;
-    // A blank subject line used to go out as a literal "(no subject)" email
-    // — default to the task's own title instead, same as how the task
-    // title already becomes the subject via "Add task details + link".
-    const subject = rightTab === "email" ? (msgSubject.trim() || task.title) : msgSubject;
-    onSendTaskMessage(rightTab, subject, rightTab === "email" ? msgBody : msgBody.trim(), pendingMsgAtts.length ? pendingMsgAtts : undefined, cc, bcc);
-    setMsgSubject(""); setMsgBody(""); setPendingMsgAtts([]); setMsgCc([]); setMsgBcc([]); setShowCcBcc(false);
-    // Stay on whichever tab was active — each channel has its own tab now,
-    // so the sent message is immediately visible right here. Bouncing back
-    // to Team (the old behavior, from when everything shared one merged
-    // feed) meant a chat/email/SMS send disappeared from view.
-  };
-  const submitScheduledTaskMessage = (whenIso: string) => {
-    // Chat has no deferred-send path (see Cockpit.tsx's sendMessage) — it's meant to be immediate.
-    if ((!hasComposedMessage && pendingMsgAtts.length === 0) || !onScheduleTaskMessage || rightTab === "activity" || rightTab === "ai" || rightTab === "chat") return;
-    const cc = rightTab === "email" ? msgCc : undefined;
-    const bcc = rightTab === "email" ? msgBcc : undefined;
-    const subject = rightTab === "email" ? (msgSubject.trim() || task.title) : msgSubject;
-    onScheduleTaskMessage(rightTab, subject, rightTab === "email" ? msgBody : msgBody.trim(), whenIso, pendingMsgAtts.length ? pendingMsgAtts : undefined, cc, bcc);
-    setMsgSubject(""); setMsgBody(""); setPendingMsgAtts([]); setMsgCc([]); setMsgBcc([]); setShowCcBcc(false);
-  };
-  // Switches to Email and pre-fills "Re: subject" — no quoted body, same
-  // reasoning as the client Journal's reply: GHL threads it and the
-  // recipient's client already shows the prior message via the thread. A
-  // reply to a chat message just switches to the Chat tab instead — chat has
-  // its own dedicated composer now, no subject or "Re:" involved.
-  const emailBodyRef = useRef<HTMLTextAreaElement>(null);
-  const replyToEmail = (m: Message) => {
-    if (m.channel === "chat") { setRightTab("chat"); return; }
-    setRightTab("email");
-    setEmailFocusNonce((n) => n + 1);
-    const subj = (m.subject ?? "").trim();
-    setMsgSubject(subj ? (/^re:/i.test(subj) ? subj : `Re: ${subj}`) : "");
-    setMsgBody("");
-    requestAnimationFrame(() => emailBodyRef.current?.focus());
-  };
-  // Admin-only correction for a message that already sent wrong (see
-  // src/app/api/messages/edit/route.ts for why this is a real API call, not
-  // just an onEditMessage(id, body) fire-and-forget like most edits here).
-  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState("");
-  const startEditMessage = (m: Message) => { setEditingMsgId(m.id); setEditDraft(looksLikeHtml(m.body) ? htmlToText(m.body) : m.body); };
-  const saveEditMessage = (m: Message) => {
-    if (!onEditMessage || !editDraft.trim()) return;
-    onEditMessage(m.id, looksLikeHtml(m.body) ? plainTextToHtml(editDraft.trim()) : editDraft.trim(), m.subject);
-    setEditingMsgId(null);
-  };
-  // Rough SMS segment estimate, matching how carriers actually bill: GSM-7
-  // encoding (plain ASCII + a handful of accented/Greek chars) fits 160
-  // chars in one segment or 153 per segment once concatenated across
-  // multiple; anything outside that set (emoji, curly quotes, etc.) forces
-  // UCS-2 encoding at 70/67 chars instead.
-  const GSM7_RE = /^[A-Za-z0-9 \r\n@£$¥èéùìòÇØøÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ!"#¤%&'()*+,\-./:;<=>?¡ÄÖÑÜ§¿äöñüà^{}\\[~\]|€]*$/;
-  const smsSegments = (text: string): { count: number; encoding: string } => {
-    if (!text) return { count: 0, encoding: "GSM-7" };
-    const isGsm = GSM7_RE.test(text);
-    const [single, multi] = isGsm ? [160, 153] : [70, 67];
-    return { count: text.length <= single ? 1 : Math.ceil(text.length / multi), encoding: isGsm ? "GSM-7" : "Unicode" };
-  };
-  const wordCount = (text: string) => (text.trim() ? text.trim().split(/\s+/).length : 0);
   const [attSort, setAttSort] = useState<"added" | "name" | "type">("added");
   // Drag-to-reorder — only meaningful in "added" order (the stored array
   // order); dragging a name/type-sorted view and writing that back as
@@ -317,13 +137,6 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attImagePaths]);
   const fileRef = useRef<HTMLInputElement>(null);
-  const msgFileRef = useRef<HTMLInputElement>(null);
-  const handleMsgFileSelect = async (files: FileList | null) => {
-    if (!files || !onUploadMessageImage) return;
-    setUploadingMsgAtt(true);
-    for (const f of Array.from(files)) { const att = await onUploadMessageImage(f); if (att) setPendingMsgAtts((a) => [...a, att]); }
-    setUploadingMsgAtt(false);
-  };
 
   // Resizable Activity column (full-page mode): drag its left edge; width
   // persists per browser.
@@ -347,8 +160,6 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
   };
-
-  const commentCount = task.comments.filter((c) => c.kind !== "event").length;
 
   // Packages the task as a ready-to-paste brief for a Claude Code session —
   // the fallback hand-off for anyone without the desktop helper installed
@@ -410,34 +221,6 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
     onAddFiles(dt.files);
   };
   const doneSubs = task.subtasks.filter((s) => s.done).length;
-  const mentionMatch = /@([\w]*)$/.exec(comment);
-  const mentionCands = mentionMatch ? users.filter((u) => u.name.toLowerCase().includes(mentionMatch[1].toLowerCase())) : [];
-
-  // Pasting into the comment box specifically stages the image on the
-  // comment being composed (not the task's own Attachments) — stopPropagation
-  // so the drawer-wide handlePaste above doesn't also fire and double-attach.
-  const [pendingCommentAtts, setPendingCommentAtts] = useState<Attachment[]>([]);
-  const [uploadingCommentAtt, setUploadingCommentAtt] = useState(false);
-  const handleCommentPaste = async (e: React.ClipboardEvent) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    const images: File[] = [];
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      if (item.kind === "file" && item.type.startsWith("image/")) { const f = item.getAsFile(); if (f) images.push(f); }
-    }
-    if (images.length === 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-    setUploadingCommentAtt(true);
-    for (const f of images) { const att = await onUploadCommentImage(f); if (att) setPendingCommentAtts((a) => [...a, att]); }
-    setUploadingCommentAtt(false);
-  };
-  const submitComment = () => {
-    if (!comment.trim() && pendingCommentAtts.length === 0) return;
-    onAddComment(pendingCommentAtts.length ? pendingCommentAtts : undefined);
-    setPendingCommentAtts([]);
-  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -689,267 +472,19 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   // Message this task's linked GHL contact directly, without leaving the
   // drawer — sends via the same GHL Conversations API path as the Chat
   // tab's Messages composer, so it shows up there too (a message isn't
-  // tied to one task in the data model, just the contact/client). Each
-  // channel gets real writing room instead of a cramped 1-row box — SMS
-  // is short but still deserves more than a single line, and email needs
-  // a proper subject-then-body layout. Sending flips back to the Activity
-  // tab (see submitTaskMessage) so the send is visible immediately.
+  // tied to one task in the data model, just the contact/client).
   const hasMessaging = !!(linkedContact && onSendTaskMessage);
-  // A "Reply to X" task exists BECAUSE something came in, so opening it on the
-  // generic Activity tab buried the actual email or text one click away. The
-  // reply task row itself stores no channel, but the inbound message does
-  // (messages.channel, back-tagged with this task's id on ingest), so the most
-  // recent inbound message decides which tab opens. Keyed on task.id because
-  // the drawer is NOT remounted between tasks — without the reset, prev/next
-  // would carry one task's channel onto the next. A "call" has no compose tab,
-  // so it stays on Activity.
-  useEffect(() => {
-    if (!hasMessaging) return;
-    const inbound = (messages ?? []).filter((m) => m.direction === "inbound");
-    if (!inbound.length) return;
-    const newest = inbound.reduce((a, b) => (b.at > a.at ? b : a));
-    if (newest.channel === "sms" || newest.channel === "email" || newest.channel === "chat") setRightTab(newest.channel);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task.id, hasMessaging]);
-  // Claude (via the MCP server's draft_email tool) staged an outbound email
-  // on this task for a human to review — never sent automatically. "Review"
-  // loads it straight into the real Email composer (same rich-text editor,
-  // same Send button, same GHL/Gmail path as writing one by hand) rather
-  // than building a second send UI here; the stored draft is cleared the
-  // moment it's loaded in, since from then on the composer IS the draft.
-  const openDraftEmail = () => {
-    if (!task.draftEmail) return;
-    setMsgSubject(task.draftEmail.subject);
-    setMsgBody(task.draftEmail.body);
-    setEmailFocusNonce((n) => n + 1);
-    setRightTab("email");
-    onPatch({ draftEmail: null });
-  };
-  const draftEmailBlock = task.draftEmail ? (
-    <div className="mt-4 rounded-xl border border-accent/30 bg-accent-soft/20 p-4">
-      <div className="mb-1 flex items-center gap-1.5 text-[15px] font-semibold text-accent"><span aria-hidden>✉️</span> Draft email ready</div>
-      <div className="truncate text-[14px] font-medium">{task.draftEmail.subject || "(no subject)"}</div>
-      <div className="mt-0.5 line-clamp-2 text-[13px] text-muted">{htmlToText(task.draftEmail.body)}</div>
-      <div className="mt-2 flex items-center gap-2">
-        {hasMessaging ? (
-          <button onClick={openDraftEmail} className="rounded-md bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white">Review &amp; send</button>
-        ) : (
-          <span className="text-[12px] text-muted" title="No linked GoHighLevel contact to send to yet">Can&apos;t send — no linked contact for this client</span>
-        )}
-        <button onClick={() => onPatch({ draftEmail: null })} className="rounded-md px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">Discard</button>
-      </div>
-    </div>
-  ) : null;
-  const msgAttBar = (pendingMsgAtts.length > 0 || uploadingMsgAtt) && (
-    <div className="mb-2 flex shrink-0 flex-wrap items-center gap-1.5">
-      <AttachmentThumbs items={pendingMsgAtts} onRemove={(id) => setPendingMsgAtts((a) => a.filter((x) => x.id !== id))} />
-      {uploadingMsgAtt && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" />}
-    </div>
-  );
-  const msgAttachButton = onUploadMessageImage && (<>
-    <button onClick={() => msgFileRef.current?.click()} title="Attach an image" className="rounded-md p-1.5 text-muted hover:bg-background hover:text-foreground"><I.clip /></button>
-    <input ref={msgFileRef} type="file" multiple accept="image/*" className="hidden" onChange={(e) => { handleMsgFileSelect(e.target.files); e.target.value = ""; }} />
-  </>);
-  const smsSeg = smsSegments(msgBody);
-  // Explicit action (not a silent auto-fill on tab-switch, which would risk
-  // clobbering a draft the next time the composer opens) that drops in this
-  // task's own title/description plus its client link — the "ticket" shape:
-  // the client can open the link to see exactly this item and reply/attach
-  // media, and a reply lands back on this task (see resolveTaskForThread in
-  // src/lib/inboundIngest.ts).
-  const fillFromTask = () => {
-    const descText = htmlToText(task.description).trim();
-    const link = onGetTaskLink?.() ?? null;
-    const lines = [descText, link ? `You can view this and reply anytime here: ${link}` : null].filter(Boolean).join("\n\n");
-    if (!msgSubject.trim()) setMsgSubject(task.title);
-    setMsgBody(plainTextToHtml(lines));
-    setEmailFocusNonce((n) => n + 1);
-  };
-  // "Prompt Claude" — type an intent, Gemini writes the message (subject+body)
-  // from that + client context. Never sends. Shared by the SMS/Email composers.
-  const runDraft = async (channel: "email" | "sms") => {
-    if (!onDraftMessage || draftingMessage) return;
-    const d = await onDraftMessage(channel, draftPrompt.trim() || undefined);
-    if (d) {
-      if (channel === "email") setMsgSubject(d.subject ?? "");
-      // The AI drafter only ever returns plain text — give the email editor
-      // real paragraphs instead of one run-on line with literal \n's in it.
-      setMsgBody(channel === "email" ? plainTextToHtml(d.body) : d.body);
-      if (channel === "email") setEmailFocusNonce((n) => n + 1);
-    }
-  };
-  const promptClaudeBlock = (channel: "email" | "sms") => onDraftMessage ? (
-    <div className="mb-2 flex shrink-0 items-start gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
-      <span aria-hidden className="pt-1 pl-1 text-[13px]">✨</span>
-      {/* Same auto-growing box as the description prompt above and the one in
-          ClientJournal's composer: wraps onto new lines up to 200px, then
-          scrolls. Enter writes, Shift+Enter gets a new line. */}
-      <textarea value={draftPrompt} rows={1}
-        onChange={(e) => { setDraftPrompt(e.target.value); e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`; }}
-        onKeyDown={(e) => { if (e.key !== "Enter" || e.shiftKey || draftingMessage) return; e.preventDefault(); runDraft(channel); }}
-        placeholder="Tell Claude what to say… (Enter to write, Shift+Enter for a new line)"
-        className="max-h-[200px] min-w-0 flex-1 resize-none self-center overflow-y-auto bg-transparent px-1 py-1 text-[13px] leading-snug outline-none placeholder:text-muted" />
-      <button onClick={() => runDraft(channel)} disabled={draftingMessage}
-        title={draftPrompt.trim() ? "Draft this with Claude" : "Draft a status update from recent activity"}
-        className="mt-0.5 shrink-0 rounded-md border border-accent/40 bg-surface px-2.5 py-1 text-[13px] font-medium text-accent disabled:opacity-40">
-        {draftingMessage ? "Drafting…" : draftPrompt.trim() ? "Write it" : "Status update"}
-      </button>
-    </div>
-  ) : null;
-  // SMS/Email replace the plain comment box at the bottom instead of taking
-  // over the whole panel — the activity feed (including the conversation
-  // history) stays visible above whichever composer is active. Color-coded
-  // to match the feed's own per-channel dot colors (dotColor in
-  // commentsFeed) so the border makes it obvious what you're about to send
-  // and through which channel, at a glance.
-  const smsComposerBlock = hasMessaging ? (
-    <div className="max-h-[50vh] shrink-0 overflow-y-auto border-t-2 border-t-[#22c55e] bg-[#22c55e0d] p-3">
-      <div className="mb-2 shrink-0 text-[13px] text-muted">Texting: <span className="font-medium text-foreground">{messageDest?.phone || "no phone on file"}</span></div>
-      <div className="mb-2">{promptClaudeBlock("sms")}</div>
-      {msgAttBar}
-      <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)} onPaste={handleMsgPaste}
-        onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitTaskMessage(); } }}
-        placeholder="Write a message… (⌘↵ to send, paste to attach an image)"
-        className="min-h-[100px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
-      <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
-        <span className="text-[13px] text-muted">{wordCount(msgBody)} word{wordCount(msgBody) === 1 ? "" : "s"} · {smsSeg.count} segment{smsSeg.count === 1 ? "" : "s"}{smsSeg.count > 0 ? ` (${smsSeg.encoding})` : ""}</span>
-        <span className="flex items-center gap-1.5">
-          {msgAttachButton}
-          <button onClick={() => switchRightTab("activity")} className="rounded-lg px-2.5 py-1.5 text-[15px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
-          {onScheduleTaskMessage && <SchedulePopover disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} onSchedule={submitScheduledTaskMessage} />}
-          <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg bg-[#22c55e] px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send text"}</button>
-        </span>
-      </div>
-    </div>
-  ) : null;
-  const emailComposerBlock = hasMessaging ? (
-    <div className="max-h-[60vh] shrink-0 overflow-y-auto border-t-2 border-t-[#3b82f6] bg-[#3b82f60d] p-3">
-      <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
-        <span className="min-w-0 truncate text-[13px] text-muted">To: <span className="font-medium text-foreground">{messageDest?.email || "no email on file"}</span></span>
-        <span className="flex shrink-0 items-center gap-2">
-          <button onClick={fillFromTask} title="Fill in this task's title, description, and a client link to view/respond" className="text-[12px] font-medium text-accent hover:underline">Add task details + link</button>
-          {!showCcBcc && <button onClick={() => setShowCcBcc(true)} className="text-[12px] font-medium text-accent hover:underline">Cc / Bcc</button>}
-        </span>
-      </div>
-      <div className="mb-2">{promptClaudeBlock("email")}</div>
-      {showCcBcc && (
-        <div className="mb-2 flex shrink-0 flex-col gap-1.5">
-          <RecipientField label="Cc" value={msgCc} onChange={setMsgCc} contacts={ccContacts ?? []} />
-          <RecipientField label="Bcc" value={msgBcc} onChange={setMsgBcc} contacts={ccContacts ?? []} />
-        </div>
-      )}
-      <input value={msgSubject} onChange={(e) => setMsgSubject(e.target.value)} placeholder="Subject"
-        className="mb-2 w-full shrink-0 rounded-lg border bg-background px-3 py-2 text-[15px] font-medium outline-none placeholder:text-muted focus:border-accent" />
-      {msgAttBar}
-      {/* Same rich-text editor the Journal composer and task descriptions
-          use; the paste-to-attach-an-image handler and the ⌘↵-to-send
-          capture both still work wrapped around it — a keydown/paste event
-          on a contentEditable child bubbles like any other DOM event. */}
-      <div className="min-h-[160px] overflow-auto" onPaste={handleMsgPaste} onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitTaskMessage(); } }}>
-        <RichTextEditor key={`task-email-${emailFocusNonce}`} value={msgBody} onChange={setMsgBody} placeholder="Write an email… (⌘↵ to send)" autoFocus />
-      </div>
-      <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
-        <span className="text-[13px] text-muted">{wordCount(htmlToText(msgBody))} word{wordCount(htmlToText(msgBody)) === 1 ? "" : "s"}</span>
-        <span className="flex items-center gap-1.5">
-          {msgAttachButton}
-          <button onClick={() => switchRightTab("activity")} className="rounded-lg px-2.5 py-1.5 text-[15px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
-          {onScheduleTaskMessage && <SchedulePopover disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} onSchedule={submitScheduledTaskMessage} />}
-          <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg bg-[#3b82f6] px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send email"}</button>
-        </span>
-      </div>
-    </div>
-  ) : null;
-  // A real "chat" channel message — a `messages` row the client sees on
-  // their public /waiting/[token] page, not an email (see Cockpit.tsx's
-  // sendMessage, channel: "chat" branch). No subject, no Cc/Bcc, no
-  // scheduling — it's meant to read and send like an actual chat.
-  const chatComposerBlock = hasMessaging ? (
-    <div className="max-h-[50vh] shrink-0 overflow-y-auto border-t-2 border-t-[#e87722] bg-[#e877220d] p-3">
-      <div className="mb-2 shrink-0 text-[13px] text-muted">Client chat — shows up on {client.name}&apos;s waiting page, no email or text goes out.</div>
-      {msgAttBar}
-      <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)} onPaste={handleMsgPaste}
-        onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitTaskMessage(); } }}
-        placeholder="Type a message… (⌘↵ to send, paste to attach an image)"
-        className="min-h-[100px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
-      <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
-        <span className="text-[13px] text-muted">{wordCount(msgBody)} word{wordCount(msgBody) === 1 ? "" : "s"}</span>
-        <span className="flex items-center gap-1.5">
-          {msgAttachButton}
-          <button onClick={() => switchRightTab("activity")} className="rounded-lg px-2.5 py-1.5 text-[15px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
-          <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg bg-[#e87722] px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send"}</button>
-        </span>
-      </div>
-    </div>
-  ) : null;
-  // Falls back to "activity" if a messaging tab was active but the contact
-  // got unlinked out from under it. AI isn't gated on hasMessaging — it
-  // summarizes tasks even without a linked contact, messages just add to it.
-  const activeRightTab = (rightTab === "chat" || rightTab === "sms" || rightTab === "email") && !hasMessaging ? "activity" : rightTab;
-  const chatMsgCount = (messages ?? []).filter((m) => m.channel === "chat").length;
-  const emailMsgCount = (messages ?? []).filter((m) => m.channel === "email").length;
-  const smsMsgCount = (messages ?? []).filter((m) => m.channel === "sms").length;
-  // A new inbound message on a channel tab you haven't opened yet — cleared
-  // by switchRightTab's onMarkChannelRead the moment you click into it.
-  const chatUnread = (messages ?? []).some((m) => m.channel === "chat" && m.direction === "inbound" && !m.read);
-  const emailUnread = (messages ?? []).some((m) => m.channel === "email" && m.direction === "inbound" && !m.read);
-  const smsUnread = (messages ?? []).some((m) => m.channel === "sms" && m.direction === "inbound" && !m.read);
-  const unreadDot = (color: string) => <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color }} />;
-  // Same colors the message feed already uses per channel (dotColor in
-  // commentsFeed) and the composers' own top border — reused here so the
-  // tab itself, and the whole panel while it's active, both say which
-  // channel you're about to send through at a glance, not just the small
-  // text label.
-  const tabColors: Record<"activity" | "chat" | "email" | "sms", string> = {
-    activity: "var(--accent)", chat: "#e87722", email: "#3b82f6", sms: "#22c55e",
-  };
-  const activeTabColor = activeRightTab === "ai" ? null : tabColors[activeRightTab];
-  const tabBtnStyle = (tab: "activity" | "chat" | "email" | "sms") => {
-    const active = activeRightTab === tab;
-    return {
-      className: `inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium ${active ? "" : "text-muted hover:text-foreground"}`,
-      style: active ? { background: tabColors[tab] + "1a", color: tabColors[tab] } : undefined,
-    };
-  };
-  const aiTabClass = `inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium ${activeRightTab === "ai" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`;
-  // One tab per channel, each icon-labeled so team chat / client chat /
-  // email / SMS read as distinct at a glance instead of a single merged
-  // "Activity" feed — Call has no log/composer, so it stays a plain link
-  // near the client header instead of a tab here.
-  const rightTabBar = (
-    <div className="flex flex-wrap items-center gap-1">
-      <button onClick={() => switchRightTab("activity")} title="Team chat (internal only)" {...tabBtnStyle("activity")}><I.comment /> Team · {commentCount}</button>
-      {hasMessaging && (
-        <button onClick={() => switchRightTab("chat")} title={chatUnread ? "Client chat — new message" : "Client chat"} {...tabBtnStyle("chat")}><I.chatBubbles /> Chat{chatMsgCount > 0 ? ` · ${chatMsgCount}` : ""} {chatUnread && unreadDot(tabColors.chat)}</button>
-      )}
-      {hasMessaging && (
-        <button onClick={() => switchRightTab("email")} title={emailUnread ? "Email — new message" : "Email"} {...tabBtnStyle("email")}><I.mail /> Email{emailMsgCount > 0 ? ` · ${emailMsgCount}` : ""} {emailUnread && unreadDot(tabColors.email)}</button>
-      )}
-      {hasMessaging && (
-        <button onClick={() => switchRightTab("sms")} title={smsUnread ? "Text message — new message" : "Text message"} {...tabBtnStyle("sms")}><I.phone /> SMS{smsMsgCount > 0 ? ` · ${smsMsgCount}` : ""} {smsUnread && unreadDot(tabColors.sms)}</button>
-      )}
-      {onRegenerateAiSummary && (
-        <button onClick={() => switchRightTab("ai")} className={aiTabClass}>AI</button>
-      )}
-    </div>
-  );
-  const aiSummaryBlock = (
-    <div className="flex-1 overflow-y-auto px-5 py-4">
-      <div className="mb-3 flex items-center justify-between">
-        <span className="text-[13px] font-medium text-muted">{client.aiSummaryAt ? `Updated ${timeAgo(client.aiSummaryAt)}` : "No summary yet"}</span>
-        <button onClick={onRegenerateAiSummary} disabled={aiSummaryBusy} className="inline-flex items-center gap-1.5 rounded-md border border-accent px-2.5 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft disabled:opacity-50">
-          {aiSummaryBusy ? "Summarizing…" : client.aiSummary ? "Regenerate" : "Summarize"}
-        </button>
-      </div>
-      {client.aiSummary ? (
-        <p className="whitespace-pre-wrap text-[15px] leading-relaxed">{client.aiSummary}</p>
-      ) : (
-        <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted">
-          <span className="text-[15px]">No AI summary yet</span>
-          <span className="text-[13px]">Pulls from this client&apos;s recent messages and tasks.</span>
-        </div>
-      )}
-    </div>
-  );
+  // Everything below (merged feed, filter chips, search, inline reply, CTA
+  // compose row, AI summary slide-over, draft-email persistence) lives in
+  // TaskMessaging.tsx — see its own comment for why it's a hook rather than
+  // a component (the three drawer layouts nest feedArea/composerFooter
+  // differently, so this file controls placement, not TaskMessaging).
+  const { feedArea, composerFooter } = useTaskMessaging({
+    task, client, comment, setComment, onPatch, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs,
+    attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, ccContacts, onUploadMessageImage,
+    onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin,
+    onDeleteMessage, onEditMessage, onRegenerateAiSummary, aiSummaryBusy, hasMessaging,
+  });
   const subtasksBlock = !showChecklist ? null : (
     <div className="mt-4 rounded-xl border bg-surface p-4">
       <div className="mb-2 flex items-center justify-between">
@@ -1148,193 +683,13 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
       </>)}
     </div>
   );
-  // Sent/received emails and texts aren't tied to one task in the data
-  // model (just the contact/client), but merging them into this task's feed
-  // — instead of only the client-level Chat tab — means sending from here
-  // shows up right where you sent it from. Each tab shows only its own
-  // channel now (Team = comments/events, Chat/Email/SMS = that channel's
-  // messages) instead of one merged feed for everything.
-  const activityItems: ({ at: string; kind: "comment" | "event"; comment: (typeof task.comments)[number] } | { at: string; kind: "message"; message: Message })[] = [
-    ...(activeRightTab === "activity" ? task.comments.map((c) => ({ at: c.at, kind: c.kind === "event" ? ("event" as const) : ("comment" as const), comment: c })) : []),
-    ...(activeRightTab === "chat" || activeRightTab === "email" || activeRightTab === "sms"
-      ? (messages ?? []).filter((m) => m.channel === activeRightTab).map((m) => ({ at: m.at, kind: "message" as const, message: m }))
-      : []),
-  ].sort((a, b) => a.at.localeCompare(b.at));
-  // GitHub/Slack-style vertical timeline: a single connecting line down a
-  // fixed 32px node gutter (line sits at x=16px — the exact center of that
-  // gutter for every node shape, dot or avatar, so nothing needs per-item
-  // positioning math beyond the shared gutter width).
-  const commentsFeed = (
-    <div className="relative">
-      {activityItems.length > 0 && <div className="absolute bottom-2 left-4 top-2 w-px bg-border" />}
-      {activityItems.map((item, i) => {
-        const gap = i === activityItems.length - 1 ? "" : "pb-3";
-        if (item.kind === "event") {
-          const c = item.comment; const u = userById(c.authorId); const diff = parseEventDiff(c.body);
-          return (
-            <div key={c.id} className={`relative flex gap-3 ${gap}`}>
-              <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface" style={{ background: diff ? eventAccentColor(diff) : "var(--muted)" }} /></div>
-              <div className="min-w-0 flex-1 pt-1.5 text-[13px] text-muted">
-                <span><span className="font-medium text-foreground">{u?.name}</span> {diff ? `updated ${diff.field}` : c.body} · {timeAgo(c.at)}</span>
-                {diff && <EventDiffCard diff={diff} />}
-              </div>
-            </div>
-          );
-        }
-        if (item.kind === "message") {
-          const m = item.message;
-          // "chat" = the client's own message sent from their public
-          // /waiting/[token] page (see resolveTaskForThread's twin,
-          // src/app/api/waiting/[token]/messages/route.ts) — lands in this
-          // same feed with zero other changes needed on this side.
-          const dotColor = m.channel === "email" ? "#3b82f6" : m.channel === "chat" ? "#e87722" : "#22c55e";
-          const channelLabel = m.channel === "email" ? "Email" : m.channel === "chat" ? "Chat" : "SMS";
-          return (
-            <div key={m.id} className={`relative flex gap-3 ${gap}`}>
-              <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface" style={{ background: dotColor }} /></div>
-              {/* A left accent bar + background tint carry the client/team
-                  distinction on their own — same color pairing used
-                  everywhere else in the app (highlight = client-facing,
-                  accent = us) — instead of relying on the small Sent/
-                  Received label alone, which is easy to miss scanning a
-                  same-channel tab where every dot color is identical. */}
-              <div className={`min-w-0 flex-1 rounded-xl border border-l-4 p-3 ${m.direction === "inbound" ? "bg-highlight-soft" : "bg-surface"}`} style={{ borderLeftColor: m.direction === "inbound" ? "var(--highlight)" : "var(--accent)" }}>
-                <div className="flex items-center gap-2 text-[13px] text-muted">
-                  <span className="inline-flex items-center gap-1 rounded px-1.5 py-0 font-medium" style={{ background: dotColor + "1a", color: dotColor }}>{channelLabel}</span>
-                  <span className="font-medium" style={{ color: m.direction === "inbound" ? "var(--highlight)" : "var(--accent)" }}>{m.direction === "inbound" ? "Received" : "Sent"}</span>
-                  {m.direction === "outbound" && m.createdBy && (
-                    <span className="inline-flex items-center gap-1"><Avatar id={m.createdBy} size={14} /> {userById(m.createdBy)?.name ?? "Unknown"}</span>
-                  )}
-                  <span>· {timeAgo(m.at)}</span>
-                  {!m.read && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-1.5 py-0 text-[11px] font-semibold text-accent">
-                      <span className="h-1.5 w-1.5 rounded-full bg-accent" /> New
-                    </span>
-                  )}
-                  <span className="ml-auto flex shrink-0 items-center gap-1">
-                    {/* Chat has no equivalent of its own "send" surface on
-                        this side — replying through email is what actually
-                        reaches the client and lands back in this same
-                        thread, so it gets the identical shortcut email does. */}
-                    {(m.channel === "email" || m.channel === "chat") && onSendTaskMessage && editingMsgId !== m.id && (
-                      <button onClick={() => replyToEmail(m)} className="rounded-md border border-accent/30 px-2 py-0.5 text-[12px] font-medium text-accent hover:bg-accent-soft">Reply</button>
-                    )}
-                    {canAdmin && onEditMessage && editingMsgId !== m.id && (
-                      <button onClick={() => startEditMessage(m)} title="Edit (this doesn't unsend anything already delivered)" className="rounded-md border px-2 py-0.5 text-[12px] font-medium text-muted hover:bg-background hover:text-foreground">Edit</button>
-                    )}
-                    {canAdmin && onDeleteMessage && (
-                      <button
-                        onClick={() => { if (window.confirm("Delete this message? This only removes it from ClickUpTasks and the client's waiting page — it does not unsend a real email or text already delivered.")) onDeleteMessage(m.id); }}
-                        title="Delete" className="rounded-md border px-2 py-0.5 text-[12px] font-medium text-muted hover:border-red-300 hover:bg-red-50 hover:text-red-600">Delete</button>
-                    )}
-                  </span>
-                </div>
-                {m.subject && <div className="mt-1 text-[15px] font-medium">{m.subject}</div>}
-                {((m.cc && m.cc.length > 0) || (m.bcc && m.bcc.length > 0)) && (
-                  <div className="mt-0.5 text-[12px] text-muted">
-                    {m.cc && m.cc.length > 0 && <span>Cc: {m.cc.join(", ")}</span>}
-                    {m.cc && m.cc.length > 0 && m.bcc && m.bcc.length > 0 && <span> · </span>}
-                    {m.bcc && m.bcc.length > 0 && <span>Bcc: {m.bcc.join(", ")}</span>}
-                  </div>
-                )}
-                {editingMsgId === m.id ? (
-                  <div className="mt-1.5 space-y-1.5">
-                    <textarea value={editDraft} onChange={(e) => setEditDraft(e.target.value)} rows={3} autoFocus
-                      className="w-full rounded-lg border bg-background px-2.5 py-2 text-[14px] outline-none focus:border-accent" />
-                    <div className="flex justify-end gap-2">
-                      <button onClick={() => setEditingMsgId(null)} className="rounded-md px-2.5 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
-                      <button onClick={() => saveEditMessage(m)} disabled={!editDraft.trim()} className="rounded-md bg-accent px-2.5 py-1 text-[13px] font-medium text-white disabled:opacity-40">Save</button>
-                    </div>
-                  </div>
-                ) : (
-                  /* Real HTML for anything sent through the Journal's rich-text
-                     email composer (always starts with a tag); plain text
-                     otherwise (SMS, or an email from before that composer). */
-                  looksLikeHtml(m.body)
-                    ? <div className="rte-content mt-1 text-[15px]" dangerouslySetInnerHTML={{ __html: m.body }} />
-                    : <CollapsibleText text={m.body} className="mt-1 text-[15px]" />
-                )}
-                {m.attachments && m.attachments.length > 0 && (
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    {m.attachments.filter((a) => a.kind === "image").length > 0 && (
-                      <div className="grid grid-cols-4 gap-1.5">
-                        {m.attachments.filter((a) => a.kind === "image").map((a) => (
-                          <AttachmentTile key={a.id} item={a} small url={a.path ? attImageUrls[a.path] : undefined} onOpen={() => openPreview(a)}
-                            actions={<>
-                              {a.path && <button onClick={(e) => { e.stopPropagation(); onDownloadFileAs(a.path!, a.name); }} title="Download" className="flex h-5 w-5 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.download className="h-2.5 w-2.5" /></button>}
-                              <button onClick={(e) => { e.stopPropagation(); attachToTask(a); }} title="Add to task attachments" className="flex h-5 w-5 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.plus className="h-2.5 w-2.5" /></button>
-                            </>}
-                          />
-                        ))}
-                      </div>
-                    )}
-                    {m.attachments.filter((a) => a.kind !== "image").length > 0 && <AttachmentThumbs items={m.attachments.filter((a) => a.kind !== "image")} onOpen={onDownloadFile} />}
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        }
-        const c = item.comment;
-        const u = userById(c.authorId);
-        return (
-          <div key={c.id} className={`relative flex gap-3 ${gap}`}>
-            <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><Avatar id={c.authorId} size={28} /></div>
-            <div className="min-w-0 flex-1 pt-0.5">
-              <div className="text-[14px]"><span className="font-medium">{u?.name}</span> <span className="text-[12px] text-muted">· {timeAgo(c.at)}</span></div>
-              {c.body && <CollapsibleText text={c.body} className="text-[15px]" />}
-              {c.attachments && c.attachments.length > 0 && (
-                <div className="mt-1 flex flex-wrap gap-1.5">
-                  {c.attachments.filter((a) => a.kind === "image").length > 0 && (
-                    <div className="grid grid-cols-4 gap-1.5">
-                      {c.attachments.filter((a) => a.kind === "image").map((a) => (
-                        <AttachmentTile key={a.id} item={a} small url={a.path ? attImageUrls[a.path] : undefined} onOpen={() => openPreview(a)}
-                          actions={<>
-                            {a.path && <button onClick={(e) => { e.stopPropagation(); onDownloadFileAs(a.path!, a.name); }} title="Download" className="flex h-5 w-5 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.download className="h-2.5 w-2.5" /></button>}
-                            <button onClick={(e) => { e.stopPropagation(); attachToTask(a); }} title="Add to task attachments" className="flex h-5 w-5 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.plus className="h-2.5 w-2.5" /></button>
-                          </>}
-                        />
-                      ))}
-                    </div>
-                  )}
-                  {c.attachments.filter((a) => a.kind !== "image").length > 0 && <AttachmentThumbs items={c.attachments.filter((a) => a.kind !== "image")} onOpen={onDownloadFile} />}
-                </div>
-              )}
-            </div>
-          </div>
-        );
-      })}
-      {activityItems.length === 0 && (
-        <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted">
-          <I.comment />
-          <span className="text-[15px]">No {activeRightTab === "activity" ? "team chat" : activeRightTab === "chat" ? "client chat" : activeRightTab} yet</span>
-          <span className="text-[13px]">{activeRightTab === "activity" ? "Type @ to mention a teammate." : "Nothing sent or received on this channel yet."}</span>
-        </div>
-      )}
-    </div>
-  );
-  const composer = (
-    <div className="relative border-t bg-surface p-3">
-      {mentionMatch && mentionCands.length > 0 && (<div className="absolute bottom-full left-3 mb-1 w-56 overflow-hidden rounded-lg border bg-surface shadow-lg">{mentionCands.map((u) => (<button key={u.id} onClick={() => setComment(comment.replace(/@([\w]*)$/, `@${u.name} `))} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[15px] hover:bg-background"><Avatar id={u.id} size={22} /> <span className="min-w-0 flex-1 truncate">{u.name}</span>{u.role === "va" && <span className="shrink-0 text-[13px] text-muted">VA</span>}</button>))}</div>)}
-      {(pendingCommentAtts.length > 0 || uploadingCommentAtt) && (
-        <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-          <AttachmentThumbs items={pendingCommentAtts} onRemove={(id) => setPendingCommentAtts((a) => a.filter((x) => x.id !== id))} />
-          {uploadingCommentAtt && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" />}
-        </div>
-      )}
-      <div className="flex items-end gap-2 rounded-xl border bg-background px-2.5 py-2 focus-within:border-accent">
-        <textarea value={comment} onChange={(e) => setComment(e.target.value)} onPaste={handleCommentPaste} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !(mentionMatch && mentionCands.length)) { e.preventDefault(); submitComment(); } }} placeholder="Write a team chat…  (internal only — type @ to mention, paste to attach an image)" rows={1} className="max-h-72 min-h-[38px] flex-1 resize-y bg-transparent text-[15px] outline-none placeholder:text-muted" />
-        <button onClick={submitComment} disabled={!comment.trim() && pendingCommentAtts.length === 0} className="rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">Send</button>
-      </div>
-    </div>
-  );
   // A task with no linked contact (so SMS/Email can never appear) and no
-  // comments yet has nothing the Activity rail could show — in full-page
+  // comments yet has nothing the messaging feed could show — in full-page
   // mode that's a ~400px column of dead space next to a document with room
-  // to spare. Fold Activity into the document column instead of reserving
-  // a wide empty rail for it; the moment it has a linked contact or a first
+  // to spare. Fold it into the document column instead of reserving a wide
+  // empty rail for it; the moment it has a linked contact or a first
   // comment, it's no longer "light" and gets the full two-column layout.
-  const isLightTask = full && !hasMessaging && activityItems.length === 0;
+  const isLightTask = full && !hasMessaging && task.comments.length === 0;
 
   return (
     <>
@@ -1383,8 +738,8 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
 
         {full ? (
           isLightTask ? (
-            // No linked contact and no comments yet — nothing the Activity
-            // rail could show, so fold it into the document instead of
+            // No linked contact and no comments yet — nothing the messaging
+            // feed could show, so fold it into the document instead of
             // reserving a wide empty column for it (see isLightTask above).
             <div className="flex-1 overflow-y-auto bg-background px-8 py-6 lg:px-12">
               <div className="mx-auto w-full max-w-4xl">
@@ -1394,7 +749,6 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                 <div className="my-4 border-t" />
                 {propsBlock}
                 <div className="my-4 border-t" />
-                {draftEmailBlock}
                 {playbookGuideBlock}
                 {clientResponseBlock}
                 {descriptionBlock}
@@ -1403,16 +757,15 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                 {emptySectionsRow}
                 {siblingsBlock}
                 <div className="mt-5 border-t pt-4">
-                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Activity</div>
-                  {commentsFeed}
-                  <div className="mt-3">{composer}</div>
+                  {feedArea}
+                  <div className="mt-3">{composerFooter}</div>
                 </div>
               </div>
             </div>
           ) : (
-          // ClickUp-style split: task content (document) on the left,
-          // the Activity/comments conversation in its own column on the right
-          // with the composer pinned to the bottom.
+          // ClickUp-style split: task content (document) on the left, the
+          // merged communications feed in its own column on the right with
+          // an active composer (if any) pinned to the bottom.
           <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
             <div className="min-w-0 flex-1 overflow-y-auto bg-background px-4 py-6 sm:px-8 lg:px-12">
               <div className="mx-auto w-full max-w-4xl">
@@ -1422,7 +775,6 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                 <div className="my-4 border-t" />
                 {propsBlock}
                 <div className="my-4 border-t" />
-                {draftEmailBlock}
                 {playbookGuideBlock}
                 {clientResponseBlock}
                 {descriptionBlock}
@@ -1435,12 +787,8 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
             {/* Stacks below the document on mobile (each pane its own scroll);
                 fixed, resizable side column at md+. Width rides a CSS var so a
                 responsive class can override the inline value below md. */}
-            <div className="relative flex min-h-0 flex-1 flex-col border-t-4 md:w-[var(--activity-w)] md:flex-none md:border-l-4 md:border-t-0"
-              style={{
-                "--activity-w": `${activityW}px`,
-                background: activeTabColor ? activeTabColor + "0d" : "color-mix(in srgb, var(--background) 50%, transparent)",
-                borderTopColor: activeTabColor ?? undefined, borderLeftColor: activeTabColor ?? undefined,
-              } as React.CSSProperties}>
+            <div className="relative flex min-h-0 flex-1 flex-col border-t-4 bg-[color-mix(in_srgb,var(--background)_50%,transparent)] md:w-[var(--activity-w)] md:flex-none md:border-l-4 md:border-t-0"
+              style={{ "--activity-w": `${activityW}px` } as React.CSSProperties}>
               <div onMouseDown={startResize} title="Drag to resize"
                 className="absolute inset-y-0 -left-1 z-10 hidden w-2 cursor-col-resize hover:bg-accent/30 active:bg-accent/40 md:block" />
               {hasMessaging && (
@@ -1462,15 +810,8 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                   </div>
                 </div>
               )}
-              <div className="flex items-center gap-1 border-b px-3 py-2" style={{ background: activeTabColor ? activeTabColor + "14" : "var(--surface)" }}>
-                {rightTabBar}
-              </div>
-              {activeRightTab === "ai" ? aiSummaryBlock : (<>
-                {/* Feed always stays visible — Chat/Email/SMS replace only the
-                    composer below it, not the conversation history above. */}
-                <div className="flex-1 overflow-y-auto px-5 py-4">{commentsFeed}</div>
-                {activeRightTab === "chat" ? chatComposerBlock : activeRightTab === "sms" ? smsComposerBlock : activeRightTab === "email" ? emailComposerBlock : composer}
-              </>)}
+              <div className="flex-1 overflow-y-auto px-5 py-4">{feedArea}</div>
+              {composerFooter}
             </div>
           </div>
           )
@@ -1481,7 +822,6 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
               {metaLine}
               {ghlWarningBanner}
               <div className="mt-5">{propsBlock}</div>
-              {draftEmailBlock}
               {playbookGuideBlock}
               {clientResponseBlock}
               {descriptionBlock}
@@ -1500,14 +840,10 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
                     {onCopyClientLink && <button onClick={onCopyClientLink} className="font-medium text-accent hover:underline">Copy client link</button>}
                   </div>
                 )}
-                <div className="-mx-3 rounded-xl border-t-4 px-3 pt-2" style={{ borderTopColor: activeTabColor ?? "transparent", background: activeTabColor ? activeTabColor + "0d" : undefined }}>
-                  {rightTabBar}
-                  {activeRightTab !== "ai" && <div className="mt-2">{commentsFeed}</div>}
-                  {activeRightTab === "ai" && <div className="mt-2">{aiSummaryBlock}</div>}
-                </div>
+                {feedArea}
               </div>
             </div>
-            {activeRightTab === "chat" ? chatComposerBlock : activeRightTab === "sms" ? smsComposerBlock : activeRightTab === "email" ? emailComposerBlock : activeRightTab === "ai" ? null : composer}
+            {composerFooter}
           </>
         )}
       </aside>

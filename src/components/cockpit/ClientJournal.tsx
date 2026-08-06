@@ -20,7 +20,7 @@ import { I, Avatar, CollapsibleText, newId, useStickyBottom, JumpToLatestButton 
 import { ConfirmModal, type ConfirmSpec } from "./modals";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 import { RichTextEditor } from "./RichTextEditor";
-import { RecipientField } from "./TaskDrawer";
+import { RecipientField } from "./TaskMessaging";
 import { SchedulePopover } from "./SchedulePopover";
 
 type JournalFilter = "all" | NoteType | "message" | "activity" | "photos" | "links" | "files";
