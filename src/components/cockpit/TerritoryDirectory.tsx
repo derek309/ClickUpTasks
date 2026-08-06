@@ -137,6 +137,18 @@ const CLICKED_META = { label: "Clicked, hasn't answered", color: "#2563eb", hint
 const OPENED_META = { label: "Opened, hasn't clicked", color: "#0891b2", hint: "read the invite but hasn't clicked through yet — worth a call or a visit" };
 
 export function computeBusinessStage(listing: DirectoryListing, client: Client | null, invite?: PlannerInvite): BusinessStage {
+  // A matched client can carry real funnel progress (e.g. a booked
+  // interview) even when the WordPress listing itself was never formally
+  // "claimed" — that flag specifically means a verified WordPress-account
+  // ownership claim (post_author transfer, staff review flag, the works —
+  // see functions.php's claim-listing handler), which the AI-chat interview
+  // booking flow deliberately never touches since nobody logged into
+  // WordPress to book a call. Trust client.status once it shows real
+  // progress past the bare "claimed" baseline, so a booked interview (or
+  // anything further) surfaces under its own stage instead of hiding behind
+  // an ownership flag it has nothing to do with — and so the Stage dropdown,
+  // gated on this same computed stage, becomes visible to fix it by hand too.
+  if (client && client.status !== "claimed") return client.status as BusinessStage;
   if (!listing.claimed) return invite && invite.status !== "skipped" ? "invited" : "unclaimed";
   if (!client) return "claimed";
   return (client.status as BusinessStage);
