@@ -493,6 +493,39 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return Date.now() - ts < CLIENT_ECHO_TTL_MS;
   };
 
+  // Client-side twin of playbookReconcileServer.ts's completePlaybookStepServer
+  // — no supabaseAdmin here, this goes through patchTask like any other
+  // status change a rep makes, so it gets the same comment/history and the
+  // same playbook_last_progress_at bump every other completion gets.
+  //
+  // Which sales stages a ClientStatus transition implies are already done,
+  // walking SALES_STAGE_STEPS forward from the start. Unlike the claim/
+  // invite-reply webhooks (narrow, single-step, event-driven — a self-claim
+  // skipping outreach is a real path per the SOP, not something to paper
+  // over), a rep moving the Stage dropdown to "Interview" is a deliberate
+  // confirmation that everything up through the verification call already
+  // happened in the real world, so catching every earlier step up too is
+  // the accurate read, not overreach. nurture/cancelled/past_client aren't
+  // listed — they're exit ramps, not forward progress, and complete nothing.
+  const SALES_STAGE_ORDER = SALES_STAGE_STEPS.map((s) => s.key);
+  const STATUS_IMPLIES_SALES_STAGE: Partial<Record<ClientStatus, string>> = {
+    claimed: "sales_listing_claimed",
+    interview: "sales_verification_call_booked",
+    onboarding: "sales_in_trial",
+    active_client: "sales_won_active",
+  };
+  const cascadeSalesStageCompletion = (clientId: string, status: ClientStatus) => {
+    const throughKey = STATUS_IMPLIES_SALES_STAGE[status];
+    const throughIdx = throughKey ? SALES_STAGE_ORDER.indexOf(throughKey) : -1;
+    if (throughIdx < 0) return;
+    const byKey = new Map(
+      tasksRef.current.filter((t) => t.clientId === clientId && t.playbookStepKey).map((t) => [t.playbookStepKey as string, t])
+    );
+    for (let i = 0; i <= throughIdx; i++) {
+      const task = byKey.get(SALES_STAGE_ORDER[i]);
+      if (task && task.status !== "done") patchTask(task.id, { status: "done" });
+    }
+  };
   const setClientStatus = (id: string, status: ClientStatus) => {
     const c = clientById(id);
     if (!c || c.status === status) return;
@@ -504,16 +537,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // "onboarding" (Listing Launch) used to promote too, and that was the
     // bug: it fires a full step BEFORE the business is actually won and
     // paying, so unclosed deals landed on the main dashboard alongside real
-    // clients. active_client is now the sole trigger — and it's a deliberate,
-    // temporary anchor, not the right long-term signal. The real "won" moment
-    // is the pitch meeting closing with a card on file, which is a sales
-    // stage transition: SALES_STAGE_STEPS (data.ts) now defines those stages,
-    // but nothing advances them automatically yet — a rep checks them off by
-    // hand, so there is still no transition to key off. When that wiring
-    // ships, this condition (and the trial stamp below) moves to the
-    // sales_pitch_meeting_booked / sales_won_active step completing instead
-    // of a fulfillment stage changing. Everything the seam needs is right
-    // here — no other place promotes out of prospect.
+    // clients. active_client is now the sole trigger.
+    //
+    // Reconciled against SALES_STAGE_STEPS below (cascadeSalesStageCompletion)
+    // rather than flipping the direction (sales_won_active completing being
+    // what promotes, instead of this dropdown) — only 2 of the 8 sales
+    // stages have a real automated trigger today (claim, invite reply); the
+    // other 6, including won_active itself, are still a checkbox in a
+    // collapsed accordion section. Making promotion depend on that checkbox
+    // risked a real business silently never reaching the main dashboard
+    // because nobody remembered to tick it, worse than today's imperfect but
+    // reliable trigger. So the Stage dropdown stays the driver, and now also
+    // catches the sales pipeline up to match whatever it's just confirmed —
+    // both directions stay in sync, drift goes away, and the dropdown keeps
+    // being the one control reps already reach for.
     const promoted = c.type === "prospect" && status === "active_client";
     // The 14-day trial starts at that same moment, and only ever once: a
     // client already carrying inTrial (or reaching active_client a second
@@ -528,7 +565,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setClients((cs) => cs.map((x) => (x.id === id ? nc : x)));
     markOwnClientWrite(nc.id);
     upsertClient(nc);
-    if (promoted) reconcilePlaybookTasks(id);
+    // Always, not just on promotion — a Stage move on a Playbook nobody's
+    // ever opened still needs its rows to exist before the cascade below has
+    // anything to complete.
+    reconcilePlaybookTasks(id);
+    cascadeSalesStageCompletion(id, status);
     pushToast(promoted ? `${c.name} → ${CLIENT_STATUS_META[status].label} · now a client` : `${c.name} → ${CLIENT_STATUS_META[status].label}`);
   };
   // "Follow" a client: adds/removes a team member from assigned_to, which
