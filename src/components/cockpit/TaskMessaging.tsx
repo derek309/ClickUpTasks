@@ -37,8 +37,8 @@ function EventDiffCard({ diff }: { diff: { field: string; from: string | null; t
   const color = eventAccentColor(diff);
   return (
     <div className="mt-1 inline-block rounded-lg border-l-[3px] bg-background px-2.5 py-1.5" style={{ borderLeftColor: color, background: color + "0d" }}>
-      <div className="mb-0.5 text-[11px] font-medium capitalize" style={{ color }}>{diff.field}</div>
-      <div className="flex items-center gap-1.5 text-[13px]">
+      <div className="mb-0.5 text-[12px] font-medium capitalize" style={{ color }}>{diff.field}</div>
+      <div className="flex items-center gap-1.5 text-[14px]">
         {diff.from && <span className="text-muted line-through">{diff.from}</span>}
         {diff.from && <span className="text-muted">→</span>}
         <span className="font-medium text-foreground">{diff.to}</span>
@@ -64,9 +64,9 @@ export function RecipientField({ label, value, onChange, contacts }: { label: st
   return (
     <div className="relative">
       <div className="flex flex-wrap items-center gap-1.5 rounded-lg border bg-background px-2 py-1.5 focus-within:border-accent">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</span>
+        <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">{label}</span>
         {value.map((e) => (
-          <span key={e} className="inline-flex items-center gap-1 rounded bg-accent-soft px-1.5 py-0.5 text-[12px] text-accent">
+          <span key={e} className="inline-flex items-center gap-1 rounded bg-accent-soft px-1.5 py-0.5 text-[13px] text-accent">
             {e}<button onClick={() => remove(e)} title="Remove" className="hover:text-foreground">×</button>
           </span>
         ))}
@@ -76,14 +76,14 @@ export function RecipientField({ label, value, onChange, contacts }: { label: st
             else if (e.key === "Backspace" && !q && value.length) { remove(value[value.length - 1]); }
           }}
           placeholder={value.length ? "" : "Search contacts or type an email…"}
-          className="min-w-[150px] flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted" />
+          className="min-w-[150px] flex-1 bg-transparent text-[14px] outline-none placeholder:text-muted" />
       </div>
       {matches.length > 0 && (
         <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-lg border bg-surface shadow-soft-md">
           {matches.map((c) => (
             <button key={c.id} onClick={() => add(c.email)} className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left hover:bg-background">
-              <span className="truncate text-[13px] font-medium">{c.name}</span>
-              <span className="shrink-0 truncate text-[12px] text-muted">{c.email}</span>
+              <span className="truncate text-[14px] font-medium">{c.name}</span>
+              <span className="shrink-0 truncate text-[13px] text-muted">{c.email}</span>
             </button>
           ))}
         </div>
@@ -260,16 +260,16 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
   };
   const draftEmailCard = task.draftEmail ? (
     <div className="mb-3 rounded-xl border border-accent/30 bg-accent-soft/20 p-4">
-      <div className="mb-1 flex items-center gap-1.5 text-[15px] font-semibold text-accent"><span aria-hidden>✉️</span> Draft email ready</div>
-      <div className="truncate text-[14px] font-medium">{task.draftEmail.subject || "(no subject)"}</div>
-      <div className="mt-0.5 line-clamp-2 text-[13px] text-muted">{htmlToText(task.draftEmail.body)}</div>
+      <div className="mb-1 flex items-center gap-1.5 text-[16px] font-semibold text-accent"><span aria-hidden>✉️</span> Draft email ready</div>
+      <div className="truncate text-[15px] font-medium">{task.draftEmail.subject || "(no subject)"}</div>
+      <div className="mt-0.5 line-clamp-2 text-[14px] text-muted">{htmlToText(task.draftEmail.body)}</div>
       <div className="mt-2 flex items-center gap-2">
         {hasMessaging ? (
-          <button onClick={openDraftEmail} className="rounded-md bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white">Review &amp; send</button>
+          <button onClick={openDraftEmail} className="rounded-md bg-accent px-2.5 py-1.5 text-[14px] font-medium text-white">Review &amp; send</button>
         ) : (
-          <span className="text-[12px] text-muted" title="No linked GoHighLevel contact to send to yet">Can&apos;t send — no linked contact for this client</span>
+          <span className="text-[13px] text-muted" title="No linked GoHighLevel contact to send to yet">Can&apos;t send — no linked contact for this client</span>
         )}
-        <button onClick={() => onPatch({ draftEmail: null })} className="rounded-md px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">Discard</button>
+        <button onClick={() => onPatch({ draftEmail: null })} className="rounded-md px-2.5 py-1.5 text-[14px] font-medium text-muted hover:bg-background hover:text-foreground">Discard</button>
       </div>
     </div>
   ) : null;
@@ -292,15 +292,15 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
   };
   const promptClaudeBlock = (channel: "email" | "sms") => onDraftMessage ? (
     <div className="mb-2 flex shrink-0 items-start gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
-      <span aria-hidden className="pt-1 pl-1 text-[13px]">✨</span>
+      <span aria-hidden className="pt-1 pl-1 text-[14px]">✨</span>
       <textarea value={draftPrompt} rows={1}
         onChange={(e) => { setDraftPrompt(e.target.value); e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`; }}
         onKeyDown={(e) => { if (e.key !== "Enter" || e.shiftKey || draftingMessage) return; e.preventDefault(); runDraft(channel); }}
         placeholder="Tell Claude what to say… (Enter to write, Shift+Enter for a new line)"
-        className="max-h-[200px] min-w-0 flex-1 resize-none self-center overflow-y-auto bg-transparent px-1 py-1 text-[13px] leading-snug outline-none placeholder:text-muted" />
+        className="max-h-[200px] min-w-0 flex-1 resize-none self-center overflow-y-auto bg-transparent px-1 py-1 text-[14px] leading-snug outline-none placeholder:text-muted" />
       <button onClick={() => runDraft(channel)} disabled={draftingMessage}
         title={draftPrompt.trim() ? "Draft this with Claude" : "Draft a status update from recent activity"}
-        className="mt-0.5 shrink-0 rounded-md border border-accent/40 bg-surface px-2.5 py-1 text-[13px] font-medium text-accent disabled:opacity-40">
+        className="mt-0.5 shrink-0 rounded-md border border-accent/40 bg-surface px-2.5 py-1 text-[14px] font-medium text-accent disabled:opacity-40">
         {draftingMessage ? "Drafting…" : draftPrompt.trim() ? "Write it" : "Status update"}
       </button>
     </div>
@@ -335,20 +335,20 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
     const color = channelColor[channel];
     if (channel === "sms") return (
       <div className="max-h-[50vh] shrink-0 overflow-y-auto rounded-xl border-t-2 p-3" style={{ borderTopColor: color, background: color + "0d" }}>
-        <div className="mb-2 shrink-0 text-[13px] text-muted">Texting: <span className="font-medium text-foreground">{messageDest?.phone || "no phone on file"}</span></div>
+        <div className="mb-2 shrink-0 text-[14px] text-muted">Texting: <span className="font-medium text-foreground">{messageDest?.phone || "no phone on file"}</span></div>
         <div className="mb-2">{promptClaudeBlock("sms")}</div>
         {msgAttBar}
         <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)} onPaste={handleMsgPaste} autoFocus
           onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitTaskMessage(); } }}
           placeholder="Write a message… (⌘↵ to send, paste to attach an image)"
-          className="min-h-[100px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
+          className="min-h-[100px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[16px] outline-none placeholder:text-muted focus:border-accent" />
         <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
-          <span className="text-[13px] text-muted">{wordCount(msgBody)} word{wordCount(msgBody) === 1 ? "" : "s"} · {smsSegments(msgBody).count} segment{smsSegments(msgBody).count === 1 ? "" : "s"}{smsSegments(msgBody).count > 0 ? ` (${smsSegments(msgBody).encoding})` : ""}</span>
+          <span className="text-[14px] text-muted">{wordCount(msgBody)} word{wordCount(msgBody) === 1 ? "" : "s"} · {smsSegments(msgBody).count} segment{smsSegments(msgBody).count === 1 ? "" : "s"}{smsSegments(msgBody).count > 0 ? ` (${smsSegments(msgBody).encoding})` : ""}</span>
           <span className="flex items-center gap-1.5">
             {msgAttachButton}
-            <button onClick={onCancel} className="rounded-lg px-2.5 py-1.5 text-[15px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
+            <button onClick={onCancel} className="rounded-lg px-2.5 py-1.5 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
             {onScheduleTaskMessage && <SchedulePopover disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} onSchedule={submitScheduledTaskMessage} />}
-            <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40" style={{ background: color }}>{sendingMessage ? "Sending…" : "Send text"}</button>
+            <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40" style={{ background: color }}>{sendingMessage ? "Sending…" : "Send text"}</button>
           </span>
         </div>
       </div>
@@ -356,10 +356,10 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
     if (channel === "email") return (
       <div className="max-h-[60vh] shrink-0 overflow-y-auto rounded-xl border-t-2 p-3" style={{ borderTopColor: color, background: color + "0d" }}>
         <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
-          <span className="min-w-0 truncate text-[13px] text-muted">To: <span className="font-medium text-foreground">{messageDest?.email || "no email on file"}</span></span>
+          <span className="min-w-0 truncate text-[14px] text-muted">To: <span className="font-medium text-foreground">{messageDest?.email || "no email on file"}</span></span>
           <span className="flex shrink-0 items-center gap-2">
-            <button onClick={fillFromTask} title="Fill in this task's title, description, and a client link to view/respond" className="text-[12px] font-medium text-accent hover:underline">Add task details + link</button>
-            {!showCcBcc && <button onClick={() => setShowCcBcc(true)} className="text-[12px] font-medium text-accent hover:underline">Cc / Bcc</button>}
+            <button onClick={fillFromTask} title="Fill in this task's title, description, and a client link to view/respond" className="text-[13px] font-medium text-accent hover:underline">Add task details + link</button>
+            {!showCcBcc && <button onClick={() => setShowCcBcc(true)} className="text-[13px] font-medium text-accent hover:underline">Cc / Bcc</button>}
           </span>
         </div>
         <div className="mb-2">{promptClaudeBlock("email")}</div>
@@ -370,18 +370,18 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
           </div>
         )}
         <input value={msgSubject} onChange={(e) => setMsgSubject(e.target.value)} placeholder="Subject"
-          className="mb-2 w-full shrink-0 rounded-lg border bg-background px-3 py-2 text-[15px] font-medium outline-none placeholder:text-muted focus:border-accent" />
+          className="mb-2 w-full shrink-0 rounded-lg border bg-background px-3 py-2 text-[16px] font-medium outline-none placeholder:text-muted focus:border-accent" />
         {msgAttBar}
         <div className="min-h-[160px] overflow-auto" onPaste={handleMsgPaste} onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitTaskMessage(); } }}>
           <RichTextEditor key={`task-email-${emailFocusNonce}`} value={msgBody} onChange={setMsgBody} placeholder="Write an email… (⌘↵ to send)" autoFocus />
         </div>
         <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
-          <span className="text-[13px] text-muted">{wordCount(htmlToText(msgBody))} word{wordCount(htmlToText(msgBody)) === 1 ? "" : "s"}</span>
+          <span className="text-[14px] text-muted">{wordCount(htmlToText(msgBody))} word{wordCount(htmlToText(msgBody)) === 1 ? "" : "s"}</span>
           <span className="flex items-center gap-1.5">
             {msgAttachButton}
-            <button onClick={onCancel} className="rounded-lg px-2.5 py-1.5 text-[15px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
+            <button onClick={onCancel} className="rounded-lg px-2.5 py-1.5 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
             {onScheduleTaskMessage && <SchedulePopover disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} onSchedule={submitScheduledTaskMessage} />}
-            <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40" style={{ background: color }}>{sendingMessage ? "Sending…" : "Send email"}</button>
+            <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40" style={{ background: color }}>{sendingMessage ? "Sending…" : "Send email"}</button>
           </span>
         </div>
       </div>
@@ -389,18 +389,18 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
     // chat
     return (
       <div className="max-h-[50vh] shrink-0 overflow-y-auto rounded-xl border-t-2 p-3" style={{ borderTopColor: color, background: color + "0d" }}>
-        <div className="mb-2 shrink-0 text-[13px] text-muted">Client chat — shows up on {client.name}&apos;s waiting page, no email or text goes out.</div>
+        <div className="mb-2 shrink-0 text-[14px] text-muted">Client chat — shows up on {client.name}&apos;s waiting page, no email or text goes out.</div>
         {msgAttBar}
         <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)} onPaste={handleMsgPaste} autoFocus
           onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitTaskMessage(); } }}
           placeholder="Type a message… (⌘↵ to send, paste to attach an image)"
-          className="min-h-[100px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
+          className="min-h-[100px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[16px] outline-none placeholder:text-muted focus:border-accent" />
         <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
-          <span className="text-[13px] text-muted">{wordCount(msgBody)} word{wordCount(msgBody) === 1 ? "" : "s"}</span>
+          <span className="text-[14px] text-muted">{wordCount(msgBody)} word{wordCount(msgBody) === 1 ? "" : "s"}</span>
           <span className="flex items-center gap-1.5">
             {msgAttachButton}
-            <button onClick={onCancel} className="rounded-lg px-2.5 py-1.5 text-[15px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
-            <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40" style={{ background: color }}>{sendingMessage ? "Sending…" : "Send"}</button>
+            <button onClick={onCancel} className="rounded-lg px-2.5 py-1.5 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
+            <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40" style={{ background: color }}>{sendingMessage ? "Sending…" : "Send"}</button>
           </span>
         </div>
       </div>
@@ -439,7 +439,7 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
         <div className="absolute bottom-full left-3 mb-1 w-56 overflow-hidden rounded-lg border bg-surface shadow-lg">
           {mentionCands.map((u) => (
             <button key={u.id} onClick={() => setComment(comment.replace(/@([\w]*)$/, `@${u.name} `))} className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-background">
-              <Avatar id={u.id} size={22} /> <span className="min-w-0 flex-1 truncate">{u.name}</span>{u.role === "va" && <span className="shrink-0 text-[13px] text-muted">VA</span>}
+              <Avatar id={u.id} size={22} /> <span className="min-w-0 flex-1 truncate">{u.name}</span>{u.role === "va" && <span className="shrink-0 text-[14px] text-muted">VA</span>}
             </button>
           ))}
         </div>
@@ -454,9 +454,9 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
         <textarea value={comment} onChange={(e) => setComment(e.target.value)} onPaste={handleCommentPaste} autoFocus
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitComment(); } }}
           placeholder="Write a team chat…  (internal only, paste to attach an image)" rows={1}
-          className="max-h-72 min-h-[38px] flex-1 resize-y bg-transparent text-[15px] outline-none placeholder:text-muted" />
-        <button onClick={submitComment} disabled={!comment.trim() && pendingCommentAtts.length === 0} className="rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">Send</button>
-        <button onClick={closeComposers} className="rounded-lg px-2 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
+          className="max-h-72 min-h-[38px] flex-1 resize-y bg-transparent text-[16px] outline-none placeholder:text-muted" />
+        <button onClick={submitComment} disabled={!comment.trim() && pendingCommentAtts.length === 0} className="rounded-lg bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">Send</button>
+        <button onClick={closeComposers} className="rounded-lg px-2 py-1.5 text-[14px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
       </div>
     </div>
   );
@@ -510,7 +510,7 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
         const color = channelColor[ch];
         return (
           <button key={ch} onClick={() => toggleChannel(ch)}
-            className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium ${active ? "" : "text-muted hover:text-foreground"}`}
+            className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[14px] font-medium ${active ? "" : "text-muted hover:text-foreground"}`}
             style={active ? { background: color + "1a", color } : undefined}>
             {channelMeta[ch].icon} {channelMeta[ch].label}
             {channelMeta[ch].unread && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color }} />}
@@ -518,12 +518,12 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
         );
       })}
       {onRegenerateAiSummary && (
-        <button onClick={() => setAiPanelOpen(true)} className="ml-auto rounded-md border border-accent/30 px-2.5 py-1.5 text-[13px] font-medium text-accent hover:bg-accent-soft">✨ AI summary</button>
+        <button onClick={() => setAiPanelOpen(true)} className="ml-auto rounded-md border border-accent/30 px-2.5 py-1.5 text-[14px] font-medium text-accent hover:bg-accent-soft">✨ AI summary</button>
       )}
       <div className="relative w-full sm:w-auto sm:flex-1 sm:min-w-[140px]">
         <I.search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted" />
         <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search messages…"
-          className="w-full rounded-md border bg-background py-1.5 pl-7 pr-2 text-[13px] outline-none focus:border-accent" />
+          className="w-full rounded-md border bg-background py-1.5 pl-7 pr-2 text-[14px] outline-none focus:border-accent" />
       </div>
     </div>
   );
@@ -533,22 +533,22 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
       <div className="fixed inset-0 z-40 bg-black/20" onClick={() => setAiPanelOpen(false)} />
       <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-[380px] flex-col border-l bg-surface shadow-xl">
         <div className="flex items-center justify-between border-b px-4 py-3">
-          <span className="text-[15px] font-semibold">✨ AI summary</span>
+          <span className="text-[16px] font-semibold">✨ AI summary</span>
           <button onClick={() => setAiPanelOpen(false)} className="rounded-md p-1 text-muted hover:bg-background"><I.close /></button>
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-4">
           <div className="mb-3 flex items-center justify-between">
-            <span className="text-[13px] font-medium text-muted">{client.aiSummaryAt ? `Updated ${timeAgo(client.aiSummaryAt)}` : "No summary yet"}</span>
-            <button onClick={onRegenerateAiSummary} disabled={aiSummaryBusy} className="inline-flex items-center gap-1.5 rounded-md border border-accent px-2.5 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft disabled:opacity-50">
+            <span className="text-[14px] font-medium text-muted">{client.aiSummaryAt ? `Updated ${timeAgo(client.aiSummaryAt)}` : "No summary yet"}</span>
+            <button onClick={onRegenerateAiSummary} disabled={aiSummaryBusy} className="inline-flex items-center gap-1.5 rounded-md border border-accent px-2.5 py-1 text-[14px] font-medium text-accent hover:bg-accent-soft disabled:opacity-50">
               {aiSummaryBusy ? "Summarizing…" : client.aiSummary ? "Regenerate" : "Summarize"}
             </button>
           </div>
           {client.aiSummary ? (
-            <p className="whitespace-pre-wrap text-[15px] leading-relaxed">{client.aiSummary}</p>
+            <p className="whitespace-pre-wrap text-[16px] leading-relaxed">{client.aiSummary}</p>
           ) : (
             <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted">
-              <span className="text-[15px]">No AI summary yet</span>
-              <span className="text-[13px]">Pulls from this client&apos;s recent messages and tasks.</span>
+              <span className="text-[16px]">No AI summary yet</span>
+              <span className="text-[14px]">Pulls from this client&apos;s recent messages and tasks.</span>
             </div>
           )}
         </div>
@@ -571,7 +571,7 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
         <div className="relative flex gap-3">
           <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface" style={{ background: dotColor }} /></div>
           <div className={`min-w-0 flex-1 rounded-xl border border-l-4 p-3 ${m.direction === "inbound" ? "bg-highlight-soft" : "bg-surface"}`} style={{ borderLeftColor: m.direction === "inbound" ? "var(--highlight)" : "var(--accent)" }}>
-            <div className="flex items-center gap-2 text-[13px] text-muted">
+            <div className="flex items-center gap-2 text-[14px] text-muted">
               <span className="inline-flex items-center gap-1 rounded px-1.5 py-0 font-medium" style={{ background: dotColor + "1a", color: dotColor }}>{channelLabel}</span>
               <span className="font-medium" style={{ color: m.direction === "inbound" ? "var(--highlight)" : "var(--accent)" }}>{m.direction === "inbound" ? "Received" : "Sent"}</span>
               {m.direction === "outbound" && m.createdBy && (
@@ -579,27 +579,27 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
               )}
               <span>· {timeAgo(m.at)}</span>
               {!m.read && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-1.5 py-0 text-[11px] font-semibold text-accent">
+                <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-1.5 py-0 text-[12px] font-semibold text-accent">
                   <span className="h-1.5 w-1.5 rounded-full bg-accent" /> New
                 </span>
               )}
               <span className="ml-auto flex shrink-0 items-center gap-1">
                 {replyableChannel(m.channel) && onSendTaskMessage && editingMsgId !== m.id && (
-                  <button onClick={() => openReply(m.id, replyableChannel(m.channel)!, m.subject)} className="rounded-md border border-accent/30 px-2 py-0.5 text-[12px] font-medium text-accent hover:bg-accent-soft">Reply</button>
+                  <button onClick={() => openReply(m.id, replyableChannel(m.channel)!, m.subject)} className="rounded-md border border-accent/30 px-2 py-0.5 text-[13px] font-medium text-accent hover:bg-accent-soft">Reply</button>
                 )}
                 {canAdmin && onEditMessage && editingMsgId !== m.id && (
-                  <button onClick={() => startEditMessage(m)} title="Edit (this doesn't unsend anything already delivered)" className="rounded-md border px-2 py-0.5 text-[12px] font-medium text-muted hover:bg-background hover:text-foreground">Edit</button>
+                  <button onClick={() => startEditMessage(m)} title="Edit (this doesn't unsend anything already delivered)" className="rounded-md border px-2 py-0.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">Edit</button>
                 )}
                 {canAdmin && onDeleteMessage && (
                   <button
                     onClick={() => { if (window.confirm("Delete this message? This only removes it from ClickUpTasks and the client's waiting page — it does not unsend a real email or text already delivered.")) onDeleteMessage(m.id); }}
-                    title="Delete" className="rounded-md border px-2 py-0.5 text-[12px] font-medium text-muted hover:border-red-300 hover:bg-red-50 hover:text-red-600">Delete</button>
+                    title="Delete" className="rounded-md border px-2 py-0.5 text-[13px] font-medium text-muted hover:border-red-300 hover:bg-red-50 hover:text-red-600">Delete</button>
                 )}
               </span>
             </div>
-            {m.subject && <div className="mt-1 text-[15px] font-medium">{m.subject}</div>}
+            {m.subject && <div className="mt-1 text-[16px] font-medium">{m.subject}</div>}
             {((m.cc && m.cc.length > 0) || (m.bcc && m.bcc.length > 0)) && (
-              <div className="mt-0.5 text-[12px] text-muted">
+              <div className="mt-0.5 text-[13px] text-muted">
                 {m.cc && m.cc.length > 0 && <span>Cc: {m.cc.join(", ")}</span>}
                 {m.cc && m.cc.length > 0 && m.bcc && m.bcc.length > 0 && <span> · </span>}
                 {m.bcc && m.bcc.length > 0 && <span>Bcc: {m.bcc.join(", ")}</span>}
@@ -608,16 +608,16 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
             {editingMsgId === m.id ? (
               <div className="mt-1.5 space-y-1.5">
                 <textarea value={editDraft} onChange={(e) => setEditDraft(e.target.value)} rows={3} autoFocus
-                  className="w-full rounded-lg border bg-background px-2.5 py-2 text-[14px] outline-none focus:border-accent" />
+                  className="w-full rounded-lg border bg-background px-2.5 py-2 text-[15px] outline-none focus:border-accent" />
                 <div className="flex justify-end gap-2">
-                  <button onClick={() => setEditingMsgId(null)} className="rounded-md px-2.5 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
-                  <button onClick={() => saveEditMessage(m)} disabled={!editDraft.trim()} className="rounded-md bg-accent px-2.5 py-1 text-[13px] font-medium text-white disabled:opacity-40">Save</button>
+                  <button onClick={() => setEditingMsgId(null)} className="rounded-md px-2.5 py-1 text-[14px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
+                  <button onClick={() => saveEditMessage(m)} disabled={!editDraft.trim()} className="rounded-md bg-accent px-2.5 py-1 text-[14px] font-medium text-white disabled:opacity-40">Save</button>
                 </div>
               </div>
             ) : (
               looksLikeHtml(m.body)
-                ? <div className="rte-content mt-1 text-[15px]" dangerouslySetInnerHTML={{ __html: m.body }} />
-                : <CollapsibleText text={m.body} className="mt-1 text-[15px]" />
+                ? <div className="rte-content mt-1 text-[16px]" dangerouslySetInnerHTML={{ __html: m.body }} />
+                : <CollapsibleText text={m.body} className="mt-1 text-[16px]" />
             )}
             {m.attachments && m.attachments.length > 0 && (
               <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -654,7 +654,7 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
           return (
             <div key={c.id} className={`relative flex gap-3 ${gap}`}>
               <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface" style={{ background: diff ? eventAccentColor(diff) : "var(--muted)" }} /></div>
-              <div className="min-w-0 flex-1 pt-1.5 text-[13px] text-muted">
+              <div className="min-w-0 flex-1 pt-1.5 text-[14px] text-muted">
                 <span><span className="font-medium text-foreground">{u?.name}</span> {diff ? `updated ${diff.field}` : c.body} · {timeAgo(c.at)}</span>
                 {diff && <EventDiffCard diff={diff} />}
               </div>
@@ -667,8 +667,8 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
           <div key={c.id} className={`relative flex gap-3 ${gap}`}>
             <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><Avatar id={c.authorId} size={28} /></div>
             <div className="min-w-0 flex-1 pt-0.5">
-              <div className="text-[14px]"><span className="font-medium">{u?.name}</span> <span className="text-[12px] text-muted">· {timeAgo(c.at)}</span></div>
-              {c.body && <CollapsibleText text={c.body} className="text-[15px]" />}
+              <div className="text-[15px]"><span className="font-medium">{u?.name}</span> <span className="text-[13px] text-muted">· {timeAgo(c.at)}</span></div>
+              {c.body && <CollapsibleText text={c.body} className="text-[16px]" />}
               {c.attachments && c.attachments.length > 0 && (
                 <div className="mt-1 flex flex-wrap gap-1.5">
                   {c.attachments.filter((a) => a.kind === "image").length > 0 && (
@@ -693,8 +693,8 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
       {mergedFeedItems.length === 0 && (
         <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted">
           <I.comment />
-          <span className="text-[15px]">{(visibleChannels.size < 4 || q) ? "No messages match these filters" : "No activity yet"}</span>
-          <span className="text-[13px]">{(visibleChannels.size < 4 || q) ? "Try a different filter or search." : "Type @ to mention a teammate, or use a button below to reach out."}</span>
+          <span className="text-[16px]">{(visibleChannels.size < 4 || q) ? "No messages match these filters" : "No activity yet"}</span>
+          <span className="text-[14px]">{(visibleChannels.size < 4 || q) ? "Try a different filter or search." : "Type @ to mention a teammate, or use a button below to reach out."}</span>
         </div>
       )}
     </div>
@@ -702,10 +702,10 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
 
   const ctaRow = !replyingTo && !composingChannel ? (
     <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
-      <button onClick={() => openCompose("activity")} className="rounded-md border px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground"><I.comment className="inline -mt-0.5 mr-1" />Team message</button>
-      {hasMessaging && <button onClick={() => openCompose("chat")} className="rounded-md border px-2.5 py-1.5 text-[13px] font-medium hover:bg-background" style={{ color: channelColor.chat, borderColor: channelColor.chat + "55" }}><I.chatBubbles className="inline -mt-0.5 mr-1" />Chat</button>}
-      {hasMessaging && <button onClick={() => openCompose("email")} className="rounded-md border px-2.5 py-1.5 text-[13px] font-medium hover:bg-background" style={{ color: channelColor.email, borderColor: channelColor.email + "55" }}><I.mail className="inline -mt-0.5 mr-1" />Email</button>}
-      {hasMessaging && <button onClick={() => openCompose("sms")} className="rounded-md border px-2.5 py-1.5 text-[13px] font-medium hover:bg-background" style={{ color: channelColor.sms, borderColor: channelColor.sms + "55" }}><I.phone className="inline -mt-0.5 mr-1" />SMS</button>}
+      <button onClick={() => openCompose("activity")} className="rounded-md border px-2.5 py-1.5 text-[14px] font-medium text-muted hover:bg-background hover:text-foreground"><I.comment className="inline -mt-0.5 mr-1" />Team message</button>
+      {hasMessaging && <button onClick={() => openCompose("chat")} className="rounded-md border px-2.5 py-1.5 text-[14px] font-medium hover:bg-background" style={{ color: channelColor.chat, borderColor: channelColor.chat + "55" }}><I.chatBubbles className="inline -mt-0.5 mr-1" />Chat</button>}
+      {hasMessaging && <button onClick={() => openCompose("email")} className="rounded-md border px-2.5 py-1.5 text-[14px] font-medium hover:bg-background" style={{ color: channelColor.email, borderColor: channelColor.email + "55" }}><I.mail className="inline -mt-0.5 mr-1" />Email</button>}
+      {hasMessaging && <button onClick={() => openCompose("sms")} className="rounded-md border px-2.5 py-1.5 text-[14px] font-medium hover:bg-background" style={{ color: channelColor.sms, borderColor: channelColor.sms + "55" }}><I.phone className="inline -mt-0.5 mr-1" />SMS</button>}
     </div>
   ) : null;
 

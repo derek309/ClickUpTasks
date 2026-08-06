@@ -186,23 +186,27 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Resizable Activity column (full-page mode): drag its left edge; width
-  // persists per browser.
-  const [activityW, setActivityW] = useState(400);
-  useEffect(() => { try { const w = parseInt(localStorage.getItem("cut_activityW") ?? "", 10); if (w >= 280 && w <= 720) setActivityW(w); } catch {} }, []);
+  // persists per browser. Default bumped 400 -> 480 and the floor raised
+  // 280 -> 340 (Derek: the messaging panel "feels small") — stored under a
+  // new key (cut_activityW2, not cut_activityW) so browsers that already
+  // persisted the old 400px default actually pick up the wider one instead
+  // of silently keeping their "unchanged" value forever.
+  const [activityW, setActivityW] = useState(480);
+  useEffect(() => { try { const w = parseInt(localStorage.getItem("cut_activityW2") ?? "", 10); if (w >= 340 && w <= 760) setActivityW(w); } catch {} }, []);
   const [siblingsCollapsed, setSiblingsCollapsed] = useState(false);
   useEffect(() => { try { setSiblingsCollapsed(localStorage.getItem("cut_siblingsCollapsed") === "1"); } catch {} }, []);
   useEffect(() => { try { localStorage.setItem("cut_siblingsCollapsed", siblingsCollapsed ? "1" : "0"); } catch {} }, [siblingsCollapsed]);
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault();
     const onMove = (ev: MouseEvent) => {
-      const w = Math.min(720, Math.max(280, window.innerWidth - ev.clientX));
+      const w = Math.min(760, Math.max(340, window.innerWidth - ev.clientX));
       setActivityW(w);
     };
     const onUp = (ev: MouseEvent) => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
-      const w = Math.min(720, Math.max(280, window.innerWidth - ev.clientX));
-      try { localStorage.setItem("cut_activityW", String(w)); } catch {}
+      const w = Math.min(760, Math.max(340, window.innerWidth - ev.clientX));
+      try { localStorage.setItem("cut_activityW2", String(w)); } catch {}
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
@@ -859,7 +863,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   </div>
                 </div>
               )}
-              <div className="flex-1 overflow-y-auto px-5 py-4">{feedArea}</div>
+              {/* justify-end so a short conversation sits near the composer
+                  (any empty space collects above it, chat-app convention)
+                  instead of floating at the top with a jarring void below —
+                  the "it jumps all the way to the bottom" complaint was this
+                  gap, not an actual scroll animation. */}
+              <div className="flex flex-1 flex-col justify-end overflow-y-auto px-5 py-4">{feedArea}</div>
               {composerFooter}
             </div>
           </div>
