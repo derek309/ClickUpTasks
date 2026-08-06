@@ -2265,11 +2265,22 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   useEffect(() => {
     if (activeClient.startsWith("cl_") && activeClient !== WORKSPACE_CLIENT_ID && !activeClient.startsWith(TERRITORY_CLIENT_PREFIX)) {
       reconcilePlaybookTasks(activeClient);
+      // cascadeSalesStageCompletion only fires forward, on an actual Stage
+      // dropdown change — a client already sitting at Claimed (or further)
+      // from before that shipped never gets a transition to trigger it. This
+      // is the same self-heal moment as the reconcile above: opening the
+      // page catches the sales pipeline up to whatever the client's current
+      // status already implies, so the backlog clears itself as reps browse
+      // rather than needing a one-off migration or a re-click on a dropdown
+      // that already shows the right value.
+      const c = clientById(activeClient);
+      if (c) cascadeSalesStageCompletion(activeClient, c.status);
     }
-    // reconcilePlaybookTasks intentionally excluded — it's redefined every
-    // render (closes over live `tasks`/`projects`), and including it here
-    // would refire this effect every render instead of only on a real
-    // client switch, which is the only time re-reconciling is meaningful.
+    // reconcilePlaybookTasks/cascadeSalesStageCompletion/clientById
+    // intentionally excluded — all three are redefined every render (close
+    // over live `tasks`/`projects`/`clients`), and including them here would
+    // refire this effect every render instead of only on a real client
+    // switch, which is the only time re-reconciling is meaningful.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeClient]);
   // Opens a business's Playbook the same way onOpenClient opens its Tasks —
