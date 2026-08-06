@@ -23,7 +23,7 @@ import { latestInviteStatus, inviteHistory, featureHistory, isDue, allInvitesByG
 import { zonedDateString, BUSINESS_TZ, AUTO_INVITE_START_HOUR } from "@/lib/businessHours";
 import {
   formatDue, playbookCompletion, plannerWeekOf, todayIso as todayIsoDate,
-  CLIENT_STATUS_META, CLIENT_STATUS_ORDER,
+  CLIENT_STATUS_META, CLIENT_STATUS_ORDER, STEP_STALL_DAYS,
   type Contact, type Client, type ClientStatus, type Task, type PlannerInvite, type PlannerWeek,
 } from "@/lib/data";
 import { I } from "./ui";
@@ -113,7 +113,7 @@ export const STAGE_META: Record<BusinessStage, { label: string; color: string; h
 // the top of the Dashboard (Cockpit.tsx's hasOpenConversationTask). A business
 // here ALSO still appears in its normal stage group below, so per-stage
 // funnel counts stay a truthful pipeline snapshot.
-const ATTENTION_META = { label: "Needs attention now", color: "#8b5cf6", hint: "replied by SMS, email, or newsletter invite — check in before anything else" };
+const ATTENTION_META = { label: "Needs attention now", color: "#8b5cf6", hint: "replied by SMS, email, or newsletter invite, or has gone quiet mid pipeline. Check in before anything else" };
 // The other half of that same group: a business someone has already reached
 // out to (walk-in, call, email) and is now waiting to hear back from. Same
 // open conversation task, just with its due date pushed out by the Followed
@@ -531,6 +531,19 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
     if (!r.client) return null;
     return r.client.playbookLastProgressAt ?? null;
   };
+  // The comment above always said Claimed+ due-ness should use
+  // STEP_STALL_DAYS (14, a real stuck-mid-pipeline signal) — but every actual
+  // caller was just passing priorityLastAt straight into isDue(), which
+  // silently used isDue's own default, ROTATION_WINDOW_DAYS (90, the
+  // cold-prospect touch cadence). A business could sit stalled on "Pitch
+  // meeting booked" for two months before either the sort or the Needs
+  // attention group (below) ever noticed. This is the one place that decides
+  // which window applies, by stage, so the sort and the attention group can't
+  // drift onto two different definitions of "stalled."
+  const isDueForStage = (lastAt: string | null, stage: BusinessStage, today: string) =>
+    stage === "claimed" || stage === "interview" || stage === "onboarding"
+      ? isDue(lastAt, today, STEP_STALL_DAYS)
+      : isDue(lastAt, today);
   const todayIso = new Date().toISOString();
   // Exactly what runPlannerAutoInvite (plannerAutoInviteServer.ts) would pick
   // next: unclaimed only (the auto-invite is "come claim your listing," not
@@ -620,8 +633,8 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
       const bStage = computeBusinessStage(b.listing, b.client, inviteFor(b.listing));
       const aLast = priorityLastAt(a, aStage);
       const bLast = priorityLastAt(b, bStage);
-      const aDue = isDue(aLast, todayIso);
-      const bDue = isDue(bLast, todayIso);
+      const aDue = isDueForStage(aLast, aStage, todayIso);
+      const bDue = isDueForStage(bLast, bStage, todayIso);
       if (aDue !== bDue) return aDue ? -1 : 1;
       // Both due (or both not) — the longer it's been (or never at all,
       // which sorts first since "" is the smallest string), the more urgent.
@@ -652,15 +665,35 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // below) and its id can be handed to the Followed up action.
   const conversationTaskFor = (r: { client: Client | null }) =>
     (r.client && (tasksByClient?.get(r.client.id) ?? []).find((t) => t.status !== "done" && t.priority === "conversation")) || null;
-  const needsAttention = (r: { client: Client | null }) => !!conversationTaskFor(r);
+  // The group's second trigger, next to an inbound reply: a business already
+  // being worked (claimed through onboarding — not a cold prospect Planner's
+  // invite queue already owns, not yet won, not parked in nurture/cancelled)
+  // whose Playbook hasn't moved in STEP_STALL_DAYS. "Verification call
+  // booked" that's been sitting untouched for three weeks is exactly as much
+  // a "check on this" signal as an inbound reply — nothing surfaced it before
+  // this, a rep had to notice on their own.
+  const isStalled = (r: { listing: DirectoryListing; client: Client | null }) => {
+    if (!r.client || r.client.type === "client") return false;
+    const stage = computeBusinessStage(r.listing, r.client, inviteFor(r.listing));
+    if (stage !== "claimed" && stage !== "interview" && stage !== "onboarding") return false;
+    return isDueForStage(r.client.playbookLastProgressAt ?? null, stage, todayIso);
+  };
+  const needsAttention = (r: { listing: DirectoryListing; client: Client | null }) => !!conversationTaskFor(r) || isStalled(r);
   // The few words a flag row carries next to the business name: why this one
-  // is up here at all. Strongest real signal first — how far it actually got
-  // through the invite chat (WordPress's own step label), then plain invite
-  // engagement, and only then the generic fact that it replied, which is what
-  // put it in the group in the first place (see ATTENTION_META). Never a
-  // placeholder: a rep scanning the group is deciding who to call from this
-  // line alone.
-  const flagReasonFor = (r: { listing: DirectoryListing }) => {
+  // is up here at all. A row with no open conversation task can only be here
+  // via isStalled — say that plainly rather than falling through the
+  // reply-shaped checks below, which would either miss (nothing to find) or
+  // resurface a stale signal from a much older reply. Otherwise, strongest
+  // real signal first: how far it actually got through the invite chat
+  // (WordPress's own step label), then plain invite engagement, and only
+  // then the generic fact that it replied, which is what put it in the group
+  // in the first place (see ATTENTION_META). Never a placeholder: a rep
+  // scanning the group is deciding who to call from this line alone.
+  const flagReasonFor = (r: { listing: DirectoryListing; client: Client | null }) => {
+    if (!conversationTaskFor(r)) {
+      const stage = computeBusinessStage(r.listing, r.client, inviteFor(r.listing));
+      return `Quiet on ${STAGE_META[stage].label} for ${STEP_STALL_DAYS}+ days`;
+    }
     const step = funnelFor(r.listing);
     if (step?.label) return step.label;
     const inv = inviteFor(r.listing);
@@ -1266,7 +1299,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                   return (
                     <ListingRow key={g.key + r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} template={template}
                       stage={stage}
-                      flaggedAbove={STAGE_KEYS.has(g.key) && !!convo}
+                      flaggedAbove={STAGE_KEYS.has(g.key) && needsAttention(r)}
                       invite={inviteFor(r.listing)}
                       funnelStep={funnelFor(r.listing)}
                       inviteHistoryList={gdPlaceId != null ? invitesByGdPlaceId.get(gdPlaceId) ?? [] : []}

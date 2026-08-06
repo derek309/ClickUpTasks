@@ -98,10 +98,10 @@ export function allInvitesByGdPlaceId(weeks: PlannerWeek[]): Map<number, Planner
   return map;
 }
 
-export function isDue(last: string | null, todayIso: string): boolean {
+export function isDue(last: string | null, todayIso: string, windowDays: number = ROTATION_WINDOW_DAYS): boolean {
   if (!last) return true;
   const days = (new Date(todayIso).getTime() - new Date(last).getTime()) / 86400000;
-  return days > ROTATION_WINDOW_DAYS;
+  return days > windowDays;
 }
 
 export function computePlannerPools(opts: {
