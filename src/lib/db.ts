@@ -184,23 +184,42 @@ export async function seedIfEmpty(): Promise<void> {
 // .range() until a page comes back short.
 async function fetchAllRows(table: string, orderCol?: string, ascending = true) {
   const PAGE_SIZE = 1000;
-  let all: any[] = [];
-  let from = 0;
-  for (;;) {
+  // Paging without a deterministic total order is how you silently drop or
+  // duplicate rows: Postgres makes no ordering promise between the separate
+  // requests, so page 2's offset can land anywhere relative to page 1. An
+  // explicit orderCol isn't enough on its own either — created_at ties are
+  // common — so always break ties on the primary key.
+  const fetchPage = (from: number) => {
     let q = supabase.from(table).select("*").range(from, from + PAGE_SIZE - 1);
     if (orderCol) q = q.order(orderCol, { ascending });
-    // Paging without a deterministic total order is how you silently drop or
-    // duplicate rows: Postgres makes no ordering promise between the separate
-    // requests, so page 2's offset can land anywhere relative to page 1. An
-    // explicit orderCol isn't enough on its own either — created_at ties are
-    // common — so always break ties on the primary key. Contacts (3,500+ rows,
-    // no orderCol) is the table that actually pages today, and re-truncating
-    // it is exactly the bug this function was written to fix.
-    q = q.order("id", { ascending: true });
-    const { data, error } = await q;
+    return q.order("id", { ascending: true });
+  };
+  // A big table (tasks: 28k+ rows as of Aug 2026) used to mean one 1000-row
+  // request at a time, sequentially — 29+ round trips end to end just to
+  // page through it, easily tens of seconds before the app's very first
+  // paint, and it only gets worse as the table grows. Ask for an exact count
+  // first (cheap: head:true returns no rows, just the number), then fire
+  // every page that count says we need in parallel instead of one at a time.
+  const { count, error: countError } = await supabase.from(table).select("*", { count: "exact", head: true });
+  if (countError) return { data: null as any[] | null, error: countError };
+  const knownPages = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
+  const firstResults = await Promise.all(Array.from({ length: knownPages }, (_, i) => fetchPage(i * PAGE_SIZE)));
+  for (const r of firstResults) if (r.error) return { data: null as any[] | null, error: r.error };
+  const all: any[] = firstResults.flatMap((r) => r.data ?? []);
+  // Safety tail: the count above can go stale if rows were inserted between
+  // it and the page fetches — same termination rule the original
+  // sequential-only version always used (keep going while the last page
+  // came back completely full), so a table that grew mid-fetch still never
+  // silently loses its newest rows. In the overwhelmingly common case
+  // (nothing inserted in the ~1 second this all takes) this loop runs zero
+  // or one extra time, not dozens.
+  let lastPageLen = firstResults[firstResults.length - 1]?.data?.length ?? 0;
+  let from = knownPages * PAGE_SIZE;
+  while (lastPageLen === PAGE_SIZE) {
+    const { data, error } = await fetchPage(from);
     if (error) return { data: null as any[] | null, error };
-    all = all.concat(data ?? []);
-    if (!data || data.length < PAGE_SIZE) break;
+    all.push(...(data ?? []));
+    lastPageLen = data?.length ?? 0;
     from += PAGE_SIZE;
   }
   return { data: all, error: null as null | { message: string } };
