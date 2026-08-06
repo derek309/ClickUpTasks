@@ -24,6 +24,15 @@ type WaitingTask = {
   response: { body: string; submittedAt: string; attachments: WaitingAttachment[] } | null;
   thread: WaitingMessage[];
 };
+// "Here's where you are, what's done, what's next" — see
+// /api/waiting/[token]/route.ts's playbook payload. next/total/doneCount
+// track the main growth-plan path only (same definition Cockpit.tsx's own
+// dashboard uses); phases is the full display breakdown, side quests (A2P,
+// email domain) and ongoing retention included, for the "see your full
+// plan" accordion below the headline.
+type WaitingPlaybookStep = { key: string; label: string; done: boolean };
+type WaitingPlaybookPhase = { key: string; label: string; steps: WaitingPlaybookStep[] };
+type WaitingPlaybook = { doneCount: number; total: number; pct: number; next: { key: string; label: string } | null; phases: WaitingPlaybookPhase[] };
 // A draft attachment is either a stored file (has `path`, uploaded via
 // upload/route.ts) or a plain link (kind "link", has `url` instead) — mirrors
 // the real Attachment shape closely enough for sanitizeWaitingAttachments to
@@ -341,11 +350,85 @@ function TaskDetailBody({
   );
 }
 
+// "Here's where you are, what's done, and what happens next" — the one
+// prominent, always-visible answer to that, right at the top of the page
+// (not a second page, not a tab), with the full step-by-step plan one click
+// away underneath it rather than hidden anywhere deeper. A phase auto-opens
+// the first time this loads if it holds the next required step, so a
+// returning client doesn't have to go hunting for where they left off.
+function PlaybookProgress({ playbook }: { playbook: WaitingPlaybook }) {
+  const [expanded, setExpanded] = useState(false);
+  const [openPhases, setOpenPhases] = useState<Set<string>>(() => {
+    const withNext = playbook.phases.find((p) => p.steps.some((s) => playbook.next?.key === s.key));
+    return new Set(withNext ? [withNext.key] : []);
+  });
+  const togglePhase = (key: string) => setOpenPhases((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
+  if (playbook.total === 0) return null; // nothing reconciled yet for this client — never render an empty plan
+  return (
+    <div className="mb-5 rounded-2xl border bg-surface p-4 shadow-[var(--shadow-sm)]">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[15px] font-bold">Your growth plan</div>
+        <div className="text-[13px] font-medium text-muted">{playbook.doneCount} of {playbook.total} done</div>
+      </div>
+      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-background">
+        <div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${playbook.pct}%` }} />
+      </div>
+      {playbook.next ? (
+        <div className="mt-3 flex items-center gap-2 rounded-xl bg-highlight-soft px-3 py-2.5">
+          <span className="text-[13px] font-semibold uppercase tracking-wide text-highlight">Next up</span>
+          <span className="text-[14px] font-medium text-foreground">{playbook.next.label}</span>
+        </div>
+      ) : (
+        <div className="mt-3 rounded-xl bg-success-soft px-3 py-2.5 text-[14px] font-medium text-success">Every step of your growth plan is done. Nice work.</div>
+      )}
+      <button onClick={() => setExpanded((e) => !e)} className="mt-3 flex items-center gap-1.5 text-[13px] font-medium text-muted hover:text-foreground">
+        <span className={`inline-block transition-transform ${expanded ? "rotate-90" : ""}`} aria-hidden>›</span>
+        {expanded ? "Hide your full plan" : "See your full plan"}
+      </button>
+      {expanded && (
+        <div className="mt-2 space-y-1.5 border-t pt-3">
+          {playbook.phases.map((phase) => {
+            const phaseDone = phase.steps.filter((s) => s.done).length;
+            const open = openPhases.has(phase.key);
+            return (
+              <div key={phase.key} className="rounded-lg border">
+                <button onClick={() => togglePhase(phase.key)} className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left">
+                  <span className="flex items-center gap-1.5 text-[13.5px] font-semibold">
+                    <span className={`inline-block text-[11px] transition-transform ${open ? "rotate-90" : ""}`} aria-hidden>›</span>
+                    {phase.label}
+                  </span>
+                  <span className="text-[12px] font-medium text-muted">{phaseDone}/{phase.steps.length}</span>
+                </button>
+                {open && (
+                  <div className="space-y-1 border-t px-3 py-2">
+                    {phase.steps.map((step) => (
+                      <div key={step.key} className="flex items-center gap-2 py-0.5">
+                        <span
+                          className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] leading-none ${step.done ? "bg-success text-white" : "border border-border"}`}
+                          aria-hidden
+                        >
+                          {step.done && "✓"}
+                        </span>
+                        <span className={`text-[13.5px] ${step.done ? "text-muted line-through decoration-muted/40" : "text-foreground"}`}>{step.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function WaitingView({ token }: { token: string }) {
   const [clientName, setClientName] = useState<string | null>(null);
   // Off until the API says otherwise, so a slow/failed load never flashes an
   // "Add Something" button at a client who isn't allowed to use it.
   const [canRequestNewTasks, setCanRequestNewTasks] = useState(false);
+  const [playbook, setPlaybook] = useState<WaitingPlaybook | null>(null);
   const [projects, setProjects] = useState<WaitingProject[]>([]);
   // The list is grouped by project (section headers) rather than filtered
   // by a tab switcher, so there's no "current list" state to hold — but a
@@ -453,6 +536,7 @@ export default function WaitingView({ token }: { token: string }) {
       hasLoadedRef.current = true;
       setClientName(j.clientName ?? null);
       setCanRequestNewTasks(j.canRequestNewTasks === true);
+      setPlaybook(j.playbook ?? null);
       setProjects(Array.isArray(j.projects) ? j.projects : []);
       const list: WaitingTask[] = Array.isArray(j.tasks) ? j.tasks : [];
       setTasks(list);
@@ -758,6 +842,7 @@ export default function WaitingView({ token }: { token: string }) {
           <div className="py-8 text-center text-[13px] text-muted">Loading…</div>
         ) : (
             <div className="min-w-0">
+              {playbook && <PlaybookProgress playbook={playbook} />}
               {/* Raising a brand-new task is per client and off by default
                   (clients.can_request_new_tasks) — for everyone else this
                   page is reply-only, so the composer and its button aren't

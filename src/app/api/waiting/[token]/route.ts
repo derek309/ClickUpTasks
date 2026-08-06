@@ -1,8 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
-import { htmlToText, initialsOf, PERSONAL_CLIENT_ID, type Attachment } from "@/lib/data";
+import {
+  htmlToText, initialsOf, PERSONAL_CLIENT_ID, playbookCompletion,
+  PLAYBOOK_ALL_STEPS, PLAYBOOK_PHASES, PLAYBOOK_A2P_PHASE, PLAYBOOK_EMAIL_DOMAIN_PHASE, PLAYBOOK_ONGOING_PHASE,
+  type Attachment,
+} from "@/lib/data";
+import { reconcilePlaybookTasksServer } from "@/lib/playbookReconcileServer";
 import { TASK_FILES_BUCKET } from "@/lib/db";
 import { rateLimit } from "@/lib/rateLimit";
+
+// Phase section headers, written for the business reading them rather than
+// the rep — the internal labels ("— side quest," "(ambassador)") are correct
+// in Cockpit.tsx for a rep audience but would confuse or read oddly to the
+// client seeing their own account described that way. Only overrides the
+// phases where that's actually true; every other phase's own label already
+// reads fine either way. A first, deliberately small step toward the
+// internal/client-facing split the game plan still wants finished — not a
+// new schema field yet, just the one place this page needs it today.
+const CLIENT_PHASE_LABEL: Record<string, string> = {
+  a2p: "Turn on texting",
+  email_domain: "Set up your email domain",
+  ongoing: "Ongoing",
+};
 
 // Public, deliberately unauthenticated — the first route of its kind in this
 // app. Backs /waiting/[token], a client-facing page showing "here's what
@@ -30,6 +49,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   // is refused upstream; this is the serve-side half of the same guard, so a
   // token written before that guard existed (or by hand) still can't be used.
   if (client.id === PERSONAL_CLIENT_ID) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  // Ensures this client's Playbook step tasks exist even if no rep has ever
+  // opened their Businesses page entry — the first thing that touches a
+  // client (an invite reply, a claim, or just this page loading) shouldn't
+  // be a prerequisite for seeing accurate progress below.
+  await reconcilePlaybookTasksServer(client.id);
 
   // A link composed from one specific task (see the task drawer's email
   // composer) carries ?task=<id> so that task shows up here even when it's
@@ -140,10 +165,47 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     };
   }));
 
+  // Playbook progress — reuses playbookCompletion()'s exact definition of
+  // "next" (the main PLAYBOOK_STEPS path only, same as Cockpit.tsx's own
+  // dashboard), so this page never tells a business something different from
+  // what a rep sees internally about the same account. SALES_STAGE_STEPS is
+  // never imported here — those are the rep's own pipeline stages, not
+  // something a business should see about its own account.
+  const { data: pbTaskRows } = await supabaseAdmin.from("tasks").select("playbook_step_key, status").eq("client_id", client.id).not("playbook_step_key", "is", null);
+  const pbRows = (pbTaskRows ?? []) as { playbook_step_key: string; status: string }[];
+  const doneKeys = new Set(pbRows.filter((t) => t.status === "done").map((t) => t.playbook_step_key));
+  const existingKeys = new Set(pbRows.map((t) => t.playbook_step_key));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const completion = playbookCompletion(client.id, pbRows.map((t) => ({ clientId: client.id, playbookStepKey: t.playbook_step_key, status: t.status })) as any);
+
+  // Display order: same as Cockpit's buildPlaybookGroups — A2P/email-domain
+  // spliced right after "Get on the map" ("do it early," per the source
+  // docs), monthly retention at the very end. PLAYBOOK_PHASES[0] is "sales"
+  // (the internal pipeline) — filtered out, never reaches this response.
+  const orderedPhases = PLAYBOOK_PHASES.filter((p) => p.key !== "sales");
+  const mapIdx = orderedPhases.findIndex((p) => p.key === "map");
+  orderedPhases.splice(mapIdx + 1, 0, PLAYBOOK_A2P_PHASE, PLAYBOOK_EMAIL_DOMAIN_PHASE);
+  orderedPhases.push(PLAYBOOK_ONGOING_PHASE);
+
+  const stepsByPhase = new Map<string, { key: string; label: string; done: boolean }[]>();
+  for (const step of PLAYBOOK_ALL_STEPS) {
+    if (!existingKeys.has(step.key)) continue; // e.g. A2P steps for a client who doesn't text
+    const list = stepsByPhase.get(step.phase) ?? [];
+    list.push({ key: step.key, label: step.label, done: doneKeys.has(step.key) });
+    stepsByPhase.set(step.phase, list);
+  }
+  const playbook = {
+    doneCount: completion.doneCount, total: completion.total, pct: completion.pct,
+    next: completion.next ? { key: completion.next.key, label: completion.next.label } : null,
+    phases: orderedPhases
+      .map((p) => ({ key: p.key, label: CLIENT_PHASE_LABEL[p.key] ?? p.label, steps: stepsByPhase.get(p.key) ?? [] }))
+      .filter((p) => p.steps.length > 0),
+  };
+
   // Whether this client may raise brand-new tasks here at all — the page uses
   // it to show or hide the "Add Something" composer. Not a permission the
   // page enforces: ./request/route.ts re-checks the same column before it
   // writes anything, so this is purely so the client isn't offered a button
   // that would only refuse them (see supabase/client-request-new-tasks.sql).
-  return NextResponse.json({ clientName: client.name, canRequestNewTasks: client.can_request_new_tasks === true, projects, tasks, deepLinkTaskId: deepLinkTaskId || null });
+  return NextResponse.json({ clientName: client.name, canRequestNewTasks: client.can_request_new_tasks === true, projects, tasks, playbook, deepLinkTaskId: deepLinkTaskId || null });
 }
