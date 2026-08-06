@@ -23,11 +23,12 @@ import { useEffect, useRef, useState } from "react";
 import { type Me, type User, type Attachment, type TeamMessage, type DmMessage, users, userById, timeAgo } from "@/lib/data";
 import { I, Avatar, renderRichText, useStickyBottom, JumpToLatestButton } from "./cockpit/ui";
 import { AttachmentThumbs } from "./cockpit/AttachmentThumbs";
+import { AttachmentTile } from "./cockpit/AttachmentTile";
 
 type Scope = { type: "team" } | { type: "dm"; other: User };
 type ChatMessage = TeamMessage | DmMessage;
 
-export default function TeamChat({ me, scope, messages, onSend, onDelete, onPin, onUploadFile, onOpenFile, onClose }: {
+export default function TeamChat({ me, scope, messages, onSend, onDelete, onPin, onUploadFile, onOpenFile, onGetSignedUrl, onClose }: {
   me: Me;
   scope: Scope;
   messages: ChatMessage[];
@@ -36,6 +37,7 @@ export default function TeamChat({ me, scope, messages, onSend, onDelete, onPin,
   onPin: (id: string, pinned: boolean) => void;
   onUploadFile: (file: File) => Promise<Attachment | null>;
   onOpenFile: (path: string) => void;
+  onGetSignedUrl: (path: string) => Promise<string | null>;
   onClose?: () => void; // omit to embed inline instead of as an overlay
 }) {
   const [draft, setDraft] = useState("");
@@ -48,6 +50,24 @@ export default function TeamChat({ me, scope, messages, onSend, onDelete, onPin,
   const pinnedMessages = sorted.filter((m) => m.pinned);
   const [showPinnedOnly, setShowPinnedOnly] = useState(false);
   const visible = showPinnedOnly ? pinnedMessages : sorted;
+
+  // Image attachments render an inline thumbnail instead of a filename link
+  // chip — same batch-resolve-then-render idiom as TaskDrawer's attImageUrls
+  // (a private Storage bucket means every image needs its own signed URL,
+  // not just a raw path).
+  const attImagePaths = sorted.flatMap((m) => m.attachments ?? []).filter((a) => a.kind === "image" && a.path).map((a) => a.path as string).join(",");
+  const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let cancelled = false;
+    const paths = attImagePaths ? attImagePaths.split(",") : [];
+    if (paths.length === 0) return;
+    Promise.all(paths.map(async (p) => [p, await onGetSignedUrl(p)] as const)).then((pairs) => {
+      if (cancelled) return;
+      setImageUrls((prev) => ({ ...prev, ...Object.fromEntries(pairs.filter(([, u]) => u).map(([p, u]) => [p, u as string])) }));
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attImagePaths]);
 
   // Auto-follow the newest message on open and whenever one arrives — but
   // only while already at the bottom, so scrolling up to read history isn't
@@ -158,7 +178,16 @@ export default function TeamChat({ me, scope, messages, onSend, onDelete, onPin,
                     <p className={`whitespace-pre-wrap break-words rounded-2xl px-3 py-1.5 text-[14px] ${isMe ? "bg-accent text-white [&_a]:!text-white [&_a]:underline" : "bg-background"}`}>{renderRichText(m.body)}</p>
                   )}
                   {m.attachments && m.attachments.length > 0 && (
-                    <div className="mt-1"><AttachmentThumbs items={m.attachments} onOpen={onOpenFile} /></div>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {m.attachments.filter((a) => a.kind === "image").length > 0 && (
+                        <div className="grid grid-cols-4 gap-1.5">
+                          {m.attachments.filter((a) => a.kind === "image").map((a) => (
+                            <AttachmentTile key={a.id} item={a} small url={a.path ? imageUrls[a.path] : undefined} onOpen={() => a.path && onOpenFile(a.path)} />
+                          ))}
+                        </div>
+                      )}
+                      {m.attachments.filter((a) => a.kind !== "image").length > 0 && <AttachmentThumbs items={m.attachments.filter((a) => a.kind !== "image")} onOpen={onOpenFile} />}
+                    </div>
                   )}
                 </div>
               </div>

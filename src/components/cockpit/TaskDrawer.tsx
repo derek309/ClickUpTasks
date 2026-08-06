@@ -300,9 +300,10 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
   // Gallery grid needs every visible image thumbnail up front, not resolved
   // one at a time on click like openPreview above — batch-fetch in
   // parallel, mirroring VaultView's identical pattern. Includes message
-  // attachments (e.g. a photo the client sent over chat) so those render as
-  // real thumbnails in the feed too, not just a filename chip.
-  const attImagePaths = [...task.attachments, ...(task.clientResponse?.attachments ?? []), ...(messages ?? []).flatMap((m) => m.attachments ?? [])].filter((a) => a.kind === "image" && a.path).map((a) => a.path as string).join(",");
+  // attachments (e.g. a photo the client sent over chat) and comment
+  // attachments (a screenshot dropped into the Activity tab) so those render
+  // as real thumbnails in the feed too, not just a filename chip.
+  const attImagePaths = [...task.attachments, ...(task.clientResponse?.attachments ?? []), ...(messages ?? []).flatMap((m) => m.attachments ?? []), ...task.comments.flatMap((c) => c.attachments ?? [])].filter((a) => a.kind === "image" && a.path).map((a) => a.path as string).join(",");
   const [attImageUrls, setAttImageUrls] = useState<Record<string, string>>({});
   useEffect(() => {
     let cancelled = false;
@@ -1296,7 +1297,23 @@ export function TaskDrawer({ task, comment, setComment, clientById, projectById,
             <div className="min-w-0 flex-1 pt-0.5">
               <div className="text-[14px]"><span className="font-medium">{u?.name}</span> <span className="text-[12px] text-muted">· {timeAgo(c.at)}</span></div>
               {c.body && <CollapsibleText text={c.body} className="text-[15px]" />}
-              {c.attachments && c.attachments.length > 0 && <div className="mt-1"><AttachmentThumbs items={c.attachments} onOpen={onDownloadFile} /></div>}
+              {c.attachments && c.attachments.length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {c.attachments.filter((a) => a.kind === "image").length > 0 && (
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {c.attachments.filter((a) => a.kind === "image").map((a) => (
+                        <AttachmentTile key={a.id} item={a} small url={a.path ? attImageUrls[a.path] : undefined} onOpen={() => openPreview(a)}
+                          actions={<>
+                            {a.path && <button onClick={(e) => { e.stopPropagation(); onDownloadFileAs(a.path!, a.name); }} title="Download" className="flex h-5 w-5 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.download className="h-2.5 w-2.5" /></button>}
+                            <button onClick={(e) => { e.stopPropagation(); attachToTask(a); }} title="Add to task attachments" className="flex h-5 w-5 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.plus className="h-2.5 w-2.5" /></button>
+                          </>}
+                        />
+                      ))}
+                    </div>
+                  )}
+                  {c.attachments.filter((a) => a.kind !== "image").length > 0 && <AttachmentThumbs items={c.attachments.filter((a) => a.kind !== "image")} onOpen={onDownloadFile} />}
+                </div>
+              )}
             </div>
           </div>
         );

@@ -1719,6 +1719,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   function hasOpenConversationTask(clientId: string): boolean {
     return scopedTasks.some((t) => t.clientId === clientId && t.status !== "done" && t.priority === "conversation");
   }
+  // Left-nav "Client replies" badge — same signal as hasOpenConversationTask
+  // above, just counted across every client instead of checked for one.
+  // scopedTasks already means "everything, for an admin; just mine,
+  // otherwise" (see its own definition), so this reads as "open client
+  // replies I'm actually responsible for" without any extra scoping here.
+  const openConversationCount = scopedTasks.filter((t) => t.status !== "done" && t.priority === "conversation").length;
   // The Review/Check-in tier (Derek + Justin, Jul 17): a client with open work
   // but nothing actually dated silently sinks to the bottom and gets
   // forgotten. This surfaces it at the very top instead — but resets, so it
@@ -4237,6 +4243,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             not deleted, just admin-toggled off by default. */}
         <nav className="shrink-0 space-y-0.5 px-2">
           {navVisible.work && <SideItem active={myWork} title="Dashboard (press 1)" onClick={() => goToView("dashboard")}><I.grid className="text-muted" /> <span>Dashboard</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
+          {/* Open client replies waiting on us — the conversation-priority
+              task count, same source hasOpenConversationTask reads. Goes to
+              Dashboard, not a dedicated view: these clients already sort to
+              the very top there (the Review/Check-in tiering just above
+              treats an open conversation task as tier 1), so there's nothing
+              a separate destination would show that Dashboard doesn't
+              already lead with. */}
+          {navVisible.work && <SideItem active={false} title="Open client replies waiting on a response" onClick={() => goToView("dashboard")}><I.inbox className="text-muted" /> <span>Client replies</span><span className="ml-auto text-[13px] text-muted">{openConversationCount}</span></SideItem>}
           {navVisible.inbox && (<>
             <SideItem active={inboxView && dmUserId === null} title="Conversations (press 2)" onClick={openTeamChat}><I.comment className="text-muted" /> <span>Conversations</span>{teamChatUnread && (
               // Literal unread team-chat messages only — general notifications
@@ -4885,14 +4899,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <TeamChat key={dmUserId} me={me} scope={{ type: "dm", other: userById(dmUserId)! }}
             messages={dmMessages.filter((m) => m.conversationId === dmConversationId(me.id, dmUserId))}
             onSend={(body, attachments, replyToId) => sendDmMessage(dmUserId, body, attachments, replyToId)} onDelete={deleteDmMessage}
-            onPin={pinDmMessage} onUploadFile={(file) => uploadOneImage(`dm/${dmConversationId(me.id, dmUserId)}`, file)} onOpenFile={downloadFile} />
+            onPin={pinDmMessage} onUploadFile={(file) => uploadOneImage(`dm/${dmConversationId(me.id, dmUserId)}`, file)} onOpenFile={downloadFile} onGetSignedUrl={signedUrlForFile} />
         ) : inboxView ? (
           // Team-wide chat, full width — task comments/mentions ("Activity")
           // moved to its own Dashboard tab (Derek: "everything is wired into
           // each contact or tasks... it doesn't belong here"), so this is
           // just the workspace feed now, same footing as a DM thread above.
           <TeamChat me={me} scope={{ type: "team" }} messages={teamMessages} onSend={sendTeamMessage} onDelete={deleteTeamMessage}
-            onPin={pinTeamMessage} onUploadFile={(file) => uploadOneImage("team-chat", file)} onOpenFile={downloadFile} />
+            onPin={pinTeamMessage} onUploadFile={(file) => uploadOneImage("team-chat", file)} onOpenFile={downloadFile} onGetSignedUrl={signedUrlForFile} />
         ) : dirView === "clients" ? (
           <ClientsDirectory clients={sortedClients} clientCompany={(c) => clientCompany(c)} taskCount={clientTaskCount} tasksByClient={territoryTasksByClient} starred={starred} onToggleStar={toggleStar}
             needsReview={(id) => clientNeedsReview(id, me.id)}
