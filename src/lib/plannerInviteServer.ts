@@ -4,7 +4,6 @@
 // authenticate. See that route for the requireUser/501-degrade wrapper.
 import { supabaseAdmin } from "./supabaseAdmin";
 import { isWithinBusinessHours, OUTSIDE_BUSINESS_HOURS } from "./businessHours";
-import { advanceInvitedToOutreach } from "./ghlOpportunities";
 // slugify only, not citySlugForTerritory: the select below already pulls
 // assigned_to off the same territory row, so resolving the slug through the
 // shared helper would cost a second round trip per invite send for nothing.
@@ -56,11 +55,6 @@ export async function sendPlannerInviteServer(territoryId: string, week: string,
   // WordPress returns 200 with {ok:false, error:'no_email'|'ghl_not_connected'|...}
   // for expected failure cases — pass those through as-is rather than reinterpreting them.
   if (!data?.ok) return { ok: false, error: data?.error || "Send failed" };
-
-  // Close the gap between the two funnels: this business just got invited
-  // (planner_weeks.picks.__invited), so it should also show as "In Outreach"
-  // in the GHL Prospects pipeline, not just here.
-  if (data.ghl_contact_id) await advanceInvitedToOutreach(String(data.ghl_contact_id));
 
   return { ok: true, ghlContactId: data.ghl_contact_id ?? null };
 }
