@@ -257,6 +257,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // All Tasks defaults to just your own — admins can flip to "all"; for VAs
   // this is inert either way since scopedTasks already fully restricts them.
   const [allTasksScope, setAllTasksScope] = useState<"mine" | "all">("mine");
+  // "Client replies" nav badge's destination — an extra filter on top of All
+  // Tasks (still respects the Mine/All scope toggle above) rather than a
+  // wholly separate view, so it doesn't need its own copy of the grouping/
+  // sorting/column machinery. Only ever set true by openConversationReplies
+  // below; cleared automatically the moment activeClient leaves "all" (the
+  // effect further down) and explicitly by openAllTasks, so clicking the
+  // plain "All Tasks" nav item never leaves a stale filter behind.
+  const [conversationsOnly, setConversationsOnly] = useState(false);
   const [groupBy, setGroupBy] = useState<"project" | "status" | "priority" | "due">("priority");
   const [filters, setFilters] = useState<FilterState>({ status: "all", assignee: "all", priority: "all" });
   const [sortBy, setSortBy] = useState<SortBy>("due");
@@ -1008,7 +1016,23 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // dashboard" — the sidebar should steer people there, not offer a
   // parallel flat-list home). Still reachable, just de-emphasized — a small
   // button on the Dashboard header, not a primary nav item.
-  const openAllTasks = () => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); };
+  const openAllTasks = () => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient("all"); setConversationsOnly(false); setSidebarOpen(false); setOpenTaskId(null); };
+  // Left-nav "Client replies" — All Tasks, scoped to "all" (not just mine,
+  // an admin clicking this wants the company-wide count the badge showed,
+  // not their own slice of it) plus the conversation-priority filter. A
+  // handful of other places can also land activeClient on "all" without
+  // going through openAllTasks (a deleted client's fallback, a workspace
+  // project with no client, page-load restoration) — the effect right below
+  // is the real safety net for those; explicitly clearing it here too is
+  // just the common, no-extra-render-needed case.
+  const openConversationReplies = () => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient("all"); setActiveProject(null); setAllTasksScope("all"); setConversationsOnly(true); setSidebarOpen(false); setOpenTaskId(null); };
+  // However activeClient ends up leaving "all" (there are ~30 call sites
+  // that can set it — see the ones above and the client/project rows further
+  // down), conversationsOnly should never survive the trip: it only ever
+  // means something on the All Tasks screen, so once you're anywhere else
+  // it'd just be a stale, invisible filter waiting to confuse the next visit
+  // to All Tasks that doesn't happen to go through openAllTasks.
+  useEffect(() => { if (activeClient !== "all" && conversationsOnly) setConversationsOnly(false); }, [activeClient, conversationsOnly]);
 
   useEffect(() => {
     (async () => {
@@ -1970,7 +1994,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // specific project IS selected, the existing t.projectId === activeProject
   // check already scopes correctly (only matches when that project happens
   // to be the Playbook one), so this only needs to guard the unscoped case.
-  const baseTasks = scopedTasks.filter((t) => t.clientId.startsWith("cl_") && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject) && (!activeFolder || projectById(t.projectId)?.folderId === activeFolder) && (activeClient !== "all" || allTasksScope === "all" || t.assigneeId === me.id) && (!t.playbookStepKey || !!activeProject));
+  const baseTasks = scopedTasks.filter((t) => t.clientId.startsWith("cl_") && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject) && (!activeFolder || projectById(t.projectId)?.folderId === activeFolder) && (activeClient !== "all" || allTasksScope === "all" || t.assigneeId === me.id) && (activeClient !== "all" || !conversationsOnly || t.priority === "conversation") && (!t.playbookStepKey || !!activeProject));
 
   // Client/project-wide equivalent of TaskDrawer's per-task copyForClaude —
   // same clipboard hand-off pattern, just widened from one task to every
@@ -4035,7 +4059,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // duplicated in source. Only one header is ever visible (CSS breakpoint),
   // so the popovers never double-render on screen.
   const territoryTitle = territoryView ? (territoryView === "all" ? "Territories" : (territoryById(territoryView) ? `${territoryById(territoryView)!.city}, ${territoryById(territoryView)!.state}` : "Territory")) : null;
-  const headerTitleText = territoryTitle ?? (settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Conversations") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? "All Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? "")));
+  const headerTitleText = territoryTitle ?? (settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Conversations") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? (conversationsOnly ? "Client replies" : "All Tasks") : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? "")));
   const isClientDetail = !myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && !!clientById(activeClient);
   // Non-null when the open "client" is actually a city's work container —
   // drives the breadcrumb and subtitle so the page reads as city work rather
@@ -4244,13 +4268,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         <nav className="shrink-0 space-y-0.5 px-2">
           {navVisible.work && <SideItem active={myWork} title="Dashboard (press 1)" onClick={() => goToView("dashboard")}><I.grid className="text-muted" /> <span>Dashboard</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
           {/* Open client replies waiting on us — the conversation-priority
-              task count, same source hasOpenConversationTask reads. Goes to
-              Dashboard, not a dedicated view: these clients already sort to
-              the very top there (the Review/Check-in tiering just above
-              treats an open conversation task as tier 1), so there's nothing
-              a separate destination would show that Dashboard doesn't
-              already lead with. */}
-          {navVisible.work && <SideItem active={false} title="Open client replies waiting on a response" onClick={() => goToView("dashboard")}><I.inbox className="text-muted" /> <span>Client replies</span><span className="ml-auto text-[13px] text-muted">{openConversationCount}</span></SideItem>}
+              task count, same source hasOpenConversationTask reads. Used to
+              just go to Dashboard on the theory these clients already sort
+              to the top there — wrong in practice: Dashboard's tiering is
+              scoped to whoever's picked in "Viewing work for," so an admin
+              with company-wide replies waiting saw a number here that
+              didn't match what Dashboard actually showed them (Derek: "I
+              can't seem to click on client replies" — it "clicked," it just
+              never showed what the badge promised). Now a real destination:
+              All Tasks, forced to scope "all" (not just mine) and filtered
+              to exactly this signal, so the badge and what it opens always
+              agree. */}
+          {navVisible.work && <SideItem active={activeClient === "all" && conversationsOnly} title="Open client replies waiting on a response" onClick={openConversationReplies}><I.inbox className="text-muted" /> <span>Client replies</span><span className="ml-auto text-[13px] text-muted">{openConversationCount}</span></SideItem>}
           {navVisible.inbox && (<>
             <SideItem active={inboxView && dmUserId === null} title="Conversations (press 2)" onClick={openTeamChat}><I.comment className="text-muted" /> <span>Conversations</span>{teamChatUnread && (
               // Literal unread team-chat messages only — general notifications
@@ -4419,7 +4448,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </p>
             </>) : (<>
               <h1 className="flex items-center gap-2 truncate text-[20px] font-semibold">
-                {territoryTitle ? territoryTitle : settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Conversations") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? "All Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
+                {territoryTitle ? territoryTitle : settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Conversations") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? (conversationsOnly ? "Client replies" : "All Tasks") : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
                 {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
               </h1>
               {/* No subtitle for a territory — it fell through to the
@@ -4439,7 +4468,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     <button onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
                     <span>›</span>
                   </>)}
-                  <span>{settingsView ? "Integrations, team, territories, templates, playbooks, and API tokens" : inboxView ? (dmUserId ? "Private — only the two of you can see this" : "Talk to the team — everyone's in this one") : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "Every client and project you're on, grouped by what needs attention first" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : activeTerritoryClient ? `City work for ${activeTerritoryClient.city}, ${activeTerritoryClient.state} — not tied to any one business` : clientCompany(clientById(activeClient))}</span>
+                  <span>{settingsView ? "Integrations, team, territories, templates, playbooks, and API tokens" : inboxView ? (dmUserId ? "Private — only the two of you can see this" : "Talk to the team — everyone's in this one") : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "Every client and project you're on, grouped by what needs attention first" : activeClient === "all" ? (conversationsOnly ? "Every open reply waiting on a response, use Mine/All to scope it to just you" : `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}`) : activeTerritoryClient ? `City work for ${activeTerritoryClient.city}, ${activeTerritoryClient.state} — not tied to any one business` : clientCompany(clientById(activeClient))}</span>
                 </p>
               )}
             </>)}
