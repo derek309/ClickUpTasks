@@ -60,6 +60,23 @@ export async function resolveOrPromoteTrackedClient(contact: { id: string; name:
   return trackedId;
 }
 
+// A booked appointment is a real "this prospect is now in interview stage"
+// signal — bump client.status to "interview" the same way claiming a
+// listing bumps it to "claimed", but only from "claimed" (the no-signal-yet
+// default resolveOrPromoteTrackedClient stamps on creation). Anyone already
+// further along (onboarding, active_client, nurture, cancelled, past_client)
+// or already at "interview" is left untouched, so this never regresses real
+// progress or fights a status someone already set by hand via the Stage
+// dropdown. Without this, computeBusinessStage (TerritoryDirectory.tsx) has
+// no way to know an interview was booked — it just reads client.status
+// as-is, and nothing else in the appointment-sync pipeline ever writes it.
+export async function bumpStatusToInterview(clientId: string): Promise<void> {
+  const { data: client } = await supabaseAdmin.from("clients").select("status").eq("id", clientId).maybeSingle();
+  if (client?.status === "claimed") {
+    await supabaseAdmin.from("clients").update({ status: "interview" }).eq("id", clientId);
+  }
+}
+
 // "Today" for a Conversation task's due date, in the team's operating
 // timezone (Pacific) rather than the server's UTC clock — due doubles as
 // "last touched" here (see below), and a UTC-computed date can already be
