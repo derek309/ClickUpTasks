@@ -1,47 +1,39 @@
 "use client";
 
-// The territory-work equivalent of the client Dashboard: log in and know who
-// to follow up with today, across every territory you're assigned to,
-// without opening each city's Businesses tab one at a time. Scoped to
-// claimed+ businesses only (claimed/interview/onboarding/active_client) —
-// "everything we're doing in territories is all about pushing everybody
-// through the playbook" (Derek) — unclaimed/invited prospecting stays
-// Planner's job, same split TerritoryDirectory.tsx's own comments already
-// draw.
-//
-// Deliberately built without any WordPress /api/directory/listings fetch:
-// Contact.city/state are already synced from GHL specifically to power this
-// match (see their doc comments in data.ts), so which territory a claimed
-// business belongs to is derivable entirely from data already loaded
-// app-wide (clients/contacts/tasks) — no new network call on login.
-//
-// Contact -> Client linkage deliberately mirrors TerritoryPanel.tsx/
-// TerritoryDirectory.tsx's own `clientIds.has("cl_" + c.id)` convention
-// rather than reading Contact.clientId: GHL-synced contacts sit in a shared
-// "c_directory" bucket on that field (never backfilled to the real
-// per-business client once one exists), so it can't be trusted here either —
-// same lesson Claytown CrossFit already taught the id-matching in
-// TerritoryDirectory. And the city/state match itself needs normalizeState()
-// on both sides — GHL returns state as "CA", "California", or "ca"
-// interchangeably for the same territory, so a raw string compare silently
-// drops every contact synced with the long form.
-import { useMemo, useState } from "react";
+// The territory-work equivalent of the client Dashboard: log in and know
+// exactly what to do today across every territory you're assigned to,
+// without opening each city's Businesses tab one at a time — and ordered by
+// what actually makes money, not just whatever happens to still be open.
+// "Super focus on money making activities and sales" (Derek) drove the tier
+// order below: answer real replies first, close warm prospects who already
+// engaged, nudge the lukewarm ones, then keep already claimed businesses
+// moving. A first cut of this page just listed every claimed+ business
+// sorted by staleness — since nothing on a brand new territory rollout had
+// tripped either trigger yet, that meant a flat wall of hundreds of rows
+// with no way to tell what actually needed a human. This version pulls in
+// the same invite engagement signals (accepted/clicked) TerritoryDirectory.tsx
+// already tracks per city, drops the untriaged full roster entirely (that's
+// what each city's own Businesses tab is for), and gives every row a
+// one line reason it's here.
+import { useEffect, useMemo, useState } from "react";
 import {
   users, userById, playbookCompletion, normalizeState, CLIENT_STATUS_META, STEP_STALL_DAYS, todayIso as todayIsoDate,
-  type Client, type Contact, type Task, type Territory, type ClientStatus,
+  type Client, type Contact, type Task, type Territory, type ClientStatus, type PlannerInvite,
 } from "@/lib/data";
-import { isDue } from "@/lib/plannerPools";
+import { isDue, latestInviteStatus } from "@/lib/plannerPools";
+import { fetchPlannerWeeks } from "@/lib/db";
 import { authedFetch } from "@/lib/supabase";
 import { TerritoryBoard, type TerritoryBoardGroup, type BusinessRow } from "./cockpit/TerritoryBoard";
+import { type DirectoryListing } from "./cockpit/TerritoryDirectory";
 
 const DASHBOARD_STATUSES: ClientStatus[] = ["claimed", "interview", "onboarding", "active_client"];
 // Only these two ever go stale in the prospecting sense isStalled checks —
 // an active_client's health is tracked elsewhere (account status, not
-// playbook cadence), so it never age out into "Needs attention" this way,
+// playbook cadence), so it never age out into "Keep them moving" this way,
 // same carve-out TerritoryDirectory.tsx's own isStalled already makes.
 const STALL_ELIGIBLE: ClientStatus[] = ["claimed", "interview", "onboarding"];
 
-export function TerritoryDashboard({ me, canAdmin, territories, contacts, clients, tasks, onOpenClient, onOpenPlaybook }: {
+export function TerritoryDashboard({ me, canAdmin, territories, contacts, clients, tasks, onOpenClient, onOpenTerritory, onOpenPlaybook }: {
   me: { id: string };
   canAdmin: boolean;
   territories: Territory[];
@@ -49,6 +41,7 @@ export function TerritoryDashboard({ me, canAdmin, territories, contacts, client
   clients: Client[];
   tasks: Task[];
   onOpenClient: (id: string) => void;
+  onOpenTerritory: (territoryId: string) => void;
   onOpenPlaybook: (id: string) => void;
 }) {
   const [viewingUser, setViewingUser] = useState(me.id);
@@ -63,6 +56,26 @@ export function TerritoryDashboard({ me, canAdmin, territories, contacts, client
 
   const myTerritories = useMemo(() => territories.filter((t) => (t.assignedTo ?? []).includes(viewingUser)), [territories, viewingUser]);
 
+  // Invite engagement (accepted/clicked/opened) and the businesses that
+  // carry it both come from WordPress + planner_weeks, per city — the exact
+  // same two fetches TerritoryDirectory.tsx makes when you open one city,
+  // just run for every assigned territory at once here instead of one at a
+  // time. No cheaper Supabase-only path exists for this (confirmed against
+  // TerritoryDirectory's own data model) — the `claimed` flag and listing
+  // name/phone/category only ever come from the WP listings endpoint.
+  const [byTerritory, setByTerritory] = useState<Record<string, { listings: DirectoryListing[]; invites: Map<number, PlannerInvite> }>>({});
+  useEffect(() => {
+    let alive = true;
+    Promise.all(myTerritories.map(async (t) => {
+      const [listingsRes, weeks] = await Promise.all([
+        authedFetch(`/api/directory/listings?${new URLSearchParams({ city: t.city, state: t.state })}`).then((r) => r.json()).catch(() => ({ listings: [] })),
+        fetchPlannerWeeks(t.id).catch(() => []),
+      ]);
+      return [t.id, { listings: Array.isArray(listingsRes?.listings) ? listingsRes.listings : [], invites: latestInviteStatus(weeks) }] as const;
+    })).then((entries) => { if (alive) setByTerritory(Object.fromEntries(entries)); });
+    return () => { alive = false; };
+  }, [myTerritories]);
+
   const tasksByClient = useMemo(() => {
     const m = new Map<string, Task[]>();
     for (const t of tasks) {
@@ -75,7 +88,6 @@ export function TerritoryDashboard({ me, canAdmin, territories, contacts, client
 
   const conversationTaskFor = (clientId: string) => (tasksByClient.get(clientId) ?? []).find((t) => t.status !== "done" && t.priority === "conversation") ?? null;
   const isStalled = (c: Client) => STALL_ELIGIBLE.includes(c.status) && isDue(c.playbookLastProgressAt ?? null, todayIsoDate(), STEP_STALL_DAYS);
-  const needsAttention = (c: Client) => !!conversationTaskFor(c.id) || isStalled(c);
   const nextCheckInFor = (c: Client) => {
     const t = conversationTaskFor(c.id);
     if (!t) return null;
@@ -90,22 +102,28 @@ export function TerritoryDashboard({ me, canAdmin, territories, contacts, client
     return latest ? { authorName: userById(latest.authorId)?.name ?? "Someone", body: latest.body, at: latest.at } : null;
   };
 
-  const rows: BusinessRow[] = useMemo(() => {
+  // Claimed+ businesses — same source as before (Supabase only, no WP call),
+  // split into two distinct signals instead of one combined "needs
+  // attention": a real inbound reply sitting unanswered is a different, more
+  // urgent job than a business that's just gone quiet on its own.
+  type ClaimedRow = BusinessRow & { hasReply: boolean; stalledOnly: boolean };
+  const claimedRows = useMemo((): ClaimedRow[] => {
     const territorySet = new Set(myTerritories.map((t) => `${t.city.toLowerCase()}|${normalizeState(t.state)}`));
     const clientById = new Map(clients.map((c) => [c.id, c] as const));
     const todayDate = todayIsoDate();
     return contacts
-      .map((contact): BusinessRow | null => {
+      .map((contact): ClaimedRow | null => {
         if (!contact.city || !contact.state) return null;
         if (!territorySet.has(`${contact.city.trim().toLowerCase()}|${normalizeState(contact.state)}`)) return null;
         const c = clientById.get("cl_" + contact.id);
         if (!c || !DASHBOARD_STATUSES.includes(c.status)) return null;
         const convo = conversationTaskFor(c.id);
-        const attention = needsAttention(c);
+        const stalled = isStalled(c);
+        const attention = !!convo || stalled;
         const nextCheckIn = nextCheckInFor(c);
         const followedUp = attention && !!nextCheckIn && nextCheckIn > todayDate;
         return {
-          client: c,
+          id: c.id, name: c.name, client: c,
           city: `${contact.city}, ${contact.state}`,
           stageLabel: CLIENT_STATUS_META[c.status].label,
           stageColor: CLIENT_STATUS_META[c.status].dot,
@@ -117,23 +135,71 @@ export function TerritoryDashboard({ me, canAdmin, territories, contacts, client
           followedUp,
           taskId: convo?.id ?? null,
           followUpKey: convo?.id ?? c.id,
+          // A real inbound reply is a different, more urgent job than a
+          // business that's just gone quiet on its own — split into two
+          // groups below instead of one combined "needs attention".
+          hasReply: !!convo && !followedUp,
+          stalledOnly: !convo && stalled && !followedUp,
         };
       })
-      .filter((r): r is BusinessRow => r !== null);
+      .filter((r): r is ClaimedRow => r !== null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myTerritories, contacts, clients, tasks, tasksByClient, followUpDue]);
 
-  const attentionRows = rows.filter((r) => r.needsAttention && !r.followedUp);
-  const followedUpRows = rows.filter((r) => r.followedUp);
-  const workingRows = rows.filter((r) => !r.needsAttention)
-    .sort((a, b) => (a.client.playbookLastProgressAt ?? "").localeCompare(b.client.playbookLastProgressAt ?? ""));
+  // Prospect engagement rows — accepted or clicked an invite but hasn't
+  // claimed yet. Built straight from the WP listings + invite map (no
+  // contact/client matching needed, unlike claimedRows above): a
+  // DirectoryListing already carries every field a row needs (name, phone,
+  // category, public url), and these businesses may not even have a Client
+  // row yet. Same "strongest tier it qualifies for" predicates
+  // TerritoryDirectory.tsx's own engagement ladder uses (accepted > clicked),
+  // so a business never double counts across both.
+  const { acceptedRows, clickedRows } = useMemo(() => {
+    const accepted: BusinessRow[] = [];
+    const clicked: BusinessRow[] = [];
+    for (const t of myTerritories) {
+      const entry = byTerritory[t.id];
+      if (!entry) continue;
+      const cityLabel = `${t.city}, ${t.state}`;
+      for (const l of entry.listings) {
+        if (l.claimed) continue;
+        const gdId = typeof l.id === "number" ? l.id : parseInt(String(l.id), 10);
+        const inv = entry.invites.get(gdId);
+        if (!inv) continue;
+        const base: BusinessRow = {
+          id: `${t.id}|${l.id}`, name: l.name, client: null, city: cityLabel,
+          stageLabel: l.category || "Unclaimed", stageColor: "#94a3b8",
+          playbook: null, lastTouch: null, flagReason: null, nextCheckIn: null,
+          needsAttention: false, followedUp: false, taskId: null, followUpKey: `${t.id}|${l.id}`,
+          phone: l.phone || null, listingUrl: l.url || null,
+        };
+        if (inv.status === "accepted") {
+          accepted.push({ ...base, flagReason: `Accepted the invite ${timeAgoShort(inv.respondedAt ?? inv.at)} — call or visit to close` });
+        } else if (inv.clickedAt) {
+          clicked.push({ ...base, flagReason: `Clicked ${timeAgoShort(inv.clickedAt)}, hasn't finished — a nudge might close it` });
+        }
+      }
+    }
+    return { acceptedRows: accepted, clickedRows: clicked };
+  }, [myTerritories, byTerritory]);
+
+  const replyRows = claimedRows.filter((r) => r.hasReply);
+  const keepMovingRows = claimedRows.filter((r) => r.stalledOnly);
+  const followedUpRows = claimedRows.filter((r) => r.followedUp);
+  // Everyone else claimed+ and caught up — deliberately not rendered as
+  // rows (that was the wall-of-stuff problem). Just a count, so a quiet
+  // territory still confirms it checked everyone rather than looking broken.
+  const quietCount = claimedRows.length - replyRows.length - keepMovingRows.length - followedUpRows.length;
 
   const groups: TerritoryBoardGroup[] = [];
-  if (attentionRows.length) groups.push({ key: "attention", label: "Needs attention now", color: "#ef4444", rows: attentionRows });
+  if (replyRows.length) groups.push({ key: "reply", label: "Reply needed", color: "#ef4444", rows: replyRows });
+  if (acceptedRows.length) groups.push({ key: "accepted", label: "Ready to close", color: "#059669", rows: acceptedRows });
+  if (clickedRows.length) groups.push({ key: "clicked", label: "Nudge these", color: "#2563eb", rows: clickedRows });
+  if (keepMovingRows.length) groups.push({ key: "keep_moving", label: "Keep them moving", color: "#f59e0b", rows: keepMovingRows });
   if (followedUpRows.length) groups.push({ key: "followed_up", label: "Followed up, waiting to hear back", color: "#64748b", rows: followedUpRows });
-  if (workingRows.length) groups.push({ key: "working", label: "Working the Playbook", color: "#3b82f6", rows: workingRows });
 
   const onFollowUp = async (row: BusinessRow, note: string) => {
+    if (!row.client) return; // prospect rows have no task to attach a follow up to yet
     setFollowUpState((m) => ({ ...m, [row.followUpKey]: "saving" }));
     try {
       const res = await authedFetch("/api/tasks/follow-up", {
@@ -143,7 +209,7 @@ export function TerritoryDashboard({ me, canAdmin, territories, contacts, client
       const j = await res.json().catch(() => ({}));
       if (res.ok && j.ok && j.due) {
         const resolvedKey = j.taskId ?? row.followUpKey;
-        setFollowUpDue((m) => ({ ...m, [resolvedKey]: { from: row.taskId ? tasksByClient.get(row.client.id)?.find((t) => t.id === row.taskId)?.due ?? null : null, to: j.due } }));
+        setFollowUpDue((m) => ({ ...m, [resolvedKey]: { from: row.taskId ? tasksByClient.get(row.client!.id)?.find((t) => t.id === row.taskId)?.due ?? null : null, to: j.due } }));
         setFollowUpState((m) => { const n = { ...m }; delete n[row.followUpKey]; return n; });
         return;
       }
@@ -165,10 +231,25 @@ export function TerritoryDashboard({ me, canAdmin, territories, contacts, client
             </select>
           </>
         ) : (
-          <span className="text-[13px] text-muted">Every claimed business across your assigned territories</span>
+          <span className="text-[13px] text-muted">Everything that needs you across your assigned territories</span>
+        )}
+        {quietCount > 0 && (
+          <span className="ml-auto text-[13px] text-muted">{quietCount} other claimed business{quietCount === 1 ? "" : "es"} moving through the Playbook, nothing urgent today</span>
         )}
       </div>
-      <TerritoryBoard groups={groups} followUpState={followUpState} onOpenClient={onOpenClient} onOpenPlaybook={onOpenPlaybook} onFollowUp={onFollowUp} onDismissError={onDismissError} />
+      <TerritoryBoard groups={groups} followUpState={followUpState} onOpenClient={onOpenClient} onOpenTerritory={onOpenTerritory} onOpenPlaybook={onOpenPlaybook} onFollowUp={onFollowUp} onDismissError={onDismissError} />
     </div>
   );
+}
+
+// Compact "2d ago" / "3h ago" style relative time for the invite engagement
+// flag lines — timeAgo() in data.ts renders a longer human sentence meant
+// for a full activity feed line, not a short reason clause.
+function timeAgoShort(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const days = Math.floor(ms / 86400000);
+  if (days >= 1) return `${days}d ago`;
+  const hours = Math.floor(ms / 3600000);
+  if (hours >= 1) return `${hours}h ago`;
+  return "just now";
 }
