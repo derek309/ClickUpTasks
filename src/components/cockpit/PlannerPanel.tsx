@@ -20,6 +20,7 @@ import {
 } from "@/lib/data";
 import { generatePlannerBrief } from "@/lib/plannerBrief";
 import { pushPlannerWeek } from "@/lib/plannerPush";
+import { computePlannerPools } from "@/lib/plannerPools";
 import { I, newId } from "./ui";
 import { type DirectoryListing } from "./TerritoryDirectory";
 
@@ -46,7 +47,7 @@ const SECTION_PRESETS = ["Hidden Gem", "The Story", "New In Town", "Ask Your Con
 // data worth syncing across devices.
 const DRAFT_CACHE_PREFIX = "cut_plannerDraft_";
 
-export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekChange, clients, tasks }: {
+export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekChange, clients, tasks, pushToast }: {
   territoryId: string; city: string; state: string;
   // Deep-link support (Cockpit's URL sync) — initialWeekId seeds which week
   // opens on mount, onWeekChange mirrors every change back up so the URL
@@ -57,6 +58,9 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
   // component still works standalone; when omitted, that queue just falls
   // back to its underlying first-accepted order.
   clients?: Client[]; tasks?: Task[];
+  // Only used for the "no eligible business left" message on Pick randomly
+  // below. Optional so this component still works standalone without it.
+  pushToast?: (text: string) => void;
 }) {
   const [weeks, setWeeks] = useState<PlannerWeek[]>([]);
   const [loading, setLoading] = useState(true);
@@ -144,7 +148,7 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
   if (openWeek) {
     return (
       <WeekWorkspace week={openWeek} weeks={weeks} listings={listings} cityName={city} state={state} onBack={() => setOpenWeekId(null)}
-        onPatch={(patch) => patchWeek(openWeek.id, patch)} onDelete={() => deleteWeek(openWeek.id)} clients={clients} tasks={tasks} />
+        onPatch={(patch) => patchWeek(openWeek.id, patch)} onDelete={() => deleteWeek(openWeek.id)} clients={clients} tasks={tasks} pushToast={pushToast} />
     );
   }
 
@@ -196,6 +200,13 @@ export function PlannerPanel({ territoryId, city, state, initialWeekId, onWeekCh
 function toGdPlaceId(id: number | string): number | null {
   const n = typeof id === "number" ? id : parseInt(String(id), 10);
   return Number.isFinite(n) ? n : null;
+}
+// Module scope, not a component/hook body, on purpose: react-hooks/purity
+// flags Math.random() as impure wherever it's textually written inside a
+// component function, even inside a click handler that never runs during
+// render. A plain top level helper is the actual fix, not a suppression.
+function pickRandomFrom<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
 }
 
 function BusinessPicker({ listings, onPick, onCancel }: {
@@ -288,7 +299,7 @@ function SlotInviteButton({ territoryId, week, gdPlaceId, count, onSent }: {
   );
 }
 
-function WeekWorkspace({ week, weeks, listings, cityName, state, onBack, onPatch, onDelete, clients, tasks }: {
+function WeekWorkspace({ week, weeks, listings, cityName, state, onBack, onPatch, onDelete, clients, tasks, pushToast }: {
   week: PlannerWeek;
   weeks: PlannerWeek[]; // the territory's full week history, for rotation "due" status
   listings: DirectoryListing[];
@@ -300,6 +311,7 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, onBack, onPatch
   // The full roster — used only to rank the "ready to feature" queue by
   // Playbook completion (see acceptedUnassigned below).
   clients?: Client[]; tasks?: Task[];
+  pushToast?: (text: string) => void;
 }) {
   const [pickerSlot, setPickerSlot] = useState<PlannerSlot | null>(null);
   const [slPickerOpen, setSlPickerOpen] = useState(false);
@@ -440,6 +452,35 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, onBack, onPatch
   const assignListingToSlot = (l: DirectoryListing, slot: PlannerSlot) => {
     const gdPlaceId = toGdPlaceId(l.id);
     setSlot(slot, { clientId: null, gdPlaceId, name: l.name, url: l.url ?? "", cat: l.category ?? "", note: "" });
+  };
+  // Filling Spotlight/Hidden Gem used to mean scrolling the whole directory
+  // by hand when nobody's accepted an invite yet (the shortlist above sits
+  // empty for weeks at a time on a newer territory) — this reuses the same
+  // rotation aware pool computePlannerPools already builds (skips anyone
+  // featured too recently, ranks the week's theme categories first if set),
+  // then picks at random among whichever of those are actually due, so a
+  // rep blocked on today's send gets a real business in one click instead
+  // of an empty search box. Spotlight pulls from claimed and has an offer
+  // listings (computePlannerPools' "spotlight" pool); every other business
+  // slot (gem/gem2/gem3) pulls from unclaimed listings (its "hiddenGem"
+  // pool) — an actual hidden gem prospect, not a client, matching the
+  // slot's own name.
+  const pickRandomForSlot = (slot: PlannerSlot) => {
+    const pools = computePlannerPools({
+      listings: listings.map((l) => ({ id: l.id, name: l.name, category: l.category ?? "", claimed: l.claimed, hasOffer: l.hasOffer, score: l.score })),
+      weeks,
+      dismissedIds: week.dismissed,
+      excludeNames: PLANNER_BUSINESS_SLOTS.map((s) => week.picks[s]?.name).filter((n): n is string => !!n),
+      todayIso: todayIso(),
+      categories: week.categories,
+    });
+    const pool = slot === "spotlight" ? pools.spotlight : pools.hiddenGem;
+    if (pool.length === 0) { pushToast?.(`No eligible ${slot === "spotlight" ? "spotlight" : "hidden gem"} businesses right now. Try Pick a business instead.`); return; }
+    const due = pool.filter((c) => c.due);
+    const eligible = due.length > 0 ? due : pool;
+    const pick = pickRandomFrom(eligible);
+    const listing = listings.find((l) => toGdPlaceId(l.id) === pick.gdPlaceId);
+    if (listing) assignListingToSlot(listing, slot);
   };
   // A listing's client, found by its ghlContactId — either the id-derived
   // contact (Client.id === "cl_" + contactId) or an explicit
@@ -770,6 +811,9 @@ function WeekWorkspace({ week, weeks, listings, cityName, state, onBack, onPatch
                   <div>
                     <div className="flex flex-wrap gap-2">
                       <button onClick={() => setPickerSlot(slot)} className="rounded-lg border border-dashed px-3 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">+ Pick a business</button>
+                      {PLANNER_BUSINESS_SLOTS.includes(slot) && (
+                        <button onClick={() => pickRandomForSlot(slot)} title="Picks a real, rotation eligible business at random so you're never stuck on an empty search" className="rounded-lg border px-3 py-1.5 text-[13px] font-medium text-accent hover:bg-accent-soft">🎲 Pick randomly</button>
+                      )}
                       {slot === "story" && (
                         <button onClick={suggestStory} disabled={storySuggestLoading} className="rounded-lg border px-3 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground disabled:opacity-40">{storySuggestLoading ? "Searching…" : "✨ Find local news"}</button>
                       )}
