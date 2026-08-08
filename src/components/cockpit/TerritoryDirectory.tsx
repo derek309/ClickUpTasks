@@ -27,6 +27,7 @@ import {
   type Contact, type Client, type ClientStatus, type Task, type PlannerInvite, type PlannerWeek,
 } from "@/lib/data";
 import { I } from "./ui";
+import { TouchPanel, type TouchResult } from "./TouchLogger";
 // Types only (erased at build) — the lib itself is server-only.
 import type { JoinFunnelStep, JoinFunnelEntry } from "@/lib/joinFunnelServer";
 
@@ -459,6 +460,16 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
     } catch (e) {
       setInviteState((m) => ({ ...m, [gdPlaceId]: e instanceof Error ? e.message : "Invite failed." }));
     }
+  };
+  // One row's touch panel open at a time — same reasoning as the Territory
+  // Dashboard's version: a list with several of these expanded stops being
+  // scannable. Patches the one listing in place from what
+  // /api/directory/activity echoes back rather than refetching the whole
+  // city, so logging a touch is instant instead of waiting on a round trip.
+  const [touchOpenId, setTouchOpenId] = useState<number | null>(null);
+  const patchListingTouch = (gdPlaceId: number, result: TouchResult) => {
+    setTouchOpenId(null);
+    setListings((prev) => (prev ?? []).map((l) => (String(l.id) === String(gdPlaceId) ? { ...l, ...result } : l)));
   };
   // The public "I'm interested" link per business — the same page the invite
   // email points at, so a rep can hand it over directly (text it, read it out
@@ -1337,7 +1348,13 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                       onFeature={onFeature && ((rr) => onFeature({ clientId: rr.client?.id ?? null, contact: rr.contact, name: rr.listing.name, city, state }))}
                       playbookTasks={(r.client && playbookTasksByClient?.get(r.client.id)) || []} onOpenPlaybook={onOpenPlaybook}
                       otherLists={(r.client && otherListsByClient?.get(r.client.id)) || []} onOpenProject={onOpenProject}
-                      inviteActions={inviteActions} followUp={followUp} />
+                      inviteActions={inviteActions} followUp={followUp}
+                      touch={gdPlaceId != null ? {
+                        gdPlaceId,
+                        open: touchOpenId === gdPlaceId,
+                        onToggle: () => setTouchOpenId((cur) => (cur === gdPlaceId ? null : gdPlaceId)),
+                        onLogged: (result) => patchListingTouch(gdPlaceId, result),
+                      } : null} />
                   );
                 })}
               </div>
@@ -1459,7 +1476,7 @@ function FlagRow({ row, onAddContact, onOpenClient, stage, reason, waiting, foll
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, template, stage, flaggedAbove, invite, funnelStep, inviteHistoryList, onSetClientStatus, canAdmin, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, otherLists, onOpenProject, inviteActions, followUp }: {
+function ListingRow({ row, onAddContact, onOpenClient, template, stage, flaggedAbove, invite, funnelStep, inviteHistoryList, onSetClientStatus, canAdmin, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, otherLists, onOpenProject, inviteActions, followUp, touch }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
   onOpenClient: (id: string) => void;
@@ -1535,6 +1552,15 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, flaggedA
     state: "saving" | string | undefined;
     onFollowUp: () => void;
     onDismissError: () => void;
+  } | null;
+  // Log a call/email/SMS/visit/appointment against this listing, same panel
+  // the Territory Dashboard uses — null when there's no valid listing id to
+  // key the write by.
+  touch?: {
+    gdPlaceId: number;
+    open: boolean;
+    onToggle: () => void;
+    onLogged: (result: TouchResult) => void;
   } | null;
 }) {
   const { listing, contact, client } = row;
@@ -1726,32 +1752,50 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, flaggedA
           retired (Derek, Aug 4); "↺ Bring back" stays only to un-stick any
           business skipped before that. Once claimed, this business's "what's
           left" is Playbook progress above, not invite state. */}
-      {inviteActions && (stage === "unclaimed" || stage === "invited") && (
+      {(inviteActions || touch) && (stage === "unclaimed" || stage === "invited") && (
         <div className="flex flex-wrap items-center gap-1.5 px-4 pb-2 pl-9 pt-1.5 sm:pl-9">
-          {invite?.status === "skipped" ? (
-            <button onClick={inviteActions.onBringBack} className="shrink-0 text-[12px] font-semibold text-accent hover:underline">↺ Bring back</button>
-          ) : (
-            <>
-              {invite?.status === "accepted" && <span className="shrink-0 rounded-md bg-emerald-100 px-2 py-1 text-[12px] font-semibold text-emerald-700">Accepted</span>}
-              {inviteActions.link && (
-                <button onClick={inviteActions.onCopyLink} title={inviteActions.link} className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">
-                  {inviteActions.copied ? "Copied ✓" : "🔗 Copy link"}
-                </button>
-              )}
-              {inviteActions.state === "sending" ? (
-                <span className="shrink-0 text-[12px] text-muted">Sending…</span>
-              ) : inviteActions.state ? (
-                <span className="flex shrink-0 items-center gap-1.5 text-[12px]">
-                  <span className="text-danger">{inviteActions.state}</span>
-                  <button onClick={inviteActions.onDismissError} className="font-medium text-muted hover:text-foreground">Dismiss</button>
-                </span>
-              ) : inviteActions.armed ? (
-                <button onClick={inviteActions.onSend} className="shrink-0 rounded-md border border-danger px-2 py-1 text-[12px] font-semibold text-danger hover:bg-danger/10">Confirm{invite ? " resend" : ""}?</button>
-              ) : (
-                <button onClick={inviteActions.onArm} className="shrink-0 rounded-md border border-accent px-2 py-1 text-[12px] font-semibold text-accent hover:bg-accent-soft">✉️ {invite ? "Invite again" : "Invite"}</button>
-              )}
-            </>
+          {inviteActions && (
+            invite?.status === "skipped" ? (
+              <button onClick={inviteActions.onBringBack} className="shrink-0 text-[12px] font-semibold text-accent hover:underline">↺ Bring back</button>
+            ) : (
+              <>
+                {invite?.status === "accepted" && <span className="shrink-0 rounded-md bg-emerald-100 px-2 py-1 text-[12px] font-semibold text-emerald-700">Accepted</span>}
+                {inviteActions.link && (
+                  <button onClick={inviteActions.onCopyLink} title={inviteActions.link} className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">
+                    {inviteActions.copied ? "Copied ✓" : "🔗 Copy link"}
+                  </button>
+                )}
+                {inviteActions.state === "sending" ? (
+                  <span className="shrink-0 text-[12px] text-muted">Sending…</span>
+                ) : inviteActions.state ? (
+                  <span className="flex shrink-0 items-center gap-1.5 text-[12px]">
+                    <span className="text-danger">{inviteActions.state}</span>
+                    <button onClick={inviteActions.onDismissError} className="font-medium text-muted hover:text-foreground">Dismiss</button>
+                  </span>
+                ) : inviteActions.armed ? (
+                  <button onClick={inviteActions.onSend} className="shrink-0 rounded-md border border-danger px-2 py-1 text-[12px] font-semibold text-danger hover:bg-danger/10">Confirm{invite ? " resend" : ""}?</button>
+                ) : (
+                  <button onClick={inviteActions.onArm} className="shrink-0 rounded-md border border-accent px-2 py-1 text-[12px] font-semibold text-accent hover:bg-accent-soft">✉️ {invite ? "Invite again" : "Invite"}</button>
+                )}
+              </>
+            )
           )}
+          {/* Call/email/SMS/visit/appointment, straight to WordPress /sales —
+              the same touch panel the Territory Dashboard uses. Sits beside
+              the invite actions rather than replacing them: inviting is
+              Planner's automated ladder, this is a rep's own manual outreach,
+              and a business can have both going at once. */}
+          {touch && !touch.open && (
+            <button onClick={touch.onToggle} className="shrink-0 rounded-md border px-2 py-1 text-[16px] font-medium text-muted hover:bg-surface hover:text-foreground">
+              📞 Log a touch
+            </button>
+          )}
+        </div>
+      )}
+      {touch?.open && (
+        <div className="px-4 pb-2 pl-9 sm:pl-9">
+          <TouchPanel listingId={touch.gdPlaceId} phone={listing.phone || null} email={listing.email || null}
+            onLogged={touch.onLogged} onCancel={touch.onToggle} />
         </div>
       )}
     </div>
