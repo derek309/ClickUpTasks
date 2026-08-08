@@ -41,7 +41,10 @@ export function TerritoryDashboard({ me, territories, contacts, clients, tasks, 
   clients: Client[];
   tasks: Task[];
   onOpenClient: (id: string) => void;
-  onOpenTerritory: (territoryId: string) => void;
+  // listingId, when given, deep-links straight to that row in the Businesses
+  // page instead of dumping the rep on the top of the whole city — see
+  // TerritoryBoard's "Open in Businesses".
+  onOpenTerritory: (territoryId: string, listingId?: number) => void;
   onOpenPlaybook: (id: string) => void;
 }) {
   const [followUpState, setFollowUpState] = useState<Record<string, "saving" | string>>({});
@@ -187,6 +190,7 @@ export function TerritoryDashboard({ me, territories, contacts, clients, tasks, 
           playbook: null, lastTouch: null, flagReason: null, nextCheckIn: null,
           needsAttention: false, followedUp: false, taskId: null, followUpKey: `${t.id}|${l.id}`,
           phone: l.phone || null, listingUrl: l.url || null, email: l.email || null,
+          bookingUrl: l.bookingUrl || null, ghlUrl: l.ghlUrl || undefined, editUrl: l.editUrl || undefined,
           listingId: Number.isFinite(gdId) ? gdId : null,
           touchLabel: l.outcomeLabel || null, touchedAt: l.lastTouched, followupDue: l.followupDue,
         };

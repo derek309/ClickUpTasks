@@ -42,8 +42,8 @@ const OUTCOMES = [
   { key: "visited", label: "Visited" },
   { key: "presented", label: "Appointment" },
 ] as const;
-type OutcomeKey = (typeof OUTCOMES)[number]["key"];
-const LINKABLE: Partial<Record<OutcomeKey, "tel" | "mailto" | "sms">> = { called: "tel", emailed: "mailto", sms: "sms" };
+export type OutcomeKey = (typeof OUTCOMES)[number]["key"];
+const LINKABLE: Partial<Record<OutcomeKey, "tel" | "mailto" | "sms" | "booking">> = { called: "tel", emailed: "mailto", sms: "sms", presented: "booking" };
 
 const FOLLOW_UPS = [
   { days: 2, label: "In 2 days" },
@@ -83,17 +83,27 @@ function daysFromToday(n: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export function TouchPanel({ listingId, phone, email, onLogged, onCancel }: {
+export function TouchPanel({ listingId, phone, email, bookingUrl, initialOutcome, onLogged, onCancel }: {
   listingId: number | string;
-  // Only what's needed to make Called/Emailed real links — absent for a
-  // listing WordPress never got a phone/email for, in which case those two
-  // fall back to a plain (non-linking) outcome select, same as Visited.
+  // Only what's needed to make Called/Emailed/Appointment real links —
+  // absent for a listing WordPress never got that contact detail for (or,
+  // for bookingUrl, a city with no interview calendar set up yet), in which
+  // case that outcome falls back to a plain (non-linking) select, same as
+  // Visited.
   phone?: string | null;
   email?: string | null;
+  bookingUrl?: string | null;
+  // Lets a caller open the panel pre-selected on a specific outcome — the
+  // row-level Call Now/Send Email/Send SMS/Book Meeting buttons are
+  // themselves the real tel:/mailto:/sms:/booking links, and pass this so
+  // the panel opens straight to "add a note, pick a follow-up" instead of
+  // making the rep pick the same outcome a second time inside the panel.
+  // Still fully editable from there — this only sets the starting point.
+  initialOutcome?: OutcomeKey;
   onLogged: (result: TouchResult) => void;
   onCancel: () => void;
 }) {
-  const [outcome, setOutcome] = useState<OutcomeKey | null>(null);
+  const [outcome, setOutcome] = useState<OutcomeKey | null>(initialOutcome ?? null);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -147,18 +157,21 @@ export function TouchPanel({ listingId, phone, email, onLogged, onCancel }: {
           <div className="flex flex-wrap gap-1.5">
             {OUTCOMES.map((o) => {
               const linkKind = LINKABLE[o.key];
-              // called/emailed/sms only get a real link when we actually
-              // have that contact detail — otherwise falling back to a plain
-              // select keeps the button usable instead of a dead tel:/mailto:
-              // link to nothing.
+              // called/emailed/sms/presented only get a real link when we
+              // actually have that contact detail (or, for presented, a
+              // booking calendar for this city) — otherwise falling back to
+              // a plain select keeps the button usable instead of a dead link.
               const href = linkKind === "tel" && phone ? `tel:${phone}`
                 : linkKind === "mailto" && email ? `mailto:${email}`
                 : linkKind === "sms" && phone ? `sms:${phone}`
+                : linkKind === "booking" && bookingUrl ? bookingUrl
                 : null;
               const cls = chip(outcome === o.key);
+              const openText = linkKind === "tel" ? "your phone app" : linkKind === "sms" ? "your messages app" : linkKind === "mailto" ? "your email app" : "the booking page";
               return href ? (
                 <a key={o.key} href={href} onClick={() => pick(o.key)}
-                  title={`${o.label} — opens your ${linkKind === "tel" ? "phone" : linkKind === "sms" ? "messages" : "email"} app and marks this as ${o.label.toLowerCase()}`}
+                  {...(linkKind === "booking" ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+                  title={`${o.label} — opens ${openText} and marks this as ${o.label.toLowerCase()}`}
                   className={`${cls} inline-flex items-center gap-1.5 ${saving ? "pointer-events-none" : ""}`} aria-disabled={saving}>
                   <I.phone className="h-3.5 w-3.5" /> {o.label}
                 </a>

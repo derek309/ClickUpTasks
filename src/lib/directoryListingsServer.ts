@@ -3,12 +3,57 @@
 // going through requireUser, which only ever authenticates a logged-in
 // browser session. See that route for the auth/501-degrade wrapper.
 import type { DirectoryListing } from "@/components/cockpit/TerritoryDirectory";
+import { supabaseAdmin } from "./supabaseAdmin";
+import { tokenForLocation } from "./ghlTokens";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 const WP_BASE = process.env.CUL_WP_BASE_URL || "";
 const WP_KEY = process.env.CLICKUPTASKS_API_KEY || "";
 export const directoryConfigured = Boolean(WP_BASE && WP_KEY);
+
+// Every unclaimed/invited contact lives under this one shared sub-account
+// (see clients.id = 'c_directory') until it actually claims and gets its own
+// real GHL location — same id the rest of the app already treats as the
+// pre-claim bucket (ghl/webhook route, tasks/follow-up route). Not a env var
+// or config value: it's a fixed piece of this account's GHL structure, same
+// spirit as WORKSPACE_CLIENT_ID.
+const DIRECTORY_CLIENT_ID = "c_directory";
+
+// Resolved once per fetchDirectoryListingsServer call, not per listing —
+// ghlUrl and bookingUrl are both location/calendar-wide, not per-business.
+async function directoryLocationId(): Promise<string | null> {
+  const { data: dir } = await supabaseAdmin.from("clients").select("ghl_location_id").eq("id", DIRECTORY_CLIENT_ID).maybeSingle();
+  return dir?.ghl_location_id ?? null;
+}
+
+// Each territory that's been set up for interviews has its own GHL calendar
+// named "{City}, {State} | ClickUpLocal Business Interview" (confirmed live:
+// Tracy and Lincoln currently have one, Rocklin and Roseville don't yet) —
+// matched by that name prefix rather than a stored mapping, so a newly
+// created calendar just works without a second place to register it. null
+// when the location/token isn't resolvable or no calendar matches this city.
+//
+// The public booking widget URL (https://api.leadconnectorhq.com/widget/
+// booking/{calendarId}) is GHL's documented pattern, not something this repo
+// had a working example of before — flagged as unverified until it's
+// actually clicked once in production.
+async function bookingUrlForCity(locationId: string, city: string, state: string): Promise<string | null> {
+  const token = await tokenForLocation(locationId);
+  if (!token) return null;
+  try {
+    const res = await fetch(`https://services.leadconnectorhq.com/calendars/?locationId=${encodeURIComponent(locationId)}`, {
+      headers: { Authorization: `Bearer ${token}`, Version: "2021-04-15", Accept: "application/json" },
+    });
+    if (!res.ok) return null;
+    const calendars: any[] = (await res.json())?.calendars ?? [];
+    const wanted = `${city}, ${state}`.toLowerCase();
+    const match = calendars.find((c) => String(c.name ?? "").toLowerCase().startsWith(wanted));
+    return match ? `https://api.leadconnectorhq.com/widget/booking/${match.id}` : null;
+  } catch {
+    return null;
+  }
+}
 
 // GeoDirectory stores region as the full state name ("California"), while the
 // territory sends the 2-letter code ("CA"). Normalize both to the abbreviation
@@ -105,32 +150,47 @@ export async function fetchDirectoryListingsServer(city: string, state: string):
     if (rawItems.length < total) truncated = true;
   }
 
+  // Both resolved once for the whole city, not per listing — a wp-admin edit
+  // link doesn't need either, but the GHL contact link and the booking link
+  // are location/calendar-wide, so there's nothing per-business to look up
+  // twice for 200 rows.
+  const locationId = await directoryLocationId();
+  const bookingUrl = locationId ? await bookingUrlForCity(locationId, city, state) : null;
+
   const wantState = normState(state);
   const listings: DirectoryListing[] = rawItems
     .filter((it) => !wantState || normState(it.region ?? it.state ?? "") === wantState || String(it.region ?? "").trim() === "")
-    .map((it) => ({
-      id: it.id,
-      name: decodeEntities(String(it.title ?? "")),
-      phone: String(it.phone ?? ""),
-      email: String(it.email ?? ""),
-      city: String(it.city ?? ""),
-      street: String(it.street ?? ""),
-      claimed: Boolean(it.claimed),
-      hasOffer: Boolean(it.has_offer),
-      hasActiveEvents: Boolean(it.has_active_events),
-      hasRecentPost: Boolean(it.has_recent_post),
-      url: String(it.listing_url ?? "").trim() || (WP_BASE ? `${WP_BASE}/?p=${it.id}` : ""),
-      score: (() => { const n = parseInt(String(it.clickuplocal_score ?? ""), 10); return Number.isFinite(n) ? n : null; })(),
-      category: decodeEntities(Array.isArray(it.categories) && it.categories.length ? String(it.categories[0]).split("›").pop()!.trim() : String(it.category ?? "")),
-      outcome: String(it.outcome ?? ""),
-      outcomeLabel: String(it.outcome_label ?? ""),
-      nextAction: String(it.next_action ?? ""),
-      nextActionLabel: String(it.next_action_label ?? ""),
-      followupDue: typeof it.followup_due === "number" ? it.followup_due : 0,
-      lastTouched: typeof it.last_touched === "number" ? it.last_touched : 0,
-      rep: String(it.sales_rep?.name ?? ""),
-      ghlContactId: String(it.ghl_contact_id ?? ""),
-    }));
+    .map((it) => {
+      const ghlContactId = String(it.ghl_contact_id ?? "");
+      return {
+        id: it.id,
+        name: decodeEntities(String(it.title ?? "")),
+        phone: String(it.phone ?? ""),
+        email: String(it.email ?? ""),
+        city: String(it.city ?? ""),
+        street: String(it.street ?? ""),
+        claimed: Boolean(it.claimed),
+        hasOffer: Boolean(it.has_offer),
+        hasActiveEvents: Boolean(it.has_active_events),
+        hasRecentPost: Boolean(it.has_recent_post),
+        url: String(it.listing_url ?? "").trim() || (WP_BASE ? `${WP_BASE}/?p=${it.id}` : ""),
+        // wp-admin edit screen for this GeoDirectory listing (gd_place post
+        // type — same post id the public listing page above resolves).
+        editUrl: WP_BASE ? `${WP_BASE.replace(/\/$/, "")}/wp-admin/post.php?post=${it.id}&action=edit` : "",
+        ghlUrl: locationId && ghlContactId ? `https://app.gohighlevel.com/v2/location/${locationId}/contacts/detail/${ghlContactId}` : "",
+        bookingUrl,
+        score: (() => { const n = parseInt(String(it.clickuplocal_score ?? ""), 10); return Number.isFinite(n) ? n : null; })(),
+        category: decodeEntities(Array.isArray(it.categories) && it.categories.length ? String(it.categories[0]).split("›").pop()!.trim() : String(it.category ?? "")),
+        outcome: String(it.outcome ?? ""),
+        outcomeLabel: String(it.outcome_label ?? ""),
+        nextAction: String(it.next_action ?? ""),
+        nextActionLabel: String(it.next_action_label ?? ""),
+        followupDue: typeof it.followup_due === "number" ? it.followup_due : 0,
+        lastTouched: typeof it.last_touched === "number" ? it.last_touched : 0,
+        rep: String(it.sales_rep?.name ?? ""),
+        ghlContactId,
+      };
+    });
 
   return { listings, total, truncated };
 }

@@ -27,7 +27,7 @@ import {
   type Contact, type Client, type ClientStatus, type Task, type PlannerInvite, type PlannerWeek,
 } from "@/lib/data";
 import { I } from "./ui";
-import { TouchPanel, type TouchResult } from "./TouchLogger";
+import { TouchPanel, type TouchResult, type OutcomeKey } from "./TouchLogger";
 // Types only (erased at build) — the lib itself is server-only.
 import type { JoinFunnelStep, JoinFunnelEntry } from "@/lib/joinFunnelServer";
 
@@ -45,6 +45,20 @@ export type DirectoryListing = {
   // the Phase 2 WP work (post-to-listing linking) ships; safe default either way.
   hasRecentPost: boolean;
   url: string; // public listing page — "" if CUL_WP_BASE_URL isn't configured
+  // wp-admin edit-post screen for this listing — "" if CUL_WP_BASE_URL isn't
+  // configured. Requires being logged into WP as an admin/editor; this app
+  // has no way to deep-auth into it, so it's a plain link, same as View listing.
+  editUrl: string;
+  // GHL contact record for a business that hasn't claimed yet, resolved
+  // against the shared pre-claim sub-account (clients.id = 'c_directory') —
+  // "" when the directory location or this listing's ghlContactId isn't
+  // resolvable.
+  ghlUrl: string;
+  // Public booking widget for this city's GHL interview calendar — null when
+  // no calendar exists yet for this city (only Tracy/Lincoln do as of
+  // 2026-08-08) or the location/token didn't resolve. Whole-city, not
+  // per-listing — every row in the same fetch shares one value.
+  bookingUrl: string | null;
   score: number | null;
   category: string;
   rep: string;          // assigned ambassador's name (read-only here)
@@ -215,7 +229,7 @@ const inviteCache = new Map<string, PlannerActivityCacheEntry>();
 type FunnelCacheEntry = { steps: JoinFunnelStep[]; byGdPlaceId: Record<number, JoinFunnelEntry>; at: number };
 const funnelCache = new Map<string, FunnelCacheEntry>();
 
-export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, otherListsByClient, onOpenProject, onSetClientStatus, canAdmin, ghlContactUrlFor, territoryId, dailyInviteCap }: {
+export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, otherListsByClient, onOpenProject, onSetClientStatus, canAdmin, ghlContactUrlFor, territoryId, dailyInviteCap, highlightListingId, onHighlightConsumed }: {
   city: string;
   state: string;
   contacts: Contact[];   // already scoped to this city/state by the caller
@@ -269,6 +283,11 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // null/0 = auto-invite is off. Optional so the admin multi-city overview
   // (which has no one territory) just skips the preview.
   dailyInviteCap?: number | null;
+  // Scrolls straight to this listing and expands its group, when set — the
+  // Territory Dashboard's "Open in Businesses" instead of the top of the
+  // whole city. Consumed once via onHighlightConsumed.
+  highlightListingId?: number | null;
+  onHighlightConsumed?: () => void;
 }) {
   const cacheKey = `${city}|${state}`;
   const warm = () => listingsCache.get(cacheKey);
@@ -288,6 +307,31 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
     setStageFilter((cur) => (cur === key ? null : key));
     setCollapsed((s) => { const n = new Set(s); n.delete(key); return n; }); // in case "Collapse all" left it closed
   };
+  // "Open in Businesses" deep link: expand everything and clear any stage
+  // filter so the target row is guaranteed to actually be in the DOM, then
+  // scroll to and flash it — otherwise it's dumped at the top of a long city
+  // like a plain sidebar click, exactly the thing this was built to fix.
+  // Declared here (must run unconditionally every render — the `if (loading)
+  // return` a bit further down means anything declared after it would be a
+  // real rules-of-hooks violation, not a lint false positive) rather than
+  // down by `groups`, so it can't reference that computed value; checking
+  // raw `listings` for existence instead is enough and avoids duplicating
+  // groups' own tier logic just for this.
+  const [highlightedRowId, setHighlightedRowId] = useState<number | null>(null);
+  useEffect(() => {
+    if (highlightListingId == null || !listings) return;
+    if (!listings.some((l) => Number(l.id) === highlightListingId)) return; // not in this city
+    setCollapsed(new Set());
+    setStageFilter(null);
+    setHighlightedRowId(highlightListingId);
+    onHighlightConsumed?.();
+    const t = setTimeout(() => {
+      document.getElementById(`listing-row-${highlightListingId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 50); // one tick so the just-expanded groups have rendered their rows first
+    const clear = setTimeout(() => setHighlightedRowId(null), 4000);
+    return () => { clearTimeout(t); clearTimeout(clear); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightListingId, listings]);
   const [q, setQ] = useState("");
   // Sort within each stage group — Priority (default: due-for-outreach first,
   // per the Planner's own rotation window, so acquisition work the Planner
@@ -466,7 +510,13 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // scannable. Patches the one listing in place from what
   // /api/directory/activity echoes back rather than refetching the whole
   // city, so logging a touch is instant instead of waiting on a round trip.
+  // touchOutcome null = closed, "manual" = opened via the plain "Log a
+  // touch" trigger with nothing pre-picked, otherwise the outcome key of
+  // whichever Call Now/Send Email/Send SMS/Book Meeting link was clicked —
+  // same pattern as the Territory Dashboard's version of this row.
   const [touchOpenId, setTouchOpenId] = useState<number | null>(null);
+  const [touchOutcome, setTouchOutcome] = useState<OutcomeKey | "manual" | null>(null);
+  const openTouch = (gdPlaceId: number, outcome: OutcomeKey | "manual") => { setTouchOpenId(gdPlaceId); setTouchOutcome(outcome); };
   const patchListingTouch = (gdPlaceId: number, result: TouchResult) => {
     setTouchOpenId(null);
     setListings((prev) => (prev ?? []).map((l) => (String(l.id) === String(gdPlaceId) ? { ...l, ...result } : l)));
@@ -1351,10 +1401,12 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                       inviteActions={inviteActions} followUp={followUp}
                       touch={gdPlaceId != null ? {
                         gdPlaceId,
-                        open: touchOpenId === gdPlaceId,
-                        onToggle: () => setTouchOpenId((cur) => (cur === gdPlaceId ? null : gdPlaceId)),
+                        outcome: touchOpenId === gdPlaceId ? touchOutcome : null,
+                        onPick: (outcome) => openTouch(gdPlaceId, outcome),
+                        onClose: () => setTouchOpenId(null),
                         onLogged: (result) => patchListingTouch(gdPlaceId, result),
-                      } : null} />
+                      } : null}
+                      highlighted={gdPlaceId != null && highlightedRowId === gdPlaceId} />
                   );
                 })}
               </div>
@@ -1476,7 +1528,7 @@ function FlagRow({ row, onAddContact, onOpenClient, stage, reason, waiting, foll
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, template, stage, flaggedAbove, invite, funnelStep, inviteHistoryList, onSetClientStatus, canAdmin, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, otherLists, onOpenProject, inviteActions, followUp, touch }: {
+function ListingRow({ row, onAddContact, onOpenClient, template, stage, flaggedAbove, invite, funnelStep, inviteHistoryList, onSetClientStatus, canAdmin, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, otherLists, onOpenProject, inviteActions, followUp, touch, highlighted }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
   onOpenClient: (id: string) => void;
@@ -1558,10 +1610,18 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, flaggedA
   // key the write by.
   touch?: {
     gdPlaceId: number;
-    open: boolean;
-    onToggle: () => void;
+    // null = panel closed. "manual" = opened via the plain trigger with
+    // nothing pre-picked, otherwise which Call Now/Send Email/Send
+    // SMS/Book Meeting link was clicked.
+    outcome: OutcomeKey | "manual" | null;
+    onPick: (outcome: OutcomeKey | "manual") => void;
+    onClose: () => void;
     onLogged: (result: TouchResult) => void;
   } | null;
+  // Briefly flashed true when this row is the deep-link target of "Open in
+  // Businesses" from the Territory Dashboard — fades on its own, see the
+  // parent's highlightListingId effect.
+  highlighted?: boolean;
 }) {
   const { listing, contact, client } = row;
   const nameMouseDown = useRef<{ x: number; y: number } | null>(null);
@@ -1575,7 +1635,8 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, flaggedA
   const ghlUrl = client ? ghlContactUrlFor?.(client.id) : null;
 
   return (
-    <div className="border-b text-[15px] transition-colors last:border-0 hover:bg-accent-soft/50">
+    <div id={`listing-row-${listing.id}`}
+      className={`border-b text-[15px] transition-colors last:border-0 hover:bg-accent-soft/50 ${highlighted ? "bg-accent-soft ring-2 ring-inset ring-accent" : ""}`}>
       <div className="flex flex-col gap-1.5 px-4 py-2.5 sm:grid sm:min-h-[42px] sm:items-center sm:gap-2 sm:py-1.5" style={{ gridTemplateColumns: template }}>
         {/* Name + invite/outcome/due chips */}
         <div className="min-w-0">
@@ -1606,8 +1667,13 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, flaggedA
             ) : (
               <span className="min-w-0 truncate font-medium">{listing.name}</span>
             )}
-            {ghlUrl && <a href={ghlUrl} target="_blank" rel="noopener noreferrer" title="Open in GoHighLevel" className="shrink-0 rounded p-0.5 text-muted hover:bg-surface hover:text-accent"><I.bolt /></a>}
+            {/* Client's own GHL contact (a real sub-account) wins once one
+                exists; listing.ghlUrl is the pre-claim fallback, resolved
+                against the shared directory sub-account — same contact
+                either way, just a different location until it claims. */}
+            {(ghlUrl || listing.ghlUrl) && <a href={ghlUrl || listing.ghlUrl} target="_blank" rel="noopener noreferrer" title="Open in GoHighLevel" className="shrink-0 rounded p-0.5 text-muted hover:bg-surface hover:text-accent"><I.bolt /></a>}
             {listing.url && <a href={listing.url} target="_blank" rel="noopener noreferrer" title="View public listing page" className="shrink-0 rounded p-0.5 text-muted hover:bg-surface hover:text-accent"><I.link /></a>}
+            {listing.editUrl && <a href={listing.editUrl} target="_blank" rel="noopener noreferrer" title="Edit business profile (WordPress admin)" className="shrink-0 rounded p-0.5 text-muted hover:bg-surface hover:text-accent"><I.pencil /></a>}
           </div>
           <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 pl-5 text-[12px] text-muted">
             {flaggedAbove && (
@@ -1780,22 +1846,51 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, flaggedA
               </>
             )
           )}
-          {/* Call/email/SMS/visit/appointment, straight to WordPress /sales —
-              the same touch panel the Territory Dashboard uses. Sits beside
+          {/* Call/email/SMS/appointment, straight to WordPress /sales — the
+              same touch actions the Territory Dashboard uses, sitting beside
               the invite actions rather than replacing them: inviting is
               Planner's automated ladder, this is a rep's own manual outreach,
-              and a business can have both going at once. */}
-          {touch && !touch.open && (
-            <button onClick={touch.onToggle} className="shrink-0 rounded-md border px-2 py-1 text-[16px] font-medium text-muted hover:bg-surface hover:text-foreground">
-              📞 Log a touch
-            </button>
+              and a business can have both going at once. Each is a real
+              tel:/mailto:/sms:/booking link that also opens the panel below
+              pre-selected on that outcome. */}
+          {touch && !touch.outcome && (
+            <>
+              {listing.phone && (
+                <a href={`tel:${listing.phone}`} onClick={() => touch.onPick("called")}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-md border border-accent px-2 py-1 text-[16px] font-medium text-accent hover:bg-accent-soft">
+                  <I.phone className="h-3 w-3" /> Call Now
+                </a>
+              )}
+              {listing.email && (
+                <a href={`mailto:${listing.email}`} onClick={() => touch.onPick("emailed")}
+                  className="shrink-0 rounded-md border border-accent px-2 py-1 text-[16px] font-medium text-accent hover:bg-accent-soft">
+                  Send Email
+                </a>
+              )}
+              {listing.phone && (
+                <a href={`sms:${listing.phone}`} onClick={() => touch.onPick("sms")}
+                  className="shrink-0 rounded-md border border-accent px-2 py-1 text-[16px] font-medium text-accent hover:bg-accent-soft">
+                  Send SMS
+                </a>
+              )}
+              {listing.bookingUrl && (
+                <a href={listing.bookingUrl} target="_blank" rel="noopener noreferrer" onClick={() => touch.onPick("presented")}
+                  className="shrink-0 rounded-md border border-accent px-2 py-1 text-[16px] font-medium text-accent hover:bg-accent-soft">
+                  Book Meeting
+                </a>
+              )}
+              <button onClick={() => touch.onPick("manual")} className="shrink-0 rounded-md border px-2 py-1 text-[16px] font-medium text-muted hover:bg-surface hover:text-foreground">
+                Log a touch
+              </button>
+            </>
           )}
         </div>
       )}
-      {touch?.open && (
+      {touch?.outcome && (
         <div className="px-4 pb-2 pl-9 sm:pl-9">
-          <TouchPanel listingId={touch.gdPlaceId} phone={listing.phone || null} email={listing.email || null}
-            onLogged={touch.onLogged} onCancel={touch.onToggle} />
+          <TouchPanel key={touch.outcome} listingId={touch.gdPlaceId} phone={listing.phone || null} email={listing.email || null} bookingUrl={listing.bookingUrl}
+            initialOutcome={touch.outcome === "manual" ? undefined : touch.outcome}
+            onLogged={touch.onLogged} onCancel={touch.onClose} />
         </div>
       )}
     </div>

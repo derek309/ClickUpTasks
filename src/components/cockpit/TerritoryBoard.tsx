@@ -22,7 +22,7 @@
 import { useState } from "react";
 import { formatDue, timeAgo, htmlToText, playbookCompletion, type Client } from "@/lib/data";
 import { I } from "./ui";
-import { TouchPanel, type TouchResult } from "./TouchLogger";
+import { TouchPanel, type TouchResult, type OutcomeKey } from "./TouchLogger";
 
 export interface BusinessRow {
   // Unique key — a claimed+ row uses client.id, a prospect row has no client
@@ -59,6 +59,13 @@ export interface BusinessRow {
    * for this listing, in which case that outcome falls back to a plain
    * select instead of a dead mailto: link. */
   email?: string | null;
+  /** Public booking widget for this business's city, when its territory has
+   * one set up — null otherwise, in which case Book Meeting doesn't render. */
+  bookingUrl?: string | null;
+  /** GHL contact record and wp-admin edit screen — "" when not resolvable
+   * (see directoryListingsServer.ts), in which case that link doesn't render. */
+  ghlUrl?: string;
+  editUrl?: string;
   /** GeoDirectory post id, which is what /api/directory/activity keys a
    * logged touch by. Prospect rows only; a claimed+ row logs its outreach as
    * a comment on its conversation task instead. */
@@ -99,7 +106,9 @@ export function TerritoryBoard({ groups, followUpState, onOpenClient, onOpenTerr
   // call/copy-link/invite-again actions already live there, so a prospect
   // row's job is surfacing it across territories, not re-building those
   // actions here.
-  onOpenTerritory: (territoryId: string) => void;
+  // listingId, when given, deep-links to that specific row on the Businesses
+  // page instead of the top of the whole city — see the call site below.
+  onOpenTerritory: (territoryId: string, listingId?: number) => void;
   onOpenPlaybook: (id: string) => void;
   onFollowUp: (row: BusinessRow, note: string) => void;
   onDismissError: (row: BusinessRow) => void;
@@ -131,7 +140,7 @@ export function TerritoryBoard({ groups, followUpState, onOpenClient, onOpenTerr
                     expanded={expandedId === row.id}
                     onToggle={() => setExpandedId((cur) => (cur === row.id ? null : row.id))}
                     state={followUpState[row.followUpKey]}
-                    onOpenClient={() => (row.client ? onOpenClient(row.client.id) : onOpenTerritory(row.id.split("|")[0]))}
+                    onOpenClient={() => (row.client ? onOpenClient(row.client.id) : onOpenTerritory(row.id.split("|")[0], row.listingId ?? undefined))}
                     onOpenPlaybook={() => row.client && onOpenPlaybook(row.client.id)}
                     onFollowUp={(note) => onFollowUp(row, note)}
                     onTouchLogged={(result) => { setExpandedId(null); onTouchLogged(row, result); }}
@@ -159,7 +168,12 @@ function BusinessRowView({ row, expanded, onToggle, state, onOpenClient, onOpenP
 }) {
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
-  const [touchOpen, setTouchOpen] = useState(false);
+  // null = panel closed. "manual" = opened via the plain "Log a touch"
+  // trigger, no outcome pre-picked. Otherwise the outcome key of whichever
+  // Call Now/Send Email/Send SMS/Book Meeting button was clicked — keyed on
+  // the panel below so switching from e.g. Call Now to Send Email properly
+  // resets the pre-selection instead of a stale one sticking around.
+  const [touchOutcome, setTouchOutcome] = useState<OutcomeKey | "manual" | null>(null);
   const submit = () => { onFollowUp(note.trim()); setNote(""); setNoteOpen(false); };
 
   return (
@@ -205,57 +219,93 @@ function BusinessRowView({ row, expanded, onToggle, state, onOpenClient, onOpenP
             </div>
           )}
 
-          {touchOpen && row.listingId != null ? (
-            <TouchPanel listingId={row.listingId} phone={row.phone} email={row.email} onLogged={onTouchLogged} onCancel={() => setTouchOpen(false)} />
-          ) : (
+          {row.client ? (
             <div className="mt-2.5 flex flex-wrap items-center gap-2">
-              {row.client ? (
-                state === "saving" ? (
-                  <span className="text-[16px] text-muted">Saving…</span>
-                ) : state ? (
-                  <span className="flex items-center gap-1.5 text-[16px]">
-                    <span className="text-danger">{state}</span>
-                    <button onClick={onDismissError} className="font-medium text-muted hover:text-foreground">Dismiss</button>
-                  </span>
-                ) : noteOpen ? (
-                  <div className="flex w-full flex-col gap-1.5 sm:max-w-md">
-                    <textarea value={note} onChange={(e) => setNote(e.target.value)} autoFocus rows={2}
-                      placeholder="What happened? (optional)"
-                      className="w-full resize-none rounded-lg border bg-background px-2.5 py-2 text-[16px] outline-none placeholder:text-muted focus:border-accent" />
-                    <div className="flex items-center gap-3">
-                      <button onClick={submit} className="rounded-lg bg-accent px-3 py-1.5 text-[16px] font-medium text-white">Log it</button>
-                      <button onClick={() => { setNoteOpen(false); setNote(""); }} className="text-[16px] font-medium text-muted hover:text-foreground">Cancel</button>
-                    </div>
+              {state === "saving" ? (
+                <span className="text-[16px] text-muted">Saving…</span>
+              ) : state ? (
+                <span className="flex items-center gap-1.5 text-[16px]">
+                  <span className="text-danger">{state}</span>
+                  <button onClick={onDismissError} className="font-medium text-muted hover:text-foreground">Dismiss</button>
+                </span>
+              ) : noteOpen ? (
+                <div className="flex w-full flex-col gap-1.5 sm:max-w-md">
+                  <textarea value={note} onChange={(e) => setNote(e.target.value)} autoFocus rows={2}
+                    placeholder="What happened? (optional)"
+                    className="w-full resize-none rounded-lg border bg-background px-2.5 py-2 text-[16px] outline-none placeholder:text-muted focus:border-accent" />
+                  <div className="flex items-center gap-3">
+                    <button onClick={submit} className="rounded-lg bg-accent px-3 py-1.5 text-[16px] font-medium text-white">Log it</button>
+                    <button onClick={() => { setNoteOpen(false); setNote(""); }} className="text-[16px] font-medium text-muted hover:text-foreground">Cancel</button>
                   </div>
-                ) : (
-                  <button onClick={() => setNoteOpen(true)}
-                    title="Record that you reached out, with a note if you want one. Checks back in a few days if nothing comes of it."
-                    className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[16px] font-medium text-foreground hover:border-accent hover:bg-accent-soft hover:text-accent">
-                    <I.comment className="h-3.5 w-3.5" /> Log a follow-up
-                  </button>
-                )
+                </div>
               ) : (
-                row.listingId != null && (
-                  <button onClick={() => setTouchOpen(true)}
-                    title="Record that you reached out and set when this should come back to you"
-                    className="rounded-lg border px-3 py-1.5 text-[16px] font-medium text-foreground hover:border-accent hover:bg-accent-soft hover:text-accent">
-                    Log a touch
-                  </button>
-                )
-              )}
-              {row.phone && (
-                <a href={`tel:${row.phone}`} className="inline-flex items-center gap-1.5 text-[16px] font-medium text-accent hover:underline">
-                  <I.phone className="h-3.5 w-3.5" /> {row.phone}
-                </a>
+                <button onClick={() => setNoteOpen(true)}
+                  title="Record that you reached out, with a note if you want one. Checks back in a few days if nothing comes of it."
+                  className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[16px] font-medium text-foreground hover:border-accent hover:bg-accent-soft hover:text-accent">
+                  <I.comment className="h-3.5 w-3.5" /> Log a follow-up
+                </button>
               )}
               {row.listingUrl && (
                 <a href={row.listingUrl} target="_blank" rel="noopener noreferrer" className="text-[16px] font-medium text-accent hover:underline">View listing</a>
               )}
-              <button onClick={onOpenClient} className="text-[16px] font-medium text-accent hover:underline">
-                {row.client ? "Open client" : "Open in Businesses"}
-              </button>
-              {row.client && <button onClick={onOpenPlaybook} className="text-[16px] font-medium text-accent hover:underline">Open Playbook</button>}
+              <button onClick={onOpenClient} className="text-[16px] font-medium text-accent hover:underline">Open client</button>
+              <button onClick={onOpenPlaybook} className="text-[16px] font-medium text-accent hover:underline">Open Playbook</button>
             </div>
+          ) : touchOutcome && row.listingId != null ? (
+            <TouchPanel key={touchOutcome} listingId={row.listingId} phone={row.phone} email={row.email} bookingUrl={row.bookingUrl}
+              initialOutcome={touchOutcome === "manual" ? undefined : touchOutcome}
+              onLogged={onTouchLogged} onCancel={() => setTouchOutcome(null)} />
+          ) : (
+            <>
+              {/* One place to see who's top priority and take the action —
+                  these four ARE the outcome picker, promoted onto the row
+                  instead of hidden behind a generic "Log a touch" click.
+                  Each is a real tel:/mailto:/sms:/booking link (fires the
+                  actual dial/compose/booking page) that also opens the panel
+                  below pre-selected on that outcome, so a rep never does the
+                  thing and then separately comes back to log it. */}
+              <div className="mt-2.5 flex flex-wrap gap-1.5">
+                {row.phone && (
+                  <a href={`tel:${row.phone}`} onClick={() => setTouchOutcome("called")}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-accent px-3 py-1.5 text-[16px] font-medium text-accent hover:bg-accent-soft">
+                    <I.phone className="h-3.5 w-3.5" /> Call Now
+                  </a>
+                )}
+                {row.email && (
+                  <a href={`mailto:${row.email}`} onClick={() => setTouchOutcome("emailed")}
+                    className="rounded-lg border border-accent px-3 py-1.5 text-[16px] font-medium text-accent hover:bg-accent-soft">
+                    Send Email
+                  </a>
+                )}
+                {row.phone && (
+                  <a href={`sms:${row.phone}`} onClick={() => setTouchOutcome("sms")}
+                    className="rounded-lg border border-accent px-3 py-1.5 text-[16px] font-medium text-accent hover:bg-accent-soft">
+                    Send SMS
+                  </a>
+                )}
+                {row.bookingUrl && (
+                  <a href={row.bookingUrl} target="_blank" rel="noopener noreferrer" onClick={() => setTouchOutcome("presented")}
+                    className="rounded-lg border border-accent px-3 py-1.5 text-[16px] font-medium text-accent hover:bg-accent-soft">
+                    Book Meeting
+                  </a>
+                )}
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                {row.listingId != null && (
+                  <button onClick={() => setTouchOutcome("manual")} className="text-[16px] font-medium text-muted hover:text-foreground">Log a touch</button>
+                )}
+                {row.listingUrl && (
+                  <a href={row.listingUrl} target="_blank" rel="noopener noreferrer" className="text-[16px] font-medium text-accent hover:underline">View listing</a>
+                )}
+                {row.editUrl && (
+                  <a href={row.editUrl} target="_blank" rel="noopener noreferrer" className="text-[16px] font-medium text-accent hover:underline">Edit business profile</a>
+                )}
+                {row.ghlUrl && (
+                  <a href={row.ghlUrl} target="_blank" rel="noopener noreferrer" className="text-[16px] font-medium text-accent hover:underline">Open GHL</a>
+                )}
+                <button onClick={onOpenClient} className="text-[16px] font-medium text-accent hover:underline">Open in Businesses</button>
+              </div>
+            </>
           )}
         </div>
       )}

@@ -10,7 +10,7 @@ import { users, normalizeState, type Me, type Territory, type Contact, type Clie
 import { I, Avatar } from "./cockpit/ui";
 import TerritoryDirectory from "./cockpit/TerritoryDirectory";
 
-export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onToggleFollower, onDeleteTerritory, onSetDailyInviteCap, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, otherListsByClient, onOpenProject, onSetClientStatus, ghlContactUrlFor, focusId }: {
+export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onToggleFollower, onDeleteTerritory, onSetDailyInviteCap, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, otherListsByClient, onOpenProject, onSetClientStatus, ghlContactUrlFor, focusId, highlightListingId, onHighlightConsumed }: {
   me: Me; canAdmin: boolean;
   territories: Territory[]; contacts: Contact[]; clients: Client[];
   onAddTerritory: (t: { name: string; city: string; state: string; assignedTo: string[] }) => void;
@@ -52,6 +52,11 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
   onSetClientStatus?: (id: string, status: ClientStatus) => void;
   ghlContactUrlFor?: (clientId: string) => string | null;
   focusId?: string; // when set, render only this one city, auto-expanded (the sidebar city page)
+  // Scrolls straight to this listing on open (Territory Dashboard's "Open in
+  // Businesses") — consumed once, then the caller clears it so a later plain
+  // sidebar click into the same city doesn't re-trigger the scroll.
+  highlightListingId?: number | null;
+  onHighlightConsumed?: () => void;
 }) {
   const [addOpen, setAddOpen] = useState(false);
   const [name, setName] = useState("");
@@ -226,7 +231,8 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                     tasksByClient={tasksByClient}
                     playbookTasksByClient={playbookTasksByClient} onOpenPlaybook={onOpenPlaybook}
                     otherListsByClient={otherListsByClient} onOpenProject={onOpenProject}
-                    onSetClientStatus={onSetClientStatus} canAdmin={canAdmin} ghlContactUrlFor={ghlContactUrlFor} territoryId={focusId} dailyInviteCap={t.dailyInviteCap} />
+                    onSetClientStatus={onSetClientStatus} canAdmin={canAdmin} ghlContactUrlFor={ghlContactUrlFor} territoryId={focusId} dailyInviteCap={t.dailyInviteCap}
+                    highlightListingId={highlightListingId} onHighlightConsumed={onHighlightConsumed} />
                 )}
               </div>
             );

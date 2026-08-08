@@ -1686,11 +1686,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // city for a stable list.
   const visibleTerritories = myTerritories.slice().sort((a, b) => a.city.localeCompare(b.city));
   const territoryById = (id: string) => territories.find((t) => t.id === id) ?? null;
-  const openTerritory = (id: string) => {
+  // listingId scrolls straight to that row on the Businesses page instead of
+  // dumping the rep on the top of the whole city — set by the Territory
+  // Dashboard's "Open in Businesses", read once by TerritoryDirectory on
+  // mount then cleared so a later plain sidebar click doesn't re-trigger it.
+  const [territoryHighlightId, setTerritoryHighlightId] = useState<number | null>(null);
+  const openTerritory = (id: string, listingId?: number) => {
     setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null);
     setActiveClient("all"); setActiveProject(null); setOpenTaskId(null); setSidebarOpen(false);
     setPlannerOpen(false); setPlannerWeekId(null);
     setTerritoryView(id);
+    setTerritoryHighlightId(listingId ?? null);
   };
   // The territory-work landing view — same territoryView sentinel idiom as
   // "all" (the territory picker), just routed to TerritoryDashboard instead
@@ -5000,7 +5006,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               onOpenProject={onOpenProject}
               onSetClientStatus={setClientStatus}
               ghlContactUrlFor={ghlContactUrlFor}
-              focusId={territoryView === "all" ? undefined : territoryView} />
+              focusId={territoryView === "all" ? undefined : territoryView}
+              highlightListingId={territoryHighlightId} onHighlightConsumed={() => setTerritoryHighlightId(null)} />
           </div>
         ) : inboxView && dmUserId ? (
           // A DM thread has no "Activity" sub-view (that's a Team Chat-page
