@@ -6,7 +6,7 @@
 // vs "unclaimed" (still just a raw synced contact). Reuses the existing client
 // status funnel for pipeline stage instead of a second, parallel state.
 import { useState } from "react";
-import { users, clientStatusMeta, normalizeState, playbookCompletion, type Me, type Territory, type Contact, type Client, type ClientStatus, type Task } from "@/lib/data";
+import { users, normalizeState, type Me, type Territory, type Contact, type Client, type ClientStatus, type Task } from "@/lib/data";
 import { I, Avatar } from "./cockpit/ui";
 import TerritoryDirectory from "./cockpit/TerritoryDirectory";
 
@@ -53,7 +53,6 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
   ghlContactUrlFor?: (clientId: string) => string | null;
   focusId?: string; // when set, render only this one city, auto-expanded (the sidebar city page)
 }) {
-  const [expanded, setExpanded] = useState<Set<string>>(() => (focusId ? new Set([focusId]) : new Set()));
   const [addOpen, setAddOpen] = useState(false);
   const [name, setName] = useState("");
   const [city, setCity] = useState("");
@@ -64,7 +63,6 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
   const scoped = canAdmin ? territories : territories.filter((t) => (t.assignedTo ?? []).includes(me.id) || (t.followers ?? []).includes(me.id));
   const visible = focusId ? scoped.filter((t) => t.id === focusId) : scoped;
   const clientIds = new Set(clients.map((c) => c.id));
-  const toggle = (id: string) => setExpanded((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const toggleAssign = (id: string) => setAssignSet((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   const submit = () => {
@@ -134,18 +132,9 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
             const matched = contacts.filter((c) => (c.city ?? "").trim().toLowerCase() === t.city.toLowerCase() && c.state && normalizeState(c.state) === territoryState);
             const unclaimed = matched.filter((c) => !clientIds.has("cl_" + c.id));
             const claimed = matched.filter((c) => clientIds.has("cl_" + c.id));
-            const open = focusId ? true : expanded.has(t.id);
-            // The focused single-city page (opened from the sidebar) doesn't
-            // need a click-to-expand accordion around content that's already
-            // the whole page — that read as a "toggle box" unlike how
-            // Tasks/Projects render (a plain header, then the list). Only the
-            // admin multi-city overview (focusId unset) keeps the accordion,
-            // since it's genuinely browsing several cities at once.
-            const HeaderTag = focusId ? "div" : "button";
             return (
               <div key={t.id} className={focusId ? "" : "mb-2 rounded-xl border"}>
-                <HeaderTag {...(focusId ? {} : { onClick: () => toggle(t.id) })} className="flex w-full items-center gap-3 px-1 py-2.5 text-left">
-                  {!focusId && <I.chevron className={`shrink-0 text-muted transition ${open ? "rotate-90" : ""}`} />}
+                <div className="flex w-full items-center gap-3 px-1 py-2.5 text-left">
                   <I.flag className="shrink-0 text-accent" />
                   {focusId ? (
                     // The city name/state is already the page's own title
@@ -218,11 +207,19 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                   {canAdmin && (
                     <span onClick={(e) => { e.stopPropagation(); onDeleteTerritory(t.id); }} title="Delete territory" className="shrink-0 rounded p-1 text-muted hover:bg-background hover:text-danger"><I.trash /></span>
                   )}
-                </HeaderTag>
+                </div>
                 {/* The Businesses/City work switch lives in the page header
                     now (Cockpit.tsx), not here — same control, same spot,
-                    regardless of which half of the territory is showing. */}
-                {open && focusId && (
+                    regardless of which half of the territory is showing.
+                    The admin multi-city overview (focusId unset) used to
+                    expand into a flat "every contact, + Add as client" list
+                    here — a leftover from before the Businesses page and its
+                    claim/invite ladder existed. It only duplicated (worse)
+                    what "Lincoln, CA" in the sidebar already shows, and read
+                    as part of assignment management since it lived in the
+                    same row. Removed rather than fixed — nothing in this
+                    view needs it anymore. */}
+                {focusId && (
                   <TerritoryDirectory city={t.city} state={t.state} contacts={matched} clients={clients} onAddContact={onAddContact}
                     onSyncClients={onSyncClients} onOpenClient={onOpenClient}
                     featuredClientIds={featuredClientIds} onFeature={onFeature}
@@ -230,35 +227,6 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                     playbookTasksByClient={playbookTasksByClient} onOpenPlaybook={onOpenPlaybook}
                     otherListsByClient={otherListsByClient} onOpenProject={onOpenProject}
                     onSetClientStatus={onSetClientStatus} canAdmin={canAdmin} ghlContactUrlFor={ghlContactUrlFor} territoryId={focusId} dailyInviteCap={t.dailyInviteCap} />
-                )}
-                {open && !focusId && (
-                  <div className="space-y-1 border-t px-3 py-2">
-                    {matched.length === 0 && <div className="py-3 text-center text-[13px] text-muted">No synced GoHighLevel contacts match {t.city}, {t.state} yet.</div>}
-                    {unclaimed.map((c) => (
-                      <div key={c.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[15px]">
-                        <span className="min-w-0 flex-1 truncate text-muted">{c.name}{c.company && <span className="text-muted/70"> · {c.company}</span>}</span>
-                        <button onClick={() => onAddContact(c)} className="shrink-0 rounded-md border border-dashed px-2 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft">+ Add as client</button>
-                      </div>
-                    ))}
-                    {claimed.map((c) => {
-                      const client = clients.find((cl) => cl.id === "cl_" + c.id);
-                      if (!client) return null;
-                      const meta = clientStatusMeta(client.status);
-                      const pb = playbookTasksByClient ? playbookCompletion(client.id, playbookTasksByClient.get(client.id) ?? []) : null;
-                      return (
-                        <button key={c.id} onClick={() => onOpenClient(client.id)} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[15px] hover:bg-background">
-                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: meta.dot }} />
-                          <span className="min-w-0 flex-1 truncate">{c.name}</span>
-                          {pb && (
-                            <span onClick={(e) => { e.stopPropagation(); onOpenPlaybook?.(client.id); }}
-                              title={pb.next ? `Open Playbook — next: ${pb.next.label}` : "Open Playbook — all steps complete"}
-                              className="shrink-0 rounded bg-background px-1.5 py-0.5 text-[12px] font-medium text-muted hover:bg-accent-soft hover:text-accent">Playbook {pb.doneCount}/{pb.total}</span>
-                          )}
-                          <span className="shrink-0 text-[13px] text-muted">{meta.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
                 )}
               </div>
             );
