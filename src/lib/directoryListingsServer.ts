@@ -178,6 +178,9 @@ export async function fetchDirectoryListingsServer(city: string, state: string):
         // type — same post id the public listing page above resolves).
         editUrl: WP_BASE ? `${WP_BASE.replace(/\/$/, "")}/wp-admin/post.php?post=${it.id}&action=edit` : "",
         ghlUrl: locationId && ghlContactId ? `https://app.gohighlevel.com/v2/location/${locationId}/contacts/detail/${ghlContactId}` : "",
+        // Raw location id, not just the URL built from it — TouchPanel needs
+        // this to actually send through /api/ghl/message, not just link out.
+        ghlLocationId: locationId ?? "",
         bookingUrl,
         score: (() => { const n = parseInt(String(it.clickuplocal_score ?? ""), 10); return Number.isFinite(n) ? n : null; })(),
         category: decodeEntities(Array.isArray(it.categories) && it.categories.length ? String(it.categories[0]).split("›").pop()!.trim() : String(it.category ?? "")),

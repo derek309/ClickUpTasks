@@ -54,6 +54,10 @@ export type DirectoryListing = {
   // "" when the directory location or this listing's ghlContactId isn't
   // resolvable.
   ghlUrl: string;
+  // Raw location id behind ghlUrl — needed to actually send an email/SMS via
+  // /api/ghl/message, not just link out to GHL. "" under the same conditions
+  // ghlUrl is "".
+  ghlLocationId: string;
   // Public booking widget for this city's GHL interview calendar — null when
   // no calendar exists yet for this city (only Tracy/Lincoln do as of
   // 2026-08-08) or the location/token didn't resolve. Whole-city, not
@@ -1850,9 +1854,11 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, flaggedA
               same touch actions the Territory Dashboard uses, sitting beside
               the invite actions rather than replacing them: inviting is
               Planner's automated ladder, this is a rep's own manual outreach,
-              and a business can have both going at once. Each is a real
-              tel:/mailto:/sms:/booking link that also opens the panel below
-              pre-selected on that outcome. */}
+              and a business can have both going at once. Call Now and Book
+              Meeting are always real links; Send Email/SMS send for real
+              through GHL when this listing has a matched contact, falling
+              back to a plain mailto:/sms: link otherwise. Either way, opens
+              the panel below pre-selected on that outcome. */}
           {touch && !touch.outcome && (
             <>
               {listing.phone && (
@@ -1862,16 +1868,30 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, flaggedA
                 </a>
               )}
               {listing.email && (
-                <a href={`mailto:${listing.email}`} onClick={() => touch.onPick("emailed")}
-                  className="shrink-0 rounded-md border border-accent px-2 py-1 text-[16px] font-medium text-accent hover:bg-accent-soft">
-                  Send Email
-                </a>
+                listing.ghlContactId && listing.ghlLocationId ? (
+                  <button onClick={() => touch.onPick("emailed")}
+                    className="shrink-0 rounded-md border border-accent px-2 py-1 text-[16px] font-medium text-accent hover:bg-accent-soft">
+                    Send Email
+                  </button>
+                ) : (
+                  <a href={`mailto:${listing.email}`} onClick={() => touch.onPick("emailed")}
+                    className="shrink-0 rounded-md border border-accent px-2 py-1 text-[16px] font-medium text-accent hover:bg-accent-soft">
+                    Send Email
+                  </a>
+                )
               )}
               {listing.phone && (
-                <a href={`sms:${listing.phone}`} onClick={() => touch.onPick("sms")}
-                  className="shrink-0 rounded-md border border-accent px-2 py-1 text-[16px] font-medium text-accent hover:bg-accent-soft">
-                  Send SMS
-                </a>
+                listing.ghlContactId && listing.ghlLocationId ? (
+                  <button onClick={() => touch.onPick("sms")}
+                    className="shrink-0 rounded-md border border-accent px-2 py-1 text-[16px] font-medium text-accent hover:bg-accent-soft">
+                    Send SMS
+                  </button>
+                ) : (
+                  <a href={`sms:${listing.phone}`} onClick={() => touch.onPick("sms")}
+                    className="shrink-0 rounded-md border border-accent px-2 py-1 text-[16px] font-medium text-accent hover:bg-accent-soft">
+                    Send SMS
+                  </a>
+                )
               )}
               {listing.bookingUrl && (
                 <a href={listing.bookingUrl} target="_blank" rel="noopener noreferrer" onClick={() => touch.onPick("presented")}
@@ -1889,6 +1909,7 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, flaggedA
       {touch?.outcome && (
         <div className="px-4 pb-2 pl-9 sm:pl-9">
           <TouchPanel key={touch.outcome} listingId={touch.gdPlaceId} phone={listing.phone || null} email={listing.email || null} bookingUrl={listing.bookingUrl}
+            ghlContactId={listing.ghlContactId} ghlLocationId={listing.ghlLocationId}
             initialOutcome={touch.outcome === "manual" ? undefined : touch.outcome}
             onLogged={touch.onLogged} onCancel={touch.onClose} />
         </div>

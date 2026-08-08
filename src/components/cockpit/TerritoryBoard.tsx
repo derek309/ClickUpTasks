@@ -66,6 +66,11 @@ export interface BusinessRow {
    * (see directoryListingsServer.ts), in which case that link doesn't render. */
   ghlUrl?: string;
   editUrl?: string;
+  /** Both required for TouchPanel to send email/SMS for real through GHL —
+   * absent when this listing has no matched GHL contact yet, in which case
+   * Send Email/Send SMS fall back to plain mailto:/sms: links. */
+  ghlContactId?: string;
+  ghlLocationId?: string;
   /** GeoDirectory post id, which is what /api/directory/activity keys a
    * logged touch by. Prospect rows only; a claimed+ row logs its outreach as
    * a comment on its conversation task instead. */
@@ -253,6 +258,7 @@ function BusinessRowView({ row, expanded, onToggle, state, onOpenClient, onOpenP
             </div>
           ) : touchOutcome && row.listingId != null ? (
             <TouchPanel key={touchOutcome} listingId={row.listingId} phone={row.phone} email={row.email} bookingUrl={row.bookingUrl}
+              ghlContactId={row.ghlContactId} ghlLocationId={row.ghlLocationId}
               initialOutcome={touchOutcome === "manual" ? undefined : touchOutcome}
               onLogged={onTouchLogged} onCancel={() => setTouchOutcome(null)} />
           ) : (
@@ -260,10 +266,15 @@ function BusinessRowView({ row, expanded, onToggle, state, onOpenClient, onOpenP
               {/* One place to see who's top priority and take the action —
                   these four ARE the outcome picker, promoted onto the row
                   instead of hidden behind a generic "Log a touch" click.
-                  Each is a real tel:/mailto:/sms:/booking link (fires the
-                  actual dial/compose/booking page) that also opens the panel
-                  below pre-selected on that outcome, so a rep never does the
-                  thing and then separately comes back to log it. */}
+                  Call Now and Book Meeting are always real links (there's no
+                  API to place a call or book a meeting from here). Send
+                  Email/SMS are real API sends when this listing has a
+                  matched GHL contact — a plain button opening the panel's
+                  composer, not a mailto:/sms: handoff — and fall back to that
+                  handoff only when it doesn't (nothing to send an API call
+                  to yet). Either way, clicking opens the panel below on that
+                  outcome so a rep never does the thing and separately comes
+                  back to log it. */}
               <div className="mt-2.5 flex flex-wrap gap-1.5">
                 {row.phone && (
                   <a href={`tel:${row.phone}`} onClick={() => setTouchOutcome("called")}
@@ -272,16 +283,30 @@ function BusinessRowView({ row, expanded, onToggle, state, onOpenClient, onOpenP
                   </a>
                 )}
                 {row.email && (
-                  <a href={`mailto:${row.email}`} onClick={() => setTouchOutcome("emailed")}
-                    className="rounded-lg border border-accent px-3 py-1.5 text-[16px] font-medium text-accent hover:bg-accent-soft">
-                    Send Email
-                  </a>
+                  row.ghlContactId && row.ghlLocationId ? (
+                    <button onClick={() => setTouchOutcome("emailed")}
+                      className="rounded-lg border border-accent px-3 py-1.5 text-[16px] font-medium text-accent hover:bg-accent-soft">
+                      Send Email
+                    </button>
+                  ) : (
+                    <a href={`mailto:${row.email}`} onClick={() => setTouchOutcome("emailed")}
+                      className="rounded-lg border border-accent px-3 py-1.5 text-[16px] font-medium text-accent hover:bg-accent-soft">
+                      Send Email
+                    </a>
+                  )
                 )}
                 {row.phone && (
-                  <a href={`sms:${row.phone}`} onClick={() => setTouchOutcome("sms")}
-                    className="rounded-lg border border-accent px-3 py-1.5 text-[16px] font-medium text-accent hover:bg-accent-soft">
-                    Send SMS
-                  </a>
+                  row.ghlContactId && row.ghlLocationId ? (
+                    <button onClick={() => setTouchOutcome("sms")}
+                      className="rounded-lg border border-accent px-3 py-1.5 text-[16px] font-medium text-accent hover:bg-accent-soft">
+                      Send SMS
+                    </button>
+                  ) : (
+                    <a href={`sms:${row.phone}`} onClick={() => setTouchOutcome("sms")}
+                      className="rounded-lg border border-accent px-3 py-1.5 text-[16px] font-medium text-accent hover:bg-accent-soft">
+                      Send SMS
+                    </a>
+                  )
                 )}
                 {row.bookingUrl && (
                   <a href={row.bookingUrl} target="_blank" rel="noopener noreferrer" onClick={() => setTouchOutcome("presented")}

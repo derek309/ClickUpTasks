@@ -191,6 +191,7 @@ export function TerritoryDashboard({ me, territories, contacts, clients, tasks, 
           needsAttention: false, followedUp: false, taskId: null, followUpKey: `${t.id}|${l.id}`,
           phone: l.phone || null, listingUrl: l.url || null, email: l.email || null,
           bookingUrl: l.bookingUrl || null, ghlUrl: l.ghlUrl || undefined, editUrl: l.editUrl || undefined,
+          ghlContactId: l.ghlContactId || undefined, ghlLocationId: l.ghlLocationId || undefined,
           listingId: Number.isFinite(gdId) ? gdId : null,
           touchLabel: l.outcomeLabel || null, touchedAt: l.lastTouched, followupDue: l.followupDue,
         };
