@@ -48,6 +48,22 @@ export type DirectoryListing = {
   category: string;
   rep: string;          // assigned ambassador's name (read-only here)
   ghlContactId: string; // links to the GoHighLevel contact record
+  // Outreach tracking, straight off WordPress /sales (the pipeline's source
+  // of truth). directoryListingsServer.ts has always mapped these six out of
+  // the light listing row, but they were never declared here, so nothing
+  // could read them and every touch WP recorded was invisible to this app.
+  // outcome/nextAction are WP's own key sets (called|emailed|sms|visited|
+  // presented|posted|won|lost and email|call|sms|visit|present|close); the
+  // *Label variants are WP's rendered text for them, used as-is so the two
+  // front ends never word the same touch differently.
+  outcome: string;
+  outcomeLabel: string;
+  nextAction: string;
+  nextActionLabel: string;
+  /** Unix seconds; 0 = no follow-up scheduled. */
+  followupDue: number;
+  /** Unix seconds; 0 = never touched. */
+  lastTouched: number;
 };
 
 // Last 10 digits — normalizes (555) 123-4567 / +1 555 123 4567 / 5551234567 to

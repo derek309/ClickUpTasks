@@ -24,6 +24,7 @@ import { isDue, latestInviteStatus } from "@/lib/plannerPools";
 import { fetchPlannerWeeks } from "@/lib/db";
 import { authedFetch } from "@/lib/supabase";
 import { TerritoryBoard, type TerritoryBoardGroup, type BusinessRow } from "./cockpit/TerritoryBoard";
+import { type TouchResult } from "./cockpit/TouchLogger";
 import { type DirectoryListing } from "./cockpit/TerritoryDirectory";
 
 const DASHBOARD_STATUSES: ClientStatus[] = ["claimed", "interview", "onboarding", "active_client"];
@@ -154,34 +155,78 @@ export function TerritoryDashboard({ me, canAdmin, territories, contacts, client
   // row yet. Same "strongest tier it qualifies for" predicates
   // TerritoryDirectory.tsx's own engagement ladder uses (accepted > clicked),
   // so a business never double counts across both.
-  const { acceptedRows, clickedRows } = useMemo(() => {
+  const { dueRows, acceptedRows, clickedRows } = useMemo(() => {
+    const due: BusinessRow[] = [];
     const accepted: BusinessRow[] = [];
     const clicked: BusinessRow[] = [];
+    const now = nowUnix();
     for (const t of myTerritories) {
       const entry = byTerritory[t.id];
       if (!entry) continue;
       const cityLabel = `${t.city}, ${t.state}`;
       for (const l of entry.listings) {
         if (l.claimed) continue;
+        // A rep marked them not interested. WP parks the outcome on "lost"
+        // and clears any follow-up, and this is the one place that has to
+        // honor it: a hard no that keeps resurfacing is worse than no
+        // dashboard at all.
+        if (l.outcome === "lost") continue;
         const gdId = typeof l.id === "number" ? l.id : parseInt(String(l.id), 10);
         const inv = entry.invites.get(gdId);
-        if (!inv) continue;
+        // No invite engagement and nobody has reached out: that's the
+        // untriaged roster, which is each city's own Businesses tab's job.
+        if (!inv && !l.lastTouched) continue;
         const base: BusinessRow = {
           id: `${t.id}|${l.id}`, name: l.name, client: null, city: cityLabel,
           stageLabel: l.category || "Unclaimed", stageColor: "#94a3b8",
           playbook: null, lastTouch: null, flagReason: null, nextCheckIn: null,
           needsAttention: false, followedUp: false, taskId: null, followUpKey: `${t.id}|${l.id}`,
           phone: l.phone || null, listingUrl: l.url || null,
+          listingId: Number.isFinite(gdId) ? gdId : null,
+          touchLabel: l.outcomeLabel || null, touchedAt: l.lastTouched, followupDue: l.followupDue,
         };
-        if (inv.status === "accepted") {
-          accepted.push({ ...base, flagReason: `Accepted the invite ${timeAgoShort(inv.respondedAt ?? inv.at)} — call or visit to close` });
-        } else if (inv.clickedAt) {
-          clicked.push({ ...base, flagReason: `Clicked ${timeAgoShort(inv.clickedAt)}, hasn't finished — a nudge might close it` });
+        // A scheduled follow-up outranks both invite signals below, and its
+        // date is the ONLY thing that decides when the business comes back:
+        // due or overdue puts them at the top, a future date keeps them off
+        // the board entirely until then. That's what makes the process
+        // uniform — every touch sets a date, and the date does the rest,
+        // instead of a business staying permanently "hot" because it once
+        // clicked an email.
+        if (l.followupDue > 0) {
+          if (l.followupDue <= now) {
+            const overdueDays = Math.floor((now - l.followupDue) / 86400);
+            due.push({ ...base, flagReason: overdueDays >= 1 ? `Follow up is ${overdueDays}d overdue.` : "Follow up is due today." });
+          }
+          continue;
+        }
+        if (inv?.status === "accepted") {
+          accepted.push({ ...base, flagReason: `Accepted the invite ${timeAgoShort(inv.respondedAt ?? inv.at)}. Call or visit to close.` });
+        } else if (inv?.clickedAt) {
+          clicked.push({ ...base, flagReason: `Clicked ${timeAgoShort(inv.clickedAt)} but hasn't finished. A nudge might close it.` });
         }
       }
     }
-    return { acceptedRows: accepted, clickedRows: clicked };
+    return { dueRows: due, acceptedRows: accepted, clickedRows: clicked };
   }, [myTerritories, byTerritory]);
+
+  // Patch just the one listing in place from the response the activity route
+  // echoes back, rather than refetching the whole city: the row re-tiers off
+  // followupDue on the next render, so logging a touch visibly moves the
+  // business off the board immediately.
+  const onTouchLogged = (row: BusinessRow, result: TouchResult) => {
+    const territoryId = row.id.split("|")[0];
+    setByTerritory((prev) => {
+      const entry = prev[territoryId];
+      if (!entry) return prev;
+      return {
+        ...prev,
+        [territoryId]: {
+          ...entry,
+          listings: entry.listings.map((l) => (String(l.id) === String(row.listingId) ? { ...l, ...result } : l)),
+        },
+      };
+    });
+  };
 
   const replyRows = claimedRows.filter((r) => r.hasReply);
   const keepMovingRows = claimedRows.filter((r) => r.stalledOnly);
@@ -193,6 +238,7 @@ export function TerritoryDashboard({ me, canAdmin, territories, contacts, client
 
   const groups: TerritoryBoardGroup[] = [];
   if (replyRows.length) groups.push({ key: "reply", label: "Reply needed", color: "#ef4444", rows: replyRows });
+  if (dueRows.length) groups.push({ key: "followup_due", label: "Follow up due", color: "#f97316", rows: dueRows });
   if (acceptedRows.length) groups.push({ key: "accepted", label: "Ready to close", color: "#059669", rows: acceptedRows });
   if (clickedRows.length) groups.push({ key: "clicked", label: "Nudge these", color: "#2563eb", rows: clickedRows });
   if (keepMovingRows.length) groups.push({ key: "keep_moving", label: "Keep them moving", color: "#f59e0b", rows: keepMovingRows });
@@ -215,7 +261,7 @@ export function TerritoryDashboard({ me, canAdmin, territories, contacts, client
       }
       setFollowUpState((m) => ({ ...m, [row.followUpKey]: j.error || `Couldn't save that follow up (${res.status}).` }));
     } catch {
-      setFollowUpState((m) => ({ ...m, [row.followUpKey]: "Network error — try again." }));
+      setFollowUpState((m) => ({ ...m, [row.followUpKey]: "Network error. Try again." }));
     }
   };
   const onDismissError = (row: BusinessRow) => setFollowUpState((m) => { const n = { ...m }; delete n[row.followUpKey]; return n; });
@@ -237,7 +283,7 @@ export function TerritoryDashboard({ me, canAdmin, territories, contacts, client
           <span className="ml-auto text-[13px] text-muted">{quietCount} other claimed business{quietCount === 1 ? "" : "es"} moving through the Playbook, nothing urgent today</span>
         )}
       </div>
-      <TerritoryBoard groups={groups} followUpState={followUpState} onOpenClient={onOpenClient} onOpenTerritory={onOpenTerritory} onOpenPlaybook={onOpenPlaybook} onFollowUp={onFollowUp} onDismissError={onDismissError} />
+      <TerritoryBoard groups={groups} followUpState={followUpState} onOpenClient={onOpenClient} onOpenTerritory={onOpenTerritory} onOpenPlaybook={onOpenPlaybook} onFollowUp={onFollowUp} onTouchLogged={onTouchLogged} onDismissError={onDismissError} />
     </div>
   );
 }
@@ -245,6 +291,13 @@ export function TerritoryDashboard({ me, canAdmin, territories, contacts, client
 // Compact "2d ago" / "3h ago" style relative time for the invite engagement
 // flag lines — timeAgo() in data.ts renders a longer human sentence meant
 // for a full activity feed line, not a short reason clause.
+// Module scope on purpose: react-hooks/purity flags Date.now() written inside
+// a component or hook body, even where it only ever runs in an event handler
+// or a memo. Same carve-out timeAgoShort below already needs.
+function nowUnix(): number {
+  return Math.floor(Date.now() / 1000);
+}
+
 function timeAgoShort(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
   const days = Math.floor(ms / 86400000);

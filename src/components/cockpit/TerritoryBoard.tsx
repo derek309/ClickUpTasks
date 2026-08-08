@@ -11,6 +11,7 @@
 import { useState } from "react";
 import { formatDue, timeAgo, htmlToText, playbookCompletion, type Client } from "@/lib/data";
 import { I } from "./ui";
+import { TouchLogger, type TouchResult } from "./TouchLogger";
 
 export interface BusinessRow {
   // Unique key — a claimed+ row uses client.id, a prospect row has no client
@@ -38,6 +39,15 @@ export interface BusinessRow {
   // open, since there's no client page yet to send a rep to.
   phone?: string | null;
   listingUrl?: string | null;
+  /** GeoDirectory post id, which is what /api/directory/activity keys a
+   * logged touch by. Prospect rows only; a claimed+ row logs its outreach as
+   * a comment on its conversation task instead. */
+  listingId?: number | null;
+  /** WP's rendered label for the last logged outcome ("Called", "SMS'd"), and
+   * when it happened / when it's due back. Unix seconds, 0 when unset. */
+  touchLabel?: string | null;
+  touchedAt?: number;
+  followupDue?: number;
 }
 
 export interface TerritoryBoardGroup {
@@ -47,9 +57,13 @@ export interface TerritoryBoardGroup {
   rows: BusinessRow[];
 }
 
-export function TerritoryBoard({ groups, followUpState, onOpenClient, onOpenTerritory, onOpenPlaybook, onFollowUp, onDismissError }: {
+export function TerritoryBoard({ groups, followUpState, onOpenClient, onOpenTerritory, onOpenPlaybook, onFollowUp, onDismissError, onTouchLogged }: {
   groups: TerritoryBoardGroup[];
   followUpState: Record<string, "saving" | string>;
+  /** A prospect row logged an outreach touch — hands the updated listing
+   * fields back up so the owner of the listing data can patch that row in
+   * place (it re-tiers off followupDue) without refetching the whole city. */
+  onTouchLogged: (row: BusinessRow, result: TouchResult) => void;
   onOpenClient: (id: string) => void;
   // Opens a prospect row's own city Businesses tab (no client page exists
   // yet for a business that hasn't claimed) — the full engagement history,
@@ -65,8 +79,8 @@ export function TerritoryBoard({ groups, followUpState, onOpenClient, onOpenTerr
     <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">
       <div className="overflow-hidden rounded-xl border bg-surface shadow-soft">
         {groups.length === 0 && (
-          <div className="px-4 py-10 text-center text-[13px] text-muted">
-            Nothing needs you right now — every territory you&apos;re assigned to is caught up.
+          <div className="px-4 py-10 text-center text-[16px] text-muted">
+            Nothing needs you right now. Every territory you&apos;re assigned to is caught up.
           </div>
         )}
         <div className="divide-y-8 divide-background">
@@ -74,8 +88,8 @@ export function TerritoryBoard({ groups, followUpState, onOpenClient, onOpenTerr
             <div key={g.key}>
               <div className="flex items-center gap-2 border-y px-4 py-2" style={{ background: g.color + "22", borderColor: g.color + "40" }}>
                 <span className="h-2.5 w-2.5 rounded-full" style={{ background: g.color }} />
-                <span className="text-[15px] font-bold">{g.label}</span>
-                <span className="rounded-full px-1.5 text-[13px] font-semibold normal-case tracking-normal text-white" style={{ background: g.color }}>{g.rows.length}</span>
+                <span className="text-[17px] font-bold">{g.label}</span>
+                <span className="rounded-full px-1.5 text-[16px] font-semibold normal-case tracking-normal text-white" style={{ background: g.color }}>{g.rows.length}</span>
               </div>
               <div>
                 {g.rows.map((row) => (
@@ -84,6 +98,7 @@ export function TerritoryBoard({ groups, followUpState, onOpenClient, onOpenTerr
                     onOpen={() => (row.client ? onOpenClient(row.client.id) : onOpenTerritory(row.id.split("|")[0]))}
                     onOpenPlaybook={() => row.client && onOpenPlaybook(row.client.id)}
                     onFollowUp={(note) => onFollowUp(row, note)}
+                    onTouchLogged={(result) => onTouchLogged(row, result)}
                     onDismissError={() => onDismissError(row)} />
                 ))}
               </div>
@@ -95,12 +110,13 @@ export function TerritoryBoard({ groups, followUpState, onOpenClient, onOpenTerr
   );
 }
 
-function BusinessRowView({ row, state, onOpen, onOpenPlaybook, onFollowUp, onDismissError }: {
+function BusinessRowView({ row, state, onOpen, onOpenPlaybook, onFollowUp, onTouchLogged, onDismissError }: {
   row: BusinessRow;
   state: "saving" | string | undefined;
   onOpen: () => void;
   onOpenPlaybook: () => void;
   onFollowUp: (note: string) => void;
+  onTouchLogged: (result: TouchResult) => void;
   onDismissError: () => void;
 }) {
   const [noteOpen, setNoteOpen] = useState(false);
@@ -112,32 +128,38 @@ function BusinessRowView({ row, state, onOpen, onOpenPlaybook, onFollowUp, onDis
         <span className="h-2.5 w-2.5 shrink-0 rounded-full" title={row.stageLabel} style={{ background: row.stageColor }} />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-[17px] font-medium leading-snug">{row.name}</span>
-          <span className="truncate text-[13px] text-muted">{row.city} · {row.stageLabel}</span>
+          <span className="truncate text-[16px] text-muted">{row.city} · {row.stageLabel}</span>
         </span>
         {row.playbook && (
-          <span className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted">
+          <span className="shrink-0 rounded-md border px-2 py-1 text-[16px] font-medium text-muted">
             Playbook {row.playbook.doneCount}/{row.playbook.total}
             {row.playbook.next && <span className="ml-1 font-normal text-accent">· {row.playbook.next.label}</span>}
           </span>
         )}
       </button>
       {row.flagReason && (
-        <div className="mt-1.5 pl-6 text-[13px] font-medium text-danger">{row.flagReason}</div>
+        <div className="mt-1.5 pl-6 text-[16px] font-medium text-danger">{row.flagReason}</div>
       )}
       {row.nextCheckIn && (
-        <div className="mt-1.5 pl-6 text-[13px] text-muted">Check back {formatDue(row.nextCheckIn)}</div>
+        <div className="mt-1.5 pl-6 text-[16px] text-muted">Check back {formatDue(row.nextCheckIn)}</div>
+      )}
+      {row.touchLabel && !!row.touchedAt && (
+        <div className="mt-1.5 pl-6 text-[16px] text-muted">
+          {row.touchLabel} {timeAgo(new Date(row.touchedAt * 1000).toISOString())}
+          {row.followupDue ? `. Back on ${new Date(row.followupDue * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" })}.` : "."}
+        </div>
       )}
       {row.lastTouch && (
-        <div className="mt-1.5 truncate pl-6 text-[13px] text-muted" title={htmlToText(row.lastTouch.body)}>
-          <span className="font-medium text-foreground">{row.lastTouch.authorName}</span> · {timeAgo(row.lastTouch.at)} — {htmlToText(row.lastTouch.body).slice(0, 80)}
+        <div className="mt-1.5 truncate pl-6 text-[16px] text-muted" title={htmlToText(row.lastTouch.body)}>
+          <span className="font-medium text-foreground">{row.lastTouch.authorName}</span> · {timeAgo(row.lastTouch.at)} · {htmlToText(row.lastTouch.body).slice(0, 80)}
         </div>
       )}
       <div className="mt-2 flex flex-wrap items-center gap-2 pl-6">
         {row.client ? (
           state === "saving" ? (
-            <span className="text-[12px] text-muted">Saving…</span>
+            <span className="text-[16px] text-muted">Saving…</span>
           ) : state ? (
-            <span className="flex items-center gap-1.5 text-[12px]">
+            <span className="flex items-center gap-1.5 text-[16px]">
               <span className="text-danger">{state}</span>
               <button onClick={onDismissError} className="font-medium text-muted hover:text-foreground">Dismiss</button>
             </span>
@@ -145,34 +167,35 @@ function BusinessRowView({ row, state, onOpen, onOpenPlaybook, onFollowUp, onDis
             <div className="flex w-full flex-col gap-1.5 sm:max-w-md">
               <textarea value={note} onChange={(e) => setNote(e.target.value)} autoFocus rows={2}
                 placeholder="What happened? (optional)"
-                className="w-full resize-none rounded-md border bg-background px-2 py-1.5 text-[13px] outline-none placeholder:text-muted focus:border-accent" />
+                className="w-full resize-none rounded-md border bg-background px-2 py-1.5 text-[16px] outline-none placeholder:text-muted focus:border-accent" />
               <div className="flex items-center gap-2">
-                <button onClick={submit} className="rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-white">Log it</button>
-                <button onClick={() => { setNoteOpen(false); setNote(""); }} className="text-[12px] font-medium text-muted hover:text-foreground">Cancel</button>
+                <button onClick={submit} className="rounded-md bg-accent px-2.5 py-1 text-[16px] font-medium text-white">Log it</button>
+                <button onClick={() => { setNoteOpen(false); setNote(""); }} className="text-[16px] font-medium text-muted hover:text-foreground">Cancel</button>
               </div>
             </div>
           ) : (
             <button onClick={() => setNoteOpen(true)}
               title="Record that you reached out, with a note if you want one. Checks back in a few days if nothing comes of it."
-              className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-background hover:text-foreground">
+              className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">
               <I.comment className="h-3 w-3" /> Log a follow-up
             </button>
           )
         ) : (
           <>
+            {row.listingId != null && <TouchLogger listingId={row.listingId} onLogged={onTouchLogged} />}
             {row.phone && (
               <a href={`tel:${row.phone}`} onClick={(e) => e.stopPropagation()}
-                className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent-soft">
+                className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[16px] font-medium text-accent hover:bg-accent-soft">
                 <I.phone className="h-3 w-3" /> Call {row.phone}
               </a>
             )}
             {row.listingUrl && (
               <a href={row.listingUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
-                className="text-[12px] font-medium text-accent hover:underline">View listing</a>
+                className="text-[16px] font-medium text-accent hover:underline">View listing</a>
             )}
           </>
         )}
-        {row.client && <button onClick={onOpenPlaybook} className="text-[12px] font-medium text-accent hover:underline">Open Playbook</button>}
+        {row.client && <button onClick={onOpenPlaybook} className="text-[16px] font-medium text-accent hover:underline">Open Playbook</button>}
       </div>
     </div>
   );
