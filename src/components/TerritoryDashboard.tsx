@@ -186,7 +186,7 @@ export function TerritoryDashboard({ me, territories, contacts, clients, tasks, 
           stageLabel: l.category || "Unclaimed", stageColor: "#94a3b8",
           playbook: null, lastTouch: null, flagReason: null, nextCheckIn: null,
           needsAttention: false, followedUp: false, taskId: null, followUpKey: `${t.id}|${l.id}`,
-          phone: l.phone || null, listingUrl: l.url || null,
+          phone: l.phone || null, listingUrl: l.url || null, email: l.email || null,
           listingId: Number.isFinite(gdId) ? gdId : null,
           touchLabel: l.outcomeLabel || null, touchedAt: l.lastTouched, followupDue: l.followupDue,
         };

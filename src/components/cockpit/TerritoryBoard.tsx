@@ -55,6 +55,10 @@ export interface BusinessRow {
   // open, since there's no client page yet to send a rep to.
   phone?: string | null;
   listingUrl?: string | null;
+  /** Feeds TouchPanel's click-to-email — absent when WP has no email on file
+   * for this listing, in which case that outcome falls back to a plain
+   * select instead of a dead mailto: link. */
+  email?: string | null;
   /** GeoDirectory post id, which is what /api/directory/activity keys a
    * logged touch by. Prospect rows only; a claimed+ row logs its outreach as
    * a comment on its conversation task instead. */
@@ -202,7 +206,7 @@ function BusinessRowView({ row, expanded, onToggle, state, onOpenClient, onOpenP
           )}
 
           {touchOpen && row.listingId != null ? (
-            <TouchPanel listingId={row.listingId} onLogged={onTouchLogged} onCancel={() => setTouchOpen(false)} />
+            <TouchPanel listingId={row.listingId} phone={row.phone} email={row.email} onLogged={onTouchLogged} onCancel={() => setTouchOpen(false)} />
           ) : (
             <div className="mt-2.5 flex flex-wrap items-center gap-2">
               {row.client ? (
