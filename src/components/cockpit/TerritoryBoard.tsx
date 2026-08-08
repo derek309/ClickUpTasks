@@ -1,17 +1,28 @@
 "use client";
 
-// Territory Dashboard's presentational layer — same visual language as
-// ClientsBoard.tsx (one card, colored tier-header bands with a count pill,
-// flat clickable rows). Rows are either a claimed+ business (a real Client,
-// with Playbook progress and a "Log a follow-up" action) or a prospect still
-// mid invite (accepted or clicked but hasn't claimed yet — no Client row to
-// attach a follow-up task to, so those get a lighter Call/Open action
-// instead). Both render through the same row shell so the page reads as one
-// list, not two different components stitched together.
+// Territory Dashboard's presentational layer, deliberately the same component
+// shape as ClientsBoard.tsx: one card, colored tier-header bands with a count
+// pill, and rows that are a single scannable line (status dot, initials
+// circle, name over a subtitle, right-aligned meta) rather than a stack of
+// detail lines.
+//
+// The first cut rendered everything inline — flag reason, last touch, a
+// Call link, a View listing link, an "Open Playbook" link and a follow-up
+// composer, all stacked under every row — which turned a list meant for
+// scanning into a wall of controls that looked nothing like the Client
+// Dashboard next to it. Rows now collapse to that one line and expand on
+// click, one at a time, so the list stays readable and the actions for the
+// business you're actually working get the room they need.
+//
+// Rows are either a claimed+ business (a real Client, with Playbook progress
+// and a "Log a follow-up" action) or a prospect still mid invite (accepted or
+// clicked but hasn't claimed yet, so there's no Client row to attach a
+// follow-up task to). Both use the same row shell; only the expanded action
+// area differs.
 import { useState } from "react";
 import { formatDue, timeAgo, htmlToText, playbookCompletion, type Client } from "@/lib/data";
 import { I } from "./ui";
-import { TouchLogger, type TouchResult } from "./TouchLogger";
+import { TouchPanel, type TouchResult } from "./TouchLogger";
 
 export interface BusinessRow {
   // Unique key — a claimed+ row uses client.id, a prospect row has no client
@@ -35,6 +46,11 @@ export interface BusinessRow {
   // there is one, else the client's own id (so a business with nothing open
   // yet can still show a "saving"/error state before its first task exists).
   followUpKey: string;
+  /** Compact right-column status, the equivalent of ClientRow's task count:
+   * "90d overdue", "Accepted 18h ago", "Back Aug 11". Kept short on purpose —
+   * the full sentence is flagReason, shown once the row is expanded. */
+  meta?: string | null;
+  metaDanger?: boolean;
   // Prospect rows only — a phone number to call and the public listing to
   // open, since there's no client page yet to send a rep to.
   phone?: string | null;
@@ -57,6 +73,15 @@ export interface TerritoryBoardGroup {
   rows: BusinessRow[];
 }
 
+const initialsOf = (name: string) =>
+  name.split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase() || "?";
+
+// One date format for every date this component renders. The first version
+// mixed timeAgo()'s absolute fallback with a locale month/day and produced
+// lines like "Visited 5/9/2026. Back on May 10." in a single sentence.
+const shortDate = (unixSeconds: number) =>
+  new Date(unixSeconds * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
 export function TerritoryBoard({ groups, followUpState, onOpenClient, onOpenTerritory, onOpenPlaybook, onFollowUp, onDismissError, onTouchLogged }: {
   groups: TerritoryBoardGroup[];
   followUpState: Record<string, "saving" | string>;
@@ -75,6 +100,11 @@ export function TerritoryBoard({ groups, followUpState, onOpenClient, onOpenTerr
   onFollowUp: (row: BusinessRow, note: string) => void;
   onDismissError: (row: BusinessRow) => void;
 }) {
+  // One row expanded at a time — the point of collapsing them was that a
+  // list with every row's actions on screen isn't scannable, and that's just
+  // as true with two open as with all of them.
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
   return (
     <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">
       <div className="overflow-hidden rounded-xl border bg-surface shadow-soft">
@@ -94,11 +124,13 @@ export function TerritoryBoard({ groups, followUpState, onOpenClient, onOpenTerr
               <div>
                 {g.rows.map((row) => (
                   <BusinessRowView key={row.id} row={row}
+                    expanded={expandedId === row.id}
+                    onToggle={() => setExpandedId((cur) => (cur === row.id ? null : row.id))}
                     state={followUpState[row.followUpKey]}
-                    onOpen={() => (row.client ? onOpenClient(row.client.id) : onOpenTerritory(row.id.split("|")[0]))}
+                    onOpenClient={() => (row.client ? onOpenClient(row.client.id) : onOpenTerritory(row.id.split("|")[0]))}
                     onOpenPlaybook={() => row.client && onOpenPlaybook(row.client.id)}
                     onFollowUp={(note) => onFollowUp(row, note)}
-                    onTouchLogged={(result) => onTouchLogged(row, result)}
+                    onTouchLogged={(result) => { setExpandedId(null); onTouchLogged(row, result); }}
                     onDismissError={() => onDismissError(row)} />
                 ))}
               </div>
@@ -110,10 +142,12 @@ export function TerritoryBoard({ groups, followUpState, onOpenClient, onOpenTerr
   );
 }
 
-function BusinessRowView({ row, state, onOpen, onOpenPlaybook, onFollowUp, onTouchLogged, onDismissError }: {
+function BusinessRowView({ row, expanded, onToggle, state, onOpenClient, onOpenPlaybook, onFollowUp, onTouchLogged, onDismissError }: {
   row: BusinessRow;
+  expanded: boolean;
+  onToggle: () => void;
   state: "saving" | string | undefined;
-  onOpen: () => void;
+  onOpenClient: () => void;
   onOpenPlaybook: () => void;
   onFollowUp: (note: string) => void;
   onTouchLogged: (result: TouchResult) => void;
@@ -121,82 +155,106 @@ function BusinessRowView({ row, state, onOpen, onOpenPlaybook, onFollowUp, onTou
 }) {
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
+  const [touchOpen, setTouchOpen] = useState(false);
   const submit = () => { onFollowUp(note.trim()); setNote(""); setNoteOpen(false); };
+
   return (
-    <div className="border-b px-4 py-3 last:border-0">
-      <button onClick={onOpen} className="flex w-full items-center gap-3 text-left transition-colors hover:bg-accent-soft/50">
+    <div className="border-b last:border-0">
+      {/* Collapsed row: deliberately the same single line as ClientsBoard's
+          ClientRow, so the two dashboards read as one product. */}
+      <button onClick={onToggle} aria-expanded={expanded}
+        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent-soft/50">
         <span className="h-2.5 w-2.5 shrink-0 rounded-full" title={row.stageLabel} style={{ background: row.stageColor }} />
+        <span className="h-8 w-8 shrink-0 rounded-full text-center text-[16px] font-semibold leading-8 text-white" style={{ background: row.stageColor }}>
+          {initialsOf(row.name)}
+        </span>
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-[17px] font-medium leading-snug">{row.name}</span>
           <span className="truncate text-[16px] text-muted">{row.city} · {row.stageLabel}</span>
         </span>
-        {row.playbook && (
-          <span className="shrink-0 rounded-md border px-2 py-1 text-[16px] font-medium text-muted">
-            Playbook {row.playbook.doneCount}/{row.playbook.total}
-            {row.playbook.next && <span className="ml-1 font-normal text-accent">· {row.playbook.next.label}</span>}
-          </span>
+        {row.meta && (
+          <span className={`shrink-0 text-right text-[16px] ${row.metaDanger ? "font-medium text-danger" : "text-muted"}`}>{row.meta}</span>
         )}
+        {/* I.chevron points left, so right = collapsed, down = expanded. */}
+        <I.chevron className={`shrink-0 text-muted transition-transform ${expanded ? "-rotate-90" : "rotate-180"}`} />
       </button>
-      {row.flagReason && (
-        <div className="mt-1.5 pl-6 text-[16px] font-medium text-danger">{row.flagReason}</div>
-      )}
-      {row.nextCheckIn && (
-        <div className="mt-1.5 pl-6 text-[16px] text-muted">Check back {formatDue(row.nextCheckIn)}</div>
-      )}
-      {row.touchLabel && !!row.touchedAt && (
-        <div className="mt-1.5 pl-6 text-[16px] text-muted">
-          {row.touchLabel} {timeAgo(new Date(row.touchedAt * 1000).toISOString())}
-          {row.followupDue ? `. Back on ${new Date(row.followupDue * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" })}.` : "."}
-        </div>
-      )}
-      {row.lastTouch && (
-        <div className="mt-1.5 truncate pl-6 text-[16px] text-muted" title={htmlToText(row.lastTouch.body)}>
-          <span className="font-medium text-foreground">{row.lastTouch.authorName}</span> · {timeAgo(row.lastTouch.at)} · {htmlToText(row.lastTouch.body).slice(0, 80)}
-        </div>
-      )}
-      <div className="mt-2 flex flex-wrap items-center gap-2 pl-6">
-        {row.client ? (
-          state === "saving" ? (
-            <span className="text-[16px] text-muted">Saving…</span>
-          ) : state ? (
-            <span className="flex items-center gap-1.5 text-[16px]">
-              <span className="text-danger">{state}</span>
-              <button onClick={onDismissError} className="font-medium text-muted hover:text-foreground">Dismiss</button>
-            </span>
-          ) : noteOpen ? (
-            <div className="flex w-full flex-col gap-1.5 sm:max-w-md">
-              <textarea value={note} onChange={(e) => setNote(e.target.value)} autoFocus rows={2}
-                placeholder="What happened? (optional)"
-                className="w-full resize-none rounded-md border bg-background px-2 py-1.5 text-[16px] outline-none placeholder:text-muted focus:border-accent" />
-              <div className="flex items-center gap-2">
-                <button onClick={submit} className="rounded-md bg-accent px-2.5 py-1 text-[16px] font-medium text-white">Log it</button>
-                <button onClick={() => { setNoteOpen(false); setNote(""); }} className="text-[16px] font-medium text-muted hover:text-foreground">Cancel</button>
-              </div>
+
+      {expanded && (
+        <div className="px-4 pb-3 pl-[60px]">
+          {row.flagReason && <div className="text-[16px] font-medium text-danger">{row.flagReason}</div>}
+          {row.nextCheckIn && <div className="mt-1 text-[16px] text-muted">Check back {formatDue(row.nextCheckIn)}</div>}
+          {row.touchLabel && !!row.touchedAt && (
+            <div className="mt-1 text-[16px] text-muted">
+              {row.touchLabel} {shortDate(row.touchedAt)}
+              {row.followupDue ? ` · Follow up due ${shortDate(row.followupDue)}` : ""}
             </div>
+          )}
+          {row.playbook && (
+            <div className="mt-1 text-[16px] text-muted">
+              Playbook {row.playbook.doneCount}/{row.playbook.total}
+              {row.playbook.next && <span className="ml-1 text-accent">· next: {row.playbook.next.label}</span>}
+            </div>
+          )}
+          {row.lastTouch && (
+            <div className="mt-1 truncate text-[16px] text-muted" title={htmlToText(row.lastTouch.body)}>
+              <span className="font-medium text-foreground">{row.lastTouch.authorName}</span> · {timeAgo(row.lastTouch.at)} · {htmlToText(row.lastTouch.body).slice(0, 80)}
+            </div>
+          )}
+
+          {touchOpen && row.listingId != null ? (
+            <TouchPanel listingId={row.listingId} onLogged={onTouchLogged} onCancel={() => setTouchOpen(false)} />
           ) : (
-            <button onClick={() => setNoteOpen(true)}
-              title="Record that you reached out, with a note if you want one. Checks back in a few days if nothing comes of it."
-              className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">
-              <I.comment className="h-3 w-3" /> Log a follow-up
-            </button>
-          )
-        ) : (
-          <>
-            {row.listingId != null && <TouchLogger listingId={row.listingId} onLogged={onTouchLogged} />}
-            {row.phone && (
-              <a href={`tel:${row.phone}`} onClick={(e) => e.stopPropagation()}
-                className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[16px] font-medium text-accent hover:bg-accent-soft">
-                <I.phone className="h-3 w-3" /> Call {row.phone}
-              </a>
-            )}
-            {row.listingUrl && (
-              <a href={row.listingUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
-                className="text-[16px] font-medium text-accent hover:underline">View listing</a>
-            )}
-          </>
-        )}
-        {row.client && <button onClick={onOpenPlaybook} className="text-[16px] font-medium text-accent hover:underline">Open Playbook</button>}
-      </div>
+            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+              {row.client ? (
+                state === "saving" ? (
+                  <span className="text-[16px] text-muted">Saving…</span>
+                ) : state ? (
+                  <span className="flex items-center gap-1.5 text-[16px]">
+                    <span className="text-danger">{state}</span>
+                    <button onClick={onDismissError} className="font-medium text-muted hover:text-foreground">Dismiss</button>
+                  </span>
+                ) : noteOpen ? (
+                  <div className="flex w-full flex-col gap-1.5 sm:max-w-md">
+                    <textarea value={note} onChange={(e) => setNote(e.target.value)} autoFocus rows={2}
+                      placeholder="What happened? (optional)"
+                      className="w-full resize-none rounded-lg border bg-background px-2.5 py-2 text-[16px] outline-none placeholder:text-muted focus:border-accent" />
+                    <div className="flex items-center gap-3">
+                      <button onClick={submit} className="rounded-lg bg-accent px-3 py-1.5 text-[16px] font-medium text-white">Log it</button>
+                      <button onClick={() => { setNoteOpen(false); setNote(""); }} className="text-[16px] font-medium text-muted hover:text-foreground">Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => setNoteOpen(true)}
+                    title="Record that you reached out, with a note if you want one. Checks back in a few days if nothing comes of it."
+                    className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[16px] font-medium text-foreground hover:border-accent hover:bg-accent-soft hover:text-accent">
+                    <I.comment className="h-3.5 w-3.5" /> Log a follow-up
+                  </button>
+                )
+              ) : (
+                row.listingId != null && (
+                  <button onClick={() => setTouchOpen(true)}
+                    title="Record that you reached out and set when this should come back to you"
+                    className="rounded-lg border px-3 py-1.5 text-[16px] font-medium text-foreground hover:border-accent hover:bg-accent-soft hover:text-accent">
+                    Log a touch
+                  </button>
+                )
+              )}
+              {row.phone && (
+                <a href={`tel:${row.phone}`} className="inline-flex items-center gap-1.5 text-[16px] font-medium text-accent hover:underline">
+                  <I.phone className="h-3.5 w-3.5" /> {row.phone}
+                </a>
+              )}
+              {row.listingUrl && (
+                <a href={row.listingUrl} target="_blank" rel="noopener noreferrer" className="text-[16px] font-medium text-accent hover:underline">View listing</a>
+              )}
+              <button onClick={onOpenClient} className="text-[16px] font-medium text-accent hover:underline">
+                {row.client ? "Open client" : "Open in Businesses"}
+              </button>
+              {row.client && <button onClick={onOpenPlaybook} className="text-[16px] font-medium text-accent hover:underline">Open Playbook</button>}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

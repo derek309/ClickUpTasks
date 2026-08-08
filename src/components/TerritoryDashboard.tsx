@@ -17,7 +17,7 @@
 // one line reason it's here.
 import { useEffect, useMemo, useState } from "react";
 import {
-  users, userById, playbookCompletion, normalizeState, CLIENT_STATUS_META, STEP_STALL_DAYS, todayIso as todayIsoDate,
+  users, userById, playbookCompletion, normalizeState, formatDue, CLIENT_STATUS_META, STEP_STALL_DAYS, todayIso as todayIsoDate,
   type Client, type Contact, type Task, type Territory, type ClientStatus, type PlannerInvite,
 } from "@/lib/data";
 import { isDue, latestInviteStatus } from "@/lib/plannerPools";
@@ -132,6 +132,9 @@ export function TerritoryDashboard({ me, canAdmin, territories, contacts, client
           lastTouch: lastTouchFor(c.id),
           flagReason: attention && !followedUp ? (convo ? convo.title : `Quiet on ${CLIENT_STATUS_META[c.status].label} for ${STEP_STALL_DAYS}+ days`) : null,
           nextCheckIn: followedUp ? nextCheckIn : null,
+          // Right-column summary, the counterpart of ClientRow's task count.
+          meta: convo && !followedUp ? "Needs reply" : followedUp && nextCheckIn ? `Back ${formatDue(nextCheckIn)}` : stalled && !followedUp ? `Quiet ${STEP_STALL_DAYS}+ days` : null,
+          metaDanger: !!convo && !followedUp,
           needsAttention: attention,
           followedUp,
           taskId: convo?.id ?? null,
@@ -195,14 +198,27 @@ export function TerritoryDashboard({ me, canAdmin, territories, contacts, client
         if (l.followupDue > 0) {
           if (l.followupDue <= now) {
             const overdueDays = Math.floor((now - l.followupDue) / 86400);
-            due.push({ ...base, flagReason: overdueDays >= 1 ? `Follow up is ${overdueDays}d overdue.` : "Follow up is due today." });
+            due.push({
+              ...base,
+              flagReason: overdueDays >= 1 ? `You said you'd follow up ${overdueDays} days ago.` : "You said you'd follow up today.",
+              meta: overdueDays >= 1 ? `${overdueDays} days late` : "Due today",
+              metaDanger: true,
+            });
           }
           continue;
         }
         if (inv?.status === "accepted") {
-          accepted.push({ ...base, flagReason: `Accepted the invite ${timeAgoShort(inv.respondedAt ?? inv.at)}. Call or visit to close.` });
+          accepted.push({
+            ...base,
+            flagReason: "Accepted the invite. Call or visit to close.",
+            meta: `Accepted ${timeAgoShort(inv.respondedAt ?? inv.at)}`,
+          });
         } else if (inv?.clickedAt) {
-          clicked.push({ ...base, flagReason: `Clicked ${timeAgoShort(inv.clickedAt)} but hasn't finished. A nudge might close it.` });
+          clicked.push({
+            ...base,
+            flagReason: "Clicked the invite but didn't finish. A nudge might close it.",
+            meta: `Clicked ${timeAgoShort(inv.clickedAt)}`,
+          });
         }
       }
     }

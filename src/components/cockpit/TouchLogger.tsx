@@ -14,6 +14,14 @@
 // decide when to put them back in front of a rep. "Not interested" is the one
 // outcome that clears the follow-up instead of setting one, so a hard no
 // stops resurfacing forever.
+//
+// Renders as a bounded panel rather than controls loose in the row. The first
+// cut inlined them and it read as a form spilling into the list: the four
+// channels, a terminal "Not interested", and the row's own Call/View listing
+// links all sat on one wrapping line with nothing saying which belonged to
+// which. The panel owns the row's full width while it's open, the caller
+// hides its other actions, and "Not interested" moved to the footer because
+// it answers a different question than the other four.
 import { useState } from "react";
 import { authedFetch } from "@/lib/supabase";
 
@@ -35,7 +43,7 @@ const FOLLOW_UPS = [
   { days: 14, label: "In 2 weeks" },
 ] as const;
 
-const LOST = { key: "lost", label: "Not interested" } as const;
+const LOST_KEY = "lost";
 
 /** The subset of the updated listing /api/directory/activity echoes back, so
  * a caller can patch its own row in place instead of refetching the city. */
@@ -48,24 +56,32 @@ export type TouchResult = {
   lastTouched: number;
 };
 
-export function TouchLogger({ listingId, onLogged }: {
+/** Shared button styling for the two pick-one rows, so the outcome and
+ * timing choices read as the same kind of control at the same size instead
+ * of drifting apart. Fixed min-width keeps them on a tidy grid when they
+ * wrap, which is most of what made the first version look thrown together. */
+const chip = (selected: boolean) =>
+  `min-w-[104px] rounded-lg border px-3 py-2 text-[16px] font-medium transition-colors disabled:opacity-40 ${
+    selected
+      ? "border-accent bg-accent text-white"
+      : "border-[color:var(--border)] text-foreground hover:border-accent hover:bg-accent-soft hover:text-accent"
+  }`;
+
+export function TouchPanel({ listingId, onLogged, onCancel }: {
   listingId: number | string;
   onLogged: (result: TouchResult) => void;
+  onCancel: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [outcome, setOutcome] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const reset = () => { setOpen(false); setOutcome(null); setNote(""); setError(null); };
-
   // followupDays null means "clear any scheduled follow-up" (the Not
   // interested path); a number schedules one that many days out. The date
   // itself is computed by WordPress from the interval, never sent from here,
   // so the two front ends can't disagree about what "in 2 days" resolves to.
-  const save = async (followupDays: number | null) => {
-    if (!outcome) return;
+  const save = async (chosenOutcome: string, followupDays: number | null) => {
     setSaving(true);
     setError(null);
     try {
@@ -74,7 +90,7 @@ export function TouchLogger({ listingId, onLogged }: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           listingId: String(listingId),
-          outcome,
+          outcome: chosenOutcome,
           ...(note.trim() ? { note: note.trim() } : {}),
           ...(followupDays === null ? { clearFollowup: true } : { followupDays }),
         }),
@@ -82,77 +98,57 @@ export function TouchLogger({ listingId, onLogged }: {
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) throw new Error(j?.error || `Couldn't save that touch (${res.status}).`);
       onLogged(j.listing as TouchResult);
-      reset();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Network error. Try again.");
       setSaving(false);
     }
   };
 
-  if (!open) {
-    return (
-      <button onClick={() => setOpen(true)}
-        title="Record that you reached out and set when this should come back to you"
-        className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">
-        Log a touch
-      </button>
-    );
-  }
-
   return (
-    <div className="flex w-full flex-col gap-2 sm:max-w-lg">
+    <div className="mt-2 w-full rounded-xl border bg-background p-3 sm:max-w-xl">
       {error && (
-        <div className="flex items-center gap-1.5 text-[16px]">
-          <span className="text-danger">{error}</span>
-          <button onClick={() => setError(null)} className="font-medium text-muted hover:text-foreground">Dismiss</button>
+        <div className="mb-2.5 flex items-start gap-2 rounded-lg bg-danger-soft px-2.5 py-2 text-[16px]">
+          <span className="flex-1 text-danger">{error}</span>
+          <button onClick={() => setError(null)} className="shrink-0 font-medium text-muted hover:text-foreground">Dismiss</button>
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-[16px] text-muted">What did you do?</span>
-        {[...OUTCOMES, LOST].map((o) => (
-          <button key={o.key} onClick={() => setOutcome(o.key)} disabled={saving}
-            className={`rounded-md border px-2.5 py-1 text-[16px] font-medium disabled:opacity-40 ${
-              outcome === o.key ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"
-            }`}>
+      <div className="mb-1.5 text-[16px] font-semibold">What did you do?</div>
+      <div className="flex flex-wrap gap-1.5">
+        {OUTCOMES.map((o) => (
+          <button key={o.key} onClick={() => setOutcome(o.key)} disabled={saving} className={chip(outcome === o.key)}>
             {o.label}
           </button>
         ))}
       </div>
 
-      {outcome && (
+      {outcome && outcome !== LOST_KEY && (
         <>
           <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} disabled={saving}
-            placeholder="What happened? (optional)"
-            className="w-full resize-none rounded-md border bg-background px-2 py-1.5 text-[16px] outline-none placeholder:text-muted focus:border-accent disabled:opacity-40" />
-          {outcome === LOST.key ? (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[16px] text-muted">Stops showing up on your dashboard.</span>
-              <button onClick={() => save(null)} disabled={saving}
-                className="rounded-md bg-accent px-2.5 py-1 text-[16px] font-medium text-white disabled:opacity-40">
-                {saving ? "Saving…" : "Log it"}
+            placeholder="Add a note (optional)"
+            className="mt-2.5 w-full resize-none rounded-lg border bg-surface px-2.5 py-2 text-[16px] outline-none placeholder:text-muted focus:border-accent disabled:opacity-40" />
+          <div className="mb-1.5 mt-2.5 text-[16px] font-semibold">When should this come back to you?</div>
+          <div className="flex flex-wrap gap-1.5">
+            {FOLLOW_UPS.map((f) => (
+              <button key={f.days} onClick={() => save(outcome, f.days)} disabled={saving} className={chip(false)}>
+                {f.label}
               </button>
-            </div>
-          ) : (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[16px] text-muted">Come back to me</span>
-              {FOLLOW_UPS.map((f) => (
-                <button key={f.days} onClick={() => save(f.days)} disabled={saving}
-                  className="rounded-md border px-2.5 py-1 text-[16px] font-medium text-accent hover:bg-accent-soft disabled:opacity-40">
-                  {f.label}
-                </button>
-              ))}
-              {saving && <span className="text-[16px] text-muted">Saving…</span>}
-            </div>
-          )}
+            ))}
+          </div>
         </>
       )}
 
-      {!saving && (
-        <div>
-          <button onClick={reset} className="text-[16px] font-medium text-muted hover:text-foreground">Cancel</button>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t pt-2.5">
+        <button onClick={() => save(LOST_KEY, null)} disabled={saving}
+          title="Records a hard no and stops this business from coming back to your dashboard"
+          className="text-[16px] font-medium text-muted hover:text-danger disabled:opacity-40">
+          Not interested
+        </button>
+        <div className="flex items-center gap-3">
+          {saving && <span className="text-[16px] text-muted">Saving…</span>}
+          <button onClick={onCancel} disabled={saving} className="text-[16px] font-medium text-muted hover:text-foreground disabled:opacity-40">Cancel</button>
         </div>
-      )}
+      </div>
     </div>
   );
 }
