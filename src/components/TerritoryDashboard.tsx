@@ -17,7 +17,7 @@
 // one line reason it's here.
 import { useEffect, useMemo, useState } from "react";
 import {
-  users, userById, playbookCompletion, normalizeState, formatDue, CLIENT_STATUS_META, STEP_STALL_DAYS, todayIso as todayIsoDate,
+  userById, playbookCompletion, normalizeState, formatDue, CLIENT_STATUS_META, STEP_STALL_DAYS, todayIso as todayIsoDate,
   type Client, type Contact, type Task, type Territory, type ClientStatus, type PlannerInvite,
 } from "@/lib/data";
 import { isDue, latestInviteStatus } from "@/lib/plannerPools";
@@ -34,9 +34,8 @@ const DASHBOARD_STATUSES: ClientStatus[] = ["claimed", "interview", "onboarding"
 // same carve-out TerritoryDirectory.tsx's own isStalled already makes.
 const STALL_ELIGIBLE: ClientStatus[] = ["claimed", "interview", "onboarding"];
 
-export function TerritoryDashboard({ me, canAdmin, territories, contacts, clients, tasks, onOpenClient, onOpenTerritory, onOpenPlaybook }: {
+export function TerritoryDashboard({ me, territories, contacts, clients, tasks, onOpenClient, onOpenTerritory, onOpenPlaybook }: {
   me: { id: string };
-  canAdmin: boolean;
   territories: Territory[];
   contacts: Contact[];
   clients: Client[];
@@ -45,7 +44,6 @@ export function TerritoryDashboard({ me, canAdmin, territories, contacts, client
   onOpenTerritory: (territoryId: string) => void;
   onOpenPlaybook: (id: string) => void;
 }) {
-  const [viewingUser, setViewingUser] = useState(me.id);
   const [followUpState, setFollowUpState] = useState<Record<string, "saving" | string>>({});
   // Same optimistic-snooze idiom TerritoryDirectory.tsx's markFollowedUp
   // uses: keyed by conversation-task id (or the client id when a task gets
@@ -55,7 +53,11 @@ export function TerritoryDashboard({ me, canAdmin, territories, contacts, client
   // snooze, never the other way around).
   const [followUpDue, setFollowUpDue] = useState<Record<string, { from: string | null; to: string }>>({});
 
-  const myTerritories = useMemo(() => territories.filter((t) => (t.assignedTo ?? []).includes(viewingUser)), [territories, viewingUser]);
+  // Always the logged-in user's own ambassador territories — no "viewing
+  // work for" picker. This is a personal work list, not an admin overview
+  // tool (Settings → Territories already covers "see everyone's assignment");
+  // Derek: log in as Derek, see Derek's; Justin logs in, sees Justin's.
+  const myTerritories = useMemo(() => territories.filter((t) => (t.assignedTo ?? []).includes(me.id)), [territories, me.id]);
 
   // Invite engagement (accepted/clicked/opened) and the businesses that
   // carry it both come from WordPress + planner_weeks, per city — the exact
@@ -285,16 +287,7 @@ export function TerritoryDashboard({ me, canAdmin, territories, contacts, client
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b bg-surface px-4 py-2.5">
-        {canAdmin ? (
-          <>
-            <span className="text-[13px] text-muted">Viewing work for</span>
-            <select value={viewingUser} onChange={(e) => setViewingUser(e.target.value)} className="rounded-md border bg-background px-2 py-1 text-[13px] outline-none focus:border-accent">
-              {users.map((u) => <option key={u.id} value={u.id}>{u.name}{u.role === "va" ? " (VA)" : ""}</option>)}
-            </select>
-          </>
-        ) : (
-          <span className="text-[13px] text-muted">Everything that needs you across your assigned territories</span>
-        )}
+        <span className="text-[16px] text-muted">Everything that needs you across your assigned territories</span>
         {quietCount > 0 && (
           <span className="ml-auto text-[13px] text-muted">{quietCount} other claimed business{quietCount === 1 ? "" : "es"} moving through the Playbook, nothing urgent today</span>
         )}

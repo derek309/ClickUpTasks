@@ -4970,7 +4970,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             dmEnabled={dmEnabled} onSetDmEnabled={setDmEnabled}
           />
         ) : territoryView === "dashboard" ? (
-          <TerritoryDashboard me={me} canAdmin={canAdmin} territories={territories} contacts={contacts} clients={clients} tasks={tasks}
+          <TerritoryDashboard me={me} territories={territories} contacts={contacts} clients={clients} tasks={tasks}
             onOpenClient={(id) => { setTerritoryView(null); setActiveClient(id); setActiveProject(null); setClientTab("tasks"); }}
             onOpenTerritory={openTerritory}
             onOpenPlaybook={openClientPlaybook} />
