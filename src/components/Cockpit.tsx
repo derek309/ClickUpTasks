@@ -1670,14 +1670,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // matching rowToProject's `?? []`.
   const assignedProjectsFor = (userId: string) => projects.filter((p) => (p.clientId === WORKSPACE_CLIENT_ID || p.clientId === PERSONAL_CLIENT_ID) && (scopedTasks.some((t) => t.projectId === p.id && t.status !== "done" && (t.assigneeId === userId || t.subtasks.some((s) => s.assigneeId === userId))) || (p.assignedTo ?? []).includes(userId)));
   const myAssignedClients = assignedClientsFor(me.id);
-  const myTerritories = territories.filter((t) => (t.assignedTo ?? []).includes(me.id));
-  // Cities shown in the sidebar: only the ones assigned to YOU, admin or not
-  // — an admin managing every territory doesn't mean every admin should see
-  // every rep's territory in their own personal nav just by being an admin.
-  // Seeing/assigning the full roster is still available via "Manage
-  // territories" (openTerritory("all"), canAdmin-gated below), which reads
-  // `territories` directly rather than this filtered list. Sorted by city
-  // for a stable list.
+  // Ambassador OR follower — this drives what shows up to LOOK at (sidebar,
+  // Settings → Territories, the Territory Dashboard's own "which cities do I
+  // pull from" scan). It deliberately does NOT gate which cities put
+  // activities on your dashboard; TerritoryDashboard.tsx re-filters its own
+  // internal myTerritories to assignedTo only, so a follower sees the city
+  // but nothing from it demands action.
+  const myTerritories = territories.filter((t) => (t.assignedTo ?? []).includes(me.id) || (t.followers ?? []).includes(me.id));
+  // Cities shown in the sidebar: only the ones assigned to (or followed by)
+  // YOU, admin or not — an admin managing every territory doesn't mean every
+  // admin should see every rep's territory in their own personal nav just by
+  // being an admin. Seeing/assigning the full roster is still available via
+  // "Manage territories" (openTerritory("all"), canAdmin-gated below), which
+  // reads `territories` directly rather than this filtered list. Sorted by
+  // city for a stable list.
   const visibleTerritories = myTerritories.slice().sort((a, b) => a.city.localeCompare(b.city));
   const territoryById = (id: string) => territories.find((t) => t.id === id) ?? null;
   const openTerritory = (id: string) => {
@@ -3436,13 +3442,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // so the four territories that predate this feature get one on first use.
   const ensureTerritoryClient = (t: Territory) => {
     const id = territoryClientId(t.id);
-    const want = (t.assignedTo ?? []).slice().sort();
+    // Ambassadors AND followers both need to actually open this city — the
+    // container client's assigned_to is what RLS checks, so a follower left
+    // off it could see the city in their sidebar (myTerritories includes
+    // followers) but get nothing back querying its contacts/tasks. Only
+    // Territory Dashboard's OWN activity tiers stay ambassador-only — that
+    // filter reads t.assignedTo directly, never this container client.
+    const want = Array.from(new Set([...(t.assignedTo ?? []), ...(t.followers ?? [])])).sort();
     const existing = clients.find((c) => c.id === id);
     const sameAssignees = existing && (existing.assignedTo ?? []).slice().sort().join(",") === want.join(",");
     if (existing && existing.name === t.name && sameAssignees) return { id, ready: Promise.resolve() };
     const nc: Client = {
       ...(existing ?? { color: "#0ea5e9", ghlLocationId: "", status: "active_client" as const, type: "client" as const }),
-      id, name: t.name, assignedTo: t.assignedTo ?? [],
+      id, name: t.name, assignedTo: want,
     };
     setClients((cs) => (existing ? cs.map((c) => (c.id === id ? nc : c)) : [...cs, nc]));
     markOwnClientWrite(id);
@@ -3452,12 +3464,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return { id, ready: upsertClient(nc) };
   };
   const addTerritory = (spec: { name: string; city: string; state: string; assignedTo: string[] }) => {
-    const t: Territory = { id: newId("terr_"), wpCitySlug: null, dailyInviteCap: null, ...spec };
+    const t: Territory = { id: newId("terr_"), wpCitySlug: null, dailyInviteCap: null, followers: [], ...spec };
     setTerritories((ts) => [...ts, t]);
     upsertTerritory(t);
     ensureTerritoryClient(t);
   };
-  // Toggle a teammate on/off a city's ambassador list — a city can have several.
+  // Toggle a teammate on/off a city's ambassador list — a city can have
+  // several. Ambassadors are who Territory Dashboard puts activities in
+  // front of; see toggleTerritoryFollower below for look-but-no-activities.
   const toggleTerritoryAssignee = (id: string, memberId: string) => {
     const t = territories.find((x) => x.id === id);
     if (!t) return;
@@ -3467,6 +3481,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     upsertTerritory(nt);
     // Keep the container's follow list in step, or a newly-added ambassador
     // can open the city but not see its work (and a removed one still can).
+    ensureTerritoryClient(nt);
+  };
+  // Toggle a teammate on/off a city's follower list — they can open the city
+  // and see its work (ensureTerritoryClient grants the same RLS visibility as
+  // an ambassador), but Territory Dashboard's tiers read assignedTo only, so
+  // a follower's own dashboard stays quiet on this city's activities.
+  const toggleTerritoryFollower = (id: string, memberId: string) => {
+    const t = territories.find((x) => x.id === id);
+    if (!t) return;
+    const has = (t.followers ?? []).includes(memberId);
+    const nt = { ...t, followers: has ? t.followers.filter((m) => m !== memberId) : [...(t.followers ?? []), memberId] };
+    setTerritories((ts) => ts.map((x) => (x.id === id ? nt : x)));
+    upsertTerritory(nt);
     ensureTerritoryClient(nt);
   };
   const deleteTerritory = (id: string) => {
@@ -4933,7 +4960,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onSaveClient={(c) => { setClients((cs) => cs.map((x) => (x.id === c.id ? c : x))); markOwnClientWrite(c.id); upsertClient(c); }}
             onSynced={async () => { try { setContacts(await fetchContacts()); pushToast("Contacts updated from GoHighLevel"); } catch { /* ignore */ } }}
             territories={territories} contacts={contacts} clients={clients}
-            onAddTerritory={addTerritory} onToggleAssignee={toggleTerritoryAssignee} onDeleteTerritory={deleteTerritory}
+            onAddTerritory={addTerritory} onToggleAssignee={toggleTerritoryAssignee} onToggleFollower={toggleTerritoryFollower} onDeleteTerritory={deleteTerritory}
             onSetDailyInviteCap={setTerritoryDailyInviteCap}
             onAddContact={(contact) => addClientContact(contact)}
             onOpenClient={(id) => { setSettingsView(false); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); }}
@@ -4955,7 +4982,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         ) : territoryView ? (
           <div className="flex-1 overflow-auto bg-background py-2">
             <TerritoryPanel me={me} canAdmin={canAdmin} territories={territories} contacts={contacts} clients={clients}
-              onAddTerritory={addTerritory} onToggleAssignee={toggleTerritoryAssignee} onDeleteTerritory={(id) => { deleteTerritory(id); if (territoryView === id) setTerritoryView("all"); }}
+              onAddTerritory={addTerritory} onToggleAssignee={toggleTerritoryAssignee} onToggleFollower={toggleTerritoryFollower} onDeleteTerritory={(id) => { deleteTerritory(id); if (territoryView === id) setTerritoryView("all"); }}
               onSetDailyInviteCap={setTerritoryDailyInviteCap}
               // Territory is a working view over what's already in GHL — no
               // "become a client" ceremony before you can open/journal a

@@ -39,6 +39,7 @@ export default function SettingsHub({
   clients,
   onAddTerritory,
   onToggleAssignee,
+  onToggleFollower,
   onDeleteTerritory,
   onSetDailyInviteCap,
   onAddContact,
@@ -67,6 +68,7 @@ export default function SettingsHub({
   clients: Client[];
   onAddTerritory: (t: { name: string; city: string; state: string; assignedTo: string[] }) => void;
   onToggleAssignee: (id: string, memberId: string) => void;
+  onToggleFollower: (id: string, memberId: string) => void;
   onDeleteTerritory: (id: string) => void;
   onSetDailyInviteCap?: (id: string, cap: number | null) => void;
   onAddContact: (contact: Contact) => void;
@@ -116,7 +118,7 @@ export default function SettingsHub({
             {tab === "team" && canAdmin && <TeamPanel me={me} dmEnabled={dmEnabled} onSetDmEnabled={onSetDmEnabled} />}
             {tab === "territories" && hasTerritoryAccess && (
               <TerritoryPanel me={me} canAdmin={canAdmin} territories={territories} contacts={contacts} clients={clients}
-                onAddTerritory={onAddTerritory} onToggleAssignee={onToggleAssignee} onDeleteTerritory={onDeleteTerritory} onSetDailyInviteCap={onSetDailyInviteCap}
+                onAddTerritory={onAddTerritory} onToggleAssignee={onToggleAssignee} onToggleFollower={onToggleFollower} onDeleteTerritory={onDeleteTerritory} onSetDailyInviteCap={onSetDailyInviteCap}
                 onAddContact={onAddContact} onOpenClient={onOpenClient} />
             )}
             {tab === "templates" && canAdmin && (

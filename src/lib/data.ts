@@ -356,7 +356,17 @@ export interface Territory {
   name: string;
   city: string;
   state: string;
-  assignedTo: string[]; // roster ids of the assigned ambassadors (one or more; [] = unassigned)
+  assignedTo: string[]; // roster ids of the assigned ambassadors (one or more; [] = unassigned) — this is who the Territory Dashboard puts activities in front of
+  // Roster ids of people who can look at this territory (open it, see its
+  // businesses/tasks) without being an ambassador — they get no follow-up
+  // rows, no invite tiers, nothing on their own Territory Dashboard.
+  // Distinct from assignedTo on purpose: "who works this" and "who can see
+  // this" used to be the same list, which is how an admin who checks in on
+  // every city ends up with every city's activities on their own dashboard
+  // too. ensureTerritoryClient (Cockpit.tsx) grants both groups the same
+  // underlying RLS visibility on the container client; only assignedTo
+  // drives TerritoryDashboard.tsx's tiers.
+  followers: string[];
   // Explicit override for the WordPress option-key slug push-sync writes
   // into (WordPress's own PHP sanitize_title() of the city name) — avoids
   // silently drifting from a JS re-derivation on punctuation/spelling edge

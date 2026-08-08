@@ -10,11 +10,15 @@ import { users, clientStatusMeta, normalizeState, playbookCompletion, type Me, t
 import { I, Avatar } from "./cockpit/ui";
 import TerritoryDirectory from "./cockpit/TerritoryDirectory";
 
-export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onDeleteTerritory, onSetDailyInviteCap, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, otherListsByClient, onOpenProject, onSetClientStatus, ghlContactUrlFor, focusId }: {
+export default function TerritoryPanel({ me, canAdmin, territories, contacts, clients, onAddTerritory, onToggleAssignee, onToggleFollower, onDeleteTerritory, onSetDailyInviteCap, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, otherListsByClient, onOpenProject, onSetClientStatus, ghlContactUrlFor, focusId }: {
   me: Me; canAdmin: boolean;
   territories: Territory[]; contacts: Contact[]; clients: Client[];
   onAddTerritory: (t: { name: string; city: string; state: string; assignedTo: string[] }) => void;
   onToggleAssignee: (id: string, memberId: string) => void; // toggle a teammate on/off a city
+  // Toggle a teammate on/off a city's follower list — they can open the city
+  // and see its work, but it never puts activities on their own Territory
+  // Dashboard the way being an ambassador does.
+  onToggleFollower: (id: string, memberId: string) => void;
   onDeleteTerritory: (id: string) => void;
   // How many prospecting invites the auto-invite cron sends per weekday for
   // this city (null/0 = off) — see runPlannerAutoInvite. Optional so the
@@ -57,7 +61,7 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
   const [assignSet, setAssignSet] = useState<Set<string>>(new Set());
   const [assignMenu, setAssignMenu] = useState<string | null>(null); // territory id whose assignee popover is open
 
-  const scoped = canAdmin ? territories : territories.filter((t) => (t.assignedTo ?? []).includes(me.id));
+  const scoped = canAdmin ? territories : territories.filter((t) => (t.assignedTo ?? []).includes(me.id) || (t.followers ?? []).includes(me.id));
   const visible = focusId ? scoped.filter((t) => t.id === focusId) : scoped;
   const clientIds = new Set(clients.map((c) => c.id));
   const toggle = (id: string) => setExpanded((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -157,24 +161,42 @@ export default function TerritoryPanel({ me, canAdmin, territories, contacts, cl
                     </div>
                   )}
                   <span className="relative flex shrink-0 items-center" onClick={(e) => e.stopPropagation()}>
-                    {(t.assignedTo ?? []).length > 0 ? (
+                    {(t.assignedTo ?? []).length > 0 || (t.followers ?? []).length > 0 ? (
                       <span className="flex items-center -space-x-1.5">
-                        {(t.assignedTo ?? []).slice(0, 4).map((mid) => <Avatar key={mid} id={mid} size={24} />)}
-                        {(t.assignedTo ?? []).length > 4 && <span className="flex h-6 w-6 items-center justify-center rounded-full border bg-background text-[11px] text-muted">+{(t.assignedTo ?? []).length - 4}</span>}
+                        {(t.assignedTo ?? []).slice(0, 4).map((mid) => <Avatar key={`a:${mid}`} id={mid} size={24} />)}
+                        {/* Followers render dimmed with a dashed ring so the
+                            avatar row itself signals "can see, not working
+                            it" without needing a legend. */}
+                        {(t.followers ?? []).slice(0, 4).map((mid) => (
+                          <span key={`f:${mid}`} title="Following (no activities)" className="rounded-full opacity-60 ring-2 ring-dashed ring-background">
+                            <Avatar id={mid} size={24} />
+                          </span>
+                        ))}
                       </span>
                     ) : canAdmin ? (
                       <span className="text-[13px] text-muted">Unassigned</span>
                     ) : null}
                     {canAdmin && (
                       <>
-                        <button onClick={() => setAssignMenu((m) => (m === t.id ? null : t.id))} title="Assign ambassadors"
+                        <button onClick={() => setAssignMenu((m) => (m === t.id ? null : t.id))} title="Manage ambassadors and followers"
                           className="ml-1.5 rounded-md border bg-background px-1.5 py-1 text-[13px] text-muted hover:text-foreground"><I.plus /></button>
                         {assignMenu === t.id && (
-                          <span className="absolute right-0 top-full z-20 mt-1 w-52 rounded-lg border bg-surface p-1 shadow-lg">
+                          <span className="absolute right-0 top-full z-20 mt-1 w-60 rounded-lg border bg-surface p-1 shadow-lg">
+                            <div className="px-2 pb-0.5 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Ambassador — works it, gets activities</div>
                             {users.map((u) => {
                               const on = (t.assignedTo ?? []).includes(u.id);
                               return (
-                                <button key={u.id} onClick={() => onToggleAssignee(t.id, u.id)} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-background">
+                                <button key={`a:${u.id}`} onClick={() => onToggleAssignee(t.id, u.id)} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-background">
+                                  <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "border-accent bg-accent text-white" : "border-border"}`}>{on && <I.check />}</span>
+                                  <Avatar id={u.id} size={18} /> <span className="truncate text-[13px]">{u.name}</span>
+                                </button>
+                              );
+                            })}
+                            <div className="mt-1 border-t px-2 pb-0.5 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Following — can look, no activities</div>
+                            {users.map((u) => {
+                              const on = (t.followers ?? []).includes(u.id);
+                              return (
+                                <button key={`f:${u.id}`} onClick={() => onToggleFollower(t.id, u.id)} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-background">
                                   <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "border-accent bg-accent text-white" : "border-border"}`}>{on && <I.check />}</span>
                                   <Avatar id={u.id} size={18} /> <span className="truncate text-[13px]">{u.name}</span>
                                 </button>
