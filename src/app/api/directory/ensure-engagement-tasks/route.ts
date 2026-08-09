@@ -49,7 +49,6 @@ export async function POST(req: NextRequest) {
   const candidates = Object.entries(funnel.byGdPlaceId)
     .filter(([, entry]) => entry.step !== lastStepValue && stepRank(entry.step) > 0)
     .map(([gdPlaceId, entry]) => ({ gdPlaceId: Number(gdPlaceId), entry }));
-  if (!candidates.length) return NextResponse.json({ ok: true, ensured: 0 });
 
   const listingById = new Map(listingsResult.listings.map((l) => [typeof l.id === "number" ? l.id : parseInt(String(l.id), 10), l] as const));
 
@@ -79,5 +78,34 @@ export async function POST(req: NextRequest) {
     if (ok) ensured++;
   }
 
-  return NextResponse.json({ ok: true, ensured });
+  // Self-heal contacts with a real open Conversation task but no city/state
+  // (Derek, 2026-08-09 — "Client replies has all the things that should be
+  // in Follow Up, those are all sales triggers"): handleEmailEngagement
+  // promotes + tasks a contact off its GHL contact id alone, independent of
+  // whether a matching WP listing was ever found (deliberately, so the
+  // engagement isn't lost — see that function's own comment) — but Follow
+  // Up's territory scoping (TerritoryDashboard.tsx) keys off contact.city/
+  // state, so a contact whose territory match failed or hadn't been
+  // attempted yet stays invisible there even though it has a real task.
+  // Reuses the exact match chain (ghlContactId, then phone, then email)
+  // against the listings this call already fetched for its own territory —
+  // no extra WP round trip — so a rep's set of assigned territories gets
+  // fully covered over the normal per-territory call cadence.
+  const { data: openConvoTasks } = await supabaseAdmin.from("tasks").select("contact_id").eq("priority", "conversation").neq("status", "done").not("contact_id", "is", null);
+  const openContactIds = Array.from(new Set((openConvoTasks ?? []).map((t) => t.contact_id as string)));
+  let healed = 0;
+  if (openContactIds.length) {
+    const { data: orphaned } = await supabaseAdmin.from("contacts").select("id, ghl_contact_id, phone, email").in("id", openContactIds).is("city", null);
+    for (const oc of orphaned ?? []) {
+      const listing =
+        (oc.ghl_contact_id && listingsResult.listings.find((l) => l.ghlContactId === oc.ghl_contact_id)) ??
+        (digits(oc.phone) ? listingsResult.listings.find((l) => digits(l.phone) === digits(oc.phone)) : undefined) ??
+        (oc.email ? listingsResult.listings.find((l) => lc(l.email) === lc(oc.email)) : undefined);
+      if (!listing) continue;
+      const { error } = await supabaseAdmin.from("contacts").update({ city, state }).eq("id", oc.id);
+      if (!error) healed++;
+    }
+  }
+
+  return NextResponse.json({ ok: true, ensured, healed });
 }

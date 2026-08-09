@@ -340,6 +340,17 @@ async function handleEmailEngagement(event: "email_opened" | "email_clicked", cu
   }
   if (!territory || gdPlaceId === null) return NextResponse.json({ ok: true, skipped: "no listing matched to that contact in any territory" });
 
+  // Follow Up's territory scoping (TerritoryDashboard.tsx) keys off
+  // contact.city/state, not this function's own listing match — without this,
+  // a contact whose underlying GHL record never had city/state set gets a
+  // real task but stays invisible on Follow Up even though the territory
+  // above was just found (Derek, 2026-08-09: "those are all sales triggers,"
+  // pointing at Client Replies tasks missing from Follow Up for exactly this
+  // reason). Only writes when it would actually change something.
+  if (!contact.city || !contact.state) {
+    await supabaseAdmin.from("contacts").update({ city: territory.city, state: territory.state }).eq("id", contact.id);
+  }
+
   const { data: weekRows } = await supabaseAdmin.from("planner_weeks").select("*").eq("territory_id", territory.id);
   const weeks: PlannerWeek[] = (weekRows ?? []).map(rowToPlannerWeek);
   // The most recent invite entry for this business, across every week —
