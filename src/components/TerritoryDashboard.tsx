@@ -62,6 +62,10 @@ function signalRank(title: string | null): number {
   return SIGNAL_RANK.find((s) => s.test.test(title))?.rank ?? 5; // unrecognized title = treat as mid-value
 }
 
+// See the ensure-engagement-tasks effect below for why this exists.
+const ENSURE_ENGAGEMENT_COOLDOWN_MS = 10 * 60 * 1000;
+const ensureEngagementLastRun = new Map<string, number>();
+
 const DASHBOARD_STATUSES: ClientStatus[] = ["claimed", "interview", "onboarding", "active_client"];
 // Only these two ever go stale in the prospecting sense isStalled checks —
 // an active_client's health is tracked elsewhere (account status, not
@@ -88,8 +92,25 @@ export function TerritoryDashboard({ me, territories, contacts, clients, tasks, 
   // route's own comment for why). Every other signal (opened/clicked/
   // accepted an invite) already creates its task at the webhook, the instant
   // it happens, so there's nothing to poll for those.
+  //
+  // Cooldown (Derek, 2026-08-09 — "3 second delay on every click"): this
+  // route does a live WordPress fetch + a GHL funnel fetch + a serial
+  // per-candidate DB loop, real backend work, not a cheap read. With no
+  // throttle it re-fired on every mount of this page, and Vercel logs showed
+  // it stacking up every ~10 seconds (each remount, e.g. someone re-clicking
+  // the nav while waiting), which was competing with every other request for
+  // the same Supabase connections. The chat-funnel signal it catches moves
+  // slowly (a business doesn't start-then-abandon the interview chat twice a
+  // minute), so a per-territory, per-tab cooldown is safe. Module scope, not
+  // state, so it survives this component unmounting/remounting within the
+  // same tab — a sessionStorage-free, no-bloat throttle, same spirit as the
+  // 20s visibility-refetch cooldown above in Cockpit.tsx.
   useEffect(() => {
+    const now = Date.now();
     myTerritories.forEach((t) => {
+      const last = ensureEngagementLastRun.get(t.id) ?? 0;
+      if (now - last < ENSURE_ENGAGEMENT_COOLDOWN_MS) return;
+      ensureEngagementLastRun.set(t.id, now);
       authedFetch("/api/directory/ensure-engagement-tasks", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ territoryId: t.id, city: t.city, state: t.state }),
