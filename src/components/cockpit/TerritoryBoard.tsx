@@ -1,45 +1,40 @@
 "use client";
 
-// Territory Dashboard's presentational layer — deliberately the same
-// component shape as ClientsBoard.tsx, not a variant of it: one card,
-// colored tier-header bands with a count pill, and rows that are a single
+// Territory Dashboard's ("Follow Up") presentational layer — deliberately
+// the same component shape as ClientsBoard.tsx, not a variant of it: one
+// card, colored tier-header bands with a count pill, rows that are a single
 // scannable line (status dot, initials circle, name over a subtitle,
 // right-aligned meta), click straight through to that business's task list.
 //
-// Big pivot (Derek, 2026-08-08): this used to own an inline expand-per-row
+// Big pivot #1 (Derek, 2026-08-08): this used to own an inline expand-per-row
 // panel — Call Now/Send Email/SMS/Book Meeting, a touch logger, a follow-up
-// composer, all living right here. None of that anymore. "I don't want them
-// to be different flows" — a row here now behaves exactly like a row on
-// ClientsBoard: click it, land on the task list, click a task, leave your
-// note there. All of that tooling moved to (and stayed on) the Businesses
-// page, which is explicitly a separate thing — a funnel-stage view of a
-// whole city, not a personal priority list. The one thing still different
-// from ClientsBoard is what a row's `meta` text says: not a task count, but
-// the activity/sales trigger that put it here ("Needs reply", "Accepted 18h
-// ago", "3 days late") — that's the actual point of this page.
+// composer, all living right here. None of that anymore — click a row, land
+// on the task list, click a task, leave your note there. That tooling moved
+// to (and stayed on) the Businesses page, a separate thing on purpose.
+//
+// Big pivot #2 (Derek, 2026-08-09): every row now always has a real Client
+// behind it — engagement signals create their Conversation task server-side,
+// at the moment they happen (see TerritoryDashboard.tsx's own header
+// comment), not lazily when this page happens to be open. So there's no more
+// "prospect with no Client yet" case to fall back from — every row is just
+// onOpenClient, same as ClientsBoard's own ClientRow, no second navigation
+// path to maintain.
 import { type Client, type playbookCompletion } from "@/lib/data";
 
 export interface BusinessRow {
-  // Real Client id once one exists (every claimed+ row, and any prospect
-  // tier row TerritoryDashboard.tsx has already promoted). The rare
-  // unpromoted prospect (no matched GHL contact yet) uses its own
-  // territoryId|listingId key instead — see fallbackTerritoryId below.
-  id: string;
+  id: string; // always a real Client id
   name: string;
   city: string;
   stageLabel: string;
   stageColor: string;
-  client: Client | null;
+  client: Client;
   playbook: ReturnType<typeof playbookCompletion> | null;
-  // Right-column trigger text — why this row earned its spot: "Needs reply",
-  // "Accepted 18h ago", "3 days late", "Quiet 14+ days", "Back Aug 11".
+  // Right-column trigger text — why this row earned its spot. Whenever an
+  // open Conversation task is why, this is that task's own title (e.g.
+  // "Clicked the invite email — call or visit to close"), not a generic
+  // placeholder — the task's title IS the "very clear" part.
   meta: string | null;
   metaDanger?: boolean;
-  // Fallback only, for a prospect with no Client yet (no GHL contact
-  // matched to promote against) — clicking opens the Businesses page at
-  // that specific listing instead of a client page that can't exist.
-  fallbackTerritoryId?: string;
-  fallbackListingId?: number | null;
 }
 
 export interface TerritoryBoardGroup {
@@ -51,10 +46,9 @@ export interface TerritoryBoardGroup {
 
 const initialsOf = (name: string) => name.split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase() || "?";
 
-export function TerritoryBoard({ groups, onOpenClient, onOpenTerritory }: {
+export function TerritoryBoard({ groups, onOpenClient }: {
   groups: TerritoryBoardGroup[];
   onOpenClient: (id: string) => void;
-  onOpenTerritory: (territoryId: string, listingId?: number) => void;
 }) {
   return (
     <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">
@@ -74,8 +68,7 @@ export function TerritoryBoard({ groups, onOpenClient, onOpenTerritory }: {
               </div>
               <div>
                 {g.rows.map((row) => (
-                  <BusinessRowView key={row.id} row={row}
-                    onOpen={() => (row.client ? onOpenClient(row.client.id) : row.fallbackTerritoryId && onOpenTerritory(row.fallbackTerritoryId, row.fallbackListingId ?? undefined))} />
+                  <BusinessRowView key={row.id} row={row} onOpen={() => onOpenClient(row.client.id)} />
                 ))}
               </div>
             </div>
@@ -103,7 +96,7 @@ function BusinessRowView({ row, onOpen }: { row: BusinessRow; onOpen: () => void
         </span>
       )}
       {row.meta && (
-        <span className={`shrink-0 text-right text-[16px] ${row.metaDanger ? "font-medium text-danger" : "text-muted"}`}>{row.meta}</span>
+        <span className={`shrink-0 truncate text-right text-[16px] ${row.metaDanger ? "font-medium text-danger" : "text-muted"}`} title={row.meta}>{row.meta}</span>
       )}
     </button>
   );

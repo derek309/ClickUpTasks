@@ -25,7 +25,6 @@ import { slugify } from "@/lib/wpCitySlug";
 // checked against CLICKUPTASKS_API_KEY) — just read as an inbound header
 // here instead of sent as an outbound one.
 
-const TASK_TITLE = "Newsletter invite response";
 // The MCP server's own synthetic roster identity (see data.ts's PROTECTED_USER_IDS)
 // — reused here as the author of an automated, no-human-actor comment, the
 // same "system posted this" convention the app already has, rather than a
@@ -158,19 +157,37 @@ export async function POST(req: NextRequest) {
     : "Submitted intake answers on the newsletter invite:\n" + Object.entries(body?.answers ?? {}).map(([k, v]) => `- ${k}: ${v}`).join("\n");
   const newComment = { id: "cm_" + crypto.randomUUID(), authorId: SYSTEM_AUTHOR_ID, body: eventLine, at: new Date().toISOString(), kind: "event" };
 
-  // Find an already-open response task for this client — the interested
-  // click and the intake submit usually happen back to back in the same
-  // visit — and append to it instead of creating a duplicate.
+  // "Very clear: they clicked... call them" (Derek, 2026-08-09) — the task
+  // title itself names exactly what happened, not a generic bucket, so a rep
+  // scanning Follow Up knows what to do without opening it first.
+  const taskTitle = event === "interested"
+    ? "Clicked interested on the invite — say hello"
+    : event === "approved"
+    ? "Approved being featured — no appointment needed"
+    : event === "info_submitted"
+    ? "Submitted info from the invite — verification call needed"
+    : "Answered the invite questions — call or visit to close";
+
+  // Find an already-open Conversation task for this client — keyed on
+  // priority + status, NOT a fixed title, so this coalesces with a task the
+  // email-open/click webhook (handleEmailEngagement, ghl/webhook/route.ts)
+  // may have already created for the same business, instead of running two
+  // separate "why is this business here" tasks side by side. The interested
+  // click and the intake submit also usually happen back to back in the same
+  // visit — same reason this append-vs-create split existed before.
   let taskId: string | null = null;
   if (clientId) {
-    const { data: openTasks } = await supabaseAdmin.from("tasks").select("id").eq("client_id", clientId).eq("title", TASK_TITLE).neq("status", "done").limit(1);
+    const { data: openTasks } = await supabaseAdmin.from("tasks").select("id").eq("client_id", clientId).eq("priority", "conversation").neq("status", "done").limit(1);
     if (openTasks && openTasks.length > 0) {
       taskId = openTasks[0].id;
       // Atomic JSONB append (append_comment, supabase/realtime.sql) rather
       // than read-modify-write of the whole comments array — "interested" and
       // "intake" fire back to back in the same visit, and a rep commenting on
       // the task at that moment would otherwise have their comment (or the
-      // webhook's) silently dropped by whichever write landed second.
+      // webhook's) silently dropped by whichever write landed second. Title
+      // is deliberately left as-is on an append (same "bumping never touches
+      // title" rule upsertConversationTask follows) — the comment carries
+      // what just happened; the title stays whatever first opened the task.
       await supabaseAdmin.rpc("append_comment", { task_id: taskId, comment: newComment });
     } else if (projectId) {
       taskId = "t_" + crypto.randomUUID();
@@ -180,7 +197,7 @@ export async function POST(req: NextRequest) {
         ? `${businessName} submitted business info${offerIncluded ? " + offer" : ""} from the invite landing page. Listing is hidden from the directory pending phone verification — call to confirm identity and details, then unhide it to publish.`
         : `${businessName} responded to a newsletter invite. Reach out to move them toward claiming their listing and booking an appointment.`;
       await supabaseAdmin.from("tasks").insert({
-        id: taskId, project_id: projectId, client_id: clientId, title: TASK_TITLE, priority: "conversation",
+        id: taskId, project_id: projectId, client_id: clientId, title: taskTitle, priority: "conversation",
         description, created_by: "client",
         comments: [newComment],
       });

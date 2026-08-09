@@ -4134,8 +4134,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // mobile header below so the bell / filter / overflow popovers aren't
   // duplicated in source. Only one header is ever visible (CSS breakpoint),
   // so the popovers never double-render on screen.
-  const territoryTitle = territoryView ? (territoryView === "dashboard" ? "Territory Dashboard" : territoryView === "all" ? "Territories" : (territoryById(territoryView) ? `${territoryById(territoryView)!.city}, ${territoryById(territoryView)!.state}` : "Territory")) : null;
-  const headerTitleText = territoryTitle ?? (settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Conversations") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? (conversationsOnly ? "Client replies" : "All Tasks") : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? "")));
+  const territoryTitle = territoryView ? (territoryView === "dashboard" ? "Follow Up" : territoryView === "all" ? "Territories" : (territoryById(territoryView) ? `${territoryById(territoryView)!.city}, ${territoryById(territoryView)!.state}` : "Territory")) : null;
+  const headerTitleText = territoryTitle ?? (settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Conversations") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "My Work" : activeClient === "all" ? (conversationsOnly ? "Client replies" : "All Tasks") : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? "")));
   const isClientDetail = !myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && !!clientById(activeClient);
   // Non-null when the open "client" is actually a city's work container —
   // drives the breadcrumb and subtitle so the page reads as city work rather
@@ -4342,7 +4342,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             want to chat with someone specifically they can use the @") but
             not deleted, just admin-toggled off by default. */}
         <nav className="shrink-0 space-y-0.5 px-2">
-          {navVisible.work && <SideItem active={myWork} title="Dashboard (press 1)" onClick={() => goToView("dashboard")}><I.grid className="text-muted" /> <span>Dashboard</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
+          {navVisible.work && <SideItem active={myWork} title="My Work (press 1)" onClick={() => goToView("dashboard")}><I.grid className="text-muted" /> <span>My Work</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
           {/* Open client replies waiting on us — the conversation-priority
               task count, same source hasOpenConversationTask reads. Used to
               just go to Dashboard on the theory these clients already sort
@@ -4435,7 +4435,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 work instead of active clients. Sits above the per-city list
                 since it's the "log in and know what to work on" entry
                 point, not a drill-down into one city. */}
-            <SideItem active={territoryView === "dashboard"} title="Territory Dashboard" onClick={openTerritoryDashboard}><I.grid className="text-muted" /> <span>Territory dashboard</span></SideItem>
+            <SideItem active={territoryView === "dashboard"} title="Follow Up" onClick={openTerritoryDashboard}><I.grid className="text-muted" /> <span>Follow Up</span></SideItem>
             {visibleTerritories.map((t) => (
               <SideItem key={t.id} active={territoryView === t.id} onClick={() => openTerritory(t.id)}>
                 <I.flag className="shrink-0 text-muted" /> <span className="min-w-0 flex-1 truncate text-left">{t.city}, {t.state}</span>
@@ -4530,7 +4530,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </p>
             </>) : (<>
               <h1 className="flex items-center gap-2 truncate text-[20px] font-semibold">
-                {territoryTitle ? territoryTitle : settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Conversations") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Dashboard" : activeClient === "all" ? (conversationsOnly ? "Client replies" : "All Tasks") : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
+                {territoryTitle ? territoryTitle : settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Conversations") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "My Work" : activeClient === "all" ? (conversationsOnly ? "Client replies" : "All Tasks") : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
                 {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
               </h1>
               {/* No subtitle for a territory — it fell through to the
@@ -4977,9 +4977,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           />
         ) : territoryView === "dashboard" ? (
           <TerritoryDashboard me={me} territories={territories} contacts={contacts} clients={clients} tasks={tasks}
-            onOpenClient={(id) => { setTerritoryView(null); setActiveClient(id); setActiveProject(null); setClientTab("tasks"); }}
-            onOpenTerritory={openTerritory}
-            onSyncClients={syncTerritoryClients} />
+            onOpenClient={(id) => { setTerritoryView(null); setActiveClient(id); setActiveProject(null); setClientTab("tasks"); }} />
         ) : territoryView && territoryView !== "all" && plannerOpen ? (
           <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">
             <PlannerPanel territoryId={territoryView} city={territoryById(territoryView)?.city ?? ""} state={territoryById(territoryView)?.state ?? ""}

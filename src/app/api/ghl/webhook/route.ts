@@ -251,12 +251,18 @@ async function handleCall(body: any, custom: any) {
   return NextResponse.json({ ok: true });
 }
 
-// A business opened (or clicked) an invite email — "we want to call or
-// visit those who opened" (Derek, Aug 3), as its own signal on the
-// Businesses page, NOT a Dashboard/Conversation task (his explicit call —
-// the Dashboard is for active-client work, this is cold-outreach follow-up).
-// So this only ever patches the matching planner_weeks.invited[] entry;
-// it never touches tasks/notifications.
+// A business opened (or clicked) an invite email. Used to be its own signal
+// on the Businesses page only, deliberately never a Conversation task
+// (Derek, Aug 3: "the Dashboard is for active-client work, this is
+// cold-outreach follow-up"). Reversed 2026-08-09 — "when there's an activity
+// like a click or an open... it needs to create a task for us to follow up.
+// It needs to be very clear" — the whole Territory Dashboard ("Follow Up")
+// is task-driven now, same flow as every other client, so an engagement
+// signal with nowhere to surface just goes unworked. Still patches
+// planner_weeks.invited[] as before (that's the Planner's own record); now
+// also promotes the contact and upserts a Conversation task naming exactly
+// what happened, same shared helpers (resolveOrPromoteTrackedClient /
+// upsertConversationTask) every other inbound signal already uses.
 //
 // Wire-up — two GHL Workflows (Email Events trigger), same Webhook-action
 // pattern as message_reply/call above:
@@ -286,10 +292,22 @@ async function handleEmailEngagement(event: "email_opened" | "email_clicked", cu
 
   const { data: contact } = await supabaseAdmin
     .from("contacts")
-    .select("ghl_contact_id, phone, email, city, state")
+    .select("id, name, client_id, ghl_contact_id, phone, email, city, state")
     .eq("ghl_contact_id", ghlContactId)
     .maybeSingle();
   if (!contact) return NextResponse.json({ ok: true, skipped: "no contact for that ghlContactId" });
+
+  // Promote + upsert the Conversation task off the contact alone — doesn't
+  // need the gdPlaceId/territory match below (that's only for the
+  // planner_weeks bookkeeping), so a business whose listing can't be found
+  // in any configured territory still gets followed up on instead of the
+  // whole engagement silently going nowhere.
+  const trackedClientId = await resolveOrPromoteTrackedClient(contact);
+  await upsertConversationTask(
+    { id: contact.id, name: contact.name, client_id: trackedClientId },
+    ghlContactId,
+    { title: event === "email_opened" ? "Opened the invite email — a nudge might help" : "Clicked the invite email — call or visit to close" },
+  );
 
   const { data: territoryRows } = await supabaseAdmin.from("territories").select("id, city, state");
   const territories = (territoryRows ?? []) as { id: string; city: string; state: string }[];
