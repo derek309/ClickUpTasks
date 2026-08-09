@@ -137,7 +137,13 @@ export function TerritoryDashboard({ me, territories, contacts, clients, tasks, 
   }, [tasks]);
 
   const conversationTaskFor = (clientId: string) => (tasksByClient.get(clientId) ?? []).find((t) => t.status !== "done" && t.priority === "conversation") ?? null;
-  const isStalled = (c: Client) => STALL_ELIGIBLE.includes(c.status) && isDue(c.playbookLastProgressAt ?? null, todayIsoDate(), STEP_STALL_DAYS);
+  // A null playbookLastProgressAt means "never started the Playbook yet,"
+  // not "stalled" — isDue treats null as always-due (correct for its other
+  // callers, e.g. "never invited" should be due for an invite), but that's
+  // wrong here: a business bulk-promoted moments ago with zero progress
+  // isn't stalled, it just hasn't begun. Only a real, actually-old timestamp
+  // counts.
+  const isStalled = (c: Client) => STALL_ELIGIBLE.includes(c.status) && !!c.playbookLastProgressAt && isDue(c.playbookLastProgressAt, todayIsoDate(), STEP_STALL_DAYS);
   // "Followed up" happens by editing the task's own due date in TaskDrawer
   // (same InlineDue control every other client's tasks already use), not a
   // dashboard-local action — the task's real `due` is the only source of

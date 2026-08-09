@@ -44,7 +44,13 @@ export async function POST(req: NextRequest) {
   for (const contact of matched) {
     const client = clientById.get("cl_" + contact.id);
     if (!client || client.type === "client" || !STALL_ELIGIBLE.has(client.status)) continue;
-    if (!isDue(client.playbook_last_progress_at ?? null, today, STEP_STALL_DAYS)) continue;
+    // A null playbook_last_progress_at means "never started," not "stalled"
+    // — a business bulk-promoted moments ago with zero progress isn't
+    // overdue, it just hasn't begun. Only a real, actually-old timestamp
+    // counts (isDue treats null as always-due, which is right for its other
+    // callers but wrong here).
+    if (!client.playbook_last_progress_at) continue;
+    if (!isDue(client.playbook_last_progress_at, today, STEP_STALL_DAYS)) continue;
     const { data: openTask } = await supabaseAdmin.from("tasks").select("id").eq("client_id", client.id).eq("priority", "conversation").neq("status", "done").limit(1).maybeSingle();
     if (openTask) continue; // a real signal already has this covered — don't compete with it
     const ok = await upsertConversationTask(
