@@ -1,7 +1,7 @@
 // Shared "one open top-tier task per GHL contact thread" logic — used by the
 // inbound webhook (messages, calls) and the appointment sync poll. Server-only.
 import { supabaseAdmin } from "./supabaseAdmin";
-import { titleCase } from "./data";
+import { titleCase, conversationSignalRank } from "./data";
 
 // PostgREST PARSES the `.or()` string below — a value carrying its own filter
 // syntax (comma, dot, parens) widens the match to arbitrary rows rather than
@@ -144,20 +144,31 @@ export async function upsertConversationTask(
   const due = opts?.due ?? todayPacific();
   const { data: openTasks } = await supabaseAdmin
     .from("tasks")
-    .select("id, attachments")
+    .select("id, title, attachments")
     .eq("contact_id", contact.id)
     .eq("priority", "conversation")
     .neq("status", "done")
     .limit(1);
   if (openTasks && openTasks.length > 0) {
-    // Bumping never touches title — a second message on a thread that
-    // already has an open task shouldn't silently relabel it. The meeting
-    // location DOES get kept current on every poll (opts.location undefined
-    // for the message/call callers, so their attachments are untouched) —
-    // this is the "pushed and kept up to date" part: a rescheduled or
-    // relocated meeting's join link updates here without creating a
-    // duplicate task or touching anything else on it.
+    // Bumping never RELABELS a thread on its own — a second message on an
+    // already-open reply thread shouldn't silently change what it says. But
+    // it DOES upgrade the title when a genuinely stronger signal arrives
+    // (conversationSignalRank), because otherwise a business that opened an
+    // invite email (rank 2, task created) and later actually claimed the
+    // listing (rank 10) would keep showing "Opened the invite email" forever
+    // — every later call here only ever touched `due`, never `title`, so the
+    // strongest signal on the whole ladder could get buried at the bottom of
+    // Follow Up's sort. Downgrades never happen (a later weaker signal, e.g.
+    // a second email open after a real reply, leaves the stronger title in
+    // place). The meeting location DOES get kept current on every poll
+    // (opts.location undefined for the message/call callers, so their
+    // attachments are untouched) — a rescheduled or relocated meeting's join
+    // link updates here without creating a duplicate task or touching
+    // anything else on it.
     const patch: Record<string, unknown> = { due };
+    if (opts?.title && conversationSignalRank(opts.title) > conversationSignalRank(openTasks[0].title)) {
+      patch.title = opts.title;
+    }
     if (opts?.location !== undefined) {
       const next = withMeetingLocation(openTasks[0].attachments ?? [], opts.location);
       if (next !== null) patch.attachments = next; // null = location unchanged, don't churn the attachment

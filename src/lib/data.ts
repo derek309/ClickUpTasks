@@ -155,6 +155,35 @@ export const NURTURE_CHECK_IN_DAYS = 30;
  * read this single constant, so the daily nudge and the dashboard's ranking
  * always agree on what "stuck" means. */
 export const STEP_STALL_DAYS = 14;
+// A Conversation task's priority, read straight off its own title rather
+// than a second signal-type field nobody would keep in sync with it — every
+// engagement signal names exactly what happened (see upsertConversationTask's
+// callers across the webhook/sync-appointments/planner-interest/
+// ensure-*-tasks routes). Shared between TerritoryDashboard.tsx (sorts
+// "Reply needed" by this) and ghlConversationTask.ts (decides whether a
+// later, stronger signal should upgrade an already-open task's title —
+// without this shared source of truth, a business that opened an invite
+// email and later claimed their listing would keep showing "Opened the
+// invite email" forever, since bumping an open task only ever touched its
+// due date). First matching pattern wins; ordered highest value (closest to
+// closing) to lowest (barely engaged). Derek, 2026-08-09: "open would be the
+// least valuable, claimed or booked would be the most."
+export const CONVERSATION_SIGNAL_RANK: { test: RegExp; rank: number }[] = [
+  { test: /Claimed their listing/, rank: 10 }, // the strongest signal on the ladder — a real conversion
+  { test: /^Meeting with/, rank: 10 }, // booked an appointment
+  { test: /^Reply to /, rank: 9 }, // a real inbound message/call — they're talking to us right now
+  { test: /Approved being featured/, rank: 9 }, // already claimed, said yes
+  { test: /Answered the invite questions/, rank: 8 }, // finished the interview chat
+  { test: /Submitted info from the invite/, rank: 7 }, // completed the claim funnel, needs a verification call
+  { test: /didn't finish, follow up/, rank: 6 }, // started the interview chat but dropped off mid-way
+  { test: /Clicked interested on the invite/, rank: 5 },
+  { test: /Clicked the invite email/, rank: 4 },
+  { test: /Opened the invite email/, rank: 2 }, // the least valuable signal — merely opened, hasn't acted
+];
+export function conversationSignalRank(title: string | null | undefined): number {
+  if (!title) return 0;
+  return CONVERSATION_SIGNAL_RANK.find((s) => s.test.test(title))?.rank ?? 5; // unrecognized title = treat as mid-value
+}
 /** How long a newly won business's trial runs, in days — the window that
  * opens the moment the deal actually closes (card on file), and the source
  * of Client.trialEndsAt. One constant so the length is changed in one

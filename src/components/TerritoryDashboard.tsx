@@ -33,35 +33,12 @@
 import { useEffect, useMemo } from "react";
 import {
   playbookCompletion, normalizeState, formatDue, CLIENT_STATUS_META, STEP_STALL_DAYS, todayIso as todayIsoDate,
+  conversationSignalRank,
   type Client, type Contact, type Task, type Territory, type ClientStatus,
 } from "@/lib/data";
 import { isDue } from "@/lib/plannerPools";
 import { authedFetch } from "@/lib/supabase";
 import { TerritoryBoard, type TerritoryBoardGroup } from "./cockpit/TerritoryBoard";
-
-// "Reply needed" priority order (Derek, 2026-08-09): "open would be the
-// least valuable, claimed or booked would be the most" — every Conversation
-// task's title already names exactly what happened (see upsertConversationTask
-// callers across the webhook/sync-appointments/planner-interest routes), so
-// rank is read straight off that title rather than a second signal-type field
-// nobody would keep in sync with it. First matching pattern wins; ordered
-// highest value (closest to closing) to lowest (barely engaged).
-const SIGNAL_RANK: { test: RegExp; rank: number }[] = [
-  { test: /Claimed their listing/, rank: 10 }, // the strongest signal on the ladder — a real conversion
-  { test: /^Meeting with/, rank: 10 }, // booked an appointment
-  { test: /^Reply to /, rank: 9 }, // a real inbound message/call — they're talking to us right now
-  { test: /Approved being featured/, rank: 9 }, // already claimed, said yes
-  { test: /Answered the invite questions/, rank: 8 }, // finished the interview chat
-  { test: /Submitted info from the invite/, rank: 7 }, // completed the claim funnel, needs a verification call
-  { test: /didn't finish, follow up/, rank: 6 }, // started the interview chat but dropped off mid-way
-  { test: /Clicked interested on the invite/, rank: 5 },
-  { test: /Clicked the invite email/, rank: 4 },
-  { test: /Opened the invite email/, rank: 2 }, // the least valuable signal — merely opened, hasn't acted
-];
-function signalRank(title: string | null): number {
-  if (!title) return 0;
-  return SIGNAL_RANK.find((s) => s.test.test(title))?.rank ?? 5; // unrecognized title = treat as mid-value
-}
 
 // See the ensure-engagement-tasks effect below for why this exists.
 const ENSURE_ENGAGEMENT_COOLDOWN_MS = 10 * 60 * 1000;
@@ -195,7 +172,7 @@ export function TerritoryDashboard({ me, territories, contacts, clients, tasks, 
           hasReply: !!convo && !followedUp,
           stalledOnly: !convo && stalled && !followedUp,
           followedUp,
-          rank: convo && !followedUp ? signalRank(convo.title) : 0,
+          rank: convo && !followedUp ? conversationSignalRank(convo.title) : 0,
         };
       })
       .filter((r): r is ClaimedRow => r !== null);

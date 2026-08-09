@@ -306,7 +306,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // Collapsed by default — the group keys are a fixed, known set (not
   // data-dependent), so this doesn't need to wait for listings to load.
   const [collapsed, setCollapsed] = useState<Set<string>>(
-    () => new Set(["attention", "followed_up", ...STAGE_ORDER]),
+    () => new Set(STAGE_ORDER),
   );
   const toggleGroup = (key: string) => setCollapsed((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
   // Clicking a stat pill hard-filters to just that stage (not a peek-while-
@@ -564,7 +564,15 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // drift onto two different definitions of "stalled."
   const isDueForStage = (lastAt: string | null, stage: BusinessStage, today: string) =>
     stage === "claimed" || stage === "interview" || stage === "onboarding"
-      ? isDue(lastAt, today, STEP_STALL_DAYS)
+      // A null playbookLastProgressAt means "never started the Playbook,"
+      // not "stalled" — isDue's own null-handling (always due) is right for
+      // the unclaimed/invited branch below (never touched = due for an
+      // invite), but wrong here: a business bulk-promoted moments ago with
+      // zero progress isn't overdue, it just hasn't begun. Only a real,
+      // actually-old timestamp counts (same fix already applied to Follow
+      // Up's own isStalled and ensure-stalled-tasks — this is the one
+      // sibling spot it was missing from).
+      ? !!lastAt && isDue(lastAt, today, STEP_STALL_DAYS)
       : isDue(lastAt, today);
   const todayIso = new Date().toISOString();
   // Exactly what runPlannerAutoInvite (plannerAutoInviteServer.ts) would pick
