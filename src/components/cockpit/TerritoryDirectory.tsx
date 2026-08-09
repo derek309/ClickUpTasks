@@ -134,7 +134,7 @@ export const STAGE_ORDER: BusinessStage[] = ["unclaimed", "invited", "claimed", 
 const STAGE_KEYS = new Set<string>(STAGE_ORDER);
 export const STAGE_META: Record<BusinessStage, { label: string; color: string; hint: string }> = {
   unclaimed: { label: "Unclaimed", color: "#f59e0b", hint: "listing nobody has claimed yet — a prospect to invite or call" },
-  invited: { label: "Claim Your Free Marketing Package", color: "#0ea5e9", hint: "invited to claim their listing, hasn't yet" },
+  invited: { label: "Invited, hasn't claimed", color: "#0ea5e9", hint: "invited to claim their free marketing package, hasn't yet — a nudge might close it" },
   claimed: { label: CLIENT_STATUS_META.claimed.label, color: "#10b981", hint: "claimed their listing — work the Playbook with them" },
   interview: { label: CLIENT_STATUS_META.interview.label, color: CLIENT_STATUS_META.interview.dot, hint: "phone/Zoom interview (doubles as verification), then the in-person visit to finalize their profile" },
   onboarding: { label: CLIENT_STATUS_META.onboarding.label, color: CLIENT_STATUS_META.onboarding.dot, hint: "actively being onboarded" },
