@@ -276,7 +276,7 @@ describe("playbookCompletionByCategory", () => {
   });
 
   it("counts a done task only toward its own step's category", () => {
-    const step = PLAYBOOK_ALL_STEPS.find((s) => s.key === "upload_photos")!; // category: branding
+    const step = PLAYBOOK_ALL_STEPS.find((s) => s.key === "complete_listing")!; // category: branding
     const tasks = [mkTask({ clientId: "cl_a", status: "done", playbookStepKey: step.key })];
     const cats = playbookCompletionByCategory("cl_a", tasks);
     expect(cats.branding.done).toBe(1);
@@ -286,7 +286,7 @@ describe("playbookCompletionByCategory", () => {
   });
 
   it("ignores tasks from other clients", () => {
-    const step = PLAYBOOK_ALL_STEPS.find((s) => s.key === "upload_photos")!;
+    const step = PLAYBOOK_ALL_STEPS.find((s) => s.key === "complete_listing")!;
     const tasks = [mkTask({ clientId: "cl_other", status: "done", playbookStepKey: step.key })];
     const cats = playbookCompletionByCategory("cl_a", tasks);
     expect(cats.branding.done).toBe(0);

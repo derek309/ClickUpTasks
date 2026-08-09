@@ -630,7 +630,7 @@ export const PLAYBOOK_PHASES: PlaybookPhase[] = [
   // because it's how a business arrives, not optional side work — hence a
   // real entry here rather than the standalone-PlaybookPhase treatment the
   // A2P/email-domain/ongoing side quests get. Its steps deliberately live in
-  // their own catalog and NOT in PLAYBOOK_STEPS: the growth plan's "X of 26"
+  // their own catalog and NOT in PLAYBOOK_STEPS: the growth plan's "X of 25"
   // is a real owner-facing number for owner work, and a rep's pipeline
   // stages aren't owner work. See SALES_STAGE_STEPS for the full reasoning.
   { key: "sales", label: "Win the business" },
@@ -672,37 +672,53 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     timeEstimate: "~10 min",
     whyItMatters: "This is where we get to know your business: how you started, what you're known for, what's coming up. Everything else in your free package, the blog post, the social posts, the newsletter spotlight, gets written from your real answers instead of a generic template.",
     howTo: [
-      "Answer the chat's questions: how the business got started, what makes it different, your favorite product or service, any local sponsorships, anything new coming up.",
+      "Answer the chat's questions.",
       "Book your short phone interview at the end so we can go deeper live.",
+      "Review and prepare for the interview — here's what we'll ask: how the business got started, what makes it different, your favorite product or service, any community involvement or sponsorships, what's new or coming up, and anything else you want customers to know.",
     ],
     commonMistake: "Rushing through with one word answers. The more specific you are, the better your blog post and spotlight turn out.",
     weGive: "We turn your answers into a written blog post, social posts, and a newsletter spotlight, no extra work from you.",
-    youGet: "Real content about your business, written for you, from a ten minute conversation.",
+    youGet: "Real content about your business, written for you, from a 15-minute conversation.",
     scoreImpact: "medium",
   },
   {
-    key: "claim_listing", phase: "package", label: "Claim your listing", category: "presence",
-    timeEstimate: "~5 min",
-    whyItMatters: "Claiming unlocks your My Business dashboard, where everything else lives. Your Score was already calculated when we built your profile — claiming lets you start improving it.",
+    key: "attend_interview", phase: "package", label: "Attend your Business Interview", category: "branding",
+    timeEstimate: "~15 min",
+    whyItMatters: "This is the live conversation that turns your written answers into a real story — we go deeper than the chat can on its own, and it's where we confirm the details that make your article and social posts sound like you, not a form.",
     howTo: [
-      "From the directory: search your business at clickuplocal.com, open your listing, and click \"Claim this business, it's free.\"",
-      "Or from the Businesses page: go to clickuplocal.com/businesses and click \"Claim My Free Listing.\"",
-      "Find your business (or add it if it's not there), verify you're the owner, and you'll land in My Business.",
+      "Book a time that works after you finish the interview chat.",
+      "Be ready to talk for about 15 minutes — no extra prep needed beyond finishing the chat.",
+      "We'll ask about how the business started, what makes it different, and what's new or coming up.",
+    ],
+    commonMistake: "Skipping this because the chat felt like enough. The phone call is where the best quotes and details usually come out.",
+    weGive: "A real conversation with someone who's going to write about your business.",
+    youGet: "A better, more personal article and social posts, straight from your own voice.",
+    scoreImpact: "medium",
+  },
+  {
+    key: "claim_listing", phase: "package", label: "Claim Your ClickUpLocal Listing", category: "presence",
+    timeEstimate: "~5 min",
+    whyItMatters: "Claiming is free and unlocks your My Business dashboard, where everything else lives. Your Score was already calculated when we built your profile — claiming lets you access the marketing tools to improve it.",
+    howTo: [
+      "Find your business (or add it if it's not there) using one of the options below.",
+      "Search for your business at clickuplocal.com, open your listing, and click \"Claim this business, it's free.\"",
+      "Or go to clickuplocal.com/businesses and click \"Claim My Free Listing.\"",
+      "Follow the quick steps to confirm you're the owner.",
     ],
     commonMistake: "Thinking you have to pay to claim — you don't. Free gets you a verified listing, Google Business Profile setup, and automated review requests at no cost.",
-    weGive: "We open your dashboard and mark you a verified local owner.",
-    youGet: "Control of your directory presence, free.",
+    weGive: "We unlock your dashboard and stamp you as a verified local owner.",
+    youGet: "Your business dashboard, unlocked and ready to go.",
     scoreImpact: "low",
   },
   {
-    key: "blog_written", phase: "package", label: "Blog post written about your business", category: "branding",
+    key: "blog_written", phase: "package", label: "Custom Article Written About Your Business", category: "branding",
     timeEstimate: "Done for you",
-    whyItMatters: "A real blog post about your business gives you a piece of content you can point people to, and it's one more page that helps you get found.",
+    whyItMatters: "A real article about your business gives you a piece of content you can point people to, and it's one more page that helps you get found.",
     howTo: [
-      "Nothing to do here — we write it from your interview chat answers.",
+      "Nothing to do here — we write it from your interview and other information to tell your business's story.",
       "Once it's live we'll send it to you to review and share.",
     ],
-    weGive: "A written blog post about your business, published on the ClickUpLocal site.",
+    weGive: "A custom-written article about your business, published on the ClickUpLocal site and shared to the community through social media and our weekly newsletter.",
     youGet: "Free content you can share on your own site and socials.",
     scoreImpact: "low",
   },
@@ -729,96 +745,88 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
     scoreImpact: "medium",
   },
   {
-    key: "upload_photos", phase: "map", label: "Upload your logo + photos", category: "branding",
-    timeEstimate: "~5 min",
-    whyItMatters: "Listings with photos and a complete profile get far more clicks and rank better — photo coverage is repeatedly called out as the single biggest lever for a listing looking alive and actually converting.",
-    howTo: [
-      "Add your logo.",
-      "Add 5–10 photos: storefront, interior, products, team.",
-    ],
-    commonMistake: "A thin listing with no photos — fill this in before anything else on your profile.",
-    weGive: "We optimize your listing for local + AI search — a photo-rich profile is one of the biggest Score drivers.",
-    youGet: "A listing that looks alive and gets chosen over a bare one.",
-    scoreImpact: "high",
-  },
-  {
+    // Was three separate steps (upload_photos, complete_listing,
+    // add_social_links) — combined 2026-08-09 per Derek: uploading photos and
+    // adding social links are part of completing the listing, not their own
+    // errands. Kept the complete_listing key (not a new one) so any client
+    // that already has that task in progress just gets retitled, not
+    // duplicated. reconcilePlaybookTasks never deletes orphaned rows, so a
+    // client who already finished upload_photos/add_social_links separately
+    // keeps those two done tasks sitting inert — harmless, just no longer
+    // counted — while this combined step tracks completion going forward.
     key: "complete_listing", phase: "map", label: "Complete business listing", category: "branding",
-    timeEstimate: "~10 min (established shortcut: copy straight from your website/Google)",
-    whyItMatters: "A fully complete listing gets found and ranks higher, and becomes eligible to be featured. Profile completeness is one of the biggest Score factors.",
+    timeEstimate: "~15 min (logo, photos, details, and socials in one pass)",
+    whyItMatters: "A complete page with great photos gets found more, ranks higher, and just looks good. It'll also give a little boost to your Score.",
     howTo: [
-      "Complete every field: name, category, description, services/products, hours, phone, website, address.",
-      "Save / Publish, then check the live preview.",
+      "Log in to your ClickUpLocal.com Business: Dashboard → My Business → Manage Listing.",
+      "Add your logo and 5–10 photos (storefront, inside, your products, your team — show off!).",
+      "Fill in every box: name, category, description, services, hours, phone, website, address.",
+      "Drop in your social media links.",
+      "Save it and admire your handiwork.",
     ],
-    commonMistake: "A blank description or half-filled fields. Fill it all in now.",
-    weGive: "We optimize your listing for local + AI search — completeness is one of the biggest Score drivers, so this keeps lifting you as your Score refreshes.",
-    youGet: "A listing that gets found and chosen.",
+    commonMistake: "Leaving it half-empty with no photos. A blank page is a closed door. A full, friendly one is a \"come on in!\"",
+    weGive: "We polish your page so it shows up in Google and AI search, and your Score keeps climbing from here.",
+    youGet: "A listing that looks alive, gets found, and gets chosen.",
     scoreImpact: "high",
   },
   {
-    key: "add_social_links", phase: "map", label: "Add your social links", category: "branding",
-    timeEstimate: "~2 min",
-    whyItMatters: "Rounds out a complete profile and gives residents another way to find and follow you.",
-    howTo: [
-      "Add your Facebook, Instagram, and any other social links to your listing.",
-    ],
-    weGive: "We keep your profile looking complete and current across every channel.",
-    youGet: "One more path for residents to find and follow you.",
-    scoreImpact: "low",
-  },
-  {
-    key: "first_offer", phase: "map", label: "Create first offer", category: "income",
+    key: "first_offer", phase: "map", label: "Create an offer they can't scroll past", category: "income",
     timeEstimate: "~10 min",
-    whyItMatters: "An offer drives residents through your door — and every redemption hands you a new customer contact you own. It doesn't have to be a discount: a bonus, upgrade, bundle, priority booking, free add-on, or VIP perk all work — what matters is it's compelling enough to make someone actually come in.",
+    whyItMatters: "An offer is what turns a browser into a customer walking through your door, and every time someone claims one, you get a new customer's info to keep. The best news is we'll promote your offer with you. Not a discount person? Totally fine — your offer can be a freebie, a bonus, an upgrade, a bundle, priority booking, or a VIP perk. The only rule: make it good enough that a local sees it and goes \"ooh, I want that.\" A meh offer gets ignored, a juicy one fills your shop.",
     howTo: [
-      "Go to Offers & Events → Offers → Create Offer.",
-      "Not sure what to offer? Use the built-in offer suggestion tool.",
-      "Write a clear title + the fine print; set the expiration (residents get 14 days to redeem).",
-      "Publish, and set up a Comeback Offer for after they redeem.",
+      "Log in to your business on ClickUpLocal.com: Dashboard → My Business.",
+      "Go to Offers → Create Offer.",
+      "Stuck for ideas? Tap the offer helper — it suggests offers that fit your kind of business.",
+      "Give it a punchy title, add any fine print, and set an end date (residents get 14 days to redeem after claiming).",
+      "Hit Publish, then set a \"comeback\" offer to pull them back for round two.",
     ],
     commonMistake: "Too small to matter, or so big it hurts. Get someone off the couch, but make it pencil out.",
-    weGive: "We push it to residents, notify the town, and feature it in the newsletter, on social, and in the app. Every redemption auto-adds a new contact to your list.",
+    weGive: "We push your offer to residents, put it in the newsletter, on social, and in the app. Every redemption auto-adds a new contact to your list.",
     youGet: "Foot traffic now + a new owned customer per redemption.",
     scoreImpact: "medium",
   },
   {
-    key: "add_events", phase: "map", label: "Add events", category: "income",
+    key: "add_events", phase: "map", label: "Add Your Events", category: "income",
     timeEstimate: "~5 min each",
-    whyItMatters: "Events give residents a reason to visit now, and give the Campaign Builder (Phase 5) more to promote.",
+    whyItMatters: "Class, tasting, live music, big sale, workshop? Add it! Events give people a reason to come in right now — and we can spin any of them into ready-made marketing later.",
     howTo: [
-      "Go to Offers & Events → Events → Add Event.",
-      "Fill in name, date/time, description, photo.",
-      "Publish. Add all your upcoming events.",
+      "Log in to your business on ClickUpLocal.com: Dashboard → My Business.",
+      "Go to Events → Add Event.",
+      "Add the event title, date/time, a short description, and a photo.",
+      "Publish — and load in all your upcoming events while you're here.",
     ],
-    weGive: "We surface your events in the directory + newsletter, and let you turn any event into a full campaign later.",
+    weGive: "We promote your events in the directory, newsletter, and social, and let you turn any event into a full campaign later.",
     youGet: "More reasons for residents to show up, promoted for you.",
     scoreImpact: "low",
   },
   {
     key: "connect_gbp", phase: "reputation", label: "Connect Google Business Profile", category: "reputation",
     timeEstimate: "~5 min",
-    whyItMatters: "Google is where new customers judge you and where your review requests point. Nothing else in reputation works until this is connected.",
+    whyItMatters: "Google is where customer reviews matter most, and where we suggest you ask new and existing customers to leave you a review. Nothing else in reputation works until this is connected.",
     howTo: [
-      "Go to Reputation → Settings → Integrations.",
+      "Log in to the Reputation Manager at ClickUpLocal.com: Dashboard → My Business → Reputation.",
+      "Click Settings → Integrations.",
       "Click Google Business Profile → Connect.",
-      "Sign in with the account that owns the listing (not a personal one) → Allow.",
-      "Confirm it says Connected.",
+      "Sign in with the account that owns/manages your Google Business Profile listing → Allow.",
+      "Make sure it says Connected.",
     ],
-    commonMistake: "Signing in with the wrong Google account — it must own the listing.",
-    weGive: "We get you ready to auto-respond to every review, past and future.",
+    commonMistake: "Signing in with the wrong Google account — it must own/manage the Google Business Profile listing. No Google page yet? No sweat, we'll help you start one — contact your ambassador!",
+    weGive: "We get everything ready to auto-reply to your reviews — even the ancient ones.",
     youGet: "The connection that powers your whole reputation engine.",
     scoreImpact: "medium",
   },
   {
-    key: "review_engine", phase: "reputation", label: "Turn on review engine", category: "reputation",
+    key: "review_engine", phase: "reputation", label: "Turn on your review engine", category: "reputation",
     timeEstimate: "~10 min",
-    whyItMatters: "Reviews are the #1 thing people check before choosing a local business — and responding to every review, good and bad, signals you care, builds trust, and lifts your Google ranking. (Industry research puts each extra Google star at roughly 5–9% more revenue.) Doing this by hand is a grind; this automates all of it.",
+    whyItMatters: "This is the magic switch. Reviews start coming in on their own, and our AI replies to each one sounding just like you. Reviews are the #1 thing people check before choosing a local business, and responding to every review, good and bad, signals you care, builds trust, and lifts your Google ranking. (Industry research puts each extra Google star at roughly 5–9% more revenue.) Doing this by hand is a grind — this automates all of it.",
     howTo: [
-      "In Reputation → Settings, Review Link: select Google (already connected — no pasting).",
-      "Requests: enable SMS Requests + Email Requests, set up Reviews QR for in-store capture, and turn on Spam Reviews filtering.",
-      "Reviews AI (Settings → AI): choose Auto Responses and set a short wait time before responding so it feels human.",
+      "Review link: in Reputation → Settings, pick Google Business Profile (already connected — nothing to paste).",
+      "Turn on review requests by text and email, add a review QR code for your counter, and flip on the spam filter.",
+      "Reviews AI: choose Auto Responses so replies send themselves, and add a short wait time so they feel human.",
+      "Catch up on old reviews: find \"Respond to Reviews – Drip Mode\" → Create a New Campaign. Name it, choose how far back to go, set Daily, and pick a chill pace (like 10 a day). Pick your helper → Create.",
     ],
-    commonMistake: "Replies-per-day too high on the requests side — a natural pace looks more genuine than a same-minute flood.",
-    weGive: "We give you a review count that climbs on its own, with AI responding to every new review automatically, in your voice.",
+    commonMistake: "Replies-per-day too high on the requests side. Keep that number low — a steady drip looks way more genuine than 200 replies at 3pm on a Tuesday.",
+    weGive: "We keep reviews coming and reply to every new one and every old one automatically, in your voice, around the clock. Want us to just set the whole thing up for you? Say the word.",
     youGet: "A reputation that works 24/7 without you touching it.",
     scoreImpact: "high",
   },
@@ -1022,7 +1030,7 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
 //
 // Its own catalog rather than eight more entries in PLAYBOOK_STEPS, for the
 // same reason the side quests are separate but with the opposite ordering:
-// PLAYBOOK_STEPS is the OWNER's growth plan, counted as "X of 26" on the
+// PLAYBOOK_STEPS is the OWNER's growth plan, counted as "X of 25" on the
 // owner-facing dashboard (playbookCompletion) and enumerated wholesale to
 // the business's own /my-business/ page (PLAYBOOK_ALL_STEPS, via
 // api/external/playbook). These eight are the REP's pipeline — an owner has
@@ -1183,7 +1191,7 @@ export const STATUS_IMPLIES_SALES_STAGE: Partial<Record<ClientStatus, string>> =
 // A2P (texting registration) — real, trackable steps, but deliberately a
 // SEPARATE catalog from PLAYBOOK_STEPS, not a 7th phase: the source doc
 // frames it as "not part of the main path, do it early" (folding it into the
-// phase loop would put it last, the opposite of that), the app's "X of 26"
+// phase loop would put it last, the opposite of that), the app's "X of 25"
 // progress math is a real doc-verified number that shouldn't silently become
 // 22, and the source material never Score-weights A2P the way the main 18
 // are. Still real Task rows via reconcilePlaybookTasks — just excluded from
@@ -1254,7 +1262,7 @@ export const PLAYBOOK_EMAIL_DOMAIN_STEPS: PlaybookStepDef[] = [
 // The standing ambassador-side retention task — NOT a one-time owner action
 // like the rest of the catalog, so it's created with recurrence: "monthly"
 // (see reconcilePlaybookTasks) instead of "none". Excluded from
-// playbookCompletion()'s "X of 26" the same way A2P/email-domain are, just by
+// playbookCompletion()'s "X of 25" the same way A2P/email-domain are, just by
 // virtue of living outside PLAYBOOK_STEPS.
 export const PLAYBOOK_ONGOING_PHASE: PlaybookPhase = { key: "ongoing", label: "Monthly retention (ambassador)" };
 export const PLAYBOOK_ONGOING_STEPS: PlaybookStepDef[] = [
@@ -1356,7 +1364,7 @@ export const PLAYBOOK_FINISH_LINE =
  * fraction stays honest even before reconcilePlaybookTasks() has caught a
  * client up to a newly-added step. Counts PLAYBOOK_STEPS only — the side
  * quests and the sales stages both have their own step-tasks and both stay
- * out of this number, so "X of 26" keeps meaning owner growth plan work. */
+ * out of this number, so "X of 25" keeps meaning owner growth plan work. */
 /** Deterministic id for a client's one Playbook project — found by id, never
  * by name, so it can't collide with an ambassador's own manually-named list. */
 export const playbookProjectId = (clientId: string) => "p_playbook_" + clientId;
@@ -1369,7 +1377,7 @@ export function playbookCompletion(clientId: string, tasks: Task[]) {
 }
 
 /** Owner-facing dashboard progress bars (branding/reputation/presence/income) —
- * unlike playbookCompletion()'s "X of 26" (which only counts PLAYBOOK_STEPS,
+ * unlike playbookCompletion()'s "X of 25" (which only counts PLAYBOOK_STEPS,
  * the main path), this tallies every entry in PLAYBOOK_ALL_STEPS, since a
  * category bar shouldn't silently exclude an owner's A2P/email-domain/ongoing
  * progress just because those steps live outside the main phase ordering. */

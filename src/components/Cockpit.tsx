@@ -2447,7 +2447,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // A2P + email-domain sit right after "Get on the map" (PLAYBOOK_PHASES[2] —
     // [0] is the sales pipeline, which runs first, then [1] "package") — "do
     // it early," per both source docs — not folded into the phase array itself
-    // so playbookCompletion()'s "X of 26" total never counts them. The sales
+    // so playbookCompletion()'s "X of 25" total never counts them. The sales
     // stages DO live in PLAYBOOK_PHASES (they're core to the funnel, not
     // optional side work) but still stay out of that total, by living outside
     // PLAYBOOK_STEPS instead — see SALES_STAGE_STEPS in data.ts.
