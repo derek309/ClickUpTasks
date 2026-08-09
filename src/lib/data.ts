@@ -173,9 +173,10 @@ export const CONVERSATION_SIGNAL_RANK: { test: RegExp; rank: number }[] = [
   { test: /^Meeting with/, rank: 10 }, // booked an appointment
   { test: /^Reply to /, rank: 9 }, // a real inbound message/call — they're talking to us right now
   { test: /Approved being featured/, rank: 9 }, // already claimed, said yes
+  { test: /Nearly booked/, rank: 9 }, // answered every question, one click from picking a time
   { test: /Answered the invite questions/, rank: 8 }, // finished the interview chat
   { test: /Submitted info from the invite/, rank: 7 }, // completed the claim funnel, needs a verification call
-  { test: /didn't finish, follow up/, rank: 6 }, // started the interview chat but dropped off mid-way
+  { test: /didn't finish, follow up/, rank: 6 }, // started the interview chat but dropped off early (info/questions only)
   { test: /Clicked interested on the invite/, rank: 5 },
   { test: /Clicked the invite email/, rank: 4 },
   { test: /Opened the invite email/, rank: 2 }, // the least valuable signal — merely opened, hasn't acted

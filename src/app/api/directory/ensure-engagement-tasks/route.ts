@@ -43,6 +43,13 @@ export async function POST(req: NextRequest) {
 
   const lastStepValue = funnel.steps[funnel.steps.length - 1]?.value;
   const stepRank = (v: string) => funnel.steps.findIndex((s) => s.value === v);
+  // Split "started but didn't finish" in two (Derek, 2026-08-09): confirming
+  // your info and someone who answered every question and is one click from
+  // picking a time aren't the same urgency, but they used to share one
+  // generic title/rank. Same boundary computeBusinessStage (TerritoryDirectory.tsx)
+  // already draws between its own "clicked" and "completed" stages, so a
+  // business's task title and its stage on the Businesses page agree.
+  const LATE_FUNNEL_STEPS = new Set(["questions_done", "slots_shown", "contact_started"]);
   // Every candidate first, THEN one contacts query for all of them — same
   // reasoning as syncTerritoryClients batching in Cockpit.tsx: this can run
   // for a whole city's worth of businesses, not one at a time.
@@ -70,10 +77,13 @@ export async function POST(req: NextRequest) {
     const contact = (listing.ghlContactId && byGhlId.get(listing.ghlContactId)) || byPhone.get(digits(listing.phone)) || byEmail.get(lc(listing.email)) || byName.get(lc(listing.name)) || null;
     if (!contact) continue; // nothing to promote against — same honest gap as the Dashboard's own fallback
     const trackedClientId = await resolveOrPromoteTrackedClient(contact);
+    const title = LATE_FUNNEL_STEPS.has(entry.step)
+      ? `Nearly booked (reached "${entry.label}") — one more step, follow up`
+      : `Started the interest chat (reached "${entry.label}") — didn't finish, follow up`;
     const ok = await upsertConversationTask(
       { id: contact.id, name: contact.name, client_id: trackedClientId },
       listing.ghlContactId || contact.ghl_contact_id || "",
-      { title: `Started the interest chat (reached "${entry.label}") — didn't finish, follow up` },
+      { title },
     );
     if (ok) ensured++;
   }
