@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
-import { resolveTrackedClientId, SAFE_CONTACT_ID } from "@/lib/ghlConversationTask";
+import { resolveTrackedClientId, SAFE_CONTACT_ID, upsertConversationTask } from "@/lib/ghlConversationTask";
 import { completePlaybookStepServer } from "@/lib/playbookReconcileServer";
 import { verifyClickUpTasksKey } from "@/lib/verifyBridgeKey";
 
@@ -63,5 +63,18 @@ export async function POST(req: NextRequest) {
   }
 
   const done = await completePlaybookStepServer(clientId, "sales_listing_claimed", "Automatically completed, listing claimed.");
+
+  // Claiming is the strongest signal in the whole engagement ladder — "claimed
+  // ... would be the most" valuable (Derek, 2026-08-09) — yet until now this
+  // route only silently advanced a Playbook step, no Follow Up task, nothing
+  // for a rep to see. Every weaker signal (opened/clicked/started-not-finished
+  // chat) already gets one via the same helper, this just closes the gap at
+  // the top of the ladder.
+  await upsertConversationTask(
+    { id: contactId, name: businessName, client_id: clientId },
+    ghlContactId,
+    { title: "Claimed their listing — say hello and get them started" },
+  );
+
   return NextResponse.json({ ok: true, done });
 }

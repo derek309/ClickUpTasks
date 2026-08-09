@@ -47,6 +47,7 @@ import { TerritoryBoard, type TerritoryBoardGroup } from "./cockpit/TerritoryBoa
 // nobody would keep in sync with it. First matching pattern wins; ordered
 // highest value (closest to closing) to lowest (barely engaged).
 const SIGNAL_RANK: { test: RegExp; rank: number }[] = [
+  { test: /Claimed their listing/, rank: 10 }, // the strongest signal on the ladder — a real conversion
   { test: /^Meeting with/, rank: 10 }, // booked an appointment
   { test: /^Reply to /, rank: 9 }, // a real inbound message/call — they're talking to us right now
   { test: /Approved being featured/, rank: 9 }, // already claimed, said yes
