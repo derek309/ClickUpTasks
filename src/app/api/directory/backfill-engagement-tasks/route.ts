@@ -60,15 +60,23 @@ export async function POST(req: NextRequest) {
     const matchContact = (l: any) => (l.ghlContactId && byGhlId.get(l.ghlContactId)) || byPhone.get(digits(l.phone)) || byEmail.get(lc(l.email)) || byName.get(lc(l.name)) || null;
 
     for (const [gdPlaceId, inv] of invites) {
+      // Decide whether this business even has a real engagement signal
+      // BEFORE looking up a contact for it — a plain "invited, never
+      // opened" business was never going to get a task either way, and
+      // checking contact-match for it first only inflates noContact with
+      // businesses that were correctly skipped, not actually blocked.
+      let title: string | null = null;
+      if (inv.status === "accepted") { title = "Accepted the invite — call or visit to close"; }
+      else if (inv.clickedAt) { title = "Clicked the invite email — call or visit to close"; }
+      else if (inv.openedAt) { title = "Opened the invite email — a nudge might help"; }
+      if (!title) continue;
       const listing = listingById.get(gdPlaceId);
       if (!listing || listing.claimed) continue;
       const contact = matchContact(listing);
       if (!contact) { noContact.push(`${listing.name} (invite: ${inv.status})`); continue; }
-      let title: string | null = null;
-      if (inv.status === "accepted") { title = "Accepted the invite — call or visit to close"; accepted++; }
-      else if (inv.clickedAt) { title = "Clicked the invite email — call or visit to close"; clicked++; }
-      else if (inv.openedAt) { title = "Opened the invite email — a nudge might help"; opened++; }
-      if (!title) continue;
+      if (title.startsWith("Accepted")) accepted++;
+      else if (title.startsWith("Clicked")) clicked++;
+      else opened++;
       entries.push(`[invite] ${listing.name} -> ${title}`);
       if (!dryRun) {
         const trackedClientId = await resolveOrPromoteTrackedClient(contact);
