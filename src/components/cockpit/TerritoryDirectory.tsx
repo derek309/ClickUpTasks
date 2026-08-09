@@ -299,7 +299,11 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   const [loading, setLoading] = useState(() => !warm());
   const [err, setErr] = useState<string | null>(null);
   const [notConfigured, setNotConfigured] = useState(() => warm()?.notConfigured ?? false);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Collapsed by default — the group keys are a fixed, known set (not
+  // data-dependent), so this doesn't need to wait for listings to load.
+  const [collapsed, setCollapsed] = useState<Set<string>>(
+    () => new Set(["attention", "followed_up", "accepted", "clicked", "opened", ...STAGE_ORDER]),
+  );
   const toggleGroup = (key: string) => setCollapsed((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
   // Clicking a stat pill hard-filters to just that stage (not a peek-while-
   // keeping-the-rest-visible expand) — the funnel-overview bar already shows
