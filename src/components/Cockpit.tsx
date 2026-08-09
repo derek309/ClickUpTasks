@@ -4979,7 +4979,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <TerritoryDashboard me={me} territories={territories} contacts={contacts} clients={clients} tasks={tasks}
             onOpenClient={(id) => { setTerritoryView(null); setActiveClient(id); setActiveProject(null); setClientTab("tasks"); }}
             onOpenTerritory={openTerritory}
-            onOpenPlaybook={openClientPlaybook} />
+            onSyncClients={syncTerritoryClients} />
         ) : territoryView && territoryView !== "all" && plannerOpen ? (
           <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">
             <PlannerPanel territoryId={territoryView} city={territoryById(territoryView)?.city ?? ""} state={territoryById(territoryView)?.state ?? ""}
