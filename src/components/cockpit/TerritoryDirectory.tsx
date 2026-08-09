@@ -135,10 +135,6 @@ const isDragClick = (down: { x: number; y: number } | null, e: { clientX: number
 //   exists.
 export type BusinessStage = "unclaimed" | "invited" | "opened" | "clicked" | "completed" | "booked" | "claimed" | "interview" | "onboarding" | "active_client" | "nurture" | "cancelled" | "past_client";
 export const STAGE_ORDER: BusinessStage[] = ["unclaimed", "invited", "opened", "clicked", "completed", "booked", "claimed", "interview", "onboarding", "active_client", "nurture", "cancelled", "past_client"];
-// Same keys as a lookup — the group loop below has to tell a real funnel
-// group apart from an override group (attention/followed up) by key alone,
-// and does it once per row.
-const STAGE_KEYS = new Set<string>(STAGE_ORDER);
 export const STAGE_META: Record<BusinessStage, { label: string; color: string; hint: string }> = {
   unclaimed: { label: "Really unclaimed", color: "#f59e0b", hint: "never invited, or the invite was skipped — a prospect to invite or call" },
   invited: { label: "Invited", color: "#0ea5e9", hint: "invited to claim their free marketing package, hasn't opened it yet" },
@@ -154,19 +150,11 @@ export const STAGE_META: Record<BusinessStage, { label: string; color: string; h
   cancelled: { label: CLIENT_STATUS_META.cancelled.label, color: CLIENT_STATUS_META.cancelled.dot, hint: "cancelled engagement" },
   past_client: { label: CLIENT_STATUS_META.past_client.label, color: CLIENT_STATUS_META.past_client.dot, hint: "wrapped up" },
 };
-// The override group above the funnel: a business whose client has an open
-// "conversation"-priority task — the exact same signal that bumps a client to
-// the top of the Dashboard (Cockpit.tsx's hasOpenConversationTask). A business
-// here ALSO still appears in its normal stage group below, so per-stage
-// funnel counts stay a truthful pipeline snapshot.
-const ATTENTION_META = { label: "Needs attention now", color: "#8b5cf6", hint: "replied by SMS, email, or newsletter invite, or has gone quiet mid pipeline. Check in before anything else" };
-// The other half of that same group: a business someone has already reached
-// out to (walk-in, call, email) and is now waiting to hear back from. Same
-// open conversation task, just with its due date pushed out (via the task's
-// own due-date edit, same as everywhere else in the app) — so it reads as
-// worked, not cold, until that date comes around and it drops back into
-// "Needs attention now" on its own.
-const FOLLOWED_UP_META = { label: "Followed up, waiting to hear back", color: "#64748b", hint: "someone already reached out, so we check back in if nothing comes of it" };
+// No more "Needs attention now" / "Followed up" override groups here — Follow
+// Up already owns "who needs a reply, pulled to the top" (Derek, 2026-08-09:
+// "we don't need these now because they should be showing up in Follow Up
+// instead"). This page is purely the flat funnel now, one place per business,
+// no duplicate rows pointing back down at themselves.
 
 export function computeBusinessStage(listing: DirectoryListing, client: Client | null, invite?: PlannerInvite, funnelStep?: JoinFunnelEntry): BusinessStage {
   // A matched client can carry real funnel progress (e.g. a booked
@@ -693,54 +681,6 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // Same id coercion as inviteFor — the GeoDirectory place id is the join key
   // on both sides. Undefined when this business never started the chat.
   const funnelFor = (listing: DirectoryListing) => funnelByGdPlaceId[typeof listing.id === "number" ? listing.id : Number(listing.id)];
-  // The open Conversation-priority task that puts a business in the attention
-  // group — the same scan needsAttention has always run, just returning the
-  // task itself so its due date can sub-bucket the row (see attentionRows
-  // below) and its id can be handed to the Followed up action.
-  const conversationTaskFor = (r: { client: Client | null }) =>
-    (r.client && (tasksByClient?.get(r.client.id) ?? []).find((t) => t.status !== "done" && t.priority === "conversation")) || null;
-  // The group's second trigger, next to an inbound reply: a business already
-  // being worked (claimed through onboarding — not a cold prospect Planner's
-  // invite queue already owns, not yet won, not parked in nurture/cancelled)
-  // whose Playbook hasn't moved in STEP_STALL_DAYS. "Verification call
-  // booked" that's been sitting untouched for three weeks is exactly as much
-  // a "check on this" signal as an inbound reply — nothing surfaced it before
-  // this, a rep had to notice on their own.
-  const isStalled = (r: { listing: DirectoryListing; client: Client | null }) => {
-    if (!r.client || r.client.type === "client") return false;
-    const stage = computeBusinessStage(r.listing, r.client, inviteFor(r.listing), funnelFor(r.listing));
-    if (stage !== "claimed" && stage !== "interview" && stage !== "onboarding") return false;
-    return isDueForStage(r.client.playbookLastProgressAt ?? null, stage, todayIso);
-  };
-  const needsAttention = (r: { listing: DirectoryListing; client: Client | null }) => !!conversationTaskFor(r) || isStalled(r);
-  // The few words a flag row carries next to the business name: why this one
-  // is up here at all. A row with no open conversation task can only be here
-  // via isStalled — say that plainly rather than falling through the
-  // reply-shaped checks below, which would either miss (nothing to find) or
-  // resurface a stale signal from a much older reply. Otherwise, strongest
-  // real signal first: how far it actually got through the invite chat
-  // (WordPress's own step label), then plain invite engagement, and only
-  // then the generic fact that it replied, which is what put it in the group
-  // in the first place (see ATTENTION_META). Never a placeholder: a rep
-  // scanning the group is deciding who to call from this line alone.
-  const flagReasonFor = (r: { listing: DirectoryListing; client: Client | null }) => {
-    if (!conversationTaskFor(r)) {
-      const stage = computeBusinessStage(r.listing, r.client, inviteFor(r.listing), funnelFor(r.listing));
-      return `Quiet on ${STAGE_META[stage].label} for ${STEP_STALL_DAYS}+ days`;
-    }
-    const step = funnelFor(r.listing);
-    if (step?.label) return step.label;
-    const inv = inviteFor(r.listing);
-    if (inv?.clickedAt) return "Clicked the invite";
-    if (inv?.openedAt) return "Opened the invite";
-    return "Replied";
-  };
-  // "We reached out, now we're waiting to hear back" — the check-back date is
-  // the task's own due date, read straight off it. Setting it isn't a
-  // dashboard-local action anymore (Derek, 2026-08-09: this page is a status
-  // overview, not an action console) — same as Follow Up, that happens by
-  // editing the task's own due date in TaskDrawer, on the client's page.
-  const nextCheckInFor = (r: { client: Client | null }) => conversationTaskFor(r)?.due ?? null;
 
   // Full invite history — every send this territory has ever made, not just
   // the latest per business (that's inviteByGdPlaceId above). Feeds the
@@ -887,19 +827,6 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
 
   if (loading) return <div className="bg-background p-4 py-10 text-center text-[13px] text-muted sm:p-5">Loading directory for {city}…</div>;
 
-  // The attention group splits in two on its own conversation task's due
-  // date, which on these tasks doubles as "last touched" (see
-  // upsertConversationTask): no due date, or one that's today or older, means
-  // nobody has reached out yet — or the follow-up window ran out and it's
-  // gone cold again — so it needs a first touch today. A due date still in
-  // the future means a rep already reached out (the Followed up button set
-  // it) and is waiting to hear back, which is worked, not urgent. Every
-  // business here lands in exactly one of the two, same as the engagement
-  // ladder below.
-  const todayDate = todayIsoDate();
-  const attentionAll = filtered.filter(needsAttention);
-  const attentionRows = sortRows(attentionAll.filter((r) => { const d = nextCheckInFor(r); return !d || d <= todayDate; }));
-  const followedUpRows = sortRows(attentionAll.filter((r) => { const d = nextCheckInFor(r); return !!d && d > todayDate; }));
   const stageRows = new Map<BusinessStage, typeof filtered>();
   for (const key of STAGE_ORDER) stageRows.set(key, []);
   for (const r of filtered) stageRows.get(computeBusinessStage(r.listing, r.client, inviteFor(r.listing), funnelFor(r.listing)))!.push(r);
@@ -907,8 +834,6 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
 
   type Group = { key: string; label: string; color: string; hint: string; rows: typeof filtered };
   const groups: Group[] = [];
-  if (attentionRows.length) groups.push({ key: "attention", label: ATTENTION_META.label, color: ATTENTION_META.color, hint: ATTENTION_META.hint, rows: attentionRows });
-  if (followedUpRows.length) groups.push({ key: "followed_up", label: FOLLOWED_UP_META.label, color: FOLLOWED_UP_META.color, hint: FOLLOWED_UP_META.hint, rows: followedUpRows });
   for (const key of STAGE_ORDER) groups.push({ key, label: STAGE_META[key].label, color: STAGE_META[key].color, hint: STAGE_META[key].hint, rows: stageRows.get(key)! });
   const allCollapsed = groups.length > 0 && groups.every((g) => collapsed.has(g.key));
   const toggleAllGroups = () => setCollapsed(allCollapsed ? new Set() : new Set(groups.map((g) => g.key)));
@@ -1227,33 +1152,10 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                 {isOpen && g.rows.map((r) => {
                   const rawId = typeof r.listing.id === "number" ? r.listing.id : parseInt(String(r.listing.id), 10);
                   const gdPlaceId = Number.isFinite(rawId) ? rawId : null;
-                  // The two attention groups are flags pointing down at a real
-                  // listing, not a second copy of it: they render a one line
-                  // FlagRow instead of the full card, and the real row in the
-                  // business's own stage group carries a small "flagged above"
-                  // tag back up to them.
-                  const isFlagGroup = g.key === "attention" || g.key === "followed_up";
-                  // Only a date still ahead of us is a live "we're waiting on
-                  // them" promise — a lapsed one is why this row is back in
-                  // "Needs attention now", so it says nothing useful on the row.
-                  const checkIn = isFlagGroup ? nextCheckInFor(r) : null;
-                  const nextCheckIn = checkIn && checkIn > todayDate ? checkIn : null;
                   const stage = computeBusinessStage(r.listing, r.client, inviteFor(r.listing), funnelFor(r.listing));
-                  if (isFlagGroup) {
-                    return (
-                      <FlagRow key={g.key + r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient}
-                        stage={stage}
-                        // Followed up already reached out, so the check back
-                        // date is the headline instead.
-                        waiting={g.key === "followed_up"}
-                        reason={g.key === "followed_up" ? null : flagReasonFor(r)}
-                        nextCheckIn={g.key === "followed_up" ? nextCheckIn : null} />
-                    );
-                  }
                   return (
                     <ListingRow key={g.key + r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient} template={template}
                       stage={stage}
-                      flaggedAbove={STAGE_KEYS.has(g.key) && needsAttention(r)}
                       invite={inviteFor(r.listing)}
                       inviteHistoryList={gdPlaceId != null ? invitesByGdPlaceId.get(gdPlaceId) ?? [] : []}
                       onSetClientStatus={onSetClientStatus} canAdmin={canAdmin} ghlContactUrlFor={ghlContactUrlFor}
@@ -1286,76 +1188,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   );
 }
 
-// The connector from a flag down to the real listing it points at — a stem
-// with an arrowhead rather than a bare chevron, so the line reads as a thread
-// between two places on the page instead of a collapse toggle.
-const ThreadArrow = () => (
-  <svg width="10" height="14" viewBox="0 0 10 14" fill="none" aria-hidden className="shrink-0 text-border">
-    <path d="M5 0V10M5 10L1 6M5 10L9 6" stroke="currentColor" strokeWidth="1.4" />
-  </svg>
-);
-
-// One line in "Needs attention now" / "Followed up, waiting to hear back".
-// These two groups are the only ones whose rows are not really listings: the
-// same business always renders again in its own funnel stage below, so a full
-// ListingRow here (icons, chips, a stack of buttons) read as an accidental
-// duplicate rather than as what it is — a pin on one real listing. So: a pin,
-// the name, why it's flagged, one action, and a thread naming the stage the
-// real row is sitting in. Everything else about that business stays on the
-// real row; this is a pointer, not a card.
-// Pure pointer — no inline action (Derek, 2026-08-09: this page is a status
-// overview now; the same "check back" date shown here is set by editing the
-// task's own due date on the client's page, same as Follow Up, not from
-// here).
-function FlagRow({ row, onAddContact, onOpenClient, stage, reason, waiting, nextCheckIn }: {
-  row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
-  onAddContact: (c: Contact) => void;
-  onOpenClient: (id: string) => void;
-  // Where the real row lives, so the thread below can name it.
-  stage: BusinessStage;
-  // Why this business is flagged, in a few words (see flagReasonFor). null in
-  // the followed up group, where the group header already says it and the
-  // check back date is the point of the row.
-  reason: string | null;
-  // Followed up bucket: somebody already reached out, so the row is
-  // informational — the check back date leads instead of a reason.
-  waiting: boolean;
-  nextCheckIn?: string | null;
-}) {
-  const { listing, contact, client } = row;
-  const nameMouseDown = useRef<{ x: number; y: number } | null>(null);
-  const openThis = client ? () => onOpenClient(client.id) : contact ? () => onAddContact(contact) : null;
-
-  return (
-    <div className="border-b last:border-0">
-      <div className="grid items-center gap-2.5 px-4 py-2 transition-colors hover:bg-accent-soft/50" style={{ gridTemplateColumns: "16px minmax(0,1fr) auto" }}>
-        <span title="Flagged from its listing below" className="text-[13px] leading-none">📌</span>
-        <div className="min-w-0 truncate text-[13px]">
-          {openThis ? (
-            <button onMouseDown={(e) => { nameMouseDown.current = { x: e.clientX, y: e.clientY }; }}
-              onClick={(e) => { if (!isDragClick(nameMouseDown.current, e)) openThis(); }} title="Open this business"
-              className="text-left font-semibold hover:text-accent hover:underline">{listing.name}</button>
-          ) : (
-            <span className="font-semibold">{listing.name}</span>
-          )}
-          {reason && <span className="text-muted"> · <span className="font-medium text-foreground">{reason}</span></span>}
-        </div>
-        {waiting && nextCheckIn && (
-          <span title="When this business comes back to “Needs attention now” if we still haven’t heard back"
-            className="shrink-0 rounded-md bg-background px-2 py-1 text-[12px] font-medium text-muted">
-            Check back {formatDue(nextCheckIn)}
-          </span>
-        )}
-      </div>
-      <div className="flex items-center gap-1.5 bg-background/40 px-4 py-1 pl-[42px] text-[12px] text-muted">
-        <ThreadArrow />
-        full listing is below, in {STAGE_META[stage].label}
-      </div>
-    </div>
-  );
-}
-
-function ListingRow({ row, onAddContact, onOpenClient, template, stage, flaggedAbove, invite, inviteHistoryList, onSetClientStatus, canAdmin, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, otherLists, onOpenProject, highlighted }: {
+function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, inviteHistoryList, onSetClientStatus, canAdmin, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, otherLists, onOpenProject, highlighted }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
   onOpenClient: (id: string) => void;
@@ -1366,12 +1199,6 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, flaggedA
   template: string;
   // This row's computed funnel position (see computeBusinessStage above).
   stage: BusinessStage;
-  // True when this business is also flagged up top (it has an open
-  // conversation task, so a FlagRow points down at this row) — shows a quiet
-  // tag saying so, since scrolling straight past the top groups shouldn't
-  // hide that somebody is mid conversation with them. Only ever set on the
-  // real stage row: inside the flag groups the row already IS the flag.
-  flaggedAbove?: boolean;
   // This business's most recent Content Planner invite, if any — undefined
   // when it's never been invited (or territoryId wasn't passed down, e.g.
   // the admin multi-city overview).
@@ -1459,12 +1286,6 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, flaggedA
             {listing.editUrl && <a href={listing.editUrl} target="_blank" rel="noopener noreferrer" title="Edit business profile (WordPress admin)" className="shrink-0 rounded p-0.5 text-muted hover:bg-surface hover:text-accent"><I.pencil /></a>}
           </div>
           <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 pl-5 text-[12px] text-muted">
-            {flaggedAbove && (
-              <span title="Someone replied, so this business is also flagged in the group at the top of the page"
-                className="rounded bg-violet-100 px-1.5 py-0.5 font-medium text-violet-700">
-                📌 flagged above
-              </span>
-            )}
             {invite && (
               inviteHistoryList.length > 1 ? (
                 <button onClick={() => setHistoryOpen((v) => !v)}
