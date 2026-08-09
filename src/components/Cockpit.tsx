@@ -4135,7 +4135,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // duplicated in source. Only one header is ever visible (CSS breakpoint),
   // so the popovers never double-render on screen.
   const territoryTitle = territoryView ? (territoryView === "dashboard" ? "Follow Up" : territoryView === "all" ? "Territories" : (territoryById(territoryView) ? `${territoryById(territoryView)!.city}, ${territoryById(territoryView)!.state}` : "Territory")) : null;
-  const headerTitleText = territoryTitle ?? (settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Conversations") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "My Work" : activeClient === "all" ? (conversationsOnly ? "Client replies" : "All Tasks") : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? "")));
+  const headerTitleText = territoryTitle ?? (settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Team Chat") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "My Work" : activeClient === "all" ? (conversationsOnly ? "Client replies" : "All Tasks") : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? "")));
   const isClientDetail = !myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && !!clientById(activeClient);
   // Non-null when the open "client" is actually a city's work container —
   // drives the breadcrumb and subtitle so the page reads as city work rather
@@ -4357,7 +4357,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               agree. */}
           {navVisible.work && <SideItem active={activeClient === "all" && conversationsOnly} title="Open client replies waiting on a response" onClick={openConversationReplies}><I.inbox className="text-muted" /> <span>Client replies</span><span className="ml-auto text-[13px] text-muted">{openConversationCount}</span></SideItem>}
           {navVisible.inbox && (<>
-            <SideItem active={inboxView && dmUserId === null} title="Conversations (press 2)" onClick={openTeamChat}><I.comment className="text-muted" /> <span>Conversations</span>{teamChatUnread && (
+            <SideItem active={inboxView && dmUserId === null} title="Team Chat (press 2)" onClick={openTeamChat}><I.comment className="text-muted" /> <span>Team Chat</span>{teamChatUnread && (
               // Literal unread team-chat messages only — general notifications
               // (task assignments, client replies, etc.) have their own home
               // on the bell, not this nav item (Derek, Aug 4).
@@ -4530,7 +4530,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </p>
             </>) : (<>
               <h1 className="flex items-center gap-2 truncate text-[20px] font-semibold">
-                {territoryTitle ? territoryTitle : settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Conversations") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "My Work" : activeClient === "all" ? (conversationsOnly ? "Client replies" : "All Tasks") : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
+                {territoryTitle ? territoryTitle : settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Team Chat") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "My Work" : activeClient === "all" ? (conversationsOnly ? "Client replies" : "All Tasks") : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
                 {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
               </h1>
               {/* No subtitle for a territory — it fell through to the
