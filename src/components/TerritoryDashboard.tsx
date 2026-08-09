@@ -116,6 +116,13 @@ export function TerritoryDashboard({ me, territories, contacts, clients, tasks, 
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ territoryId: t.id, city: t.city, state: t.state }),
       }).catch(() => {});
+      // "Keep them moving" used to be a pure computed signal with no task
+      // behind it — nothing to click into (Derek, 2026-08-09). Same cooldown
+      // gate, purely Supabase-driven so it's cheap alongside the call above.
+      authedFetch("/api/directory/ensure-stalled-tasks", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ territoryId: t.id, city: t.city, state: t.state }),
+      }).catch(() => {});
     });
   }, [myTerritories]);
 

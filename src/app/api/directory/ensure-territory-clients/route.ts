@@ -40,6 +40,7 @@ export async function POST(req: NextRequest) {
   const lc = (s: string | undefined) => (s ?? "").trim().toLowerCase();
 
   const { data: contactRows } = await supabaseAdmin.from("contacts").select("id, name, ghl_contact_id, phone, email");
+  const existingContactIds = new Set((contactRows ?? []).map((c: any) => c.id as string));
   const byGhlId = new Map<string, any>(), byPhone = new Map<string, any>(), byEmail = new Map<string, any>(), byName = new Map<string, any>();
   for (const c of contactRows ?? []) {
     if (c.ghl_contact_id) byGhlId.set(c.ghl_contact_id, c);
@@ -51,21 +52,28 @@ export async function POST(req: NextRequest) {
   const newContacts: any[] = [];
   const resolvedContactIds: string[] = [];
   for (const l of listingsResult.listings) {
-    const existing = (l.ghlContactId && byGhlId.get(l.ghlContactId)) || byPhone.get(digits(l.phone)) || byEmail.get(lc(l.email)) || byName.get(lc(l.name)) || null;
-    if (existing) { resolvedContactIds.push(existing.id); continue; }
     const rawId = typeof l.id === "number" ? l.id : parseInt(String(l.id), 10);
     if (!Number.isFinite(rawId)) continue;
     // ghlContactId-keyed when we have one (matches the convention every
     // other promotion path in this app already uses); a synthetic
     // gdPlaceId-keyed id otherwise, for a listing WP has never sent an
     // invite through GHL for yet.
-    const id = l.ghlContactId ? `ct_ghl_${l.ghlContactId}` : `ct_gd_${rawId}`;
+    const candidateId = l.ghlContactId ? `ct_ghl_${l.ghlContactId}` : `ct_gd_${rawId}`;
+    // Checked FIRST, before any fuzzy match — this listing's own id is
+    // stable across calls even when the live WP fetch's phone/email
+    // formatting isn't (an external API has no byte-stability guarantee
+    // the way this deterministic id does), so a listing this route already
+    // promoted is always recognized as done, instead of recomputing "new"
+    // every re-run and redoing the same bulk upsert work for nothing.
+    if (existingContactIds.has(candidateId)) { resolvedContactIds.push(candidateId); continue; }
+    const existing = (l.ghlContactId && byGhlId.get(l.ghlContactId)) || byPhone.get(digits(l.phone)) || byEmail.get(lc(l.email)) || byName.get(lc(l.name)) || null;
+    if (existing) { resolvedContactIds.push(existing.id); continue; }
     newContacts.push({
-      id, client_id: "c_directory", name: l.name,
+      id: candidateId, client_id: "c_directory", name: l.name,
       email: l.email || null, phone: l.phone || null, ghl_contact_id: l.ghlContactId || null,
       city, state,
     });
-    resolvedContactIds.push(id);
+    resolvedContactIds.push(candidateId);
   }
 
   if (newContacts.length) {
