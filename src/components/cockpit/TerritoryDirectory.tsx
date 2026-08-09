@@ -18,7 +18,7 @@
 // "Unclaimed" — exactly the pre-directory behavior, just relabeled.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
-import { fetchPlannerWeeks, upsertPlannerWeek } from "@/lib/db";
+import { fetchPlannerWeeks } from "@/lib/db";
 import { latestInviteStatus, inviteHistory, featureHistory, isDue, allInvitesByGdPlaceId } from "@/lib/plannerPools";
 import { zonedDateString, BUSINESS_TZ, AUTO_INVITE_START_HOUR } from "@/lib/businessHours";
 import {
@@ -27,7 +27,6 @@ import {
   type Contact, type Client, type ClientStatus, type Task, type PlannerInvite, type PlannerWeek,
 } from "@/lib/data";
 import { I } from "./ui";
-import { TouchPanel, type TouchResult, type OutcomeKey } from "./TouchLogger";
 // Types only (erased at build) — the lib itself is server-only.
 import type { JoinFunnelStep, JoinFunnelEntry } from "@/lib/joinFunnelServer";
 
@@ -118,23 +117,35 @@ const DRAG_THRESHOLD_PX = 4;
 const isDragClick = (down: { x: number; y: number } | null, e: { clientX: number; clientY: number }) =>
   !!down && (Math.abs(e.clientX - down.x) > DRAG_THRESHOLD_PX || Math.abs(e.clientY - down.y) > DRAG_THRESHOLD_PX);
 
-// The funnel every business is walked through, in order. Everyone always sits
-// in exactly one of these — this is the Businesses page's whole reason for
-// being: see where everyone is, and get everyone to Active Client.
-//   Unclaimed  — listing nobody has claimed yet
-//   Invited    — invited to claim it (Content Planner outreach), hasn't yet
-//   Claimed    — claimed the listing, but not yet moved past Lead/Prospect
-//   Onboarding / Active Client / Nurture / Cancelled / Past Client — the
-//   client record's own lifecycle (ClientStatus), once a real client exists.
-export type BusinessStage = "unclaimed" | "invited" | "claimed" | "interview" | "onboarding" | "active_client" | "nurture" | "cancelled" | "past_client";
-export const STAGE_ORDER: BusinessStage[] = ["unclaimed", "invited", "claimed", "interview", "onboarding", "active_client", "nurture", "cancelled", "past_client"];
-// Same nine keys as a lookup — the group loop below has to tell a real funnel
-// group apart from an override group (attention/followed up/engagement ladder)
-// by key alone, and does it once per row.
+// The funnel every business is walked through, in order — one flat top-down
+// list (Derek, 2026-08-09: "this should be a top-down funnel"), not a stage
+// funnel plus a separate overlapping "engagement ladder" of the same
+// businesses shown twice. Everyone always sits in exactly one of these — this
+// is the Businesses page's whole reason for being: see where everyone
+// actually is, and get everyone to Active Client.
+//   Unclaimed — never invited, or the invite was skipped
+//   Invited   — invited, hasn't opened it yet
+//   Opened    — opened the invite, hasn't clicked into the chat
+//   Clicked   — clicked into the interview chat, hasn't finished the questions
+//   Completed — answered the interview questions, hasn't booked a call
+//   Booked    — booked a call
+//   Claimed   — claimed the listing, but not yet moved past Lead/Prospect
+//   Interview / Onboarding / Active Client / Nurture / Cancelled / Past Client
+//   — the client record's own lifecycle (ClientStatus), once a real client
+//   exists.
+export type BusinessStage = "unclaimed" | "invited" | "opened" | "clicked" | "completed" | "booked" | "claimed" | "interview" | "onboarding" | "active_client" | "nurture" | "cancelled" | "past_client";
+export const STAGE_ORDER: BusinessStage[] = ["unclaimed", "invited", "opened", "clicked", "completed", "booked", "claimed", "interview", "onboarding", "active_client", "nurture", "cancelled", "past_client"];
+// Same keys as a lookup — the group loop below has to tell a real funnel
+// group apart from an override group (attention/followed up) by key alone,
+// and does it once per row.
 const STAGE_KEYS = new Set<string>(STAGE_ORDER);
 export const STAGE_META: Record<BusinessStage, { label: string; color: string; hint: string }> = {
-  unclaimed: { label: "Unclaimed", color: "#f59e0b", hint: "listing nobody has claimed yet — a prospect to invite or call" },
-  invited: { label: "Invited, hasn't claimed", color: "#0ea5e9", hint: "invited to claim their free marketing package, hasn't yet — a nudge might close it" },
+  unclaimed: { label: "Really unclaimed", color: "#f59e0b", hint: "never invited, or the invite was skipped — a prospect to invite or call" },
+  invited: { label: "Invited", color: "#0ea5e9", hint: "invited to claim their free marketing package, hasn't opened it yet" },
+  opened: { label: "Opened", color: "#0891b2", hint: "opened the invite but hasn't clicked into the chat yet — worth a call or a visit" },
+  clicked: { label: "Clicked", color: "#2563eb", hint: "clicked into the interview chat but hasn't finished it — a nudge might close it" },
+  completed: { label: "Completed, not booked", color: "#059669", hint: "answered the interview questions but hasn't booked a call yet — the hottest lead that hasn't claimed" },
+  booked: { label: "Booked", color: "#7c3aed", hint: "booked a call — get them to the finish line" },
   claimed: { label: CLIENT_STATUS_META.claimed.label, color: "#10b981", hint: "claimed their listing — work the Playbook with them" },
   interview: { label: CLIENT_STATUS_META.interview.label, color: CLIENT_STATUS_META.interview.dot, hint: "phone/Zoom interview (doubles as verification), then the in-person visit to finalize their profile" },
   onboarding: { label: CLIENT_STATUS_META.onboarding.label, color: CLIENT_STATUS_META.onboarding.dot, hint: "actively being onboarded" },
@@ -151,27 +162,13 @@ export const STAGE_META: Record<BusinessStage, { label: string; color: string; h
 const ATTENTION_META = { label: "Needs attention now", color: "#8b5cf6", hint: "replied by SMS, email, or newsletter invite, or has gone quiet mid pipeline. Check in before anything else" };
 // The other half of that same group: a business someone has already reached
 // out to (walk-in, call, email) and is now waiting to hear back from. Same
-// open conversation task, just with its due date pushed out by the Followed
-// up button below — so it reads as worked, not cold, until that date comes
-// around and it drops back into "Needs attention now" on its own. Deliberately
-// a calm slate rather than another hot color: the whole point is that a rep
-// scanning this page can see at a glance which of these still need a first
-// touch.
+// open conversation task, just with its due date pushed out (via the task's
+// own due-date edit, same as everywhere else in the app) — so it reads as
+// worked, not cold, until that date comes around and it drops back into
+// "Needs attention now" on its own.
 const FOLLOWED_UP_META = { label: "Followed up, waiting to hear back", color: "#64748b", hint: "someone already reached out, so we check back in if nothing comes of it" };
-// Three more override groups, purely from invite engagement (status/openedAt/
-// clickedAt on the latest invite — see PlannerInvite) — NOT tasks, so none of
-// these ever touch the Dashboard ("that's for active clients," Derek, Aug 3).
-// A daily call/visit ladder ranked by how strong the signal is: answered the
-// 3 questions (real intent) is hotter than a link click, which is hotter than
-// just opening the email. Each business sits in exactly ONE of these three —
-// the strongest tier it qualifies for — so the page reads as "who to work
-// today," not the same names stacked three times (Derek, Aug 4: "bring the
-// important things to the top so we can focus on the right businesses").
-const ACCEPTED_META = { label: "Accepted, hasn't claimed", color: "#059669", hint: "answered the intake questions — the hottest lead that hasn't claimed yet, call or visit today" };
-const CLICKED_META = { label: "Clicked, hasn't answered", color: "#2563eb", hint: "clicked the invite link but didn't finish the questions — a nudge might close it" };
-const OPENED_META = { label: "Opened, hasn't clicked", color: "#0891b2", hint: "read the invite but hasn't clicked through yet — worth a call or a visit" };
 
-export function computeBusinessStage(listing: DirectoryListing, client: Client | null, invite?: PlannerInvite): BusinessStage {
+export function computeBusinessStage(listing: DirectoryListing, client: Client | null, invite?: PlannerInvite, funnelStep?: JoinFunnelEntry): BusinessStage {
   // A matched client can carry real funnel progress (e.g. a booked
   // interview) even when the WordPress listing itself was never formally
   // "claimed" — that flag specifically means a verified WordPress-account
@@ -184,7 +181,21 @@ export function computeBusinessStage(listing: DirectoryListing, client: Client |
   // an ownership flag it has nothing to do with — and so the Stage dropdown,
   // gated on this same computed stage, becomes visible to fix it by hand too.
   if (client && client.status !== "claimed") return client.status as BusinessStage;
-  if (!listing.claimed) return invite && invite.status !== "skipped" ? "invited" : "unclaimed";
+  if (!listing.claimed) {
+    // The join-chat funnel is the stronger, more specific signal once a
+    // business is actually in the chat — WordPress's own step tracking, not
+    // the older invite-email open/click fields — so it wins whenever present.
+    // "accepted" (the older direct-intake path, still live for businesses
+    // that never went through the new chat) counts the same as finishing the
+    // funnel's questions: both mean "answered, hasn't booked."
+    if (funnelStep?.step === "booked") return "booked";
+    if (funnelStep && (funnelStep.step === "questions_done" || funnelStep.step === "slots_shown" || funnelStep.step === "contact_started")) return "completed";
+    if (invite?.status === "accepted") return "completed";
+    if (funnelStep) return "clicked"; // opened/info_confirmed/questions_started — in the chat, hasn't finished
+    if (invite?.clickedAt) return "clicked";
+    if (invite?.openedAt) return "opened";
+    return invite && invite.status !== "skipped" ? "invited" : "unclaimed";
+  }
   if (!client) return "claimed";
   return (client.status as BusinessStage);
 }
@@ -232,6 +243,11 @@ const inviteCache = new Map<string, PlannerActivityCacheEntry>();
 // switching cities never shows the previous city's funnel.
 type FunnelCacheEntry = { steps: JoinFunnelStep[]; byGdPlaceId: Record<number, JoinFunnelEntry>; at: number };
 const funnelCache = new Map<string, FunnelCacheEntry>();
+
+// See the ensure-territory-clients effect below for why this exists — same
+// per-city, per-tab throttle Follow Up's own ensure-engagement-tasks uses.
+const ENSURE_TERRITORY_CLIENTS_COOLDOWN_MS = 10 * 60 * 1000;
+const ensureTerritoryClientsLastRun = new Map<string, number>();
 
 export default function TerritoryDirectory({ city, state, contacts, clients, onAddContact, onSyncClients, onOpenClient, featuredClientIds, onFeature, tasksByClient, playbookTasksByClient, onOpenPlaybook, otherListsByClient, onOpenProject, onSetClientStatus, canAdmin, ghlContactUrlFor, territoryId, dailyInviteCap, highlightListingId, onHighlightConsumed }: {
   city: string;
@@ -302,7 +318,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // Collapsed by default — the group keys are a fixed, known set (not
   // data-dependent), so this doesn't need to wait for listings to load.
   const [collapsed, setCollapsed] = useState<Set<string>>(
-    () => new Set(["attention", "followed_up", "accepted", "clicked", "opened", ...STAGE_ORDER]),
+    () => new Set(["attention", "followed_up", ...STAGE_ORDER]),
   );
   const toggleGroup = (key: string) => setCollapsed((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
   // Clicking a stat pill hard-filters to just that stage (not a peek-while-
@@ -390,6 +406,22 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
     return () => { alive = false; clearInterval(interval); };
   }, [city, state, cacheKey]);
 
+  // Every listing gets a real tracked client, even a genuinely cold
+  // "Really unclaimed" one with zero engagement — so every row on the page
+  // is uniformly clickable, same as Follow Up (Derek, 2026-08-09, confirmed:
+  // promote all of them). Real backend work (a live WP fetch + bulk upserts
+  // across the whole city), so this is throttled per city per tab, same
+  // reasoning and pattern as Follow Up's own ensure-engagement-tasks cooldown.
+  useEffect(() => {
+    const last = ensureTerritoryClientsLastRun.get(cacheKey) ?? 0;
+    if (Date.now() - last < ENSURE_TERRITORY_CLIENTS_COOLDOWN_MS) return;
+    ensureTerritoryClientsLastRun.set(cacheKey, Date.now());
+    authedFetch("/api/directory/ensure-territory-clients", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ city, state }),
+    }).catch(() => {});
+  }, [cacheKey, city, state]);
+
   // Invite status (invited/accepted/skipped) for this territory's own
   // businesses, from the same planner_weeks rows the Content Planner writes.
   // No new storage: PlannerInvite.gdPlaceId is the same GeoDirectory id as
@@ -450,113 +482,18 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
     return () => { alive = false; clearInterval(interval); };
   }, [territoryId]);
 
-  // Invite/skip actions always target THIS week (auto-created if it doesn't
-  // exist yet) — same anchor runPlannerAutoInvite uses server-side, so a
-  // manual send here and an automatic one land in the identical place.
-  // Invites aren't really a weekly concept, but the underlying storage
-  // (planner_weeks.picks.__invited) still is, and a bigger schema change to
-  // move invite history off weeks entirely is a separate piece of work.
+  // The auto-invite batch (below) is now the only way an invite goes out —
+  // no more per-row Invite/Skip/Copy-link (Derek, 2026-08-09: this page is a
+  // full status overview now, not an action console; Follow Up is where you
+  // act). Still need this week's anchor for the status strip and the
+  // template editor, and humanizeInviteError for the batch send's own error
+  // display.
   const todayWeekIso = plannerWeekOf(todayIsoDate());
-  const ensureThisWeek = async (): Promise<PlannerWeek> => {
-    const existing = plannerWeeksRef.current.find((w) => w.week === todayWeekIso);
-    if (existing) return existing;
-    const w: PlannerWeek = {
-      id: "pw_" + crypto.randomUUID(), territoryId: territoryId!, week: todayWeekIso, themeOverride: "", themeDescription: "", categories: [], notes: "", weatherNote: "",
-      picks: {}, dismissed: [], invited: [], supportLocalExcluded: [], supportLocalAdded: [], archived: false, sentDate: null, wpPushedAt: null, createdAt: new Date().toISOString(),
-    };
-    plannerWeeksRef.current = [w, ...plannerWeeksRef.current];
-    setPlannerWeeks(plannerWeeksRef.current);
-    await upsertPlannerWeek(w);
-    return w;
-  };
-  const patchThisWeek = async (patch: Partial<PlannerWeek> | ((w: PlannerWeek) => Partial<PlannerWeek>)) => {
-    const w = await ensureThisWeek();
-    const merged: PlannerWeek = { ...w, ...(typeof patch === "function" ? patch(w) : patch) };
-    plannerWeeksRef.current = plannerWeeksRef.current.map((x) => (x.id === w.id ? merged : x));
-    setPlannerWeeks(plannerWeeksRef.current);
-    await upsertPlannerWeek(merged);
-  };
-  const bringBackBusiness = async (gdPlaceId: number) => {
-    const w = await ensureThisWeek();
-    let idx = -1;
-    w.invited.forEach((inv, i) => { if (inv.gdPlaceId === gdPlaceId) idx = i; });
-    if (idx !== -1 && w.invited[idx].status === "skipped") await patchThisWeek((cur) => ({ invited: cur.invited.map((inv, i) => (i === idx ? { ...inv, status: "invited" as const } : inv)) }));
-    else if (w.dismissed.includes(gdPlaceId)) await patchThisWeek((cur) => ({ dismissed: cur.dismissed.filter((id) => id !== gdPlaceId) }));
-  };
-  // Sending again is allowed — a business might miss the first email, or a
-  // rep might want to follow up. Every send appends its own {gdPlaceId, at}
-  // entry (not deduped), so week.invited also doubles as a send count.
-  const [inviteState, setInviteState] = useState<Partial<Record<number, "sending" | string>>>({});
-  const [inviteArmed, setInviteArmed] = useState<number | null>(null);
   const humanizeInviteError = (err: string | undefined) =>
     err === "no_email" ? "No email on file for this listing."
     : err === "ghl_not_connected" ? "GoHighLevel isn't connected for this city yet."
     : err === "outside_business_hours" ? "Outside business hours (8am–6pm Mon–Fri) — nothing was sent, try again in the morning."
     : err || "Invite failed.";
-  const sendInvite = async (gdPlaceId: number) => {
-    setInviteArmed(null);
-    setInviteState((m) => ({ ...m, [gdPlaceId]: "sending" }));
-    try {
-      const w = await ensureThisWeek();
-      const res = await authedFetch("/api/planner/invite/send", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ territoryId, week: w.week, gdPlaceId, themeDescription: "" }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (res.ok && j.ok) {
-        setInviteState((m) => { const n = { ...m }; delete n[gdPlaceId]; return n; });
-        await patchThisWeek((cur) => ({ invited: [...cur.invited, { gdPlaceId, at: new Date().toISOString(), status: "invited" as const }] }));
-        return;
-      }
-      setInviteState((m) => ({ ...m, [gdPlaceId]: humanizeInviteError(j.error) }));
-    } catch (e) {
-      setInviteState((m) => ({ ...m, [gdPlaceId]: e instanceof Error ? e.message : "Invite failed." }));
-    }
-  };
-  // One row's touch panel open at a time — same reasoning as the Territory
-  // Dashboard's version: a list with several of these expanded stops being
-  // scannable. Patches the one listing in place from what
-  // /api/directory/activity echoes back rather than refetching the whole
-  // city, so logging a touch is instant instead of waiting on a round trip.
-  // touchOutcome null = closed, "manual" = opened via the plain "Log a
-  // touch" trigger with nothing pre-picked, otherwise the outcome key of
-  // whichever Call Now/Send Email/Send SMS/Book Meeting link was clicked —
-  // same pattern as the Territory Dashboard's version of this row.
-  const [touchOpenId, setTouchOpenId] = useState<number | null>(null);
-  const [touchOutcome, setTouchOutcome] = useState<OutcomeKey | "manual" | null>(null);
-  const openTouch = (gdPlaceId: number, outcome: OutcomeKey | "manual") => { setTouchOpenId(gdPlaceId); setTouchOutcome(outcome); };
-  const patchListingTouch = (gdPlaceId: number, result: TouchResult) => {
-    setTouchOpenId(null);
-    setListings((prev) => (prev ?? []).map((l) => (String(l.id) === String(gdPlaceId) ? { ...l, ...result } : l)));
-  };
-  // The public "I'm interested" link per business — the same page the invite
-  // email points at, so a rep can hand it over directly (text it, read it out
-  // on a call) instead of only being able to trigger an email. Fetched for
-  // every unclaimed/invited business at once, same as the old Planner queue.
-  const [inviteLinks, setInviteLinks] = useState<Record<string, string>>({});
-  const [copiedLinkId, setCopiedLinkId] = useState<number | null>(null);
-  useEffect(() => {
-    if (!territoryId || !listings) return;
-    const ids = listings.filter((l) => !l.claimed).map((l) => (typeof l.id === "number" ? l.id : parseInt(String(l.id), 10))).filter((id) => Number.isFinite(id));
-    if (ids.length === 0) return;
-    let alive = true;
-    authedFetch("/api/planner/invite/links", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ territoryId, week: todayWeekIso, gdPlaceIds: ids }),
-    })
-      .then((r) => r.json())
-      .then((j) => { if (alive && j?.links) setInviteLinks(j.links); })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, [territoryId, listings, todayWeekIso]);
-  const copyInviteLink = (gdPlaceId: number) => {
-    const url = inviteLinks[String(gdPlaceId)];
-    if (!url) return;
-    navigator.clipboard.writeText(url).then(() => {
-      setCopiedLinkId(gdPlaceId);
-      setTimeout(() => setCopiedLinkId((c) => (c === gdPlaceId ? null : c)), 2000);
-    }).catch(() => {});
-  };
 
   const clientIds = useMemo(() => new Set(clients.map((c) => c.id)), [clients]);
 
@@ -726,8 +663,8 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   };
   const sortRows = <T extends { listing: DirectoryListing; client: Client | null }>(arr: T[]) => [...arr].sort((a, b) => {
     if (sort === "priority") {
-      const aStage = computeBusinessStage(a.listing, a.client, inviteFor(a.listing));
-      const bStage = computeBusinessStage(b.listing, b.client, inviteFor(b.listing));
+      const aStage = computeBusinessStage(a.listing, a.client, inviteFor(a.listing), funnelFor(a.listing));
+      const bStage = computeBusinessStage(b.listing, b.client, inviteFor(b.listing), funnelFor(b.listing));
       const aLast = priorityLastAt(a, aStage);
       const bLast = priorityLastAt(b, bStage);
       const aDue = isDueForStage(aLast, aStage, todayIso);
@@ -771,7 +708,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // this, a rep had to notice on their own.
   const isStalled = (r: { listing: DirectoryListing; client: Client | null }) => {
     if (!r.client || r.client.type === "client") return false;
-    const stage = computeBusinessStage(r.listing, r.client, inviteFor(r.listing));
+    const stage = computeBusinessStage(r.listing, r.client, inviteFor(r.listing), funnelFor(r.listing));
     if (stage !== "claimed" && stage !== "interview" && stage !== "onboarding") return false;
     return isDueForStage(r.client.playbookLastProgressAt ?? null, stage, todayIso);
   };
@@ -788,7 +725,7 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   // scanning the group is deciding who to call from this line alone.
   const flagReasonFor = (r: { listing: DirectoryListing; client: Client | null }) => {
     if (!conversationTaskFor(r)) {
-      const stage = computeBusinessStage(r.listing, r.client, inviteFor(r.listing));
+      const stage = computeBusinessStage(r.listing, r.client, inviteFor(r.listing), funnelFor(r.listing));
       return `Quiet on ${STAGE_META[stage].label} for ${STEP_STALL_DAYS}+ days`;
     }
     const step = funnelFor(r.listing);
@@ -798,44 +735,12 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
     if (inv?.openedAt) return "Opened the invite";
     return "Replied";
   };
-  // "We reached out, now we're waiting to hear back." Keyed by conversation
-  // task id: the date the server just set, held locally so the row moves to
-  // the followed-up bucket the moment the call returns instead of waiting on
-  // the Realtime echo of the task row and the parent re-deriving
-  // tasksByClient from it. `from` is the due date the task showed when the
-  // button was clicked — the optimistic value applies only while the row
-  // still shows that, so the instant it catches up (our own write echoing
-  // back, or an inbound reply bumping due to today, see
-  // upsertConversationTask) the task's own date takes over again and a
-  // snooze can never mask a business that has since answered. Same shape as
-  // inviteState above for the busy/error half: "saving", or an error string
-  // to show inline with a Dismiss.
-  const [followUpDue, setFollowUpDue] = useState<Record<string, { from: string | null; to: string }>>({});
-  const [followUpState, setFollowUpState] = useState<Record<string, "saving" | string>>({});
-  const nextCheckInFor = (r: { client: Client | null }) => {
-    const t = conversationTaskFor(r);
-    if (!t) return null;
-    const pending = followUpDue[t.id];
-    return pending && t.due === pending.from ? pending.to : t.due;
-  };
-  const markFollowedUp = async (taskId: string, from: string | null) => {
-    setFollowUpState((m) => ({ ...m, [taskId]: "saving" }));
-    try {
-      const res = await authedFetch("/api/tasks/follow-up", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ taskId }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (res.ok && j.ok && j.due) {
-        setFollowUpDue((m) => ({ ...m, [taskId]: { from, to: j.due } }));
-        setFollowUpState((m) => { const n = { ...m }; delete n[taskId]; return n; });
-        return;
-      }
-      setFollowUpState((m) => ({ ...m, [taskId]: j.error || `Couldn't save that follow up (${res.status}).` }));
-    } catch (e) {
-      setFollowUpState((m) => ({ ...m, [taskId]: e instanceof Error ? e.message : "Couldn't save that follow up." }));
-    }
-  };
+  // "We reached out, now we're waiting to hear back" — the check-back date is
+  // the task's own due date, read straight off it. Setting it isn't a
+  // dashboard-local action anymore (Derek, 2026-08-09: this page is a status
+  // overview, not an action console) — same as Follow Up, that happens by
+  // editing the task's own due date in TaskDrawer, on the client's page.
+  const nextCheckInFor = (r: { client: Client | null }) => conversationTaskFor(r)?.due ?? null;
 
   // Full invite history — every send this territory has ever made, not just
   // the latest per business (that's inviteByGdPlaceId above). Feeds the
@@ -995,34 +900,15 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   const attentionAll = filtered.filter(needsAttention);
   const attentionRows = sortRows(attentionAll.filter((r) => { const d = nextCheckInFor(r); return !d || d <= todayDate; }));
   const followedUpRows = sortRows(attentionAll.filter((r) => { const d = nextCheckInFor(r); return !!d && d > todayDate; }));
-  // The engagement ladder — each business sits in exactly the strongest tier
-  // it qualifies for (accepted > clicked > opened), never more than one, so
-  // these three groups partition the unclaimed/invited pool instead of
-  // overlapping.
-  const acceptedNotClaimed = (r: { listing: DirectoryListing }) => !r.listing.claimed && inviteFor(r.listing)?.status === "accepted";
-  const clickedNotAnswered = (r: { listing: DirectoryListing }) => {
-    const inv = inviteFor(r.listing);
-    return !r.listing.claimed && !!inv && inv.status !== "accepted" && !!inv.clickedAt;
-  };
-  const openedNotClicked = (r: { listing: DirectoryListing }) => {
-    const inv = inviteFor(r.listing);
-    return !r.listing.claimed && !!inv && inv.status !== "accepted" && !inv.clickedAt && !!inv.openedAt;
-  };
-  const acceptedRows = sortRows(filtered.filter(acceptedNotClaimed));
-  const clickedRows = sortRows(filtered.filter(clickedNotAnswered));
-  const openedRows = sortRows(filtered.filter(openedNotClicked));
   const stageRows = new Map<BusinessStage, typeof filtered>();
   for (const key of STAGE_ORDER) stageRows.set(key, []);
-  for (const r of filtered) stageRows.get(computeBusinessStage(r.listing, r.client, inviteFor(r.listing)))!.push(r);
+  for (const r of filtered) stageRows.get(computeBusinessStage(r.listing, r.client, inviteFor(r.listing), funnelFor(r.listing)))!.push(r);
   for (const key of STAGE_ORDER) stageRows.set(key, sortRows(stageRows.get(key)!));
 
   type Group = { key: string; label: string; color: string; hint: string; rows: typeof filtered };
   const groups: Group[] = [];
   if (attentionRows.length) groups.push({ key: "attention", label: ATTENTION_META.label, color: ATTENTION_META.color, hint: ATTENTION_META.hint, rows: attentionRows });
   if (followedUpRows.length) groups.push({ key: "followed_up", label: FOLLOWED_UP_META.label, color: FOLLOWED_UP_META.color, hint: FOLLOWED_UP_META.hint, rows: followedUpRows });
-  if (acceptedRows.length) groups.push({ key: "accepted", label: ACCEPTED_META.label, color: ACCEPTED_META.color, hint: ACCEPTED_META.hint, rows: acceptedRows });
-  if (clickedRows.length) groups.push({ key: "clicked", label: CLICKED_META.label, color: CLICKED_META.color, hint: CLICKED_META.hint, rows: clickedRows });
-  if (openedRows.length) groups.push({ key: "opened", label: OPENED_META.label, color: OPENED_META.color, hint: OPENED_META.hint, rows: openedRows });
   for (const key of STAGE_ORDER) groups.push({ key, label: STAGE_META[key].label, color: STAGE_META[key].color, hint: STAGE_META[key].hint, rows: stageRows.get(key)! });
   const allCollapsed = groups.length > 0 && groups.every((g) => collapsed.has(g.key));
   const toggleAllGroups = () => setCollapsed(allCollapsed ? new Set() : new Set(groups.map((g) => g.key)));
@@ -1341,56 +1227,27 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                 {isOpen && g.rows.map((r) => {
                   const rawId = typeof r.listing.id === "number" ? r.listing.id : parseInt(String(r.listing.id), 10);
                   const gdPlaceId = Number.isFinite(rawId) ? rawId : null;
-                  // Invite/Skip/Copy-link only make sense for a real listing
-                  // id, scoped to a single territory — the admin multi-city
-                  // overview (no territoryId) stays a read-only list.
-                  const inviteActions = gdPlaceId != null && territoryId ? {
-                    gdPlaceId,
-                    state: inviteState[gdPlaceId],
-                    armed: inviteArmed === gdPlaceId,
-                    onArm: () => setInviteArmed(gdPlaceId),
-                    onSend: () => sendInvite(gdPlaceId),
-                    onDismissError: () => setInviteState((m) => { const n = { ...m }; delete n[gdPlaceId]; return n; }),
-                    onBringBack: () => bringBackBusiness(gdPlaceId),
-                    link: inviteLinks[String(gdPlaceId)],
-                    onCopyLink: () => copyInviteLink(gdPlaceId),
-                    copied: copiedLinkId === gdPlaceId,
-                  } : null;
                   // The two attention groups are flags pointing down at a real
                   // listing, not a second copy of it: they render a one line
                   // FlagRow instead of the full card, and the real row in the
                   // business's own stage group carries a small "flagged above"
-                  // tag back up to them. Everything else (the engagement
-                  // ladder, every funnel stage) renders exactly as before.
+                  // tag back up to them.
                   const isFlagGroup = g.key === "attention" || g.key === "followed_up";
-                  const convo = conversationTaskFor(r);
-                  // Only in the two attention groups, the same way the
-                  // invite actions above only render for the two stages they
-                  // apply to — an attention row also appears in its normal
-                  // stage group below, and the button belongs where a rep is
-                  // actually working the replies, not on both copies.
-                  const convoTask = isFlagGroup ? convo : null;
-                  const convoDue = convoTask ? nextCheckInFor(r) : null;
-                  const followUp = convoTask ? {
-                    // Only a date still ahead of us is a live "we're waiting
-                    // on them" promise — a lapsed one is why this row is back
-                    // in "Needs attention now", so it says nothing useful on
-                    // the row and the history stays in the task's comments.
-                    nextCheckIn: convoDue && convoDue > todayDate ? convoDue : null,
-                    state: followUpState[convoTask.id],
-                    onFollowUp: () => markFollowedUp(convoTask.id, convoTask.due),
-                    onDismissError: () => setFollowUpState((m) => { const n = { ...m }; delete n[convoTask.id]; return n; }),
-                  } : null;
-                  const stage = computeBusinessStage(r.listing, r.client, inviteFor(r.listing));
+                  // Only a date still ahead of us is a live "we're waiting on
+                  // them" promise — a lapsed one is why this row is back in
+                  // "Needs attention now", so it says nothing useful on the row.
+                  const checkIn = isFlagGroup ? nextCheckInFor(r) : null;
+                  const nextCheckIn = checkIn && checkIn > todayDate ? checkIn : null;
+                  const stage = computeBusinessStage(r.listing, r.client, inviteFor(r.listing), funnelFor(r.listing));
                   if (isFlagGroup) {
                     return (
                       <FlagRow key={g.key + r.listing.id} row={r} onAddContact={onAddContact} onOpenClient={onOpenClient}
                         stage={stage}
-                        // Followed up already reached out, so the date it comes
-                        // back is the headline and the button steps aside.
+                        // Followed up already reached out, so the check back
+                        // date is the headline instead.
                         waiting={g.key === "followed_up"}
                         reason={g.key === "followed_up" ? null : flagReasonFor(r)}
-                        followUp={followUp} />
+                        nextCheckIn={g.key === "followed_up" ? nextCheckIn : null} />
                     );
                   }
                   return (
@@ -1398,7 +1255,6 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                       stage={stage}
                       flaggedAbove={STAGE_KEYS.has(g.key) && needsAttention(r)}
                       invite={inviteFor(r.listing)}
-                      funnelStep={funnelFor(r.listing)}
                       inviteHistoryList={gdPlaceId != null ? invitesByGdPlaceId.get(gdPlaceId) ?? [] : []}
                       onSetClientStatus={onSetClientStatus} canAdmin={canAdmin} ghlContactUrlFor={ghlContactUrlFor}
                       featured={!!r.client && !!featuredClientIds?.has(r.client.id)}
@@ -1406,14 +1262,6 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                       onFeature={onFeature && ((rr) => onFeature({ clientId: rr.client?.id ?? null, contact: rr.contact, name: rr.listing.name, city, state }))}
                       playbookTasks={(r.client && playbookTasksByClient?.get(r.client.id)) || []} onOpenPlaybook={onOpenPlaybook}
                       otherLists={(r.client && otherListsByClient?.get(r.client.id)) || []} onOpenProject={onOpenProject}
-                      inviteActions={inviteActions} followUp={followUp}
-                      touch={gdPlaceId != null ? {
-                        gdPlaceId,
-                        outcome: touchOpenId === gdPlaceId ? touchOutcome : null,
-                        onPick: (outcome) => openTouch(gdPlaceId, outcome),
-                        onClose: () => setTouchOpenId(null),
-                        onLogged: (result) => patchListingTouch(gdPlaceId, result),
-                      } : null}
                       highlighted={gdPlaceId != null && highlightedRowId === gdPlaceId} />
                   );
                 })}
@@ -1455,7 +1303,11 @@ const ThreadArrow = () => (
 // the name, why it's flagged, one action, and a thread naming the stage the
 // real row is sitting in. Everything else about that business stays on the
 // real row; this is a pointer, not a card.
-function FlagRow({ row, onAddContact, onOpenClient, stage, reason, waiting, followUp }: {
+// Pure pointer — no inline action (Derek, 2026-08-09: this page is a status
+// overview now; the same "check back" date shown here is set by editing the
+// task's own due date on the client's page, same as Follow Up, not from
+// here).
+function FlagRow({ row, onAddContact, onOpenClient, stage, reason, waiting, nextCheckIn }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
   onOpenClient: (id: string) => void;
@@ -1466,16 +1318,9 @@ function FlagRow({ row, onAddContact, onOpenClient, stage, reason, waiting, foll
   // check back date is the point of the row.
   reason: string | null;
   // Followed up bucket: somebody already reached out, so the row is
-  // informational. The check back date leads and the button stays available
-  // but quiet, since clicking it again just buys another few days.
+  // informational — the check back date leads instead of a reason.
   waiting: boolean;
-  // Same wiring the full row uses — see ListingRow's own followUp prop.
-  followUp?: {
-    nextCheckIn: string | null;
-    state: "saving" | string | undefined;
-    onFollowUp: () => void;
-    onDismissError: () => void;
-  } | null;
+  nextCheckIn?: string | null;
 }) {
   const { listing, contact, client } = row;
   const nameMouseDown = useRef<{ x: number; y: number } | null>(null);
@@ -1495,38 +1340,12 @@ function FlagRow({ row, onAddContact, onOpenClient, stage, reason, waiting, foll
           )}
           {reason && <span className="text-muted"> · <span className="font-medium text-foreground">{reason}</span></span>}
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {followUp && (
-            followUp.state === "saving" ? (
-              <span className="text-[12px] text-muted">Saving…</span>
-            ) : followUp.state ? (
-              <span className="flex items-center gap-1.5 text-[12px]">
-                <span className="text-danger">{followUp.state}</span>
-                <button onClick={followUp.onDismissError} className="font-medium text-muted hover:text-foreground">Dismiss</button>
-              </span>
-            ) : waiting ? (
-              <>
-                {followUp.nextCheckIn && (
-                  <span title="When this business comes back to “Needs attention now” if we still haven’t heard back"
-                    className="rounded-md bg-background px-2 py-1 text-[12px] font-medium text-muted">
-                    Check back {formatDue(followUp.nextCheckIn)}
-                  </span>
-                )}
-                <button onClick={followUp.onFollowUp}
-                  title="Reached out again? This pushes the check back date out another three days."
-                  className="text-[12px] font-medium text-muted hover:text-foreground hover:underline">
-                  ↩ Followed up
-                </button>
-              </>
-            ) : (
-              <button onClick={followUp.onFollowUp}
-                title="Record that you reached out. This business moves out of the way for three days, then comes back if nothing happens."
-                className="rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">
-                ↩ Followed up
-              </button>
-            )
-          )}
-        </div>
+        {waiting && nextCheckIn && (
+          <span title="When this business comes back to “Needs attention now” if we still haven’t heard back"
+            className="shrink-0 rounded-md bg-background px-2 py-1 text-[12px] font-medium text-muted">
+            Check back {formatDue(nextCheckIn)}
+          </span>
+        )}
       </div>
       <div className="flex items-center gap-1.5 bg-background/40 px-4 py-1 pl-[42px] text-[12px] text-muted">
         <ThreadArrow />
@@ -1536,7 +1355,7 @@ function FlagRow({ row, onAddContact, onOpenClient, stage, reason, waiting, foll
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, template, stage, flaggedAbove, invite, funnelStep, inviteHistoryList, onSetClientStatus, canAdmin, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, otherLists, onOpenProject, inviteActions, followUp, touch, highlighted }: {
+function ListingRow({ row, onAddContact, onOpenClient, template, stage, flaggedAbove, invite, inviteHistoryList, onSetClientStatus, canAdmin, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, otherLists, onOpenProject, highlighted }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
   onAddContact: (c: Contact) => void;
   onOpenClient: (id: string) => void;
@@ -1557,12 +1376,6 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, flaggedA
   // when it's never been invited (or territoryId wasn't passed down, e.g.
   // the admin multi-city overview).
   invite?: PlannerInvite;
-  // The furthest step this business ever reached in the invite chat, from
-  // WordPress's own tracking. Undefined when it never started the chat (or
-  // the funnel isn't reachable) — no chip in that case. Lives on the sub-line
-  // with the other engagement chips rather than in a grid column: that grid
-  // is a computed three-track template whose width math is already fragile.
-  funnelStep?: JoinFunnelEntry;
   // Every invite ever sent to this business, newest first (invite above is
   // just the first entry of this same list) — click-to-expand full history.
   // Empty when never invited or no valid listing id.
@@ -1588,44 +1401,6 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, flaggedA
   // list rather than an inline expand. Empty when it has none (or no client yet).
   otherLists: { id: string; name: string; done: number; total: number }[];
   onOpenProject?: (clientId: string, projectId: string) => void;
-  // Invite/Skip/Copy-link for this row — null when there's no valid listing
-  // id or no territory to scope the send to (the admin multi-city overview).
-  inviteActions?: {
-    gdPlaceId: number;
-    state: "sending" | string | undefined;
-    armed: boolean;
-    onArm: () => void;
-    onSend: () => void;
-    onDismissError: () => void;
-    onBringBack: () => void;
-    link: string | undefined;
-    onCopyLink: () => void;
-    copied: boolean;
-  } | null;
-  // "Followed up" for this row's open conversation task — null everywhere
-  // except the two attention groups (nothing to snooze anywhere else).
-  // nextCheckIn is that task's due date, i.e. when this business comes back
-  // to "Needs attention now" if nothing has happened by then; null when
-  // nobody has followed up yet.
-  followUp?: {
-    nextCheckIn: string | null;
-    state: "saving" | string | undefined;
-    onFollowUp: () => void;
-    onDismissError: () => void;
-  } | null;
-  // Log a call/email/SMS/visit/appointment against this listing, same panel
-  // the Territory Dashboard uses — null when there's no valid listing id to
-  // key the write by.
-  touch?: {
-    gdPlaceId: number;
-    // null = panel closed. "manual" = opened via the plain trigger with
-    // nothing pre-picked, otherwise which Call Now/Send Email/Send
-    // SMS/Book Meeting link was clicked.
-    outcome: OutcomeKey | "manual" | null;
-    onPick: (outcome: OutcomeKey | "manual") => void;
-    onClose: () => void;
-    onLogged: (result: TouchResult) => void;
-  } | null;
   // Briefly flashed true when this row is the deep-link target of "Open in
   // Businesses" from the Territory Dashboard — fades on its own, see the
   // parent's highlightListingId effect.
@@ -1710,12 +1485,6 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, flaggedA
                 {invite.clickedAt ? "🖱️ Clicked" : "👀 Opened"}
               </span>
             )}
-            {funnelStep && (
-              <span title={`Furthest step in the invite chat${funnelStep.at ? `, ${formatDue(new Date(funnelStep.at * 1000).toISOString())}` : ""}`}
-                className="rounded bg-violet-100 px-1.5 py-0.5 font-medium text-violet-700">
-                💬 {funnelStep.label}
-              </span>
-            )}
             {listing.rep && <span>· {listing.rep}</span>}
           </div>
           {historyOpen && inviteHistoryList.length > 1 && (
@@ -1787,137 +1556,6 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, flaggedA
         </div>
       )}
 
-      {/* "Followed up" — the one action for a business that replied. It does
-          NOT close the conversation task (closing is what already existed,
-          and it throws away the fact that we're still waiting on an answer):
-          it pushes the task's due date out three days, which moves this row
-          into "Followed up, waiting to hear back" until that date passes and
-          it resurfaces on its own. Available in both attention groups, so a
-          second touch on a business that still hasn't answered buys another
-          three days rather than needing the row closed. */}
-      {followUp && (
-        <div className="flex flex-wrap items-center gap-1.5 px-4 pb-2 pl-9 pt-1.5 sm:pl-9">
-          {followUp.state === "saving" ? (
-            <span className="shrink-0 text-[12px] text-muted">Saving…</span>
-          ) : followUp.state ? (
-            <span className="flex shrink-0 items-center gap-1.5 text-[12px]">
-              <span className="text-danger">{followUp.state}</span>
-              <button onClick={followUp.onDismissError} className="font-medium text-muted hover:text-foreground">Dismiss</button>
-            </span>
-          ) : (
-            <button onClick={followUp.onFollowUp}
-              title="Record that you reached out. This business moves out of the way for three days, then comes back if nothing happens."
-              className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">
-              ↩ Followed up
-            </button>
-          )}
-          {followUp.nextCheckIn && (
-            <span title="When this business comes back to “Needs attention now” if we still haven’t heard back"
-              className="shrink-0 rounded-md bg-background px-2 py-1 text-[12px] font-medium text-muted">
-              Check back {formatDue(followUp.nextCheckIn)}
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* The invite queue's own actions — Copy-link and a two-click
-          Invite/Confirm (mirrors WP's own caution around a button that sends
-          a real email) — only for the two stages it applies to. Skip is
-          retired (Derek, Aug 4); "↺ Bring back" stays only to un-stick any
-          business skipped before that. Once claimed, this business's "what's
-          left" is Playbook progress above, not invite state. */}
-      {(inviteActions || touch) && (stage === "unclaimed" || stage === "invited") && (
-        <div className="flex flex-wrap items-center gap-1.5 px-4 pb-2 pl-9 pt-1.5 sm:pl-9">
-          {inviteActions && (
-            invite?.status === "skipped" ? (
-              <button onClick={inviteActions.onBringBack} className="shrink-0 text-[12px] font-semibold text-accent hover:underline">↺ Bring back</button>
-            ) : (
-              <>
-                {invite?.status === "accepted" && <span className="shrink-0 rounded-md bg-emerald-100 px-2 py-1 text-[12px] font-semibold text-emerald-700">Accepted</span>}
-                {inviteActions.link && (
-                  <button onClick={inviteActions.onCopyLink} title={inviteActions.link} className="shrink-0 rounded-md border px-2 py-1 text-[12px] font-medium text-muted hover:bg-surface hover:text-foreground">
-                    {inviteActions.copied ? "Copied ✓" : "🔗 Copy link"}
-                  </button>
-                )}
-                {inviteActions.state === "sending" ? (
-                  <span className="shrink-0 text-[12px] text-muted">Sending…</span>
-                ) : inviteActions.state ? (
-                  <span className="flex shrink-0 items-center gap-1.5 text-[12px]">
-                    <span className="text-danger">{inviteActions.state}</span>
-                    <button onClick={inviteActions.onDismissError} className="font-medium text-muted hover:text-foreground">Dismiss</button>
-                  </span>
-                ) : inviteActions.armed ? (
-                  <button onClick={inviteActions.onSend} className="shrink-0 rounded-md border border-danger px-2 py-1 text-[12px] font-semibold text-danger hover:bg-danger/10">Confirm{invite ? " resend" : ""}?</button>
-                ) : (
-                  <button onClick={inviteActions.onArm} className="shrink-0 rounded-md border border-accent px-2 py-1 text-[12px] font-semibold text-accent hover:bg-accent-soft">✉️ {invite ? "Invite again" : "Invite"}</button>
-                )}
-              </>
-            )
-          )}
-          {/* Call/email/SMS/appointment, straight to WordPress /sales — the
-              same touch actions the Territory Dashboard uses, sitting beside
-              the invite actions rather than replacing them: inviting is
-              Planner's automated ladder, this is a rep's own manual outreach,
-              and a business can have both going at once. Call Now and Book
-              Meeting are always real links; Send Email/SMS send for real
-              through GHL when this listing has a matched contact, falling
-              back to a plain mailto:/sms: link otherwise. Either way, opens
-              the panel below pre-selected on that outcome. */}
-          {touch && !touch.outcome && (
-            <>
-              {listing.phone && (
-                <a href={`tel:${listing.phone}`} onClick={() => touch.onPick("called")}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-md border border-accent px-2 py-1 text-[16px] font-medium text-accent hover:bg-accent-soft">
-                  <I.phone className="h-3 w-3" /> Call Now
-                </a>
-              )}
-              {listing.email && (
-                listing.ghlContactId && listing.ghlLocationId ? (
-                  <button onClick={() => touch.onPick("emailed")}
-                    className="shrink-0 rounded-md border border-accent px-2 py-1 text-[16px] font-medium text-accent hover:bg-accent-soft">
-                    Send Email
-                  </button>
-                ) : (
-                  <a href={`mailto:${listing.email}`} onClick={() => touch.onPick("emailed")}
-                    className="shrink-0 rounded-md border border-accent px-2 py-1 text-[16px] font-medium text-accent hover:bg-accent-soft">
-                    Send Email
-                  </a>
-                )
-              )}
-              {listing.phone && (
-                listing.ghlContactId && listing.ghlLocationId ? (
-                  <button onClick={() => touch.onPick("sms")}
-                    className="shrink-0 rounded-md border border-accent px-2 py-1 text-[16px] font-medium text-accent hover:bg-accent-soft">
-                    Send SMS
-                  </button>
-                ) : (
-                  <a href={`sms:${listing.phone}`} onClick={() => touch.onPick("sms")}
-                    className="shrink-0 rounded-md border border-accent px-2 py-1 text-[16px] font-medium text-accent hover:bg-accent-soft">
-                    Send SMS
-                  </a>
-                )
-              )}
-              {listing.bookingUrl && (
-                <a href={listing.bookingUrl} target="_blank" rel="noopener noreferrer" onClick={() => touch.onPick("presented")}
-                  className="shrink-0 rounded-md border border-accent px-2 py-1 text-[16px] font-medium text-accent hover:bg-accent-soft">
-                  Book Meeting
-                </a>
-              )}
-              <button onClick={() => touch.onPick("manual")} className="shrink-0 rounded-md border px-2 py-1 text-[16px] font-medium text-muted hover:bg-surface hover:text-foreground">
-                Log a touch
-              </button>
-            </>
-          )}
-        </div>
-      )}
-      {touch?.outcome && (
-        <div className="px-4 pb-2 pl-9 sm:pl-9">
-          <TouchPanel key={touch.outcome} listingId={touch.gdPlaceId} phone={listing.phone || null} email={listing.email || null} bookingUrl={listing.bookingUrl}
-            ghlContactId={listing.ghlContactId} ghlLocationId={listing.ghlLocationId}
-            initialOutcome={touch.outcome === "manual" ? undefined : touch.outcome}
-            onLogged={touch.onLogged} onCancel={touch.onClose} />
-        </div>
-      )}
     </div>
   );
 }
