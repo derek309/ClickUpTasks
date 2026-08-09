@@ -272,9 +272,15 @@ async function handleCall(body: any, custom: any) {
 //   Trigger "Email Events" -> Clicked -> Webhook, Custom Data:
 //     event -> email_clicked  (literal)
 //     contactId -> {{contact.id}}
-// There's no invite-specific scoping in GHL's trigger itself — this assumes
-// the invite is the only email a business gets before claiming, which holds
-// today (unclaimed businesses aren't on any other email flow yet).
+// GHL's trigger has no invite-specific scoping — it fires on ANY email sent
+// from that sub-account, not just the invite-to-claim send. Confirmed live,
+// 2026-08-09: of 16 open Conversation tasks this created, only 1 was a real
+// unmatched business — the other 15 were the Directory sub-account's own
+// newsletter subscribers and Agency contacts opening THEIR newsletters,
+// mislabeled as "Clicked the invite email — call or visit to close." A
+// real-but-unmatched business was the exception, not the rule, so this now
+// REQUIRES a listing match (below) before creating anything — see git log
+// for the prior "create regardless of match" behavior and why it was wrong.
 //
 // Contact -> gdPlaceId has no stored mapping (planner_weeks.invited only
 // carries gdPlaceId, contacts only carries ghl_contact_id), so this
@@ -296,18 +302,6 @@ async function handleEmailEngagement(event: "email_opened" | "email_clicked", cu
     .eq("ghl_contact_id", ghlContactId)
     .maybeSingle();
   if (!contact) return NextResponse.json({ ok: true, skipped: "no contact for that ghlContactId" });
-
-  // Promote + upsert the Conversation task off the contact alone — doesn't
-  // need the gdPlaceId/territory match below (that's only for the
-  // planner_weeks bookkeeping), so a business whose listing can't be found
-  // in any configured territory still gets followed up on instead of the
-  // whole engagement silently going nowhere.
-  const trackedClientId = await resolveOrPromoteTrackedClient(contact);
-  await upsertConversationTask(
-    { id: contact.id, name: contact.name, client_id: trackedClientId },
-    ghlContactId,
-    { title: event === "email_opened" ? "Opened the invite email — a nudge might help" : "Clicked the invite email — call or visit to close" },
-  );
 
   const { data: territoryRows } = await supabaseAdmin.from("territories").select("id, city, state");
   const territories = (territoryRows ?? []) as { id: string; city: string; state: string }[];
@@ -338,18 +332,26 @@ async function handleEmailEngagement(event: "email_opened" | "email_clicked", cu
     territory = t; gdPlaceId = id;
     break;
   }
+  // No listing match = not a business we invited, most likely a newsletter
+  // subscriber or an unrelated agency contact opening some other email from
+  // the same sub-account (see the function comment above) — skip entirely,
+  // no promotion, no task, nothing for a rep to chase that isn't real.
   if (!territory || gdPlaceId === null) return NextResponse.json({ ok: true, skipped: "no listing matched to that contact in any territory" });
 
   // Follow Up's territory scoping (TerritoryDashboard.tsx) keys off
-  // contact.city/state, not this function's own listing match — without this,
-  // a contact whose underlying GHL record never had city/state set gets a
-  // real task but stays invisible on Follow Up even though the territory
-  // above was just found (Derek, 2026-08-09: "those are all sales triggers,"
-  // pointing at Client Replies tasks missing from Follow Up for exactly this
-  // reason). Only writes when it would actually change something.
+  // contact.city/state — backfill it here so this contact is visible there
+  // the moment its task is created, not dependent on a later reconciliation
+  // pass. Only writes when it would actually change something.
   if (!contact.city || !contact.state) {
     await supabaseAdmin.from("contacts").update({ city: territory.city, state: territory.state }).eq("id", contact.id);
   }
+
+  const trackedClientId = await resolveOrPromoteTrackedClient(contact);
+  await upsertConversationTask(
+    { id: contact.id, name: contact.name, client_id: trackedClientId },
+    ghlContactId,
+    { title: event === "email_opened" ? "Opened the invite email — a nudge might help" : "Clicked the invite email — call or visit to close" },
+  );
 
   const { data: weekRows } = await supabaseAdmin.from("planner_weeks").select("*").eq("territory_id", territory.id);
   const weeks: PlannerWeek[] = (weekRows ?? []).map(rowToPlannerWeek);
