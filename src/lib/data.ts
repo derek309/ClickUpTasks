@@ -1022,20 +1022,24 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
   },
 ];
 
-// The canonical 10-stage sales pipeline (02-SOP-Sales-Process.md), as the
-// first phase of the Playbook — stages 1 through 8 only. Stages 9 (Nurture)
-// and 10 (Lost) are exit ramps off the path, not steps a business works
-// through on the way in, and they already have a home in ClientStatus
-// ("nurture" / "cancelled") — nothing new is invented for them here.
+// The sales pipeline, as the first phase of the Playbook. Replaced
+// 2026-08-09 (Derek): the old 8-stage version below was built from the
+// canonical 02-SOP-Sales-Process.md doc; these 6 are the ones Derek named in
+// ClickUpTasks (t_msg8lo6y4/t_yfpkk91z) and confirmed as a full replace, not
+// an insert alongside the old 8. sales_site_visit/sales_delivery/
+// sales_approval are newly authored — no source doc to draw from yet, worth
+// a skim against 02-SOP-Sales-Process.md next time it's touched. Exit ramps
+// off the path (Nurture/Lost) still live in ClientStatus ("nurture" /
+// "cancelled"), not here — same as before.
 //
-// Its own catalog rather than eight more entries in PLAYBOOK_STEPS, for the
+// Its own catalog rather than six more entries in PLAYBOOK_STEPS, for the
 // same reason the side quests are separate but with the opposite ordering:
 // PLAYBOOK_STEPS is the OWNER's growth plan, counted as "X of 25" on the
 // owner-facing dashboard (playbookCompletion) and enumerated wholesale to
 // the business's own /my-business/ page (PLAYBOOK_ALL_STEPS, via
-// api/external/playbook). These eight are the REP's pipeline — an owner has
-// no business reading "Pitch meeting booked" on their own dashboard, and
-// folding them in would silently restate every owner's progress as X of 34.
+// api/external/playbook). These six are the REP's pipeline — an owner has
+// no business reading "Sales pitch" on their own dashboard, and folding them
+// in would silently restate every owner's progress as X of 31.
 // So: its own phase in PLAYBOOK_PHASES (it's core to the funnel, and renders
 // first), real Task rows like everything else (playbookStepsForClient), and
 // resolvable in PLAYBOOK_STEP_BY_KEY so the guide panel works — but out of
@@ -1050,76 +1054,35 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
 // required by PlaybookStepDef but inert for this catalog: every stage is a
 // step toward revenue, and none of them feed the owner's four category bars
 // (playbookCompletionByCategory reads PLAYBOOK_ALL_STEPS, which excludes
-// these), so all eight are simply "income" rather than arbitrarily split.
+// these), so all six are simply "income" rather than arbitrarily split.
 //
-// Nothing advances these automatically yet. They're created inert and a rep
-// checks them off by hand, exactly like the other 26 — wiring claim/invite/
-// inbound signals to advance them is a separate, later change.
+// Nothing advances these automatically yet except claim/invite-reply (see
+// listing-claimed and planner-interest webhooks, both now firing
+// sales_invite) — the rest are still a checkbox in a collapsed accordion
+// section, checked off by hand.
 export const SALES_STAGE_STEPS: PlaybookStepDef[] = [
   {
-    key: "sales_new_not_contacted", phase: "sales", label: "New, not contacted", category: "income",
-    timeEstimate: "~2 min",
-    whyItMatters: "Their listing is already live in the directory and their Score is already calculated, so the work is done before the first hello. Marking this stage is what puts a business on the board as a real name someone is working, instead of one more row in the territory.",
-    howTo: [
-      "Confirm the listing is live in the directory and reads correctly.",
-      "Check the contact details we have on file: owner name, phone, email.",
-      "Leave it here until real outreach actually goes out.",
-    ],
-    commonMistake: "Sitting on a full territory because nobody has picked up the names. A business nobody has claimed is a business nobody is working.",
-    weGive: "We build the listing and calculate the Score before anyone reaches out, so you always open with something already done for them.",
-    youGet: "A warm opening instead of a cold one.",
-    scoreImpact: "low",
-  },
-  {
-    key: "sales_in_outreach", phase: "sales", label: "In outreach", category: "income",
+    key: "sales_invite", phase: "sales", label: "Invite", category: "income",
     timeEstimate: "~10 min to start",
-    whyItMatters: "The first real touch: the invite email, the text, the call, or the walk in. Nothing moves until the owner knows we exist, and running it as a sequence is what keeps the follow up from depending on anyone's memory.",
+    whyItMatters: "The first real touch, the invite email, the text, the call, or the walk in, is what turns a name in the territory into a business someone is working. Their listing and Score are already live before you ever say hello, so you always open with something already done for them. This stage covers everything from outreach through them claiming their free listing.",
     howTo: [
       "Start the outreach sequence from the Businesses page (invite, call, or visit).",
-      "Log every touch, so whoever picks this up next can see what has already been tried.",
-      "Keep going. A first no answer is not a no.",
+      "Log every touch so whoever picks this up next can see what has already been tried.",
+      "Walk them through claiming their listing, or claim it with them while you have them on the phone.",
     ],
     commonMistake: "One touch and moving on. Most owners answer on the third or fourth try, not the first.",
-    weGive: "We send the invite and keep the sequence running, so no business quietly falls off the list.",
-    youGet: "A pipeline that keeps working while you are somewhere else.",
-    scoreImpact: "low",
-  },
-  {
-    key: "sales_engaged", phase: "sales", label: "Engaged / interested", category: "income",
-    timeEstimate: "Varies",
-    whyItMatters: "The owner answered. That is the first moment this is a conversation rather than a campaign, and it changes how you work them: a real reply gets a person, not another automated send.",
-    howTo: [
-      "Reply the same day. Speed is most of what separates a live conversation from a dead one.",
-      "Ask what they are trying to fix before you say anything about the package.",
-      "Set the next step before the conversation ends, even if it is only a call time.",
-    ],
-    commonMistake: "Pitching the moment they say hello. Find out what they actually want first, or the pitch lands on nothing.",
-    weGive: "We surface every reply at the top of the Businesses page, so a live conversation never sits unanswered.",
-    youGet: "A real conversation you can work, instead of a list you can only send to.",
+    weGive: "We build the listing and calculate the Score before anyone reaches out, and send the invite and keep the sequence running so no business quietly falls off the list.",
+    youGet: "A claimed listing and a business you're actually working, not just a name on a list.",
     scoreImpact: "medium",
   },
   {
-    key: "sales_listing_claimed", phase: "sales", label: "Listing claimed", category: "income",
-    timeEstimate: "~15 min with the owner",
-    whyItMatters: "Claiming is where the give first move actually lands: the profile gets completed, the offer goes on, and the listing goes hidden until you publish it together. It is the first thing the owner does rather than something done to them, which is why the ones who claim are the ones who close.",
-    howTo: [
-      "Walk them through claiming their listing, or claim it with them while you have them on the phone.",
-      "Complete the profile and add their first offer while you still have their attention.",
-      "Confirm the listing is hidden, and tell them you will publish it live together at the pitch meeting.",
-    ],
-    commonMistake: "Letting the listing go public at claim time. Publishing is the moment you save for the pitch meeting, and giving it away early costs you the reason to meet.",
-    weGive: "We hold the listing hidden until the pitch, so the publish moment stays yours to give.",
-    youGet: "A committed owner and a reason to get in the room.",
-    scoreImpact: "high",
-  },
-  {
-    key: "sales_verification_call_booked", phase: "sales", label: "Verification call booked", category: "income",
+    key: "sales_interview_appointment", phase: "sales", label: "Interview Appointment", category: "income",
     timeEstimate: "~5 min to book, ~20 min on the call",
-    whyItMatters: "The verification call is a real business interview that doubles as proof they are who they say they are. It is also where you learn enough about the business to make the pitch obvious later. The listing stays hidden through this whole stage.",
+    whyItMatters: "The interview is a real business conversation that doubles as proof they are who they say they are. It's also where you learn enough about the business to make the pitch obvious later, and where you gather the details their free content gets built from.",
     howTo: [
       "Book the phone interview while you still have them on the line.",
-      "Ask about the business itself: how it started, what they are known for, what is coming up.",
-      "Confirm the listing is still hidden, and set the pitch meeting date before you hang up.",
+      "Ask about the business itself: how it started, what they're known for, what's coming up.",
+      "Confirm the listing is still hidden, and set expectations for the site visit before you hang up.",
     ],
     commonMistake: "Treating it as a formality. Everything you learn here is what makes the pitch feel personal instead of scripted.",
     weGive: "We turn the interview answers into their blog post, social post, and newsletter spotlight, so the call pays for itself either way.",
@@ -1127,7 +1090,49 @@ export const SALES_STAGE_STEPS: PlaybookStepDef[] = [
     scoreImpact: "medium",
   },
   {
-    key: "sales_pitch_meeting_booked", phase: "sales", label: "Pitch meeting booked", category: "income",
+    key: "sales_site_visit", phase: "sales", label: "Site visit / image & video gathering", category: "income",
+    timeEstimate: "~30 min",
+    whyItMatters: "Real photos and video of the actual business are what make their listing, blog post, and social content look like them instead of a stock template. This is the in-person step that turns an interview into something visual.",
+    howTo: [
+      "Schedule a short visit to the business.",
+      "Shoot photos of the storefront, interior, products, and team, plus a short video if they're up for it.",
+      "Grab anything else worth having: logo files, menu, existing marketing pieces.",
+    ],
+    commonMistake: "Skipping the visit and using whatever photos they already have online. A quick in-person visit almost always beats what's already public.",
+    weGive: "We build all of it, the blog post, social posts, and listing, around whatever you bring back.",
+    youGet: "Real photo and video content their package actually deserves.",
+    scoreImpact: "medium",
+  },
+  {
+    key: "sales_delivery", phase: "sales", label: "Delivery", category: "income",
+    timeEstimate: "~20 min",
+    whyItMatters: "This is the moment the free package stops being a promise and becomes something real they can see: the listing, the blog post, the social posts, the newsletter spotlight, all built and ready to show.",
+    howTo: [
+      "Package up what's been built: listing, blog post, social posts, newsletter spotlight.",
+      "Walk them through it live if you can, or send it with a short summary.",
+      "Ask what they think before you move on. This is the reaction that sets up the pitch.",
+    ],
+    commonMistake: "Delivering it and moving straight to the ask. Give them a real moment to react to their own content first.",
+    weGive: "We build the entire package before this call happens, so there's nothing left for you to produce.",
+    youGet: "A finished, real product to show, not a pitch deck of promises.",
+    scoreImpact: "high",
+  },
+  {
+    key: "sales_approval", phase: "sales", label: "Approval", category: "income",
+    timeEstimate: "~10 min",
+    whyItMatters: "Getting a yes on the free package, out loud, is the last checkpoint before the listing goes live and the pitch happens. It's also the moment you find out if anything needs fixing before you publish.",
+    howTo: [
+      "Confirm they're happy with the listing, blog post, and social content.",
+      "Make any small edits they ask for before publishing.",
+      "Get a clear yes to going live before you schedule the pitch.",
+    ],
+    commonMistake: "Publishing before you have a real yes. A quiet assumption isn't approval.",
+    weGive: "We make the edits fast, so approval doesn't stall the pitch.",
+    youGet: "A business that's already said yes once before you ask for the sale.",
+    scoreImpact: "medium",
+  },
+  {
+    key: "sales_pitch", phase: "sales", label: "Sales pitch", category: "income",
     timeEstimate: "~45 min, in person or on Zoom",
     whyItMatters: "This is the close. You publish the listing live in front of them, they watch their own business go public, and the card goes on file. The trial starts the moment that happens, so this one stage is where a prospect becomes a business we are responsible for.",
     howTo: [
@@ -1139,35 +1144,6 @@ export const SALES_STAGE_STEPS: PlaybookStepDef[] = [
     commonMistake: "Publishing before the meeting. The live moment is the close, and spending it early leaves you pitching a feature list.",
     weGive: "We have the listing, the offer, the blog post, and the spotlight all staged and ready the second you hit publish.",
     youGet: "A close built on something real happening in the room.",
-    scoreImpact: "high",
-  },
-  {
-    key: "sales_in_trial", phase: "sales", label: "In trial", category: "income",
-    timeEstimate: "14 days",
-    whyItMatters: "The trial is the only two weeks where the business decides whether any of this was real. What they see in that window is what they renew on, which makes the growth plan work below this phase matter more here than anywhere else in the relationship.",
-    howTo: [
-      "Get their first offer live and promoted inside the first few days.",
-      "Work the Playbook with them rather than waiting for them to work it alone.",
-      "Check in before the window closes, not after.",
-    ],
-    commonMistake: "Going quiet during the trial and hoping it holds. A silent two weeks is the most common reason a won deal does not stick.",
-    weGive: "We promote them across the newsletter, our social, and the app from day one, so there is something to point at inside the first week.",
-    youGet: "A business that has already seen a result before the first full payment.",
-    scoreImpact: "medium",
-  },
-  {
-    key: "sales_won_active", phase: "sales", label: "Won, active $197", category: "income",
-    timeEstimate: "~15 min to hand off",
-    whyItMatters: "The deal is closed and the business is on the roster at $197 a month. This is the handoff, and it only works cleanly if everything you learned on the way through goes with it: the sale is finished, but fulfillment onboarding is only starting.",
-    howTo: [
-      "Move the business to Active Client so it joins the roster.",
-      "Hand off what you learned in the interview and the pitch: what they care about, what they were promised, what is already live.",
-      "Make sure the growth plan below is actually being worked, not just created.",
-      "Ask for a referral once they have seen their first strong month.",
-    ],
-    commonMistake: "Closing and walking away. What you promised in the room is what fulfillment has to deliver, and nobody else was there to hear it.",
-    weGive: "We keep promoting them every month and send a proof of results report, so renewal is never a question.",
-    youGet: "A business that stays, and a neighbor who refers the next one.",
     scoreImpact: "high",
   },
 ];
@@ -1182,10 +1158,10 @@ export const SALES_STAGE_STEPS: PlaybookStepDef[] = [
 // forward progress, and imply nothing about the sales pipeline.
 export const SALES_STAGE_ORDER: string[] = SALES_STAGE_STEPS.map((s) => s.key);
 export const STATUS_IMPLIES_SALES_STAGE: Partial<Record<ClientStatus, string>> = {
-  claimed: "sales_listing_claimed",
-  interview: "sales_verification_call_booked",
-  onboarding: "sales_in_trial",
-  active_client: "sales_won_active",
+  claimed: "sales_invite",
+  interview: "sales_interview_appointment",
+  onboarding: "sales_delivery",
+  active_client: "sales_pitch",
 };
 
 // A2P (texting registration) — real, trackable steps, but deliberately a

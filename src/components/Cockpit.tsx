@@ -526,11 +526,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // clients. active_client is now the sole trigger.
     //
     // Reconciled against SALES_STAGE_STEPS below (cascadeSalesStageCompletion)
-    // rather than flipping the direction (sales_won_active completing being
-    // what promotes, instead of this dropdown) — only 2 of the 8 sales
-    // stages have a real automated trigger today (claim, invite reply); the
-    // other 6, including won_active itself, are still a checkbox in a
-    // collapsed accordion section. Making promotion depend on that checkbox
+    // rather than flipping the direction (sales_pitch completing being
+    // what promotes, instead of this dropdown) — only 1 of the 6 sales
+    // stages has a real automated trigger today (sales_invite, via claim or
+    // invite reply); the other 5, including sales_pitch itself, are still a
+    // checkbox in a collapsed accordion section. Making promotion depend on that checkbox
     // risked a real business silently never reaching the main dashboard
     // because nobody remembered to tick it, worse than today's imperfect but
     // reliable trigger. So the Stage dropdown stays the driver, and now also

@@ -128,9 +128,9 @@ export async function POST(req: NextRequest) {
   // Sales pipeline automation: the same real-engagement gate as the
   // status:"accepted" flip above (event !== "interested" — a page-load auto
   // fire isn't a real response, see the comment on that block). A genuine
-  // reply is exactly "Engaged / interested," SALES_STAGE_STEPS' second stage.
+  // reply is real outreach paying off, SALES_STAGE_STEPS' "Invite" stage.
   if (clientId && event !== "interested") {
-    await completePlaybookStepServer(clientId, "sales_engaged", `Automatically completed, replied to the newsletter invite ("${event}").`);
+    await completePlaybookStepServer(clientId, "sales_invite", `Automatically completed, replied to the newsletter invite ("${event}").`);
   }
 
   // Reuse the client's existing project, else create a "Tasks" fallback —

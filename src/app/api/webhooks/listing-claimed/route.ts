@@ -11,7 +11,9 @@ import { verifyClickUpTasksKey } from "@/lib/verifyBridgeKey";
 // cul_claim_sync_to_ghl, via the cul_listing_claimed action and
 // cul_notify_clickuptasks_listing_claimed()). Sales pipeline automation's
 // other trigger, next to planner-interest/route.ts's invite-reply handling —
-// this one completes SALES_STAGE_STEPS' sales_listing_claimed stage.
+// both complete SALES_STAGE_STEPS' sales_invite stage (claiming is the
+// strongest signal that a business is worked, and sales_invite now covers
+// everything from first outreach through the claim).
 //
 // Deliberately its own route rather than folded into planner-interest: a
 // claim isn't tied to any planner week/city context — an organic self-claim
@@ -62,7 +64,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const done = await completePlaybookStepServer(clientId, "sales_listing_claimed", "Automatically completed, listing claimed.");
+  const done = await completePlaybookStepServer(clientId, "sales_invite", "Automatically completed, listing claimed.");
 
   // Claiming is the strongest signal in the whole engagement ladder — "claimed
   // ... would be the most" valuable (Derek, 2026-08-09) — yet until now this
