@@ -1,0 +1,34 @@
+name: Planner auto-invite backup trigger
+
+# Vercel's Hobby-plan cron is "best effort" (no execution guarantee), and on
+# 2026-08-10 it silently missed its 9am Pacific fire entirely, leaving every
+# territory (Lincoln, Tracy) un-invited until Derek noticed and manually
+# clicked "Send now." This workflow is a free, independent second trigger
+# for the same route, 20 minutes after Vercel's own scheduled time, so a
+# missed Vercel cron self-heals instead of needing a manual catch.
+#
+# Safe to fire even when Vercel's own cron already ran: runPlannerAutoInvite
+# tracks how many invites already went out today per territory and stops at
+# the daily cap, so a redundant call is just a fast no-op, never a
+# double-send.
+on:
+  schedule:
+    # 16:20 UTC = 9:20am Pacific during PDT (summer). Pacific shifts to PST
+    # in winter, at which point this (like the primary Vercel cron, also
+    # hardcoded in UTC) drifts an hour off 9am local — a pre-existing
+    # limitation shared with vercel.json's own schedules, not something this
+    # workflow introduces.
+    - cron: "20 16 * * 1-5"
+  workflow_dispatch: {}
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call planner-auto-invite
+        run: |
+          curl -sf -X POST "https://clickuptasks.vercel.app/api/cron/planner-auto-invite" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -o response.json -w "\nHTTP %{http_code}\n"
+          cat response.json
