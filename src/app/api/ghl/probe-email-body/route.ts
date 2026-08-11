@@ -16,8 +16,12 @@ import { tokenForLocation, configuredLocations } from "@/lib/ghlTokens";
 
 export async function GET(req: NextRequest) {
   if (!adminConfigured) return NextResponse.json({ error: "Not configured" }, { status: 501 });
+  // Its own throwaway secret, NOT GHL_WEBHOOK_SECRET: that one is what
+  // WordPress signs its inbound webhooks with, so rotating it to something
+  // readable here would break a live integration. This var is created for
+  // this probe and removed with the route.
   const secret = req.nextUrl.searchParams.get("secret");
-  if (!secret || secret !== process.env.GHL_WEBHOOK_SECRET) {
+  if (!process.env.PROBE_SECRET || secret !== process.env.PROBE_SECRET) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const messageId = req.nextUrl.searchParams.get("messageId") ?? "";
