@@ -1624,6 +1624,11 @@ export interface Task {
   draftEmail?: { subject: string; body: string; createdAt: string } | null;
   contactId: string | null;
   due: string | null; // ISO yyyy-mm-dd
+  /** Full-precision "last touched," written only by upsertConversationTask
+   * (ghlConversationTask.ts) — due (date-only) already served this purpose
+   * for Follow Up's sort, but couldn't distinguish two tasks touched the
+   * same day. Null on any task upsertConversationTask has never bumped. */
+  lastActivityAt?: string | null;
   recurrence: Recurrence;
   /** Only meaningful when recurrence === "custom" — "every N days/weeks/months". */
   recurrenceInterval?: number;

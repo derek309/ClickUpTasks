@@ -2466,11 +2466,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       ...PLAYBOOK_PHASES.slice(3).map(groupFor),
       groupFor(PLAYBOOK_ONGOING_PHASE),
     ];
-    // Latest activity first, same reasoning as Follow Up's replyRows
-    // (Derek, 2026-08-11) — a Conversation task's due doubles as "last
-    // touched," so this surfaces whoever just engaged instead of leaving
-    // these in arbitrary fetch order.
-    const extra = list.filter((t) => !t.playbookStepKey).sort((a, b) => (b.due ?? "").localeCompare(a.due ?? ""));
+    // Latest activity first, same reasoning and same lastActivityAt field as
+    // Follow Up's replyRows (Derek, 2026-08-11) — falls back to due (date-
+    // only) for anything upsertConversationTask hasn't stamped.
+    const extra = list.filter((t) => !t.playbookStepKey)
+      .sort((a, b) => (b.lastActivityAt ?? b.due ?? "").localeCompare(a.lastActivityAt ?? a.due ?? ""));
     return extra.length ? [...byPhase, { key: "extra", label: "Other", color: "#94a3b8", tasks: extra }] : byPhase;
   };
 

@@ -99,6 +99,7 @@ const asPriority = (p: unknown): Priority => (typeof p === "string" && p in PRIO
 export const rowToTask = (r: any): Task => ({
   id: r.id, projectId: r.project_id, clientId: r.client_id, title: r.title, description: r.description ?? "",
   status: r.status, priority: asPriority(r.priority), assigneeId: r.assignee_id, waitingOnClient: r.waiting_on_client ?? false, contactId: r.contact_id, due: r.due,
+  lastActivityAt: r.last_activity_at ?? null,
   recurrence: r.recurrence, recurrenceInterval: r.recurrence_interval ?? undefined, recurrenceUnit: r.recurrence_unit ?? undefined,
   recurrenceDaysOfMonth: r.recurrence_days_of_month ?? undefined,
   ghlTaskId: r.ghl_task_id, labelIds: r.label_ids ?? [], subtasks: r.subtasks ?? [],

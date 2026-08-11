@@ -165,7 +165,7 @@ export async function upsertConversationTask(
     // attachments are untouched) — a rescheduled or relocated meeting's join
     // link updates here without creating a duplicate task or touching
     // anything else on it.
-    const patch: Record<string, unknown> = { due };
+    const patch: Record<string, unknown> = { due, last_activity_at: new Date().toISOString() };
     if (opts?.title && conversationSignalRank(opts.title) > conversationSignalRank(openTasks[0].title)) {
       patch.title = opts.title;
     }
@@ -200,6 +200,7 @@ export async function upsertConversationTask(
     priority: "conversation",
     contact_id: contact.id,
     due,
+    last_activity_at: new Date().toISOString(),
     created_by: null,
     // On a brand-new task there's nothing to preserve, so a null "no change"
     // result just means "no meeting location" — fall back to the base array.

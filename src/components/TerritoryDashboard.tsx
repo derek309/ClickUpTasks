@@ -139,7 +139,7 @@ export function TerritoryDashboard({ me, territories, contacts, clients, tasks, 
     playbook: ReturnType<typeof playbookCompletion>;
     meta: string | null; metaDanger: boolean;
     hasReply: boolean; stalledOnly: boolean; followedUp: boolean;
-    rank: number; due: string | null;
+    rank: number; lastActivityAt: string | null;
   };
   const claimedRows = useMemo((): ClaimedRow[] => {
     const territorySet = new Set(myTerritories.map((t) => `${t.city.toLowerCase()}|${normalizeState(t.state)}`));
@@ -173,20 +173,26 @@ export function TerritoryDashboard({ me, territories, contacts, clients, tasks, 
           stalledOnly: !convo && stalled && !followedUp,
           followedUp,
           rank: convo && !followedUp ? conversationSignalRank(convo.title) : 0,
-          due: convo?.due ?? null,
+          // lastActivityAt is full-precision (set by upsertConversationTask);
+          // due is date-only and predates it, so it's the fallback for any
+          // task upsertConversationTask hasn't touched since this shipped —
+          // still real progress over no date signal at all, just coarser.
+          lastActivityAt: convo?.lastActivityAt ?? convo?.due ?? null,
         };
       })
       .filter((r): r is ClaimedRow => r !== null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myTerritories, contacts, clients, tasks, tasksByClient]);
 
-  // Latest activity first (Derek, 2026-08-11) — due doubles as "last touched"
-  // on a Conversation task (see upsertConversationTask), so this surfaces
-  // whoever just engaged, not whoever's sat longest. Signal strength (rank)
-  // only breaks a tie between two rows touched the same day — a booked
-  // meeting still outranks a mere email open on the same date (Derek,
-  // 2026-08-09), it just no longer overrides genuinely newer activity.
-  const replyRows = claimedRows.filter((r) => r.hasReply).sort((a, b) => (b.due ?? "").localeCompare(a.due ?? "") || b.rank - a.rank);
+  // Latest activity first (Derek, 2026-08-11) — lastActivityAt is a real
+  // timestamp (set by upsertConversationTask), unlike due's date-only
+  // precision, which couldn't tell apart two businesses touched the same
+  // day. Signal strength (rank) only breaks a tie between two rows with the
+  // identical timestamp (functionally: two rows still on the date-only
+  // fallback) — a booked meeting still outranks a mere email open on the
+  // same date (Derek, 2026-08-09), it just no longer overrides genuinely
+  // newer activity.
+  const replyRows = claimedRows.filter((r) => r.hasReply).sort((a, b) => (b.lastActivityAt ?? "").localeCompare(a.lastActivityAt ?? "") || b.rank - a.rank);
   const keepMovingRows = claimedRows.filter((r) => r.stalledOnly);
   const followedUpRows = claimedRows.filter((r) => r.followedUp);
   // Everyone else claimed+ and caught up — deliberately not rendered as
