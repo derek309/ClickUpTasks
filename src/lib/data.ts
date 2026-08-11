@@ -51,6 +51,38 @@ export const THIS_MONTH_END = (() => {
   const [y, m] = TODAY.split("-").map(Number);
   return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
 })();
+/** The urgency buckets a dated row falls into, shared by My Work's task list
+ * (Cockpit.tsx buildGroups) and Follow Up's sales board (TerritoryDashboard)
+ * so "what needs me today" reads identically on both — My Work for active
+ * clients, Follow Up for sales (Derek, 2026-08-11). Order is the render
+ * order; "month" sits between next week and later so a longer-dated
+ * follow-up still lands somewhere meaningful instead of all-of-it in
+ * "Later." */
+export type DueBucket = "overdue" | "today" | "tomorrow" | "week" | "nextWeek" | "month" | "later" | "none";
+export const DUE_BUCKETS: { key: DueBucket; label: string; color: string }[] = [
+  { key: "overdue", label: "Overdue", color: "#ef4444" },
+  { key: "today", label: "Today", color: "#f59e0b" },
+  { key: "tomorrow", label: "Tomorrow", color: "#eab308" },
+  { key: "week", label: "This week", color: "#3b82f6" },
+  { key: "nextWeek", label: "Next week", color: "#6366f1" },
+  { key: "month", label: "This month", color: "#8b5cf6" },
+  { key: "later", label: "Later", color: "#94a3b8" },
+  { key: "none", label: "No date", color: "#cbd5e1" },
+];
+/** Which bucket a yyyy-mm-dd date falls into, relative to TODAY. `isDone`
+ * suppresses the overdue bucket — a finished task that happened to be late
+ * isn't something that still needs doing. */
+export function dueBucketOf(due: string | null | undefined, isDone = false): DueBucket {
+  if (!due) return "none";
+  if (due < TODAY && !isDone) return "overdue";
+  if (due === TODAY) return "today";
+  if (due === TOMORROW) return "tomorrow";
+  if (due <= THIS_WEEK_END) return "week";
+  if (due <= NEXT_WEEK_END) return "nextWeek";
+  if (due <= THIS_MONTH_END) return "month";
+  return "later";
+}
+
 /** Whole days from `a` to `b` (positive if `b` is later) — via UTC date math
  * to dodge DST, matching addDaysIso. Used for bulk "shift all dates forward"
  * style operations, where one date's move determines the delta applied to

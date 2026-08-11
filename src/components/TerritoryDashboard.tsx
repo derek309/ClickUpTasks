@@ -30,10 +30,20 @@
 // shows up here because it has an open Conversation task, full stop, same
 // as any other client — the task's own title is what makes it "very clear,"
 // not a computed dashboard label.
+//
+// Big pivot #3 (Derek, 2026-08-11 — grouped by date, not by tier): "I want
+// the follow up to be what I need to focus on today, tomorrow, this week,
+// next week, this month, just like My Work. My Work is for active clients
+// and Follow Up is for sales." The old Reply needed / Keep them moving /
+// Followed up tiers collapsed into the same due-date buckets My Work uses
+// (DUE_BUCKETS/dueBucketOf in data.ts, shared by both) — those three tiers
+// were really "now," "now," and "later" under different names, and none of
+// them answered "which day." A snoozed follow-up now simply reappears in
+// the bucket for the day it's due, instead of sitting in a parked list.
 import { useEffect, useMemo } from "react";
 import {
-  playbookCompletion, normalizeState, formatDue, CLIENT_STATUS_META, STEP_STALL_DAYS, todayIso as todayIsoDate,
-  conversationSignalRank,
+  playbookCompletion, normalizeState, CLIENT_STATUS_META, STEP_STALL_DAYS, todayIso as todayIsoDate,
+  conversationSignalRank, DUE_BUCKETS, dueBucketOf, type DueBucket,
   type Client, type Contact, type Task, type Territory, type ClientStatus,
 } from "@/lib/data";
 import { isDue } from "@/lib/plannerPools";
@@ -121,11 +131,6 @@ export function TerritoryDashboard({ me, territories, contacts, clients, tasks, 
   // isn't stalled, it just hasn't begun. Only a real, actually-old timestamp
   // counts.
   const isStalled = (c: Client) => STALL_ELIGIBLE.includes(c.status) && !!c.playbookLastProgressAt && isDue(c.playbookLastProgressAt, todayIsoDate(), STEP_STALL_DAYS);
-  // "Followed up" happens by editing the task's own due date in TaskDrawer
-  // (same InlineDue control every other client's tasks already use), not a
-  // dashboard-local action — the task's real `due` is the only source of
-  // truth here, no optimistic local override needed.
-  const nextCheckInFor = (c: Client) => conversationTaskFor(c.id)?.due ?? null;
 
   // Every claimed+ business in an assigned territory, split into the tiers
   // that earn a spot on this page: a real open Conversation task (any
@@ -138,7 +143,11 @@ export function TerritoryDashboard({ me, territories, contacts, clients, tasks, 
     stageLabel: string; stageColor: string;
     playbook: ReturnType<typeof playbookCompletion>;
     meta: string | null; metaDanger: boolean;
-    hasReply: boolean; stalledOnly: boolean; followedUp: boolean;
+    /** Whether this business earns a spot at all — a real open Conversation
+     * task, or a Playbook that's gone quiet. Everyone else is just "moving
+     * along fine" and stays a count, not a row. */
+    attention: boolean;
+    bucket: DueBucket; due: string | null;
     rank: number; lastActivityAt: string | null;
   };
   const claimedRows = useMemo((): ClaimedRow[] => {
@@ -154,8 +163,7 @@ export function TerritoryDashboard({ me, territories, contacts, clients, tasks, 
         const convo = conversationTaskFor(c.id);
         const stalled = isStalled(c);
         const attention = !!convo || stalled;
-        const nextCheckIn = nextCheckInFor(c);
-        const followedUp = attention && !!nextCheckIn && nextCheckIn > todayDate;
+        const due = convo?.due ?? null;
         return {
           id: c.id, name: c.name, client: c,
           city: `${contact.city}, ${contact.state}`,
@@ -166,13 +174,23 @@ export function TerritoryDashboard({ me, territories, contacts, clients, tasks, 
           // ("Clicked the invite email — call or visit to close", "Started
           // the interest chat... didn't finish", or a real "Reply to
           // {name}") — shown as-is rather than a generic "Needs reply"
-          // placeholder, so the row says exactly what happened.
-          meta: convo && !followedUp ? convo.title : followedUp && nextCheckIn ? `Back ${formatDue(nextCheckIn)}` : stalled && !followedUp ? `Quiet ${STEP_STALL_DAYS}+ days` : null,
-          metaDanger: !!convo && !followedUp,
-          hasReply: !!convo && !followedUp,
-          stalledOnly: !convo && stalled && !followedUp,
-          followedUp,
-          rank: convo && !followedUp ? conversationSignalRank(convo.title) : 0,
+          // placeholder, so the row says exactly what happened. The old
+          // "Back {date}" variant is gone: which bucket the row sits in now
+          // says when it's due, so repeating it in the meta was noise.
+          meta: convo ? convo.title : stalled ? `Quiet ${STEP_STALL_DAYS}+ days` : null,
+          attention,
+          // Everything the row needs to place itself on the calendar. A
+          // freshly-fired signal is due today (lands in Today); snoozing the
+          // task's own due date forward moves the row to that day's bucket,
+          // which is what replaced the old "Followed up, waiting to hear
+          // back" tier — a scheduled follow-up simply shows up on the day
+          // it's scheduled for, instead of in a separate parked list.
+          bucket: dueBucketOf(due),
+          due,
+          // Only red once it's actually due — a follow-up scheduled for next
+          // week isn't behind, it's planned.
+          metaDanger: !!convo && !!due && due <= todayDate,
+          rank: convo ? conversationSignalRank(convo.title) : 0,
           // lastActivityAt is full-precision (set by upsertConversationTask);
           // due is date-only and predates it, so it's the fallback for any
           // task upsertConversationTask hasn't touched since this shipped —
@@ -184,26 +202,28 @@ export function TerritoryDashboard({ me, territories, contacts, clients, tasks, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myTerritories, contacts, clients, tasks, tasksByClient]);
 
-  // Latest activity first (Derek, 2026-08-11) — lastActivityAt is a real
-  // timestamp (set by upsertConversationTask), unlike due's date-only
-  // precision, which couldn't tell apart two businesses touched the same
-  // day. Signal strength (rank) only breaks a tie between two rows with the
-  // identical timestamp (functionally: two rows still on the date-only
-  // fallback) — a booked meeting still outranks a mere email open on the
-  // same date (Derek, 2026-08-09), it just no longer overrides genuinely
-  // newer activity.
-  const replyRows = claimedRows.filter((r) => r.hasReply).sort((a, b) => (b.lastActivityAt ?? "").localeCompare(a.lastActivityAt ?? "") || b.rank - a.rank);
-  const keepMovingRows = claimedRows.filter((r) => r.stalledOnly);
-  const followedUpRows = claimedRows.filter((r) => r.followedUp);
+  // Grouped by when it's due, exactly like My Work's task list — My Work is
+  // for active clients, Follow Up is the same idea for sales (Derek,
+  // 2026-08-11). Replaces the old Reply needed / Keep them moving /
+  // Followed up split: those three were really "now," "now," and "later"
+  // wearing different names, and none of them told you WHICH day.
+  const actionRows = claimedRows.filter((r) => r.attention);
   // Everyone else claimed+ and caught up — deliberately not rendered as
   // rows (that was the wall-of-stuff problem). Just a count, so a quiet
   // territory still confirms it checked everyone rather than looking broken.
-  const quietCount = claimedRows.length - replyRows.length - keepMovingRows.length - followedUpRows.length;
+  const quietCount = claimedRows.length - actionRows.length;
 
-  const groups: TerritoryBoardGroup[] = [];
-  if (replyRows.length) groups.push({ key: "reply", label: "Reply needed", color: "#ef4444", rows: replyRows });
-  if (keepMovingRows.length) groups.push({ key: "keep_moving", label: "Keep them moving", color: "#f59e0b", rows: keepMovingRows });
-  if (followedUpRows.length) groups.push({ key: "followed_up", label: "Followed up, waiting to hear back", color: "#64748b", rows: followedUpRows });
+  // Soonest first within a bucket (oldest-overdue first at the top of
+  // Overdue), then strongest signal, then most recent activity — so a day
+  // with several follow-ups still leads with the one most worth the call.
+  const groups: TerritoryBoardGroup[] = DUE_BUCKETS.map((b) => ({
+    key: b.key,
+    label: b.label,
+    color: b.color,
+    rows: actionRows
+      .filter((r) => r.bucket === b.key)
+      .sort((x, y) => (x.due ?? "").localeCompare(y.due ?? "") || y.rank - x.rank || (y.lastActivityAt ?? "").localeCompare(x.lastActivityAt ?? "")),
+  })).filter((g) => g.rows.length > 0);
 
   return (
     <div className="flex h-full flex-col">
