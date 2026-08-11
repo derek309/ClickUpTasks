@@ -614,6 +614,14 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
                   <button onClick={() => saveEditMessage(m)} disabled={!editDraft.trim()} className="rounded-md bg-accent px-2.5 py-1 text-[14px] font-medium text-white disabled:opacity-40">Save</button>
                 </div>
               </div>
+            ) : !m.body?.trim() ? (
+              // GHL's conversations/{id}/messages response omits the body on a
+              // sizeable share of email messages (~1 in 3 as of 2026-08-11),
+              // and refresh-messages stores that as "". Saying so beats
+              // rendering an empty card that reads like the app lost the
+              // message (Derek, 2026-08-11). Our own sends are never empty, so
+              // this only ever labels a genuine gap in what GHL handed back.
+              <div className="mt-1 text-[15px] italic text-muted">No content synced from GoHighLevel for this message.</div>
             ) : (
               looksLikeHtml(m.body)
                 ? <div className="rte-content mt-1 text-[16px]" dangerouslySetInnerHTML={{ __html: m.body }} />
