@@ -700,8 +700,11 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
     </div>
   );
 
+  // Lives in the pinned footer slot, not in the scrolling feed, so the way to
+  // start a message is always on screen instead of only after scrolling to
+  // the bottom of a long thread (Derek, 2026-08-11).
   const ctaRow = !replyingTo && !composingChannel ? (
-    <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
+    <div className="flex shrink-0 flex-wrap items-center gap-2 border-t bg-surface px-3 py-2.5">
       <button onClick={() => openCompose("activity")} className="rounded-md border px-2.5 py-1.5 text-[14px] font-medium text-muted hover:bg-background hover:text-foreground"><I.comment className="inline -mt-0.5 mr-1" />Team message</button>
       {hasMessaging && <button onClick={() => openCompose("chat")} className="rounded-md border px-2.5 py-1.5 text-[14px] font-medium hover:bg-background" style={{ color: channelColor.chat, borderColor: channelColor.chat + "55" }}><I.chatBubbles className="inline -mt-0.5 mr-1" />Chat</button>}
       {hasMessaging && <button onClick={() => openCompose("email")} className="rounded-md border px-2.5 py-1.5 text-[14px] font-medium hover:bg-background" style={{ color: channelColor.email, borderColor: channelColor.email + "55" }}><I.mail className="inline -mt-0.5 mr-1" />Email</button>}
@@ -714,15 +717,18 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
       {draftEmailCard}
       {filterBar}
       {commentsFeed}
-      {!composingChannel && ctaRow}
       {aiSlideOver}
       <input ref={msgFileRef} type="file" multiple accept="image/*" className="hidden" onChange={(e) => { handleMsgFileSelect(e.target.files); e.target.value = ""; }} />
     </>
   );
 
+  // The footer is always occupied: the active composer while writing,
+  // otherwise the compose buttons. Keeping the buttons here rather than at
+  // the end of the feed is what makes them always reachable without
+  // scrolling a long thread first.
   const composerFooter = composingChannel
     ? (composingChannel === "activity" ? teamComposer : channelComposer(composingChannel, closeComposers))
-    : null;
+    : ctaRow;
 
   void mentionMatch; void mentionCands; // reserved: team @-mention affordance can be reintroduced here if needed
 

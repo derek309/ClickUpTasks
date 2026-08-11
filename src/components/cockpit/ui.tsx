@@ -298,22 +298,32 @@ export function renderRichText(body: string) {
 // everything else off-screen — collapse past this many words behind a "Show
 // more" toggle. A plain clickable span, not a <button>, so this still works
 // nested inside a parent <button> (e.g. the Task Activity rollup row).
-const LONG_TEXT_WORD_THRESHOLD = 200;
+// A short preview by default (Derek, 2026-08-11 — "only show like 150
+// characters and then read more"): a full newsletter body pasted into the
+// feed ran for screens, burying every other message. Characters rather than
+// words, since one 40-word paragraph and one 40-word list of tracking URLs
+// take up wildly different amounts of room.
+const LONG_TEXT_CHAR_THRESHOLD = 150;
 // A signature/address block (several short lines) reads as "long" — pushes
-// the card tall and clunky — well before it hits the word threshold above.
+// the card tall and clunky — well before it hits the character limit above.
 // Whichever limit is crossed first decides how the preview gets truncated.
-const LONG_TEXT_LINE_THRESHOLD = 10;
+const LONG_TEXT_LINE_THRESHOLD = 6;
 export function CollapsibleText({ text, className }: { text: string; className?: string }) {
   const [expanded, setExpanded] = useState(false);
   const trimmed = text.trim();
-  const words = trimmed.split(/\s+/);
   const lines = trimmed.split("\n");
-  const overWordLimit = words.length > LONG_TEXT_WORD_THRESHOLD;
+  const overCharLimit = trimmed.length > LONG_TEXT_CHAR_THRESHOLD;
   const overLineLimit = lines.length > LONG_TEXT_LINE_THRESHOLD;
-  const isLong = overWordLimit || overLineLimit;
+  const isLong = overCharLimit || overLineLimit;
+  // Cut on a word boundary so the preview doesn't end mid-word.
+  const charPreview = () => {
+    const cut = trimmed.slice(0, LONG_TEXT_CHAR_THRESHOLD);
+    const lastSpace = cut.lastIndexOf(" ");
+    return (lastSpace > LONG_TEXT_CHAR_THRESHOLD * 0.6 ? cut.slice(0, lastSpace) : cut).trimEnd();
+  };
   const shown = !isLong || expanded
     ? text
-    : (overWordLimit ? words.slice(0, LONG_TEXT_WORD_THRESHOLD).join(" ") : lines.slice(0, LONG_TEXT_LINE_THRESHOLD).join("\n")) + "…";
+    : (overCharLimit ? charPreview() : lines.slice(0, LONG_TEXT_LINE_THRESHOLD).join("\n")) + "…";
   const toggle = (e: React.SyntheticEvent) => { e.stopPropagation(); setExpanded((x) => !x); };
   // break-words so a long unbroken string (a long URL, most commonly) wraps
   // instead of forcing the whole feed to scroll horizontally.
