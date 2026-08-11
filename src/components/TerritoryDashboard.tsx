@@ -226,7 +226,7 @@ export function TerritoryDashboard({ me, territories, contacts, clients, tasks, 
   })).filter((g) => g.rows.length > 0);
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b bg-surface px-4 py-2.5">
         <span className="text-[16px] text-muted">Everything that needs you across your assigned territories</span>
         {quietCount > 0 && (

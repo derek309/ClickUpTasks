@@ -124,6 +124,10 @@ export function toPacificDate(iso: string): string {
 // is safe to replace wholesale: find-by-name, swap it out, leave everything
 // else (including any manually attached files) untouched.
 const MEETING_LOCATION_ATTACHMENT_NAME = "Meeting location";
+// Same system author every other server-side event line uses (see
+// planner-interest, playbook toggle, granolaSync) so these render
+// identically in the feed rather than looking like a real teammate posted.
+const SYSTEM_AUTHOR_ID = "u_claude";
 // Returns null when nothing would change — so the caller can skip a needless
 // write. When the location is unchanged we return the SAME attachment object
 // (not a fresh one), preserving any Vault folderId/position a user filed it
@@ -144,7 +148,7 @@ export async function upsertConversationTask(
   const due = opts?.due ?? todayPacific();
   const { data: openTasks } = await supabaseAdmin
     .from("tasks")
-    .select("id, title, attachments")
+    .select("id, title, attachments, comments")
     .eq("contact_id", contact.id)
     .eq("priority", "conversation")
     .neq("status", "done")
@@ -168,6 +172,29 @@ export async function upsertConversationTask(
     const patch: Record<string, unknown> = { due, last_activity_at: new Date().toISOString() };
     if (opts?.title && conversationSignalRank(opts.title) > conversationSignalRank(openTasks[0].title)) {
       patch.title = opts.title;
+    }
+    // Keep the whole journey, not just the latest headline (Derek,
+    // 2026-08-11 — "open, click, start chat, book, etc, keep all the
+    // history"). The title only ever shows the STRONGEST signal so far, so
+    // without this every earlier step was silently overwritten and the
+    // sequence that actually tells you how warm a business got was lost.
+    // Each named signal appends one compact event line to the same feed
+    // TaskDrawer already renders, oldest at the top.
+    //
+    // Only named signals (opts.title) log — the message/call pollers bump
+    // `due` with no title on every sync, and logging those would bury the
+    // real milestones under a wall of no-op lines. Consecutive duplicates
+    // are skipped too, so a webhook redelivering the same open/click event
+    // doesn't repeat itself.
+    if (opts?.title) {
+      const comments: { kind?: string; body?: string }[] = Array.isArray(openTasks[0].comments) ? openTasks[0].comments : [];
+      const lastEvent = [...comments].reverse().find((c) => c?.kind === "event");
+      if (lastEvent?.body !== opts.title) {
+        patch.comments = [...comments, {
+          id: "cm_" + crypto.randomUUID(), authorId: SYSTEM_AUTHOR_ID,
+          body: opts.title, at: new Date().toISOString(), kind: "event",
+        }];
+      }
     }
     if (opts?.location !== undefined) {
       const next = withMeetingLocation(openTasks[0].attachments ?? [], opts.location);
@@ -202,6 +229,12 @@ export async function upsertConversationTask(
     due,
     last_activity_at: new Date().toISOString(),
     created_by: null,
+    // Seed the history with the signal that created the task, so the feed
+    // reads as a complete sequence from the first touch rather than
+    // starting at whatever happened second.
+    comments: opts?.title
+      ? [{ id: "cm_" + crypto.randomUUID(), authorId: SYSTEM_AUTHOR_ID, body: opts.title, at: new Date().toISOString(), kind: "event" }]
+      : [],
     // On a brand-new task there's nothing to preserve, so a null "no change"
     // result just means "no meeting location" — fall back to the base array.
     attachments: (() => { const base = ghlUrl ? [{ id: "at_" + crypto.randomUUID(), name: "GHL conversation", kind: "link", size: "", url: ghlUrl }] : []; return withMeetingLocation(base, opts?.location) ?? base; })(),

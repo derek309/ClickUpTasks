@@ -19,6 +19,7 @@
 // "prospect with no Client yet" case to fall back from — every row is just
 // onOpenClient, same as ClientsBoard's own ClientRow, no second navigation
 // path to maintain.
+import { useState } from "react";
 import { type Client, type playbookCompletion } from "@/lib/data";
 
 export interface BusinessRow {
@@ -50,8 +51,24 @@ export function TerritoryBoard({ groups, onOpenClient }: {
   groups: TerritoryBoardGroup[];
   onOpenClient: (id: string) => void;
 }) {
+  // Tracks what's been OPENED, not what's been closed, so every group —
+  // including one that appears later (a bucket that was empty on first
+  // render) — starts collapsed without needing to be seeded here (Derek,
+  // 2026-08-11: "make everyone collapse by default and click to open").
+  // Landing on a wall of 20+ rows was the thing to fix; the headers alone
+  // read as a summary of where the day's work actually sits.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (key: string) => setExpanded((prev) => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+
+  // No overflow of its own — the page's <main> is already the scroll
+  // container, and nesting a second one here is what put two scrollbars
+  // side by side on this page (Derek, 2026-08-11).
   return (
-    <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">
+    <div className="flex-1 bg-background p-4 sm:p-5">
       <div className="overflow-hidden rounded-xl border bg-surface shadow-soft">
         {groups.length === 0 && (
           <div className="px-4 py-10 text-center text-[16px] text-muted">
@@ -59,20 +76,28 @@ export function TerritoryBoard({ groups, onOpenClient }: {
           </div>
         )}
         <div className="divide-y-8 divide-background">
-          {groups.map((g) => (
-            <div key={g.key}>
-              <div className="flex items-center gap-2 border-y px-4 py-2" style={{ background: g.color + "22", borderColor: g.color + "40" }}>
-                <span className="h-2.5 w-2.5 rounded-full" style={{ background: g.color }} />
-                <span className="text-[17px] font-bold">{g.label}</span>
-                <span className="rounded-full px-1.5 text-[16px] font-semibold normal-case tracking-normal text-white" style={{ background: g.color }}>{g.rows.length}</span>
+          {groups.map((g) => {
+            const isOpen = expanded.has(g.key);
+            return (
+              <div key={g.key}>
+                <button type="button" onClick={() => toggle(g.key)} aria-expanded={isOpen}
+                  className="flex w-full items-center gap-2 border-y px-4 py-2 text-left transition-opacity hover:opacity-80"
+                  style={{ background: g.color + "22", borderColor: g.color + "40" }}>
+                  <span className={`shrink-0 text-[13px] text-muted transition-transform ${isOpen ? "rotate-90" : ""}`} aria-hidden="true">▶</span>
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: g.color }} />
+                  <span className="text-[17px] font-bold">{g.label}</span>
+                  <span className="rounded-full px-1.5 text-[16px] font-semibold normal-case tracking-normal text-white" style={{ background: g.color }}>{g.rows.length}</span>
+                </button>
+                {isOpen && (
+                  <div>
+                    {g.rows.map((row) => (
+                      <BusinessRowView key={row.id} row={row} onOpen={() => onOpenClient(row.client.id)} />
+                    ))}
+                  </div>
+                )}
               </div>
-              <div>
-                {g.rows.map((row) => (
-                  <BusinessRowView key={row.id} row={row} onOpen={() => onOpenClient(row.client.id)} />
-                ))}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
