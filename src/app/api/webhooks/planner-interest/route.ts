@@ -31,6 +31,24 @@ import { slugify } from "@/lib/wpCitySlug";
 // bare null author.
 const SYSTEM_AUTHOR_ID = "u_claude";
 
+// The join chat's fixed question set, mirrored from WordPress's
+// cul_sales_join_questions_default() (includes/sales-outreach.php). WP sends
+// only the answer KEYS over the webhook, so without this the feed read
+// "- offer: Yes", which tells a rep nothing about what was asked (Derek,
+// 2026-08-11). Kept as a fallback map rather than a second source of truth:
+// an unrecognized key still renders, just under its raw name, so adding a
+// question on the WP side degrades to today's behavior instead of dropping
+// the answer.
+const JOIN_QUESTION_LABELS: Record<string, string> = {
+  offer: "Do you have a current offer or deal you are promoting?",
+  events: "Do you host any events?",
+  more: "Anything else you would like us to know about your business?",
+};
+const formatAnswers = (answers: unknown): string =>
+  Object.entries((answers ?? {}) as Record<string, unknown>)
+    .map(([k, v]) => `- ${JOIN_QUESTION_LABELS[k] ?? k}\n  ${String(v)}`)
+    .join("\n");
+
 export async function POST(req: NextRequest) {
   if (!adminConfigured) return NextResponse.json({ error: "Not configured" }, { status: 501 });
   if (!verifyClickUpTasksKey(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -153,8 +171,8 @@ export async function POST(req: NextRequest) {
     ? `Approved being featured in the ${weekLabel} newsletter (listing already claimed) — no appointment needed, ready to add to the newsletter.`
     : event === "info_submitted"
     ? `Submitted business info${offerIncluded ? " + offer" : ""} from the invite landing page. The listing is now HIDDEN from the directory pending phone verification — confirm identity and details on the call, then uncheck "Hide From Directory" in wp-admin to publish.\n`
-      + Object.entries(body?.answers ?? {}).map(([k, v]) => `- ${k}: ${v}`).join("\n")
-    : "Submitted intake answers on the newsletter invite:\n" + Object.entries(body?.answers ?? {}).map(([k, v]) => `- ${k}: ${v}`).join("\n");
+      + formatAnswers(body?.answers)
+    : "Submitted intake answers on the newsletter invite:\n" + formatAnswers(body?.answers);
   const newComment = { id: "cm_" + crypto.randomUUID(), authorId: SYSTEM_AUTHOR_ID, body: eventLine, at: new Date().toISOString(), kind: "event" };
 
   // "Very clear: they clicked... call them" (Derek, 2026-08-09) — the task
