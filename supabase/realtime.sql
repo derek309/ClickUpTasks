@@ -54,3 +54,32 @@ $$;
 -- protects the row either way — this is defense-in-depth, not the real gate.
 revoke execute on function public.append_comment(text, jsonb) from public;
 grant execute on function public.append_comment(text, jsonb) to authenticated;
+
+-- ── upsert_source_comment ──────────────────────────────────────────────────
+-- Added 2026-08-12. Replace-in-place sibling of append_comment: drops any
+-- existing comment carrying the same sourceKey, then appends the new one.
+-- WordPress re-posts the WHOLE accumulated intake answer set after every
+-- single answer (sales-outreach.php's saveIntake), so a plain append
+-- produced one comment per answer — offer, then offer+events, then
+-- +freeform — for what is really one chat. Matching on an explicit
+-- sourceKey rather than the comment prose keeps this precise and
+-- refactor-safe. Same security_invoker/RLS posture as append_comment above.
+create or replace function public.upsert_source_comment(task_id text, comment jsonb, source_key text)
+returns void
+language sql
+security invoker
+set search_path = public
+as $$
+  update tasks
+  set comments = coalesce(
+        (select jsonb_agg(c order by ord)
+           from jsonb_array_elements(coalesce(comments, '[]'::jsonb)) with ordinality as t(c, ord)
+          where coalesce(c->>'sourceKey', '') <> source_key),
+        '[]'::jsonb
+      ) || jsonb_build_array(comment),
+      updated_by = coalesce(comment->>'authorId', updated_by)
+  where id = task_id;
+$$;
+
+revoke execute on function public.upsert_source_comment(text, jsonb, text) from public;
+grant execute on function public.upsert_source_comment(text, jsonb, text) to authenticated;

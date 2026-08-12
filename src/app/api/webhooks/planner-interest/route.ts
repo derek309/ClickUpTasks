@@ -44,10 +44,19 @@ const JOIN_QUESTION_LABELS: Record<string, string> = {
   events: "Do you host any events?",
   more: "Anything else you would like us to know about your business?",
 };
-const formatAnswers = (answers: unknown): string =>
+const answerEntries = (answers: unknown): [string, unknown][] =>
   Object.entries((answers ?? {}) as Record<string, unknown>)
+    .filter(([, v]) => String(v ?? "").trim() !== "");
+const formatAnswers = (answers: unknown): string =>
+  answerEntries(answers)
     .map(([k, v]) => `- ${JOIN_QUESTION_LABELS[k] ?? k}\n  ${String(v)}`)
     .join("\n");
+
+// One stable key for the join-chat intake comment, so a re-post replaces the
+// previous one instead of stacking another partial copy beside it. WordPress
+// re-sends the full accumulated answer set after EVERY answer, which is why
+// a single chat used to leave three comments and an empty fourth.
+const INTAKE_SOURCE_KEY = "join_intake";
 
 export async function POST(req: NextRequest) {
   if (!adminConfigured) return NextResponse.json({ error: "Not configured" }, { status: 501 });
@@ -173,7 +182,20 @@ export async function POST(req: NextRequest) {
     ? `Submitted business info${offerIncluded ? " + offer" : ""} from the invite landing page. The listing is now HIDDEN from the directory pending phone verification — confirm identity and details on the call, then uncheck "Hide From Directory" in wp-admin to publish.\n`
       + formatAnswers(body?.answers)
     : "Submitted intake answers on the newsletter invite:\n" + formatAnswers(body?.answers);
-  const newComment = { id: "cm_" + crypto.randomUUID(), authorId: SYSTEM_AUTHOR_ID, body: eventLine, at: new Date().toISOString(), kind: "event" };
+  // Events that carry the chat's answers get a stable sourceKey so a re-post
+  // REPLACES the running copy; one-shot events (interested/approved) keep
+  // plain append semantics, since each is a distinct thing that happened.
+  const carriesAnswers = event === "intake" || event === "info_submitted";
+  const newComment: Record<string, unknown> = {
+    id: "cm_" + crypto.randomUUID(), authorId: SYSTEM_AUTHOR_ID, body: eventLine,
+    at: new Date().toISOString(), kind: "event",
+    ...(carriesAnswers ? { sourceKey: INTAKE_SOURCE_KEY } : {}),
+  };
+  // A bare "intake" ping with nothing filled in yet says nothing a rep can
+  // act on and used to post an empty-bodied comment ("Submitted intake
+  // answers on the newsletter invite:" and then nothing). The funnel-step
+  // tracking on the WordPress side still records that they started.
+  const isEmptyIntake = event === "intake" && answerEntries(body?.answers).length === 0;
 
   // "Very clear: they clicked... call them" (Derek, 2026-08-09) — the task
   // title itself names exactly what happened, not a generic bucket, so a rep
@@ -206,7 +228,18 @@ export async function POST(req: NextRequest) {
       // is deliberately left as-is on an append (same "bumping never touches
       // title" rule upsertConversationTask follows) — the comment carries
       // what just happened; the title stays whatever first opened the task.
-      await supabaseAdmin.rpc("append_comment", { task_id: taskId, comment: newComment });
+      if (!isEmptyIntake) {
+        // upsert_source_comment for answer-carrying events (replaces the
+        // running intake copy in place), append_comment for one-shot ones —
+        // both atomic in SQL, for the same reason append_comment exists:
+        // read-modify-write here would silently drop a rep's comment posted
+        // in the same moment.
+        if (carriesAnswers) {
+          await supabaseAdmin.rpc("upsert_source_comment", { task_id: taskId, comment: newComment, source_key: INTAKE_SOURCE_KEY });
+        } else {
+          await supabaseAdmin.rpc("append_comment", { task_id: taskId, comment: newComment });
+        }
+      }
     } else if (projectId) {
       taskId = "t_" + crypto.randomUUID();
       const description = event === "approved"
@@ -217,7 +250,7 @@ export async function POST(req: NextRequest) {
       await supabaseAdmin.from("tasks").insert({
         id: taskId, project_id: projectId, client_id: clientId, title: taskTitle, priority: "conversation",
         description, created_by: "client",
-        comments: [newComment],
+        comments: isEmptyIntake ? [] : [newComment],
       });
     }
   }
