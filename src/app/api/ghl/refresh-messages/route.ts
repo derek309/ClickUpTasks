@@ -151,6 +151,30 @@ export async function POST(req: NextRequest) {
         })
         .filter((r): r is NonNullable<typeof r> => r !== null);
 
+      // GHL's conversations/{id}/messages response omits `body` on a large
+      // share of email messages (237 of 707 synced emails as of 2026-08-12;
+      // our own sends are never blank), which rendered as empty cards in the
+      // feed. The content lives behind a SEPARATE per-email endpoint keyed on
+      // its own id — confirmed live: the conversation message id is rejected
+      // ("Email message does not exist with id ..."), while
+      // meta.email.messageIds[0] returns 200 with the body under
+      // `emailMessage.body`. messageIds is an array because GHL groups a
+      // thread under one conversation message; [0] is the one this row
+      // represents.
+      await Promise.all(rows.map(async (r) => {
+        if (r.channel !== "email" || r.body) return;
+        const src = messages.find((m) => m.id === r.ghl_message_id);
+        const emailId = src?.meta?.email?.messageIds?.[0];
+        if (typeof emailId !== "string" || !emailId) return;
+        try {
+          const er = await fetch(`https://services.leadconnectorhq.com/conversations/messages/email/${encodeURIComponent(emailId)}`, { headers });
+          if (!er.ok) return; // leave it blank; the feed labels that honestly
+          const em = (await er.json())?.emailMessage;
+          if (typeof em?.body === "string" && em.body) r.body = em.body;
+          if (!r.subject && typeof em?.subject === "string") r.subject = em.subject;
+        } catch { /* network hiccup — blank body is still a valid row */ }
+      }));
+
       rows.forEach((r) => known.add(r.ghl_message_id));
       if (rows.length) {
         const { error } = await supabaseAdmin.from("messages").insert(rows);
