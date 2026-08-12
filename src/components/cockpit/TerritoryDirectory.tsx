@@ -470,13 +470,42 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
     return () => { alive = false; clearInterval(interval); };
   }, [territoryId]);
 
-  // The auto-invite batch (below) is now the only way an invite goes out —
-  // no more per-row Invite/Skip/Copy-link (Derek, 2026-08-09: this page is a
-  // full status overview now, not an action console; Follow Up is where you
-  // act). Still need this week's anchor for the status strip and the
-  // template editor, and humanizeInviteError for the batch send's own error
-  // display.
+  // The auto-invite batch (below) is the only way an invite SENDS — no more
+  // per-row Invite/Skip (Derek, 2026-08-09: this page is a full status
+  // overview now, not an action console; Follow Up is where you act).
+  //
+  // Copy-link is the exception, restored 2026-08-12. It went out with the
+  // rest of the row actions, but it isn't an action console button — it's
+  // the only way to get at the invite URL at all, and the token is HMAC'd
+  // with a secret that lives only in WordPress, so it can't be reconstructed
+  // anywhere else. Without it the only remaining source was the retired WP
+  // /sales/ board. Needed for texting a link, reading one out on a call, or
+  // testing the chat end to end.
   const todayWeekIso = plannerWeekOf(todayIsoDate());
+  const [inviteLinks, setInviteLinks] = useState<Record<string, string>>({});
+  const [copiedLinkId, setCopiedLinkId] = useState<number | null>(null);
+  useEffect(() => {
+    if (!territoryId || !listings?.length) return;
+    const ids = listings.map((l) => (typeof l.id === "number" ? l.id : parseInt(String(l.id), 10))).filter(Number.isFinite);
+    if (!ids.length) return;
+    let alive = true;
+    authedFetch("/api/planner/invite/links", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ territoryId, week: todayWeekIso, gdPlaceIds: ids }),
+    })
+      .then((r) => r.json())
+      .then((j) => { if (alive && j?.links) setInviteLinks(j.links); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [territoryId, listings, todayWeekIso]);
+  const copyInviteLink = (gdPlaceId: number) => {
+    const url = inviteLinks[String(gdPlaceId)];
+    if (!url) return;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedLinkId(gdPlaceId);
+      setTimeout(() => setCopiedLinkId((c) => (c === gdPlaceId ? null : c)), 2000);
+    }).catch(() => {});
+  };
   const humanizeInviteError = (err: string | undefined) =>
     err === "no_email" ? "No email on file for this listing."
     : err === "ghl_not_connected" ? "GoHighLevel isn't connected for this city yet."
@@ -1172,7 +1201,10 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
                       onFeature={onFeature && ((rr) => onFeature({ clientId: rr.client?.id ?? null, contact: rr.contact, name: rr.listing.name, city, state }))}
                       playbookTasks={(r.client && playbookTasksByClient?.get(r.client.id)) || []} onOpenPlaybook={onOpenPlaybook}
                       otherLists={(r.client && otherListsByClient?.get(r.client.id)) || []} onOpenProject={onOpenProject}
-                      highlighted={gdPlaceId != null && highlightedRowId === gdPlaceId} />
+                      highlighted={gdPlaceId != null && highlightedRowId === gdPlaceId}
+                      inviteLink={gdPlaceId != null ? inviteLinks[String(gdPlaceId)] : undefined}
+                      linkCopied={gdPlaceId != null && copiedLinkId === gdPlaceId}
+                      onCopyLink={gdPlaceId != null ? () => copyInviteLink(gdPlaceId) : undefined} />
                   );
                 })}
               </div>
@@ -1196,8 +1228,13 @@ export default function TerritoryDirectory({ city, state, contacts, clients, onA
   );
 }
 
-function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, inviteHistoryList, onSetClientStatus, canAdmin, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, otherLists, onOpenProject, highlighted }: {
+function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, inviteHistoryList, onSetClientStatus, canAdmin, ghlContactUrlFor, featured, canFeature, onFeature, playbookTasks, onOpenPlaybook, otherLists, onOpenProject, highlighted, inviteLink, linkCopied, onCopyLink }: {
   row: { listing: DirectoryListing; contact: Contact | null; client: Client | null };
+  /** This business's invite URL, once /api/planner/invite/links has resolved
+   *  it — undefined until then, or if the listing has no valid id. */
+  inviteLink?: string;
+  linkCopied?: boolean;
+  onCopyLink?: () => void;
   onAddContact: (c: Contact) => void;
   onOpenClient: (id: string) => void;
   // Grid column widths for this render — Category's width is computed by the
@@ -1292,6 +1329,17 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
             {(ghlUrl || listing.ghlUrl) && <a href={ghlUrl || listing.ghlUrl} target="_blank" rel="noopener noreferrer" title="Open in GoHighLevel" className="shrink-0 rounded p-0.5 text-muted hover:bg-surface hover:text-accent"><I.bolt /></a>}
             {listing.url && <a href={listing.url} target="_blank" rel="noopener noreferrer" title="View public listing page" className="shrink-0 rounded p-0.5 text-muted hover:bg-surface hover:text-accent"><I.link /></a>}
             {listing.editUrl && <a href={listing.editUrl} target="_blank" rel="noopener noreferrer" title="Edit business profile (WordPress admin)" className="shrink-0 rounded p-0.5 text-muted hover:bg-surface hover:text-accent"><I.pencil /></a>}
+            {/* Copy, not a link: opening the invite in your own browser would
+                register as the BUSINESS opening it and corrupt their funnel
+                step. Copying lets you paste it into a text, an email, or a
+                private window deliberately. */}
+            {inviteLink && onCopyLink && (
+              <button onClick={(e) => { e.stopPropagation(); onCopyLink(); }}
+                title="Copy this business's invite chat link"
+                className={`shrink-0 rounded p-0.5 hover:bg-surface ${linkCopied ? "text-success" : "text-muted hover:text-accent"}`}>
+                {linkCopied ? <I.check /> : <I.clipboard />}
+              </button>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 pl-5 text-[12px] text-muted">
             {invite && (
