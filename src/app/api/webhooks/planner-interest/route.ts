@@ -52,11 +52,20 @@ const formatAnswers = (answers: unknown): string =>
     .map(([k, v]) => `- ${JOIN_QUESTION_LABELS[k] ?? k}\n  ${String(v)}`)
     .join("\n");
 
-// One stable key for the join-chat intake comment, so a re-post replaces the
-// previous one instead of stacking another partial copy beside it. WordPress
-// re-sends the full accumulated answer set after EVERY answer, which is why
-// a single chat used to leave three comments and an empty fourth.
-const INTAKE_SOURCE_KEY = "join_intake";
+// Key for the join-chat intake comment, so a re-post replaces the previous
+// one instead of stacking another partial copy beside it. WordPress re-sends
+// the full accumulated answer set after EVERY answer, which is why a single
+// chat used to leave three comments and an empty fourth.
+//
+// Scoped BY DAY, not globally: a business can run the chat again on a later
+// visit, and WordPress starts that session's answers from scratch. A single
+// global key would let a thinner later session silently overwrite a richer
+// earlier one — real risk, not hypothetical: one business answered
+// offer/events/freeform (including a mobile number) on Aug 5, then came back
+// on Aug 6 and answered just "No". Same-day re-posts collapse (the actual
+// bug); a separate day keeps its own record.
+const intakeSourceKey = () =>
+  `join_intake:${new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date())}`;
 
 export async function POST(req: NextRequest) {
   if (!adminConfigured) return NextResponse.json({ error: "Not configured" }, { status: 501 });
@@ -186,10 +195,11 @@ export async function POST(req: NextRequest) {
   // REPLACES the running copy; one-shot events (interested/approved) keep
   // plain append semantics, since each is a distinct thing that happened.
   const carriesAnswers = event === "intake" || event === "info_submitted";
+  const sourceKey = intakeSourceKey();
   const newComment: Record<string, unknown> = {
     id: "cm_" + crypto.randomUUID(), authorId: SYSTEM_AUTHOR_ID, body: eventLine,
     at: new Date().toISOString(), kind: "event",
-    ...(carriesAnswers ? { sourceKey: INTAKE_SOURCE_KEY } : {}),
+    ...(carriesAnswers ? { sourceKey } : {}),
   };
   // A bare "intake" ping with nothing filled in yet says nothing a rep can
   // act on and used to post an empty-bodied comment ("Submitted intake
@@ -235,7 +245,7 @@ export async function POST(req: NextRequest) {
         // read-modify-write here would silently drop a rep's comment posted
         // in the same moment.
         if (carriesAnswers) {
-          await supabaseAdmin.rpc("upsert_source_comment", { task_id: taskId, comment: newComment, source_key: INTAKE_SOURCE_KEY });
+          await supabaseAdmin.rpc("upsert_source_comment", { task_id: taskId, comment: newComment, source_key: sourceKey });
         } else {
           await supabaseAdmin.rpc("append_comment", { task_id: taskId, comment: newComment });
         }
