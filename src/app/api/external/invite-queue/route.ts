@@ -74,7 +74,14 @@ export async function GET(req: NextRequest) {
     .filter((c) => isDue(c.lastAt, today))
     .sort((a, b) => (a.lastAt ?? "").localeCompare(b.lastAt ?? ""));
 
-  const remaining = Math.max(0, cap - sentToday.length);
+  // With automation paused (no cap) there is still a queue worth seeing and
+  // sending by hand — pausing the schedule is not the same as having nothing
+  // to send. Fall back to a display batch size so the lists populate, and say
+  // plainly that the schedule is off rather than rendering an empty card.
+  const DISPLAY_BATCH = 15;
+  const paused = cap <= 0;
+  const effectiveCap = paused ? DISPLAY_BATCH : cap;
+  const remaining = Math.max(0, effectiveCap - sentToday.length);
   const shape = (c: (typeof candidates)[number]) => ({
     gdPlaceId: c.gdPlaceId,
     name: c.l.name,
@@ -88,12 +95,17 @@ export async function GET(req: NextRequest) {
   // "who is next in line right now" — labelled as such on the WordPress side
   // rather than presented as a schedule.
   const todayQueue = candidates.slice(0, remaining).map(shape);
-  const tomorrowQueue = cap > 0 ? candidates.slice(remaining, remaining + cap).map(shape) : [];
+  const tomorrowQueue = candidates.slice(remaining, remaining + effectiveCap).map(shape);
 
   return NextResponse.json({
     ok: true,
     city: terr.city,
     cap,
+    // The batch size actually used for the lists below, and whether the daily
+    // schedule is switched off. The card shows the queue either way; only the
+    // wording and the presence of a manual send change.
+    batchSize: effectiveCap,
+    paused,
     rotationWindowDays: ROTATION_WINDOW_DAYS,
     sentToday,
     remainingToday: remaining,
