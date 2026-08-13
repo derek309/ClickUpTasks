@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/serverAuth";
+import { verifyClickUpTasksKey } from "@/lib/verifyBridgeKey";
 
 // The Content Planner's AI co-pilot — rebuilt on ClickUpTasks' own Gemini
 // integration (same pattern as draft-message/draft-description) rather than
@@ -42,7 +43,16 @@ function parseJsonBlock(text: string): ParsedPayload | null {
 }
 
 export async function POST(req: NextRequest) {
-  const caller = await requireUser(req);
+  // A signed-in user OR the WordPress bridge. The WordPress planner runs the
+  // same Find events / Find the story / Get weather flows, and the alternative
+  // was a second copy of every prompt and parser living in PHP — which would
+  // drift the moment either side was tuned, and give the two planners quietly
+  // different suggestions from the same button.
+  //
+  // The bridge key is a server-held secret at the same trust level as the
+  // other cul/v1 bridge routes, and this endpoint only reads: it searches and
+  // returns suggestions, it writes nothing.
+  const caller = (await requireUser(req)) || (verifyClickUpTasksKey(req) ? "wordpress-bridge" : null);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const apiKey = process.env.GEMINI_API_KEY;
