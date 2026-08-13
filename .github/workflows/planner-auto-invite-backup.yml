@@ -11,14 +11,21 @@ name: Planner auto-invite backup trigger
 # tracks how many invites already went out today per territory and stops at
 # the daily cap, so a redundant call is just a fast no-op, never a
 # double-send.
+# DISABLED 2026-08-13. Territories are switched off in the app
+# (src/lib/features.ts, TERRITORIES_ENABLED) while that work moves to
+# GoHighLevel, so there is nothing for this to back up — it would keep sending
+# invites for a surface nobody can see, and keep emailing a failure every
+# weekday. The schedule is commented rather than deleted so re-enabling it is
+# uncommenting three lines, alongside flipping the flag and restoring the
+# vercel.json cron.
 on:
-  schedule:
+  # schedule:
     # 16:20 UTC = 9:20am Pacific during PDT (summer). Pacific shifts to PST
     # in winter, at which point this (like the primary Vercel cron, also
     # hardcoded in UTC) drifts an hour off 9am local — a pre-existing
     # limitation shared with vercel.json's own schedules, not something this
     # workflow introduces.
-    - cron: "20 16 * * 1-5"
+    #   - cron: "20 16 * * 1-5"
   workflow_dispatch: {}
 
 jobs:

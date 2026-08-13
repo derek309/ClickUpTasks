@@ -16,6 +16,7 @@
 import { useState } from "react";
 import { type Me, type Client, type Contact, type Territory, type TaskTemplate, type Playbook, type PlaybookTask, type Project } from "@/lib/data";
 import { I } from "./cockpit/ui";
+import { TERRITORIES_ENABLED } from "@/lib/features";
 import SettingsPanel from "./SettingsPanel";
 import TeamPanel from "./TeamPanel";
 import TerritoryPanel from "./TerritoryPanel";
@@ -91,7 +92,7 @@ export default function SettingsHub({
   const tabs: { key: TabKey; label: string; icon: keyof typeof I; visible: boolean }[] = [
     { key: "integrations", label: "Integrations", icon: "gear", visible: canAdmin },
     { key: "team", label: "Team", icon: "user", visible: canAdmin },
-    { key: "territories", label: "Territories", icon: "flag", visible: hasTerritoryAccess },
+    { key: "territories", label: "Territories", icon: "flag", visible: hasTerritoryAccess && TERRITORIES_ENABLED },
     { key: "templates", label: "Task templates", icon: "clipboard", visible: canAdmin },
     { key: "playbooks", label: "Playbooks", icon: "bookmark", visible: canAdmin },
     { key: "tokens", label: "API tokens", icon: "key", visible: true },

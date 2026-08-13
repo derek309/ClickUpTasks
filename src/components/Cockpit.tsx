@@ -98,6 +98,7 @@ import TeamChat from "./TeamChat";
 import AddClientModal from "./AddClientModal";
 import TerritoryPanel from "./TerritoryPanel";
 import { TerritoryDashboard } from "./TerritoryDashboard";
+import { TERRITORIES_ENABLED } from "@/lib/features";
 import { PlannerPanel } from "./cockpit/PlannerPanel";
 
 
@@ -4379,7 +4380,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
         {/* Territories — cities (city+state) assigned to you; an admin sees all.
             Click a city to work its contacts (claimed vs unclaimed). */}
-        {visibleTerritories.length > 0 && (
+        {TERRITORIES_ENABLED && visibleTerritories.length > 0 && (
           <nav className="mt-[10px] shrink-0 space-y-0.5 border-t px-2 pt-[10px]">
             <div className="flex items-center justify-between px-2.5 pb-1">
               <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Territories</span>
@@ -4398,9 +4399,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             ))}
           </nav>
         )}
-        {canAdmin && visibleTerritories.length === 0 && (
+        {TERRITORIES_ENABLED && canAdmin && visibleTerritories.length === 0 && (
           <nav className="mt-[10px] shrink-0 border-t px-2 pt-[10px]">
             <SideItem active={territoryView === "all"} onClick={() => openTerritory("all")}><I.flag className="text-muted" /> <span>Territories</span></SideItem>
+          </nav>
+        )}
+        {/* Follow Up outlives Territories. It lives in the block above for
+            historical reasons only — it is task-driven, not city-driven, and is
+            worked every day — so with territories switched off it gets its own
+            entry rather than disappearing along with the city list. */}
+        {!TERRITORIES_ENABLED && (
+          <nav className="mt-[10px] shrink-0 border-t px-2 pt-[10px]">
+            <SideItem active={territoryView === "dashboard"} title="Follow Up" onClick={openTerritoryDashboard}><I.grid className="text-muted" /> <span>Follow Up</span></SideItem>
           </nav>
         )}
 
