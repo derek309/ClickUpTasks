@@ -9,8 +9,16 @@ import { NextRequest } from "next/server";
 import { timingSafeEqual } from "crypto";
 
 export function verifyClickUpTasksKey(req: NextRequest): boolean {
-  const expected = process.env.CLICKUPTASKS_API_KEY || "";
-  const sent = req.headers.get("x-clickuptasks-key") || "";
+  // Both sides trimmed. An env var set through a shell (`echo` into `vercel
+  // env add`) carries a trailing newline that is invisible everywhere except
+  // a byte comparison, and HTTP strips trailing whitespace from header values
+  // in transit. That asymmetry made the bridge work in one direction and fail
+  // in the other on 2026-08-12: WordPress matched the clean header against its
+  // own clean wp-config value, while this side compared an env copy one byte
+  // longer and bailed on the length guard below, reporting a key mismatch for
+  // two values that are in fact the same secret.
+  const expected = (process.env.CLICKUPTASKS_API_KEY || "").trim();
+  const sent = (req.headers.get("x-clickuptasks-key") || "").trim();
   if (!expected || !sent) return false;
   const a = Buffer.from(expected);
   const b = Buffer.from(sent);
