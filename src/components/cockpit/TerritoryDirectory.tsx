@@ -124,9 +124,12 @@ const isDragClick = (down: { x: number; y: number } | null, e: { clientX: number
 // is the Businesses page's whole reason for being: see where everyone
 // actually is, and get everyone to Active Client.
 //   Unclaimed — never invited, or the invite was skipped
-//   Invited   — invited, hasn't opened it yet
-//   Opened    — opened the invite, hasn't clicked into the chat
-//   Clicked   — clicked into the interview chat, hasn't finished the questions
+//   Invited   — invited, hasn't done anything in the chat yet. Email opens and
+//               clicks do NOT move a business out of here: most of them are
+//               scanners, not people (see businessStage.ts for the numbers).
+//   Confirmed — pressed the confirm-your-info button, the first thing in the
+//               chat only a human can do
+//   Answering — working through the interview questions
 //   Completed — answered the interview questions, hasn't booked a call
 //   Booked    — booked a call
 //   Claimed   — claimed the listing, but not yet moved past Lead/Prospect
@@ -141,12 +144,12 @@ import { computeBusinessStage, type BusinessStage } from "@/lib/businessStage";
 export { computeBusinessStage };
 export type { BusinessStage };
 
-export const STAGE_ORDER: BusinessStage[] = ["unclaimed", "invited", "opened", "clicked", "completed", "booked", "claimed", "interview", "onboarding", "active_client", "nurture", "cancelled", "past_client"];
+export const STAGE_ORDER: BusinessStage[] = ["unclaimed", "invited", "info_confirmed", "answering", "completed", "booked", "claimed", "interview", "onboarding", "active_client", "nurture", "cancelled", "past_client"];
 export const STAGE_META: Record<BusinessStage, { label: string; color: string; hint: string }> = {
   unclaimed: { label: "Really unclaimed", color: "#f59e0b", hint: "never invited, or the invite was skipped — a prospect to invite or call" },
-  invited: { label: "Invited", color: "#0ea5e9", hint: "invited to claim their free marketing package, hasn't opened it yet" },
-  opened: { label: "Opened", color: "#0891b2", hint: "opened the invite but hasn't clicked into the chat yet — worth a call or a visit" },
-  clicked: { label: "Clicked", color: "#2563eb", hint: "clicked into the interview chat but hasn't finished it — a nudge might close it" },
+  invited: { label: "Invited", color: "#0ea5e9", hint: "invited to claim their free marketing package, hasn't touched the chat yet — an email open or click on its own does not count, most of those are scanners" },
+  info_confirmed: { label: "Confirmed their info", color: "#0891b2", hint: "pressed the confirm-your-info button in the chat, so a real person is on the other end — hasn't started the questions yet" },
+  answering: { label: "Answering questions", color: "#2563eb", hint: "working through the interview questions but hasn't finished — a nudge might close it" },
   completed: { label: "Completed, not booked", color: "#059669", hint: "answered the interview questions but hasn't booked a call yet — the hottest lead that hasn't claimed" },
   booked: { label: "Booked", color: "#7c3aed", hint: "booked a call — get them to the finish line" },
   claimed: { label: CLIENT_STATUS_META.claimed.label, color: "#10b981", hint: "claimed their listing — work the Playbook with them" },
@@ -1332,12 +1335,26 @@ function ListingRow({ row, onAddContact, onOpenClient, template, stage, invite, 
                 </span>
               )
             )}
-            {invite && invite.status !== "accepted" && (invite.clickedAt || invite.openedAt) && (
-              <span title={invite.clickedAt ? `Clicked the invite link ${formatDue(invite.clickedAt)}` : `Opened the invite email ${formatDue(invite.openedAt!)}`}
-                className="rounded bg-cyan-100 px-1.5 py-0.5 font-medium text-cyan-700">
-                {invite.clickedAt ? "🖱️ Clicked" : "👀 Opened"}
-              </span>
-            )}
+            {invite && invite.status !== "accepted" && (invite.clickedAt || invite.openedAt) && (() => {
+              // An open and a click stamped within the same second is a machine
+              // reading the email, not a person: one scanner pass fetches the
+              // tracking pixel and every wrapped link together. Measured across
+              // Lincoln and Tracy, that pattern was 17 of 29 recorded clicks.
+              // Still shown, because the timestamps are real and hiding them
+              // would just move the confusion — but shown for what it is, so a
+              // scanner never looks like a warm lead worth calling.
+              const t = (s?: string | null) => (s ? new Date(s).getTime() : null);
+              const [o, c] = [t(invite.openedAt), t(invite.clickedAt)];
+              const machine = o !== null && c !== null && Math.abs(c - o) < 1000;
+              return (
+                <span title={machine
+                  ? `Opened and clicked in the same second (${formatDue(invite.clickedAt!)}) — almost certainly an email scanner, not the business`
+                  : invite.clickedAt ? `Clicked the invite link ${formatDue(invite.clickedAt)}` : `Opened the invite email ${formatDue(invite.openedAt!)}`}
+                  className={`rounded px-1.5 py-0.5 font-medium ${machine ? "bg-background text-muted" : "bg-cyan-100 text-cyan-700"}`}>
+                  {machine ? "🤖 Likely a scanner" : invite.clickedAt ? "🖱️ Clicked" : "👀 Opened"}
+                </span>
+              );
+            })()}
             {listing.rep && <span>· {listing.rep}</span>}
           </div>
           {historyOpen && inviteHistoryList.length > 1 && (

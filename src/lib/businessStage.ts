@@ -13,7 +13,7 @@
 import type { Client } from "./data";
 
 export type BusinessStage =
-  | "unclaimed" | "invited" | "opened" | "clicked" | "completed" | "booked"
+  | "unclaimed" | "invited" | "info_confirmed" | "answering" | "completed" | "booked"
   | "claimed" | "interview" | "onboarding" | "active_client" | "nurture"
   | "cancelled" | "past_client";
 
@@ -40,18 +40,37 @@ export function computeBusinessStage(
   // gated on this same computed stage, becomes visible to fix it by hand too.
   if (client && client.status !== "claimed") return client.status as BusinessStage;
   if (!listing.claimed) {
-    // The join-chat funnel is the stronger, more specific signal once a
-    // business is actually in the chat — WordPress's own step tracking, not
-    // the older invite-email open/click fields — so it wins whenever present.
+    // Only the join-chat funnel advances a business past "invited", and every
+    // one of its steps is a real button press inside the chat. Email opens and
+    // clicks deliberately do NOT, even though we still have those timestamps.
+    //
+    // Why (measured 2026-08-12, Lincoln + Tracy, 113 invites / 29 recorded
+    // clicks): 17 of those clicks carry an open and a click stamped in the
+    // SAME second, 3 more landed within 12 seconds of send, and 6 recorded a
+    // click with no open at all — the signature of security scanners and link
+    // preview crawlers fetching every URL in the email, not of people. Two
+    // clicks in the whole set had human-looking timing. WordPress already
+    // learned this the hard way and moved its own interest write off page
+    // load onto the first real click (sales-outreach.php:882, "a scanner
+    // looked exactly like a real business saying yes") — this is the same
+    // correction applied to the stage a rep actually works from, since a bot
+    // scan promoting a business into the funnel is worse than showing nothing:
+    // it puts a cold prospect at the top of the list dressed as a warm one.
+    //
+    // The raw open/click timestamps are still shown on the row, marked as
+    // unreliable, so nothing is hidden — it just no longer moves the funnel.
+    //
     // "accepted" (the older direct-intake path, still live for businesses
     // that never went through the new chat) counts the same as finishing the
     // funnel's questions: both mean "answered, hasn't booked."
     if (funnelStep?.step === "booked") return "booked";
     if (funnelStep && (funnelStep.step === "questions_done" || funnelStep.step === "slots_shown" || funnelStep.step === "contact_started")) return "completed";
     if (invite?.status === "accepted") return "completed";
-    if (funnelStep) return "clicked"; // opened/info_confirmed/questions_started — in the chat, hasn't finished
-    if (invite?.clickedAt) return "clicked";
-    if (invite?.openedAt) return "opened";
+    if (funnelStep?.step === "questions_started") return "answering";
+    // WP stamps "opened" on the confirm-your-info button press, not on page
+    // load, so reaching it means they really did confirm (or correct) their
+    // details — see cul_sales_join_mark_step's caller in the /sales/join route.
+    if (funnelStep) return "info_confirmed";
     return invite && invite.status !== "skipped" ? "invited" : "unclaimed";
   }
   if (!client) return "claimed";
