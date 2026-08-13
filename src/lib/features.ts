@@ -13,12 +13,22 @@
 // GoHighLevel. Turning this back on restores the sidebar city list and the
 // Settings tab exactly as they were; nothing is destroyed while it is off.
 //
-// Note that Follow Up is deliberately NOT behind this switch. It sits inside
-// the Territories nav block for historical reasons but is task-driven, not
-// city-driven, and is used daily, so it is rendered on its own while
-// territories are off.
+// Follow Up goes with it — see the note below.
 //
 // The planner-auto-invite cron is disabled alongside this, in vercel.json and
 // in .github/workflows/planner-auto-invite-backup.yml. Leaving them running
 // would keep sending invites for a surface nobody can see.
 export const TERRITORIES_ENABLED = false;
+
+// Follow Up went with it on 2026-08-13. It was held back for one deploy on the
+// assumption it was still worked daily; it is not. Sales, the Playbook and
+// follow-up are all moving to GoHighLevel, so ClickUpTasks stops being where
+// that work is managed.
+//
+// The Playbook itself is NOT unpicked here. It is woven through Clients (the
+// per-client Playbook project, its tasks, the completion badges), and Clients
+// is still used daily, so tearing it out would risk the surface that still
+// matters. What IS switched off is the machinery that runs on its own: the
+// playbook-checkins cron, which created stall check-in tasks and reconciled new
+// Playbook rows for every client without anyone asking. That is also a real
+// contributor to the tasks table being 28k rows.

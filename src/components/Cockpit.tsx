@@ -4404,15 +4404,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <SideItem active={territoryView === "all"} onClick={() => openTerritory("all")}><I.flag className="text-muted" /> <span>Territories</span></SideItem>
           </nav>
         )}
-        {/* Follow Up outlives Territories. It lives in the block above for
-            historical reasons only — it is task-driven, not city-driven, and is
-            worked every day — so with territories switched off it gets its own
-            entry rather than disappearing along with the city list. */}
-        {!TERRITORIES_ENABLED && (
-          <nav className="mt-[10px] shrink-0 border-t px-2 pt-[10px]">
-            <SideItem active={territoryView === "dashboard"} title="Follow Up" onClick={openTerritoryDashboard}><I.grid className="text-muted" /> <span>Follow Up</span></SideItem>
-          </nav>
-        )}
+        {/* Follow Up is gone with Territories. It was kept out on its own for
+            one deploy on the assumption it was still worked daily; it is not —
+            follow-up moves to GoHighLevel along with sales and the Playbook. */}
 
       </aside>
 

@@ -13,10 +13,6 @@
       "schedule": "0 16 * * *"
     },
     {
-      "path": "/api/cron/playbook-checkins",
-      "schedule": "0 15 * * *"
-    },
-    {
       "path": "/api/cron/newsletter-reminder",
       "schedule": "30 13 * * *"
     }
