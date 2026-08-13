@@ -3,7 +3,10 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { fetchDirectoryListingsServer } from "@/lib/directoryListingsServer";
 import { fetchJoinFunnelServer } from "@/lib/joinFunnelServer";
 import { rowToClient, rowToPlannerWeek } from "@/lib/db";
-import { computeBusinessStage } from "@/components/cockpit/TerritoryDirectory";
+// Straight from lib, NOT via TerritoryDirectory's re-export — routing the
+// import through a "use client" module keeps it on the client side of the
+// boundary and Next still refuses to call it here.
+import { computeBusinessStage } from "@/lib/businessStage";
 import type { Client } from "@/lib/data";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
