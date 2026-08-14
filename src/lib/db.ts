@@ -183,6 +183,39 @@ export async function seedIfEmpty(): Promise<void> {
 // headed the same way once every ClickUpLocal client is migrated in), that
 // silently hid ~2,500 contacts from search/add entirely. Pages through with
 // .range() until a page comes back short.
+// One shared ceiling on how many row-fetches are in the air at once, across
+// every table, not per table.
+//
+// Firing every page at once looked like the fast option and became the reason
+// the app stopped loading on 2026-08-13: a single page of tasks runs in about
+// 280ms, but fetchAll pages 18 tables concurrently and tasks alone was 29
+// pages, so ~45 requests landed together, starved each other, and each one
+// then blew the statement timeout. Postgres was never slow; it was being
+// asked 45 things at the same instant. A per-table limit would not have fixed
+// that, because the fan-out is across tables too.
+//
+// Six is chosen to keep the wall clock close to the unbounded version (29
+// pages over 6 lanes is about 1.4s) while never presenting the database with
+// a burst it has to fight itself over.
+const MAX_INFLIGHT_ROW_FETCHES = 6;
+let inFlight = 0;
+const waiting: (() => void)[] = [];
+function withSlot<T>(run: () => PromiseLike<T>): Promise<T> {
+  const start = async (): Promise<T> => {
+    inFlight++;
+    try {
+      return await run();
+    } finally {
+      inFlight--;
+      // Hand the slot to the next waiter rather than letting everyone wake at
+      // once, which would just recreate the stampede one step later.
+      waiting.shift()?.();
+    }
+  };
+  if (inFlight < MAX_INFLIGHT_ROW_FETCHES) return start();
+  return new Promise<void>((resolve) => waiting.push(resolve)).then(start);
+}
+
 async function fetchAllRows(table: string, orderCol?: string, ascending = true) {
   const PAGE_SIZE = 1000;
   // Paging without a deterministic total order is how you silently drop or
@@ -199,12 +232,15 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true) 
   // request at a time, sequentially — 29+ round trips end to end just to
   // page through it, easily tens of seconds before the app's very first
   // paint, and it only gets worse as the table grows. Ask for an exact count
-  // first (cheap: head:true returns no rows, just the number), then fire
-  // every page that count says we need in parallel instead of one at a time.
-  const { count, error: countError } = await supabase.from(table).select("*", { count: "exact", head: true });
+  // first (cheap: head:true returns no rows, just the number), then fetch the
+  // pages that count says we need concurrently, but through the shared slot
+  // limiter above rather than all at once.
+  const { count, error: countError } = await withSlot(() =>
+    supabase.from(table).select("*", { count: "exact", head: true }));
   if (countError) return { data: null as any[] | null, error: countError };
   const knownPages = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
-  const firstResults = await Promise.all(Array.from({ length: knownPages }, (_, i) => fetchPage(i * PAGE_SIZE)));
+  const firstResults = await Promise.all(
+    Array.from({ length: knownPages }, (_, i) => withSlot(() => fetchPage(i * PAGE_SIZE))));
   for (const r of firstResults) if (r.error) return { data: null as any[] | null, error: r.error };
   const all: any[] = firstResults.flatMap((r) => r.data ?? []);
   // Safety tail: the count above can go stale if rows were inserted between
@@ -217,7 +253,7 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true) 
   let lastPageLen = firstResults[firstResults.length - 1]?.data?.length ?? 0;
   let from = knownPages * PAGE_SIZE;
   while (lastPageLen === PAGE_SIZE) {
-    const { data, error } = await fetchPage(from);
+    const { data, error } = await withSlot(() => fetchPage(from));
     if (error) return { data: null as any[] | null, error };
     all.push(...(data ?? []));
     lastPageLen = data?.length ?? 0;
