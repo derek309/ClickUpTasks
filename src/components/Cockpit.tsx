@@ -1672,6 +1672,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [scopedTasks, clients, me.id]
   );
+  // Memoized for the same reason — the sidebar's "My Work" nav badge
+  // (below) calls this inline on every render of every view, including
+  // Team Chat, which is what made typing/sending there feel laggy even
+  // after the myWorkGroups and sidebar-client-list fixes.
+  const myAssignedProjects = useMemo(
+    () => assignedProjectsFor(me.id),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [scopedTasks, projects, me.id]
+  );
   // Ambassador OR follower — this drives what shows up to LOOK at (sidebar,
   // Settings → Territories, the Territory Dashboard's own "which cities do I
   // pull from" scan). It deliberately does NOT gate which cities put
@@ -1994,10 +2003,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Review tier, in the same order My Work shows them. Drives the header
   // "Review next" button so you can click through them one at a time (the
   // interaction Derek wanted — open each, decide, advance) instead of hunting.
-  const reviewQueue: { kind: "client" | "project"; id: string }[] = [
-    ...assignedClientsFor(me.id).filter((c) => clientNeedsReview(c.id, me.id)).map((c) => ({ kind: "client" as const, id: c.id })),
-    ...assignedProjectsFor(me.id).filter((p) => projectNeedsReview(p.id, me.id)).map((p) => ({ kind: "project" as const, id: p.id })),
-  ];
+  // Memoized — reuses myAssignedClients/myAssignedProjects instead of
+  // recalling assignedClientsFor/assignedProjectsFor from scratch, and only
+  // reruns the clientNeedsReview/projectNeedsReview scan when the underlying
+  // data changes rather than on every render.
+  const reviewQueue: { kind: "client" | "project"; id: string }[] = useMemo(() => [
+    ...myAssignedClients.filter((c) => clientNeedsReview(c.id, me.id)).map((c) => ({ kind: "client" as const, id: c.id })),
+    ...myAssignedProjects.filter((p) => projectNeedsReview(p.id, me.id)).map((p) => ({ kind: "project" as const, id: p.id })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [myAssignedClients, myAssignedProjects, scopedTasks, clients, projects, me.id]);
   const goToNextReview = (afterClientId: string, afterProjectId: string | null) => {
     const curIdx = reviewQueue.findIndex((r) => (afterProjectId ? r.kind === "project" && r.id === afterProjectId : r.kind === "client" && r.id === afterClientId));
     // Wrap around so the last item's "next" loops back to the first still-
@@ -4353,7 +4367,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             want to chat with someone specifically they can use the @") but
             not deleted, just admin-toggled off by default. */}
         <nav className="shrink-0 space-y-0.5 px-2">
-          {navVisible.work && <SideItem active={myWork} title="My Work (press 1)" onClick={() => goToView("dashboard")}><I.grid className="text-muted" /> <span>My Work</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + assignedProjectsFor(me.id).length}</span></SideItem>}
+          {navVisible.work && <SideItem active={myWork} title="My Work (press 1)" onClick={() => goToView("dashboard")}><I.grid className="text-muted" /> <span>My Work</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + myAssignedProjects.length}</span></SideItem>}
           {/* "Client replies" nav item removed (Derek, 2026-08-09) — My Work
               and Follow Up already surface an open conversation-priority
               task each their own way (hasOpenConversationTask / Follow Up's
