@@ -356,7 +356,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // tab and clear the unread dot. Used by both the sidebar item and the
   // header shortcut so there's exactly one home for it.
   const openTeamChat = () => goToView("teamchat");
-  const teamChatUnread = teamMessages.some((m) => m.authorId !== me.id && m.at > teamChatLastRead);
+  // Memoized — .some over teamMessages every render, and it also sits in a
+  // useEffect's dependency array below, so an unstable value here re-ran
+  // that effect on every render too.
+  const teamChatUnread = useMemo(
+    () => teamMessages.some((m) => m.authorId !== me.id && m.at > teamChatLastRead),
+    [teamMessages, me.id, teamChatLastRead]
+  );
   // Chat is always on screen now (the whole Conversations page is Chat, full
   // width), so this fires any time you're on that page at all. Messages
   // arriving while you're already there are already read — without this the
@@ -1606,7 +1612,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks, clients, projects, canAdmin]);
   // Sub-accounts (Agency/Directory) are the contact source; clients (cl_*) are contacts you've added.
-  const subAccounts = clients.filter((c) => !c.id.startsWith("cl_"));
+  const subAccounts = useMemo(() => clients.filter((c) => !c.id.startsWith("cl_")), [clients]);
   // Only type 'client' gets sidebar/⌘K/task presence — prospects/past
   // clients/vendors are classified contacts you can message, reached via the
   // Contacts tab and Conversations, not full clients with projects/tasks.
@@ -1616,7 +1622,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // TERRITORY_CLIENT_PREFIX containers are per-city work buckets, excluded the
   // same way WORKSPACE_CLIENT_ID is — reached from the city's Work tab, not
   // from the client roster.
-  const clientList = clients.filter((c) => c.id.startsWith("cl_") && c.type === "client" && c.id !== WORKSPACE_CLIENT_ID && !c.id.startsWith(TERRITORY_CLIENT_PREFIX));
+  const clientList = useMemo(
+    () => clients.filter((c) => c.id.startsWith("cl_") && c.type === "client" && c.id !== WORKSPACE_CLIENT_ID && !c.id.startsWith(TERRITORY_CLIENT_PREFIX)),
+    [clients]
+  );
   // Everything you can hang work on: real clients PLUS territory prospects
   // (directory businesses the territory auto-tracks, which are deliberately
   // kept out of clientList above so a city's few hundred businesses don't
@@ -1626,8 +1635,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // falls out of My Work / ⌘K / the move-task pickers.
   // Territory containers ARE included here — city work is work: you can
   // ⌘K to a city, quick-add against it, and move a task into it.
-  const workableClients = clients.filter((c) => c.id.startsWith("cl_") && c.id !== WORKSPACE_CLIENT_ID && (c.type === "client" || c.type === "prospect"));
-  const workspaceProjects = clients.some((c) => c.id === WORKSPACE_CLIENT_ID) ? projects.filter((p) => p.clientId === WORKSPACE_CLIENT_ID) : [];
+  const workableClients = useMemo(
+    () => clients.filter((c) => c.id.startsWith("cl_") && c.id !== WORKSPACE_CLIENT_ID && (c.type === "client" || c.type === "prospect")),
+    [clients]
+  );
+  const workspaceProjects = useMemo(
+    () => (clients.some((c) => c.id === WORKSPACE_CLIENT_ID) ? projects.filter((p) => p.clientId === WORKSPACE_CLIENT_ID) : []),
+    [clients, projects]
+  );
   // Mirrors the RLS rule in supabase/client-assignment.sql: a VA sees a
   // client if they have a task on it OR they're explicitly following it —
   // this is a display-layer echo of that DB rule, not the enforcement of it.
@@ -1749,7 +1764,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const territoryForClientId = (cid: string) => territories.find((t) => territoryClientId(t.id) === cid) ?? null;
   // ⌘K's "Not imported" search — any type counts as "already added" here,
   // not just type 'client', so a contact never shows as addable twice.
-  const addedContactIds = new Set(clients.filter((c) => c.id.startsWith("cl_")).map((c) => c.id.slice(3)));
+  const addedContactIds = useMemo(() => new Set(clients.filter((c) => c.id.startsWith("cl_")).map((c) => c.id.slice(3))), [clients]);
   // The sidebar stays a *roster* view in both scopes: territory prospects are
   // filtered back out here even though myAssignedClients now includes them.
   // A prospect you have a task on shows up on the My Work board and in ⌘K,
@@ -2080,7 +2095,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // specific project IS selected, the existing t.projectId === activeProject
   // check already scopes correctly (only matches when that project happens
   // to be the Playbook one), so this only needs to guard the unscoped case.
-  const baseTasks = scopedTasks.filter((t) => t.clientId.startsWith("cl_") && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject) && (!activeFolder || projectById(t.projectId)?.folderId === activeFolder) && (activeClient !== "all" || allTasksScope === "all" || t.assigneeId === me.id) && (!t.playbookStepKey || !!activeProject));
+  // Memoized — the main task list's hot path. With activeFolder set this
+  // was O(scopedTasks × projects) every render (projectById is a linear
+  // scan), and it feeds displayedGroups/vaultItems/Journal counts below.
+  const baseTasks = useMemo(
+    () => scopedTasks.filter((t) => t.clientId.startsWith("cl_") && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject) && (!activeFolder || projectById(t.projectId)?.folderId === activeFolder) && (activeClient !== "all" || allTasksScope === "all" || t.assigneeId === me.id) && (!t.playbookStepKey || !!activeProject)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [scopedTasks, activeClient, activeProject, activeFolder, projects, allTasksScope, me.id]
+  );
 
   // Client/project-wide equivalent of TaskDrawer's per-task copyForClaude —
   // same clipboard hand-off pattern, just widened from one task to every
@@ -2239,7 +2261,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // react-hooks/preserve-manual-memoization (it can't see that the arrays
   // being pushed into are freshly built here, not scopedTasks itself), and a
   // single pass over a few thousand tasks per render is not worth the fight.
-  const territoryTasksByClient = (() => {
+  // Memoized — a single pass over scopedTasks (up to ~28k rows), previously
+  // rerun on every render regardless of view, same class of bug as the
+  // sidebar/My Work fixes above.
+  const territoryTasksByClient = useMemo(() => {
     const m = new Map<string, Task[]>();
     for (const t of scopedTasks) {
       if (t.status === "done") continue;
@@ -2247,13 +2272,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       if (list) list.push(t); else m.set(t.clientId, [t]);
     }
     return m;
-  })();
+  }, [scopedTasks]);
   const territoryOpenWorkCount = (territoryId: string) => clientTaskCount(territoryClientId(territoryId));
   // A business's own tasks, ANY status, excluding Playbook/Sales checklist
   // steps (those get their own dedicated pill) — feeds the Businesses page's
   // "needs attention now" scan (a conversation-priority task can be open
   // regardless of which list it's in).
-  const territoryAllTasksByClient = (() => {
+  // Memoized — same one-pass-over-scopedTasks shape as territoryTasksByClient.
+  const territoryAllTasksByClient = useMemo(() => {
     const m = new Map<string, Task[]>();
     for (const t of scopedTasks) {
       if (t.playbookStepKey) continue;
@@ -2261,14 +2287,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       if (list) list.push(t); else m.set(t.clientId, [t]);
     }
     return m;
-  })();
+  }, [scopedTasks]);
   // A business's own lists (projects) OTHER than Playbook, each with
   // its own done/total count — the Businesses page shows one pill per list
   // (not one aggregated count) so an ambassador can jump straight into
   // whichever list actually has the open work, same click-through as the
   // Playbook pill. Empty lists (no tasks yet) show no pill — nothing
   // to jump to.
-  const territoryOtherListsByClient = (() => {
+  // Memoized — one pass over scopedTasks plus one over projects.
+  const territoryOtherListsByClient = useMemo(() => {
     const tasksByProject = new Map<string, Task[]>();
     for (const t of scopedTasks) {
       if (t.playbookStepKey) continue;
@@ -2285,7 +2312,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       if (list) list.push(entry); else m.set(p.clientId, [entry]);
     }
     return m;
-  })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopedTasks, projects]);
   // Same idea as openClientPlaybook/openClientSales, for a business's other
   // (non-checklist) lists — no reconciliation needed, it's already a real list.
   const onOpenProject = (clientId: string, projectId: string) => {
@@ -2294,7 +2322,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Owner Growth Plan tasks, bucketed by client — same one-pass-not-memoized
   // shape as territoryTasksByClient above, but WITHOUT the status==="done"
   // exclusion (playbookCompletion needs to see done steps too, to count them).
-  const playbookTasksByClient = (() => {
+  // Memoized — one pass over the full unfiltered tasks table (~28k rows).
+  const playbookTasksByClient = useMemo(() => {
     const m = new Map<string, Task[]>();
     for (const t of tasks) {
       if (!t.playbookStepKey) continue;
@@ -2302,7 +2331,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       if (list) list.push(t); else m.set(t.clientId, [t]);
     }
     return m;
-  })();
+  }, [tasks]);
   // Owner Growth Plan — every client's Playbook is the SAME fixed catalog
   // (PLAYBOOK_STEPS), never a per-client copy. This is the one place that
   // keeps a client's real Task rows in sync with whatever the catalog
@@ -2432,9 +2461,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Not gated by myWorkUser (the admin-only "viewing work for" selector) —
   // RLS never even returns another person's private tasks in `tasks`, so
   // filtering by `me.id` here is correct regardless of who's being viewed.
-  const myPersonalTasks = sortTasks(tasks.filter((t) => t.assigneeId === me.id && t.private));
+  // Memoized — filters + sorts the full ~28k-row tasks table every render.
+  const myPersonalTasks = useMemo(
+    () => sortTasks(tasks.filter((t) => t.assigneeId === me.id && t.private)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tasks, me.id, sortBy, sortDir, notifications]
+  );
 
-  const openTask = tasks.find((t) => t.id === openTaskId) ?? null;
+  // Memoized — a linear scan of the full tasks table every render, even
+  // when no task is open.
+  const openTask = useMemo(() => tasks.find((t) => t.id === openTaskId) ?? null, [tasks, openTaskId]);
   // Opening an Interaction task auto-pulls any reply sent directly in GHL's
   // own UI (not through this app) — the whole point being nobody wastes time
   // re-replying to something a teammate already answered elsewhere. Scoped
@@ -2534,8 +2570,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // myWork (the merged My Work board) has no entry here — it's a client/
   // project board, not a flat task list, so j/k prev/next task navigation
   // doesn't apply to it, same as it never applied to the old My Clients tab.
-  const displayedGroups = personalView ? buildGroups(myPersonalTasks, "due").filter((g) => g.tasks.length > 0) : buildGroups(sortTasks(baseTasks.filter(passesFilters)));
-  const orderedTaskIds = displayedGroups.flatMap((g) => g.tasks.map((t) => t.id));
+  // Memoized — buildGroups does an O(list × visibleProjects) pass in the
+  // project-grouped case and several full scans of baseTasks otherwise, all
+  // previously rerun on every render regardless of view.
+  const displayedGroups = useMemo(
+    () => (personalView ? buildGroups(myPersonalTasks, "due").filter((g) => g.tasks.length > 0) : buildGroups(sortTasks(baseTasks.filter(passesFilters)))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [personalView, myPersonalTasks, groupBy, visibleProjects, clients, baseTasks, filters, hideDone, notifications, me.id, sortBy, sortDir]
+  );
+  const orderedTaskIds = useMemo(() => displayedGroups.flatMap((g) => g.tasks.map((t) => t.id)), [displayedGroups]);
   // Snapshotted per open task, not recomputed live: marking the open task
   // Done drops it out of `orderedTaskIds` the instant "Hide done" (on by
   // default) filters it from the list — without freezing the nav order at
