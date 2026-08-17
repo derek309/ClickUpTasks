@@ -235,10 +235,21 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true) 
   // first (cheap: head:true returns no rows, just the number), then fetch the
   // pages that count says we need concurrently, but through the shared slot
   // limiter above rather than all at once.
+  //
+  // The count query itself can fail independently of the actual data being
+  // fetchable — e.g. an inefficient RLS policy makes a COUNT(*) with
+  // per-row auth checks slow enough to hit a statement timeout on a large
+  // table, which Supabase reports back as a 503, even though the same table
+  // pages through fine via .range(). Treating that as a hard failure meant a
+  // single slow COUNT could blank out an entire table's data (and looked
+  // exactly like a slow/laggy app, since fetchAll's Promise.all wouldn't
+  // resolve any faster than its slowest failing table). A failed count now
+  // just falls back to unknown-size paging — fire one page, then let the
+  // existing safety-tail loop below keep going until a short page — instead
+  // of failing the whole table.
   const { count, error: countError } = await withSlot(() =>
     supabase.from(table).select("*", { count: "exact", head: true }));
-  if (countError) return { data: null as any[] | null, error: countError };
-  const knownPages = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
+  const knownPages = countError ? 1 : Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
   const firstResults = await Promise.all(
     Array.from({ length: knownPages }, (_, i) => withSlot(() => fetchPage(i * PAGE_SIZE))));
   for (const r of firstResults) if (r.error) return { data: null as any[] | null, error: r.error };
