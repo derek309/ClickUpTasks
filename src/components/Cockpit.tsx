@@ -1557,7 +1557,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!me.canSendMessages) return false;
     return (clientById(clientId)?.canMessage ?? []).includes(me.id);
   };
-  const scopedTasks = canAdmin ? tasks : tasks.filter((t) => t.assigneeId === me.id);
+  // Memoized — this filters the full tasks table (28k+ rows) and was
+  // previously recomputed on every render (Cockpit re-renders often, driven
+  // by realtime subscriptions), making it and everything downstream of it
+  // (myWorkGroups, sortedClients, clientTaskCountRef, etc.) redo an O(tasks)
+  // scan on every update even when tasks/canAdmin/me.id hadn't changed.
+  const scopedTasks = useMemo(
+    () => (canAdmin ? tasks : tasks.filter((t) => t.assigneeId === me.id)),
+    [tasks, canAdmin, me.id]
+  );
   // Follow-up date = "always true": auto-track each client/project's
   // follow-up to the soonest due date among its open (status != done) dated
   // tasks, so it always reflects the next real deadline. Diff-then-write —
@@ -1910,7 +1918,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // rather than two separate lists. Scoped by myWorkUser, not always `me` —
   // that's what lets the admin "viewing work for" selector repoint this at
   // a teammate.
-  const myWorkGroups: WorkBoardGroup[] = (() => {
+  // Memoized — this drives every "My Work" render (the VA/admin default
+  // landing view) and was an unmemoized IIFE recomputed on every Cockpit
+  // render, each time re-scanning scopedTasks per assigned client/project via
+  // assignedClientsFor/clientUrgencyKey/hasOpenConversationTask etc. With
+  // ~28k tasks and Cockpit re-rendering continuously off realtime updates,
+  // that was the actual "running very slow" bottleneck on view=work — the
+  // earlier fix (capping concurrent row fetches) only bounded the initial
+  // load, not this per-render CPU cost. Deps mirror the true inputs of
+  // assignedClientsFor/assignedProjectsFor/clientUrgencyKey/projectUrgencyKey/
+  // hasOpenConversationTask/clientNeedsReview/projectNeedsReview, which all
+  // close over tasks/scopedTasks/clients/projects/canAdmin/me.id.
+  const myWorkGroups: WorkBoardGroup[] = useMemo(() => {
     const defs: [number, string, string][] = [
       [0, "Review", "#14b8a6"],
       [1, "New message", "#8b5cf6"],
@@ -1942,7 +1961,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           .map((x) => x.item),
       }))
       .filter((g) => g.items.length > 0);
-  })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, scopedTasks, clients, projects, myWorkUser]);
   // The Monday "set up your week" queue: my clients/projects currently in the
   // Review tier, in the same order My Work shows them. Drives the header
   // "Review next" button so you can click through them one at a time (the
