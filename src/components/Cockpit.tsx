@@ -1631,7 +1631,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Mirrors the RLS rule in supabase/client-assignment.sql: a VA sees a
   // client if they have a task on it OR they're explicitly following it —
   // this is a display-layer echo of that DB rule, not the enforcement of it.
-  const visibleClients = canAdmin ? clientList : clientList.filter((c) => scopedTasks.some((t) => t.clientId === c.id) || (c.assignedTo ?? []).includes(me.id));
+  // Memoized — for a non-admin this filters clientList against a scan of
+  // scopedTasks per client, and it's computed on every render of Cockpit
+  // (the sidebar is always mounted) regardless of which view is active.
+  const visibleClients = useMemo(
+    () => (canAdmin ? clientList : clientList.filter((c) => scopedTasks.some((t) => t.clientId === c.id) || (c.assignedTo ?? []).includes(me.id))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [canAdmin, clients, scopedTasks, me.id]
+  );
   // "My Work" is a strictly personal-to-someone view — only clients with a
   // currently *open* task assigned to that person specifically (or that
   // they're explicitly following), even for admins, who otherwise see every
@@ -1656,7 +1663,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // field yet (pre-migration rows) just falls back to an empty follow-list,
   // matching rowToProject's `?? []`.
   const assignedProjectsFor = (userId: string) => projects.filter((p) => (p.clientId === WORKSPACE_CLIENT_ID || p.clientId === PERSONAL_CLIENT_ID) && (scopedTasks.some((t) => t.projectId === p.id && t.status !== "done" && (t.assigneeId === userId || t.subtasks.some((s) => s.assigneeId === userId))) || (p.assignedTo ?? []).includes(userId)));
-  const myAssignedClients = assignedClientsFor(me.id);
+  // Memoized — always computed every render (unconditionally, regardless of
+  // clientListScope) via assignedClientsFor, which scans scopedTasks per
+  // workable client. Same class of bug as myWorkGroups: this ran on every
+  // Cockpit render since the sidebar is always mounted, not just on My Work.
+  const myAssignedClients = useMemo(
+    () => assignedClientsFor(me.id),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [scopedTasks, clients, me.id]
+  );
   // Ambassador OR follower — this drives what shows up to LOOK at (sidebar,
   // Settings → Territories, the Territory Dashboard's own "which cities do I
   // pull from" scan). It deliberately does NOT gate which cities put
@@ -1737,9 +1752,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // (reuses myAssignedClients, the exact same set My Work uses) so a long
   // client roster doesn't bury what actually needs attention. Toggled to
   // visibleClients (everyone you can see) via the header's Mine/All control.
-  const clientListBase = rosterOnly(clientListScope === "mine" ? myAssignedClients : visibleClients);
-  // Apply the user's sort preference; starred clients always float to the top.
-  const sortedClients = (() => {
+  // Memoized so its reference stays stable across renders when the underlying
+  // data hasn't changed — otherwise sortedClients below (which depends on
+  // this) would recompute its expensive "urgent"/"mine" branches every
+  // render regardless of memoization, since a fresh array reference here
+  // would look like a change every time.
+  const clientListBase = useMemo(
+    () => rosterOnly(clientListScope === "mine" ? myAssignedClients : visibleClients),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [clientListScope, myAssignedClients, visibleClients]
+  );
+  // Memoized — the "urgent"/"mine" branches call clientUrgencyKey per client,
+  // which scans scopedTasks; same O(clients × tasks) cost as myWorkGroups,
+  // but this ran on every render since the sidebar is always mounted.
+  const sortedClients = useMemo(() => {
     const base = [...clientListBase];
     if (clientSort === "az") base.sort((a, b) => a.name.localeCompare(b.name));
     else if (clientSort === "tasks") base.sort((a, b) => clientTaskCountRef(b.id) - clientTaskCountRef(a.id));
@@ -1767,7 +1793,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     }
     else if (manualOrder.length) base.sort((a, b) => { const ia = manualOrder.indexOf(a.id), ib = manualOrder.indexOf(b.id); return (ia < 0 ? 1e9 : ia) - (ib < 0 ? 1e9 : ib); });
     return [...base.filter((c) => starred.has(c.id)), ...base.filter((c) => !starred.has(c.id))];
-  })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientListBase, clientSort, clientUsed, starred, manualOrder, scopedTasks, tasks, clients, projects, me.id]);
   function clientTaskCountRef(clientId: string) { return scopedTasks.filter((t) => t.clientId === clientId).length; }
   function hasUnreadMessage(clientId: string): boolean {
     if (!clientId.startsWith("cl_")) return false;
