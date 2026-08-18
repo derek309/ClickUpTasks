@@ -7,7 +7,7 @@
 // completion) — this is the other half, catching businesses that have gone
 // quiet. Same "server needs its own copy" reasoning as playbookReconcileServer.ts.
 import { supabaseAdmin } from "./supabaseAdmin";
-import { PLAYBOOK_STEPS, playbookProjectId, todayIso, STEP_STALL_DAYS as STALL_DAYS } from "./data";
+import { PLAYBOOK_STEPS, playbookProjectId, todayIso, STEP_STALL_DAYS as STALL_DAYS, WORKSPACE_CLIENT_ID, PERSONAL_CLIENT_ID } from "./data";
 import { reconcilePlaybookTasksServer } from "./playbookReconcileServer";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -17,10 +17,20 @@ const SYSTEM_AUTHOR_ID = "u_claude";
 export async function runPlaybookStallCheck(): Promise<{ created: number }> {
   const cutoff = new Date(Date.now() - STALL_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
+  // WORKSPACE_CLIENT_ID/PERSONAL_CLIENT_ID are internal pseudo-clients (the
+  // Cockpit's own Administration/Idea-board projects and each teammate's
+  // private to-dos), not real businesses — but they're still `type: "client"`
+  // rows and can carry a real `status`, so they slip through this query like
+  // any other client unless excluded explicitly. Confirmed live: the
+  // Workspace pseudo-client had status "active_client" and picked up a full
+  // real Playbook (a "Playbook" project + all its step tasks) that had no
+  // business existing there — Derek: "not sure why the playbook is here...
+  // this was for clients so remove it."
   const { data: clients } = await supabaseAdmin
     .from("clients")
     .select("id, name, assigned_to, playbook_last_progress_at")
-    .in("status", ["onboarding", "active_client"]);
+    .in("status", ["onboarding", "active_client"])
+    .not("id", "in", `(${WORKSPACE_CLIENT_ID},${PERSONAL_CLIENT_ID})`);
   if (!clients?.length) return { created: 0 };
 
   let fallbackAdminId: string | null | undefined; // lazy-resolved, cached across the loop

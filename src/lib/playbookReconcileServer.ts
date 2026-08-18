@@ -7,11 +7,18 @@
 // read/write from the WordPress bridge so a business that's never had its
 // Playbook opened in the app yet still gets a complete row set first.
 import { supabaseAdmin } from "./supabaseAdmin";
-import { playbookStepsForClient, playbookProjectId } from "./data";
+import { playbookStepsForClient, playbookProjectId, WORKSPACE_CLIENT_ID, PERSONAL_CLIENT_ID } from "./data";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 export async function reconcilePlaybookTasksServer(clientId: string): Promise<void> {
+  // Playbook is a real-business concept — the Workspace/Personal pseudo-
+  // clients have no growth plan to track. Guarded here (the actual
+  // create-the-rows choke point) rather than just at each caller, since a
+  // future caller passing either id by accident would otherwise recreate
+  // the exact "Playbook" project + step tasks under cl_workspace that had
+  // to be cleaned up once already (see playbookCheckinsServer.ts).
+  if (clientId === WORKSPACE_CLIENT_ID || clientId === PERSONAL_CLIENT_ID) return;
   const pbProjectId = playbookProjectId(clientId);
   const { data: existingProject } = await supabaseAdmin.from("projects").select("id").eq("id", pbProjectId).maybeSingle();
   if (!existingProject) {
