@@ -2895,16 +2895,26 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     });
   };
   // Backs the follow-up pill's own edit — "we're waiting longer than
-  // planned, snooze whatever's actually blocking it" — only tasks due
-  // today or already overdue jump to the new date (anything due later is
-  // untouched, since it was never what pushed the follow-up date out).
+  // planned, snooze whatever's actually blocking it" — tasks due today or
+  // already overdue jump to the new date, AND (2026-08-17 fix) so does
+  // whichever task is exactly at the OLD follow-up date, even if that date
+  // was still in the future. The original "anything due later was never
+  // what pushed the follow-up date out" assumption breaks for a client
+  // whose only open dated task isn't overdue yet: the recompute effect
+  // above pins followUpAt to that task's due date regardless of whether
+  // it's overdue, but this function only dragged overdue tasks — so moving
+  // the pill away from a not-yet-due anchor task did nothing to the task,
+  // and the very next render's recompute pass snapped the date straight
+  // back. Reported live on Melissa Lamberti: her one open dated task was
+  // due tomorrow, and every attempt to move her follow-up date out
+  // reverted instantly with no way to actually change it.
   // Scoped to the viewer's own assigned tasks (Derek, Jul 27): moving the
   // follow-up date used to drag every assignee's overdue tasks forward,
   // which silently rescheduled a teammate's work out from under them. Only
   // the current user's own tasks move now — a teammate's overdue tasks on
   // the same client/project are untouched, so the follow-up date can still
   // show overdue on their account even after you move yours.
-  const alignOverdueTasksTo = (clientId: string, projectId: string | null, newDate: string) => {
+  const alignOverdueTasksTo = (clientId: string, projectId: string | null, newDate: string, oldFollowUp: string | null) => {
     // Conversation-priority tasks ("Reply to X") are excluded: they re-pin
     // their own due date to today on every inbound message
     // (inboundIngest.ts/ghlConversationTask.ts), on purpose — an unanswered
@@ -2912,7 +2922,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // (implies "we'll wait" on it) or pointless (the next message just
     // bounces it right back to today), which is exactly the loop this was
     // built to prevent, not cause.
-    const blocking = tasks.filter((t) => t.status !== "done" && t.priority !== "conversation" && t.assigneeId === me.id && !!t.due && t.due <= TODAY && (projectId ? t.projectId === projectId : t.clientId === clientId));
+    const blocking = tasks.filter((t) => t.status !== "done" && t.priority !== "conversation" && t.assigneeId === me.id && !!t.due && (t.due <= TODAY || t.due === oldFollowUp) && (projectId ? t.projectId === projectId : t.clientId === clientId));
     if (!blocking.length) return;
     blocking.forEach((t) => patchTask(t.id, { due: newDate }));
     pushToast(`Moved ${blocking.length} overdue task${blocking.length === 1 ? "" : "s"} to ${formatDue(newDate)}.`);
@@ -4645,24 +4655,24 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             // Auto-tracked when this entity has an open dated task — the
             // recompute effect keeps followUpAt pinned to the soonest one.
             // Admins can still move it (see alignOverdueTasksTo above): doing
-            // so drags any task due today or earlier up to the new date, so
-            // that's what the effect settles back onto next render — moving
-            // the ONE follow-up date is what actually clears "overdue"
-            // instead of hunting down every task blocking it by hand. VAs
-            // keep the old read-only display — tasks_update RLS would
-            // reject them writing a teammate's task anyway.
+            // so drags any task due today or earlier, OR exactly at the old
+            // follow-up date (even if that was still in the future), up to
+            // the new date — otherwise the anchoring task never moves and
+            // the recompute effect snaps the pill straight back on the next
+            // render. VAs keep the old read-only display — tasks_update RLS
+            // would reject them writing a teammate's task anyway.
             // Playbook steps excluded to match the recompute effect above: they
             // aren't visible in the Tasks tab, so claiming "auto-tracked" from
             // one told you the date was following a task you couldn't find.
             const autoTracked = tasks.some((t) => t.status !== "done" && !!t.due && !t.playbookStepKey && (scopedProject ? t.projectId === scopedProject.id : t.clientId === activeClient));
             const editable = !autoTracked || canAdmin;
             return (
-              <div title={autoTracked ? (canAdmin ? "Follow-up date — click to move it, and it'll pull anything due today or overdue up to match" : "Follow-up date — auto-tracked to the next task due date") : "Follow-up date — when to next check in on this"}
+              <div title={autoTracked ? (canAdmin ? "Follow-up date — click to move it, and it'll pull anything due today, overdue, or at the current follow-up date up to match" : "Follow-up date — auto-tracked to the next task due date") : "Follow-up date — when to next check in on this"}
                 className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 ${overdue ? "border-danger/40 bg-danger-soft" : fu ? "border-accent/40 bg-accent-soft" : "border-dashed"}`}>
                 <I.calendar className={overdue ? "text-danger" : fu ? "text-accent" : "text-muted"} />
                 {editable ? (
                   <InlineDue value={fu} overdue={overdue} onChange={(d) => {
-                    if (d && autoTracked) alignOverdueTasksTo(activeClient, scopedProject?.id ?? null, d);
+                    if (d && autoTracked) alignOverdueTasksTo(activeClient, scopedProject?.id ?? null, d, fu);
                     setFollowUp(d);
                   }} emptyLabel="Follow-up" strong />
                 ) : (
