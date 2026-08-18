@@ -475,6 +475,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // applied to the client list instead of the task list. Not persisted,
   // same as allTasksScope — always starts scoped down.
   const [clientListScope, setClientListScope] = useState<"mine" | "all">("mine");
+  // Clients directory's grouping mode — "status" (default, pipeline stage
+  // buckets) or "team" (one section per teammate's own active clients, see
+  // teamActiveClients below). Not persisted, same as clientListScope.
+  const [clientsGroupBy, setClientsGroupBy] = useState<"status" | "team">("status");
   // Recently-used ordering: clientId → last-opened epoch, persisted locally.
   // Opening a client stamps it (see the effect below), floating it to the top
   // when the "Recently used" sort is active.
@@ -629,6 +633,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // created, same as every other reconcile call in this file.
     if (on) reconcilePlaybookTasks(clientId);
     pushToast(on ? `${c.name} now gets the A2P setup steps.` : `${c.name} no longer gets the A2P setup steps.`);
+  };
+  // Whether the public /waiting/[token] page shows the "Your growth plan"
+  // progress card. Off by default — same reasoning as the toggles above,
+  // just for whether the Playbook itself is client-visible at all, not one
+  // client's specific steps. Admin only, same reasoning as the toggles above.
+  const toggleClientShowGrowthPlan = (clientId: string) => {
+    const c = clientById(clientId);
+    if (!c) return;
+    const on = c.showGrowthPlan !== true;
+    const nc = { ...c, showGrowthPlan: on };
+    setClients((cs) => cs.map((x) => (x.id === clientId ? nc : x)));
+    markOwnClientWrite(nc.id);
+    upsertClient(nc);
+    pushToast(on ? `${c.name}'s client link now shows their growth plan.` : `${c.name}'s client link no longer shows their growth plan.`);
   };
   // "Follow" a project directly — same idea as toggleClientAssignment, just
   // scoped to one project instead of the whole client. App-level only (no
@@ -1685,6 +1703,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     () => assignedClientsFor(me.id),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [scopedTasks, clients, me.id]
+  );
+  // "Who's working with who" — the Clients directory's "By teammate" view
+  // (Derek: "right now we're both in the dark what the other people are
+  // doing"). Same assignedClientsFor definition every other per-person view
+  // in this app already uses (open task assignee/subtask assignee, or
+  // explicitly following) — restricted to active_client status only, since
+  // this is a review-the-active-roster view, not a full pipeline dump.
+  // Excludes the u_claude pseudo user (never a real teammate to review).
+  const teamActiveClients = useMemo(
+    () => users.filter((u) => u.id !== "u_claude").map((u) => ({ member: u, clients: assignedClientsFor(u.id).filter((c) => c.status === "active_client").sort((a, b) => a.name.localeCompare(b.name)) })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [scopedTasks, clients, users]
   );
   // Memoized for the same reason — the sidebar's "My Work" nav badge
   // (below) calls this inline on every render of every view, including
@@ -4323,6 +4353,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               Client can add requests
             </button>
           )}
+          {canAdmin && activeClient !== "all" && !activeProject && clientById(activeClient) && (
+            <button onClick={() => toggleClientShowGrowthPlan(activeClient)}
+              title="Show the growth plan progress card on this client's client link"
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background">
+              <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${clientById(activeClient)?.showGrowthPlan ? "border-accent bg-accent text-white" : "border-border"}`}>{clientById(activeClient)?.showGrowthPlan && <I.check />}</span>
+              Client sees growth plan
+            </button>
+          )}
           {/* Not every business does SMS marketing, so the A2P setup steps
               and the email domain step are opt in rather than created for
               everyone (see playbookStepsForClient in data.ts). Sits here
@@ -4831,6 +4869,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                       </button>
                     )}
                     {canAdmin && activeClient !== "all" && !activeProject && clientById(activeClient) && (
+                      <button onClick={() => toggleClientShowGrowthPlan(activeClient)}
+                        title="Show the growth plan progress card on this client's client link"
+                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background">
+                        <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${clientById(activeClient)?.showGrowthPlan ? "border-accent bg-accent text-white" : "border-border"}`}>{clientById(activeClient)?.showGrowthPlan && <I.check />}</span>
+                        Client sees growth plan
+                      </button>
+                    )}
+                    {canAdmin && activeClient !== "all" && !activeProject && clientById(activeClient) && (
                       <button onClick={() => toggleClientDoesA2P(activeClient)}
                         title="Include the A2P texting setup steps in this client's Playbook"
                         className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background">
@@ -5075,7 +5121,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             needsReview={(id) => clientNeedsReview(id, me.id)}
             onOpen={(id) => { setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); setClientTab("tasks"); }}
             canAdmin={canAdmin} onAddClient={() => setAddClientOpen(true)} onRename={renameClient} onDelete={deleteClient} onSetStatus={setClientStatus}
-            sort={clientSort} onSetSort={saveClientSort} scope={clientListScope} onToggleScope={() => setClientListScope((s) => (s === "mine" ? "all" : "mine"))} />
+            sort={clientSort} onSetSort={saveClientSort} scope={clientListScope} onToggleScope={() => setClientListScope((s) => (s === "mine" ? "all" : "mine"))}
+            groupBy={clientsGroupBy} onToggleGroupBy={() => setClientsGroupBy((g) => (g === "status" ? "team" : "status"))} teamGroups={teamActiveClients} />
         ) : dirView === "projects" ? (
           <ProjectsDirectory projects={sortedWorkspaceProjects} openCount={projectTaskCount}
             onOpen={(id) => { setDirView(null); setTerritoryView(null); setActiveClient(WORKSPACE_CLIENT_ID); setActiveProject(id); setOpenTaskId(null); setClientTab("tasks"); }}

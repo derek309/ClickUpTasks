@@ -330,6 +330,13 @@ export interface Client {
    * (like canMessage) so existing clientsSeed literals don't need editing;
    * read as `=== true` everywhere. */
   doesA2P?: boolean;
+  /** Whether the public /waiting/[token] page shows the "Your growth plan"
+   * progress card at all. Off unless an admin turns it on — not every client
+   * should see internal Playbook framing on their link, so this is opted in
+   * per client rather than shown by default. Optional (like canMessage) so
+   * existing clientsSeed literals don't need editing; read as `=== true`
+   * everywhere. */
+  showGrowthPlan?: boolean;
 }
 
 /** A quick-access link on a client's page (live site, WP admin, etc.), stored

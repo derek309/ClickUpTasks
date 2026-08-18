@@ -9,7 +9,7 @@
 // rather than importing from src/components/cockpit/ui.tsx, so this public
 // page doesn't pull in the internal component tree.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { formatDue, isOverdue, timeAgo, type Attachment } from "@/lib/data";
+import { timeAgo, type Attachment } from "@/lib/data";
 
 type WaitingAttachment = { id: string; name: string; kind: Attachment["kind"]; size: string; path: string | null; url: string | null };
 type WaitingProject = { id: string; name: string };
@@ -269,19 +269,11 @@ function TaskDetailBody({
           a non-overflowing element does nothing. Fixed by moving the ref
           here, onto the actual scrolling container. */}
       <div ref={(el) => { scrollRef.current = el; threadRef(el); }} onScroll={(e) => checkAtBottom(e.currentTarget)} className="relative min-h-0 flex-1 overflow-y-auto px-6 py-4 md:px-10">
-        {(showProjectName && projectName) || isDone || t.due ? (
+        {(showProjectName && projectName) || isDone ? (
           <div className="mb-2 flex flex-wrap items-center justify-center gap-1.5 text-center">
             {showProjectName && projectName && <span className="text-[12px] text-muted">{projectName}</span>}
             {isDone && (
               <span className="inline-flex items-center gap-1 rounded-full bg-success-soft px-2 py-0.5 text-[12px] font-medium text-success">✓ Completed</span>
-            )}
-            {t.due && (
-              <span
-                className={`shrink-0 rounded-full border px-2 py-0.5 text-[12px] font-medium ${isOverdue(t.due) && !isDone ? "bg-danger-soft text-danger" : "bg-accent-soft text-accent"}`}
-                style={{ borderColor: isOverdue(t.due) && !isDone ? "color-mix(in srgb, var(--danger) 30%, var(--border))" : "transparent" }}
-              >
-                {formatDue(t.due)}
-              </span>
             )}
           </div>
         ) : null}
@@ -586,23 +578,28 @@ export default function WaitingView({ token }: { token: string }) {
     for (const el of Object.values(threadRefs.current)) { if (el) el.scrollTop = el.scrollHeight; }
   }, [tasks, selectedTaskId]);
 
-  const rankOpen = (t: WaitingTask) => (t.needsResponse ? 0 : 1);
   const sortFn = (a: WaitingTask, b: WaitingTask) => (a.due ?? "9999").localeCompare(b.due ?? "9999");
-  // Open tasks grouped by list — a section per project (needing-response
-  // tasks first within each), plus a catch-all for anything whose project
-  // got deleted/reassigned out from under it. Skipped when there's only
-  // one project total, since a single repeated header would just be noise.
-  const openGroups = useMemo(() => {
-    if (!tasks) return [];
-    const open = tasks.filter((t) => t.status !== "done");
+  // Groups a flat task list by project — a section per project, plus a
+  // catch-all for anything whose project got deleted/reassigned out from
+  // under it. Shared by both top-level sections below (needsResponseGroups,
+  // inProgressGroups) rather than duplicated per section.
+  const groupByProject = (list: WaitingTask[]) => {
     const groups = projects
-      .map((p) => ({ project: p as WaitingProject | null, tasks: open.filter((t) => t.projectId === p.id).sort((a, b) => rankOpen(a) - rankOpen(b) || sortFn(a, b)) }))
+      .map((p) => ({ project: p as WaitingProject | null, tasks: list.filter((t) => t.projectId === p.id).sort(sortFn) }))
       .filter((g) => g.tasks.length > 0);
-    const orphan = open.filter((t) => !projects.some((p) => p.id === t.projectId)).sort((a, b) => rankOpen(a) - rankOpen(b) || sortFn(a, b));
+    const orphan = list.filter((t) => !projects.some((p) => p.id === t.projectId)).sort(sortFn);
     if (orphan.length > 0) groups.push({ project: null, tasks: orphan });
     return groups;
-  }, [tasks, projects]);
-  const totalOpen = openGroups.reduce((n, g) => n + g.tasks.length, 0);
+  };
+  // Split into two top-level sections instead of interleaving within each
+  // project: "what we need from you" (needsResponse) always leads, since
+  // that's the actionable half of the page, then "what we're working on"
+  // (everything else still open) below it — each still broken out by
+  // project underneath, same as before.
+  const open = useMemo(() => (tasks ?? []).filter((t) => t.status !== "done"), [tasks]);
+  const needsResponseGroups = useMemo(() => groupByProject(open.filter((t) => t.needsResponse)), [open, projects]);
+  const inProgressGroups = useMemo(() => groupByProject(open.filter((t) => !t.needsResponse)), [open, projects]);
+  const totalOpen = open.length;
   // Completed items are their own flat list (not grouped) since there's
   // rarely more than a handful — shown behind the collapsed toggle below.
   const completedTasks = useMemo(() => (tasks ?? []).filter((t) => t.status === "done").sort(sortFn), [tasks]);
@@ -621,15 +618,18 @@ export default function WaitingView({ token }: { token: string }) {
   // a "Copy list link" (?project=<id>) — the grouped layout replaced the
   // old filter-by-tab behavior, so this is what "opens straight to this
   // list" means now.
+  // A project can now appear in both sections (it has tasks in each), so
+  // refs are keyed per section — the scroll target prefers "needs your
+  // input" since that's the topmost, most actionable occurrence.
   const groupRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const scrolledToProject = useRef(false);
   useEffect(() => {
     if (!initialProjectId || scrolledToProject.current) return;
-    const el = groupRefs.current[initialProjectId];
+    const el = groupRefs.current[`req-${initialProjectId}`] ?? groupRefs.current[`wip-${initialProjectId}`];
     if (!el) return;
     scrolledToProject.current = true;
     el.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [openGroups, initialProjectId]);
+  }, [needsResponseGroups, inProgressGroups, initialProjectId]);
 
   const updateBody = (taskId: string, body: string) =>
     setDrafts((prev) => ({ ...prev, [taskId]: { ...(prev[taskId] ?? { attachments: [] }), body } }));
@@ -770,13 +770,12 @@ export default function WaitingView({ token }: { token: string }) {
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           {isDone ? (
-            <span className="text-[12px] text-muted">Completed{t.due ? ` ${formatDue(t.due)}` : ""}</span>
-          ) : (<>
+            <span className="text-[12px] text-muted">Completed</span>
+          ) : (
             <span className={`rounded-full px-2 py-0.5 text-[11.5px] font-semibold ${t.needsResponse ? "bg-highlight-soft text-highlight" : "bg-accent-soft text-accent"}`}>
               {t.needsResponse ? "Needs your input" : "In progress"}
             </span>
-            {t.due && <span className={`text-[12px] ${isOverdue(t.due) ? "font-medium text-danger" : "text-muted"}`}>{formatDue(t.due)}</span>}
-          </>)}
+          )}
         </div>
         <span className="shrink-0 text-muted" aria-hidden>›</span>
       </button>
@@ -932,15 +931,37 @@ export default function WaitingView({ token }: { token: string }) {
               ))}
 
               {isEmpty ? emptyState : (
-                <div className="space-y-5">
-                  {openGroups.map((g) => (
-                    <div key={g.project?.id ?? "__other__"} ref={g.project ? (el) => { groupRefs.current[g.project!.id] = el; } : undefined}>
-                      {projects.length > 1 && (
-                        <div className="mb-2 text-[12.5px] font-semibold uppercase tracking-wide text-muted">{g.project?.name ?? "Other"}</div>
-                      )}
-                      <div className="space-y-2">{g.tasks.map((t) => renderTaskRow(t))}</div>
+                <div className="space-y-7">
+                  {needsResponseGroups.length > 0 && (
+                    <div>
+                      <div className="mb-2.5 text-[13px] font-bold uppercase tracking-wide text-highlight">What we need from you</div>
+                      <div className="space-y-5">
+                        {needsResponseGroups.map((g) => (
+                          <div key={g.project?.id ?? "__other__"} ref={g.project ? (el) => { groupRefs.current[`req-${g.project!.id}`] = el; } : undefined}>
+                            {projects.length > 1 && (
+                              <div className="mb-2 text-[12.5px] font-semibold uppercase tracking-wide text-muted">{g.project?.name ?? "Other"}</div>
+                            )}
+                            <div className="space-y-2">{g.tasks.map((t) => renderTaskRow(t))}</div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  ))}
+                  )}
+                  {inProgressGroups.length > 0 && (
+                    <div>
+                      <div className="mb-2.5 text-[13px] font-bold uppercase tracking-wide text-muted">What we&apos;re working on</div>
+                      <div className="space-y-5">
+                        {inProgressGroups.map((g) => (
+                          <div key={g.project?.id ?? "__other__"} ref={g.project ? (el) => { groupRefs.current[`wip-${g.project!.id}`] = el; } : undefined}>
+                            {projects.length > 1 && (
+                              <div className="mb-2 text-[12.5px] font-semibold uppercase tracking-wide text-muted">{g.project?.name ?? "Other"}</div>
+                            )}
+                            <div className="space-y-2">{g.tasks.map((t) => renderTaskRow(t))}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

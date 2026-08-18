@@ -182,10 +182,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   // what a rep sees internally about the same account. SALES_STAGE_STEPS is
   // never imported here — those are the rep's own pipeline stages, not
   // something a business should see about its own account. Skipped entirely
-  // for a project-scoped token: Playbook is whole-client progress, out of
-  // scope for a "just this one list" link even as read-only context.
+  // for a project-scoped token (Playbook is whole-client progress, out of
+  // scope for a "just this one list" link even as read-only context) or
+  // when the client's showGrowthPlan flag is off — no reason to do the work
+  // below if the page won't render it.
   let playbook: { doneCount: number; total: number; pct: number; next: { key: string; label: string } | null; phases: unknown[] } | null = null;
-  if (!scope.projectId) {
+  if (!scope.projectId && scope.showGrowthPlan) {
     const { data: pbTaskRows } = await supabaseAdmin.from("tasks").select("playbook_step_key, status").eq("client_id", scope.clientId).not("playbook_step_key", "is", null);
     const pbRows = (pbTaskRows ?? []) as { playbook_step_key: string; status: string }[];
     const doneKeys = new Set(pbRows.filter((t) => t.status === "done").map((t) => t.playbook_step_key));
