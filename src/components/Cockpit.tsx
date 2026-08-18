@@ -4300,8 +4300,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const isClientDetail = !myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && !!clientById(activeClient);
   // Non-null when the open "client" is actually a city's work container —
   // drives the breadcrumb and subtitle so the page reads as city work rather
-  // than as a client that wandered out of the roster.
-  const activeTerritoryClient = territoryForClientId(activeClient);
+  // than as a client that wandered out of the roster. Forced null when
+  // territories are off (see TERRITORIES_ENABLED) — TERRITORIES_ENABLED
+  // only ever gated the sidebar's own Territories section, not this: a
+  // territory container was still reachable via My Work/All Tasks/search
+  // (workableClients deliberately includes cl_terr_* rows — "city work is
+  // work"), so opening one still rendered the full Businesses/City
+  // work/Planner switcher below with the flag off. Derek: "we're still
+  // seeing city work."
+  const activeTerritoryClient = TERRITORIES_ENABLED ? territoryForClientId(activeClient) : null;
   const showFilterControl = !territoryView && !inboxView && !dirView && !myWork && !settingsView && !(activeClient !== "all" && (clientTab === "chat" || clientTab === "vault"));
   const bellControl = (
     <div className="relative">

@@ -11,10 +11,6 @@
     {
       "path": "/api/cron/send-scheduled",
       "schedule": "0 16 * * *"
-    },
-    {
-      "path": "/api/cron/newsletter-reminder",
-      "schedule": "30 13 * * *"
     }
   ]
 }
