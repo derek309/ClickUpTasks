@@ -8,12 +8,11 @@ import { PLAYBOOK_ALL_STEPS } from "@/lib/data";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 // Inbound WordPress -> ClickUpTasks: the owner-facing /my-business/{slug}/
-// dashboard's Playbook read. Same shared-secret auth as
-// webhooks/planner-interest, resolved on ghlContactId (WP's `ghl_contact_id`
-// listing postmeta, set for every claimed listing by cul_claim_sync_to_ghl)
-// rather than a new WP-business-id column — resolveTrackedClientId is the
-// existing GHL-contact -> tracked-client resolver, already exercised by the
-// inbound message/call/appointment paths.
+// dashboard's Playbook read. Shared-secret auth, resolved on ghlContactId
+// (WP's `ghl_contact_id` listing postmeta, set for every claimed listing by
+// cul_claim_sync_to_ghl) rather than a new WP-business-id column —
+// resolveTrackedClientId is the existing GHL-contact -> tracked-client
+// resolver, already exercised by the inbound message/call/appointment paths.
 //
 // Deliberately thin response — only key/label/category/done per step, plus
 // per-category totals. No assignee, comments, or other internal task fields

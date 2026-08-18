@@ -34,10 +34,8 @@ export async function resolveTrackedClientId(contactId: string, fallback: string
 // contact's activity filed under the sub-account — a real inbound
 // message/call/appointment is exactly the kind of signal that should surface
 // them as an actual client, not require someone to notice and add them by
-// hand. Same "claimed"/"prospect" convention Cockpit.tsx's syncTerritoryClients
-// and the newsletter invite-response webhook already use for this. Also
-// repoints the contact's own client_id so future lookups resolve directly
-// without re-triggering this promotion every time.
+// hand. Also repoints the contact's own client_id so future lookups resolve
+// directly without re-triggering this promotion every time.
 export async function resolveOrPromoteTrackedClient(contact: { id: string; name: string; client_id: string }): Promise<string> {
   const resolved = await resolveTrackedClientId(contact.id, contact.client_id);
   if (resolved !== contact.client_id) return resolved; // already tracked (or linked/merged) — nothing to promote
@@ -67,9 +65,8 @@ export async function resolveOrPromoteTrackedClient(contact: { id: string; name:
 // further along (onboarding, active_client, nurture, cancelled, past_client)
 // or already at "interview" is left untouched, so this never regresses real
 // progress or fights a status someone already set by hand via the Stage
-// dropdown. Without this, computeBusinessStage (TerritoryDirectory.tsx) has
-// no way to know an interview was booked — it just reads client.status
-// as-is, and nothing else in the appointment-sync pipeline ever writes it.
+// dropdown. Without this, nothing else in the appointment-sync pipeline
+// ever writes client.status when an interview gets booked.
 export async function bumpStatusToInterview(clientId: string): Promise<void> {
   const { data: client } = await supabaseAdmin.from("clients").select("status").eq("id", clientId).maybeSingle();
   if (client?.status === "claimed") {
@@ -124,9 +121,9 @@ export function toPacificDate(iso: string): string {
 // is safe to replace wholesale: find-by-name, swap it out, leave everything
 // else (including any manually attached files) untouched.
 const MEETING_LOCATION_ATTACHMENT_NAME = "Meeting location";
-// Same system author every other server-side event line uses (see
-// planner-interest, playbook toggle, granolaSync) so these render
-// identically in the feed rather than looking like a real teammate posted.
+// Same system author every other server-side event line uses (see the
+// playbook toggle route, granolaSync) so these render identically in the
+// feed rather than looking like a real teammate posted.
 const SYSTEM_AUTHOR_ID = "u_claude";
 // Returns null when nothing would change — so the caller can skip a needless
 // write. When the location is unchanged we return the SAME attachment object

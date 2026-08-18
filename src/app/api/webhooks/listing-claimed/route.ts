@@ -9,18 +9,12 @@ import { verifyClickUpTasksKey } from "@/lib/verifyBridgeKey";
 // Inbound webhook: WordPress -> ClickUpTasks, fired the instant a business
 // finishes claiming its directory listing (functions.php's
 // cul_claim_sync_to_ghl, via the cul_listing_claimed action and
-// cul_notify_clickuptasks_listing_claimed()). Sales pipeline automation's
-// other trigger, next to planner-interest/route.ts's invite-reply handling —
-// both complete SALES_STAGE_STEPS' sales_invite stage (claiming is the
-// strongest signal that a business is worked, and sales_invite now covers
-// everything from first outreach through the claim).
-//
-// Deliberately its own route rather than folded into planner-interest: a
-// claim isn't tied to any planner week/city context — an organic self-claim
-// isn't tied to an invite at all (02-SOP-Sales-Process.md calls
-// self-claim-straight-to-stage-4 "a valid path, not a gap") — so this
-// doesn't share that route's required city/week or its planner_weeks
-// bookkeeping.
+// cul_notify_clickuptasks_listing_claimed()). Completes SALES_STAGE_STEPS'
+// sales_invite stage — claiming is the strongest signal that a business is
+// worked, and sales_invite now covers everything from first outreach
+// through the claim. An organic self-claim isn't tied to any prior outreach
+// at all (02-SOP-Sales-Process.md calls self-claim-straight-to-stage-4 "a
+// valid path, not a gap").
 //
 // Auth: the same shared secret as every other WP -> CUT direction
 // (X-ClickUpTasks-Key checked against CLICKUPTASKS_API_KEY).
@@ -41,11 +35,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Missing or invalid ghl_contact_id" }, { status: 400 });
   }
 
-  // Resolve (or create) the tracked client — identical pattern to
-  // planner-interest/route.ts, so a business that replied to an invite
-  // earlier and then claims resolves to the SAME client instead of a
-  // duplicate, and a business that claims with no prior invite history at
-  // all still gets a real, tracked client created here.
+  // Resolve (or create) the tracked client, so a business that claims with
+  // no prior tracked history still gets a real, tracked client created here.
   const contactId = `ct_ghl_${ghlContactId}`;
   const { data: existingContact } = await supabaseAdmin.from("contacts").select("id, client_id").eq("ghl_contact_id", ghlContactId).maybeSingle();
   const fallbackClientId = existingContact?.client_id ?? `cl_${contactId}`;

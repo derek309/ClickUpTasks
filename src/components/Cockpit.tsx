@@ -58,7 +58,6 @@ import {
   type ScheduledMessage,
   type GranolaUnmatchedMeeting,
   type Me,
-  type Territory,
   type TaskTemplate,
   type Playbook,
   type PlaybookTask,
@@ -83,23 +82,16 @@ import {
   dmConversationId,
   PERSONAL_CLIENT_ID,
   WORKSPACE_CLIENT_ID,
-  TERRITORY_CLIENT_PREFIX,
-  territoryClientId,
   PERSONAL_PROJECT_ID,
   normalizeState,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTerritory, deleteTerritoryDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact, rowToScheduledMessage, touchPlaybookProgress, markGranolaUnmatchedHandledDb, linkGranolaSyncedNoteDb, fetchAppSetting, upsertAppSetting, fetchPlannerWeeks } from "@/lib/db";
-import { inviteHistory, featureHistory } from "@/lib/plannerPools";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact, rowToScheduledMessage, touchPlaybookProgress, markGranolaUnmatchedHandledDb, linkGranolaSyncedNoteDb, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import { Inbox } from "./cockpit/Inbox";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import TeamChat from "./TeamChat";
 import AddClientModal from "./AddClientModal";
-import TerritoryPanel from "./TerritoryPanel";
-import { TerritoryDashboard } from "./TerritoryDashboard";
-import { TERRITORIES_ENABLED } from "@/lib/features";
-import { PlannerPanel } from "./cockpit/PlannerPanel";
 
 
 import { I, Avatar, SideItem, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFromName, LIST_COLUMNS, SearchableSelect, type FilterState, type SortBy, type Toast } from "./cockpit/ui";
@@ -123,15 +115,11 @@ import { FolderRail } from "./cockpit/FolderRail";
 //   ?view=work|clients|personal|settings   the special boards
 //   ?view=inbox[&dm=<userId>]              team chat, optionally a DM thread
 //   ?client=<id>[&project=<id>]   a client (optionally scoped to one project)
-//   ?territory=<id>[&mode=planner[&week=<id>]]   a city, or its Content Planner
 //   ?task=<id>                    the task drawer (layers over any of the above)
-type NavState = { view: "work" | "personal" | "inbox" | "clients" | "projects" | "settings" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | "vault" | null; vaultFolder: string | null; dm: string | null; territory: string | null; plannerMode: boolean; plannerWeek: string | null };
+type NavState = { view: "work" | "personal" | "inbox" | "clients" | "projects" | "settings" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | "vault" | null; vaultFolder: string | null; dm: string | null };
 function buildSearch(s: NavState): string {
   const p = new URLSearchParams();
-  if (s.territory) {
-    p.set("territory", s.territory);
-    if (s.plannerMode) { p.set("mode", "planner"); if (s.plannerWeek) p.set("week", s.plannerWeek); }
-  } else if (s.view) {
+  if (s.view) {
     p.set("view", s.view);
     if (s.view === "inbox" && s.dm) p.set("dm", s.dm);
   } else if (s.client !== "all") {
@@ -158,9 +146,6 @@ function parseSearch(search: string): NavState {
     clientTab: tab === "chat" || tab === "vault" ? tab : null,
     vaultFolder: p.get("folder"),
     dm: p.get("dm"),
-    territory: p.get("territory"),
-    plannerMode: p.get("mode") === "planner",
-    plannerWeek: p.get("week"),
   };
 }
 
@@ -199,20 +184,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [clientLinks, setClientLinks] = useState<ClientLink[]>([]);
   const [clientNotes, setClientNotes] = useState<ClientNote[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [territories, setTerritories] = useState<Territory[]>([]);
-  // Territory (city) view — a value is a territory id, or "all" for the manage-
-  // all overview. Its own top-level view alongside inbox/dashboard/etc.
-  const [territoryView, setTerritoryView] = useState<string | null>(null);
-  // Content Planner mode, layered on top of territoryView rather than a
-  // parallel top-level state — meaningful only while territoryView is set
-  // (a third "which half of the territory" mode alongside Businesses/City
-  // work), so every existing !territoryView-gated header guard stays
-  // correct for free instead of needing a matching !plannerOpen everywhere.
-  const [plannerOpen, setPlannerOpen] = useState(false);
-  // Which week is open inside the Planner, mirrored down as PlannerPanel's
-  // initialWeekId and back up via onWeekChange — lets the deep-link URL
-  // (currentNav below) reflect it without lifting the rest of Planner's state.
-  const [plannerWeekId, setPlannerWeekId] = useState<string | null>(null);
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
   const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
   const [vaultFolders, setVaultFolders] = useState<VaultFolder[]>([]);
@@ -287,7 +258,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // initialTab prop.
   const [settingsInitialTab, setSettingsInitialTab] = useState<TabKey>("integrations");
   const openSettingsTab = (tab: TabKey) => {
-    setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setDirView(null); setTerritoryView(null);
+    setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setDirView(null);
     setSettingsInitialTab(tab);
     setSettingsView(true);
   };
@@ -342,7 +313,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setDirView(view === "clients" ? "clients" : view === "projects" ? "projects" : null);
     setDmUserId(null);
     setSettingsView(false);
-    setTerritoryView(null);
+
     setOpenTaskId(null);
     setSidebarOpen(false);
     // Only the two directory views cleared this before; leaving it alone
@@ -404,7 +375,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // of the shared feed.
   const openDm = (userId: string) => {
     setInboxView(true); setDmUserId(userId);
-    setMyWork(false); setPersonalView(false); setDirView(null); setTerritoryView(null); setSettingsView(false);
+    setMyWork(false); setPersonalView(false); setDirView(null); setSettingsView(false);
     setOpenTaskId(null); setSidebarOpen(false);
     markDmRead(dmConversationId(me.id, userId));
     markDmNotifsRead(userId);
@@ -527,7 +498,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const setClientStatus = (id: string, status: ClientStatus) => {
     const c = clientById(id);
     if (!c || c.status === status) return;
-    // Conversion moment: a territory prospect that reaches active_client has
+    // Conversion moment: a prospect that reaches active_client has
     // stopped being a prospect, so it joins the real client roster here.
     // One-way on purpose — moving a client back to an earlier stage is a
     // lifecycle correction, not a reason to hide it from the sidebar again.
@@ -914,21 +885,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     client: activeClient, project: activeProject, task: openTaskId,
     clientTab, vaultFolder: null, // vaultFolder is write-only (via copyFolderLink) — not mirrored into the live URL as you browse
     dm: inboxView ? dmUserId : null,
-    territory: territoryView, plannerMode: plannerOpen, plannerWeek: plannerOpen ? plannerWeekId : null,
   });
   const applyNav = (s: NavState) => {
-    if (s.territory) {
-      setSettingsView(false); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setDirView(null);
-      setActiveClient("all"); setActiveProject(null);
-      setTerritoryView(s.territory); setPlannerOpen(s.plannerMode); setPlannerWeekId(s.plannerMode ? s.plannerWeek : null);
-    } else {
-      setTerritoryView(null); setPlannerOpen(false); setPlannerWeekId(null);
-      setSettingsView(s.view === "settings");
-      setMyWork(s.view === "work"); setPersonalView(s.view === "personal"); setInboxView(s.view === "inbox");
-      setDmUserId(s.view === "inbox" ? s.dm : null);
-      setDirView(s.view === "clients" || s.view === "projects" ? s.view : null);
-      setActiveClient(s.view ? "all" : s.client); setActiveProject(s.view ? null : s.project);
-    }
+    setSettingsView(s.view === "settings");
+    setMyWork(s.view === "work"); setPersonalView(s.view === "personal"); setInboxView(s.view === "inbox");
+    setDmUserId(s.view === "inbox" ? s.dm : null);
+    setDirView(s.view === "clients" || s.view === "projects" ? s.view : null);
+    setActiveClient(s.view ? "all" : s.client); setActiveProject(s.view ? null : s.project);
     setOpenTaskId(s.task);
     if (s.clientTab) setClientTab(s.clientTab);
     setInitialVaultFolder(s.vaultFolder);
@@ -1039,7 +1002,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // dashboard" — the sidebar should steer people there, not offer a
   // parallel flat-list home). Still reachable, just de-emphasized — a small
   // button on the Dashboard header, not a primary nav item.
-  const openAllTasks = () => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); };
+  const openAllTasks = () => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); };
 
   useEffect(() => {
     (async () => {
@@ -1078,7 +1041,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         const d = await fetchAll();
         setClients(d.clients); setProjects(d.projects); setContacts(d.contacts); setTasks(d.tasks); setNotifications(d.notifications);
         setClientLinks(d.clientLinks); setClientNotes(d.clientNotes); setMessages(d.messages);
-        setTerritories(d.territories);
         setTaskTemplates(d.taskTemplates);
         setPlaybooks(d.playbooks);
         setVaultFolders(d.vaultFolders);
@@ -1530,7 +1492,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (n.kind === "dm" && n.actorId) { openDm(n.actorId); return; }
     if (n.taskId) { setOpenTaskId(n.taskId); return; }
     if (n.clientId) {
-      setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null);
+      setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null);
       setActiveClient(n.clientId); setActiveProject(n.projectId ?? null); setClientTab("chat");
       return;
     }
@@ -1654,22 +1616,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // WORKSPACE_CLIENT_ID is a contact-less container for internal/agency work
   // (its projects behave like standalone lists that never sync). Kept out of
   // the real client list and shown as its own top-of-sidebar section.
-  // TERRITORY_CLIENT_PREFIX containers are per-city work buckets, excluded the
-  // same way WORKSPACE_CLIENT_ID is — reached from the city's Work tab, not
-  // from the client roster.
   const clientList = useMemo(
-    () => clients.filter((c) => c.id.startsWith("cl_") && c.type === "client" && c.id !== WORKSPACE_CLIENT_ID && !c.id.startsWith(TERRITORY_CLIENT_PREFIX)),
+    () => clients.filter((c) => c.id.startsWith("cl_") && c.type === "client" && c.id !== WORKSPACE_CLIENT_ID),
     [clients]
   );
-  // Everything you can hang work on: real clients PLUS territory prospects
-  // (directory businesses the territory auto-tracks, which are deliberately
-  // kept out of clientList above so a city's few hundred businesses don't
-  // bury the real roster). A prospect still has a full record — tasks,
-  // projects, journal — so anywhere that reasons about *work* rather than
-  // *the roster* has to look here instead, or a task on a prospect silently
-  // falls out of My Work / ⌘K / the move-task pickers.
-  // Territory containers ARE included here — city work is work: you can
-  // ⌘K to a city, quick-add against it, and move a task into it.
+  // Everything you can hang work on: real clients PLUS prospects. A prospect
+  // still has a full record — tasks, projects, journal — so anywhere that
+  // reasons about *work* rather than *the roster* has to look here instead,
+  // or a task on a prospect silently falls out of My Work / ⌘K / the
+  // move-task pickers.
   const workableClients = useMemo(
     () => clients.filter((c) => c.id.startsWith("cl_") && c.id !== WORKSPACE_CLIENT_ID && (c.type === "client" || c.type === "prospect")),
     [clients]
@@ -1697,8 +1652,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // rather than lingering in "No open tasks" forever. Parametrized by
   // userId (not just `me`) so the admin-only "viewing work for" selector
   // can point this at a teammate instead of yourself.
-  // Reads workableClients, not clientList: a territory prospect you've been
-  // assigned a task on is real work and belongs on your board.
+  // Reads workableClients, not clientList: a prospect you've been assigned
+  // a task on is real work and belongs on your board.
   const assignedClientsFor = (userId: string) => workableClients.filter((c) => scopedTasks.some((t) => t.clientId === c.id && t.status !== "done" && (t.assigneeId === userId || t.subtasks.some((s) => s.assigneeId === userId))) || (c.assignedTo ?? []).includes(userId));
   // Same rule, applied to projects — but only "Projects" in Derek's sense
   // (the sidebar's Administration/Idea board/etc. list, i.e. workspaceProjects
@@ -1772,82 +1727,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [scopedTasks, projects, me.id]
   );
-  // Ambassador OR follower — this drives what shows up to LOOK at (sidebar,
-  // Settings → Territories, the Territory Dashboard's own "which cities do I
-  // pull from" scan). It deliberately does NOT gate which cities put
-  // activities on your dashboard; TerritoryDashboard.tsx re-filters its own
-  // internal myTerritories to assignedTo only, so a follower sees the city
-  // but nothing from it demands action.
-  const myTerritories = territories.filter((t) => (t.assignedTo ?? []).includes(me.id) || (t.followers ?? []).includes(me.id));
-  // Cities shown in the sidebar: only the ones assigned to (or followed by)
-  // YOU, admin or not — an admin managing every territory doesn't mean every
-  // admin should see every rep's territory in their own personal nav just by
-  // being an admin. Seeing/assigning the full roster is still available via
-  // "Manage territories" (openTerritory("all"), canAdmin-gated below), which
-  // reads `territories` directly rather than this filtered list. Sorted by
-  // city for a stable list.
-  const visibleTerritories = myTerritories.slice().sort((a, b) => a.city.localeCompare(b.city));
-  const territoryById = (id: string) => territories.find((t) => t.id === id) ?? null;
-  // listingId scrolls straight to that row on the Businesses page instead of
-  // dumping the rep on the top of the whole city — set by the Territory
-  // Dashboard's "Open in Businesses", read once by TerritoryDirectory on
-  // mount then cleared so a later plain sidebar click doesn't re-trigger it.
-  const [territoryHighlightId, setTerritoryHighlightId] = useState<number | null>(null);
-  const openTerritory = (id: string, listingId?: number) => {
-    setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null);
-    setActiveClient("all"); setActiveProject(null); setOpenTaskId(null); setSidebarOpen(false);
-    setPlannerOpen(false); setPlannerWeekId(null);
-    setTerritoryView(id);
-    setTerritoryHighlightId(listingId ?? null);
-  };
-  // The territory-work landing view — same territoryView sentinel idiom as
-  // "all" (the territory picker), just routed to TerritoryDashboard instead
-  // of TerritoryPanel below. Reuses every existing mutual-exclusion guard
-  // that already keys off "is territoryView set" rather than needing its own
-  // new top-level view flag threaded through the whole file.
-  const openTerritoryDashboard = () => {
-    setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null);
-    setActiveClient("all"); setActiveProject(null); setOpenTaskId(null); setSidebarOpen(false);
-    setPlannerOpen(false); setPlannerWeekId(null);
-    setTerritoryView("dashboard");
-  };
-  // Same city, Content Planner mode instead of the Businesses list. Always
-  // starts at the week index — setPlannerWeekId(null) so re-opening the
-  // Planner doesn't jump back into whatever week was last open.
-  const openTerritoryPlanner = (id: string) => {
-    setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null);
-    setActiveClient("all"); setActiveProject(null); setOpenTaskId(null); setSidebarOpen(false);
-    setTerritoryView(id);
-    setPlannerOpen(true); setPlannerWeekId(null);
-  };
-  // The city's own work bucket, opened as an ordinary client page — that's
-  // what gives it the full task list, quick-add, Journal, Links and Vault
-  // without rebuilding any of it inside the territory panel. The container is
-  // created on demand here for territories that predate the feature.
-  const openTerritoryWork = async (id: string) => {
-    const t = territoryById(id);
-    if (!t) return;
-    const { id: cid, ready } = ensureTerritoryClient(t);
-    // Wait for the container row to commit before showing the page — the
-    // first list/task added there has a foreign key onto it.
-    await ready;
-    setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null);
-    setTerritoryView(null); setPlannerOpen(false); setActiveProject(null); setOpenTaskId(null); setSidebarOpen(false);
-    setActiveClient(cid); setClientTab("tasks");
-  };
-  // Reverse of territoryClientId — lets the client page know it's showing a
-  // city's work and offer a way back to that city's businesses.
-  const territoryForClientId = (cid: string) => territories.find((t) => territoryClientId(t.id) === cid) ?? null;
   // ⌘K's "Not imported" search — any type counts as "already added" here,
   // not just type 'client', so a contact never shows as addable twice.
   const addedContactIds = useMemo(() => new Set(clients.filter((c) => c.id.startsWith("cl_")).map((c) => c.id.slice(3))), [clients]);
-  // The sidebar stays a *roster* view in both scopes: territory prospects are
-  // filtered back out here even though myAssignedClients now includes them.
-  // A prospect you have a task on shows up on the My Work board and in ⌘K,
-  // but a city's businesses never enter the client sidebar — that flood is
-  // exactly what typing them as prospects is meant to prevent, and it would
-  // otherwise leak back in through the "Mine" scope.
-  const rosterOnly = (list: Client[]) => list.filter((c) => c.type === "client" && !c.id.startsWith(TERRITORY_CLIENT_PREFIX));
+  // The sidebar stays a *roster* view: prospects are filtered back out here
+  // even though myAssignedClients now includes them. A prospect you have a
+  // task on shows up on the My Work board and in ⌘K, but never enters the
+  // client sidebar — that's exactly what typing them as prospects is meant
+  // to prevent, and it would otherwise leak back in through the "Mine" scope.
+  const rosterOnly = (list: Client[]) => list.filter((c) => c.type === "client");
   // The sidebar's actual source list — scoped down to "mine" by default
   // (reuses myAssignedClients, the exact same set My Work uses) so a long
   // client roster doesn't bury what actually needs attention. Toggled to
@@ -2102,8 +1990,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // pending one; nothing left → let the caller know via a toast.
     const next = reviewQueue[(curIdx + 1) % reviewQueue.length] ?? reviewQueue[0];
     if (!next) { pushToast("Nothing left to review — all caught up. 🎉"); return; }
-    if (next.kind === "project") { const pr = projectById(next.id); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(pr?.clientId ?? "all"); setActiveProject(next.id); }
-    else { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(next.id); setActiveProject(null); }
+    if (next.kind === "project") { const pr = projectById(next.id); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(pr?.clientId ?? "all"); setActiveProject(next.id); }
+    else { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(next.id); setActiveProject(null); }
     setClientTab("tasks");
     setOpenTaskId(null);
   };
@@ -2130,8 +2018,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (dashboardIdx < 0) return;
     const next = dashboardSnapshot[dashboardIdx + delta];
     if (!next) return;
-    if (next.kind === "project") { const pr = projectById(next.id); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(pr?.clientId ?? "all"); setActiveProject(next.id); }
-    else { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(next.id); setActiveProject(null); }
+    if (next.kind === "project") { const pr = projectById(next.id); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(pr?.clientId ?? "all"); setActiveProject(next.id); }
+    else { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(next.id); setActiveProject(null); }
     setClientTab("tasks");
     setOpenTaskId(null);
   };
@@ -2305,9 +2193,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // with "Hide done" on by default, so the sidebar/board badge and the list
   // never disagree about how many tasks "need attention".
   const clientTaskCount = (clientId: string) => scopedTasks.filter((t) => t.clientId === clientId && t.status !== "done").length;
-  // Open tasks bucketed by client, for the territory's per-business Tasks
-  // column. One pass instead of a filter per row — a city renders a couple
-  // hundred rows, and a per-row scan of every task is quadratic.
+  // Open tasks bucketed by client, for the Clients directory's Tasks
+  // column. One pass instead of a filter per row.
   // Not memoized: useMemo over a bucketing loop trips
   // react-hooks/preserve-manual-memoization (it can't see that the arrays
   // being pushed into are freshly built here, not scopedTasks itself), and a
@@ -2315,7 +2202,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Memoized — a single pass over scopedTasks (up to ~28k rows), previously
   // rerun on every render regardless of view, same class of bug as the
   // sidebar/My Work fixes above.
-  const territoryTasksByClient = useMemo(() => {
+  const openTasksByClient = useMemo(() => {
     const m = new Map<string, Task[]>();
     for (const t of scopedTasks) {
       if (t.status === "done") continue;
@@ -2324,54 +2211,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     }
     return m;
   }, [scopedTasks]);
-  const territoryOpenWorkCount = (territoryId: string) => clientTaskCount(territoryClientId(territoryId));
-  // A business's own tasks, ANY status, excluding Playbook/Sales checklist
-  // steps (those get their own dedicated pill) — feeds the Businesses page's
-  // "needs attention now" scan (a conversation-priority task can be open
-  // regardless of which list it's in).
-  // Memoized — same one-pass-over-scopedTasks shape as territoryTasksByClient.
-  const territoryAllTasksByClient = useMemo(() => {
-    const m = new Map<string, Task[]>();
-    for (const t of scopedTasks) {
-      if (t.playbookStepKey) continue;
-      const list = m.get(t.clientId);
-      if (list) list.push(t); else m.set(t.clientId, [t]);
-    }
-    return m;
-  }, [scopedTasks]);
-  // A business's own lists (projects) OTHER than Playbook, each with
-  // its own done/total count — the Businesses page shows one pill per list
-  // (not one aggregated count) so an ambassador can jump straight into
-  // whichever list actually has the open work, same click-through as the
-  // Playbook pill. Empty lists (no tasks yet) show no pill — nothing
-  // to jump to.
-  // Memoized — one pass over scopedTasks plus one over projects.
-  const territoryOtherListsByClient = useMemo(() => {
-    const tasksByProject = new Map<string, Task[]>();
-    for (const t of scopedTasks) {
-      if (t.playbookStepKey) continue;
-      const list = tasksByProject.get(t.projectId);
-      if (list) list.push(t); else tasksByProject.set(t.projectId, [t]);
-    }
-    const m = new Map<string, { id: string; name: string; done: number; total: number }[]>();
-    for (const p of projects) {
-      if (p.id === playbookProjectId(p.clientId)) continue;
-      const pTasks = tasksByProject.get(p.id);
-      if (!pTasks?.length) continue;
-      const entry = { id: p.id, name: p.name, done: pTasks.filter((t) => t.status === "done").length, total: pTasks.length };
-      const list = m.get(p.clientId);
-      if (list) list.push(entry); else m.set(p.clientId, [entry]);
-    }
-    return m;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scopedTasks, projects]);
   // Same idea as openClientPlaybook/openClientSales, for a business's other
   // (non-checklist) lists — no reconciliation needed, it's already a real list.
   const onOpenProject = (clientId: string, projectId: string) => {
-    setTerritoryView(null); setActiveClient(clientId); setActiveProject(projectId); setClientTab("tasks");
+ setActiveClient(clientId); setActiveProject(projectId); setClientTab("tasks");
   };
   // Owner Growth Plan tasks, bucketed by client — same one-pass-not-memoized
-  // shape as territoryTasksByClient above, but WITHOUT the status==="done"
+  // shape as openTasksByClient above, but WITHOUT the status==="done"
   // exclusion (playbookCompletion needs to see done steps too, to count them).
   // Memoized — one pass over the full unfiltered tasks table (~28k rows).
   const playbookTasksByClient = useMemo(() => {
@@ -2437,15 +2283,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     else bulkUpsertTasks(toWrite);
   };
   // The Playbook is standard on every contact, not just ones that came
-  // through the territory-claim flow (addClientContact/setClientStatus
-  // already reconcile eagerly there) — this is what makes it "just show up"
-  // for a plain agency client too: opening ANY real client's page reconciles
-  // its Playbook, so a client added before this feature existed (or added
+  // through the claim flow (addClientContact/setClientStatus already
+  // reconcile eagerly there) — this is what makes it "just show up" for a
+  // plain agency client too: opening ANY real client's page reconciles its
+  // Playbook, so a client added before this feature existed (or added
   // through some other path entirely) self-heals the first time anyone
-  // actually looks at them, same lazy philosophy as the territory rollout,
-  // just with no special-cased entry point required anymore.
+  // actually looks at them, just with no special-cased entry point required
+  // anymore.
   useEffect(() => {
-    if (activeClient.startsWith("cl_") && activeClient !== WORKSPACE_CLIENT_ID && !activeClient.startsWith(TERRITORY_CLIENT_PREFIX)) {
+    if (activeClient.startsWith("cl_") && activeClient !== WORKSPACE_CLIENT_ID) {
       reconcilePlaybookTasks(activeClient);
       // cascadeSalesStageCompletion only fires forward, on an actual Stage
       // dropdown change — a client already sitting at Claimed (or further)
@@ -2470,45 +2316,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // a fully caught-up list, not a stale/empty one.
   const openClientPlaybook = (clientId: string) => {
     reconcilePlaybookTasks(clientId);
-    setTerritoryView(null); setActiveClient(clientId); setActiveProject(playbookProjectId(clientId)); setClientTab("tasks");
+ setActiveClient(clientId); setActiveProject(playbookProjectId(clientId)); setClientTab("tasks");
   };
-  // Planner activity for the open client — how many times invited to the
-  // newsletter and how many times actually featured, both already tracked by
-  // the Content Planner (planner_weeks) rather than anything new here. This
-  // is a summary, not a live-editing surface, so it's a plain lazy fetch per
-  // client switch rather than a persisted/cached map like the territory
-  // view's — silently shows nothing if the business's city has no assigned
-  // territory yet, or the directory/planner isn't reachable.
-  const [plannerActivity, setPlannerActivity] = useState<{ clientId: string; inviteCount: number; featureCount: number } | null>(null);
-  useEffect(() => {
-    setPlannerActivity(null);
-    if (!activeClient.startsWith("cl_") || activeClient === WORKSPACE_CLIENT_ID || activeClient.startsWith(TERRITORY_CLIENT_PREFIX)) return;
-    const client = clientById(activeClient);
-    const contact = contactForClient(activeClient);
-    if (!client || !contact?.city || !contact?.state) return;
-    const terr = territories.find((t) => t.city.trim().toLowerCase() === contact.city!.trim().toLowerCase() && normalizeState(t.state) === normalizeState(contact.state!));
-    if (!terr) return;
-    let alive = true;
-    const digits = (s?: string) => (s ?? "").replace(/\D/g, "").slice(-10);
-    const lc = (s?: string) => (s ?? "").trim().toLowerCase();
-    Promise.all([
-      authedFetch(`/api/directory/listings?${new URLSearchParams({ city: contact.city!, state: contact.state! })}`).then((r) => r.json()).catch(() => ({ listings: [] })),
-      fetchPlannerWeeks(terr.id).catch(() => []),
-    ]).then(([listingsBody, weeks]) => {
-      if (!alive) return;
-      const listings: { id: number | string; ghlContactId?: string; phone?: string; email?: string; name?: string }[] = Array.isArray(listingsBody?.listings) ? listingsBody.listings : [];
-      const listing = listings.find((l) =>
-        (contact.ghlContactId && l.ghlContactId === contact.ghlContactId)
-        || (!!digits(contact.phone) && digits(l.phone) === digits(contact.phone))
-        || (!!lc(contact.email) && lc(l.email) === lc(contact.email))
-        || lc(l.name) === lc(client.name));
-      const inviteCount = listing ? (inviteHistory(weeks).get(typeof listing.id === "number" ? listing.id : Number(listing.id))?.invited ?? 0) : 0;
-      const featureCount = featureHistory(weeks).get(lc(client.name))?.count ?? 0;
-      setPlannerActivity({ clientId: activeClient, inviteCount, featureCount });
-    });
-    return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeClient]);
   // Not gated by myWorkUser (the admin-only "viewing work for" selector) —
   // RLS never even returns another person's private tasks in `tasks`, so
   // filtering by `me.id` here is correct regardless of who's being viewed.
@@ -3432,14 +3241,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const clientCompany = (c: Client | null) => (c && c.id.startsWith("cl_") ? c.ghlLocationId : "");
   const addClientContact = async (contact: Contact, type: ClientType = "client") => {
     const id = "cl_" + contact.id;
-    if (clients.some((c) => c.id === id)) { setActiveClient(id); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setAddClientOpen(false); return; }
+    if (clients.some((c) => c.id === id)) { setActiveClient(id); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setAddClientOpen(false); return; }
     // Prevent a duplicate: if this contact matches a client we already track
     // (same email/phone/name, e.g. the same business in the other GHL
     // account), link it to that one and open it instead of making a second.
     const dupe = findDuplicateTrackedClient(contact);
     if (dupe) {
       linkContactToClient(dupe, contact.id);
-      setActiveClient(dupe); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setAddClientOpen(false);
+      setActiveClient(dupe); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setAddClientOpen(false);
       pushToast(`${contact.name} is already tracked as “${clientById(dupe)?.name}” — linked to it.`);
       return;
     }
@@ -3474,207 +3283,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       const j = await res.json();
       if (j.company) { const up: Client = { ...c, ghlLocationId: j.company }; setClients((cs) => cs.map((x) => (x.id === id ? up : x))); markOwnClientWrite(up.id); upsertClient(up); }
     } catch { /* business name is optional */ }
-  };
-  // Territory is a working view over what's already in GHL — a business
-  // showing up in the ClickUpLocal directory for an assigned city means it's
-  // being actively worked, so it just needs to already be here as a Lead
-  // (no manual "+ Add as client" step). Bulk, silent, no navigation/toast —
-  // unlike addClientContact (a single user-initiated add-and-open action),
-  // this can fire for dozens/hundreds of contacts at once as a territory
-  // page loads.
-  const syncTerritoryClients = (matched: Contact[]) => {
-    // Skip contacts already tracked under a different id (same email/phone/
-    // name in the other GHL account) — auto-creating cl_<id> for them is
-    // exactly how duplicate client records were getting made.
-    const missing = matched.filter((c) => !clients.some((cl) => cl.id === "cl_" + c.id) && !findDuplicateTrackedClient(c));
-    if (!missing.length) return;
-    // Dedupe before building the batch, on two axes:
-    //
-    // 1. Same contact id twice. The caller maps over LISTINGS, and two
-    //    listings can resolve to the same GHL contact, so the same cl_<id>
-    //    could appear twice. Postgres rejects an upsert whose statement
-    //    touches one row twice ("ON CONFLICT DO UPDATE command cannot affect
-    //    row a second time"), failing the whole batch — and since nothing
-    //    persisted, every refresh retried the identical failing write.
-    //
-    // 2. Distinct contact ids that are the same business (shared email,
-    //    phone, or name). findDuplicateTrackedClient above only compares
-    //    against already-persisted clients, never members of this batch
-    //    against each other, so these sailed through with different primary
-    //    keys — no error, no toast, just the same business silently listed
-    //    twice after a first sync. Same rule as the persisted check.
-    const seenEmail = new Set<string>(), seenPhone = new Set<string>(), seenName = new Set<string>();
-    const unique = [...new Map(missing.map((c) => [c.id, c])).values()].filter((c) => {
-      const email = (c.email ?? "").trim().toLowerCase();
-      const phone = dedupPhone(c.phone);
-      const name = dedupName(c.name);
-      if ((email && seenEmail.has(email)) || (phone && seenPhone.has(phone)) || (name.length > 3 && seenName.has(name))) return false;
-      if (email) seenEmail.add(email);
-      if (phone) seenPhone.add(phone);
-      if (name.length > 3) seenName.add(name);
-      return true;
-    });
-    const newClients: Client[] = unique.map((c) => {
-      const sub = subAccounts.find((s) => s.id === c.clientId);
-      // 'prospect', not 'client': a city can hold hundreds of directory
-      // businesses, and auto-adding every one of them to the client roster
-      // buried the real clients. A prospect keeps its full record (tasks,
-      // projects, journal) and is worked from the territory; setClientStatus
-      // promotes it to 'client' the moment it reaches onboarding.
-      return { id: "cl_" + c.id, name: c.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "claimed", type: "prospect", assignedTo: [] };
-    });
-    setClients((cs) => [...cs, ...newClients]);
-    newClients.forEach((c) => markOwnClientWrite(c.id));
-    bulkUpsertClients(newClients);
-  };
-  // The list every feature's touches land in. Named by us, not the user, so
-  // deriving "has this business been featured?" off it is stable.
-  const FEATURE_LIST = "Newsletter feature";
-  // Businesses already run through the newsletter motion, so the territory
-  // can show who's been used and you never double-feature a city.
-  const featuredClientIds = useMemo(() => {
-    const listIds = new Set(projects.filter((p) => p.name === FEATURE_LIST).map((p) => p.id));
-    return new Set(tasks.filter((t) => listIds.has(t.projectId)).map((t) => t.clientId));
-  }, [projects, tasks]);
-
-  // G2-SOP Stage 3, turned into dated work. Per the Jul 20 2026 field note in
-  // 02-SOP-Sales-Process.md, the feature invite IS the opener ("we want to
-  // write an article about your business") — cold calling is the low-yield
-  // path. Day 0 is the day you click, because that's when the invite goes
-  // out; the newsletter itself ships the following Wednesday.
-  const featureBusiness = (opts: { clientId: string | null; contact: Contact | null; name: string; city: string; state: string }) => {
-    const { name, city, state } = opts;
-    // A directory business you haven't touched yet has no client record — the
-    // bulk sync only creates one once it's matched to a GHL contact. Featuring
-    // it is a decision to start working it, so promote it here rather than
-    // making the button quietly do nothing (which is exactly what it did).
-    let clientId = opts.clientId;
-    if (!clientId) {
-      if (!opts.contact) { pushToast(`No GoHighLevel contact matched to ${name} yet — can't start the sequence.`); return; }
-      const c = opts.contact;
-      const sub = subAccounts.find((s) => s.id === c.clientId);
-      // Same reasoning as syncTerritoryClients: featuring a business is still
-      // prospecting (per the SOP the feature invite IS the opener), so it
-      // starts as a prospect rather than entering the client roster.
-      const nc: Client = { id: "cl_" + c.id, name: c.name, color: sub?.color ?? "#a855f7", ghlLocationId: "", status: "claimed", type: "prospect", assignedTo: [] };
-      setClients((cs) => (cs.some((x) => x.id === nc.id) ? cs : [...cs, nc]));
-      markOwnClientWrite(nc.id);
-      bulkUpsertClients([nc]);
-      clientId = nc.id;
-    }
-    let projectId = projects.find((p) => p.clientId === clientId && p.name === FEATURE_LIST)?.id;
-    if (!projectId) {
-      const p: Project = { id: newId("p_"), clientId, name: FEATURE_LIST, description: "" };
-      setProjects((ps) => [...ps, p]);
-      upsertProject(p);
-      projectId = p.id;
-    }
-    // The city's ambassador owns the sequence when there's exactly one;
-    // otherwise it lands on whoever pressed the button rather than guessing.
-    const terr = territories.find((t) => t.city.trim().toLowerCase() === city.trim().toLowerCase() && normalizeState(t.state) === normalizeState(state));
-    const roster = terr?.assignedTo ?? [];
-    const owner = roster.length === 1 ? roster[0] : me.id;
-    const contactId = clientId.startsWith("cl_") ? clientId.slice(3) : null;
-    // Day offsets straight from the SOP's touch timeline.
-    const touches: [number, string][] = [
-      [0, `Feature invite email — ${name}`],
-      [1, `Call or drop-in — ${name}`],
-      [3, `Value email: what the feature looks like — ${name}`],
-      [5, `Second attempt — still want to feature you — ${name}`],
-      [8, `Break-up note — ${name}`],
-    ];
-    const created: Task[] = touches.map(([offset, title]) => ({
-      id: newId("t_"), projectId: projectId!, clientId, title, description: "",
-      status: "todo", priority: "normal", assigneeId: owner, contactId,
-      due: addDaysIso(TODAY, offset), recurrence: "none", labelIds: [], ghlTaskId: null, private: false,
-      subtasks: [], comments: [], attachments: [], createdAt: new Date().toISOString(), createdBy: me.id,
-    }));
-    setTasks((ts) => [...ts, ...created]);
-    created.forEach((t) => upsertTask(t, me.id));
-    if (owner !== me.id) notify(owner, `${me.name} queued ${name} for a newsletter feature — ${created.length} touches`, created[0].id, { clientId });
-    pushToast(`${name} featured — ${created.length} touches added to ${userById(owner)?.name ?? "you"}.`);
-  };
-
-  // A city's own work (launch plan, newsletter, chamber event) has nowhere to
-  // live otherwise: every task needs a clientId, and a city isn't a client.
-  // The container is an ordinary `clients` row on a derived id — no schema of
-  // its own — kept out of the roster by its id prefix, exactly how
-  // WORKSPACE_CLIENT_ID is handled. It never syncs to GHL: ghlTargetFor()
-  // resolves through a contact, and there is no contact behind this id.
-  //
-  // assignedTo mirrors the territory's ambassadors, which is what actually
-  // grants them access — supabase/client-assignment.sql's RLS lets a VA see a
-  // client they're following even with no task on it yet. Re-runnable: called
-  // on create, on every assignee change, and lazily when the Work tab opens,
-  // so the four territories that predate this feature get one on first use.
-  const ensureTerritoryClient = (t: Territory) => {
-    const id = territoryClientId(t.id);
-    // Ambassadors AND followers both need to actually open this city — the
-    // container client's assigned_to is what RLS checks, so a follower left
-    // off it could see the city in their sidebar (myTerritories includes
-    // followers) but get nothing back querying its contacts/tasks. Only
-    // Territory Dashboard's OWN activity tiers stay ambassador-only — that
-    // filter reads t.assignedTo directly, never this container client.
-    const want = Array.from(new Set([...(t.assignedTo ?? []), ...(t.followers ?? [])])).sort();
-    const existing = clients.find((c) => c.id === id);
-    const sameAssignees = existing && (existing.assignedTo ?? []).slice().sort().join(",") === want.join(",");
-    if (existing && existing.name === t.name && sameAssignees) return { id, ready: Promise.resolve() };
-    const nc: Client = {
-      ...(existing ?? { color: "#0ea5e9", ghlLocationId: "", status: "active_client" as const, type: "client" as const }),
-      id, name: t.name, assignedTo: want,
-    };
-    setClients((cs) => (existing ? cs.map((c) => (c.id === id ? nc : c)) : [...cs, nc]));
-    markOwnClientWrite(id);
-    // `ready` resolves once the row is actually committed. projects.client_id
-    // and tasks.client_id are foreign keys, so the first list/task created in
-    // a brand-new city would otherwise race its own container row.
-    return { id, ready: upsertClient(nc) };
-  };
-  const addTerritory = (spec: { name: string; city: string; state: string; assignedTo: string[] }) => {
-    const t: Territory = { id: newId("terr_"), wpCitySlug: null, dailyInviteCap: null, followers: [], ...spec };
-    setTerritories((ts) => [...ts, t]);
-    upsertTerritory(t);
-    ensureTerritoryClient(t);
-  };
-  // Toggle a teammate on/off a city's ambassador list — a city can have
-  // several. Ambassadors are who Territory Dashboard puts activities in
-  // front of; see toggleTerritoryFollower below for look-but-no-activities.
-  const toggleTerritoryAssignee = (id: string, memberId: string) => {
-    const t = territories.find((x) => x.id === id);
-    if (!t) return;
-    const has = (t.assignedTo ?? []).includes(memberId);
-    const nt = { ...t, assignedTo: has ? t.assignedTo.filter((m) => m !== memberId) : [...(t.assignedTo ?? []), memberId] };
-    setTerritories((ts) => ts.map((x) => (x.id === id ? nt : x)));
-    upsertTerritory(nt);
-    // Keep the container's follow list in step, or a newly-added ambassador
-    // can open the city but not see its work (and a removed one still can).
-    ensureTerritoryClient(nt);
-  };
-  // Toggle a teammate on/off a city's follower list — they can open the city
-  // and see its work (ensureTerritoryClient grants the same RLS visibility as
-  // an ambassador), but Territory Dashboard's tiers read assignedTo only, so
-  // a follower's own dashboard stays quiet on this city's activities.
-  const toggleTerritoryFollower = (id: string, memberId: string) => {
-    const t = territories.find((x) => x.id === id);
-    if (!t) return;
-    const has = (t.followers ?? []).includes(memberId);
-    const nt = { ...t, followers: has ? t.followers.filter((m) => m !== memberId) : [...(t.followers ?? []), memberId] };
-    setTerritories((ts) => ts.map((x) => (x.id === id ? nt : x)));
-    upsertTerritory(nt);
-    ensureTerritoryClient(nt);
-  };
-  const deleteTerritory = (id: string) => {
-    setTerritories((ts) => ts.filter((t) => t.id !== id));
-    deleteTerritoryDb(id);
-  };
-  // null/0 = the auto-invite cron skips this territory entirely — see
-  // runPlannerAutoInvite (plannerAutoInviteServer.ts).
-  const setTerritoryDailyInviteCap = (id: string, cap: number | null) => {
-    const t = territories.find((x) => x.id === id);
-    if (!t) return;
-    const nt = { ...t, dailyInviteCap: cap };
-    setTerritories((ts) => ts.map((x) => (x.id === id ? nt : x)));
-    upsertTerritory(nt);
   };
   const saveTemplate = (id: string | undefined, spec: { name: string; checklistItems: string[] }) => {
     const t: TaskTemplate = { id: id ?? newId("tmpl_"), ...spec };
@@ -4295,21 +3903,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // mobile header below so the bell / filter / overflow popovers aren't
   // duplicated in source. Only one header is ever visible (CSS breakpoint),
   // so the popovers never double-render on screen.
-  const territoryTitle = territoryView ? (territoryView === "dashboard" ? "Follow Up" : territoryView === "all" ? "Territories" : (territoryById(territoryView) ? `${territoryById(territoryView)!.city}, ${territoryById(territoryView)!.state}` : "Territory")) : null;
-  const headerTitleText = territoryTitle ?? (settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Team Chat") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "My Work" : activeClient === "all" ? "All Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? "")));
-  const isClientDetail = !myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && !!clientById(activeClient);
-  // Non-null when the open "client" is actually a city's work container —
-  // drives the breadcrumb and subtitle so the page reads as city work rather
-  // than as a client that wandered out of the roster. Forced null when
-  // territories are off (see TERRITORIES_ENABLED) — TERRITORIES_ENABLED
-  // only ever gated the sidebar's own Territories section, not this: a
-  // territory container was still reachable via My Work/All Tasks/search
-  // (workableClients deliberately includes cl_terr_* rows — "city work is
-  // work"), so opening one still rendered the full Businesses/City
-  // work/Planner switcher below with the flag off. Derek: "we're still
-  // seeing city work."
-  const activeTerritoryClient = TERRITORIES_ENABLED ? territoryForClientId(activeClient) : null;
-  const showFilterControl = !territoryView && !inboxView && !dirView && !myWork && !settingsView && !(activeClient !== "all" && (clientTab === "chat" || clientTab === "vault"));
+  const headerTitleText = settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Team Chat") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "My Work" : activeClient === "all" ? "All Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? ""));
+  const isClientDetail = !myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && !!clientById(activeClient);
+  const showFilterControl = !inboxView && !dirView && !myWork && !settingsView && !(activeClient !== "all" && (clientTab === "chat" || clientTab === "vault"));
   const bellControl = (
     <div className="relative">
       <button onClick={() => { const opening = !bellOpen; setBellOpen(opening); if (opening) { setNotifications((ns) => ns.map((n) => (n.recipientId === me.id ? { ...n, read: true } : n))); markNotifsReadDb(me.id); } }} aria-label="Notifications" className="relative rounded-lg border bg-background p-2 text-muted hover:text-foreground">
@@ -4409,7 +4005,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <button onClick={() => { setHeaderMoreOpen(false); openCompose("sms"); }}
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background sm:hidden"><I.comment /> SMS</button>
           )}
-          <button onClick={() => { setHeaderMoreOpen(false); copyLink({ view: null, client: activeClient, project: activeProject, task: null, clientTab, vaultFolder: null, dm: null, territory: null, plannerMode: false, plannerWeek: null }); }}
+          <button onClick={() => { setHeaderMoreOpen(false); copyLink({ view: null, client: activeClient, project: activeProject, task: null, clientTab, vaultFolder: null, dm: null }); }}
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy link</button>
           {activeClient !== "all" && !activeProject && clientById(activeClient) && (
             <button onClick={() => { setHeaderMoreOpen(false); copyClientShareLink(activeClient); }} title="A public, no-login link showing this client what we're waiting on them for"
@@ -4499,15 +4095,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         <div className="flex shrink-0 items-center gap-1 border-b px-3 py-3">
           <span className="inline-flex shrink-0 items-center justify-center rounded-full text-[15px] font-semibold text-white" style={{ width: 30, height: 30, background: me.color }}>{me.initials}</span>
           <div className="ml-1 min-w-0 flex-1 leading-tight"><div className="truncate text-[15px] font-medium">{me.name}</div><div className="text-[13px] capitalize text-muted">{me.role}</div></div>
-          <button onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setDirView(null); setTerritoryView(null); setSidebarOpen(false); setOpenTaskId(null); setSettingsView(true); }} title="Settings" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>
+          <button onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setDirView(null); setSidebarOpen(false); setOpenTaskId(null); setSettingsView(true); }} title="Settings" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>
           <button onClick={toggleTheme} title={`Theme: ${theme === "auto" ? `Auto (${resolveTheme(theme)} now)` : theme[0].toUpperCase() + theme.slice(1)} — click to change`} className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-foreground">{resolveTheme(theme) === "light" ? <I.moon /> : <I.sun />}</button>
           <button onClick={onSignOut} title="Sign out" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-red-500"><I.logout /></button>
         </div>
 
         {/* Dashboard, Conversations, and Clients/Projects/Personal, all one
             block (Derek: put them together "so they use less space") — no
-            divider/gap between them, just Pinned/Territories below stay
-            their own sections. DMs under Conversations are parked per
+            divider/gap between them, just Pinned below stays its own
+            section. DMs under Conversations are parked per
             Derek's ask ("we don't need DMs for now, just the team — if they
             want to chat with someone specifically they can use the @") but
             not deleted, just admin-toggled off by default. */}
@@ -4541,11 +4137,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
         {/* Pinned — per-user quick access to starred clients + lists. Starring
             a client (from the Clients directory or its header) pins it here.
-            Placed right after Clients/Projects, ahead of Territories — a
-            territory roster can run long, and Pinned is the highest-value,
+            Placed right after Clients/Projects since it's the highest-value,
             most-frequently-tapped section, so it shouldn't get pushed below
-            the fold on a phone (where scrolling past a long Territories list
-            to reach it is what made pins effectively invisible on mobile). */}
+            the fold on a phone. */}
         {(() => {
           const pinnedClients = [...starred].map((id) => clientById(id)).filter((c): c is Client => !!c && c.id.startsWith("cl_"));
           const pinned = [...starredLists].map((id) => projectById(id)).filter((p): p is Project => !!p);
@@ -4556,7 +4150,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               {pinnedClients.map((c) => {
                 const active = !myWork && !personalView && !inboxView && !settingsView && !dirView && !activeProject && activeClient === c.id;
                 return (
-                  <SideItem key={c.id} active={active} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(c.id); setActiveProject(null); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
+                  <SideItem key={c.id} active={active} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(c.id); setActiveProject(null); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: clientStatusMeta(c.status).dot }} /> <span className="min-w-0 flex-1 truncate text-left">{c.name}</span>
                     <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); toggleStar(c.id); }} title="Unpin from sidebar" className="shrink-0 rounded p-0.5 text-amber-400 hover:bg-background"><I.star filled /></span>
                   </SideItem>
@@ -4570,7 +4164,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 // subtitle for the same ambiguity.
                 const clientName = clientById(p.clientId)?.name;
                 return (
-                  <SideItem key={p.id} active={active} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(p.clientId); setActiveProject(p.id); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
+                  <SideItem key={p.id} active={active} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(p.clientId); setActiveProject(p.id); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
                     <I.list className="shrink-0 text-muted" />
                     <span className="min-w-0 flex-1 text-left">
                       {clientName && <span className="block truncate text-[11px] leading-tight text-muted">{clientName}</span>}
@@ -4583,36 +4177,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             </nav>
           );
         })()}
-
-        {/* Territories — cities (city+state) assigned to you; an admin sees all.
-            Click a city to work its contacts (claimed vs unclaimed). */}
-        {TERRITORIES_ENABLED && visibleTerritories.length > 0 && (
-          <nav className="mt-[10px] shrink-0 space-y-0.5 border-t px-2 pt-[10px]">
-            <div className="flex items-center justify-between px-2.5 pb-1">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Territories</span>
-              {canAdmin && <button onClick={() => openTerritory("all")} title="Manage territories" className="rounded p-0.5 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>}
-            </div>
-            {/* Landing view across every assigned territory — who to follow
-                up with today, same spirit as Dashboard but for prospecting
-                work instead of active clients. Sits above the per-city list
-                since it's the "log in and know what to work on" entry
-                point, not a drill-down into one city. */}
-            <SideItem active={territoryView === "dashboard"} title="Follow Up" onClick={openTerritoryDashboard}><I.grid className="text-muted" /> <span>Follow Up</span></SideItem>
-            {visibleTerritories.map((t) => (
-              <SideItem key={t.id} active={territoryView === t.id} onClick={() => openTerritory(t.id)}>
-                <I.flag className="shrink-0 text-muted" /> <span className="min-w-0 flex-1 truncate text-left">{t.city}, {t.state}</span>
-              </SideItem>
-            ))}
-          </nav>
-        )}
-        {TERRITORIES_ENABLED && canAdmin && visibleTerritories.length === 0 && (
-          <nav className="mt-[10px] shrink-0 border-t px-2 pt-[10px]">
-            <SideItem active={territoryView === "all"} onClick={() => openTerritory("all")}><I.flag className="text-muted" /> <span>Territories</span></SideItem>
-          </nav>
-        )}
-        {/* Follow Up is gone with Territories. It was kept out on its own for
-            one deploy on the assumption it was still worked daily; it is not —
-            follow-up moves to GoHighLevel along with sales and the Playbook. */}
 
       </aside>
 
@@ -4690,7 +4254,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeProject && projectById(activeProject) ? (<>
               <h1 className="flex items-center gap-1.5 truncate text-[20px] font-semibold"><I.folder className="shrink-0 text-muted" /> {projectById(activeProject)!.name}</h1>
               <p className="hidden items-center gap-1.5 text-[13px] text-muted sm:flex">
-                <button onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
+                <button onClick={() => { setDirView("clients"); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
                 <span>›</span>
                 <button onClick={() => setActiveProject(null)} className="hover:text-foreground hover:underline">{clientById(activeClient)?.name}</button>
                 <span>·</span>
@@ -4698,39 +4262,24 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </p>
             </>) : (<>
               <h1 className="flex items-center gap-2 truncate text-[20px] font-semibold">
-                {territoryTitle ? territoryTitle : settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Team Chat") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "My Work" : activeClient === "all" ? "All Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
-                {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
+                {settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Team Chat") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "My Work" : activeClient === "all" ? "All Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
+                {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
               </h1>
-              {/* No subtitle for a territory — it fell through to the
-                  generic "All Tasks" branch below (wrong, global counts)
-                  because activeClient is "all" while viewing one; the
-                  territory's own scoped counts render right below instead,
-                  so repeating them here would just duplicate the title. */}
-              {!territoryTitle && (
-                <p className="hidden items-center gap-1.5 text-[13px] text-muted sm:flex">
-                  {/* Breadcrumb back to the Clients directory — only meaningful
-                      when a specific client is the thing being viewed. */}
-                  {/* A territory container isn't in the Clients directory, so
-                      it skips this breadcrumb entirely — the Businesses/City
-                      work switcher in the action row (below) is its way back,
-                      not a second, redundant link doing the same thing. */}
-                  {!myWork && !personalView && !inboxView && !settingsView && !dirView && !activeTerritoryClient && activeClient !== "all" && (<>
-                    <button onClick={() => { setDirView("clients"); setTerritoryView(null); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
-                    <span>›</span>
-                  </>)}
-                  <span>{settingsView ? "Integrations, team, territories, templates, playbooks, and API tokens" : inboxView ? (dmUserId ? "Private — only the two of you can see this" : "Talk to the team — everyone's in this one") : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "Every client and project you're on, grouped by what needs attention first" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : activeTerritoryClient ? `City work for ${activeTerritoryClient.city}, ${activeTerritoryClient.state} — not tied to any one business` : clientCompany(clientById(activeClient))}</span>
-                </p>
-              )}
+              <p className="hidden items-center gap-1.5 text-[13px] text-muted sm:flex">
+                {/* Breadcrumb back to the Clients directory — only meaningful
+                    when a specific client is the thing being viewed. */}
+                {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && (<>
+                  <button onClick={() => { setDirView("clients"); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
+                  <span>›</span>
+                </>)}
+                <span>{settingsView ? "Integrations, team, templates, playbooks, and API tokens" : inboxView ? (dmUserId ? "Private — only the two of you can see this" : "Talk to the team — everyone's in this one") : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "Every client and project you're on, grouped by what needs attention first" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</span>
+              </p>
             </>)}
           </div>
 
           <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
-          {/* This is the "All Tasks" scope toggle — it belongs there only.
-              openTerritory() also sets activeClient to "all" (there's no
-              real client selected while browsing a city), so without
-              !territoryView here this leaked onto the territory Businesses
-              page too, where it does nothing relevant. */}
-          {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient === "all" && canAdmin && (
+          {/* This is the "All Tasks" scope toggle — it belongs there only. */}
+          {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient === "all" && canAdmin && (
             <div className="inline-flex overflow-hidden rounded-md border" title="VAs only ever see their own tasks here regardless of this toggle">
               <button onClick={() => setAllTasksScope("mine")} className={`px-2.5 py-1.5 text-[13px] font-medium ${allTasksScope === "mine" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Mine</button>
               <button onClick={() => setAllTasksScope("all")} className={`px-2.5 py-1.5 text-[13px] font-medium ${allTasksScope === "all" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>All</button>
@@ -4741,7 +4290,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               the header actions, ahead of the Tasks/Journal/Vault tabs, as a
               prominent accent (or red-when-overdue) pill rather than the tiny
               grey chip it used to be. */}
-          {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && clientById(activeClient) && (() => {
+          {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && clientById(activeClient) && (() => {
             const scopedProject = activeProject ? projectById(activeProject) : null;
             // Project-level pill — unchanged, still one shared date per
             // project (the per-person split below is client-level only).
@@ -4818,38 +4367,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </div>
             );
           })()}
-          {/* Reverse direction of the Businesses/City work switcher on the
-              city page (TerritoryPanel) — same classNames, so flipping
-              between "this city's businesses" and "this city's own work" is
-              one click either way instead of a tab strip on one side and a
-              breadcrumb link on the other. */}
-          {activeTerritoryClient && (
-            <div className="inline-flex overflow-hidden rounded-md border" title="Switch to this city's businesses or newsletter planner">
-              <button onClick={() => openTerritory(activeTerritoryClient.id)} className="px-2.5 py-1.5 text-[13px] font-medium bg-background text-muted hover:text-foreground">Businesses</button>
-              <span className="px-2.5 py-1.5 text-[13px] font-medium bg-accent-soft text-accent">City work</span>
-              <button onClick={() => openTerritoryPlanner(activeTerritoryClient.id)} className="px-2.5 py-1.5 text-[13px] font-medium bg-background text-muted hover:text-foreground">Planner</button>
-            </div>
-          )}
-          {/* Same control, other side: browsing a city's businesses or
-              planner page. Lives in the header now (not inside
-              TerritoryPanel's own body) so it sits in the exact same spot
-              as its reverse above — one consistent place for this switch
-              regardless of which third of the territory you're looking at. */}
-          {territoryView && territoryView !== "all" && (
-            <div className="inline-flex overflow-hidden rounded-md border" title="Switch between this city's businesses, its own work, and the newsletter planner">
-              {plannerOpen
-                ? <button onClick={() => setPlannerOpen(false)} className="px-2.5 py-1.5 text-[13px] font-medium bg-background text-muted hover:text-foreground">Businesses</button>
-                : <span className="px-2.5 py-1.5 text-[13px] font-medium bg-accent-soft text-accent">Businesses</span>}
-              <button onClick={() => openTerritoryWork(territoryView)} className="flex items-center gap-1.5 px-2.5 py-1.5 text-[13px] font-medium bg-background text-muted hover:text-foreground">
-                City work
-                {territoryOpenWorkCount(territoryView) > 0 && <span className="rounded-full bg-accent px-1.5 text-[12px] font-semibold text-white">{territoryOpenWorkCount(territoryView)}</span>}
-              </button>
-              {plannerOpen
-                ? <span className="px-2.5 py-1.5 text-[13px] font-medium bg-accent-soft text-accent">Planner</span>
-                : <button onClick={() => setPlannerOpen(true)} className="px-2.5 py-1.5 text-[13px] font-medium bg-background text-muted hover:text-foreground">Planner</button>}
-            </div>
-          )}
-          {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && (
+          {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && (
             <div className="inline-flex overflow-hidden rounded-md border">
               <button onClick={() => setClientTab("tasks")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "tasks" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Tasks</button>
               <button onClick={() => setClientTab("chat")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "chat" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Journal · {(() => {
@@ -4868,13 +4386,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           {/* Quick Email/SMS — jumps straight into the Journal composer in that
               mode. Client-scoped messaging only (not projects), gated by the
               same permission as sending. */}
-          {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && !activeProject && canMessageClient(activeClient) && (
+          {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && !activeProject && canMessageClient(activeClient) && (
             <div className="hidden overflow-hidden rounded-md border sm:inline-flex">
               <button onClick={() => openCompose("email")} title="Email this client" className="inline-flex items-center gap-1 bg-background px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-accent-soft hover:text-accent"><I.comment /> <span className="hidden sm:inline">Email</span></button>
               <button onClick={() => openCompose("sms")} title="Text this client" className="border-l bg-background px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-accent-soft hover:text-accent">SMS</button>
             </div>
           )}
-          {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && clientById(activeClient) && (
+          {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && clientById(activeClient) && (
             <div className="flex items-center gap-1.5">
               {/* Only shown when this client/project is actually on your
                   Dashboard — arriving here some other way (search, a link,
@@ -4972,7 +4490,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                       <button onClick={() => { setHeaderMoreOpen(false); openCompose("sms"); }}
                         className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background sm:hidden"><I.comment /> SMS</button>
                     )}
-                    <button onClick={() => { setHeaderMoreOpen(false); copyLink({ view: null, client: activeClient, project: activeProject, task: null, clientTab, vaultFolder: null, dm: null, territory: null, plannerMode: false, plannerWeek: null }); }}
+                    <button onClick={() => { setHeaderMoreOpen(false); copyLink({ view: null, client: activeClient, project: activeProject, task: null, clientTab, vaultFolder: null, dm: null }); }}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy link</button>
                     {activeClient !== "all" && !activeProject && clientById(activeClient) && (
                       <button onClick={() => { setHeaderMoreOpen(false); copyClientShareLink(activeClient); }} title="A public, no-login link showing this client what we're waiting on them for"
@@ -5035,7 +4553,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           )}
 
 
-          {territoryView || inboxView || settingsView || dirView ? null : myWork ? (
+          {inboxView || settingsView || dirView ? null : myWork ? (
             <div className="flex flex-wrap items-center gap-2">
               <div className="inline-flex overflow-hidden rounded-md border">
                 <button onClick={() => setDashboardView("work")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "work" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Work</button>
@@ -5158,7 +4676,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </div>
         </header>
 
-        {!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && (
+        {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && (
           <QuickLinksBar
             links={clientLinks.filter((l) => l.clientId === activeClient)}
             canEdit={canAdmin}
@@ -5173,52 +4691,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         {settingsView ? (
           <SettingsHub
             initialTab={settingsInitialTab}
-            me={me} canAdmin={canAdmin} hasTerritoryAccess={canAdmin || myTerritories.length > 0}
+            me={me} canAdmin={canAdmin}
             subAccounts={subAccounts}
             onSaveClient={(c) => { setClients((cs) => cs.map((x) => (x.id === c.id ? c : x))); markOwnClientWrite(c.id); upsertClient(c); }}
             onSynced={async () => { try { setContacts(await fetchContacts()); pushToast("Contacts updated from GoHighLevel"); } catch { /* ignore */ } }}
-            territories={territories} contacts={contacts} clients={clients}
-            onAddTerritory={addTerritory} onToggleAssignee={toggleTerritoryAssignee} onToggleFollower={toggleTerritoryFollower} onDeleteTerritory={deleteTerritory}
-            onSetDailyInviteCap={setTerritoryDailyInviteCap}
-            onAddContact={(contact) => addClientContact(contact)}
-            onOpenClient={(id) => { setSettingsView(false); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); }}
+            clients={clients}
             templates={taskTemplates} projects={projects}
             onSaveTemplate={saveTemplate} onDeleteTemplate={deleteTemplate} onUseTemplateAsTask={useTemplateAsTask}
             playbooks={playbooks} onSavePlaybook={savePlaybook} onDeletePlaybook={deletePlaybook} onLoadPlaybook={loadPlaybook}
             dmEnabled={dmEnabled} onSetDmEnabled={setDmEnabled}
           />
-        ) : territoryView === "dashboard" ? (
-          <TerritoryDashboard me={me} territories={territories} contacts={contacts} clients={clients} tasks={tasks}
-            onOpenClient={(id) => { setTerritoryView(null); setActiveClient(id); setActiveProject(null); setClientTab("tasks"); }} />
-        ) : territoryView && territoryView !== "all" && plannerOpen ? (
-          <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">
-            <PlannerPanel territoryId={territoryView} city={territoryById(territoryView)?.city ?? ""} state={territoryById(territoryView)?.state ?? ""}
-              initialWeekId={plannerWeekId} onWeekChange={setPlannerWeekId} clients={clients} tasks={tasks} pushToast={pushToast} />
-          </div>
-        ) : territoryView ? (
-          <div className="flex-1 overflow-auto bg-background py-2">
-            <TerritoryPanel me={me} canAdmin={canAdmin} territories={territories} contacts={contacts} clients={clients}
-              onAddTerritory={addTerritory} onToggleAssignee={toggleTerritoryAssignee} onToggleFollower={toggleTerritoryFollower} onDeleteTerritory={(id) => { deleteTerritory(id); if (territoryView === id) setTerritoryView("all"); }}
-              onSetDailyInviteCap={setTerritoryDailyInviteCap}
-              // Territory is a working view over what's already in GHL — no
-              // "become a client" ceremony before you can open/journal a
-              // business. Clicking the name is the same immediate action as
-              // "+ Add as client": no confirm, no separate step.
-              onAddContact={(c) => addClientContact(c)}
-              onSyncClients={syncTerritoryClients}
-              featuredClientIds={featuredClientIds}
-              onFeature={featureBusiness}
-              onOpenClient={(id) => { setTerritoryView(null); setActiveClient(id); setActiveProject(null); setClientTab("tasks"); }}
-              tasksByClient={territoryAllTasksByClient}
-              playbookTasksByClient={playbookTasksByClient}
-              onOpenPlaybook={openClientPlaybook}
-              otherListsByClient={territoryOtherListsByClient}
-              onOpenProject={onOpenProject}
-              onSetClientStatus={setClientStatus}
-              ghlContactUrlFor={ghlContactUrlFor}
-              focusId={territoryView === "all" ? undefined : territoryView}
-              highlightListingId={territoryHighlightId} onHighlightConsumed={() => setTerritoryHighlightId(null)} />
-          </div>
         ) : inboxView && dmUserId ? (
           // A DM thread has no "Activity" sub-view (that's a Team Chat-page
           // concept — task comments/mentions addressed to you, not private
@@ -5235,16 +4717,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <TeamChat me={me} scope={{ type: "team" }} messages={teamMessages} onSend={sendTeamMessage} onDelete={deleteTeamMessage}
             onPin={pinTeamMessage} onUploadFile={(file) => uploadOneImage("team-chat", file)} onOpenFile={downloadFile} onGetSignedUrl={signedUrlForFile} />
         ) : dirView === "clients" ? (
-          <ClientsDirectory clients={sortedClients} clientCompany={(c) => clientCompany(c)} taskCount={clientTaskCount} tasksByClient={territoryTasksByClient} starred={starred} onToggleStar={toggleStar}
+          <ClientsDirectory clients={sortedClients} clientCompany={(c) => clientCompany(c)} taskCount={clientTaskCount} tasksByClient={openTasksByClient} starred={starred} onToggleStar={toggleStar}
             needsReview={(id) => clientNeedsReview(id, me.id)}
-            onOpen={(id) => { setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); setClientTab("tasks"); }}
+            onOpen={(id) => { setDirView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); setClientTab("tasks"); }}
             canAdmin={canAdmin} onAddClient={() => setAddClientOpen(true)} onRename={renameClient} onDelete={deleteClient} onSetStatus={setClientStatus}
             sort={clientSort} onSetSort={saveClientSort} scope={clientListScope} onToggleScope={() => setClientListScope((s) => (s === "mine" ? "all" : "mine"))}
             groupBy={clientsGroupBy} onSetGroupBy={setClientsGroupBy} teamGroups={teamActiveClients} completionLog={completionLog}
-            onOpenTask={(clientId, taskId) => { setDirView(null); setTerritoryView(null); setActiveClient(clientId); setActiveProject(null); setOpenTaskId(taskId); }} />
+            onOpenTask={(clientId, taskId) => { setDirView(null); setActiveClient(clientId); setActiveProject(null); setOpenTaskId(taskId); }} />
         ) : dirView === "projects" ? (
           <ProjectsDirectory projects={sortedWorkspaceProjects} openCount={projectTaskCount}
-            onOpen={(id) => { setDirView(null); setTerritoryView(null); setActiveClient(WORKSPACE_CLIENT_ID); setActiveProject(id); setOpenTaskId(null); setClientTab("tasks"); }}
+            onOpen={(id) => { setDirView(null); setActiveClient(WORKSPACE_CLIENT_ID); setActiveProject(id); setOpenTaskId(null); setClientTab("tasks"); }}
             canAdmin={canAdmin} onAddProject={() => addProject(WORKSPACE_CLIENT_ID)} onRename={renameProject} onDelete={deleteProject}
             starredLists={starredLists} onToggleStarList={toggleStarList} />
         ) : personalView ? (
@@ -5259,11 +4741,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             granolaUnmatched={canAdmin ? granolaUnmatched : []} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onAssignGranolaMeeting={assignGranolaUnmatched} onDismissGranolaUnmatched={dismissGranolaUnmatched} />
         ) : myWork ? (
           <ClientsBoard groups={myWorkGroups} clientTaskCount={clientTaskCount} projectTaskCount={projectTaskCount} hasUnreadMessage={hasUnreadMessage} onOpenTask={setOpenTaskId}
-            onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }}
+            onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }}
             onOpenProject={(id) => {
-              if (id === PERSONAL_PROJECT_ID) { setMyWork(false); setPersonalView(true); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setOpenTaskId(null); return; }
+              if (id === PERSONAL_PROJECT_ID) { setMyWork(false); setPersonalView(true); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setOpenTaskId(null); return; }
               const p = projects.find((x) => x.id === id); if (!p) return;
-              setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(p.clientId); setActiveProject(id); setOpenTaskId(null);
+              setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(p.clientId); setActiveProject(id); setOpenTaskId(null);
             }} />
         ) : activeClient !== "all" && clientTab === "chat" ? (
           <ClientJournal
@@ -5311,18 +4793,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             initialFolderId={initialVaultFolder} />
         ) : (
           <>
-          {/* Planner activity — how many times this business has been
-              invited to the newsletter and actually featured, straight from
-              the Content Planner's own history. Hidden entirely rather than
-              showing "0 invites" clutter on a business the Planner hasn't
-              touched yet (no assigned territory, or genuinely never invited). */}
-          {activeClient !== "all" && !activeProject && plannerActivity?.clientId === activeClient && (plannerActivity.inviteCount > 0 || plannerActivity.featureCount > 0) && (
-            <div className="border-b bg-background/40 px-4 py-1.5 text-[13px] text-muted">
-              Planner: {plannerActivity.inviteCount > 0 && <span>{plannerActivity.inviteCount} newsletter invite{plannerActivity.inviteCount === 1 ? "" : "s"}</span>}
-              {plannerActivity.inviteCount > 0 && plannerActivity.featureCount > 0 && " · "}
-              {plannerActivity.featureCount > 0 && <span>{plannerActivity.featureCount} newsletter feature{plannerActivity.featureCount === 1 ? "" : "s"}</span>}
-            </div>
-          )}
           {activeClient !== "all" && (() => {
             const cf = foldersForClient(activeClient);
             const cl = projectsForClient(activeClient);
@@ -5446,7 +4916,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={navTaskIds.length} navTasks={navTaskIds.map((id) => tasks.find((t) => t.id === id)).filter((t): t is Task => !!t)} onOpenTask={setOpenTaskId} onAddSibling={(title) => addTaskToList(openTask.clientId, openTask.projectId, openTask.private, title)} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(body, attachments) => addComment(openTask.id, body, attachments)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { if (openTask.playbookStepKey) { pushToast("Playbook steps can't be moved to a different list."); return; } patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, territory: null, plannerMode: false, plannerWeek: null })} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} onMarkChannelRead={(channel) => markTaskChannelRead(openTask.id, channel)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} onScheduleTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, scheduledAt, attachments, cc, bcc) => scheduleMessage(openTask.clientId, channel, subject, body, scheduledAt, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId)} draftingMessage={draftingMessage} onGetTaskLink={() => getClientShareUrl(openTask.clientId, { projectId: openTask.projectId, taskId: openTask.id })} canAdmin={canAdmin} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onCopyClientLink={() => copyClientShareLink(openTask.clientId, openTask.projectId)} onDraftDescription={draftDescription} draftingDescription={draftingDescription} onRegenerateAiSummary={() => regenerateAiSummary(openTask.clientId)} aiSummaryBusy={aiSummaryBusyId === openTask.clientId} pushToast={pushToast} />
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { if (openTask.playbookStepKey) { pushToast("Playbook steps can't be moved to a different list."); return; } patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null })} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} onMarkChannelRead={(channel) => markTaskChannelRead(openTask.id, channel)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} onScheduleTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, scheduledAt, attachments, cc, bcc) => scheduleMessage(openTask.clientId, channel, subject, body, scheduledAt, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId)} draftingMessage={draftingMessage} onGetTaskLink={() => getClientShareUrl(openTask.clientId, { projectId: openTask.projectId, taskId: openTask.id })} canAdmin={canAdmin} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onCopyClientLink={() => copyClientShareLink(openTask.clientId, openTask.projectId)} onDraftDescription={draftDescription} draftingDescription={draftingDescription} onRegenerateAiSummary={() => regenerateAiSummary(openTask.clientId)} aiSummaryBusy={aiSummaryBusyId === openTask.clientId} pushToast={pushToast} />
       )}
 
       {addClientOpen && <AddClientModal subAccounts={subAccounts} contacts={contacts} existingIds={new Set(clients.map((c) => c.id))} onAdd={addClientContact} onClose={() => setAddClientOpen(false)} />}
@@ -5519,10 +4989,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       </>)}
       {cmdkOpen && <CommandK tasks={scopedTasks} clients={workableClients} projects={projects} contacts={contacts} addedContactIds={addedContactIds} clientById={clientById}
         onOpenTask={(id) => { setOpenTaskId(id); setCmdkOpen(false); }}
-        onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); setCmdkOpen(false); }}
+        onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(id); setActiveProject(null); setCmdkOpen(false); }}
         onOpenProject={(id) => {
-          if (id === PERSONAL_PROJECT_ID) { setMyWork(false); setPersonalView(true); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setCmdkOpen(false); return; }
-          const p = projects.find((x) => x.id === id); if (p) { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setTerritoryView(null); setActiveClient(p.clientId); setActiveProject(id); } setCmdkOpen(false);
+          if (id === PERSONAL_PROJECT_ID) { setMyWork(false); setPersonalView(true); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setCmdkOpen(false); return; }
+          const p = projects.find((x) => x.id === id); if (p) { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(p.clientId); setActiveProject(id); } setCmdkOpen(false);
         }}
         onAddContact={(contact) => { addClientContact(contact); setCmdkOpen(false); }}
         onClose={() => setCmdkOpen(false)} />}
@@ -5531,7 +5001,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           Send button and toasts live bottom-right), draggable so it can be
           parked anywhere, and hidden on the Journal tab so it never covers the
           message composer while writing/sending. */}
-      {!(!myWork && !personalView && !inboxView && !settingsView && !dirView && !territoryView && activeClient !== "all" && clientTab === "chat") && (
+      {!(!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && clientTab === "chat") && (
         <button onPointerDown={onFabPointerDown} onPointerMove={onFabPointerMove} onPointerUp={onFabPointerUp}
           title="Add a task (drag to move)" aria-label="Add a task"
           style={fabPos ? { left: fabPos.x, top: fabPos.y, right: "auto", bottom: "auto" } : undefined}

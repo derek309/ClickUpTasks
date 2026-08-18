@@ -51,12 +51,10 @@ export const THIS_MONTH_END = (() => {
   const [y, m] = TODAY.split("-").map(Number);
   return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
 })();
-/** The urgency buckets a dated row falls into, shared by My Work's task list
- * (Cockpit.tsx buildGroups) and Follow Up's sales board (TerritoryDashboard)
- * so "what needs me today" reads identically on both — My Work for active
- * clients, Follow Up for sales (Derek, 2026-08-11). Order is the render
- * order; "month" sits between next week and later so a longer-dated
- * follow-up still lands somewhere meaningful instead of all-of-it in
+/** The urgency buckets a dated row falls into, used by My Work's task list
+ * (Cockpit.tsx buildGroups) so "what needs me today" reads consistently.
+ * Order is the render order; "month" sits between next week and later so a
+ * longer-dated follow-up still lands somewhere meaningful instead of all-of-it in
  * "Later." */
 export type DueBucket = "overdue" | "today" | "tomorrow" | "week" | "nextWeek" | "month" | "later" | "none";
 export const DUE_BUCKETS: { key: DueBucket; label: string; color: string }[] = [
@@ -162,8 +160,7 @@ export const CLIENT_STATUS_META: Record<ClientStatus, { label: string; dot: stri
   // app ever treated them differently and they don't correspond to any real
   // step in moving a business through the pipeline — merged into one
   // (Derek, Aug 4). Matches the Businesses page's own "Claimed" funnel-stage
-  // key exactly, so computeBusinessStage no longer needs a lead/prospect
-  // special case (see TerritoryDirectory.tsx).
+  // key exactly, so it no longer needs a lead/prospect special case.
   claimed: { label: "Claimed", dot: "#94a3b8" },
   interview: { label: "Interview", dot: "#06b6d4" },
   onboarding: { label: "Listing Launch", dot: "#a855f7" },
@@ -190,9 +187,8 @@ export const STEP_STALL_DAYS = 14;
 // A Conversation task's priority, read straight off its own title rather
 // than a second signal-type field nobody would keep in sync with it — every
 // engagement signal names exactly what happened (see upsertConversationTask's
-// callers across the webhook/sync-appointments/planner-interest/
-// ensure-*-tasks routes). Shared between TerritoryDashboard.tsx (sorts
-// "Reply needed" by this) and ghlConversationTask.ts (decides whether a
+// callers across the webhook/sync-appointments routes). Read by
+// ghlConversationTask.ts to decide whether a
 // later, stronger signal should upgrade an already-open task's title —
 // without this shared source of truth, a business that opened an invite
 // email and later claimed their listing would keep showing "Opened the
@@ -418,212 +414,6 @@ export interface Contact {
   company?: string; // GHL companyName — shown alongside the name in search
   city?: string; // GHL address fields — power the territory dashboard's city/state match
   state?: string;
-}
-
-/** A city+state assigned to one ambassador (existing team member) for the
- * territory dashboard. "Claimed" vs "unclaimed" contacts within a territory
- * are derived at query time (does a `clients` row already exist for this
- * contact?) rather than stored here — reuses the existing client status
- * funnel instead of a second, parallel pipeline state. */
-export interface Territory {
-  id: string;
-  name: string;
-  city: string;
-  state: string;
-  assignedTo: string[]; // roster ids of the assigned ambassadors (one or more; [] = unassigned) — this is who the Territory Dashboard puts activities in front of
-  // Roster ids of people who can look at this territory (open it, see its
-  // businesses/tasks) without being an ambassador — they get no follow-up
-  // rows, no invite tiers, nothing on their own Territory Dashboard.
-  // Distinct from assignedTo on purpose: "who works this" and "who can see
-  // this" used to be the same list, which is how an admin who checks in on
-  // every city ends up with every city's activities on their own dashboard
-  // too. ensureTerritoryClient (Cockpit.tsx) grants both groups the same
-  // underlying RLS visibility on the container client; only assignedTo
-  // drives TerritoryDashboard.tsx's tiers.
-  followers: string[];
-  // Explicit override for the WordPress option-key slug push-sync writes
-  // into (WordPress's own PHP sanitize_title() of the city name) — avoids
-  // silently drifting from a JS re-derivation on punctuation/spelling edge
-  // cases. Null = derive it the simple way (see planner push route).
-  wpCitySlug: string | null;
-  // How many prospecting invites the auto-invite cron sends per weekday for
-  // this territory (most-overdue-first, unclaimed businesses only) — see
-  // runPlannerAutoInvite in plannerAutoInviteServer.ts. null/0 = off; a rep
-  // still sends manually from the Planner queue either way.
-  dailyInviteCap: number | null;
-}
-
-// --- Content Planner (the per-city weekly newsletter workflow) -------------
-// Moved in from WordPress's /sales Content Planner; ClickUpTasks is now the
-// source of truth (see supabase/planner.sql), pushing finalized picks out to
-// WordPress on save so the public "{City} Weekly" archive page keeps working
-// unchanged. See /Users/derekfox/.claude/plans/twinkly-puzzling-prism.md for
-// the full migration plan.
-
-// A business reference attached to a slot/section/event. clientId links a
-// ClickUpTasks prospect/client when one exists; gdPlaceId is the WordPress
-// GeoDirectory listing id (captured from /api/directory/listings at pick
-// time) so push-sync can build the public listing link. Free-text-only
-// (both null) is legal — matches what WordPress already allowed.
-export interface PlannerBiz {
-  clientId: string | null;
-  gdPlaceId: number | null;
-  name: string;
-  url: string;
-  cat: string;
-  note: string;
-}
-
-export type PlannerSlot = "spotlight" | "gem" | "gem2" | "gem3" | "story";
-// Business Spotlight + up to 3 Hidden Gems — new businesses claimed to be
-// featured. "story" (local news) is content-only, not a business slot.
-export const PLANNER_BUSINESS_SLOTS: PlannerSlot[] = ["spotlight", "gem", "gem2", "gem3"];
-export const PLANNER_CONTENT_SLOTS: PlannerSlot[] = [...PLANNER_BUSINESS_SLOTS, "story"];
-
-export interface PlannerWeek {
-  id: string;
-  territoryId: string;
-  week: string; // yyyy-mm-dd — the issue's Wednesday ship date, same key WordPress used
-  themeOverride: string;
-  // Longer-form "what this week is about" — the goal, what to feature, what
-  // to promote. Set from an AI theme suggestion's description, or by hand.
-  themeDescription: string;
-  categories: string[]; // per-week override of the theme calendar's target categories — drives "who to go after" pools and the brief's Support Local section
-  notes: string;
-  // A fetched local forecast blurb (suggest_weather), reviewed/approved like
-  // any other AI suggestion — replaces plannerBrief's old hardcoded stub.
-  weatherNote: string;
-  picks: Partial<Record<PlannerSlot, PlannerBiz>>;
-  // gd_place_ids explicitly skipped for this week's newsletter — "not using
-  // them this week," set before ever inviting them. Reversible (bring back
-  // clears it). A business that WAS invited and later marked skipped lives
-  // in `invited[].status` instead, not here — the two never overlap.
-  dismissed: number[];
-  // gd_place_ids invited to be featured this week (via the WordPress outreach
-  // proxy), with when — lets the "Invited ✓" mark survive a refresh instead
-  // of being session-only. `status` starts "invited" and flips to "accepted"
-  // by the inbound response webhook (planner-interest route), or to
-  // "skipped" by a rep manually — WordPress has no "declined" signal to wait
-  // on, so skipped is always a local, manual call. Entries from before this
-  // field existed have no `status` — treat as "invited" at every read site.
-  invited: PlannerInvite[];
-  // Support Local override, on top of the auto-populated "every claimed
-  // business with an active offer" list: ids hidden this week (a listing id,
-  // as a string), and businesses added on top that don't otherwise qualify
-  // (e.g. not flagged hasOffer, or unclaimed but worth a shout-out anyway).
-  supportLocalExcluded: string[];
-  supportLocalAdded: PlannerBiz[];
-  archived: boolean;
-  sentDate: string | null;
-  wpPushedAt: string | null;
-  createdAt: string;
-}
-
-export type PlannerInvite = {
-  gdPlaceId: number;
-  at: string;
-  status?: "invited" | "accepted" | "skipped";
-  respondedAt?: string;
-  responseEvent?: string;
-  // Set to "auto" when this send came from the daily auto-invite cron
-  // (plannerAutoInviteServer.ts) rather than a rep clicking Invite — lets
-  // the invite history distinguish the two. Omitted for manual sends.
-  by?: "auto";
-  // Set by a GHL "Email Events" workflow (Opened/Clicked) relayed through
-  // /api/ghl/webhook — a business that read (or clicked) the invite but
-  // hasn't claimed is a call/visit signal (Derek, Aug 3), distinct from
-  // `status` above (which tracks the "I'm interested" click-through, not
-  // read receipts).
-  openedAt?: string;
-  clickedAt?: string;
-};
-
-export interface PlannerSection {
-  id: string;
-  weekId: string;
-  position: number;
-  type: string; // "The Story" | "New In Town" | "Ask Your Concierge" | "Last Call" | a custom title
-  text: string;
-  biz: PlannerBiz | null;
-}
-
-export interface PlannerEvent {
-  id: string;
-  weekId: string;
-  position: number;
-  text: string;
-  biz: PlannerBiz | null;
-}
-
-export type NewsletterItemType = "business" | "video" | "event" | "offer" | "news" | "social" | "blog";
-export type NewsletterItemStatus = "pending" | "done";
-
-// A queued item in the newsletter backlog — added from a business's own
-// page or the planner sidebar, optionally assigned to a week (null = "who
-// to go after" backlog, not yet scheduled).
-export interface NewsletterItem {
-  id: string;
-  territoryId: string;
-  type: NewsletterItemType;
-  clientId: string | null;
-  gdPlaceId: number | null;
-  weekId: string | null;
-  title: string;
-  note: string;
-  url: string | null;
-  status: NewsletterItemStatus;
-  createdBy: string | null;
-  createdAt: string;
-}
-
-export interface ThemeCalendarEntry {
-  id: number;
-  month: number; // 1-12
-  weekOfMonth: number; // 1-5
-  title: string;
-  categories: string[];
-}
-
-// The Wednesday (yyyy-mm-dd) of the ISO week containing `iso` — the same
-// anchor WordPress's planner uses (cul_planner_current_week_iso), so a
-// ClickUpTasks week id maps 1:1 onto the WP push-sync option key with no
-// date translation needed.
-export function plannerWeekOf(iso: string): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  const isoDow = dt.getUTCDay() === 0 ? 7 : dt.getUTCDay(); // 1=Mon…7=Sun
-  dt.setUTCDate(dt.getUTCDate() + (3 - isoDow));
-  return dt.toISOString().slice(0, 10);
-}
-export const PLANNER_CURRENT_WEEK = plannerWeekOf(TODAY);
-
-// Human label for a planner week as its Sunday–Saturday span, e.g.
-// "Jun 14 – 20, 2026" (or "Jun 28 – Jul 4, 2026" across months) — matches
-// WordPress's cul_planner_week_label. The week is keyed by its Wednesday
-// ship date; Sunday = Wed − 3 days, Saturday = Wed + 3 days.
-export function plannerWeekLabel(week: string): string {
-  const sun = addDaysIso(week, -3);
-  const sat = addDaysIso(week, 3);
-  const parts = (iso: string) => { const [y, m, d] = iso.split("-").map(Number); return { y, m, d }; };
-  const s = parts(sun), e = parts(sat);
-  const monthName = (m: number) => new Date(Date.UTC(2000, m - 1, 1)).toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
-  if (s.y !== e.y) return `${monthName(s.m)} ${s.d}, ${s.y} – ${monthName(e.m)} ${e.d}, ${e.y}`;
-  if (s.m !== e.m) return `${monthName(s.m)} ${s.d} – ${monthName(e.m)} ${e.d}, ${e.y}`;
-  return `${monthName(s.m)} ${s.d} – ${e.d}, ${e.y}`;
-}
-
-// The calendar entry auto-assigned to a week, by its Wednesday's month +
-// week-of-month — a direct port of WordPress's cul_sales_week_theme (same
-// clamped ceil(day/7) index, same "fall back to the month's last entry"
-// behavior when a month has fewer than 5 seeded rows) so a given date
-// resolves to the same theme it always has, just re-derived here instead of
-// carried over as stored data.
-export function themeForWeek(weekIso: string, calendar: ThemeCalendarEntry[]): ThemeCalendarEntry | null {
-  const [, m, d] = weekIso.split("-").map(Number);
-  const weekIndex = Math.min(5, Math.max(1, Math.ceil(d / 7)));
-  const list = calendar.filter((c) => c.month === m).sort((a, b) => a.weekOfMonth - b.weekOfMonth);
-  if (!list.length) return null;
-  return list[Math.min(weekIndex - 1, list.length - 1)];
 }
 
 // A reusable checklist, applied either to quick-populate a new task (title
@@ -1100,10 +890,9 @@ export const PLAYBOOK_STEPS: PlaybookStepDef[] = [
 // (playbookCompletionByCategory reads PLAYBOOK_ALL_STEPS, which excludes
 // these), so all six are simply "income" rather than arbitrarily split.
 //
-// Nothing advances these automatically yet except claim/invite-reply (see
-// listing-claimed and planner-interest webhooks, both now firing
-// sales_invite) — the rest are still a checkbox in a collapsed accordion
-// section, checked off by hand.
+// Nothing advances these automatically yet except a claim (see the
+// listing-claimed webhook, which fires sales_invite) — the rest are still a
+// checkbox in a collapsed accordion section, checked off by hand.
 export const SALES_STAGE_STEPS: PlaybookStepDef[] = [
   {
     key: "sales_invite", phase: "sales", label: "Invite", category: "income",
@@ -1712,12 +1501,9 @@ export interface Task {
   /** Set when this task is an auto-generated recurring reminder — a
    * SEPARATE marker from playbookStepKey/other identity fields, since a
    * check-in must stay a normal, fully-editable/deletable task, not a
-   * locked system step. "playbook_stalled"/"playbook_progress": see
-   * src/lib/playbookCheckinsServer.ts and the owner-toggle route's progress
-   * trigger. "newsletter_due": see src/lib/newsletterReminderServer.ts —
-   * one per territory per ISO week, deduped on (client_id, checkin_kind,
-   * due) so the daily cron never doubles up. */
-  checkinKind?: "playbook_stalled" | "playbook_progress" | "newsletter_due" | null;
+   * locked system step. See src/lib/playbookCheckinsServer.ts and the
+   * owner-toggle route's progress trigger. */
+  checkinKind?: "playbook_stalled" | "playbook_progress" | null;
 }
 
 /** A custom Kanban-style column for one project's own task board (e.g.
@@ -1747,22 +1533,6 @@ export const PERSONAL_PROJECT_ID = "personal_project";
 // standalone "lists" with no GHL contact, so they never sync. Shown as its
 // own sidebar section above Clients, not in the client list.
 export const WORKSPACE_CLIENT_ID = "cl_workspace";
-// Same idea, one per territory: a contact-less container holding a city's own
-// work (launch plan, newsletter, events) as opposed to the work on any one
-// business in it. Id is derived from the territory id so it needs no schema
-// of its own — `cl_terr_` + territory.id — and the shared prefix is what
-// keeps these out of the client roster (see clientList in Cockpit).
-// Territory ids are themselves newId("terr_")-generated, so the leading
-// "terr_" is stripped rather than doubled up ("cl_terr_terr_ab12"). Every
-// territory id carries that prefix, which makes the strip a bijection — no
-// two territories can collide on the container id.
-export const TERRITORY_CLIENT_PREFIX = "cl_terr_";
-export const territoryClientId = (territoryId: string) => TERRITORY_CLIENT_PREFIX + territoryId.replace(/^terr_/, "");
-// Same "deterministic id, no lookup" idiom as playbookProjectId — the
-// newsletter reminder cron's one list under a territory's own container
-// client, holding the weekly "send the newsletter" task.
-export const newsletterProjectId = (territoryId: string) => "p_newsletter_" + territoryId;
-
 export const STATUS_META: Record<TaskStatus, { label: string; dot: string; chip: string }> = {
   todo: { label: "To do", dot: "#94a3b8", chip: "#f1f5f9" },
   in_progress: { label: "Progress", dot: "#3b82f6", chip: "#eff6ff" },

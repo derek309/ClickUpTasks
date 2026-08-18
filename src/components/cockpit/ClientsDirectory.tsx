@@ -2,10 +2,9 @@
 
 // Full-page Clients directory — the "Clients" nav destination. Lists every
 // client (sorted/scoped the same way the old sidebar section was), grouped
-// into colored, collapsible status sections — the same "colored strip"
-// language TerritoryDirectory uses for its Claimed/Unclaimed buckets — with a
-// search box, the sort + Mine/All controls relocated from the sidebar, and an
-// Add-client button. Clicking a row opens that client's task list.
+// into colored, collapsible status sections, with a search box, the sort +
+// Mine/All controls relocated from the sidebar, and an Add-client button.
+// Clicking a row opens that client's task list.
 import { useState } from "react";
 import { CLIENT_STATUS_ORDER, CLIENT_STATUS_META, formatDue, isOverdue, timeAgo, type ClientStatus, type Client, type Task, type User } from "@/lib/data";
 import { I } from "./ui";
@@ -23,8 +22,8 @@ export function ClientsDirectory({
   clientCompany: (c: Client) => string;
   taskCount: (id: string) => number;
   // Open tasks per client, for the soonest-due badge in the Tasks column —
-  // same map Cockpit already builds for the territory view's per-business
-  // Tasks column (territoryTasksByClient), reused here rather than re-derived.
+  // reuses the map Cockpit already builds (openTasksByClient) rather than
+  // re-deriving it here.
   tasksByClient?: Map<string, Task[]>;
   starred: Set<string>;
   onToggleStar: (id: string) => void;
@@ -225,10 +224,8 @@ export function ClientsDirectory({
 
       {/* Same flat, column-aligned list surface as the task lists, but
           bucketed into colored, collapsible sections — either pipeline
-          status (the same "colored strip" language TerritoryDirectory uses
-          for Claimed/Unclaimed) or, in "By teammate" mode, one section per
-          team member's own active clients — instead of one long
-          undifferentiated list. */}
+          status or, in "By teammate" mode, one section per team member's
+          own active clients — instead of one long undifferentiated list. */}
       <div className="overflow-hidden rounded-xl border bg-surface shadow-soft">
         {groupBy !== "completed" && (
           <div className="hidden items-center gap-3 border-b bg-background/40 px-4 py-2 text-[12px] font-semibold uppercase tracking-wide text-muted sm:flex">

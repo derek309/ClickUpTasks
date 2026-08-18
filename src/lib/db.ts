@@ -27,18 +27,11 @@ import {
   type ScheduledMessageStatus,
   type MessageChannel,
   type MessageDirection,
-  type Territory,
   type TaskTemplate,
   type Playbook,
   type Priority,
   type TeamMessage,
   type DmMessage,
-  type PlannerWeek,
-  type PlannerSection,
-  type PlannerEvent,
-  type PlannerBiz,
-  type NewsletterItem,
-  type ThemeCalendarEntry,
   titleCase,
   PRIORITY_META,
 } from "./data";
@@ -130,9 +123,6 @@ export const rowToDmMessage = (r: any): DmMessage => ({ id: r.id, conversationId
 
 const vaultFolderToRow = (f: VaultFolder) => ({ id: f.id, client_id: f.clientId, project_id: f.projectId, name: f.name, created_at: f.createdAt });
 const rowToVaultFolder = (r: any): VaultFolder => ({ id: r.id, clientId: r.client_id, projectId: r.project_id ?? null, name: r.name, createdAt: r.created_at });
-
-const territoryToRow = (t: Territory) => ({ id: t.id, name: t.name, city: t.city, state: t.state, assigned_to: t.assignedTo ?? [], followers: t.followers ?? [], wp_city_slug: t.wpCitySlug ?? null, daily_invite_cap: t.dailyInviteCap ?? null });
-const rowToTerritory = (r: any): Territory => ({ id: r.id, name: r.name, city: r.city, state: r.state, assignedTo: Array.isArray(r.assigned_to) ? r.assigned_to : (r.member_id ? [r.member_id] : []), followers: Array.isArray(r.followers) ? r.followers : [], wpCitySlug: r.wp_city_slug ?? null, dailyInviteCap: typeof r.daily_invite_cap === "number" ? r.daily_invite_cap : null });
 
 const taskTemplateToRow = (t: TaskTemplate) => ({ id: t.id, name: t.name, checklist_items: t.checklistItems });
 const rowToTaskTemplate = (r: any): TaskTemplate => ({ id: r.id, name: r.name, checklistItems: r.checklist_items ?? [] });
@@ -274,19 +264,18 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true) 
 }
 
 export async function fetchAll() {
-  const [c, ct, p, t, n, cl, cn, m, tr, tt, vf, fd, um, sg, tm, pb, dm, gu] = await Promise.all([
+  const [c, ct, p, t, n, cl, cn, m, tt, vf, fd, um, sg, tm, pb, dm, gu] = await Promise.all([
     fetchAllRows("clients", "created_at"),
     fetchAllRows("contacts"),
     fetchAllRows("projects"),
     fetchAllRows("tasks", "created_at"),
     fetchAllRows("notifications", "created_at", false),
     // Fetched separately from the hard-fail set below: these tables ship via a
-    // manually-run migration (client-links-notes.sql / messages.sql / territories.sql),
+    // manually-run migration (client-links-notes.sql / messages.sql),
     // so a not-yet-run migration must degrade to "nothing yet", not break the app.
     fetchAllRows("client_links", "position"),
     fetchAllRows("client_notes", "created_at", false),
     fetchAllRows("messages", "created_at"),
-    fetchAllRows("territories", "created_at"),
     fetchAllRows("task_templates", "created_at"),
     fetchAllRows("vault_folders", "created_at"),
     fetchAllRows("folders", "position"),
@@ -305,7 +294,6 @@ export async function fetchAll() {
   if (cl.error) console.warn("[db] client_links unavailable — run supabase/client-links-notes.sql", cl.error.message);
   if (cn.error) console.warn("[db] client_notes unavailable — run supabase/client-links-notes.sql", cn.error.message);
   if (m.error) console.warn("[db] messages unavailable — run supabase/messages.sql", m.error.message);
-  if (tr.error) console.warn("[db] territories unavailable — run supabase/territories.sql", tr.error.message);
   if (tt.error) console.warn("[db] task_templates unavailable — run supabase/task-templates.sql", tt.error.message);
   if (vf.error) console.warn("[db] vault_folders unavailable — run supabase/vault-folders.sql", vf.error.message);
   if (fd.error) console.warn("[db] folders unavailable — run supabase/folders.sql", fd.error.message);
@@ -324,7 +312,6 @@ export async function fetchAll() {
     clientLinks: cl.error ? [] : (cl.data ?? []).map(rowToClientLink),
     clientNotes: cn.error ? [] : (cn.data ?? []).map(rowToClientNote),
     messages: m.error ? [] : (m.data ?? []).map(rowToMessage),
-    territories: tr.error ? [] : (tr.data ?? []).map(rowToTerritory),
     taskTemplates: tt.error ? [] : (tt.data ?? []).map(rowToTaskTemplate),
     vaultFolders: vf.error ? [] : (vf.data ?? []).map(rowToVaultFolder),
     folders: fd.error ? [] : (fd.data ?? []).map(rowToFolder),
@@ -387,8 +374,7 @@ export const upsertClient = (c: Client) => supabase.from("clients").upsert(clien
 // toggle route has its own server-side twin) — see playbookLastProgressAt's
 // doc comment on Client and playbookCheckinsServer.ts's stall check.
 export const touchPlaybookProgress = (clientId: string) => supabase.from("clients").update({ playbook_last_progress_at: new Date().toISOString() }).eq("id", clientId).then(logErr);
-// One request for many new clients at once (e.g. territory auto-sync creating
-// dozens/hundreds of Lead-stage clients) instead of N separate round trips.
+// One request for many new clients at once instead of N separate round trips.
 export const bulkUpsertClients = (cs: Client[]) => (cs.length ? supabase.from("clients").upsert(cs.map(clientToRow)).then(logErr) : Promise.resolve());
 export const upsertProject = (p: Project) => supabase.from("projects").upsert(projectToRow(p)).then(logErr);
 export const deleteProjectDb = (id: string) => supabase.from("projects").delete().eq("id", id).then(logErr);
@@ -404,8 +390,6 @@ export const markNotifReadDb = (id: string) => supabase.from("notifications").up
 export const upsertClientLink = (l: ClientLink) => supabase.from("client_links").upsert(clientLinkToRow(l)).then(logErr);
 export const deleteClientLinkDb = (id: string) => supabase.from("client_links").delete().eq("id", id).then(logErr);
 export const upsertClientNote = (n: ClientNote) => supabase.from("client_notes").upsert(clientNoteToRow(n)).then(logErr);
-export const upsertTerritory = (t: Territory) => supabase.from("territories").upsert(territoryToRow(t)).then(logErr);
-export const deleteTerritoryDb = (id: string) => supabase.from("territories").delete().eq("id", id).then(logErr);
 
 export const upsertTaskTemplate = (t: TaskTemplate) => supabase.from("task_templates").upsert(taskTemplateToRow(t)).then(logErr);
 export const deleteTaskTemplateDb = (id: string) => supabase.from("task_templates").delete().eq("id", id).then(logErr);
@@ -495,109 +479,6 @@ export async function downloadUrlForFile(path: string, filename: string, expiryS
 
 export async function deleteTaskFile(path: string): Promise<void> {
   await supabase.storage.from(TASK_FILES_BUCKET).remove([path]).then(logErr);
-}
-
-// --- Content Planner ---------------------------------------------------------
-// Fetched on demand (per territory, when the Planner view opens) rather than
-// bundled into fetchAll — most sessions never touch it, and a city can
-// accumulate a full rolling year of weeks.
-
-const bizToJson = (b: PlannerBiz | null) => b ? { client_id: b.clientId, gd_place_id: b.gdPlaceId, name: b.name, url: b.url, cat: b.cat, note: b.note } : null;
-const jsonToBiz = (v: any): PlannerBiz | null => (v && typeof v === "object" && v.name) ? { clientId: v.client_id ?? null, gdPlaceId: v.gd_place_id ?? null, name: v.name ?? "", url: v.url ?? "", cat: v.cat ?? "", note: v.note ?? "" } : null;
-
-// planner_weeks.picks is one jsonb column holding the slot picks plus a
-// handful of reserved metadata keys (mirrors the WordPress blob shape) —
-// split apart here so PlannerWeek keeps them as separate, typed fields.
-// __themeDesc/__weather (added alongside __dismissed/__cats) are the same
-// trick: new week-level fields with no migration, just another reserved key.
-export const plannerWeekToRow = (w: PlannerWeek) => ({
-  id: w.id, territory_id: w.territoryId, week: w.week,
-  theme_override: w.themeOverride ?? "", notes: w.notes ?? "",
-  picks: {
-    ...Object.fromEntries(Object.entries(w.picks).map(([k, v]) => [k, bizToJson(v as PlannerBiz)])),
-    __dismissed: w.dismissed ?? [], __cats: w.categories ?? [], __themeDesc: w.themeDescription ?? "", __weather: w.weatherNote ?? "",
-    __invited: w.invited ?? [],
-    __slExcluded: w.supportLocalExcluded ?? [], __slAdded: (w.supportLocalAdded ?? []).map(bizToJson),
-  },
-  archived: w.archived ?? false, sent_date: w.sentDate ?? null, wp_pushed_at: w.wpPushedAt ?? null,
-});
-export const rowToPlannerWeek = (r: any): PlannerWeek => {
-  const raw = (r.picks && typeof r.picks === "object") ? r.picks : {};
-  const { __dismissed, __cats, __themeDesc, __weather, __invited, __slExcluded, __slAdded, ...slots } = raw;
-  const picks: PlannerWeek["picks"] = {};
-  for (const [k, v] of Object.entries(slots)) { const b = jsonToBiz(v); if (b) (picks as any)[k] = b; }
-  return {
-    id: r.id, territoryId: r.territory_id, week: r.week,
-    themeOverride: r.theme_override ?? "", themeDescription: typeof __themeDesc === "string" ? __themeDesc : "",
-    categories: Array.isArray(__cats) ? __cats : [], notes: r.notes ?? "",
-    weatherNote: typeof __weather === "string" ? __weather : "",
-    invited: Array.isArray(__invited) ? __invited : [],
-    picks, dismissed: Array.isArray(__dismissed) ? __dismissed : [],
-    supportLocalExcluded: Array.isArray(__slExcluded) ? __slExcluded : [],
-    supportLocalAdded: Array.isArray(__slAdded) ? (__slAdded as any[]).map(jsonToBiz).filter((b): b is PlannerBiz => !!b) : [],
-    archived: !!r.archived, sentDate: r.sent_date ?? null, wpPushedAt: r.wp_pushed_at ?? null,
-    createdAt: r.created_at,
-  };
-};
-export async function fetchPlannerWeeks(territoryId: string): Promise<PlannerWeek[]> {
-  const { data, error } = await supabase.from("planner_weeks").select("*").eq("territory_id", territoryId).order("week", { ascending: false });
-  if (error) { logErr({ error }); return []; }
-  return (data ?? []).map(rowToPlannerWeek);
-}
-export const upsertPlannerWeek = (w: PlannerWeek) => supabase.from("planner_weeks").upsert(plannerWeekToRow(w)).then(logErr);
-export const deletePlannerWeekDb = (id: string) => supabase.from("planner_weeks").delete().eq("id", id).then(logErr);
-
-const bizCols = (b: PlannerBiz | null) => ({
-  biz_client_id: b?.clientId ?? null, biz_gd_place_id: b?.gdPlaceId ?? null,
-  biz_name: b?.name ?? null, biz_url: b?.url ?? null, biz_cat: b?.cat ?? null,
-});
-const bizFromCols = (r: any): PlannerBiz | null => r.biz_name ? { clientId: r.biz_client_id ?? null, gdPlaceId: r.biz_gd_place_id ?? null, name: r.biz_name, url: r.biz_url ?? "", cat: r.biz_cat ?? "", note: "" } : null;
-
-const plannerSectionToRow = (s: PlannerSection) => ({ id: s.id, week_id: s.weekId, position: s.position, type: s.type, text: s.text, ...bizCols(s.biz) });
-export const rowToPlannerSection = (r: any): PlannerSection => ({ id: r.id, weekId: r.week_id, position: r.position, type: r.type ?? "", text: r.text ?? "", biz: bizFromCols(r) });
-export async function fetchPlannerSections(weekId: string): Promise<PlannerSection[]> {
-  const { data, error } = await supabase.from("planner_sections").select("*").eq("week_id", weekId).order("position", { ascending: true });
-  if (error) { logErr({ error }); return []; }
-  return (data ?? []).map(rowToPlannerSection);
-}
-export const upsertPlannerSection = (s: PlannerSection) => supabase.from("planner_sections").upsert(plannerSectionToRow(s)).then(logErr);
-export const deletePlannerSectionDb = (id: string) => supabase.from("planner_sections").delete().eq("id", id).then(logErr);
-
-const plannerEventToRow = (e: PlannerEvent) => ({ id: e.id, week_id: e.weekId, position: e.position, text: e.text, ...bizCols(e.biz) });
-export const rowToPlannerEvent = (r: any): PlannerEvent => ({ id: r.id, weekId: r.week_id, position: r.position, text: r.text ?? "", biz: bizFromCols(r) });
-export async function fetchPlannerEvents(weekId: string): Promise<PlannerEvent[]> {
-  const { data, error } = await supabase.from("planner_events").select("*").eq("week_id", weekId).order("position", { ascending: true });
-  if (error) { logErr({ error }); return []; }
-  return (data ?? []).map(rowToPlannerEvent);
-}
-export const upsertPlannerEvent = (e: PlannerEvent) => supabase.from("planner_events").upsert(plannerEventToRow(e)).then(logErr);
-export const deletePlannerEventDb = (id: string) => supabase.from("planner_events").delete().eq("id", id).then(logErr);
-
-// Events across several weeks at once (not just the open one) — used to keep
-// a recurring event (a weekly farmers market, say) from getting suggested
-// and re-added every single week.
-export async function fetchRecentPlannerEvents(weekIds: string[]): Promise<PlannerEvent[]> {
-  if (!weekIds.length) return [];
-  const { data, error } = await supabase.from("planner_events").select("*").in("week_id", weekIds);
-  if (error) { logErr({ error }); return []; }
-  return (data ?? []).map(rowToPlannerEvent);
-}
-
-const newsletterItemToRow = (n: NewsletterItem) => ({ id: n.id, territory_id: n.territoryId, type: n.type, client_id: n.clientId, gd_place_id: n.gdPlaceId, week_id: n.weekId, title: n.title, note: n.note, url: n.url, status: n.status, created_by: n.createdBy });
-export const rowToNewsletterItem = (r: any): NewsletterItem => ({ id: r.id, territoryId: r.territory_id, type: r.type ?? "business", clientId: r.client_id ?? null, gdPlaceId: r.gd_place_id ?? null, weekId: r.week_id ?? null, title: r.title ?? "", note: r.note ?? "", url: r.url ?? null, status: r.status ?? "pending", createdBy: r.created_by ?? null, createdAt: r.created_at });
-export async function fetchNewsletterItems(territoryId: string): Promise<NewsletterItem[]> {
-  const { data, error } = await supabase.from("newsletter_items").select("*").eq("territory_id", territoryId).order("created_at", { ascending: false });
-  if (error) { logErr({ error }); return []; }
-  return (data ?? []).map(rowToNewsletterItem);
-}
-export const upsertNewsletterItem = (n: NewsletterItem) => supabase.from("newsletter_items").upsert(newsletterItemToRow(n)).then(logErr);
-export const deleteNewsletterItemDb = (id: string) => supabase.from("newsletter_items").delete().eq("id", id).then(logErr);
-
-const rowToThemeCalendarEntry = (r: any): ThemeCalendarEntry => ({ id: r.id, month: r.month, weekOfMonth: r.week_of_month, title: r.title, categories: Array.isArray(r.categories) ? r.categories : [] });
-export async function fetchThemeCalendar(): Promise<ThemeCalendarEntry[]> {
-  const { data, error } = await supabase.from("planner_theme_calendar").select("*").order("month", { ascending: true }).order("week_of_month", { ascending: true });
-  if (error) { logErr({ error }); return []; }
-  return (data ?? []).map(rowToThemeCalendarEntry);
 }
 
 // Shared, admin-controlled app settings (see supabase/app-settings.sql) — a

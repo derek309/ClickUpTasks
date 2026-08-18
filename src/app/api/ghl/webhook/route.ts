@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHash, randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
-import { titleCase, normalizeState, advanceDue, type PlannerWeek, type Recurrence, type RecurrenceUnit, type Subtask } from "@/lib/data";
-import { plannerWeekToRow, rowToPlannerWeek } from "@/lib/db";
+import { titleCase, advanceDue, type Recurrence, type RecurrenceUnit, type Subtask } from "@/lib/data";
 import { resolveOrPromoteTrackedClient, upsertConversationTask } from "@/lib/ghlConversationTask";
-import { fetchDirectoryListingsServer } from "@/lib/directoryListingsServer";
 import { sendInboundReplyEmail } from "@/lib/inboundIngest";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -33,9 +31,6 @@ import { sendInboundReplyEmail } from "@/lib/inboundIngest";
 //   merge field for it — it's read instead from GHL's own standard
 //   `message.type` (3 = email, 2 = sms).
 //
-//   Invite email opened/clicked — see handleEmailEngagement below for full
-//   wire-up (two more Workflows, "Email Events" trigger).
-//
 // Security: shared-secret query param (set GHL_WEBHOOK_SECRET in env). GHL
 // workflow webhooks can't sign requests, so a long random secret in the URL is
 // the standard guard.
@@ -61,7 +56,6 @@ export async function POST(req: NextRequest) {
   if (custom?.event === "message_reply" || body?.event === "message_reply") return handleMessageReply(body, custom);
   const ev: string = custom?.event ?? body?.event ?? "";
   if (ev === "call" || ev === "inbound_call" || ev === "missed_call") return handleCall(body, custom);
-  if (ev === "email_opened" || ev === "email_clicked") return handleEmailEngagement(ev, custom);
 
   // GHL workflow webhook payloads vary; accept the common shapes.
   const ghlTaskId: string | null = body?.task?.id ?? body?.taskId ?? body?.id ?? null;
@@ -273,130 +267,6 @@ async function handleCall(body: any, custom: any) {
   }
   if (!msgError) await notifyInbound(contact, taskId, `📞 ${label} ${titleCase(contact.name)}`);
   return NextResponse.json({ ok: true });
-}
-
-// A business opened (or clicked) an invite email. Used to be its own signal
-// on the Businesses page only, deliberately never a Conversation task
-// (Derek, Aug 3: "the Dashboard is for active-client work, this is
-// cold-outreach follow-up"). Reversed 2026-08-09 — "when there's an activity
-// like a click or an open... it needs to create a task for us to follow up.
-// It needs to be very clear" — the whole Territory Dashboard ("Follow Up")
-// is task-driven now, same flow as every other client, so an engagement
-// signal with nowhere to surface just goes unworked. Still patches
-// planner_weeks.invited[] as before (that's the Planner's own record); now
-// also promotes the contact and upserts a Conversation task naming exactly
-// what happened, same shared helpers (resolveOrPromoteTrackedClient /
-// upsertConversationTask) every other inbound signal already uses.
-//
-// Wire-up — two GHL Workflows (Email Events trigger), same Webhook-action
-// pattern as message_reply/call above:
-//   Trigger "Email Events" -> Opened  -> Webhook, Custom Data:
-//     event -> email_opened   (literal)
-//     contactId -> {{contact.id}}
-//   Trigger "Email Events" -> Clicked -> Webhook, Custom Data:
-//     event -> email_clicked  (literal)
-//     contactId -> {{contact.id}}
-// GHL's trigger has no invite-specific scoping — it fires on ANY email sent
-// from that sub-account, not just the invite-to-claim send. Confirmed live,
-// 2026-08-09: of 16 open Conversation tasks this created, only 1 was a real
-// unmatched business — the other 15 were the Directory sub-account's own
-// newsletter subscribers and Agency contacts opening THEIR newsletters,
-// mislabeled as "Clicked the invite email — call or visit to close." A
-// real-but-unmatched business was the exception, not the rule, so this now
-// REQUIRES a listing match (below) before creating anything — see git log
-// for the prior "create regardless of match" behavior and why it was wrong.
-//
-// Contact -> gdPlaceId has no stored mapping (planner_weeks.invited only
-// carries gdPlaceId, contacts only carries ghl_contact_id), so this
-// re-derives it the same way the Businesses page does client-side: contact's
-// city/state -> that territory's directory listings -> match by
-// ghlContactId, then phone, then email (same fallback chain, see
-// TerritoryDirectory.tsx's own comment on why the chain exists). A contact's
-// city/state can be missing (internal/test contacts, or a sync gap) even
-// when the underlying listing is real, so this checks every configured
-// territory rather than bailing when city/state is absent — cheap with only
-// a couple territories, and more robust than trusting one field to be set.
-async function handleEmailEngagement(event: "email_opened" | "email_clicked", custom: any) {
-  const ghlContactId: string | null = custom?.contactId ?? null;
-  if (!ghlContactId) return NextResponse.json({ ok: true, skipped: "missing contactId" });
-
-  const { data: contact } = await supabaseAdmin
-    .from("contacts")
-    .select("id, name, client_id, ghl_contact_id, phone, email, city, state")
-    .eq("ghl_contact_id", ghlContactId)
-    .maybeSingle();
-  if (!contact) return NextResponse.json({ ok: true, skipped: "no contact for that ghlContactId" });
-
-  const { data: territoryRows } = await supabaseAdmin.from("territories").select("id, city, state");
-  const territories = (territoryRows ?? []) as { id: string; city: string; state: string }[];
-  if (!territories.length) return NextResponse.json({ ok: true, skipped: "no territories configured" });
-
-  // Try the contact's own city/state first when set (skips straight to the
-  // right territory), then every other territory as a fallback.
-  const wantState = contact.state ? normalizeState(contact.state) : null;
-  const cityMatches = (t: { city: string; state: string }) =>
-    !!contact.city && !!wantState && t.city.trim().toLowerCase() === contact.city.trim().toLowerCase() && normalizeState(t.state) === wantState;
-  const ordered = [...territories.filter(cityMatches), ...territories.filter((t) => !cityMatches(t))];
-
-  const digits = (s: string | undefined) => (s ?? "").replace(/\D/g, "").slice(-10);
-  const lc = (s: string | undefined) => (s ?? "").trim().toLowerCase();
-
-  let territory: { id: string; city: string; state: string } | null = null;
-  let gdPlaceId: number | null = null;
-  for (const t of ordered) {
-    const listingsResult = await fetchDirectoryListingsServer(t.city, t.state);
-    if ("error" in listingsResult) continue;
-    const listing =
-      listingsResult.listings.find((l) => l.ghlContactId && l.ghlContactId === ghlContactId) ??
-      (digits(contact.phone) ? listingsResult.listings.find((l) => digits(l.phone) === digits(contact.phone)) : undefined) ??
-      (contact.email ? listingsResult.listings.find((l) => lc(l.email) === lc(contact.email)) : undefined);
-    if (!listing) continue;
-    const id = typeof listing.id === "number" ? listing.id : parseInt(String(listing.id), 10);
-    if (!Number.isFinite(id)) continue;
-    territory = t; gdPlaceId = id;
-    break;
-  }
-  // No listing match = not a business we invited, most likely a newsletter
-  // subscriber or an unrelated agency contact opening some other email from
-  // the same sub-account (see the function comment above) — skip entirely,
-  // no promotion, no task, nothing for a rep to chase that isn't real.
-  if (!territory || gdPlaceId === null) return NextResponse.json({ ok: true, skipped: "no listing matched to that contact in any territory" });
-
-  // Follow Up's territory scoping (TerritoryDashboard.tsx) keys off
-  // contact.city/state — backfill it here so this contact is visible there
-  // the moment its task is created, not dependent on a later reconciliation
-  // pass. Only writes when it would actually change something.
-  if (!contact.city || !contact.state) {
-    await supabaseAdmin.from("contacts").update({ city: territory.city, state: territory.state }).eq("id", contact.id);
-  }
-
-  const trackedClientId = await resolveOrPromoteTrackedClient(contact);
-  await upsertConversationTask(
-    { id: contact.id, name: contact.name, client_id: trackedClientId },
-    ghlContactId,
-    { title: event === "email_opened" ? "Opened the invite email — a nudge might help" : "Clicked the invite email — call or visit to close" },
-  );
-
-  const { data: weekRows } = await supabaseAdmin.from("planner_weeks").select("*").eq("territory_id", territory.id);
-  const weeks: PlannerWeek[] = (weekRows ?? []).map(rowToPlannerWeek);
-  // The most recent invite entry for this business, across every week —
-  // an open naturally correlates to whichever send was last, not an older one.
-  let targetWeek: PlannerWeek | null = null;
-  let targetIdx = -1;
-  for (const w of weeks) {
-    w.invited.forEach((inv, i) => {
-      if (inv.gdPlaceId !== gdPlaceId) return;
-      if (!targetWeek || inv.at > targetWeek.invited[targetIdx].at) { targetWeek = w; targetIdx = i; }
-    });
-  }
-  if (!targetWeek || targetIdx === -1) return NextResponse.json({ ok: true, skipped: "no invite on record for that business" });
-
-  const nowIso = new Date().toISOString();
-  const field = event === "email_opened" ? "openedAt" : "clickedAt";
-  const patchedInvited = (targetWeek as PlannerWeek).invited.map((inv, i) => (i === targetIdx ? { ...inv, [field]: nowIso } : inv));
-  const { error } = await supabaseAdmin.from("planner_weeks").upsert(plannerWeekToRow({ ...(targetWeek as PlannerWeek), invited: patchedInvited }));
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true, gdPlaceId, event });
 }
 
 // resolveTrackedClientId / upsertConversationTask now live in

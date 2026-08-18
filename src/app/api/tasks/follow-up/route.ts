@@ -8,7 +8,7 @@ import { addDaysIso, formatDue } from "@/lib/data";
 
 // "We reached out, now we're waiting to hear back" for one open
 // Conversation-priority task — the Businesses page's Followed up button, and
-// (via clientId below) the Territory Dashboard's "Log a follow-up" action.
+// (via clientId below) a "Log a follow-up" action scoped to a client.
 //
 // Before this, a business that replied sat in "Needs attention now" until
 // someone closed its conversation task, so a walk-in or an email follow-up
@@ -58,12 +58,12 @@ export async function POST(req: NextRequest) {
     }
     if (!(await isClientVisible(caller, task.client_id))) return NextResponse.json({ error: "Unknown or inaccessible task." }, { status: 403 });
   } else {
-    // clientId path — the Territory Dashboard's "Log a follow-up," which can
-    // fire on a claimed+ business that has never had an inbound reply or
-    // booked appointment, so there may be no open conversation task to bump
-    // yet. Resolve one, or create it on demand (same shape the appointment
-    // sync and inbound webhook already use), so logging a follow-up works
-    // from day one instead of only after something else happened first.
+    // clientId path — "Log a follow-up" on a claimed+ business that has never
+    // had an inbound reply or booked appointment, so there may be no open
+    // conversation task to bump yet. Resolve one, or create it on demand
+    // (same shape the appointment sync and inbound webhook already use), so
+    // logging a follow-up works from day one instead of only after something
+    // else happened first.
     if (!(await isClientVisible(caller, clientId))) return NextResponse.json({ error: "Unknown or inaccessible client." }, { status: 403 });
     const { data: openTask } = await supabaseAdmin.from("tasks").select("id, client_id, status, priority").eq("client_id", clientId).eq("priority", "conversation").neq("status", "done").limit(1).maybeSingle();
     if (openTask) {
@@ -71,13 +71,11 @@ export async function POST(req: NextRequest) {
     } else {
       // Contacts.client_id can't be trusted here: GHL-synced contacts sit in
       // a shared "c_directory" bucket on that field, never backfilled to the
-      // real per-business client once one exists (same lesson
-      // TerritoryDashboard.tsx's own row-matching already learned). The
-      // reliable link for those is the id convention every other territory
-      // view uses — client.id === "cl_" + contact.id — so try that first and
-      // fall back to the client_id field for clients that were never
-      // GHL-directory-synced (e.g. hand-created ones) and so rely on it
-      // being set correctly.
+      // real per-business client once one exists. The reliable link is the
+      // id convention used elsewhere — client.id === "cl_" + contact.id — so
+      // try that first and fall back to the client_id field for clients that
+      // were never GHL-directory-synced (e.g. hand-created ones) and so rely
+      // on it being set correctly.
       const contactId = clientId.startsWith("cl_") ? clientId.slice(3) : null;
       const { data: contact } = contactId
         ? await supabaseAdmin.from("contacts").select("id, name, client_id, ghl_contact_id").eq("id", contactId).maybeSingle()

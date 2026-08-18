@@ -59,8 +59,8 @@ export async function reconcilePlaybookTasksServer(clientId: string): Promise<vo
 
 // The MCP server's own synthetic roster identity (see data.ts's
 // PROTECTED_USER_IDS) — reused as the author of an automated, no-human-actor
-// comment, same convention planner-interest/route.ts and the playbook toggle
-// route already use for system-posted activity.
+// comment, same convention the playbook toggle route uses for system-posted
+// activity.
 const SYSTEM_AUTHOR_ID = "u_claude";
 
 /** Marks one SALES_STAGE_STEPS step done for a client, from a server-side

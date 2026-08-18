@@ -1,7 +1,7 @@
 "use client";
 
 // One settings surface instead of five separate icon-triggered popups
-// (Settings/Integrations, Team, Territories, Templates, API Tokens each used
+// (Settings/Integrations, Team, Templates, API Tokens each used
 // to open their own floating modal). Each panel below still owns its own
 // state/logic exactly as before — this just supplies one shared frame/
 // header and a tab rail, and each panel's own chrome was stripped down to
@@ -14,37 +14,25 @@
 // close button — you navigate away the same way you leave any other page,
 // by clicking somewhere else in the sidebar.
 import { useState } from "react";
-import { type Me, type Client, type Contact, type Territory, type TaskTemplate, type Playbook, type PlaybookTask, type Project } from "@/lib/data";
+import { type Me, type Client, type TaskTemplate, type Playbook, type PlaybookTask, type Project } from "@/lib/data";
 import { I } from "./cockpit/ui";
-import { TERRITORIES_ENABLED } from "@/lib/features";
 import SettingsPanel from "./SettingsPanel";
 import TeamPanel from "./TeamPanel";
-import TerritoryPanel from "./TerritoryPanel";
 import TemplatesPanel from "./TemplatesPanel";
 import PlaybooksPanel from "./PlaybooksPanel";
 import ApiTokensPanel from "./ApiTokensPanel";
 import NotificationPrefsPanel from "./NotificationPrefsPanel";
 
-export type TabKey = "integrations" | "team" | "territories" | "templates" | "playbooks" | "tokens" | "notifications";
+export type TabKey = "integrations" | "team" | "templates" | "playbooks" | "tokens" | "notifications";
 
 export default function SettingsHub({
   initialTab = "integrations",
   me,
   canAdmin,
-  hasTerritoryAccess,
   subAccounts,
   onSaveClient,
   onSynced,
-  territories,
-  contacts,
   clients,
-  onAddTerritory,
-  onToggleAssignee,
-  onToggleFollower,
-  onDeleteTerritory,
-  onSetDailyInviteCap,
-  onAddContact,
-  onOpenClient,
   templates,
   projects,
   onSaveTemplate,
@@ -60,20 +48,10 @@ export default function SettingsHub({
   initialTab?: TabKey;
   me: Me;
   canAdmin: boolean;
-  hasTerritoryAccess: boolean;
   subAccounts: Client[];
   onSaveClient: (c: Client) => void;
   onSynced: () => void | Promise<void>;
-  territories: Territory[];
-  contacts: Contact[];
   clients: Client[];
-  onAddTerritory: (t: { name: string; city: string; state: string; assignedTo: string[] }) => void;
-  onToggleAssignee: (id: string, memberId: string) => void;
-  onToggleFollower: (id: string, memberId: string) => void;
-  onDeleteTerritory: (id: string) => void;
-  onSetDailyInviteCap?: (id: string, cap: number | null) => void;
-  onAddContact: (contact: Contact) => void;
-  onOpenClient: (clientId: string) => void;
   templates: TaskTemplate[];
   projects: Project[];
   onSaveTemplate: (id: string | undefined, spec: { name: string; checklistItems: string[] }) => void;
@@ -92,7 +70,6 @@ export default function SettingsHub({
   const tabs: { key: TabKey; label: string; icon: keyof typeof I; visible: boolean }[] = [
     { key: "integrations", label: "Integrations", icon: "gear", visible: canAdmin },
     { key: "team", label: "Team", icon: "user", visible: canAdmin },
-    { key: "territories", label: "Territories", icon: "flag", visible: hasTerritoryAccess && TERRITORIES_ENABLED },
     { key: "templates", label: "Task templates", icon: "clipboard", visible: canAdmin },
     { key: "playbooks", label: "Playbooks", icon: "bookmark", visible: canAdmin },
     { key: "tokens", label: "API tokens", icon: "key", visible: true },
@@ -117,11 +94,6 @@ export default function SettingsHub({
       <div className="min-w-0 flex-1 overflow-y-auto">
             {tab === "integrations" && canAdmin && <SettingsPanel clients={subAccounts} onSaveClient={onSaveClient} onSynced={onSynced} />}
             {tab === "team" && canAdmin && <TeamPanel me={me} dmEnabled={dmEnabled} onSetDmEnabled={onSetDmEnabled} />}
-            {tab === "territories" && hasTerritoryAccess && (
-              <TerritoryPanel me={me} canAdmin={canAdmin} territories={territories} contacts={contacts} clients={clients}
-                onAddTerritory={onAddTerritory} onToggleAssignee={onToggleAssignee} onToggleFollower={onToggleFollower} onDeleteTerritory={onDeleteTerritory} onSetDailyInviteCap={onSetDailyInviteCap}
-                onAddContact={onAddContact} onOpenClient={onOpenClient} />
-            )}
             {tab === "templates" && canAdmin && (
               <TemplatesPanel templates={templates} clients={clients} projects={projects}
                 onSave={onSaveTemplate} onDelete={onDeleteTemplate} onUseAsTask={onUseTemplateAsTask} />
