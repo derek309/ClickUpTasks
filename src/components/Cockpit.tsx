@@ -2788,8 +2788,21 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // patches status through here, bypassing patchTask entirely, so this
     // needs its own copy of the sync rather than relying on patchTask's.
     const synced = cur ? { ...patch, ...applyWaitingStatusSync(cur, patch) } : patch;
-    setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, ...synced } : t)));
-    if (cur) { const merged = { ...cur, ...synced }; upsertTask(merged, me.id); syncGhlIfLinked(merged, patch); }
+    // Recurrence also needs its own copy, for the same reason — dragging a
+    // recurring task into a done-flagged Kanban stage went through here, not
+    // patchTask, so it was marking the task done with no next occurrence
+    // ever created (Derek: "check recurring tasks... are recreated
+    // according to settings and not just marked done"). Same clone shape as
+    // patchTask's own version below — kept in sync manually since this path
+    // deliberately skips the event-comment logging patchTask also does.
+    let clone: Task | null = null;
+    if (cur && synced.status === "done" && cur.status !== "done" && cur.recurrence !== "none") {
+      const nextDue = advanceDue(cur.due, cur.recurrence, cur.recurrenceInterval, cur.recurrenceUnit, cur.recurrenceDaysOfMonth);
+      clone = { ...cur, id: newId("t_"), status: "todo", due: nextDue, subtasks: cur.subtasks.map((s) => ({ ...s, id: newId("s_"), done: false })), comments: [], attachments: [...cur.attachments], ghlTaskId: null };
+      pushToast(`🔁 Recurring — next occurrence created for ${formatDue(nextDue)}`);
+    }
+    setTasks((ts) => { let next = ts.map((t) => (t.id === id ? { ...t, ...synced } : t)); if (clone) next = [...next, clone]; return next; });
+    if (cur) { const merged = { ...cur, ...synced }; upsertTask(merged, me.id); syncGhlIfLinked(merged, patch); if (clone) upsertTask(clone, me.id); }
   };
 
   // Field changes on a task that are worth a line in its Activity feed. Stored

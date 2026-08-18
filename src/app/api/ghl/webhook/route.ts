@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
-import { titleCase, normalizeState, type PlannerWeek } from "@/lib/data";
+import { titleCase, normalizeState, advanceDue, type PlannerWeek, type Recurrence, type RecurrenceUnit, type Subtask } from "@/lib/data";
 import { plannerWeekToRow, rowToPlannerWeek } from "@/lib/db";
 import { resolveOrPromoteTrackedClient, upsertConversationTask } from "@/lib/ghlConversationTask";
 import { fetchDirectoryListingsServer } from "@/lib/directoryListingsServer";
@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
   const ghlTaskId: string | null = body?.task?.id ?? body?.taskId ?? body?.id ?? null;
   if (!ghlTaskId) return NextResponse.json({ ok: true, skipped: "no task id in payload" });
 
-  const { data: row } = await supabaseAdmin.from("tasks").select("id, status, subtasks").eq("ghl_task_id", ghlTaskId).maybeSingle();
+  const { data: row } = await supabaseAdmin.from("tasks").select("*").eq("ghl_task_id", ghlTaskId).maybeSingle();
   if (!row) return NextResponse.json({ ok: true, skipped: "no linked task" });
 
   const patch: Record<string, unknown> = {};
@@ -83,6 +83,30 @@ export async function POST(req: NextRequest) {
 
   const { error } = await supabaseAdmin.from("tasks").update({ ...patch, updated_by: null }).eq("id", row.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Same recurrence-on-complete rule the internal app applies (Cockpit.tsx's
+  // patchTask) — a GHL-side "Task Completed" workflow marking a linked task
+  // done is still completing it, so a recurring task needs its next
+  // occurrence created here too, not just a status flip. A recurring task
+  // can absolutely have a ghl_task_id (it's pushed to GHL like any other),
+  // so skipping this would silently stop those from ever recreating.
+  if (patch.status === "done" && row.recurrence && row.recurrence !== "none") {
+    const nextDue = advanceDue((patch.due as string | undefined) ?? (row.due as string | null), row.recurrence as Recurrence, row.recurrence_interval as number | undefined, row.recurrence_unit as RecurrenceUnit | undefined, row.recurrence_days_of_month as number[] | undefined);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { created_at, ...rest } = row;
+    await supabaseAdmin.from("tasks").insert({
+      ...rest, ...patch,
+      id: "t_" + randomUUID().replace(/-/g, ""),
+      status: "todo",
+      due: nextDue,
+      subtasks: ((row.subtasks as Subtask[] | null) ?? []).map((s) => ({ ...s, id: "s_" + randomUUID().replace(/-/g, ""), done: false })),
+      comments: [],
+      client_response: null,
+      ghl_task_id: null,
+      updated_by: null,
+    });
+  }
+
   return NextResponse.json({ ok: true, updated: Object.keys(patch) });
 }
 
