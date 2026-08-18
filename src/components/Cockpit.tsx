@@ -478,7 +478,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Clients directory's grouping mode — "status" (default, pipeline stage
   // buckets) or "team" (one section per teammate's own active clients, see
   // teamActiveClients below). Not persisted, same as clientListScope.
-  const [clientsGroupBy, setClientsGroupBy] = useState<"status" | "team">("status");
+  const [clientsGroupBy, setClientsGroupBy] = useState<"status" | "team" | "completed">("status");
   // Recently-used ordering: clientId → last-opened epoch, persisted locally.
   // Opening a client stamps it (see the effect below), floating it to the top
   // when the "Recently used" sort is active.
@@ -1716,6 +1716,35 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [scopedTasks, clients, users]
   );
+  // "Completed" log for the Clients directory — who marked what done, and
+  // when. No new schema needed: every status change already writes a plain
+  // "kind: event" comment onto the task (see patchTask's describeFieldChange
+  // call) with a real authorId/at, so a task marked done the normal way
+  // through this app already carries its own completion record — including
+  // ones from before this view existed, i.e. the "backfill" is just reading
+  // history that was already there. Tasks completed some other way (a GHL
+  // sync, a webhook) won't have one, so this is a log of what we can prove,
+  // not a total task count. Gated on the tab actually being open — a full
+  // scan of every task's comments is real work at this app's task volume,
+  // no reason to pay for it on every render of every other view.
+  const completionLog = useMemo(() => {
+    if (clientsGroupBy !== "completed") return [];
+    const rows: { id: string; taskId: string; taskTitle: string; clientId: string; clientName: string; authorId: string; authorName: string; authorColor: string; authorInitials: string; at: string }[] = [];
+    for (const t of tasks) {
+      if (t.clientId === PERSONAL_CLIENT_ID) continue; // personal to-dos aren't client work to review
+      for (const c of t.comments) {
+        if (c.kind !== "event" || !isCompletionEvent(c.body)) continue;
+        const author = userById(c.authorId);
+        rows.push({
+          id: c.id, taskId: t.id, taskTitle: t.title, clientId: t.clientId, clientName: clientById(t.clientId)?.name ?? "—",
+          authorId: c.authorId, authorName: author?.name ?? "Unknown", authorColor: author?.color ?? "#94a3b8", authorInitials: author?.initials ?? "?",
+          at: c.at,
+        });
+      }
+    }
+    rows.sort((a, b) => b.at.localeCompare(a.at));
+    return rows.slice(0, 300); // a running log, not a full export
+  }, [clientsGroupBy, tasks]);
   // Memoized for the same reason — the sidebar's "My Work" nav badge
   // (below) calls this inline on every render of every view, including
   // Team Chat, which is what made typing/sending there feel laggy even
@@ -5122,7 +5151,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onOpen={(id) => { setDirView(null); setTerritoryView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); setClientTab("tasks"); }}
             canAdmin={canAdmin} onAddClient={() => setAddClientOpen(true)} onRename={renameClient} onDelete={deleteClient} onSetStatus={setClientStatus}
             sort={clientSort} onSetSort={saveClientSort} scope={clientListScope} onToggleScope={() => setClientListScope((s) => (s === "mine" ? "all" : "mine"))}
-            groupBy={clientsGroupBy} onToggleGroupBy={() => setClientsGroupBy((g) => (g === "status" ? "team" : "status"))} teamGroups={teamActiveClients} />
+            groupBy={clientsGroupBy} onSetGroupBy={setClientsGroupBy} teamGroups={teamActiveClients} completionLog={completionLog}
+            onOpenTask={(clientId, taskId) => { setDirView(null); setTerritoryView(null); setActiveClient(clientId); setActiveProject(null); setOpenTaskId(taskId); }} />
         ) : dirView === "projects" ? (
           <ProjectsDirectory projects={sortedWorkspaceProjects} openCount={projectTaskCount}
             onOpen={(id) => { setDirView(null); setTerritoryView(null); setActiveClient(WORKSPACE_CLIENT_ID); setActiveProject(id); setOpenTaskId(null); setClientTab("tasks"); }}
