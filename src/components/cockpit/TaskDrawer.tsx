@@ -11,7 +11,6 @@ import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId } from "./ui";
 import { AttachmentTile } from "./AttachmentTile";
 import { InlineAssignee, InlineDue } from "./GroupedList";
 import { RichTextEditor } from "./RichTextEditor";
-import { claudeWorkUrl } from "@/lib/claudeLink";
 import { useTaskMessaging } from "./TaskMessaging";
 
 // Title/description onChange used to call onPatch on every keystroke, which
@@ -45,7 +44,7 @@ function useDebouncedCommit(delayMs = 600) {
   return { schedule, flush };
 }
 
-export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, onRegenerateAiSummary, aiSummaryBusy, pushToast, onOpenClaudeSetup }: {
+export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, onRegenerateAiSummary, aiSummaryBusy, pushToast }: {
   task: Task;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; navTasks: Task[]; onOpenTask: (id: string) => void; onAddSibling: (title: string) => void; onPrev: () => void; onNext: () => void;
@@ -81,7 +80,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   onRegenerateAiSummary?: () => void; // AI tab's "Regenerate" — only ever called on click, never automatically
   aiSummaryBusy?: boolean;
   pushToast: (text: string, action?: { label: string; run: () => void }, secondaryAction?: { label: string; run: () => void }) => void;
-  onOpenClaudeSetup: () => void; // jumps Settings to the API Tokens tab, which has the one-time desktop-helper install command
 }) {
   const client = clientById(task.clientId)!;
   const project = projectById(task.projectId)!;
@@ -212,10 +210,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     window.addEventListener("mouseup", onUp);
   };
 
-  // Packages the task as a ready-to-paste brief for a Claude Code session —
-  // the fallback hand-off for anyone without the desktop helper installed
-  // (see the "Work with Claude" button below, which uses a real deep link
-  // when the helper app is present).
+  // Packages the task as a ready-to-paste brief for a Claude Code session.
   const copyForClaude = async () => {
     const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId);
     const descText = htmlToText(task.description);
@@ -236,18 +231,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch { /* clipboard unavailable */ }
-  };
-  // A browser gives JS no way to detect whether the clickuptasks:// scheme
-  // is actually registered (no prompt, no error, no resolved/rejected
-  // promise) — on a computer that never ran the one-time desktop-helper
-  // install script, clicking this does nothing observable at all. Rather
-  // than trying to detect success (impossible), always follow up with a
-  // toast offering the "Copy for Claude" fallback above.
-  const workWithClaude = () => {
-    window.location.href = claudeWorkUrl({ task: task.id });
-    setTimeout(() => {
-      pushToast("Didn't see Claude open? You may need one-time setup on this computer.", { label: "Copy for Claude instead", run: copyForClaude }, { label: "Set up Work with Claude", run: onOpenClaudeSetup });
-    }, 1200);
   };
   // Pasting an image anywhere in the drawer (title, description, a comment
   // draft — doesn't matter which field has focus) attaches it to the task,
@@ -769,10 +752,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             )}
             <button onClick={copyForClaude} title="Copy this task as a brief to paste into Claude Code" className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
               <span aria-hidden>{copied ? "✓" : "✳"}</span><span className="hidden sm:inline">{copied ? "Copied" : "Copy for Claude"}</span>
-            </button>
-            <button onClick={workWithClaude}
-              title="Resume (or start) this task's Claude Code session" className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
-              <span aria-hidden>▶</span><span className="hidden sm:inline">Work with Claude</span>
             </button>
             {ghlContactUrl && (
               <a href={ghlContactUrl} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="inline-flex items-center gap-1 rounded-md border border-accent px-2 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft">
