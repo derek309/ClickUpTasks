@@ -279,11 +279,16 @@ export interface Client {
    * /api/ghl/message. Optional (unlike assignedTo) so existing clientsSeed
    * literals don't need editing; treat as `?? []` everywhere it's read. */
   canMessage?: string[];
-  /** A personal "check in on this again" reminder date, independent of any
-   * task's due date — lets a client stay a real urgency signal (sidebar
-   * sort, My Work) even when none of its tasks carry a due date. Plain ISO
-   * string, matching tasks.due's exact type/comparison semantics. */
-  followUpAt?: string | null;
+  /** Per-teammate "check in on this again" reminder dates — memberId → ISO
+   * date — so a client with several people on it (Derek: "hard to tell when
+   * the follow-up is supposed to happen and who is doing it") shows each
+   * person's own date instead of one shared, ambiguous one. Auto-tracks to
+   * that person's own soonest open dated task on this client (see the
+   * recompute effect in Cockpit.tsx), same idea as the old single-value
+   * followUpAt just split per person; empty/missing key = that person has no
+   * follow-up here. Dates are plain ISO strings, matching tasks.due's exact
+   * type/comparison semantics. */
+  followUpBy?: Record<string, string>;
   /** yyyy-mm-dd of the last time this client was reviewed — powers the
    * weekly/monthly Review tier reset (see clientUrgencyKey). */
   reviewedAt?: string | null;

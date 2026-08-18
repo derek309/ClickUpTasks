@@ -2,7 +2,7 @@
 
 // Styled in-app replacements for window.confirm()/prompt().
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { LINK_COLORS, randomLinkColor, STATUS_META, clientStatusMeta, formatDue, type TaskStatus, type Client, type Contact } from "@/lib/data";
+import { LINK_COLORS, randomLinkColor, STATUS_META, clientStatusMeta, type TaskStatus, type Client, type Contact } from "@/lib/data";
 
 export type ConfirmSpec = { title: string; message: string; confirmLabel?: string; danger?: boolean; onConfirm: () => void };
 export function ConfirmModal({ title, message, confirmLabel = "Confirm", danger = true, onConfirm, onCancel }: ConfirmSpec & { onCancel: () => void }) {
@@ -91,7 +91,7 @@ export function MergeTaskModal({ sourceTitle, candidates, onSubmit, onCancel }: 
 // Phase 1: pick the other client. Phase 2: choose which record survives and,
 // per field, which record's value wins. Everything from both ends up on the
 // survivor; the other is removed. Irreversible.
-type MergeField = "name" | "ghlLocationId" | "status" | "color" | "followUpAt";
+type MergeField = "name" | "ghlLocationId" | "status" | "color";
 export type MergeClientSpec = {
   a: Client;
   candidates: Client[];           // other clients that can be picked as the second side
@@ -109,7 +109,7 @@ export function MergeClientModal({ a, candidates, initialB, contactFor, taskCoun
   const [b, setB] = useState<Client | null>(initialB ?? null);
   const [query, setQuery] = useState("");
   const [survivorId, setSurvivorId] = useState<string>(seedSurvivor);
-  const [choice, setChoice] = useState<Record<MergeField, "a" | "b">>({ name: seedSide, ghlLocationId: seedSide, status: seedSide, color: seedSide, followUpAt: seedSide });
+  const [choice, setChoice] = useState<Record<MergeField, "a" | "b">>({ name: seedSide, ghlLocationId: seedSide, status: seedSide, color: seedSide });
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => { if (!b) ref.current?.focus(); }, [b]);
 
@@ -120,7 +120,7 @@ export function MergeClientModal({ a, candidates, initialB, contactFor, taskCoun
     const surv = taskCount(other.id) > taskCount(a.id) ? other : a;
     setSurvivorId(surv.id);
     const side: "a" | "b" = surv.id === a.id ? "a" : "b";
-    setChoice({ name: side, ghlLocationId: side, status: side, color: side, followUpAt: side });
+    setChoice({ name: side, ghlLocationId: side, status: side, color: side });
   };
 
   if (!b) {
@@ -157,11 +157,16 @@ export function MergeClientModal({ a, candidates, initialB, contactFor, taskCoun
     { f: "ghlLocationId", label: "Business", render: (c) => c.ghlLocationId || "—" },
     { f: "status", label: "Status", render: (c) => clientStatusMeta(c.status).label },
     { f: "color", label: "Color", render: (c) => <span className="inline-block h-4 w-4 rounded-full align-middle" style={{ background: c.color }} /> },
-    { f: "followUpAt", label: "Follow-up", render: (c) => (c.followUpAt ? formatDue(c.followUpAt) : "—") },
   ];
   const submit = () => {
     const patch: Partial<Client> = {};
     for (const { f } of rows) { const from = choice[f] === "a" ? a : b; (patch as Record<string, unknown>)[f] = val(from, f); }
+    // Per-person follow-ups aren't a single either/or choice like the fields
+    // above — union both sides' maps instead, so nobody's date silently
+    // disappears just because their side of the merge lost the coin flip on
+    // an unrelated field. A person with dates on both sides keeps the
+    // survivor's own value (already the "winning" record by definition).
+    patch.followUpBy = { ...source.followUpBy, ...survivor.followUpBy };
     onSubmit(source.id, survivor.id, patch);
   };
   const sTasks = taskCount(source.id);
@@ -177,7 +182,7 @@ export function MergeClientModal({ a, candidates, initialB, contactFor, taskCoun
           <span className="text-muted">Keep as:</span>
           <div className="inline-flex overflow-hidden rounded-md border">
             {[a, b].map((c) => (
-              <button key={c.id} onClick={() => { setSurvivorId(c.id); const side: "a" | "b" = c.id === a.id ? "a" : "b"; setChoice({ name: side, ghlLocationId: side, status: side, color: side, followUpAt: side }); }}
+              <button key={c.id} onClick={() => { setSurvivorId(c.id); const side: "a" | "b" = c.id === a.id ? "a" : "b"; setChoice({ name: side, ghlLocationId: side, status: side, color: side }); }}
                 className={`px-2.5 py-1 font-medium ${survivorId === c.id ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>{c.name}</button>
             ))}
           </div>
