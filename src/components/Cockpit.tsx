@@ -2908,12 +2908,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // back. Reported live on Melissa Lamberti: her one open dated task was
   // due tomorrow, and every attempt to move her follow-up date out
   // reverted instantly with no way to actually change it.
-  // Scoped to the viewer's own assigned tasks (Derek, Jul 27): moving the
-  // follow-up date used to drag every assignee's overdue tasks forward,
-  // which silently rescheduled a teammate's work out from under them. Only
-  // the current user's own tasks move now — a teammate's overdue tasks on
-  // the same client/project are untouched, so the follow-up date can still
-  // show overdue on their account even after you move yours.
+  // Scoped to the viewer's own assigned tasks (Derek, Jul 27), PLUS
+  // unassigned ones (2026-08-19 fix) — moving the follow-up date used to
+  // drag every assignee's overdue tasks forward, which silently
+  // rescheduled a teammate's work out from under them, so only the current
+  // user's own tasks moved. But that scoping also caught tasks with no
+  // assignee at all, which isn't anyone's work being taken away — an
+  // unassigned task anchoring the date (e.g. Nicole Scott's "Redesign
+  // website") could never be dragged by ANYONE, so the follow-up pill was
+  // permanently stuck reverting no matter who tried to move it. A
+  // teammate's overdue tasks on the same client/project are still
+  // untouched, so the follow-up date can still show overdue on their
+  // account even after you move yours.
   const alignOverdueTasksTo = (clientId: string, projectId: string | null, newDate: string, oldFollowUp: string | null) => {
     // Conversation-priority tasks ("Reply to X") are excluded: they re-pin
     // their own due date to today on every inbound message
@@ -2922,7 +2928,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // (implies "we'll wait" on it) or pointless (the next message just
     // bounces it right back to today), which is exactly the loop this was
     // built to prevent, not cause.
-    const blocking = tasks.filter((t) => t.status !== "done" && t.priority !== "conversation" && t.assigneeId === me.id && !!t.due && (t.due <= TODAY || t.due === oldFollowUp) && (projectId ? t.projectId === projectId : t.clientId === clientId));
+    const blocking = tasks.filter((t) => t.status !== "done" && t.priority !== "conversation" && (t.assigneeId === me.id || t.assigneeId === null) && !!t.due && (t.due <= TODAY || t.due === oldFollowUp) && (projectId ? t.projectId === projectId : t.clientId === clientId));
     if (!blocking.length) return;
     blocking.forEach((t) => patchTask(t.id, { due: newDate }));
     pushToast(`Moved ${blocking.length} overdue task${blocking.length === 1 ? "" : "s"} to ${formatDue(newDate)}.`);
