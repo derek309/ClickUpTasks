@@ -2047,16 +2047,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // restricted by scopedTasks; only changes anything for admins.
   // Owner Growth Plan tasks are excluded from any unscoped-by-project view
   // (activeProject === null — "All" for a client, or the cross-client All
-  // Tasks tab) — they're only ever meant to be seen inside their own
-  // Playbook list, never mixed in with a business's regular work. Once a
-  // specific project IS selected, the existing t.projectId === activeProject
-  // check already scopes correctly (only matches when that project happens
-  // to be the Playbook one), so this only needs to guard the unscoped case.
+  // Tasks tab) UNLESS someone has actually made it active work — given it an
+  // assignee or a due date. Untouched, it's just a checklist item living in
+  // its own Playbook list; the moment either is set, it's real work and
+  // should surface like any other task (Derek: "when we assign a task or a
+  // due date it can then start to show up on all because it's active,
+  // otherwise it sits there a checklist"). Once a specific project IS
+  // selected, the existing t.projectId === activeProject check already
+  // scopes correctly (only matches when that project happens to be the
+  // Playbook one), so this only needs to guard the unscoped case.
   // Memoized — the main task list's hot path. With activeFolder set this
   // was O(scopedTasks × projects) every render (projectById is a linear
   // scan), and it feeds displayedGroups/vaultItems/Journal counts below.
   const baseTasks = useMemo(
-    () => scopedTasks.filter((t) => t.clientId.startsWith("cl_") && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject) && (!activeFolder || projectById(t.projectId)?.folderId === activeFolder) && (activeClient !== "all" || allTasksScope === "all" || t.assigneeId === me.id) && (!t.playbookStepKey || !!activeProject)),
+    () => scopedTasks.filter((t) => t.clientId.startsWith("cl_") && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject) && (!activeFolder || projectById(t.projectId)?.folderId === activeFolder) && (activeClient !== "all" || allTasksScope === "all" || t.assigneeId === me.id) && (!t.playbookStepKey || !!activeProject || !!t.assigneeId || !!t.due)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [scopedTasks, activeClient, activeProject, activeFolder, projects, allTasksScope, me.id]
   );
