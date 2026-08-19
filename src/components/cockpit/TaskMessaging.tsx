@@ -33,17 +33,14 @@ function eventAccentColor(diff: { field: string; to: string }): string {
   if (diff.field === "due date") return "#f59e0b";
   return "#94a3b8";
 }
-function EventDiffCard({ diff }: { diff: { field: string; from: string | null; to: string } }) {
+// One inline pill for the new value — folded straight into the event
+// line ("Derek updated due date to [Aug 18] · 1d ago") instead of a
+// separate two-line boxed card underneath it (Derek: "the due date label
+// is not good... make the timestamps cleaner").
+function EventValuePill({ diff }: { diff: { field: string; to: string } }) {
   const color = eventAccentColor(diff);
   return (
-    <div className="mt-1 inline-block rounded-lg border-l-[3px] bg-background px-2.5 py-1.5" style={{ borderLeftColor: color, background: color + "0d" }}>
-      <div className="mb-0.5 text-[12px] font-medium capitalize" style={{ color }}>{diff.field}</div>
-      <div className="flex items-center gap-1.5 text-[14px]">
-        {diff.from && <span className="text-muted line-through">{diff.from}</span>}
-        {diff.from && <span className="text-muted">→</span>}
-        <span className="font-medium text-foreground">{diff.to}</span>
-      </div>
-    </div>
+    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[15px] font-medium" style={{ background: color + "1a", color }}>{diff.to}</span>
   );
 }
 
@@ -674,9 +671,10 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
           return (
             <div key={c.id} className={`relative flex gap-3 ${gap}`}>
               <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface" style={{ background: diff ? eventAccentColor(diff) : "var(--muted)" }} /></div>
-              <div className="min-w-0 flex-1 pt-1.5 text-[14px] text-muted">
-                <span><span className="font-medium text-foreground">{u?.name}</span> {diff ? `updated ${diff.field}` : c.body} · {timeAgo(c.at)}</span>
-                {diff && <EventDiffCard diff={diff} />}
+              <div className="min-w-0 flex-1 pt-1.5 text-[16px] text-muted">
+                <span className="font-medium text-foreground">{u?.name}</span>{" "}
+                {diff ? <>updated {diff.field} to <EventValuePill diff={diff} /></> : c.body}
+                {" · "}<span className="text-[15px]">{timeAgo(c.at)}</span>
               </div>
             </div>
           );

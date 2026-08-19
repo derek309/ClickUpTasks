@@ -846,15 +846,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   </div>
                 </div>
               )}
-              {/* mt-auto on the INNER wrapper (not justify-end on the scroll
-                  container) so a short conversation still sits near the
-                  composer, chat-app convention, without breaking scrolling:
-                  justify-content on an overflow container makes content that
-                  spills past the TOP edge permanently unreachable — you
-                  physically could not scroll up to older messages (Derek,
-                  2026-08-11). An auto margin collapses to 0 once content
-                  overflows, so the same layout scrolls correctly. */}
-              <div className="flex flex-1 flex-col overflow-y-auto px-5 py-4"><div className="mt-auto">{feedArea}</div></div>
+              {/* Top-anchored (Derek, 2026-08-19: the bottom-anchored
+                  chat-app convention this used to have — mt-auto pinning a
+                  short thread near the composer — left a client/task with
+                  little activity looking broken, a wall of empty space
+                  above one lonely event). The filter bar and feed now sit
+                  right under the header where they belong; composerFooter
+                  stays pinned below, outside this scroll area. */}
+              <div className="flex flex-1 flex-col overflow-y-auto px-5 py-4">{feedArea}</div>
               {composerFooter}
             </div>
           </div>
