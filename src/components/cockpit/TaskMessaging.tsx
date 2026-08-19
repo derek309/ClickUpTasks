@@ -117,6 +117,8 @@ export interface TaskMessagingProps {
   onUploadCommentImage: (file: File) => Promise<Attachment | null>;
   onDownloadFile: (path: string) => void;
   onDownloadFileAs: (path: string, filename: string) => void;
+  onDownloadAll: (items: Attachment[], zipName: string, batchId: string) => void;
+  zippingIds: Set<string>;
   attImageUrls: Record<string, string>;
   openPreview: (att: Attachment) => void;
   attachToTask: (att: Attachment) => void;
@@ -140,7 +142,7 @@ export interface TaskMessagingProps {
 }
 
 export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.ReactNode; composerFooter: React.ReactNode } {
-  const { task, client, comment, setComment, onPatch, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs,
+  const { task, client, comment, setComment, onPatch, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, ccContacts, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin,
     onDeleteMessage, onEditMessage, onRegenerateAiSummary, aiSummaryBusy, hasMessaging } = p;
@@ -629,6 +631,16 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
             )}
             {m.attachments && m.attachments.length > 0 && (
               <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {/* A client dropping a dozen+ files into one message shouldn't mean
+                    downloading them one at a time — zips everything with a path
+                    into a single file. Only worth showing past 1 attachment. */}
+                {m.attachments.filter((a) => a.path).length > 1 && (
+                  <button onClick={(e) => { e.stopPropagation(); onDownloadAll(m.attachments, `${task.title || "attachments"} — ${timeAgo(m.at)}`, m.id); }}
+                    disabled={zippingIds.has(m.id)}
+                    className="mb-0.5 flex w-full items-center gap-1.5 text-[12.5px] font-medium text-accent hover:underline disabled:opacity-50">
+                    <I.download className="h-3 w-3" /> {zippingIds.has(m.id) ? "Zipping…" : `Download all ${m.attachments.filter((a) => a.path).length}`}
+                  </button>
+                )}
                 {m.attachments.filter((a) => a.kind === "image").length > 0 && (
                   <div className="grid grid-cols-4 gap-1.5">
                     {m.attachments.filter((a) => a.kind === "image").map((a) => (
@@ -679,6 +691,13 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
               {c.body && <CollapsibleText text={c.body} className="text-[16px]" />}
               {c.attachments && c.attachments.length > 0 && (
                 <div className="mt-1 flex flex-wrap gap-1.5">
+                  {c.attachments.filter((a) => a.path).length > 1 && (
+                    <button onClick={(e) => { e.stopPropagation(); onDownloadAll(c.attachments!, `${task.title || "attachments"} — ${timeAgo(c.at)}`, c.id); }}
+                      disabled={zippingIds.has(c.id)}
+                      className="mb-0.5 flex w-full items-center gap-1.5 text-[12.5px] font-medium text-accent hover:underline disabled:opacity-50">
+                      <I.download className="h-3 w-3" /> {zippingIds.has(c.id) ? "Zipping…" : `Download all ${c.attachments.filter((a) => a.path).length}`}
+                    </button>
+                  )}
                   {c.attachments.filter((a) => a.kind === "image").length > 0 && (
                     <div className="grid grid-cols-4 gap-1.5">
                       {c.attachments.filter((a) => a.kind === "image").map((a) => (
