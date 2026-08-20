@@ -127,7 +127,7 @@ export interface TaskMessagingProps {
   onSendTaskMessage?: (channel: MessageChannel, subject: string, body: string, attachments?: Attachment[], cc?: string[], bcc?: string[]) => void;
   onScheduleTaskMessage?: (channel: MessageChannel, subject: string, body: string, scheduledAt: string, attachments?: Attachment[], cc?: string[], bcc?: string[]) => void;
   sendingMessage?: boolean;
-  onDraftMessage?: (channel: "email" | "sms", prompt?: string) => Promise<{ subject?: string; body: string } | null>;
+  onDraftMessage?: (channel: "email" | "sms" | "chat", prompt?: string) => Promise<{ subject?: string; body: string } | null>;
   draftingMessage?: boolean;
   onGetTaskLink?: () => string | null;
   canAdmin?: boolean;
@@ -289,6 +289,17 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
       onPatch({ draftEmail: { subject: d.subject ?? "", body: plainTextToHtml(d.body), createdAt: new Date().toISOString() } });
     }
   };
+  // SMS/Chat's simpler "AI Write" button (Derek, 2026-08-19: type your
+  // message, then Send it as-is or hand it to Claude) — no separate prompt
+  // field like runDraft's; whatever's already typed in the composer IS the
+  // instruction ("tell the client we're waiting on their logo files"), or,
+  // typed blank, falls back to the same default "status update" draft.
+  const aiWriteInto = async (channel: "sms" | "chat") => {
+    if (!onDraftMessage || draftingMessage) return;
+    const d = await onDraftMessage(channel, msgBody.trim() || undefined);
+    if (!d) return;
+    setMsgBody(d.body);
+  };
   const promptClaudeBlock = (channel: "email" | "sms") => onDraftMessage ? (
     <div className="mb-2 flex shrink-0 items-start gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
       <span aria-hidden className="pt-1 pl-1 text-[14px]">✨</span>
@@ -335,7 +346,6 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
     if (channel === "sms") return (
       <div className="max-h-[50vh] shrink-0 overflow-y-auto rounded-xl border-t-2 p-3" style={{ borderTopColor: color, background: color + "0d" }}>
         <div className="mb-2 shrink-0 text-[14px] text-muted">Texting: <span className="font-medium text-foreground">{messageDest?.phone || "no phone on file"}</span></div>
-        <div className="mb-2">{promptClaudeBlock("sms")}</div>
         {msgAttBar}
         <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)} onPaste={handleMsgPaste} autoFocus
           onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitTaskMessage(); } }}
@@ -347,6 +357,7 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
             {msgAttachButton}
             <button onClick={onCancel} className="rounded-lg px-2.5 py-1.5 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
             {onScheduleTaskMessage && <SchedulePopover disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} onSchedule={submitScheduledTaskMessage} />}
+            {onDraftMessage && <button onClick={() => aiWriteInto("sms")} disabled={draftingMessage} title="Write it as-typed, or hand what you typed to Claude as instructions" className="rounded-lg border border-accent/40 px-2.5 py-1.5 text-[16px] font-medium text-accent disabled:opacity-40">{draftingMessage ? "Writing…" : "✨ AI Write"}</button>}
             <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40" style={{ background: color }}>{sendingMessage ? "Sending…" : "Send text"}</button>
           </span>
         </div>
@@ -399,6 +410,7 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
           <span className="flex items-center gap-1.5">
             {msgAttachButton}
             <button onClick={onCancel} className="rounded-lg px-2.5 py-1.5 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
+            {onDraftMessage && <button onClick={() => aiWriteInto("chat")} disabled={draftingMessage} title="Write it as-typed, or hand what you typed to Claude as instructions" className="rounded-lg border border-accent/40 px-2.5 py-1.5 text-[16px] font-medium text-accent disabled:opacity-40">{draftingMessage ? "Writing…" : "✨ AI Write"}</button>}
             <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40" style={{ background: color }}>{sendingMessage ? "Sending…" : "Send"}</button>
           </span>
         </div>
@@ -433,7 +445,7 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
   const mentionMatch = /@([\w]*)$/.exec(comment);
   const mentionCands = mentionMatch ? users.filter((u) => u.name.toLowerCase().includes(mentionMatch[1].toLowerCase())) : [];
   const teamComposer = (
-    <div className="relative rounded-xl border-t-2 p-3" style={{ borderTopColor: channelColor.activity, background: "color-mix(in srgb, var(--accent) 5%, transparent)" }}>
+    <div className="relative max-h-[50vh] shrink-0 overflow-y-auto rounded-xl border-t-2 p-3" style={{ borderTopColor: channelColor.activity, background: "color-mix(in srgb, var(--accent) 5%, transparent)" }}>
       {mentionMatch && mentionCands.length > 0 && (
         <div className="absolute bottom-full left-3 mb-1 w-56 overflow-hidden rounded-lg border bg-surface shadow-lg">
           {mentionCands.map((u) => (
@@ -443,19 +455,23 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
           ))}
         </div>
       )}
+      <div className="mb-2 shrink-0 text-[14px] text-muted">Team message — internal only, nobody outside the team sees this.</div>
       {(pendingCommentAtts.length > 0 || uploadingCommentAtt) && (
         <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
           <AttachmentThumbs items={pendingCommentAtts} onRemove={(id) => setPendingCommentAtts((a) => a.filter((x) => x.id !== id))} />
           {uploadingCommentAtt && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" />}
         </div>
       )}
-      <div className="flex items-end gap-2 rounded-xl border bg-background px-2.5 py-2 focus-within:border-accent">
-        <textarea value={comment} onChange={(e) => setComment(e.target.value)} onPaste={handleCommentPaste} autoFocus
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitComment(); } }}
-          placeholder="Write a team chat…  (internal only, paste to attach an image)" rows={1}
-          className="max-h-72 min-h-[38px] flex-1 resize-y bg-transparent text-[16px] outline-none placeholder:text-muted" />
-        <button onClick={submitComment} disabled={!comment.trim() && pendingCommentAtts.length === 0} className="rounded-lg bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">Send</button>
-        <button onClick={closeComposers} className="rounded-lg px-2 py-1.5 text-[14px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
+      <textarea value={comment} onChange={(e) => setComment(e.target.value)} onPaste={handleCommentPaste} autoFocus
+        onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitComment(); } }}
+        placeholder="Write a team message… (⌘↵ to send, paste to attach an image)"
+        className="min-h-[100px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[16px] outline-none placeholder:text-muted focus:border-accent" />
+      <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
+        <span className="text-[14px] text-muted">{wordCount(comment)} word{wordCount(comment) === 1 ? "" : "s"}</span>
+        <span className="flex items-center gap-1.5">
+          <button onClick={closeComposers} className="rounded-lg px-2.5 py-1.5 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
+          <button onClick={submitComment} disabled={!comment.trim() && pendingCommentAtts.length === 0} className="rounded-lg bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">Send</button>
+        </span>
       </div>
     </div>
   );
