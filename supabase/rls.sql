@@ -10,6 +10,17 @@
 -- founder bootstrap) use the service-role key via src/lib/supabaseAdmin.ts.
 -- Everything the browser does runs under the signed-in user's JWT, so these
 -- policies are what actually protect the data.
+--
+-- is_admin()/my_member_id() calls below are wrapped as `(select is_admin())`
+-- rather than called bare. Postgres treats a bare stable-function call in a
+-- policy as a per-row re-evaluation (an "initplan" the planner can't hoist),
+-- so on tasks (28k+ rows) every SELECT — including a plain COUNT(*) — was
+-- re-running the `profiles` lookup once per row and hitting the statement
+-- timeout (reported back to the app as a 503). Wrapping in `(select ...)`
+-- lets Postgres evaluate it once per query instead of once per row — the
+-- documented fix for this exact pattern. See src/lib/db.ts's fetchAllRows,
+-- which had a slow-paging fallback specifically for when this count query
+-- 503s; this is the actual fix, not a workaround.
 
 -- --- helper functions -------------------------------------------------------
 -- SECURITY DEFINER so they can read `profiles` without tripping profiles' own
@@ -30,13 +41,13 @@ alter table clients enable row level security;
 
 drop policy if exists clients_select on clients;
 create policy clients_select on clients for select to authenticated using (
-  is_admin()
-  or exists (select 1 from tasks t where t.client_id = clients.id and t.assignee_id = my_member_id())
+  (select is_admin())
+  or exists (select 1 from tasks t where t.client_id = clients.id and t.assignee_id = (select my_member_id()))
 );
 
 drop policy if exists clients_write on clients;
 create policy clients_write on clients for all to authenticated
-  using (is_admin()) with check (is_admin());
+  using ((select is_admin())) with check ((select is_admin()));
 
 -- --- contacts ---------------------------------------------------------------
 -- A client is a GHL contact: its id is 'cl_' || contacts.id. A VA can see a
@@ -45,26 +56,26 @@ alter table contacts enable row level security;
 
 drop policy if exists contacts_select on contacts;
 create policy contacts_select on contacts for select to authenticated using (
-  is_admin()
-  or exists (select 1 from tasks t where t.client_id = 'cl_' || contacts.id and t.assignee_id = my_member_id())
+  (select is_admin())
+  or exists (select 1 from tasks t where t.client_id = 'cl_' || contacts.id and t.assignee_id = (select my_member_id()))
 );
 
 drop policy if exists contacts_write on contacts;
 create policy contacts_write on contacts for all to authenticated
-  using (is_admin()) with check (is_admin());
+  using ((select is_admin())) with check ((select is_admin()));
 
 -- --- projects ---------------------------------------------------------------
 alter table projects enable row level security;
 
 drop policy if exists projects_select on projects;
 create policy projects_select on projects for select to authenticated using (
-  is_admin()
-  or exists (select 1 from tasks t where t.project_id = projects.id and t.assignee_id = my_member_id())
+  (select is_admin())
+  or exists (select 1 from tasks t where t.project_id = projects.id and t.assignee_id = (select my_member_id()))
 );
 
 drop policy if exists projects_write on projects;
 create policy projects_write on projects for all to authenticated
-  using (is_admin()) with check (is_admin());
+  using ((select is_admin())) with check ((select is_admin()));
 
 -- --- tasks ------------------------------------------------------------------
 -- VAs may see and edit the tasks assigned to them; only admins delete or
@@ -73,21 +84,21 @@ alter table tasks enable row level security;
 
 drop policy if exists tasks_select on tasks;
 create policy tasks_select on tasks for select to authenticated using (
-  is_admin() or assignee_id = my_member_id()
+  (select is_admin()) or assignee_id = (select my_member_id())
 );
 
 drop policy if exists tasks_insert on tasks;
 create policy tasks_insert on tasks for insert to authenticated with check (
-  is_admin() or assignee_id = my_member_id()
+  (select is_admin()) or assignee_id = (select my_member_id())
 );
 
 drop policy if exists tasks_update on tasks;
 create policy tasks_update on tasks for update to authenticated
-  using (is_admin() or assignee_id = my_member_id())
-  with check (is_admin() or assignee_id = my_member_id());
+  using ((select is_admin()) or assignee_id = (select my_member_id()))
+  with check ((select is_admin()) or assignee_id = (select my_member_id()));
 
 drop policy if exists tasks_delete on tasks;
-create policy tasks_delete on tasks for delete to authenticated using (is_admin());
+create policy tasks_delete on tasks for delete to authenticated using ((select is_admin()));
 
 -- --- notifications ----------------------------------------------------------
 -- You read/clear your own; anyone signed in can create one (e.g. to notify an
@@ -96,7 +107,7 @@ alter table notifications enable row level security;
 
 drop policy if exists notifications_select on notifications;
 create policy notifications_select on notifications for select to authenticated using (
-  is_admin() or recipient_id = my_member_id()
+  (select is_admin()) or recipient_id = (select my_member_id())
 );
 
 drop policy if exists notifications_insert on notifications;
@@ -104,8 +115,8 @@ create policy notifications_insert on notifications for insert to authenticated 
 
 drop policy if exists notifications_update on notifications;
 create policy notifications_update on notifications for update to authenticated
-  using (is_admin() or recipient_id = my_member_id())
-  with check (is_admin() or recipient_id = my_member_id());
+  using ((select is_admin()) or recipient_id = (select my_member_id()))
+  with check ((select is_admin()) or recipient_id = (select my_member_id()));
 
 -- --- profiles (tighten the Phase-1b policy) ---------------------------------
 -- Was: readable by any authenticated user. Now: you see your own; admins see
@@ -114,5 +125,5 @@ create policy notifications_update on notifications for update to authenticated
 drop policy if exists "profiles readable by authenticated" on profiles;
 drop policy if exists profiles_select on profiles;
 create policy profiles_select on profiles for select to authenticated using (
-  id = auth.uid() or is_admin()
+  id = (select auth.uid()) or (select is_admin())
 );

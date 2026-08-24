@@ -634,29 +634,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setProjects((ps) => ps.map((x) => (x.id === projectId ? np : x)));
     upsertProject(np);
   };
-  // A personal "check on this again" reminder date, independent of any
-  // task's due date — see clientUrgencyKey/projectUrgencyKey, which treat
-  // this as one more urgency candidate alongside open task due dates.
-  // Per-member on clients (Derek: "hard to tell when the follow-up is
-  // supposed to happen and who is doing it") — patches just that one
-  // person's key in the map rather than the whole client's single date.
-  const setClientFollowUpFor = (clientId: string, memberId: string, date: string | null) => {
-    const c = clientById(clientId);
-    if (!c) return;
-    const map = { ...(c.followUpBy ?? {}) };
-    if (date) map[memberId] = date; else delete map[memberId];
-    const nc = { ...c, followUpBy: map };
-    setClients((cs) => cs.map((x) => (x.id === clientId ? nc : x)));
-    markOwnClientWrite(nc.id);
-    upsertClient(nc);
-  };
-  const setProjectFollowUp = (projectId: string, date: string | null) => {
-    const p = projectById(projectId);
-    if (!p) return;
-    const np = { ...p, followUpAt: date };
-    setProjects((ps) => ps.map((x) => (x.id === projectId ? np : x)));
-    upsertProject(np);
-  };
   // Stamp reviewedAt = today, clearing this client/project from the Review
   // tier until next Monday (weekly) or its next nurture cycle. See
   // clientNeedsReview.
@@ -1594,67 +1571,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     }
     return m;
   }, [scopedTasks]);
-  // Follow-up date = "always true": auto-track each client/project's
-  // follow-up to the soonest due date among its open (status != done) dated
-  // tasks, so it always reflects the next real deadline. Diff-then-write —
-  // only rows whose stored value actually differs get touched, which also
-  // stops the effect from looping (once written, the next pass matches and
-  // skips). When a client/project has NO dated open task, its follow-up is
-  // left untouched so a manually-set reminder still sticks. Admin-only: a VA
-  // only sees their own scoped tasks, so they'd compute a too-late value and
-  // (RLS aside) locally clobber the admin-maintained date.
-  // Client-level tracking is per member — soonest due date among THAT
-  // person's own open dated tasks on the client, not a blended client-wide
-  // date — so "who's doing it" is unambiguous (Derek: "hard to tell when
-  // the follow-up is supposed to happen and who is doing it"). A task with
-  // no assignee doesn't drive anyone's personal follow-up; project-level
-  // tracking is unchanged (still one shared date per project).
-  useEffect(() => {
-    if (canAdmin === false) return;
-    // Debounced: `tasks` gets a new reference on every single field edit
-    // (status, due date, assignee, priority — the app's most common click),
-    // and this used to redo its full-table pass plus a clients×users
-    // reconcile loop synchronously on every one of those. A burst of quick
-    // edits now coalesces into one pass after things settle, instead of one
-    // per keystroke/click — same eventual result (diff-then-write already
-    // made repeated runs idempotent), just not paid for on every click.
-    const timer = setTimeout(() => {
-    const soonestByClientMember = new Map<string, string>(); // key `${clientId}|${memberId}`
-    const soonestByProject = new Map<string, string>();
-    for (const t of tasks) {
-      // Playbook steps are excluded for the same reason baseTasks hides them:
-      // they're the Owner Growth Plan, not the business's regular work. Leaving
-      // them in pinned follow-up dates to a task nobody could see in the Tasks
-      // tab, and the date couldn't be moved off it either — alignMemberOverdueTasksTo
-      // only shifts tasks assigned to that person, and playbook steps are
-      // unassigned, so this effect just wrote the old date straight back.
-      // monthly_proof_report recurs monthly, so it re-pinned every client to
-      // a 1st-of-month date.
-      if (t.status === "done" || !t.due || t.playbookStepKey) continue;
-      if (t.assigneeId) {
-        const key = `${t.clientId}|${t.assigneeId}`;
-        const prev = soonestByClientMember.get(key);
-        if (!prev || t.due < prev) soonestByClientMember.set(key, t.due);
-      }
-      if (t.projectId) {
-        const pp = soonestByProject.get(t.projectId);
-        if (!pp || t.due < pp) soonestByProject.set(t.projectId, t.due);
-      }
-    }
-    for (const c of clients) {
-      for (const u of users) {
-        const soonest = soonestByClientMember.get(`${c.id}|${u.id}`);
-        if (soonest && soonest !== (c.followUpBy?.[u.id] ?? null)) setClientFollowUpFor(c.id, u.id, soonest);
-      }
-    }
-    for (const p of projects) {
-      const soonest = soonestByProject.get(p.id);
-      if (soonest && soonest !== (p.followUpAt ?? null)) setProjectFollowUp(p.id, soonest);
-    }
-    }, 400);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tasks, clients, projects, users, canAdmin]);
   // Sub-accounts (Agency/Directory) are the contact source; clients (cl_*) are contacts you've added.
   const subAccounts = useMemo(() => clients.filter((c) => !c.id.startsWith("cl_")), [clients]);
   // Only type 'client' gets sidebar/⌘K/task presence — prospects/past
@@ -1870,8 +1786,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!c) return false;
     if (hasOpenConversationTask(clientId)) return false;
     const open = (scopedTasksByClientId.get(clientId) ?? []).filter((t) => t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
-    const hasFollowUp = forAssignee ? !!c.followUpBy?.[forAssignee] : Object.values(c.followUpBy ?? {}).some(Boolean);
-    const hasAnyDate = open.some((t) => t.due) || hasFollowUp;
+    const hasAnyDate = open.some((t) => t.due);
     const reviewedThisWeek = !!c.reviewedAt && c.reviewedAt >= THIS_MONDAY;
     if (open.length > 0 && !hasAnyDate && !reviewedThisWeek) return true; // (A)
     if (c.status === "nurture" && (!c.reviewedAt || daysBetween(c.reviewedAt, TODAY) >= NURTURE_CHECK_IN_DAYS)) return true; // (B)
@@ -1882,7 +1797,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const p = projectById(projectId);
     if (!p) return false;
     const open = (scopedTasksByProjectId.get(projectId) ?? []).filter((t) => t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
-    const hasAnyDate = open.some((t) => t.due) || !!p.followUpAt;
+    const hasAnyDate = open.some((t) => t.due);
     const reviewedThisWeek = !!p.reviewedAt && p.reviewedAt >= THIS_MONDAY;
     return open.length > 0 && !hasAnyDate && !reviewedThisWeek;
   }
@@ -1907,24 +1822,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (clientNeedsReview(clientId, forAssignee)) return { tier: 0, due: "", priorityRank: 0 };
     if (hasOpenConversationTask(clientId)) return { tier: 1, due: "", priorityRank: 0 };
     const open = (scopedTasksByClientId.get(clientId) ?? []).filter((t) => t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
-    // Follow-up date is one more urgency candidate alongside task due dates —
-    // "whichever is soonest wins." Deliberately does NOT also scan this
-    // client's projects' own follow-up dates (unlike tasks, which already
-    // roll up from project to client automatically via t.clientId) — kept
-    // independent per client/project for now; add a rollup here later if a
-    // project-only follow-up date turns out to need to surface the client too.
-    // followUpBy is genuinely per-person (see the recompute effect), so —
-    // unlike the old single shared followUpAt — a per-assignee tier can just
-    // read that person's own entry directly: it can never be "really a
-    // mirror of a teammate's task," since each person's key only ever tracks
-    // their own dated open tasks. When forAssignee isn't set (the unfiltered
-    // "Overdue first" sort), fold in whichever person's date is soonest.
-    const followUpMap = clientById(clientId)?.followUpBy ?? {};
-    const followUp = forAssignee ? (followUpMap[forAssignee] ?? null) : (Object.values(followUpMap).filter(Boolean).sort()[0] ?? null);
-    const candidates: { date: string; priorityRank: number }[] = [
-      ...open.filter((t) => t.due).map((t) => ({ date: t.due!, priorityRank: PRIORITY_META[t.priority].rank })),
-      ...(followUp ? [{ date: followUp, priorityRank: 0 }] : []),
-    ];
+    const candidates: { date: string; priorityRank: number }[] = open.filter((t) => t.due).map((t) => ({ date: t.due!, priorityRank: PRIORITY_META[t.priority].rank }));
     if (candidates.length === 0) {
       if (open.length === 0) return { tier: 10, due: "", priorityRank: 0 };
       return { tier: 9, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
@@ -1933,21 +1831,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const atSoonest = candidates.filter((c) => c.date === soonest);
     return { tier: tierForDate(soonest), due: soonest, priorityRank: Math.max(...atSoonest.map((c) => c.priorityRank)) };
   }
-  // Same tiering as clientUrgencyKey, scoped to one project's tasks (+ its
-  // own followUpAt). No "New message" tier — that's a client-level Conversation
-  // concept, not a project one.
+  // Same tiering as clientUrgencyKey, scoped to one project's tasks. No "New
+  // message" tier — that's a client-level Conversation concept, not a
+  // project one.
   function projectUrgencyKey(projectId: string, forAssignee?: string): { tier: number; due: string; priorityRank: number } {
     if (projectNeedsReview(projectId, forAssignee)) return { tier: 0, due: "", priorityRank: 0 };
     const open = (scopedTasksByProjectId.get(projectId) ?? []).filter((t) => t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
-    // Same rule as clientUrgencyKey: only counts per-assignee when nobody
-    // currently has a dated open task in this project.
-    const followUp = projectById(projectId)?.followUpAt;
-    const projectHasAnyDatedOpenTask = tasks.some((t) => t.projectId === projectId && t.status !== "done" && !!t.due);
-    const includeFollowUp = !forAssignee || !projectHasAnyDatedOpenTask;
-    const candidates: { date: string; priorityRank: number }[] = [
-      ...open.filter((t) => t.due).map((t) => ({ date: t.due!, priorityRank: PRIORITY_META[t.priority].rank })),
-      ...(followUp && includeFollowUp ? [{ date: followUp, priorityRank: 0 }] : []),
-    ];
+    const candidates: { date: string; priorityRank: number }[] = open.filter((t) => t.due).map((t) => ({ date: t.due!, priorityRank: PRIORITY_META[t.priority].rank }));
     if (candidates.length === 0) {
       if (open.length === 0) return { tier: 10, due: "", priorityRank: 0 };
       return { tier: 9, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
@@ -2818,58 +2708,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         pushToast(`${n} task${n === 1 ? "" : "s"} deleted`);
       },
     });
-  };
-  // Backs the follow-up pill's own edit — "we're waiting longer than
-  // planned, snooze whatever's actually blocking it" — tasks due today or
-  // already overdue jump to the new date, AND (2026-08-17 fix) so does
-  // whichever task is exactly at the OLD follow-up date, even if that date
-  // was still in the future. The original "anything due later was never
-  // what pushed the follow-up date out" assumption breaks for a client
-  // whose only open dated task isn't overdue yet: the recompute effect
-  // above pins followUpAt to that task's due date regardless of whether
-  // it's overdue, but this function only dragged overdue tasks — so moving
-  // the pill away from a not-yet-due anchor task did nothing to the task,
-  // and the very next render's recompute pass snapped the date straight
-  // back. Reported live on Melissa Lamberti: her one open dated task was
-  // due tomorrow, and every attempt to move her follow-up date out
-  // reverted instantly with no way to actually change it.
-  // Scoped to the viewer's own assigned tasks (Derek, Jul 27), PLUS
-  // unassigned ones (2026-08-19 fix) — moving the follow-up date used to
-  // drag every assignee's overdue tasks forward, which silently
-  // rescheduled a teammate's work out from under them, so only the current
-  // user's own tasks moved. But that scoping also caught tasks with no
-  // assignee at all, which isn't anyone's work being taken away — an
-  // unassigned task anchoring the date (e.g. Nicole Scott's "Redesign
-  // website") could never be dragged by ANYONE, so the follow-up pill was
-  // permanently stuck reverting no matter who tried to move it. A
-  // teammate's overdue tasks on the same client/project are still
-  // untouched, so the follow-up date can still show overdue on their
-  // account even after you move yours.
-  const alignOverdueTasksTo = (clientId: string, projectId: string | null, newDate: string, oldFollowUp: string | null) => {
-    // Conversation-priority tasks ("Reply to X") are excluded: they re-pin
-    // their own due date to today on every inbound message
-    // (inboundIngest.ts/ghlConversationTask.ts), on purpose — an unanswered
-    // message isn't something to snooze. Moving one here is either wrong
-    // (implies "we'll wait" on it) or pointless (the next message just
-    // bounces it right back to today), which is exactly the loop this was
-    // built to prevent, not cause.
-    const blocking = tasks.filter((t) => t.status !== "done" && t.priority !== "conversation" && (t.assigneeId === me.id || t.assigneeId === null) && !!t.due && (t.due <= TODAY || t.due === oldFollowUp) && (projectId ? t.projectId === projectId : t.clientId === clientId));
-    if (!blocking.length) return;
-    blocking.forEach((t) => patchTask(t.id, { due: newDate }));
-    pushToast(`Moved ${blocking.length} overdue task${blocking.length === 1 ? "" : "s"} to ${formatDue(newDate)}.`);
-  };
-  // Same drag-along idea as alignOverdueTasksTo above, for the per-person
-  // client follow-up pills — moving Justin's pill should only drag Justin's
-  // own overdue/anchoring tasks, never an unassigned one (nobody's personal
-  // follow-up tracks unassigned work — see the recompute effect) and never a
-  // teammate's. Kept as its own function rather than folding a memberId
-  // param into alignOverdueTasksTo: that one's unassigned-task inclusion is
-  // still correct for the project-level pill, which stays single-value.
-  const alignMemberOverdueTasksTo = (clientId: string, memberId: string, newDate: string, oldFollowUp: string | null) => {
-    const blocking = tasks.filter((t) => t.status !== "done" && t.priority !== "conversation" && t.assigneeId === memberId && t.clientId === clientId && !!t.due && (t.due <= TODAY || t.due === oldFollowUp));
-    if (!blocking.length) return;
-    blocking.forEach((t) => patchTask(t.id, { due: newDate }));
-    pushToast(`Moved ${blocking.length} overdue task${blocking.length === 1 ? "" : "s"} to ${formatDue(newDate)}.`);
   };
   const deleteTask = (id: string) => {
     // Owner Growth Plan/Sales checklist steps are a fixed template every
@@ -4234,21 +4072,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <div className="flex items-center gap-2">
             <button onClick={toggleSidebar} aria-label="Menu" className="shrink-0 rounded-lg border p-2 text-muted"><I.menu /></button>
             <h1 className="min-w-0 flex-1 truncate text-[17px] font-semibold">{headerTitleText}</h1>
-            {isClientDetail && (() => {
-              const scopedProject = activeProject ? projectById(activeProject) : null;
-              // Mobile is space-constrained — one pill, not a row of them.
-              // Project pill is still the single shared date; the client
-              // pill shows just the viewer's own follow-up (see the full
-              // per-person row in the desktop header below).
-              const fu = scopedProject ? (scopedProject.followUpAt ?? null) : (clientById(activeClient)!.followUpBy?.[me.id] ?? null);
-              if (!fu) return null;
-              const overdue = isOverdue(fu);
-              return (
-                <span className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-1 text-[12px] font-medium ${overdue ? "border-danger/40 bg-danger-soft text-danger" : "border-accent/40 bg-accent-soft text-accent"}`} title="Your follow-up date">
-                  <I.calendar /> {formatDue(fu)}
-                </span>
-              );
-            })()}
             {!(inboxView && !dmUserId) && bellControl}
             {isClientDetail && overflowControl}
           </div>
@@ -4326,88 +4149,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <button onClick={() => setAllTasksScope("all")} className={`px-2.5 py-1.5 text-[13px] font-medium ${allTasksScope === "all" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>All</button>
             </div>
           )}
-          {/* Follow-up date — Derek's primary planning signal (he works by
-              "when do I next check in", not per-task due dates), so it leads
-              the header actions, ahead of the Tasks/Journal/Vault tabs, as a
-              prominent accent (or red-when-overdue) pill rather than the tiny
-              grey chip it used to be. */}
-          {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && clientById(activeClient) && (() => {
-            const scopedProject = activeProject ? projectById(activeProject) : null;
-            // Project-level pill — unchanged, still one shared date per
-            // project (the per-person split below is client-level only).
-            if (scopedProject) {
-              const fu = scopedProject.followUpAt ?? null;
-              const overdue = isOverdue(fu);
-              // Auto-tracked when this project has an open dated task — the
-              // recompute effect keeps followUpAt pinned to the soonest one.
-              // Admins can still move it (see alignOverdueTasksTo above): doing
-              // so drags any task due today or earlier, OR exactly at the old
-              // follow-up date (even if that was still in the future), up to
-              // the new date — otherwise the anchoring task never moves and
-              // the recompute effect snaps the pill straight back on the next
-              // render. VAs keep the old read-only display — tasks_update RLS
-              // would reject them writing a teammate's task anyway.
-              // Playbook steps excluded to match the recompute effect above: they
-              // aren't visible in the Tasks tab, so claiming "auto-tracked" from
-              // one told you the date was following a task you couldn't find.
-              const autoTracked = tasks.some((t) => t.status !== "done" && !!t.due && !t.playbookStepKey && t.projectId === scopedProject.id);
-              const editable = !autoTracked || canAdmin;
-              return (
-                <div title={autoTracked ? (canAdmin ? "Follow-up date — click to move it, and it'll pull anything due today, overdue, or at the current follow-up date up to match" : "Follow-up date — auto-tracked to the next task due date") : "Follow-up date — when to next check in on this"}
-                  className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 ${overdue ? "border-danger/40 bg-danger-soft" : fu ? "border-accent/40 bg-accent-soft" : "border-dashed"}`}>
-                  <I.calendar className={overdue ? "text-danger" : fu ? "text-accent" : "text-muted"} />
-                  {editable ? (
-                    <InlineDue value={fu} overdue={overdue} onChange={(d) => {
-                      if (d && autoTracked) alignOverdueTasksTo(activeClient, scopedProject.id, d, fu);
-                      setProjectFollowUp(scopedProject.id, d);
-                    }} emptyLabel="Follow-up" strong />
-                  ) : (
-                    <span className={`text-[13px] font-semibold ${overdue ? "text-danger" : "text-accent"}`}>{fu ? formatDue(fu) : "—"}<span className="ml-1 font-normal text-muted">· auto</span></span>
-                  )}
-                </div>
-              );
-            }
-            // Client-level: one pill per person with a follow-up here, "You"
-            // first — instead of one shared date nobody could tell was
-            // whose (Derek: "hard to tell when the follow-up is supposed to
-            // happen and who is doing it"). Admins see everyone's; anyone
-            // else sees just their own (they can't move a teammate's tasks
-            // anyway — tasks_update RLS would reject it).
-            const c = clientById(activeClient)!;
-            const followUpBy = c.followUpBy ?? {};
-            const memberIds = canAdmin
-              ? Array.from(new Set([me.id, ...Object.keys(followUpBy)]))
-              : [me.id];
-            return (
-              <div className="flex flex-wrap items-center gap-1.5">
-                {memberIds.map((memberId) => {
-                  const person = userById(memberId);
-                  if (!person) return null;
-                  const fu = followUpBy[memberId] ?? null;
-                  const overdue = isOverdue(fu);
-                  const autoTracked = tasks.some((t) => t.status !== "done" && !!t.due && !t.playbookStepKey && t.clientId === activeClient && t.assigneeId === memberId);
-                  const editable = memberId === me.id || canAdmin;
-                  const label = memberId === me.id ? "You" : person.name;
-                  return (
-                    <div key={memberId}
-                      title={`${label}'s follow-up` + (autoTracked ? " — click to move it, and it'll pull anything due today, overdue, or at the current follow-up date up to match" : " — when to next check in on this")}
-                      className={`inline-flex items-center gap-1.5 rounded-lg border px-2 py-1.5 ${overdue ? "border-danger/40 bg-danger-soft" : fu ? "border-accent/40 bg-accent-soft" : "border-dashed"}`}>
-                      <span className="text-[11px] font-semibold text-muted">{label}</span>
-                      <I.calendar className={overdue ? "text-danger" : fu ? "text-accent" : "text-muted"} />
-                      {editable ? (
-                        <InlineDue value={fu} overdue={overdue} onChange={(d) => {
-                          if (d && autoTracked) alignMemberOverdueTasksTo(activeClient, memberId, d, fu);
-                          setClientFollowUpFor(activeClient, memberId, d);
-                        }} emptyLabel="Follow-up" strong />
-                      ) : (
-                        <span className={`text-[13px] font-semibold ${overdue ? "text-danger" : "text-accent"}`}>{fu ? formatDue(fu) : "—"}</span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })()}
           {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && (
             <div className="inline-flex overflow-hidden rounded-md border">
               <button onClick={() => setClientTab("tasks")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "tasks" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Tasks</button>

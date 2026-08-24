@@ -275,16 +275,6 @@ export interface Client {
    * /api/ghl/message. Optional (unlike assignedTo) so existing clientsSeed
    * literals don't need editing; treat as `?? []` everywhere it's read. */
   canMessage?: string[];
-  /** Per-teammate "check in on this again" reminder dates — memberId → ISO
-   * date — so a client with several people on it (Derek: "hard to tell when
-   * the follow-up is supposed to happen and who is doing it") shows each
-   * person's own date instead of one shared, ambiguous one. Auto-tracks to
-   * that person's own soonest open dated task on this client (see the
-   * recompute effect in Cockpit.tsx), same idea as the old single-value
-   * followUpAt just split per person; empty/missing key = that person has no
-   * follow-up here. Dates are plain ISO strings, matching tasks.due's exact
-   * type/comparison semantics. */
-  followUpBy?: Record<string, string>;
   /** yyyy-mm-dd of the last time this client was reviewed — powers the
    * weekly/monthly Review tier reset (see clientUrgencyKey). */
   reviewedAt?: string | null;
@@ -319,7 +309,7 @@ export interface Client {
    * onto the roster (see setClientStatus in Cockpit.tsx) — never re-stamped
    * by a later save, so the window can't silently slide forward.
    * trialEndsAt is a plain ISO date string, same type/comparison semantics as
-   * followUpAt and tasks.due. */
+   * tasks.due. */
   inTrial?: boolean;
   trialEndsAt?: string | null;
   /** Whether this business actually does SMS marketing, which is what gates
@@ -1353,9 +1343,6 @@ export interface Project {
    * "My Work" tab's assigned-or-following filter; not an RLS/visibility
    * change (a project's own client-level following already covers that). */
   assignedTo?: string[];
-  /** Same concept as Client.followUpAt, scoped to just this project — kept
-   * fully independent (no rollup into the parent client's urgency). */
-  followUpAt?: string | null;
   /** Last-reviewed date (yyyy-mm-dd) for the weekly Review tier. */
   reviewedAt?: string | null;
   /** Public share token for this ONE list — see supabase/project-share-token.sql.

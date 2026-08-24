@@ -161,12 +161,6 @@ export function MergeClientModal({ a, candidates, initialB, contactFor, taskCoun
   const submit = () => {
     const patch: Partial<Client> = {};
     for (const { f } of rows) { const from = choice[f] === "a" ? a : b; (patch as Record<string, unknown>)[f] = val(from, f); }
-    // Per-person follow-ups aren't a single either/or choice like the fields
-    // above — union both sides' maps instead, so nobody's date silently
-    // disappears just because their side of the merge lost the coin flip on
-    // an unrelated field. A person with dates on both sides keeps the
-    // survivor's own value (already the "winning" record by definition).
-    patch.followUpBy = { ...source.followUpBy, ...survivor.followUpBy };
     onSubmit(source.id, survivor.id, patch);
   };
   const sTasks = taskCount(source.id);
