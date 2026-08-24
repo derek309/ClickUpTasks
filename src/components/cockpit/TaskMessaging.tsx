@@ -455,7 +455,7 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
           ))}
         </div>
       )}
-      <div className="mb-2 shrink-0 text-[14px] text-muted">Team message — internal only, nobody outside the team sees this.</div>
+      <div className="mb-2 shrink-0 text-[14px] text-muted">Note — internal only, nobody outside the team sees this.</div>
       {(pendingCommentAtts.length > 0 || uploadingCommentAtt) && (
         <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
           <AttachmentThumbs items={pendingCommentAtts} onRemove={(id) => setPendingCommentAtts((a) => a.filter((x) => x.id !== id))} />
@@ -505,7 +505,7 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
   const smsUnread = (messages ?? []).some((m) => m.channel === "sms" && m.direction === "inbound" && !m.read);
 
   const channelMeta: Record<Channel, { label: string; unread: boolean; icon: React.ReactNode }> = {
-    activity: { label: `Team · ${commentCount}`, unread: false, icon: <I.comment /> },
+    activity: { label: `Note · ${commentCount}`, unread: false, icon: <I.comment /> },
     chat: { label: `Chat${chatMsgCount ? ` · ${chatMsgCount}` : ""}`, unread: chatUnread, icon: <I.chatBubbles /> },
     email: { label: `Email${emailMsgCount ? ` · ${emailMsgCount}` : ""}`, unread: emailUnread, icon: <I.mail /> },
     sms: { label: `SMS${smsMsgCount ? ` · ${smsMsgCount}` : ""}`, unread: smsUnread, icon: <I.phone /> },
@@ -746,7 +746,7 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
   // the bottom of a long thread (Derek, 2026-08-11).
   const ctaRow = !replyingTo && !composingChannel ? (
     <div className="flex shrink-0 flex-wrap items-center gap-2 border-t bg-surface px-3 py-2.5">
-      <button onClick={() => openCompose("activity")} className="rounded-md border px-2.5 py-1.5 text-[14px] font-medium text-muted hover:bg-background hover:text-foreground"><I.comment className="inline -mt-0.5 mr-1" />Team message</button>
+      <button onClick={() => openCompose("activity")} className="rounded-md border px-2.5 py-1.5 text-[14px] font-medium text-muted hover:bg-background hover:text-foreground"><I.comment className="inline -mt-0.5 mr-1" />Note</button>
       {hasMessaging && <button onClick={() => openCompose("chat")} className="rounded-md border px-2.5 py-1.5 text-[14px] font-medium hover:bg-background" style={{ color: channelColor.chat, borderColor: channelColor.chat + "55" }}><I.chatBubbles className="inline -mt-0.5 mr-1" />Chat</button>}
       {hasMessaging && <button onClick={() => openCompose("email")} className="rounded-md border px-2.5 py-1.5 text-[14px] font-medium hover:bg-background" style={{ color: channelColor.email, borderColor: channelColor.email + "55" }}><I.mail className="inline -mt-0.5 mr-1" />Email</button>}
       {hasMessaging && <button onClick={() => openCompose("sms")} className="rounded-md border px-2.5 py-1.5 text-[14px] font-medium hover:bg-background" style={{ color: channelColor.sms, borderColor: channelColor.sms + "55" }}><I.phone className="inline -mt-0.5 mr-1" />SMS</button>}
