@@ -6,17 +6,16 @@
 // Mine/All controls relocated from the sidebar, and an Add-client button.
 // Clicking a row opens that client's task list.
 import { useState } from "react";
-import { CLIENT_STATUS_ORDER, CLIENT_STATUS_META, formatDue, isOverdue, timeAgo, type ClientStatus, type Client, type Task, type User } from "@/lib/data";
+import { CLIENT_STATUS_ORDER, CLIENT_STATUS_META, formatDue, isOverdue, type ClientStatus, type Client, type Task, type User } from "@/lib/data";
 import { I } from "./ui";
 
 type ClientSort = "manual" | "az" | "tasks" | "recent" | "used" | "urgent" | "mine";
-type GroupBy = "status" | "team" | "completed";
-type CompletionRow = { id: string; taskId: string; taskTitle: string; clientId: string; clientName: string; authorId: string; authorName: string; authorColor: string; authorInitials: string; at: string };
+type GroupBy = "status" | "team";
 
 export function ClientsDirectory({
   clients, clientCompany, taskCount, tasksByClient, starred, onToggleStar, needsReview, onOpen,
   canAdmin, onAddClient, onRename, onDelete, onSetStatus, sort, onSetSort, scope, onToggleScope,
-  groupBy, onSetGroupBy, teamGroups, completionLog, onOpenTask,
+  groupBy, onSetGroupBy, teamGroups,
 }: {
   clients: Client[]; // already sorted + scoped by the caller
   clientCompany: (c: Client) => string;
@@ -44,20 +43,14 @@ export function ClientsDirectory({
   // already scoped to their own active clients by the caller (Cockpit:
   // "right now we're both in the dark what the other people are doing") —
   // so reps can review the whole active roster side by side in one screen.
-  // "Completed" renders `completionLog` instead — a flat, filterable "who
-  // finished what, and when" feed (Derek: "track tasks that are being
-  // completed and by which person").
   groupBy: GroupBy;
   onSetGroupBy: (g: GroupBy) => void;
   teamGroups?: { member: User; clients: Client[] }[];
-  completionLog?: CompletionRow[];
-  onOpenTask?: (clientId: string, taskId: string) => void;
 }) {
   const [q, setQ] = useState("");
   const [sortOpen, setSortOpen] = useState(false);
   const [statusOpenId, setStatusOpenId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [completedBy, setCompletedBy] = useState<string>("all");
   const toggleGroup = (key: string) => setCollapsed((cur) => { const n = new Set(cur); if (n.has(key)) n.delete(key); else n.add(key); return n; });
   const query = q.trim().toLowerCase();
   const matches = (c: Client) => !query || c.name.toLowerCase().includes(query) || clientCompany(c).toLowerCase().includes(query);
@@ -71,29 +64,6 @@ export function ClientsDirectory({
   // a teammate with nothing active right now just doesn't get a section,
   // rather than showing an empty "0" header for everyone every time.
   const filteredTeamGroups = (teamGroups ?? []).map((g) => ({ ...g, clients: g.clients.filter(matches) })).filter((g) => g.clients.length > 0);
-  // Completed log: search matches task title or client name; person filter
-  // is a separate control (not the search box) since "who" is the whole
-  // point of this tab.
-  const completedMatches = (r: CompletionRow) => !query || r.taskTitle.toLowerCase().includes(query) || r.clientName.toLowerCase().includes(query);
-  const shownCompletions = (completionLog ?? []).filter((r) => (completedBy === "all" || r.authorId === completedBy) && completedMatches(r));
-  // Filter dropdown options — every teammate who's actually completed
-  // something in the log, not the full roster (no point offering someone
-  // with zero rows to filter to).
-  const completedByOptions = Array.from(new Map((completionLog ?? []).map((r) => [r.authorId, { id: r.authorId, name: r.authorName, color: r.authorColor }])).values())
-    .sort((a, b) => a.name.localeCompare(b.name));
-  // Grouped by calendar day. completionLog is already sorted most-recent-first,
-  // so a Map preserves that order for both the days and the rows within each.
-  const today = new Date().toDateString();
-  const yesterday = new Date(Date.now() - 86400000).toDateString();
-  const dayLabel = (key: string) => key === today ? "Today" : key === yesterday ? "Yesterday" : new Date(key).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
-  const dayGroups = (() => {
-    const map = new Map<string, CompletionRow[]>();
-    for (const r of shownCompletions) {
-      const key = new Date(r.at).toDateString();
-      (map.get(key) ?? map.set(key, []).get(key)!).push(r);
-    }
-    return Array.from(map.entries());
-  })();
 
   // Shared row — used by both the status buckets and the teammate buckets,
   // so the two grouping modes render identically aside from their headers.
@@ -156,11 +126,9 @@ export function ClientsDirectory({
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search clients…"
             className="w-full rounded-lg border bg-surface py-2 pl-8 pr-3 text-[15px] outline-none focus:border-accent" />
         </div>
-        {/* Three grouping modes instead of a single cycling toggle — status
-            (pipeline), team (who's on what), completed (who finished what,
-            when). A cycling button reads fine for two states, not three. */}
+        {/* Two grouping modes — status (pipeline) or team (who's on what). */}
         <div className="flex overflow-hidden rounded-lg border">
-          {([["status", "By status"], ["team", "By teammate"], ["completed", "Completed"]] as [GroupBy, string][]).map(([g, label]) => (
+          {([["status", "By status"], ["team", "By teammate"]] as [GroupBy, string][]).map(([g, label]) => (
             <button key={g} onClick={() => onSetGroupBy(g)}
               className={`px-2.5 py-2 text-[13px] font-medium ${groupBy === g ? "bg-accent-soft text-accent" : "text-muted hover:bg-surface"}`}>{label}</button>
           ))}
@@ -169,29 +137,20 @@ export function ClientsDirectory({
           <button onClick={onToggleScope} title={scope === "mine" ? "Showing only clients with open work assigned to or followed by you" : "Showing every client"}
             className={`rounded-lg border px-2.5 py-2 text-[13px] font-medium ${scope === "mine" ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-surface"}`}>{scope === "mine" ? "My clients" : "All clients"}</button>
         )}
-        {groupBy === "completed" && completedByOptions.length > 0 && (
-          <select value={completedBy} onChange={(e) => setCompletedBy(e.target.value)} title="Filter by who completed it"
-            className="rounded-lg border bg-surface px-2.5 py-2 text-[13px] font-medium outline-none focus:border-accent">
-            <option value="all">Everyone</option>
-            {completedByOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-          </select>
-        )}
-        {groupBy !== "completed" && (
-          <span className="relative">
-            <button onClick={() => setSortOpen((o) => !o)} title="Sort" className="rounded-lg border px-2.5 py-2 text-muted hover:bg-surface"><I.list className="h-4 w-4" /></button>
-            {sortOpen && (<>
-              <div className="fixed inset-0 z-30" onClick={() => setSortOpen(false)} />
-              <div className="absolute right-0 top-full z-40 mt-1 w-44 rounded-lg border bg-surface p-1 shadow-soft-md">
-                {sortLabels.map(([v, label]) => (
-                  <button key={v} onClick={() => { onSetSort(v); setSortOpen(false); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-background">
-                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${sort === v ? "bg-accent" : "bg-transparent"}`} />{label}
-                  </button>
-                ))}
-              </div>
-            </>)}
-          </span>
-        )}
-        {canAdmin && groupBy !== "completed" && <button onClick={onAddClient} className="inline-flex items-center gap-1.5 rounded-lg border border-accent bg-accent px-3 py-2 text-[13px] font-medium text-white hover:opacity-90"><I.plus /> Add client</button>}
+        <span className="relative">
+          <button onClick={() => setSortOpen((o) => !o)} title="Sort" className="rounded-lg border px-2.5 py-2 text-muted hover:bg-surface"><I.list className="h-4 w-4" /></button>
+          {sortOpen && (<>
+            <div className="fixed inset-0 z-30" onClick={() => setSortOpen(false)} />
+            <div className="absolute right-0 top-full z-40 mt-1 w-44 rounded-lg border bg-surface p-1 shadow-soft-md">
+              {sortLabels.map(([v, label]) => (
+                <button key={v} onClick={() => { onSetSort(v); setSortOpen(false); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-background">
+                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${sort === v ? "bg-accent" : "bg-transparent"}`} />{label}
+                </button>
+              ))}
+            </div>
+          </>)}
+        </span>
+        {canAdmin && <button onClick={onAddClient} className="inline-flex items-center gap-1.5 rounded-lg border border-accent bg-accent px-3 py-2 text-[13px] font-medium text-white hover:opacity-90"><I.plus /> Add client</button>}
       </div>
 
       {/* Same flat, column-aligned list surface as the task lists, but
@@ -199,43 +158,11 @@ export function ClientsDirectory({
           status or, in "By teammate" mode, one section per team member's
           own active clients — instead of one long undifferentiated list. */}
       <div className="overflow-hidden rounded-xl border bg-surface shadow-soft">
-        {groupBy !== "completed" && (
-          <div className="hidden items-center gap-3 border-b bg-background/40 px-4 py-2 text-[12px] font-semibold uppercase tracking-wide text-muted sm:flex">
-            <span className="flex-1">Client</span>
-            <span className="w-32">Status</span>
-            <span className="w-28 text-right">Tasks</span>
-          </div>
-        )}
-        {groupBy === "completed" ? (
-          <div className="divide-y-8 divide-background">
-            {dayGroups.map(([key, rows]) => (
-              <div key={key}>
-                <div className="flex items-center gap-2 border-y bg-background/40 px-4 py-2">
-                  <span className="text-[13px] font-bold">{dayLabel(key)}</span>
-                  <span className="rounded-full bg-border px-1.5 text-[12px] font-semibold text-foreground">{rows.length}</span>
-                </div>
-                {rows.map((r) => (
-                  <div key={r.id} onClick={() => onOpenTask?.(r.clientId, r.taskId)}
-                    className="flex cursor-pointer items-center gap-3 border-b px-4 py-2.5 transition-colors last:border-0 hover:bg-accent-soft/50">
-                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ background: r.authorColor }} title={r.authorName}>{r.authorInitials}</span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[14.5px] font-medium">{r.taskTitle}</span>
-                      <span className="block truncate text-[12.5px] text-muted">{r.clientName} &middot; {r.authorName}</span>
-                    </span>
-                    <span className="shrink-0 text-[12.5px] text-muted" title={timeAgo(r.at)}>
-                      {new Date(r.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ))}
-            {dayGroups.length === 0 && (
-              <div className="py-16 text-center text-[15px] text-muted">
-                {query || completedBy !== "all" ? "No completions match." : "Nothing completed yet — this fills in as tasks get marked done."}
-              </div>
-            )}
-          </div>
-        ) : (
+        <div className="hidden items-center gap-3 border-b bg-background/40 px-4 py-2 text-[12px] font-semibold uppercase tracking-wide text-muted sm:flex">
+          <span className="flex-1">Client</span>
+          <span className="w-32">Status</span>
+          <span className="w-28 text-right">Tasks</span>
+        </div>
         <div className="divide-y-8 divide-background">
           {groupBy === "team" ? filteredTeamGroups.map((g) => {
             const key = `member_${g.member.id}`;
@@ -267,7 +194,6 @@ export function ClientsDirectory({
             );
           })}
         </div>
-        )}
         {groupBy === "status" && shown.length === 0 && (
           <div className="py-16 text-center text-[15px] text-muted">{query ? "No clients match your search." : "No clients yet."}</div>
         )}

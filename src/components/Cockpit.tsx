@@ -107,6 +107,7 @@ import { QuickAddTask } from "./cockpit/QuickAddTask";
 import { VaultView, type VaultItem } from "./cockpit/VaultView";
 import { ClientsBoard, type WorkBoardGroup, type WorkItem } from "./cockpit/ClientsBoard";
 import { ClientsDirectory } from "./cockpit/ClientsDirectory";
+import { CompletedLog } from "./cockpit/CompletedLog";
 import { ProjectsDirectory } from "./cockpit/ProjectsDirectory";
 import { FolderRail } from "./cockpit/FolderRail";
 
@@ -225,10 +226,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // shows the directory instead of a client/task view. clearViews() below
   // resets it alongside the others.
   const [dirView, setDirView] = useState<"clients" | "projects" | null>(null);
-  // Dashboard's own Work/Activity split — Activity relocated here from the
-  // old Chat/Activity split on the Conversations page (see the myWork
-  // content branch below).
-  const [dashboardView, setDashboardView] = useState<"work" | "activity">("work");
+  // Dashboard's own Work/Activity/Completed split — Activity relocated here
+  // from the old Chat/Activity split on the Conversations page; Completed
+  // relocated here from the Clients directory (Derek: "makes more sense
+  // there") — see the myWork content branch below.
+  const [dashboardView, setDashboardView] = useState<"work" | "activity" | "completed">("work");
   // All Tasks defaults to just your own — admins can flip to "all"; for VAs
   // this is inert either way since scopedTasks already fully restricts them.
   const [allTasksScope, setAllTasksScope] = useState<"mine" | "all">("mine");
@@ -450,7 +452,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Clients directory's grouping mode — "status" (default, pipeline stage
   // buckets) or "team" (one section per teammate's own active clients, see
   // teamActiveClients below). Not persisted, same as clientListScope.
-  const [clientsGroupBy, setClientsGroupBy] = useState<"status" | "team" | "completed">("status");
+  // ("completed" used to live here too; moved under My Work — Derek: "makes
+  // more sense there.")
+  const [clientsGroupBy, setClientsGroupBy] = useState<"status" | "team">("status");
   // Recently-used ordering: clientId → last-opened epoch, persisted locally.
   // Opening a client stamps it (see the effect below), floating it to the top
   // when the "Recently used" sort is active.
@@ -1598,7 +1602,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     }
     for (const c of clients) {
       for (const u of users) {
-        if (u.id === "u_claude") continue;
         const soonest = soonestByClientMember.get(`${c.id}|${u.id}`);
         if (soonest && soonest !== (c.followUpBy?.[u.id] ?? null)) setClientFollowUpFor(c.id, u.id, soonest);
       }
@@ -1684,25 +1687,25 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // in this app already uses (open task assignee/subtask assignee, or
   // explicitly following) — restricted to active_client status only, since
   // this is a review-the-active-roster view, not a full pipeline dump.
-  // Excludes the u_claude pseudo user (never a real teammate to review).
   const teamActiveClients = useMemo(
-    () => users.filter((u) => u.id !== "u_claude").map((u) => ({ member: u, clients: assignedClientsFor(u.id).filter((c) => c.status === "active_client").sort((a, b) => a.name.localeCompare(b.name)) })),
+    () => users.map((u) => ({ member: u, clients: assignedClientsFor(u.id).filter((c) => c.status === "active_client").sort((a, b) => a.name.localeCompare(b.name)) })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [scopedTasks, clients, users]
   );
-  // "Completed" log for the Clients directory — who marked what done, and
-  // when. No new schema needed: every status change already writes a plain
-  // "kind: event" comment onto the task (see patchTask's describeFieldChange
-  // call) with a real authorId/at, so a task marked done the normal way
-  // through this app already carries its own completion record — including
-  // ones from before this view existed, i.e. the "backfill" is just reading
-  // history that was already there. Tasks completed some other way (a GHL
-  // sync, a webhook) won't have one, so this is a log of what we can prove,
-  // not a total task count. Gated on the tab actually being open — a full
-  // scan of every task's comments is real work at this app's task volume,
-  // no reason to pay for it on every render of every other view.
+  // "Completed" log — who marked what done, and when. Lives under My Work
+  // now (Derek: "makes more sense there"), not the Clients directory. No new
+  // schema needed: every status change already writes a plain "kind: event"
+  // comment onto the task (see patchTask's describeFieldChange call) with a
+  // real authorId/at, so a task marked done the normal way through this app
+  // already carries its own completion record — including ones from before
+  // this view existed, i.e. the "backfill" is just reading history that was
+  // already there. Tasks completed some other way (a GHL sync, a webhook)
+  // won't have one, so this is a log of what we can prove, not a total task
+  // count. Gated on the tab actually being open — a full scan of every
+  // task's comments is real work at this app's task volume, no reason to
+  // pay for it on every render of every other view.
   const completionLog = useMemo(() => {
-    if (clientsGroupBy !== "completed") return [];
+    if (!(myWork && dashboardView === "completed")) return [];
     const rows: { id: string; taskId: string; taskTitle: string; clientId: string; clientName: string; authorId: string; authorName: string; authorColor: string; authorInitials: string; at: string }[] = [];
     for (const t of tasks) {
       if (t.clientId === PERSONAL_CLIENT_ID) continue; // personal to-dos aren't client work to review
@@ -1718,7 +1721,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     }
     rows.sort((a, b) => b.at.localeCompare(a.at));
     return rows.slice(0, 300); // a running log, not a full export
-  }, [clientsGroupBy, tasks]);
+  }, [myWork, dashboardView, tasks]);
   // Memoized for the same reason — the sidebar's "My Work" nav badge
   // (below) calls this inline on every render of every view, including
   // Team Chat, which is what made typing/sending there feel laggy even
@@ -4168,7 +4171,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               // on the bell, not this nav item (Derek, Aug 4).
               <span title="Unread conversations" className="ml-auto h-2 w-2 rounded-full bg-accent" />
             )}</SideItem>
-            {dmEnabled && users.filter((u) => u.id !== me.id && u.id !== "u_claude").map((u) => (
+            {dmEnabled && users.filter((u) => u.id !== me.id).map((u) => (
               <SideItem key={u.id} active={inboxView && dmUserId === u.id} onClick={() => openDm(u.id)}>
                 <Avatar id={u.id} size={20} /> <span className="min-w-0 flex-1 truncate text-left">{u.name}</span>
                 {dmUnread(u.id) && <span title="Unread messages" className="ml-auto h-2 w-2 rounded-full bg-accent" />}
@@ -4273,6 +4276,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <div className="flex rounded-lg bg-background p-0.5">
                 <button onClick={() => setDashboardView("work")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "work" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Work</button>
                 <button onClick={() => setDashboardView("activity")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "activity" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Activity{unread > 0 ? ` · ${unread}` : ""}</button>
+                <button onClick={() => setDashboardView("completed")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "completed" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Completed</button>
               </div>
               {dashboardView === "work" && canAdmin && (
                 <div className="flex items-center gap-2">
@@ -4605,6 +4609,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <div className="inline-flex overflow-hidden rounded-md border">
                 <button onClick={() => setDashboardView("work")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "work" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Work</button>
                 <button onClick={() => setDashboardView("activity")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "activity" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Activity{unread > 0 ? ` · ${unread}` : ""}</button>
+                <button onClick={() => setDashboardView("completed")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "completed" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Completed</button>
               </div>
               {dashboardView === "work" && (canAdmin ? (
                 <label className="flex items-center gap-2"><span className="text-muted">Viewing work for</span>
@@ -4769,8 +4774,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onOpen={(id) => { setDirView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); setClientTab("tasks"); }}
             canAdmin={canAdmin} onAddClient={() => setAddClientOpen(true)} onRename={renameClient} onDelete={deleteClient} onSetStatus={setClientStatus}
             sort={clientSort} onSetSort={saveClientSort} scope={clientListScope} onToggleScope={() => setClientListScope((s) => (s === "mine" ? "all" : "mine"))}
-            groupBy={clientsGroupBy} onSetGroupBy={setClientsGroupBy} teamGroups={teamActiveClients} completionLog={completionLog}
-            onOpenTask={(clientId, taskId) => { setDirView(null); setActiveClient(clientId); setActiveProject(null); setOpenTaskId(taskId); }} />
+            groupBy={clientsGroupBy} onSetGroupBy={setClientsGroupBy} teamGroups={teamActiveClients} />
         ) : dirView === "projects" ? (
           <ProjectsDirectory projects={sortedWorkspaceProjects} openCount={projectTaskCount}
             onOpen={(id) => { setDirView(null); setActiveClient(WORKSPACE_CLIENT_ID); setActiveProject(id); setOpenTaskId(null); setClientTab("tasks"); }}
@@ -4786,6 +4790,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <Inbox notifications={myNotifs} clientById={clientById} projectById={projectById} onOpen={openNotification} onMarkRead={markNotifRead} onMarkAllRead={markAllNotifsRead} onSyncEmail={canAdmin ? syncEmail : undefined} syncingEmail={syncingEmail} onSyncAppointments={canAdmin ? syncAppointments : undefined} syncingAppointments={syncingAppointments}
             unmatchedEmails={canAdmin ? unmatchedEmails : []} onAddAsClient={addAsClientFromEmail} onDismissUnmatched={dismissUnmatched}
             granolaUnmatched={canAdmin ? granolaUnmatched : []} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onAssignGranolaMeeting={assignGranolaUnmatched} onDismissGranolaUnmatched={dismissGranolaUnmatched} />
+        ) : myWork && dashboardView === "completed" ? (
+          // Relocated from the Clients directory (Derek: "makes more sense
+          // there") — same completionLog data, day-grouped feed of who
+          // finished what and when.
+          <CompletedLog rows={completionLog} onOpenTask={(_clientId, taskId) => setOpenTaskId(taskId)} />
         ) : myWork ? (
           <ClientsBoard groups={myWorkGroups} clientTaskCount={clientTaskCount} projectTaskCount={projectTaskCount} hasUnreadMessage={hasUnreadMessage} onOpenTask={setOpenTaskId}
             onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }}

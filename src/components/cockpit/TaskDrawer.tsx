@@ -308,7 +308,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       </Row>
       <Row label="Due date" icon={<I.calendar />}>
         <span className="inline-flex flex-wrap items-center gap-1.5">
-          <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} />
+          <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} showRecurrenceLabel onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} />
           {task.recurrence === "custom" && (
             <span className="inline-flex items-center gap-1.5 text-[14px] text-muted">
               {task.recurrenceUnit === "day-of-month" ? (
