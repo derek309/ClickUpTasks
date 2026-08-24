@@ -46,7 +46,6 @@ import {
   type Client,
   type Project,
   type Contact,
-  type UnmatchedEmail,
   type Attachment,
   type Notification,
   type NotificationKind,
@@ -57,7 +56,6 @@ import {
   type Message,
   type MessageChannel,
   type ScheduledMessage,
-  type GranolaUnmatchedMeeting,
   type Me,
   type TaskTemplate,
   type Playbook,
@@ -87,9 +85,8 @@ import {
   normalizeState,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, markUnmatchedHandledDb, fetchUnmatchedDb, upsertContact, rowToScheduledMessage, touchPlaybookProgress, markGranolaUnmatchedHandledDb, linkGranolaSyncedNoteDb, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, touchPlaybookProgress, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
-import { Inbox } from "./cockpit/Inbox";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import TeamChat from "./TeamChat";
 import AddClientModal from "./AddClientModal";
@@ -189,8 +186,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
   const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
   const [vaultFolders, setVaultFolders] = useState<VaultFolder[]>([]);
-  const [unmatchedEmails, setUnmatchedEmails] = useState<UnmatchedEmail[]>([]);
-  const [granolaUnmatched, setGranolaUnmatched] = useState<GranolaUnmatchedMeeting[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [stages, setStages] = useState<Stage[]>([]);
   const [clientTab, setClientTab] = useState<"tasks" | "chat" | "vault">("tasks");
@@ -215,9 +210,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // that's the more useful default (VAs still land here first) and the
   // board already covers due-date urgency across everything relevant.
   const [myWork, setMyWork] = useState(me.role === "va");
-  // Admin-only "viewing work for [teammate]" — carried over from the old
-  // My Work tab's selector, now scoping the merged board instead.
-  const [myWorkUser, setMyWorkUser] = useState<string>(me.id);
+  // My Work always shows your own work now — the "Viewing work for
+  // [teammate]" selector was removed (Derek). Kept as a named constant
+  // rather than inlining me.id everywhere it's read below.
+  const myWorkUser = me.id;
   const [personalView, setPersonalView] = useState(false);
   const [inboxView, setInboxView] = useState(false);
   // Full-page Clients / Projects directory views (the "Clients" and "Projects"
@@ -225,11 +221,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // shows the directory instead of a client/task view. clearViews() below
   // resets it alongside the others.
   const [dirView, setDirView] = useState<"clients" | "projects" | null>(null);
-  // Dashboard's own Work/Activity/Completed split — Activity relocated here
-  // from the old Chat/Activity split on the Conversations page; Completed
-  // relocated here from the Clients directory (Derek: "makes more sense
-  // there") — see the myWork content branch below.
-  const [dashboardView, setDashboardView] = useState<"work" | "activity" | "completed">("work");
+  // Dashboard's own Work/Completed split — Completed relocated here from the
+  // Clients directory (Derek: "makes more sense there") — see the myWork
+  // content branch below. The Activity tab (notifications inbox) was cut
+  // (Derek, 2026-08-24: "not finding it useful... cut the tab" — the notif
+  // bell dropdown already covers real mentions/assignments; Activity's own
+  // "Unmatched email" section was mostly automated noise — WordPress,
+  // Stripe, Amazon — not real leads).
+  const [dashboardView, setDashboardView] = useState<"work" | "completed">("work");
   // All Tasks defaults to just your own — admins can flip to "all"; for VAs
   // this is inert either way since scopedTasks already fully restricts them.
   const [allTasksScope, setAllTasksScope] = useState<"mine" | "all">("mine");
@@ -1030,8 +1029,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setStages(d.stages);
         setTeamMessages(d.teamMessages);
         setDmMessages(d.dmMessages);
-        setUnmatchedEmails(d.unmatchedEmails);
-        setGranolaUnmatched(d.granolaUnmatched);
       } catch (e) {
         setDbError(e instanceof Error ? e.message : "Failed to load data.");
       } finally {
@@ -1381,113 +1378,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // top-of-list group/sort-boost (see buildGroups/sortTasks below), above
   // even Urgent priority.
   const hasUnreadReply = (t: Task) => notifications.some((n) => n.taskId === t.id && n.recipientId === me.id && n.kind === "message" && !n.read);
-  const markAllNotifsRead = () => {
-    setNotifications((ns) => ns.map((n) => (n.recipientId === me.id ? { ...n, read: true } : n)));
-    markNotifsReadDb(me.id);
-  };
-  // On-demand pull of client email replies that came back through Gmail
-  // (bypassing GHL). Runs the same poll the cron does, via the admin session
-  // — the reliable trigger on Vercel Hobby (cron only fires once a day there).
-  const [syncingEmail, setSyncingEmail] = useState(false);
-  const syncEmail = async () => {
-    setSyncingEmail(true);
-    try {
-      const res = await authedFetch("/api/google/poll-replies", { method: "POST" });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j.error ?? "Email sync failed.");
-      if (j.surfaced) setUnmatchedEmails(await fetchUnmatchedDb()); // pull the newly-parked unknown senders into the Inbox
-      const parts: string[] = [];
-      if (j.ingested) parts.push(`${j.ingested} new to Journal`);
-      if (j.surfaced) parts.push(`${j.surfaced} to Inbox`);
-      pushToast(parts.length ? `📥 Synced email — ${parts.join(", ")}.` : "Email synced — nothing new.");
-    } catch (e) {
-      pushToast(e instanceof Error ? e.message : "Email sync failed.");
-    } finally {
-      setSyncingEmail(false);
-    }
-  };
-  // On-demand pull of upcoming GHL appointments (see sync-appointments/route.ts)
-  // — same Vercel-Hobby-cron-is-once-a-day reasoning as syncEmail above.
-  const [syncingAppointments, setSyncingAppointments] = useState(false);
-  const syncAppointments = async () => {
-    setSyncingAppointments(true);
-    try {
-      const res = await authedFetch("/api/ghl/sync-appointments", { method: "POST" });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j.error ?? "Appointment sync failed.");
-      pushToast(j.synced ? `📅 Synced ${j.synced} upcoming appointment${j.synced === 1 ? "" : "s"}.` : "Appointments synced — nothing new.");
-    } catch (e) {
-      pushToast(e instanceof Error ? e.message : "Appointment sync failed.");
-    } finally {
-      setSyncingAppointments(false);
-    }
-  };
-  // Triage an unknown-sender email parked in the Inbox: dismiss it, or turn the
-  // sender into a tracked client (creating a contact + cl_ client and pulling
-  // any of their conversation onto the new page via addClientContact).
-  const dismissUnmatched = (id: string) => {
-    setUnmatchedEmails((us) => us.filter((u) => u.id !== id));
-    markUnmatchedHandledDb(id);
-  };
-  const addAsClientFromEmail = async (u: UnmatchedEmail) => {
-    const ct: Contact = {
-      id: newId("ct_"), clientId: subAccounts[0]?.id ?? WORKSPACE_CLIENT_ID,
-      name: u.fromName?.trim() || u.fromEmail, email: u.fromEmail,
-      phone: "", ghlContactId: "", company: "", city: "", state: "",
-    };
-    setContacts((cs) => [...cs, ct]);
-    upsertContact(ct);
-    await addClientContact(ct); // creates cl_<ct.id>, opens it, brings any conversation over
-    dismissUnmatched(u.id);
-  };
-  // Twin of the two above, for a Granola meeting whose attendees didn't
-  // match any known contact — assign it to an existing client's Journal, or
-  // dismiss it.
-  const dismissGranolaUnmatched = (id: string) => {
-    setGranolaUnmatched((gs) => gs.filter((g) => g.id !== id));
-    markGranolaUnmatchedHandledDb(id);
-  };
-  const assignGranolaUnmatched = (g: GranolaUnmatchedMeeting, clientId: string) => {
-    const title = g.title || "Meeting";
-    const summary = g.summary?.trim() || "(no summary)";
-    const link = g.webUrl ? `\n\nView in Granola: ${g.webUrl}` : "";
-    const note: ClientNote = { id: newId("cn_"), clientId, projectId: null, type: "meeting", body: `${title}\n\n${summary}${link}`, authorId: me.id, at: g.occurredAt || new Date().toISOString() };
-    setClientNotes((ns) => [note, ...ns]);
-    upsertClientNote(note);
-    linkGranolaSyncedNoteDb(g.granolaNoteId, clientId, note.id);
-    dismissGranolaUnmatched(g.id);
-  };
-  // Standalone mark-read — shared with openNotification below, but also
-  // exposed on its own so a notification can be dismissed off the unread
-  // count without actually opening/navigating to it.
-  const markNotifRead = (n: Notification) => {
-    setNotifications((ns) => ns.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
-    markNotifReadDb(n.id);
-  };
-  // Notifications otherwise only get marked read in bulk via the bell
-  // dropdown (markAllNotifsRead) — since the whole point of the "Needs your
-  // reply" boost is that notifications aren't reliably checked, actually
-  // opening the task itself should clear it too.
+  // Notifications otherwise only get marked read via the bell dropdown —
+  // since the whole point of the "Needs your reply" boost is that
+  // notifications aren't reliably checked, actually opening the task itself
+  // should clear it too.
   const markTaskNotifsRead = (taskId: string) => {
     const ids = notifications.filter((n) => n.taskId === taskId && n.recipientId === me.id && n.kind === "message" && !n.read).map((n) => n.id);
     if (!ids.length) return;
     setNotifications((ns) => ns.map((n) => (ids.includes(n.id) ? { ...n, read: true } : n)));
     ids.forEach((id) => markNotifReadDb(id));
-  };
-  const openNotification = (n: Notification) => {
-    if (!n.read) markNotifRead(n);
-    // A DM notification's actorId is exactly who sent it — that's the thread to open.
-    if (n.kind === "dm" && n.actorId) { openDm(n.actorId); return; }
-    if (n.taskId) { setOpenTaskId(n.taskId); return; }
-    if (n.clientId) {
-      setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null);
-      setActiveClient(n.clientId); setActiveProject(n.projectId ?? null); setClientTab("chat");
-      return;
-    }
-    // A direct message with no task and no client is a Team Chat mention —
-    // the only notification kind with nowhere else to point. Nothing left to
-    // do here now that Chat sits right next to Activity on the same page
-    // (used to switch a "which pane" tab to Chat; that tab no longer exists).
   };
 
   const passesFilters = (t: Task) =>
@@ -4088,15 +3987,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <div className="flex flex-col gap-2">
               <div className="flex rounded-lg bg-background p-0.5">
                 <button onClick={() => setDashboardView("work")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "work" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Work</button>
-                <button onClick={() => setDashboardView("activity")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "activity" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Activity{unread > 0 ? ` · ${unread}` : ""}</button>
                 <button onClick={() => setDashboardView("completed")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "completed" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Completed</button>
               </div>
-              {dashboardView === "work" && canAdmin && (
-                <div className="flex items-center gap-2">
-                  <span className="shrink-0 text-[13px] text-muted">Work for</span>
-                  <select value={myWorkUser} onChange={(e) => setMyWorkUser(e.target.value)} className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1.5 text-[14px] outline-none">{users.map((u) => (<option key={u.id} value={u.id}>{u.name}{u.role === "va" ? " (VA)" : ""}</option>))}</select>
-                </div>
-              )}
             </div>
           ) : showFilterControl ? (
             <div className="flex items-center gap-2">
@@ -4285,16 +4177,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <div className="flex flex-wrap items-center gap-2">
               <div className="inline-flex overflow-hidden rounded-md border">
                 <button onClick={() => setDashboardView("work")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "work" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Work</button>
-                <button onClick={() => setDashboardView("activity")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "activity" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Activity{unread > 0 ? ` · ${unread}` : ""}</button>
                 <button onClick={() => setDashboardView("completed")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "completed" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Completed</button>
               </div>
-              {dashboardView === "work" && (canAdmin ? (
-                <label className="flex items-center gap-2"><span className="text-muted">Viewing work for</span>
-                  <select value={myWorkUser} onChange={(e) => setMyWorkUser(e.target.value)} className="rounded-md border bg-background px-2 py-1 outline-none">{users.map((u) => (<option key={u.id} value={u.id}>{u.name}{u.role === "va" ? " (VA)" : ""}</option>))}</select>
-                </label>
-              ) : (
-                <span className="text-[13px] text-muted">Your assigned clients and projects</span>
-              ))}
               {/* De-emphasized on purpose — the Dashboard is meant to be the
                   one place everyone works from; this is just an escape
                   hatch to the flat list, not a peer to it. */}
@@ -4459,14 +4343,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             starredLists={starredLists} onToggleStarList={toggleStarList} />
         ) : personalView ? (
           <GroupedList groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} colOrder={colOrder} onReorderCols={reorderCols} />
-        ) : myWork && dashboardView === "activity" ? (
-          // Relocated from the old Conversations Chat/Activity split (Derek:
-          // "everything is wired into each contact or tasks... maybe it's a
-          // tab on the dashboard") — same Inbox component, same data, just
-          // reachable from here now instead of always-on next to Chat.
-          <Inbox notifications={myNotifs} clientById={clientById} projectById={projectById} onOpen={openNotification} onMarkRead={markNotifRead} onMarkAllRead={markAllNotifsRead} onSyncEmail={canAdmin ? syncEmail : undefined} syncingEmail={syncingEmail} onSyncAppointments={canAdmin ? syncAppointments : undefined} syncingAppointments={syncingAppointments}
-            unmatchedEmails={canAdmin ? unmatchedEmails : []} onAddAsClient={addAsClientFromEmail} onDismissUnmatched={dismissUnmatched}
-            granolaUnmatched={canAdmin ? granolaUnmatched : []} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onAssignGranolaMeeting={assignGranolaUnmatched} onDismissGranolaUnmatched={dismissGranolaUnmatched} />
         ) : myWork && dashboardView === "completed" ? (
           // Relocated from the Clients directory (Derek: "makes more sense
           // there") — same completionLog data, day-grouped feed of who
