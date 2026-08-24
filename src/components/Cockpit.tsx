@@ -193,7 +193,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [granolaUnmatched, setGranolaUnmatched] = useState<GranolaUnmatchedMeeting[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [stages, setStages] = useState<Stage[]>([]);
-  const [importingTasks, setImportingTasks] = useState(false);
   const [clientTab, setClientTab] = useState<"tasks" | "chat" | "vault">("tasks");
   // Set once from a deep link's ?folder= param (see applyNav); VaultView
   // reads it only as its initial selected-folder value, not a live prop.
@@ -2052,34 +2051,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setClientTab("tasks");
     setOpenTaskId(null);
   };
-  // Derek: "I'm on my dashboard, I don't want to work on this one right now,
-  // I just want to go next" — step through every client/project on the
-  // Dashboard, in the exact tier order it's laid out in, without bouncing
-  // back to the Dashboard between each one.
-  // Personal tasks (kind "task") aren't part of this stepper — they open
-  // straight into the task drawer via onOpenTask, not a client/project
-  // detail page, so there's no "next" position for goDashboard to resume at.
-  const dashboardOrder: { kind: "client" | "project"; id: string }[] = myWorkGroups.flatMap((g) =>
-    g.items.flatMap((item): { kind: "client" | "project"; id: string }[] =>
-      item.kind === "client" ? [{ kind: "client", id: item.client.id }] : item.kind === "project" ? [{ kind: "project", id: item.project.id }] : [])
-  );
-  // Snapshotted at the moment you leave the Dashboard, not recomputed live —
-  // same reasoning as the task drawer's Prev/Next fix: without freezing it,
-  // completing/reassigning a client mid-browse could reshuffle the order out
-  // from under you and strand navigation, exactly like the task-nav bug.
-  const [dashboardSnapshot, setDashboardSnapshot] = useState<{ kind: "client" | "project"; id: string }[]>([]);
-  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
-  useEffect(() => { if (!myWork) setDashboardSnapshot(dashboardOrder); }, [myWork]);
-  const dashboardIdx = dashboardSnapshot.findIndex((d) => (activeProject ? d.kind === "project" && d.id === activeProject : d.kind === "client" && d.id === activeClient));
-  const goDashboard = (delta: number) => {
-    if (dashboardIdx < 0) return;
-    const next = dashboardSnapshot[dashboardIdx + delta];
-    if (!next) return;
-    if (next.kind === "project") { const pr = projectById(next.id); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(pr?.clientId ?? "all"); setActiveProject(next.id); }
-    else { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(next.id); setActiveProject(null); }
-    setClientTab("tasks");
-    setOpenTaskId(null);
-  };
   // Resolves the GHL contact backing a client: an explicit link (set via
   // "Link to GHL" for clients whose id isn't itself a contact id) wins;
   // otherwise fall back to the id-derived contact ("cl_" + contact id).
@@ -3284,56 +3255,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     }
   };
 
-  // Pulls a contact's tasks created directly in GoHighLevel (not pushed from
-  // here) into local tracked tasks, linked via ghlTaskId so they join the
-  // existing two-way sync (see GHL_SYNC_FIELDS/syncGhlIfLinked below) going
-  // forward. Dedupes against ghlTaskId already present locally so re-clicking
-  // never creates duplicates.
-  const importGhlTasks = async () => {
-    const contact = activeContact();
-    const target = contact && ghlTargetForContact(contact);
-    if (!contact || !target) return;
-    setImportingTasks(true);
-    try {
-      const res = await authedFetch(`/api/ghl/import-tasks?${new URLSearchParams(target)}`);
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || j?.error) { pushToast(j?.error ?? "GoHighLevel import failed."); return; }
-      const existingGhlIds = new Set(tasks.map((t) => t.ghlTaskId).filter(Boolean));
-      const notYetImported = ((j.tasks ?? []) as { ghlTaskId: string; title: string; description: string; due: string | null; completed: boolean }[])
-        .filter((g) => !existingGhlIds.has(g.ghlTaskId));
-      // GHL tasks are commonly years of completed history (recurring blog/
-      // review tasks, etc.) — importing those would just be dead clutter in
-      // an active task manager, so open tasks only.
-      const skippedDone = notYetImported.filter((g) => g.completed).length;
-      const fresh = notYetImported.filter((g) => !g.completed);
-      if (fresh.length === 0) {
-        pushToast(skippedDone > 0
-          ? `No open tasks to import — skipped ${skippedDone} already-completed task${skippedDone === 1 ? "" : "s"}.`
-          : "No new tasks to import — everything's already tracked.");
-        return;
-      }
-      let projectId = projects.find((p) => p.clientId === activeClient)?.id;
-      if (!projectId) {
-        const p: Project = { id: newId("p_"), clientId: activeClient, name: "Tasks", description: "" };
-        setProjects((ps) => [...ps, p]);
-        upsertProject(p);
-        projectId = p.id;
-      }
-      const newTasks: Task[] = fresh.map((g) => ({
-        id: newId("t_"), projectId: projectId!, clientId: activeClient, title: g.title, description: g.description,
-        status: "todo", priority: "none", assigneeId: null, contactId: contact.id,
-        due: g.due, recurrence: "none", labelIds: [], ghlTaskId: g.ghlTaskId, private: false, subtasks: [], attachments: [], comments: [],
-        createdAt: new Date().toISOString(), createdBy: me.id,
-      }));
-      setTasks((ts) => [...ts, ...newTasks]);
-      newTasks.forEach((t) => upsertTask(t, me.id));
-      pushToast(`Imported ${newTasks.length} task${newTasks.length === 1 ? "" : "s"} from GoHighLevel${skippedDone > 0 ? ` (skipped ${skippedDone} already completed)` : ""}`);
-    } catch {
-      pushToast("Network error reaching GoHighLevel.");
-    } finally {
-      setImportingTasks(false);
-    }
-  };
   const toggleSub = (taskId: string, subId: string) => {
     const t = tasks.find((x) => x.id === taskId);
     if (!t) return;
@@ -4183,10 +4104,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" onClick={() => setHeaderMoreOpen(false)}
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-accent hover:bg-background"><I.bolt /> Open in GoHighLevel</a>
           )}
-          {ghlContactUrlFor(activeClient) && (
-            <button onClick={() => { setHeaderMoreOpen(false); importGhlTasks(); }} disabled={importingTasks}
-              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background disabled:opacity-50"><I.repeat /> Import tasks from GHL</button>
-          )}
           {canAdmin && !ghlContactUrlFor(activeClient) && (
             <button onClick={() => { setHeaderMoreOpen(false); setGhlLinkSearch(""); setGhlLinkOpen(true); }}
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.bolt /> Link to GoHighLevel</button>
@@ -4507,73 +4424,23 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <button onClick={() => setClientTab("vault")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "vault" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Vault · {vaultItems.length}</button>
             </div>
           )}
-          {/* Quick Email/SMS — jumps straight into the Journal composer in that
-              mode. Client-scoped messaging only (not projects), gated by the
-              same permission as sending. */}
-          {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && !activeProject && canMessageClient(activeClient) && (
-            <div className="hidden overflow-hidden rounded-md border sm:inline-flex">
-              <button onClick={() => openCompose("email")} title="Email this client" className="inline-flex items-center gap-1 bg-background px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-accent-soft hover:text-accent"><I.comment /> <span className="hidden sm:inline">Email</span></button>
-              <button onClick={() => openCompose("sms")} title="Text this client" className="border-l bg-background px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-accent-soft hover:text-accent">SMS</button>
-            </div>
-          )}
           {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && clientById(activeClient) && (
             <div className="flex items-center gap-1.5">
-              {/* Only shown when this client/project is actually on your
-                  Dashboard — arriving here some other way (search, a link,
-                  the Clients directory) has no "position" to step through. */}
-              {dashboardIdx >= 0 && (
-                <span className="inline-flex items-center gap-0.5 rounded-md border bg-background px-1 py-1" title="Step through your Dashboard, in the order it's laid out">
-                  <button onClick={() => goDashboard(-1)} disabled={dashboardIdx <= 0} title="Previous on Dashboard"
-                    className="rounded p-1 text-muted hover:bg-surface hover:text-foreground disabled:opacity-30"><I.chevron className="rotate-90" /></button>
-                  <span className="min-w-[46px] text-center text-[13px] tabular-nums text-muted">{dashboardIdx + 1} of {dashboardSnapshot.length}</span>
-                  <button onClick={() => goDashboard(1)} disabled={dashboardIdx >= dashboardSnapshot.length - 1} title="Next on Dashboard"
-                    className="rounded p-1 text-muted hover:bg-surface hover:text-foreground disabled:opacity-30"><I.chevron className="-rotate-90" /></button>
-                </span>
-              )}
-              {(() => {
-                // One contextual Follow toggle, not two — it tracks whatever
-                // scope is currently open (the project, if one's selected;
-                // the client otherwise), since that's the only thing that
-                // matters for surfacing it in My Work.
-                const scopedProject = activeProject ? projectById(activeProject) : null;
-                const following = scopedProject
-                  ? (scopedProject.assignedTo ?? []).includes(me.id)
-                  : (clientById(activeClient)!.assignedTo ?? []).includes(me.id);
-                const toggle = () => scopedProject ? toggleProjectAssignment(scopedProject.id, me.id) : toggleClientAssignment(activeClient, me.id);
-                const label = scopedProject ? "this project" : "this client";
-                return (
-                  <button onClick={toggle}
-                    title={following ? `Following — click to stop following ${label}` : `Follow ${label} to keep it in My Work`}
-                    className={`rounded-md border p-1.5 ${following ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}>
-                    <I.bookmark filled={following} />
-                  </button>
-                );
-              })()}
-              {/* Client status, promoted from the sidebar-dot popover onto the
-                  main header (Derek, Jul 17). "Nurture" drives the monthly
-                  check-in. Client-scoped, so hidden while a project is open. */}
+              {/* Status dropdown hidden per Derek (Aug 23): the multi-stage
+                  pipeline (Claimed/Interview/.../Past Client) isn't needed —
+                  a client either made it into ClickUpTasks or didn't. Status
+                  data/column and setClientStatus are untouched, just not
+                  shown/editable here. Trial window is separate info (how
+                  long the clock has left, not where the work's at) and
+                  stays. Client-scoped, so hidden while a project is open. */}
               {!activeProject && canAdmin && (() => {
                 const c = clientById(activeClient)!;
-                const meta = clientStatusMeta(c.status);
-                return (<>
-                  <span className="inline-flex items-center gap-1.5 rounded-md border pl-2 pr-1 py-1" title="Client status">
-                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: meta.dot }} />
-                    <select value={c.status} onChange={(e) => { setClientStatus(c.id, e.target.value as ClientStatus); }}
-                      className="cursor-pointer rounded bg-transparent py-0.5 text-[13px] font-medium text-foreground outline-none">
-                      {CLIENT_STATUS_ORDER.map((s) => <option key={s} value={s}>{CLIENT_STATUS_META[s].label}</option>)}
-                    </select>
+                if (!c.trialEndsAt) return null;
+                return (
+                  <span className="inline-flex items-center rounded-md border px-2 py-1 text-[13px] font-medium text-muted" title="14 day trial window, set when this deal closed">
+                    Trial ends {formatDue(c.trialEndsAt)}
                   </span>
-                  {/* Trial window, stamped when the deal closed (see
-                      setClientStatus). Read-only on purpose: the stage
-                      dropdown next to it says where the work has got to,
-                      this says how long the clock has left, and they're
-                      genuinely different questions. Nothing to click. */}
-                  {c.trialEndsAt && (
-                    <span className="inline-flex items-center rounded-md border px-2 py-1 text-[13px] font-medium text-muted" title="14 day trial window, set when this deal closed">
-                      Trial ends {formatDue(c.trialEndsAt)}
-                    </span>
-                  )}
-                </>);
+                );
               })()}
               {/* Review controls — only when the open scope currently needs a
                   review. "Reviewed" clears it (stamps reviewedAt=today); "Next"
@@ -4657,10 +4524,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     {ghlContactUrlFor(activeClient) && (
                       <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" onClick={() => setHeaderMoreOpen(false)}
                         className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-accent hover:bg-background"><I.bolt /> Open in GoHighLevel</a>
-                    )}
-                    {ghlContactUrlFor(activeClient) && (
-                      <button onClick={() => { setHeaderMoreOpen(false); importGhlTasks(); }} disabled={importingTasks}
-                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background disabled:opacity-50"><I.repeat /> Import tasks from GHL</button>
                     )}
                     {canAdmin && !ghlContactUrlFor(activeClient) && (
                       <button onClick={() => { setHeaderMoreOpen(false); setGhlLinkSearch(""); setGhlLinkOpen(true); }}
