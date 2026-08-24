@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, clientStatusMeta,
   STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY,
+  PERSONAL_CLIENT_ID, WORKSPACE_CLIENT_ID,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Row, CollapsibleText, SearchableSelect, newId } from "./ui";
@@ -85,6 +86,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
 }) {
   const client = clientById(task.clientId)!;
   const project = projectById(task.projectId)!;
+  // Phase 3 A1: a task under Personal or the internal Workspace pseudo-client
+  // is never client work — neither can ever carry a GHL contact/location by
+  // construction (see PERSONAL_CLIENT_ID/WORKSPACE_CLIENT_ID in data.ts), so
+  // there's no "not yet linked" state to recover from, only "will never
+  // link." Every GoHighLevel surface (banner, field, menu item) and the
+  // conversation pane are conditioned on this being false.
+  const internalMode = task.clientId === PERSONAL_CLIENT_ID || task.clientId === WORKSPACE_CLIENT_ID;
   // The task's own client is appended when it isn't in `allClients` (an
   // archived or otherwise filtered-out one), so the field still shows where
   // the task actually lives instead of falling back to the placeholder.
@@ -303,7 +311,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Prominent warning, not just the compact badge buried in the properties
   // grid below — a client with no linked GHL contact/location is a real
   // gap (this task can never sync), worth catching at a glance.
-  const ghlWarningBanner = !task.ghlTaskId && !ghlLinkable ? (
+  const ghlWarningBanner = !internalMode && !task.ghlTaskId && !ghlLinkable ? (
     <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[13px] text-amber-800">
       <I.bolt className="mt-0.5 shrink-0 text-amber-500" />
       <span>This client has no linked GoHighLevel contact or location, so this task can&apos;t sync to GHL.</span>
@@ -399,17 +407,19 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         </>
       )}
       <Row label="Contact">{(() => { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return ct ? (<span className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[14px] text-muted"><I.user /> {ct.name}</span>) : <span className="text-[14px] text-muted">—</span>; })()}</Row>
-      <Row label="GoHighLevel" icon={<I.bolt />}>{task.ghlTaskId ? (
-        <span className="inline-flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 rounded-md bg-success-soft px-2 py-1 text-[13px] font-medium text-success"><I.bolt /> Synced — changes push automatically</span>
-          {ghlContactUrl && <a href={ghlContactUrl} target="_blank" rel="noopener noreferrer" className="text-[13px] font-medium text-accent hover:underline">Open contact ↗</a>}
-          <button onClick={onUnlinkGhl} className="text-[13px] text-muted hover:text-danger">Unlink</button>
-        </span>
-      ) : ghlLinkable ? (
-        <button onClick={onPushGhl} disabled={ghlBusy} className="inline-flex items-center gap-1.5 rounded-md border border-accent px-2.5 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft disabled:opacity-50"><I.bolt /> {ghlBusy ? "Pushing…" : "Push to GHL"}</button>
-      ) : (
-        <span className="inline-flex items-center gap-1.5 rounded-md bg-background px-2 py-1 text-[13px] text-muted" title="This client has no linked GHL contact/location, so this task can't sync to GoHighLevel."><I.bolt className="opacity-40" /> Not linkable</span>
-      )}</Row>
+      {!internalMode && (
+        <Row label="GoHighLevel" icon={<I.bolt />}>{task.ghlTaskId ? (
+          <span className="inline-flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-md bg-success-soft px-2 py-1 text-[13px] font-medium text-success"><I.bolt /> Synced — changes push automatically</span>
+            {ghlContactUrl && <a href={ghlContactUrl} target="_blank" rel="noopener noreferrer" className="text-[13px] font-medium text-accent hover:underline">Open contact ↗</a>}
+            <button onClick={onUnlinkGhl} className="text-[13px] text-muted hover:text-danger">Unlink</button>
+          </span>
+        ) : ghlLinkable ? (
+          <button onClick={onPushGhl} disabled={ghlBusy} className="inline-flex items-center gap-1.5 rounded-md border border-accent px-2.5 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft disabled:opacity-50"><I.bolt /> {ghlBusy ? "Pushing…" : "Push to GHL"}</button>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 rounded-md bg-background px-2 py-1 text-[13px] text-muted" title="This client has no linked GHL contact/location, so this task can't sync to GoHighLevel."><I.bolt className="opacity-40" /> Not linkable</span>
+        )}</Row>
+      )}
     </dl>
     </div>
   );
@@ -727,7 +737,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // to spare. Fold it into the document column instead of reserving a wide
   // empty rail for it; the moment it has a linked contact or a first
   // comment, it's no longer "light" and gets the full two-column layout.
-  const isLightTask = full && !hasMessaging && task.comments.length === 0;
+  // Internal-mode tasks always fold into the single-column document layout
+  // regardless of comment count — there's no conversation pane possible for
+  // them (no linkable contact by construction), so unlike a real client
+  // task there's nothing that ever earns a dedicated right-hand column.
+  const isLightTask = full && (internalMode || (!hasMessaging && task.comments.length === 0));
 
   return (
     <>
