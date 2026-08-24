@@ -12,7 +12,7 @@ import { reconcilePlaybookTasksServer } from "./playbookReconcileServer";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-const SYSTEM_AUTHOR_ID = "u_claude";
+const SYSTEM_AUTHOR_ID = "u_derek";
 
 export async function runPlaybookStallCheck(): Promise<{ created: number }> {
   const cutoff = new Date(Date.now() - STALL_DAYS * 24 * 60 * 60 * 1000).toISOString();

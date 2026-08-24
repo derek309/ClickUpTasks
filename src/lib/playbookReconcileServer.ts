@@ -57,11 +57,11 @@ export async function reconcilePlaybookTasksServer(clientId: string): Promise<vo
   for (const r of toRetitle) await supabaseAdmin.from("tasks").update({ title: r.title, updated_by: null }).eq("id", r.id);
 }
 
-// The MCP server's own synthetic roster identity (see data.ts's
-// PROTECTED_USER_IDS) — reused as the author of an automated, no-human-actor
-// comment, same convention the playbook toggle route uses for system-posted
-// activity.
-const SYSTEM_AUTHOR_ID = "u_claude";
+// Author for an automated, no-human-actor comment — same convention the
+// playbook toggle route uses for system-posted activity. Used to point at a
+// synthetic "Claude" roster entry, removed (Derek: "we no longer need
+// Claude as a user"); attributed to Derek's own account now.
+const SYSTEM_AUTHOR_ID = "u_derek";
 
 /** Marks one SALES_STAGE_STEPS step done for a client, from a server-side
  * automation trigger (a claim, an invite reply) rather than a rep checking a

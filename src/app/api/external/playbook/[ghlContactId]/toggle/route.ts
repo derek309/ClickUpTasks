@@ -23,7 +23,7 @@ import { PLAYBOOK_ALL_STEPS, PLAYBOOK_STEP_BY_KEY, PLAYBOOK_STEPS, PLAYBOOK_PHAS
 // tracked client — a real self-reported completion is exactly the kind of
 // signal that justifies it, same reasoning resolveOrPromoteTrackedClient's
 // own doc comment already gives for inbound messages/calls/appointments.
-const SYSTEM_AUTHOR_ID = "u_claude";
+const SYSTEM_AUTHOR_ID = "u_derek";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ ghlContactId: string }> }) {
   if (!adminConfigured) return NextResponse.json({ error: "Not configured" }, { status: 501 });

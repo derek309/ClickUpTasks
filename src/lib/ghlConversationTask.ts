@@ -123,8 +123,10 @@ export function toPacificDate(iso: string): string {
 const MEETING_LOCATION_ATTACHMENT_NAME = "Meeting location";
 // Same system author every other server-side event line uses (see the
 // playbook toggle route, granolaSync) so these render identically in the
-// feed rather than looking like a real teammate posted.
-const SYSTEM_AUTHOR_ID = "u_claude";
+// feed. The synthetic "Claude" roster entry this used to point at was
+// removed (Derek: "we no longer need Claude as a user") — attributed to
+// Derek's own account now, same as every other automated comment.
+const SYSTEM_AUTHOR_ID = "u_derek";
 // Returns null when nothing would change — so the caller can skip a needless
 // write. When the location is unchanged we return the SAME attachment object
 // (not a fresh one), preserving any Vault folderId/position a user filed it

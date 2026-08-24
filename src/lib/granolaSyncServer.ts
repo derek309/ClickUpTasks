@@ -10,7 +10,7 @@ import { resolveOrPromoteTrackedClient } from "./ghlConversationTask";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-const SYSTEM_AUTHOR_ID = "u_claude";
+const SYSTEM_AUTHOR_ID = "u_derek";
 
 export type GranolaSyncResult = "created" | "unmatched" | "skipped" | "internal";
 
