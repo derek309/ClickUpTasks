@@ -317,33 +317,39 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // stay editable too, just folded into a smaller secondary "Details"
   // block below instead of sharing top billing with the fields someone
   // actually touches on every task.
+  // Chip base: a real bordered pill against bg-surface so it reads as a
+  // discrete control against the page's bg-background — plain bg-background
+  // chips over a bg-background page were invisible, reading as bare native
+  // selects in a row instead of chips (Derek: "seems clunky").
+  const chip = "inline-flex items-center rounded-full border bg-surface shadow-sm px-1 py-0.5";
   const chipRow = (
     <div className="mt-4 flex flex-wrap items-center gap-1.5">
-      <span className="inline-flex items-center rounded-full bg-background px-1 py-0.5" style={{ color: STATUS_META[task.status].dot }}>
-        <select value={task.status} onChange={(e) => onPatch({ status: e.target.value as TaskStatus })} className="rounded-full bg-transparent px-1.5 py-0.5 text-[13px] font-medium outline-none">
+      <span className={chip} style={{ borderColor: STATUS_META[task.status].dot + "55" }}>
+        <span className="ml-2 h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: STATUS_META[task.status].dot }} />
+        <select value={task.status} onChange={(e) => onPatch({ status: e.target.value as TaskStatus })} className="rounded-full bg-transparent py-0.5 pl-1.5 pr-1 text-[13px] font-medium outline-none" style={{ color: STATUS_META[task.status].dot }}>
           {STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
         </select>
       </span>
-      <span className="inline-flex items-center rounded-full bg-background px-1 py-0.5">
-        <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} showRecurrenceLabel onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} />
+      <span className={chip}>
+        <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} showRecurrenceLabel={task.recurrence !== "custom"} onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} />
       </span>
       {task.recurrence === "custom" && (
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-background px-2 py-1 text-[13px] text-muted">
+        <span className={`${chip} gap-1.5 px-2 py-1 text-[13px] text-muted`}>
           {task.recurrenceUnit === "day-of-month" ? (
             <>
               On day(s)
               <input type="text" placeholder="1, 15" defaultValue={(task.recurrenceDaysOfMonth ?? []).join(", ")}
                 onBlur={(e) => onPatch({ recurrenceDaysOfMonth: parseDaysOfMonth(e.target.value) })}
-                className="w-16 rounded-md border bg-surface px-1.5 py-0.5 text-center text-[13px] outline-none focus:border-accent" />
+                className="w-16 rounded-md border bg-background px-1.5 py-0.5 text-center text-[13px] outline-none focus:border-accent" />
               of month
             </>
           ) : (
             <>
               Every
-              <input type="number" min={1} value={task.recurrenceInterval ?? 1} onChange={(e) => onPatch({ recurrenceInterval: Math.max(1, parseInt(e.target.value, 10) || 1) })} className="w-12 rounded-md border bg-surface px-1.5 py-0.5 text-center text-[13px] outline-none focus:border-accent" />
+              <input type="number" min={1} value={task.recurrenceInterval ?? 1} onChange={(e) => onPatch({ recurrenceInterval: Math.max(1, parseInt(e.target.value, 10) || 1) })} className="w-12 rounded-md border bg-background px-1.5 py-0.5 text-center text-[13px] outline-none focus:border-accent" />
             </>
           )}
-          <select value={task.recurrenceUnit ?? "week"} onChange={(e) => onPatch({ recurrenceUnit: e.target.value as RecurrenceUnit })} className="rounded-md border bg-surface px-1.5 py-0.5 text-[13px] outline-none focus:border-accent">
+          <select value={task.recurrenceUnit ?? "week"} onChange={(e) => onPatch({ recurrenceUnit: e.target.value as RecurrenceUnit })} className="rounded-md border bg-background px-1.5 py-0.5 text-[13px] outline-none focus:border-accent">
             <option value="day">day(s)</option>
             <option value="week">week(s)</option>
             <option value="month">month(s)</option>
@@ -355,15 +361,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           and "⏳ Waiting on {long business name}" pushed it clean out of the
           properties grid (Derek, 2026-08-11). Filling the cell instead keeps
           the layout stable no matter how long a client's name is. */}
-      <span className="inline-flex max-w-[220px] items-center rounded-full bg-background px-1 py-0.5">
-        <select value={task.waitingOnClient ? "__waiting__" : (task.assigneeId ?? "")} onChange={(e) => { const v = e.target.value; if (v === "__waiting__") onPatch({ waitingOnClient: true, assigneeId: null }); else onPatch({ assigneeId: v || null, waitingOnClient: false }); }} className="w-full min-w-0 rounded-full bg-transparent px-1.5 py-0.5 text-[13px] outline-none"><option value="__waiting__">⏳ {client ? `Waiting on ${client.name}` : "Waiting on client"}</option><option value="">Unassigned</option>{users.map((u) => (<option key={u.id} value={u.id}>{u.name} {u.role === "va" ? "(VA)" : "(Admin)"}</option>))}</select>
+      <span className={`${chip} max-w-[220px] gap-1`}>
+        <I.user className="ml-1.5 shrink-0 text-muted" />
+        <select value={task.waitingOnClient ? "__waiting__" : (task.assigneeId ?? "")} onChange={(e) => { const v = e.target.value; if (v === "__waiting__") onPatch({ waitingOnClient: true, assigneeId: null }); else onPatch({ assigneeId: v || null, waitingOnClient: false }); }} className="w-full min-w-0 rounded-full bg-transparent py-0.5 pl-0.5 pr-1 text-[13px] outline-none"><option value="__waiting__">⏳ {client ? `Waiting on ${client.name}` : "Waiting on client"}</option><option value="">Unassigned</option>{users.map((u) => (<option key={u.id} value={u.id}>{u.name} {u.role === "va" ? "(VA)" : "(Admin)"}</option>))}</select>
       </span>
-      <span className="inline-flex items-center rounded-full bg-background px-1 py-0.5" style={{ color: PRIORITY_META[task.priority].color }}>
-        <select value={task.priority} onChange={(e) => onPatch({ priority: e.target.value as Priority })} className="rounded-full bg-transparent px-1.5 py-0.5 text-[13px] outline-none">{manualPriorityOptions(task.priority).map((p) => (<option key={p} value={p}>{PRIORITY_META[p].label}</option>))}</select>
+      <span className={chip} style={{ borderColor: PRIORITY_META[task.priority].color + "55" }}>
+        <span className="ml-1.5 shrink-0" style={{ color: PRIORITY_META[task.priority].color }}><I.flag /></span>
+        <select value={task.priority} onChange={(e) => onPatch({ priority: e.target.value as Priority })} className="rounded-full bg-transparent py-0.5 pl-1 pr-1 text-[13px] outline-none" style={{ color: PRIORITY_META[task.priority].color }}>{manualPriorityOptions(task.priority).map((p) => (<option key={p} value={p}>{PRIORITY_META[p].label}</option>))}</select>
       </span>
-      {task.labelIds.map((id) => { const l = labelById(id); return l ? (<button key={id} onClick={() => onToggleLabel(id)} className="group inline-flex items-center gap-1 rounded-full px-2 py-1 text-[13px] font-medium" style={{ background: l.color + "1a", color: l.color }}>{l.name} <span className="opacity-50 group-hover:opacity-100">×</span></button>) : null; })}
+      {task.labelIds.map((id) => { const l = labelById(id); return l ? (<button key={id} onClick={() => onToggleLabel(id)} className="group inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[13px] font-medium" style={{ background: l.color + "1a", color: l.color, borderColor: l.color + "40" }}>{l.name} <span className="opacity-50 group-hover:opacity-100">×</span></button>) : null; })}
       <div className="relative">
-        <button onClick={() => setLabelOpen((o) => !o)} className="inline-flex items-center gap-0.5 rounded-full border border-dashed px-2 py-1 text-[13px] text-muted hover:bg-background"><I.plus /> Label</button>
+        <button onClick={() => setLabelOpen((o) => !o)} className="inline-flex items-center gap-0.5 rounded-full border border-dashed px-2 py-1 text-[13px] text-muted hover:bg-surface"><I.plus /> Label</button>
         {labelOpen && (<div className="absolute z-30 mt-1 w-40 rounded-lg border bg-surface p-1 shadow-lg">{labels.map((l) => { const on = task.labelIds.includes(l.id); return (<button key={l.id} onClick={() => onToggleLabel(l.id)} className="flex w-full items-center gap-2 rounded px-2 py-1 text-[13px] hover:bg-background"><span className="h-2.5 w-2.5 rounded-full" style={{ background: l.color }} /> {l.name}{on && <I.check className="ml-auto text-accent" />}</button>); })}</div>)}
       </div>
     </div>
