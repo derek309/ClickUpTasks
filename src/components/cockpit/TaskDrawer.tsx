@@ -1,7 +1,7 @@
 "use client";
 
 // The task detail window (sidebar or full-page "document" view).
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, formatDue, htmlToText, plainTextToHtml, clientStatusMeta,
   STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY,
@@ -12,6 +12,8 @@ import { AttachmentTile } from "./AttachmentTile";
 import { InlineAssignee, InlineDue } from "./GroupedList";
 import { RichTextEditor } from "./RichTextEditor";
 import { useTaskMessaging } from "./TaskMessaging";
+
+const ATT_KIND_ORDER: Record<Attachment["kind"], number> = { image: 0, pdf: 1, doc: 2, sheet: 3, link: 4 };
 
 // Title/description onChange used to call onPatch on every keystroke, which
 // writes through Cockpit.tsx's top-level `tasks` state (a full-array clone +
@@ -168,7 +170,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // attachments (e.g. a photo the client sent over chat) and comment
   // attachments (a screenshot dropped into the Activity tab) so those render
   // as real thumbnails in the feed too, not just a filename chip.
-  const attImagePaths = [...task.attachments, ...(task.clientResponse?.attachments ?? []), ...(messages ?? []).flatMap((m) => m.attachments ?? []), ...task.comments.flatMap((c) => c.attachments ?? [])].filter((a) => a.kind === "image" && a.path).map((a) => a.path as string).join(",");
+  const attImagePaths = useMemo(
+    () => [...task.attachments, ...(task.clientResponse?.attachments ?? []), ...(messages ?? []).flatMap((m) => m.attachments ?? []), ...task.comments.flatMap((c) => c.attachments ?? [])].filter((a) => a.kind === "image" && a.path).map((a) => a.path as string).join(","),
+    [task.attachments, task.clientResponse, messages, task.comments]
+  );
   const [attImageUrls, setAttImageUrls] = useState<Record<string, string>>({});
   useEffect(() => {
     let cancelled = false;
@@ -561,12 +566,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       <div className="mt-1.5"><input value={subDraft} onChange={(e) => setSubDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { onAddSub(subDraft); setSubDraft(""); } }} placeholder="+ Add a checklist item…" className="w-full rounded-md border border-transparent px-2 py-1 text-[15px] outline-none transition placeholder:text-muted hover:bg-background focus:border-accent focus:bg-background" /></div>
     </div>
   );
-  const ATT_KIND_ORDER: Record<Attachment["kind"], number> = { image: 0, pdf: 1, doc: 2, sheet: 3, link: 4 };
-  const sortedAttachments = [...task.attachments].sort((a, b) => {
+  const sortedAttachments = useMemo(() => [...task.attachments].sort((a, b) => {
     if (attSort === "name") return a.name.localeCompare(b.name);
     if (attSort === "type") return ATT_KIND_ORDER[a.kind] - ATT_KIND_ORDER[b.kind];
     return 0; // "added" — keep stored order (oldest first, matches how they were attached)
-  });
+  }), [task.attachments, attSort]);
   const attachmentsBlock = !showAttachments ? null : (
     <div className="mt-4 rounded-xl border bg-surface p-4">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -678,7 +682,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // fraction/bar below is accurate and you can see where this task sits
   // among its siblings without leaving the drawer. Collapsed state
   // persists per-browser, same pattern as activityW.
-  const listSiblings = navTasks.filter((t) => t.projectId === task.projectId);
+  const listSiblings = useMemo(() => navTasks.filter((t) => t.projectId === task.projectId), [navTasks, task.projectId]);
   const siblingsDone = listSiblings.filter((t) => t.status === "done").length;
   const siblingsPct = listSiblings.length ? Math.round((siblingsDone / listSiblings.length) * 100) : 0;
   const siblingsBlock = (

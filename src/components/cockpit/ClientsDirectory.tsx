@@ -5,7 +5,7 @@
 // into colored, collapsible status sections, with a search box, the sort +
 // Mine/All controls relocated from the sidebar, and an Add-client button.
 // Clicking a row opens that client's task list.
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { CLIENT_STATUS_ORDER, CLIENT_STATUS_META, formatDue, isOverdue, type ClientStatus, type Client, type Task, type User } from "@/lib/data";
 import { I } from "./ui";
 
@@ -54,16 +54,25 @@ export function ClientsDirectory({
   const toggleGroup = (key: string) => setCollapsed((cur) => { const n = new Set(cur); if (n.has(key)) n.delete(key); else n.add(key); return n; });
   const query = q.trim().toLowerCase();
   const matches = (c: Client) => !query || c.name.toLowerCase().includes(query) || clientCompany(c).toLowerCase().includes(query);
-  const shown = clients.filter(matches);
   const sortLabels: [ClientSort, string][] = [["urgent", "Overdue first"], ["mine", "By my work"], ["used", "Recently used"], ["manual", "Manual"], ["az", "A → Z"], ["tasks", "Most active"], ["recent", "Recently added"]];
+  const shown = useMemo(() => clients.filter(matches),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [clients, query]);
   // Preserves the caller's sort order within each bucket — just partitions
   // `shown` by status rather than re-sorting. Empty buckets are skipped so
   // e.g. a workspace with no Cancelled clients doesn't show a bare "0" header.
-  const statusGroups = CLIENT_STATUS_ORDER.map((s) => ({ status: s, clients: shown.filter((c) => c.status === s) })).filter((g) => g.clients.length > 0);
+  const statusGroups = useMemo(
+    () => CLIENT_STATUS_ORDER.map((s) => ({ status: s, clients: shown.filter((c) => c.status === s) })).filter((g) => g.clients.length > 0),
+    [shown]
+  );
   // Same search filtering applied per member, and same empty-bucket skip —
   // a teammate with nothing active right now just doesn't get a section,
   // rather than showing an empty "0" header for everyone every time.
-  const filteredTeamGroups = (teamGroups ?? []).map((g) => ({ ...g, clients: g.clients.filter(matches) })).filter((g) => g.clients.length > 0);
+  const filteredTeamGroups = useMemo(
+    () => (teamGroups ?? []).map((g) => ({ ...g, clients: g.clients.filter(matches) })).filter((g) => g.clients.length > 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [teamGroups, query]
+  );
 
   // Shared row — used by both the status buckets and the teammate buckets,
   // so the two grouping modes render identically aside from their headers.

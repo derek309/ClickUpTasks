@@ -4,7 +4,7 @@
 // from the Clients directory, Derek: "makes more sense there"). A flat,
 // day-grouped feed: task, client, who completed it, and the time — the only
 // filter is who completed it, on purpose (Derek: "that's it, simple clean").
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { timeAgo } from "@/lib/data";
 import { I } from "./ui";
 
@@ -16,24 +16,31 @@ export function CompletedLog({ rows, onOpenTask }: { rows: CompletionRow[]; onOp
 
   const query = q.trim().toLowerCase();
   const matches = (r: CompletionRow) => !query || r.taskTitle.toLowerCase().includes(query) || r.clientName.toLowerCase().includes(query);
-  const shown = rows.filter((r) => (completedBy === "all" || r.authorId === completedBy) && matches(r));
+  const shown = useMemo(() => rows.filter((r) => (completedBy === "all" || r.authorId === completedBy) && matches(r)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, completedBy, query]);
 
-  const completedByOptions = Array.from(new Map(rows.map((r) => [r.authorId, { id: r.authorId, name: r.authorName, color: r.authorColor }])).values())
-    .sort((a, b) => a.name.localeCompare(b.name));
+  // Doesn't depend on the search query at all — rebuilding it on every
+  // keystroke was wasted work.
+  const completedByOptions = useMemo(
+    () => Array.from(new Map(rows.map((r) => [r.authorId, { id: r.authorId, name: r.authorName, color: r.authorColor }])).values())
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    [rows]
+  );
 
   // Grouped by calendar day. `rows` arrives already sorted most-recent-first,
   // so a Map preserves that order for both the days and the rows within each.
   const today = new Date().toDateString();
   const yesterday = new Date(Date.now() - 86400000).toDateString();
   const dayLabel = (key: string) => key === today ? "Today" : key === yesterday ? "Yesterday" : new Date(key).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
-  const dayGroups = (() => {
+  const dayGroups = useMemo(() => {
     const map = new Map<string, CompletionRow[]>();
     for (const r of shown) {
       const key = new Date(r.at).toDateString();
       (map.get(key) ?? map.set(key, []).get(key)!).push(r);
     }
     return Array.from(map.entries());
-  })();
+  }, [shown]);
 
   return (
     <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">

@@ -493,7 +493,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const throughIdx = throughKey ? SALES_STAGE_ORDER.indexOf(throughKey) : -1;
     if (throughIdx < 0) return;
     const byKey = new Map(
-      tasksRef.current.filter((t) => t.clientId === clientId && t.playbookStepKey).map((t) => [t.playbookStepKey as string, t])
+      (playbookTasksByClient.get(clientId) ?? []).map((t) => [t.playbookStepKey as string, t])
     );
     for (let i = 0; i <= throughIdx; i++) {
       const task = byKey.get(SALES_STAGE_ORDER[i]);
@@ -919,7 +919,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!hydratedRef.current) return;
     const next = buildSearch(currentNav());
     if (next !== window.location.search) window.history.pushState(null, "", next || window.location.pathname);
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsView, dirView, myWork, personalView, inboxView, activeClient, activeProject, openTaskId, clientTab, dmUserId]);
   // Back/forward → state.
   useEffect(() => {
     const onPop = () => applyNav(parseSearch(window.location.search));
@@ -1063,8 +1064,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     })();
   }, []);
 
-  const clientById = (id: string) => clients.find((c) => c.id === id) ?? null;
-  const projectById = (id: string) => projects.find((p) => p.id === id) ?? null;
+  // Map indices — clientById/projectById/tasksById used to be linear .find()
+  // scans over the full arrays, called from many places per render (often
+  // several times per client/task). O(1) lookups instead.
+  const clientsById = useMemo(() => new Map(clients.map((c) => [c.id, c])), [clients]);
+  const projectsById = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
+  const tasksById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
+  const clientById = (id: string) => clientsById.get(id) ?? null;
+  const projectById = (id: string) => projectsById.get(id) ?? null;
   const contactById = (id: string | null) => contacts.find((c) => c.id === id) ?? null;
 
   const toggleTheme = () => {
@@ -1561,6 +1568,33 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     () => (canAdmin ? tasks : tasks.filter((t) => t.assigneeId === me.id)),
     [tasks, canAdmin, me.id]
   );
+  // Map indices for scopedTasks/clients/projects — every lookup helper below
+  // (clientById, clientTaskCount, clientNeedsReview, hasOpenConversationTask,
+  // clientUrgencyKey, assignedClientsFor, ...) used to do its own linear
+  // .find()/.filter()/.some() over the FULL scopedTasks/clients/projects
+  // array on every call, and several of them call each other, so a single
+  // clientUrgencyKey call could be 3+ full-table scans — multiplied across
+  // every client in the sidebar, every user in "By teammate," every row of
+  // My Work. Building these once per scopedTasks/clients/projects change
+  // turns every one of those sites into an O(1) Map.get() plus a scan of
+  // just that one client's/project's own (typically small) task list.
+  const scopedTasksByClientId = useMemo(() => {
+    const m = new Map<string, Task[]>();
+    for (const t of scopedTasks) {
+      const list = m.get(t.clientId);
+      if (list) list.push(t); else m.set(t.clientId, [t]);
+    }
+    return m;
+  }, [scopedTasks]);
+  const scopedTasksByProjectId = useMemo(() => {
+    const m = new Map<string, Task[]>();
+    for (const t of scopedTasks) {
+      if (!t.projectId) continue;
+      const list = m.get(t.projectId);
+      if (list) list.push(t); else m.set(t.projectId, [t]);
+    }
+    return m;
+  }, [scopedTasks]);
   // Follow-up date = "always true": auto-track each client/project's
   // follow-up to the soonest due date among its open (status != done) dated
   // tasks, so it always reflects the next real deadline. Diff-then-write —
@@ -1578,6 +1612,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // tracking is unchanged (still one shared date per project).
   useEffect(() => {
     if (canAdmin === false) return;
+    // Debounced: `tasks` gets a new reference on every single field edit
+    // (status, due date, assignee, priority — the app's most common click),
+    // and this used to redo its full-table pass plus a clients×users
+    // reconcile loop synchronously on every one of those. A burst of quick
+    // edits now coalesces into one pass after things settle, instead of one
+    // per keystroke/click — same eventual result (diff-then-write already
+    // made repeated runs idempotent), just not paid for on every click.
+    const timer = setTimeout(() => {
     const soonestByClientMember = new Map<string, string>(); // key `${clientId}|${memberId}`
     const soonestByProject = new Map<string, string>();
     for (const t of tasks) {
@@ -1610,6 +1652,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       const soonest = soonestByProject.get(p.id);
       if (soonest && soonest !== (p.followUpAt ?? null)) setProjectFollowUp(p.id, soonest);
     }
+    }, 400);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks, clients, projects, users, canAdmin]);
   // Sub-accounts (Agency/Directory) are the contact source; clients (cl_*) are contacts you've added.
@@ -1658,7 +1702,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // can point this at a teammate instead of yourself.
   // Reads workableClients, not clientList: a prospect you've been assigned
   // a task on is real work and belongs on your board.
-  const assignedClientsFor = (userId: string) => workableClients.filter((c) => scopedTasks.some((t) => t.clientId === c.id && t.status !== "done" && (t.assigneeId === userId || t.subtasks.some((s) => s.assigneeId === userId))) || (c.assignedTo ?? []).includes(userId));
+  const assignedClientsFor = (userId: string) => workableClients.filter((c) => (scopedTasksByClientId.get(c.id) ?? []).some((t) => t.status !== "done" && (t.assigneeId === userId || t.subtasks.some((s) => s.assigneeId === userId))) || (c.assignedTo ?? []).includes(userId));
   // Same rule, applied to projects — but only "Projects" in Derek's sense
   // (the sidebar's Administration/Idea board/etc. list, i.e. workspaceProjects
   // above — not tied to a real GHL client). A client's own internal
@@ -1671,7 +1715,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // non-client-scoped ids explicitly instead. A project with no assignedTo
   // field yet (pre-migration rows) just falls back to an empty follow-list,
   // matching rowToProject's `?? []`.
-  const assignedProjectsFor = (userId: string) => projects.filter((p) => (p.clientId === WORKSPACE_CLIENT_ID || p.clientId === PERSONAL_CLIENT_ID) && (scopedTasks.some((t) => t.projectId === p.id && t.status !== "done" && (t.assigneeId === userId || t.subtasks.some((s) => s.assigneeId === userId))) || (p.assignedTo ?? []).includes(userId)));
+  const assignedProjectsFor = (userId: string) => projects.filter((p) => (p.clientId === WORKSPACE_CLIENT_ID || p.clientId === PERSONAL_CLIENT_ID) && ((scopedTasksByProjectId.get(p.id) ?? []).some((t) => t.status !== "done" && (t.assigneeId === userId || t.subtasks.some((s) => s.assigneeId === userId))) || (p.assignedTo ?? []).includes(userId)));
   // Memoized — always computed every render (unconditionally, regardless of
   // clientListScope) via assignedClientsFor, which scans scopedTasks per
   // workable client. Same class of bug as myWorkGroups: this ran on every
@@ -1687,11 +1731,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // in this app already uses (open task assignee/subtask assignee, or
   // explicitly following) — restricted to active_client status only, since
   // this is a review-the-active-roster view, not a full pipeline dump.
-  const teamActiveClients = useMemo(
-    () => users.map((u) => ({ member: u, clients: assignedClientsFor(u.id).filter((c) => c.status === "active_client").sort((a, b) => a.name.localeCompare(b.name)) })),
+  // Gated on the "By teammate" tab actually being open — its only consumer
+  // (ClientsDirectory's teamGroups prop) — same reasoning as completionLog
+  // below: an O(users × clients × tasks) scan isn't worth paying on every
+  // task edit while looking at some other view entirely.
+  const teamActiveClients = useMemo(() => {
+    if (!(dirView === "clients" && clientsGroupBy === "team")) return [];
+    return users.map((u) => ({ member: u, clients: assignedClientsFor(u.id).filter((c) => c.status === "active_client").sort((a, b) => a.name.localeCompare(b.name)) }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [scopedTasks, clients, users]
-  );
+  }, [dirView, clientsGroupBy, scopedTasks, clients, users]);
   // "Completed" log — who marked what done, and when. Lives under My Work
   // now (Derek: "makes more sense there"), not the Clients directory. No new
   // schema needed: every status change already writes a plain "kind: event"
@@ -1787,11 +1835,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return [...base.filter((c) => starred.has(c.id)), ...base.filter((c) => !starred.has(c.id))];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientListBase, clientSort, clientUsed, starred, manualOrder, scopedTasks, tasks, clients, projects, me.id]);
-  function clientTaskCountRef(clientId: string) { return scopedTasks.filter((t) => t.clientId === clientId).length; }
+  function clientTaskCountRef(clientId: string) { return (scopedTasksByClientId.get(clientId) ?? []).length; }
+  const unreadContactIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const m of messages) if (m.direction === "inbound" && !m.read) s.add(m.contactId);
+    return s;
+  }, [messages]);
   function hasUnreadMessage(clientId: string): boolean {
     if (!clientId.startsWith("cl_")) return false;
     const contactId = clientId.slice(3);
-    return messages.some((m) => m.contactId === contactId && m.direction === "inbound" && !m.read);
+    return unreadContactIds.has(contactId);
   }
   // The tier-0 "New message" boost in clientUrgencyKey is driven by an open
   // Conversation-priority task (the priority-system source of truth for "a
@@ -1799,7 +1852,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // boosted for as long as its task is open, even after the message itself
   // is marked read, and clears only when the task is completed.
   function hasOpenConversationTask(clientId: string): boolean {
-    return scopedTasks.some((t) => t.clientId === clientId && t.status !== "done" && t.priority === "conversation");
+    return (scopedTasksByClientId.get(clientId) ?? []).some((t) => t.status !== "done" && t.priority === "conversation");
   }
   // The Review/Check-in tier (Derek + Justin, Jul 17): a client with open work
   // but nothing actually dated silently sinks to the bottom and gets
@@ -1817,7 +1870,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const c = clientById(clientId);
     if (!c) return false;
     if (hasOpenConversationTask(clientId)) return false;
-    const open = scopedTasks.filter((t) => t.clientId === clientId && t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
+    const open = (scopedTasksByClientId.get(clientId) ?? []).filter((t) => t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
     const hasFollowUp = forAssignee ? !!c.followUpBy?.[forAssignee] : Object.values(c.followUpBy ?? {}).some(Boolean);
     const hasAnyDate = open.some((t) => t.due) || hasFollowUp;
     const reviewedThisWeek = !!c.reviewedAt && c.reviewedAt >= THIS_MONDAY;
@@ -1829,7 +1882,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   function projectNeedsReview(projectId: string, forAssignee?: string): boolean {
     const p = projectById(projectId);
     if (!p) return false;
-    const open = scopedTasks.filter((t) => t.projectId === projectId && t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
+    const open = (scopedTasksByProjectId.get(projectId) ?? []).filter((t) => t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
     const hasAnyDate = open.some((t) => t.due) || !!p.followUpAt;
     const reviewedThisWeek = !!p.reviewedAt && p.reviewedAt >= THIS_MONDAY;
     return open.length > 0 && !hasAnyDate && !reviewedThisWeek;
@@ -1854,7 +1907,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   function clientUrgencyKey(clientId: string, forAssignee?: string): { tier: number; due: string; priorityRank: number } {
     if (clientNeedsReview(clientId, forAssignee)) return { tier: 0, due: "", priorityRank: 0 };
     if (hasOpenConversationTask(clientId)) return { tier: 1, due: "", priorityRank: 0 };
-    const open = scopedTasks.filter((t) => t.clientId === clientId && t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
+    const open = (scopedTasksByClientId.get(clientId) ?? []).filter((t) => t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
     // Follow-up date is one more urgency candidate alongside task due dates —
     // "whichever is soonest wins." Deliberately does NOT also scan this
     // client's projects' own follow-up dates (unlike tasks, which already
@@ -1886,7 +1939,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // concept, not a project one.
   function projectUrgencyKey(projectId: string, forAssignee?: string): { tier: number; due: string; priorityRank: number } {
     if (projectNeedsReview(projectId, forAssignee)) return { tier: 0, due: "", priorityRank: 0 };
-    const open = scopedTasks.filter((t) => t.projectId === projectId && t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
+    const open = (scopedTasksByProjectId.get(projectId) ?? []).filter((t) => t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
     // Same rule as clientUrgencyKey: only counts per-assignee when nobody
     // currently has a dated open task in this project.
     const followUp = projectById(projectId)?.followUpAt;
@@ -1912,7 +1965,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!task.due) return { tier: 9, due: "", priorityRank: PRIORITY_META[task.priority].rank };
     return { tier: tierForDate(task.due), due: task.due, priorityRank: PRIORITY_META[task.priority].rank };
   }
-  const projectTaskCount = (projectId: string) => scopedTasks.filter((t) => t.projectId === projectId && t.status !== "done").length;
+  const projectTaskCount = (projectId: string) => (scopedTasksByProjectId.get(projectId) ?? []).filter((t) => t.status !== "done").length;
   // Same "Overdue first" urgency ordering the Clients section gets when
   // clientSort === "urgent" — the sidebar's Projects section had no sort at
   // all before this. Same comparator as myWorkGroups/sortedClients's
@@ -2185,13 +2238,23 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // attachments, task comment images, and Chat message images — collected
   // into one flat list for the Vault tab. Only computed when the Vault tab
   // is reachable at all (a real client, not "All tasks"/My Work/etc.).
-  const activeVaultFolders = activeClient === "all" ? [] : vaultFolders.filter((f) => f.clientId === activeClient);
-  const vaultItems: VaultItem[] = activeClient === "all" ? [] : [
+  // Memoized: the Tasks/Journal/Vault switcher shows this count on every
+  // sub-tab (not just Vault), so it can't be gated on clientTab === "vault"
+  // — but it doesn't need to redo the attachment/comment flatMap on every
+  // unrelated Cockpit render either, only when the underlying data changes.
+  const activeVaultFolders = useMemo(
+    () => (activeClient === "all" ? [] : vaultFolders.filter((f) => f.clientId === activeClient)),
+    [activeClient, vaultFolders]
+  );
+  const vaultItems: VaultItem[] = useMemo(() => (activeClient === "all" ? [] : [
     ...baseTasks.flatMap((t) => t.attachments.map((a) => ({ ...a, sourceLabel: t.title, onOpenSource: () => { setClientTab("tasks"); setOpenTaskId(t.id); }, onSetFolder: (folderId: string | null) => setTaskAttachmentFolder(t.id, a.id, folderId) }))),
     ...baseTasks.flatMap((t) => t.comments.flatMap((c) => (c.attachments ?? []).map((a) => ({ ...a, sourceLabel: t.title, onOpenSource: () => { setClientTab("tasks"); setOpenTaskId(t.id); }, onSetFolder: (folderId: string | null) => setCommentAttachmentFolder(t.id, c.id, a.id, folderId) })))),
     ...clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId))
       .flatMap((n) => (n.attachments ?? []).map((a) => ({ ...a, sourceLabel: "Journal", onOpenSource: () => setClientTab("chat"), onSetFolder: (folderId: string | null) => setNoteAttachmentFolder(n, a.id, folderId) }))),
-  ];
+  ]),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeClient, activeProject, baseTasks, clientNotes]
+  );
   const projectsForClient = (clientId: string) => projects.filter((p) => p.clientId === clientId);
   const foldersForClient = (clientId: string) => folders.filter((f) => f.clientId === clientId).sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt));
   const stagesForProject = (projectId: string) => stages.filter((s) => s.projectId === projectId).sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt));
@@ -2200,7 +2263,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Open (non-done) count — matches what the client's task list actually shows
   // with "Hide done" on by default, so the sidebar/board badge and the list
   // never disagree about how many tasks "need attention".
-  const clientTaskCount = (clientId: string) => scopedTasks.filter((t) => t.clientId === clientId && t.status !== "done").length;
+  const clientTaskCount = (clientId: string) => (scopedTasksByClientId.get(clientId) ?? []).filter((t) => t.status !== "done").length;
   // Open tasks bucketed by client, for the Clients directory's Tasks
   // column. One pass instead of a filter per row.
   // Not memoized: useMemo over a bucketing loop trips
@@ -2256,7 +2319,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       setProjects((ps) => [...ps, p]);
       projectWrite = upsertProject(p);
     }
-    const byKey = new Map(tasks.filter((t) => t.clientId === clientId && t.playbookStepKey).map((t) => [t.playbookStepKey as string, t]));
+    const byKey = new Map((playbookTasksByClient.get(clientId) ?? []).map((t) => [t.playbookStepKey as string, t]));
     const toWrite: Task[] = [];
     // The sales pipeline stages and the A2P/email-domain/ongoing side quests
     // all ride the same reconciliation as the main growth plan
@@ -2462,6 +2525,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const navTaskIds = navSnapshot.taskId === openTaskId ? navSnapshot.ids : orderedTaskIds;
   const openTaskIdx = openTaskId ? navTaskIds.indexOf(openTaskId) : -1;
   const goToTask = (delta: number) => { if (openTaskIdx < 0) return; const next = navTaskIds[openTaskIdx + delta]; if (next) setOpenTaskId(next); };
+  // Was built inline in JSX as navTaskIds.map(id => tasks.find(...)) — a
+  // linear search through the full ~28k-row task table per id in the
+  // currently displayed list, unmemoized, rerunning on every render while
+  // the drawer stayed open (any realtime update, any keystroke elsewhere).
+  // tasksById makes each lookup O(1); memoized so it only rebuilds when the
+  // nav list or the task table actually changes.
+  const navTasks = useMemo(
+    () => navTaskIds.map((id) => tasksById.get(id)).filter((t): t is Task => !!t),
+    [navTaskIds, tasksById]
+  );
   useEffect(() => {
     if (!openTaskId) return;
     const onKey = (e: KeyboardEvent) => {
@@ -4970,7 +5043,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       {openTask && (
         <TaskDrawer task={openTask} clientById={clientById} projectById={projectById} contactById={contactById}
           full={drawerFull} onToggleFull={toggleDrawerFull}
-          navIndex={openTaskIdx} navTotal={navTaskIds.length} navTasks={navTaskIds.map((id) => tasks.find((t) => t.id === id)).filter((t): t is Task => !!t)} onOpenTask={setOpenTaskId} onAddSibling={(title) => addTaskToList(openTask.clientId, openTask.projectId, openTask.private, title)} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
+          navIndex={openTaskIdx} navTotal={navTaskIds.length} navTasks={navTasks} onOpenTask={setOpenTaskId} onAddSibling={(title) => addTaskToList(openTask.clientId, openTask.projectId, openTask.private, title)} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(body, attachments) => addComment(openTask.id, body, attachments)}
           onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onDownloadAll={downloadAllAsZip} zippingIds={zippingIds} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { if (openTask.playbookStepKey) { pushToast("Playbook steps can't be moved to a different list."); return; } patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null })} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} onMarkChannelRead={(channel) => markTaskChannelRead(openTask.id, channel)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} onScheduleTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, scheduledAt, attachments, cc, bcc) => scheduleMessage(openTask.clientId, channel, subject, body, scheduledAt, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId)} draftingMessage={draftingMessage} onGetTaskLink={() => getClientShareUrl(openTask.clientId, { projectId: openTask.projectId, taskId: openTask.id })} canAdmin={canAdmin} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onCopyClientLink={() => copyClientShareLink(openTask.clientId, openTask.projectId)} onDraftDescription={draftDescription} draftingDescription={draftingDescription} onRegenerateAiSummary={() => regenerateAiSummary(openTask.clientId)} aiSummaryBusy={aiSummaryBusyId === openTask.clientId} pushToast={pushToast} />
       )}
