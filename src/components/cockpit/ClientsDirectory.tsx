@@ -254,7 +254,11 @@ export function ClientsDirectory({
                         <span className="block truncate text-[14.5px] font-medium">{r.clientName}</span>
                         <span className="block truncate text-[12.5px] text-muted">{r.authorName}</span>
                       </span>
-                      <span className="shrink-0 text-[12.5px] text-muted" title={new Date(r.at).toLocaleString()}>{timeAgo(r.at)}</span>
+                      <span className="shrink-0 text-[12.5px] text-muted" title={timeAgo(r.at)}>
+                        {new Date(r.at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                        {" · "}
+                        {new Date(r.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+                      </span>
                     </div>
                   ))}
                 </div>
