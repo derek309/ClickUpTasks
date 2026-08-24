@@ -44,6 +44,59 @@ function EventValuePill({ diff }: { diff: { field: string; to: string } }) {
   );
 }
 
+// GHL message bodies routinely embed a raw media URL inline in the text
+// (e.g. a logo/invoice send is "Location logo [https://storage...png]
+// INVOICE FOR BRIAN Hi..."), which used to render as three lines of URL
+// ahead of one line of actual content. Pulled out here so any bare URL
+// becomes either an image card or a domain chip instead of raw text.
+const URL_RE = /https?:\/\/[^\s<>"')\]]+/gi;
+const IMAGE_URL_RE = /\.(png|jpe?g|gif|webp|svg|bmp|heic)(\?[^\s]*)?$/i;
+
+function splitMessageUrls(rawText: string): { cleanText: string; imageUrls: string[]; linkUrls: string[] } {
+  const imageUrls: string[] = [];
+  const linkUrls: string[] = [];
+  const cleanText = rawText
+    .replace(URL_RE, (url) => {
+      (IMAGE_URL_RE.test(url) ? imageUrls : linkUrls).push(url);
+      return "";
+    })
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .split("\n").map((l) => l.trim()).join("\n")
+    .trim();
+  return { cleanText, imageUrls, linkUrls };
+}
+
+function urlFilename(url: string): string {
+  try { return decodeURIComponent(new URL(url).pathname.split("/").pop() || url); } catch { return url; }
+}
+function urlDomain(url: string): string {
+  try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return url; }
+}
+
+// An attachment card for a bare image URL found in a message body — same
+// visual language as a real Attachment, but there's no Attachment record
+// behind it (it's text GHL embedded, not a file we stored), so this is a
+// lighter-weight standalone tile rather than reusing AttachmentTile.
+function UrlImageCard({ url }: { url: string }) {
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className="group relative block h-16 w-16 overflow-hidden rounded-lg border bg-background" title={urlFilename(url)}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={url} alt={urlFilename(url)} className="h-full w-full object-cover" />
+      <span className="absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 py-0.5 text-[10px] text-white opacity-0 group-hover:opacity-100">{urlFilename(url)}</span>
+    </a>
+  );
+}
+// Any other bare URL in a body → a small chip naming just the domain,
+// never the raw link text (acceptance: no raw URL over 40 chars visible).
+function UrlLinkChip({ url }: { url: string }) {
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-[13px] font-medium text-accent hover:underline">
+      <I.link className="h-3 w-3" /> {urlDomain(url)}
+    </a>
+  );
+}
+
 type Channel = "activity" | "chat" | "email" | "sms";
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -479,10 +532,34 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
   // ---- Merged feed ----
   type FeedItem =
     | { at: string; kind: "comment" | "event"; channel: "activity"; comment: Comment }
-    | { at: string; kind: "message"; channel: "chat" | "email" | "sms"; message: Message };
+    | { at: string; kind: "message"; channel: "chat" | "email" | "sms"; message: Message; dupeCount?: number };
+
+  // Two byte-identical sends (a genuine GHL double-send, not just a display
+  // quirk — see the item-2 write-up) shouldn't read as two separate
+  // messages. Collapses only truly adjacent messages in the sorted feed —
+  // a comment or another channel's message in between breaks the run, same
+  // as a person scanning the thread would expect. Display-layer only: the
+  // underlying duplicate rows are untouched.
+  function collapseDuplicateMessages(items: FeedItem[]): FeedItem[] {
+    const out: FeedItem[] = [];
+    for (const item of items) {
+      const prev = out[out.length - 1];
+      if (
+        item.kind === "message" && prev?.kind === "message" &&
+        item.channel === prev.channel && item.message.direction === prev.message.direction &&
+        item.message.body.trim() === prev.message.body.trim() &&
+        Math.abs(new Date(item.at).getTime() - new Date(prev.at).getTime()) <= 10 * 60 * 1000
+      ) {
+        prev.dupeCount = (prev.dupeCount ?? 1) + 1;
+        continue;
+      }
+      out.push(item.kind === "message" ? { ...item } : item);
+    }
+    return out;
+  }
 
   const q = searchQuery.trim().toLowerCase();
-  const mergedFeedItems: FeedItem[] = [
+  const mergedFeedItems: FeedItem[] = collapseDuplicateMessages([
     ...(visibleChannels.has("activity") ? task.comments.map((c) => ({ at: c.at, kind: (c.kind === "event" ? "event" : "comment") as "event" | "comment", channel: "activity" as const, comment: c })) : []),
     ...(messages ?? [])
       .filter((m): m is Message & { channel: "chat" | "email" | "sms" } => m.channel !== "call" && visibleChannels.has(m.channel))
@@ -494,7 +571,7 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
       if (item.kind === "comment") return item.comment.body.toLowerCase().includes(q);
       return false;
     })
-    .sort((a, b) => a.at.localeCompare(b.at));
+    .sort((a, b) => a.at.localeCompare(b.at)));
 
   const commentCount = task.comments.filter((c) => c.kind !== "event").length;
   const chatMsgCount = (messages ?? []).filter((m) => m.channel === "chat").length;
@@ -577,10 +654,12 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
   const replyableChannel = (ch: MessageChannel): Channel | undefined =>
     ch === "chat" ? "email" : ch === "email" || ch === "sms" ? ch : undefined;
 
-  const renderMessageItem = (m: Message, gap: string) => {
+  const renderMessageItem = (m: Message, gap: string, dupeCount?: number) => {
     const dotColor = m.channel === "email" ? "#3b82f6" : m.channel === "chat" ? "#e87722" : "#22c55e";
     const channelLabel = m.channel === "email" ? "Email" : m.channel === "chat" ? "Chat" : "SMS";
     const isReplyingHere = replyingTo?.id === m.id;
+    const rawBodyText = m.body?.trim() ? (looksLikeHtml(m.body) ? htmlToText(m.body) : m.body) : "";
+    const { cleanText, imageUrls, linkUrls } = splitMessageUrls(rawBodyText);
     return (
       <div key={m.id} className={`relative ${gap}`}>
         <div className="relative flex gap-3">
@@ -593,6 +672,9 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
                 <span className="inline-flex items-center gap-1"><Avatar id={m.createdBy} size={14} /> {userById(m.createdBy)?.name ?? "Unknown"}</span>
               )}
               <span>· {timeAgo(m.at)}</span>
+              {dupeCount && dupeCount > 1 && (
+                <span className="inline-flex items-center rounded-full bg-background px-1.5 py-0 text-[12px] font-semibold text-muted" title={`Collapsed ${dupeCount} identical sends within 10 minutes`}>sent {dupeCount}×</span>
+              )}
               {!m.read && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-1.5 py-0 text-[12px] font-semibold text-accent">
                   <span className="h-1.5 w-1.5 rounded-full bg-accent" /> New
@@ -638,9 +720,19 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
               // this only ever labels a genuine gap in what GHL handed back.
               <div className="mt-1 text-[15px] italic text-muted">No content synced from GoHighLevel for this message.</div>
             ) : (
-              looksLikeHtml(m.body)
-                ? <div className="rte-content mt-1 text-[16px]" dangerouslySetInnerHTML={{ __html: m.body }} />
-                : <CollapsibleText text={m.body} className="mt-1 text-[16px]" />
+              <>
+                {cleanText && <CollapsibleText text={cleanText} className="mt-1 text-[16px]" />}
+                {imageUrls.length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {imageUrls.map((url) => <UrlImageCard key={url} url={url} />)}
+                  </div>
+                )}
+                {linkUrls.length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {linkUrls.map((url) => <UrlLinkChip key={url} url={url} />)}
+                  </div>
+                )}
+              </>
             )}
             {m.attachments && m.attachments.length > 0 && (
               <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -681,7 +773,7 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
       {mergedFeedItems.length > 0 && <div className="absolute bottom-2 left-4 top-2 w-px bg-border" />}
       {mergedFeedItems.map((item, i) => {
         const gap = i === mergedFeedItems.length - 1 ? "" : "pb-3";
-        if (item.kind === "message") return renderMessageItem(item.message, gap);
+        if (item.kind === "message") return renderMessageItem(item.message, gap, item.dupeCount);
         if (item.kind === "event") {
           const c = item.comment; const u = userById(c.authorId); const diff = parseEventDiff(c.body);
           return (

@@ -153,3 +153,20 @@ body {
   background: var(--surface);
   color: var(--foreground);
 }
+
+/* Item 8 of the Phase 1 redesign brief: there was no visible focus state
+   anywhere in the app (buttons, rows, chips, menu items, toggles all used
+   the UA default, which most of our own resets/appearance:none styling
+   quietly strips). :focus-visible only shows the ring for keyboard focus
+   (Tab), not for a mouse click, so this doesn't add a ring around every
+   button someone taps with a mouse. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent, #4f46e5);
+  outline-offset: 2px;
+  border-radius: 4px;
+}

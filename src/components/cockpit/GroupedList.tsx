@@ -5,17 +5,21 @@
 import { useRef, useState } from "react";
 import {
   users, formatDue, isOverdue, TODAY, timeAgo, userById, clientInitials,
-  PRIORITY_META, manualPriorityOptions,
+  PRIORITY_META,
   STATUS_META, STATUS_ORDER, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence,
   PLAYBOOK_STEP_BY_KEY,
-  type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus,
+  type Task, type Recurrence, type Client, type Project, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, LabelChips, CollapsibleText, COL_WIDTHS, LIST_COLUMNS } from "./ui";
 
 // --- grouped list view (ClickUp-style: group, quick-add, expandable subtasks) --
 
-export function GroupedList({ groups, showClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onDeleteSub, onAddComment, hideEmpty, highlightDelegateFor, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect }: {
+export function GroupedList({ groups, showClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onDeleteSub, onAddComment, hideEmpty, highlightDelegateFor, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId }: {
   groups: { key: string; label: string; color: string; tasks: Task[] }[];
+  // The signed-in user — the row's assignee avatar only renders when the
+  // task is assigned to someone else; seeing your own face on every one of
+  // your own rows added nothing.
+  meId?: string;
   showClient: boolean; clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null;
   visibleCols: string[]; sortKey: string; sortDir: "asc" | "desc"; onSort: (key: string) => void;
   onOpen: (id: string) => void; onPatch: (taskId: string, patch: Partial<Task>) => void; canQuickAdd: boolean; quickAddHint: string; onQuickAdd: (groupKey: string, title: string) => void;
@@ -139,7 +143,7 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
               {!collapsedG.has(g.key) && (
                 <div>
                   {g.tasks.map((t) => (
-                    <TaskRow key={t.id} task={t} template={template} cols={cols} showClient={showClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} onAddComment={onAddComment} delegated={!!highlightDelegateFor && t.assigneeId !== highlightDelegateFor && t.subtasks.some((s) => s.assigneeId === highlightDelegateFor)}
+                    <TaskRow key={t.id} task={t} template={template} cols={cols} showClient={showClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} onAddComment={onAddComment} meId={meId} delegated={!!highlightDelegateFor && t.assigneeId !== highlightDelegateFor && t.subtasks.some((s) => s.assigneeId === highlightDelegateFor)}
                       selected={!!selectedIds?.has(t.id)} onToggleSelect={onToggleSelect ? (e) => handleSelectClick(t.id, e) : undefined}
                       draggable={!!onDropInGroup || !!onMergeTasks} onDragStart={() => setDragTaskId(t.id)} onDragEnd={() => { setDragTaskId(null); setDragOverKey(null); setDragOverTaskId(null); }}
                       isMergeDropTarget={dragOverTaskId === t.id}
@@ -169,9 +173,9 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   );
 }
 
-function TaskRow({ task, template, cols, showClient, clientById, projectById, contactById, onOpen, onPatch, onAddComment, delegated, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
+function TaskRow({ task, template, cols, showClient, clientById, projectById, contactById, onOpen, onPatch, onAddComment, meId, delegated, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
   task: Task; template: string; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean;
-  clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void; onAddComment: (taskId: string, body: string) => void; delegated?: boolean;
+  clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void; onAddComment: (taskId: string, body: string) => void; meId?: string; delegated?: boolean;
   selected?: boolean; onToggleSelect?: (e: React.MouseEvent) => void;
   draggable?: boolean; onDragStart?: () => void; onDragEnd?: () => void;
   // Drop-onto-this-row-to-merge — independent of the drag-to-reorder-groups
@@ -185,16 +189,19 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
   const overdue = isOverdue(task.due) && task.status !== "done";
   const doneSubs = task.subtasks.filter((x) => x.done).length;
   const crumb = project && project.name !== "Tasks" ? project.name : "";
+  const commentCount = task.comments.filter((c) => c.kind !== "event").length;
+  // Priority used to be its own column; it's now a 3px bar on the row's
+  // leading edge so it reads at a glance without repeating the group
+  // heading when a view is already grouped by priority.
+  const priorityBarColor = task.priority !== "none" ? PRIORITY_META[task.priority].color : "transparent";
   // The payoff for this Playbook step, surfaced right on the row — so an
   // ambassador scanning the list before walking into a business sees "if
   // they do this, they get that" without opening every task individually.
   const playbookStep = task.playbookStepKey ? PLAYBOOK_STEP_BY_KEY.get(task.playbookStepKey) : undefined;
   const cell = (key: string) => {
     if (key === "status") return <InlineStatus value={task.status} onChange={(s) => onPatch(task.id, { status: s })} />;
-    if (key === "priority") return <InlinePriority value={task.priority} onChange={(p) => onPatch(task.id, { priority: p })} />;
     if (key === "assignee") return <InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a, waitingOnClient: false })} onSetWaiting={() => onPatch(task.id, { waitingOnClient: true, assigneeId: null })} />;
     if (key === "due") return <InlineDue value={task.due} overdue={overdue} recurrence={task.recurrence} onChange={(d) => onPatch(task.id, { due: d })} onRecurrenceChange={(r) => onPatch(task.id, { recurrence: r })} />;
-    if (key === "comments") return <InlineComments task={task} onAddComment={onAddComment} />;
     if (key === "contact") { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return <span className="truncate text-[11px] text-muted">{ct?.name ?? "—"}</span>; }
     if (key === "labels") return <LabelChips ids={task.labelIds} />;
     return null;
@@ -205,7 +212,8 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
         onDragOver={(e) => { if (onRowDragOver) { e.preventDefault(); onRowDragOver(); } }}
         onDragLeave={onRowDragLeave}
         onDrop={(e) => { if (onRowDrop) { e.preventDefault(); onRowDrop(); } }}
-        className={`group/tr flex flex-col gap-1.5 border-b px-4 py-3 transition-colors last:border-0 hover:bg-accent-soft/50 sm:grid sm:min-h-[46px] sm:items-center sm:gap-2 sm:py-2 ${delegated ? "border-l-[3px] border-l-accent bg-accent-soft/30" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${isMergeDropTarget ? "ring-2 ring-inset ring-accent" : ""}`} style={{ gridTemplateColumns: template }}>
+        className={`group/tr flex flex-col gap-1 border-b border-l-[3px] px-4 py-2 transition-colors last:border-0 hover:bg-accent-soft/50 sm:grid sm:min-h-[40px] sm:items-center sm:gap-2 sm:py-1.5 ${delegated ? "border-l-accent bg-accent-soft/30" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${isMergeDropTarget ? "ring-2 ring-inset ring-accent" : ""}`}
+        style={{ gridTemplateColumns: template, borderLeftColor: delegated ? undefined : priorityBarColor }}>
         <div className="flex min-w-0 items-center gap-0.5">
           {onToggleSelect && (
             <button onClick={(e) => { e.stopPropagation(); onToggleSelect(e); }} title="Select — shift-click to select a range"
@@ -214,7 +222,9 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
             </button>
           )}
           <button onClick={onToggleExpand} className={`shrink-0 rounded p-0.5 text-muted hover:text-foreground ${task.subtasks.length ? "" : "opacity-0 group-hover/tr:opacity-40"}`} title="Subtasks"><I.chevron className={`transition ${expanded ? "-rotate-90" : "rotate-180"}`} /></button>
-          <InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a, waitingOnClient: false })} onSetWaiting={() => onPatch(task.id, { waitingOnClient: true, assigneeId: null })} size={36} />
+          {(task.waitingOnClient || (task.assigneeId && task.assigneeId !== meId)) && (
+            <InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a, waitingOnClient: false })} onSetWaiting={() => onPatch(task.id, { waitingOnClient: true, assigneeId: null })} size={30} />
+          )}
           <button onClick={onOpen} className="flex min-w-0 flex-1 flex-col justify-center py-0.5 pl-1 text-left">
             {/* Project crumb is redundant once the Client column is already
                 shown (My Work, All tasks) — keep it only in single-client
@@ -225,6 +235,7 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
               <span className="line-clamp-none min-w-0 flex-1 break-words text-[15px] font-medium leading-snug sm:line-clamp-2" title={task.title}>{task.title}</span>
               {task.recurrence !== "none" && <span title={describeRecurrence(task.recurrence, task.recurrenceInterval, task.recurrenceUnit, task.recurrenceDaysOfMonth)}><I.repeat className="shrink-0 text-muted" /></span>}
               {task.attachments.length > 0 && <I.clip className="shrink-0 text-muted" />}
+              {commentCount > 0 && <InlineComments task={task} onAddComment={onAddComment} />}
               {task.subtasks.length > 0 && <span className="inline-flex shrink-0 items-center gap-0.5 text-[11px] text-muted"><I.check />{doneSubs}/{task.subtasks.length}</span>}
             </span>
             {playbookStep?.youGet && task.status !== "done" && (
@@ -289,34 +300,6 @@ function InlineStatus({ value, onChange }: { value: TaskStatus; onChange: (s: Ta
           {STATUS_ORDER.map((s) => (
             <button key={s} onClick={(e) => { e.stopPropagation(); onChange(s); setOpen(false); }} className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[15px] hover:bg-background">
               <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[s].dot }} /> {STATUS_META[s].label}
-            </button>
-          ))}
-        </div>
-      </>)}
-    </div>
-  );
-}
-
-// Conversation is auto-created-only (see PRIORITY_META doc comment in
-// data.ts) — it's hidden from this manual picker unless it's already the
-// task's current value, so an existing conversation task can still be
-// displayed/reselected but a person can't manually assign it to a new task.
-function InlinePriority({ value, onChange }: { value: Priority; onChange: (p: Priority) => void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLButtonElement>(null);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-  const options = manualPriorityOptions(value);
-  return (
-    <div className="relative">
-      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 128, options.length * 32 + 8)); setOpen((o) => !o); }} className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[13px] font-medium hover:bg-background" style={{ color: value === "none" ? "var(--muted)" : PRIORITY_META[value].color }}>
-        {value === "none" ? "—" : (<><I.flag />{PRIORITY_META[value].label}</>)}
-      </button>
-      {open && (<>
-        <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
-        <div style={{ position: "fixed", top: pos.top, left: pos.left, width: 128 }} className="z-40 rounded-lg border bg-surface p-1 shadow-lg">
-          {options.map((p) => (
-            <button key={p} onClick={(e) => { e.stopPropagation(); onChange(p); setOpen(false); }} className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[15px] hover:bg-background" style={{ color: p === "none" ? "var(--muted)" : PRIORITY_META[p].color }}>
-              {p !== "none" && <I.flag />} {PRIORITY_META[p].label}
             </button>
           ))}
         </div>
@@ -445,7 +428,11 @@ export function InlineDue({ value, overdue, recurrence = "none", recurrenceInter
     }
     setOpen(true);
   };
-  const tone = overdue ? "font-medium text-danger" : strong ? (value ? "font-semibold text-accent" : "font-medium text-accent/70") : "text-muted";
+  // Amber only for a genuinely near date — not "any date that isn't
+  // overdue," which would paint every far-future due date the same urgent
+  // color as one due tomorrow.
+  const dueThisWeek = !!value && !overdue && value >= TODAY && value <= addDaysIso(TODAY, 7);
+  const tone = overdue ? "font-medium text-danger" : strong ? (value ? "font-semibold text-accent" : "font-medium text-accent/70") : dueThisWeek ? "font-medium text-amber-600" : "text-muted";
   return (
     <>
       <button ref={ref} onClick={openIt} className={`inline-flex items-center gap-1 rounded px-1 py-0.5 text-[11px] hover:bg-background ${tone}`}>

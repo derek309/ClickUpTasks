@@ -236,13 +236,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [filters, setFilters] = useState<FilterState>({ status: "all", assignee: "all", priority: "all" });
   const [sortBy, setSortBy] = useState<SortBy>("due");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
-  const [visibleCols, setVisibleCols] = useState<string[]>(["status", "due", "priority", "comments"]);
+  const [visibleCols, setVisibleCols] = useState<string[]>(["status", "due", "contact"]);
   // Manual drag order for list columns — persisted like the other view
   // toggles below. Any key not yet in a saved order (e.g. after adding a new
   // column) falls back to LIST_COLUMNS' own order in reorderCols/colOrder use.
   const [colOrder, setColOrder] = useState<string[]>(LIST_COLUMNS.map((c) => c.key));
   const reorderCols = (keys: string[]) => { setColOrder(keys); try { localStorage.setItem("cut_colOrder", JSON.stringify(keys)); } catch {} };
-  const [filterOpen, setFilterOpen] = useState(false);
+  // The old "Filter & view" popover held Following, group/sort, filter, and
+  // column config all in one 290px panel — split into three focused menus
+  // (item 6) plus Following moving to its own header avatar stack below.
+  const [groupSortOpen, setGroupSortOpen] = useState(false);
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const [followingOpen, setFollowingOpen] = useState(false);
   const [hideEmpty, setHideEmpty] = useState(true);
   const [hideDone, setHideDone] = useState(true);
 
@@ -464,6 +470,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const [manualOrder, setManualOrder] = useState<string[]>([]);
   const [headerMoreOpen, setHeaderMoreOpen] = useState(false);
+  // New Client settings sheet (item 7) — replaces the three standing toggles
+  // that used to live directly in the kebab menu (a menu mixing persistent
+  // toggles with one-shot actions gave no signal about what closes it).
+  const [clientSettingsOpen, setClientSettingsOpen] = useState(false);
 
   // Realtime echo suppression for `clients` writes. Admin-only, low-frequency
   // writes — a short TTL ledger is proportionate here (unlike tasks, which
@@ -2285,16 +2295,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const navTaskIds = navSnapshot.taskId === openTaskId ? navSnapshot.ids : orderedTaskIds;
   const openTaskIdx = openTaskId ? navTaskIds.indexOf(openTaskId) : -1;
   const goToTask = (delta: number) => { if (openTaskIdx < 0) return; const next = navTaskIds[openTaskIdx + delta]; if (next) setOpenTaskId(next); };
-  // Was built inline in JSX as navTaskIds.map(id => tasks.find(...)) — a
-  // linear search through the full ~28k-row task table per id in the
-  // currently displayed list, unmemoized, rerunning on every render while
-  // the drawer stayed open (any realtime update, any keystroke elsewhere).
-  // tasksById makes each lookup O(1); memoized so it only rebuilds when the
-  // nav list or the task table actually changes.
-  const navTasks = useMemo(
-    () => navTaskIds.map((id) => tasksById.get(id)).filter((t): t is Task => !!t),
-    [navTaskIds, tasksById]
-  );
   useEffect(() => {
     if (!openTaskId) return;
     const onKey = (e: KeyboardEvent) => {
@@ -2391,23 +2391,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       if (!isManuallyAssignable(groupKey as Priority)) { pushToast("Interaction is assigned automatically, not manually."); return; }
       patchTask(taskId, { priority: groupKey as Priority });
     }
-  };
-
-  // Add a task straight into a specific list (client + project), used by the
-  // task drawer's sibling-list quick-add. Inherits the list's private flag so
-  // adding under a Personal task stays private.
-  const addTaskToList = (clientId: string, projectId: string, isPrivate: boolean, title: string) => {
-    if (!title.trim()) return;
-    const t: Task = {
-      id: newId("t_"), projectId, clientId, title: title.trim(), description: "",
-      status: "todo", priority: "normal", assigneeId: me.id,
-      contactId: clientId.startsWith("cl_") ? clientId.slice(3) : null,
-      due: null, recurrence: "none", labelIds: [], ghlTaskId: null, private: isPrivate, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
-      createdBy: me.id,
-    };
-    setTasks((ts) => [...ts, t]);
-    upsertTask(t, me.id);
-    maybeCleanupTaskTitle(t.id, t.title, t.description);
   };
 
   const quickAddPersonal = (groupKey: string, title: string) => {
@@ -3705,44 +3688,50 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       </>)}
     </div>
   );
-  const filterControl = (
+  // Following moved out of the filter popover into its own header avatar
+  // stack — "Following" isn't a filter, it's who's watching this client.
+  const followingControl = !personalView && activeClient !== "all" && clientById(activeClient) ? (
     <div className="relative">
-      <button onClick={() => setFilterOpen((o) => !o)} title="Filter & view" className="relative rounded-md border bg-background p-2 text-muted hover:text-foreground">
-        <I.filter />
-        {activeFilterCount > 0 && <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{activeFilterCount}</span>}
+      <button onClick={() => setFollowingOpen((o) => !o)} title="Following" className="flex items-center -space-x-1.5 rounded-md border bg-background px-1.5 py-1 hover:bg-accent-soft">
+        {(clientById(activeClient)!.assignedTo ?? []).length === 0
+          ? <I.user className="text-muted" />
+          : (clientById(activeClient)!.assignedTo ?? []).slice(0, 3).map((uid) => (<Avatar key={uid} id={uid} size={20} />))}
       </button>
-      {filterOpen && (<>
-        <div className="fixed inset-0 z-30" onClick={() => setFilterOpen(false)} />
-        <div className="absolute right-0 z-40 mt-1 w-72 max-w-[calc(100vw-1.5rem)] space-y-2.5 rounded-xl border bg-surface p-3 shadow-xl">
-          {!personalView && activeClient !== "all" && clientById(activeClient) && (
-            <div className="space-y-1.5 border-b pb-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Following</span>
-                {!canAdmin && (
-                  <div className="flex items-center -space-x-1.5">
-                    {(clientById(activeClient)!.assignedTo ?? []).length === 0 && <span className="text-[13px] text-muted">Nobody yet</span>}
-                    {(clientById(activeClient)!.assignedTo ?? []).map((uid) => (<Avatar key={uid} id={uid} size={20} />))}
-                  </div>
-                )}
-              </div>
-              {canAdmin && (
-                <div className="grid grid-cols-2 gap-0.5">
-                  {users.map((u) => {
-                    const on = (clientById(activeClient)!.assignedTo ?? []).includes(u.id);
-                    return (
-                      <button key={u.id} onClick={() => toggleClientAssignment(activeClient, u.id)} className="flex items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-background">
-                        <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "border-accent bg-accent text-white" : "border-border"}`}>{on && <I.check />}</span>
-                        <Avatar id={u.id} size={18} /> <span className="truncate text-[13px]">{u.name}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+      {followingOpen && (<>
+        <div className="fixed inset-0 z-30" onClick={() => setFollowingOpen(false)} />
+        <div className="absolute right-0 z-40 mt-1 w-56 max-w-[calc(100vw-1.5rem)] rounded-xl border bg-surface p-3 shadow-xl">
+          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Following</div>
+          {!canAdmin && (
+            <div className="text-[13px] text-muted">
+              {(clientById(activeClient)!.assignedTo ?? []).length === 0 ? "Nobody yet" : (clientById(activeClient)!.assignedTo ?? []).map((uid) => userById(uid)?.name).filter(Boolean).join(", ")}
             </div>
           )}
+          {canAdmin && (
+            <div className="grid grid-cols-2 gap-0.5">
+              {users.map((u) => {
+                const on = (clientById(activeClient)!.assignedTo ?? []).includes(u.id);
+                return (
+                  <button key={u.id} onClick={() => toggleClientAssignment(activeClient, u.id)} className="flex items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-background">
+                    <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "border-accent bg-accent text-white" : "border-border"}`}>{on && <I.check />}</span>
+                    <Avatar id={u.id} size={18} /> <span className="truncate text-[13px]">{u.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </>)}
+    </div>
+  ) : null;
+  const groupSortControl = (
+    <div className="relative">
+      <button onClick={() => setGroupSortOpen((o) => !o)} title="Group & sort" className="rounded-md border bg-background p-2 text-muted hover:text-foreground"><I.list /></button>
+      {groupSortOpen && (<>
+        <div className="fixed inset-0 z-30" onClick={() => setGroupSortOpen(false)} />
+        <div className="absolute right-0 z-40 mt-1 w-64 max-w-[calc(100vw-1.5rem)] space-y-2.5 rounded-xl border bg-surface p-3 shadow-xl">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Group &amp; sort</span>
-            {(filtersActive || sortBy !== "due" || groupBy !== "priority") && <button onClick={() => { setFilters({ status: "all", assignee: "all", priority: "all" }); setGroupBy("priority"); setSortBy("due"); }} className="text-[13px] font-medium text-accent">Reset</button>}
+            {(sortBy !== "due" || groupBy !== "priority") && <button onClick={() => { setGroupBy("priority"); setSortBy("due"); }} className="text-[13px] font-medium text-accent">Reset</button>}
           </div>
           <label className="flex items-center justify-between gap-3"><span className="text-muted">Group by</span><select value={groupBy} onChange={(e) => setGroupBy(e.target.value as typeof groupBy)} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="status">Status</option><option value="priority">Priority</option><option value="due">Due date</option><option value="project">Project</option></select></label>
           <label className="flex items-center justify-between gap-3"><span className="text-muted">Sort</span><select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="manual">Manual</option><option value="due">Due date</option><option value="priority">Priority</option><option value="title">Task name</option><option value="status">Status</option><option value="assignee">Assignee</option></select></label>
@@ -3754,11 +3743,42 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${hideDone ? "border-accent bg-accent text-white" : "border-border"}`}>{hideDone && <I.check />}</span>
             <span className="text-muted">Hide done tasks</span>
           </button>
-          <div className="border-t pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Filter</div>
+          {activeProject && canAdmin && stagesForProject(activeProject).length === 0 && (
+            <button onClick={() => createStage(activeProject)} className="flex w-full items-center gap-2 rounded border-t px-0 pt-2 text-left text-[13px] font-medium text-accent hover:bg-background">
+              <I.plus /> Set up custom Kanban stages for this list
+            </button>
+          )}
+        </div>
+      </>)}
+    </div>
+  );
+  const filterMenuControl = (
+    <div className="relative">
+      <button onClick={() => setFilterMenuOpen((o) => !o)} title="Filter" className="relative rounded-md border bg-background p-2 text-muted hover:text-foreground">
+        <I.filter />
+        {activeFilterCount > 0 && <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{activeFilterCount}</span>}
+      </button>
+      {filterMenuOpen && (<>
+        <div className="fixed inset-0 z-30" onClick={() => setFilterMenuOpen(false)} />
+        <div className="absolute right-0 z-40 mt-1 w-64 max-w-[calc(100vw-1.5rem)] space-y-2.5 rounded-xl border bg-surface p-3 shadow-xl">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Filter</span>
+            {filtersActive && <button onClick={() => setFilters({ status: "all", assignee: "all", priority: "all" })} className="text-[13px] font-medium text-accent">Clear</button>}
+          </div>
           <label className="flex items-center justify-between gap-3"><span className="text-muted">Status</span><select value={filters.status} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value as FilterState["status"] }))} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="all">All</option>{STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}</select></label>
           <label className="flex items-center justify-between gap-3"><span className="text-muted">Assignee</span><select value={filters.assignee} onChange={(e) => setFilters((f) => ({ ...f, assignee: e.target.value }))} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="all">All</option><option value="unassigned">Unassigned</option><option value="waiting">⏳ Waiting on client</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
           <label className="flex items-center justify-between gap-3"><span className="text-muted">Priority</span><select value={filters.priority} onChange={(e) => setFilters((f) => ({ ...f, priority: e.target.value as FilterState["priority"] }))} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="all">All</option>{PRIORITY_ORDER.filter((p) => p !== "none").map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}</select></label>
-          <div className="border-t pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Columns</div>
+        </div>
+      </>)}
+    </div>
+  );
+  const columnsControl = (
+    <div className="relative">
+      <button onClick={() => setColumnsOpen((o) => !o)} title="Columns & density" className="rounded-md border bg-background p-2 text-muted hover:text-foreground"><I.grid /></button>
+      {columnsOpen && (<>
+        <div className="fixed inset-0 z-30" onClick={() => setColumnsOpen(false)} />
+        <div className="absolute right-0 z-40 mt-1 w-56 max-w-[calc(100vw-1.5rem)] rounded-xl border bg-surface p-3 shadow-xl">
+          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Columns</div>
           <div className="grid grid-cols-2 gap-0.5">
             {LIST_COLUMNS.map((c) => (
               <button key={c.key} onClick={() => toggleCol(c.key)} className="flex items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-background">
@@ -3771,6 +3791,30 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       </>)}
     </div>
   );
+  // Names each active filter as a dismissible chip above the list instead of
+  // an unexplained "3 of 18" count in the header — clicking a chip's × clears
+  // just that filter, Clear resets all three at once.
+  const activeFilterBar = filtersActive ? (
+    <div className="mb-2 flex flex-wrap items-center gap-1.5 px-4 sm:px-0">
+      {filters.status !== "all" && (
+        <span className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-[13px]">Status: {STATUS_META[filters.status].label}
+          <button onClick={() => setFilters((f) => ({ ...f, status: "all" }))} className="text-muted hover:text-foreground"><I.close className="h-3 w-3" /></button></span>
+      )}
+      {filters.assignee !== "all" && (
+        <span className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-[13px]">Assignee: {filters.assignee === "unassigned" ? "Unassigned" : filters.assignee === "waiting" ? "Waiting on client" : userById(filters.assignee)?.name ?? filters.assignee}
+          <button onClick={() => setFilters((f) => ({ ...f, assignee: "all" }))} className="text-muted hover:text-foreground"><I.close className="h-3 w-3" /></button></span>
+      )}
+      {filters.priority !== "all" && (
+        <span className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-[13px]">Priority: {PRIORITY_META[filters.priority].label}
+          <button onClick={() => setFilters((f) => ({ ...f, priority: "all" }))} className="text-muted hover:text-foreground"><I.close className="h-3 w-3" /></button></span>
+      )}
+      <button onClick={() => setFilters({ status: "all", assignee: "all", priority: "all" })} className="text-[13px] font-medium text-accent hover:underline">Clear</button>
+    </div>
+  ) : null;
+  // Hoisted rather than looked up inline inside the settings sheet's JSX —
+  // an IIFE returning JSX there confused the React Compiler into treating it
+  // as a component defined during render.
+  const settingsClient = clientSettingsOpen && activeClient !== "all" ? clientById(activeClient) : null;
   const overflowControl = (
     <div className="relative">
       <button onClick={() => setHeaderMoreOpen((o) => !o)} title="More actions"
@@ -3786,56 +3830,23 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <button onClick={() => { setHeaderMoreOpen(false); openCompose("sms"); }}
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background sm:hidden"><I.comment /> SMS</button>
           )}
+          <div className="px-2.5 pb-0.5 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Share</div>
           <button onClick={() => { setHeaderMoreOpen(false); copyLink({ view: null, client: activeClient, project: activeProject, task: null, clientTab, vaultFolder: null, dm: null }); }}
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy link</button>
           {activeClient !== "all" && !activeProject && clientById(activeClient) && (
             <button onClick={() => { setHeaderMoreOpen(false); copyClientShareLink(activeClient); }} title="A public, no-login link showing this client what we're waiting on them for"
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy client link</button>
           )}
-          {/* Sits with "Copy client link" because it's a setting about that
-              same link. Left open on click (like the Columns toggles) so the
-              checkbox visibly flips instead of the menu vanishing. */}
-          {canAdmin && activeClient !== "all" && !activeProject && clientById(activeClient) && (
-            <button onClick={() => toggleClientCanRequestNewTasks(activeClient)}
-              title="Let this client add their own requests from their client link, instead of only replying to what we send them"
-              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background">
-              <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${clientById(activeClient)?.canRequestNewTasks ? "border-accent bg-accent text-white" : "border-border"}`}>{clientById(activeClient)?.canRequestNewTasks && <I.check />}</span>
-              Client can add requests
-            </button>
-          )}
-          {canAdmin && activeClient !== "all" && !activeProject && clientById(activeClient) && (
-            <button onClick={() => toggleClientShowGrowthPlan(activeClient)}
-              title="Show the growth plan progress card on this client's client link"
-              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background">
-              <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${clientById(activeClient)?.showGrowthPlan ? "border-accent bg-accent text-white" : "border-border"}`}>{clientById(activeClient)?.showGrowthPlan && <I.check />}</span>
-              Client sees growth plan
-            </button>
-          )}
-          {/* Not every business does SMS marketing, so the A2P setup steps
-              and the email domain step are opt in rather than created for
-              everyone (see playbookStepsForClient in data.ts). Sits here
-              because it's the same kind of per client Playbook decision. */}
-          {canAdmin && activeClient !== "all" && !activeProject && clientById(activeClient) && (
-            <button onClick={() => toggleClientDoesA2P(activeClient)}
-              title="Include the A2P texting setup steps in this client's Playbook"
-              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background">
-              <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${clientById(activeClient)?.doesA2P ? "border-accent bg-accent text-white" : "border-border"}`}>{clientById(activeClient)?.doesA2P && <I.check />}</span>
-              Client does A2P texting
-            </button>
-          )}
           {activeClient !== "all" && activeProject && projectById(activeProject) && (
             <button onClick={() => { setHeaderMoreOpen(false); copyProjectShareLink(activeProject); }} title="A separate public link scoped to only this list — nothing else on the client is reachable from it"
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy list link</button>
           )}
-          <button onClick={() => { setHeaderMoreOpen(false); copyClientForClaude(); }}
-            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>✳</span> Copy for Claude</button>
           {canAdmin && (
             <button onClick={() => { setHeaderMoreOpen(false); setLinkModal({}); }}
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.plus /> Add quick link</button>
           )}
-          {canAdmin && !activeProject && activeClient.startsWith("cl_") && clientById(activeClient) && (
-            <button onClick={() => { setHeaderMoreOpen(false); setMergeClientState({ a: clientById(activeClient)! }); }}
-              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.repeat /> Merge with another client…</button>
+          {(ghlContactUrlFor(activeClient) || canAdmin) && (
+            <div className="mt-1 border-t px-2.5 pb-0.5 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">GoHighLevel</div>
           )}
           {ghlContactUrlFor(activeClient) && (
             <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" onClick={() => setHeaderMoreOpen(false)}
@@ -3848,6 +3859,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           {canAdmin && clientById(activeClient)?.linkedContactId && (
             <button onClick={() => { setHeaderMoreOpen(false); linkClientToContact(activeClient, null); }}
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-muted hover:bg-background hover:text-danger"><I.close /> Unlink from GoHighLevel</button>
+          )}
+          <div className="mt-1 border-t px-2.5 pb-0.5 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Manage</div>
+          {canAdmin && activeClient !== "all" && !activeProject && clientById(activeClient) && (
+            <button onClick={() => { setHeaderMoreOpen(false); setClientSettingsOpen(true); }}
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.gear /> Client settings</button>
+          )}
+          <button onClick={() => { setHeaderMoreOpen(false); copyClientForClaude(); }}
+            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>✳</span> Copy for Claude</button>
+          {canAdmin && !activeProject && activeClient.startsWith("cl_") && clientById(activeClient) && (
+            <button onClick={() => { setHeaderMoreOpen(false); setMergeClientState({ a: clientById(activeClient)! }); }}
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-danger hover:bg-background"><I.repeat /> Merge with another client…</button>
           )}
         </div>
       </>)}
@@ -3981,7 +4003,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 <button onClick={() => setClientTab("chat")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${clientTab === "chat" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Journal</button>
                 <button onClick={() => setClientTab("vault")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${clientTab === "vault" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Vault</button>
               </div>
-              {clientTab === "tasks" && filterControl}
+              {clientTab === "tasks" && (
+                <div className="flex items-center gap-1.5">
+                  {followingControl}
+                  {groupSortControl}
+                  {filterMenuControl}
+                  {columnsControl}
+                </div>
+              )}
             </div>
           ) : myWork ? (
             <div className="flex flex-col gap-2">
@@ -3999,7 +4028,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 </div>
               )}
               <div className="flex-1" />
-              {filterControl}
+              {followingControl}
+              {groupSortControl}
+              {filterMenuControl}
+              {columnsControl}
             </div>
           ) : null}
         </header>
@@ -4020,6 +4052,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <h1 className="flex items-center gap-2 truncate text-[20px] font-semibold">
                 {settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Team Chat") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "My Work" : activeClient === "all" ? "All Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
                 {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
+                {/* Same star as the Clients directory row — pinning to the
+                    sidebar shouldn't require leaving the client's own page
+                    to do it. */}
+                {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && !activeProject && (
+                  <span role="button" tabIndex={-1} onClick={() => toggleStar(activeClient)} title={starred.has(activeClient) ? "Unpin from sidebar" : "Pin to sidebar"}
+                    className={`shrink-0 rounded p-0.5 hover:bg-background ${starred.has(activeClient) ? "text-amber-400" : "text-muted"}`}><I.star filled={starred.has(activeClient)} /></span>
+                )}
               </h1>
               <p className="hidden items-center gap-1.5 text-[13px] text-muted sm:flex">
                 {/* Breadcrumb back to the Clients directory — only meaningful
@@ -4095,80 +4134,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               })()}
               {/* Secondary/config actions folded into one overflow menu so the
                   header leads with Follow-up / tabs / Email-SMS / Follow / Status
-                  / Review instead of a cluster of equal-weight buttons. The GHL
-                  actions (Open, Import, Link) all live in here too. */}
-              <div className="relative">
-                <button onClick={() => setHeaderMoreOpen((o) => !o)} title="More actions"
-                  className="rounded-md border bg-background p-1.5 text-muted hover:text-foreground"><I.dots /></button>
-                {headerMoreOpen && (<>
-                  <div className="fixed inset-0 z-40" onClick={() => setHeaderMoreOpen(false)} />
-                  <div className="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg border bg-surface p-1 shadow-soft-md">
-                    {/* Mobile-only: the messaging + recap actions that show as
-                        inline buttons on ≥sm live here instead, so the phone
-                        header stays short. */}
-                    {activeClient !== "all" && !activeProject && canMessageClient(activeClient) && (
-                      <button onClick={() => { setHeaderMoreOpen(false); openCompose("email"); }}
-                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background sm:hidden"><I.comment /> Email</button>
-                    )}
-                    {activeClient !== "all" && !activeProject && canMessageClient(activeClient) && (
-                      <button onClick={() => { setHeaderMoreOpen(false); openCompose("sms"); }}
-                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background sm:hidden"><I.comment /> SMS</button>
-                    )}
-                    <button onClick={() => { setHeaderMoreOpen(false); copyLink({ view: null, client: activeClient, project: activeProject, task: null, clientTab, vaultFolder: null, dm: null }); }}
-                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy link</button>
-                    {activeClient !== "all" && !activeProject && clientById(activeClient) && (
-                      <button onClick={() => { setHeaderMoreOpen(false); copyClientShareLink(activeClient); }} title="A public, no-login link showing this client what we're waiting on them for"
-                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy client link</button>
-                    )}
-                    {canAdmin && activeClient !== "all" && !activeProject && clientById(activeClient) && (
-                      <button onClick={() => toggleClientCanRequestNewTasks(activeClient)}
-                        title="Let this client add their own requests from their client link, instead of only replying to what we send them"
-                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background">
-                        <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${clientById(activeClient)?.canRequestNewTasks ? "border-accent bg-accent text-white" : "border-border"}`}>{clientById(activeClient)?.canRequestNewTasks && <I.check />}</span>
-                        Client can add requests
-                      </button>
-                    )}
-                    {canAdmin && activeClient !== "all" && !activeProject && clientById(activeClient) && (
-                      <button onClick={() => toggleClientShowGrowthPlan(activeClient)}
-                        title="Show the growth plan progress card on this client's client link"
-                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background">
-                        <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${clientById(activeClient)?.showGrowthPlan ? "border-accent bg-accent text-white" : "border-border"}`}>{clientById(activeClient)?.showGrowthPlan && <I.check />}</span>
-                        Client sees growth plan
-                      </button>
-                    )}
-                    {canAdmin && activeClient !== "all" && !activeProject && clientById(activeClient) && (
-                      <button onClick={() => toggleClientDoesA2P(activeClient)}
-                        title="Include the A2P texting setup steps in this client's Playbook"
-                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background">
-                        <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${clientById(activeClient)?.doesA2P ? "border-accent bg-accent text-white" : "border-border"}`}>{clientById(activeClient)?.doesA2P && <I.check />}</span>
-                        Client does A2P texting
-                      </button>
-                    )}
-                    <button onClick={() => { setHeaderMoreOpen(false); copyClientForClaude(); }}
-                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>✳</span> Copy for Claude</button>
-                    {canAdmin && (
-                      <button onClick={() => { setHeaderMoreOpen(false); setLinkModal({}); }}
-                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.plus /> Add quick link</button>
-                    )}
-                    {canAdmin && !activeProject && activeClient.startsWith("cl_") && clientById(activeClient) && (
-                      <button onClick={() => { setHeaderMoreOpen(false); setMergeClientState({ a: clientById(activeClient)! }); }}
-                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.repeat /> Merge with another client…</button>
-                    )}
-                    {ghlContactUrlFor(activeClient) && (
-                      <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" onClick={() => setHeaderMoreOpen(false)}
-                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-accent hover:bg-background"><I.bolt /> Open in GoHighLevel</a>
-                    )}
-                    {canAdmin && !ghlContactUrlFor(activeClient) && (
-                      <button onClick={() => { setHeaderMoreOpen(false); setGhlLinkSearch(""); setGhlLinkOpen(true); }}
-                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.bolt /> Link to GoHighLevel</button>
-                    )}
-                    {canAdmin && clientById(activeClient)?.linkedContactId && (
-                      <button onClick={() => { setHeaderMoreOpen(false); linkClientToContact(activeClient, null); }}
-                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-muted hover:bg-background hover:text-danger"><I.close /> Unlink from GoHighLevel</button>
-                    )}
-                  </div>
-                </>)}
-              </div>
+                  / Review instead of a cluster of equal-weight buttons. Same
+                  menu as the compact header — see overflowControl above. */}
+              {overflowControl}
             </div>
           )}
 
@@ -4190,74 +4158,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               )}
             </div>
           ) : !personalView && (clientTab === "chat" || clientTab === "vault") ? null : (
-            <div className="relative">
-              <button onClick={() => setFilterOpen((o) => !o)} title="Filter & view" className="relative rounded-md border bg-background p-2 text-muted hover:text-foreground">
-                <I.filter />
-                {activeFilterCount > 0 && <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{activeFilterCount}</span>}
-              </button>
-              {filterOpen && (<>
-                <div className="fixed inset-0 z-30" onClick={() => setFilterOpen(false)} />
-                <div className="absolute right-0 z-40 mt-1 w-72 space-y-2.5 rounded-xl border bg-surface p-3 shadow-xl">
-                  {!personalView && activeClient !== "all" && clientById(activeClient) && (
-                    <div className="space-y-1.5 border-b pb-2.5">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Following</span>
-                        {!canAdmin && (
-                          <div className="flex items-center -space-x-1.5">
-                            {(clientById(activeClient)!.assignedTo ?? []).length === 0 && <span className="text-[13px] text-muted">Nobody yet</span>}
-                            {(clientById(activeClient)!.assignedTo ?? []).map((uid) => (<Avatar key={uid} id={uid} size={20} />))}
-                          </div>
-                        )}
-                      </div>
-                      {canAdmin && (
-                        <div className="grid grid-cols-2 gap-0.5">
-                          {users.map((u) => {
-                            const on = (clientById(activeClient)!.assignedTo ?? []).includes(u.id);
-                            return (
-                              <button key={u.id} onClick={() => toggleClientAssignment(activeClient, u.id)} className="flex items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-background">
-                                <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "border-accent bg-accent text-white" : "border-border"}`}>{on && <I.check />}</span>
-                                <Avatar id={u.id} size={18} /> <span className="truncate text-[13px]">{u.name}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {activeProject && canAdmin && stagesForProject(activeProject).length === 0 && (
-                    <button onClick={() => { setHeaderMoreOpen(false); createStage(activeProject); }} className="flex w-full items-center gap-2 rounded px-0 py-1 text-left text-[13px] font-medium text-accent hover:bg-background">
-                      <I.plus /> Set up custom Kanban stages for this list
-                    </button>
-                  )}
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Group &amp; sort</span>
-                    {(filtersActive || sortBy !== "due" || groupBy !== "priority") && <button onClick={() => { setFilters({ status: "all", assignee: "all", priority: "all" }); setGroupBy("priority"); setSortBy("due"); }} className="text-[13px] font-medium text-accent">Reset</button>}
-                  </div>
-                  <label className="flex items-center justify-between gap-3"><span className="text-muted">Group by</span><select value={groupBy} onChange={(e) => setGroupBy(e.target.value as typeof groupBy)} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="status">Status</option><option value="priority">Priority</option><option value="due">Due date</option><option value="project">Project</option></select></label>
-                  <label className="flex items-center justify-between gap-3"><span className="text-muted">Sort</span><select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="manual">Manual</option><option value="due">Due date</option><option value="priority">Priority</option><option value="title">Task name</option><option value="status">Status</option><option value="assignee">Assignee</option></select></label>
-                  <button onClick={toggleHideEmpty} className="flex w-full items-center gap-2 rounded px-0 py-1 text-left hover:bg-background">
-                    <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${hideEmpty ? "border-accent bg-accent text-white" : "border-border"}`}>{hideEmpty && <I.check />}</span>
-                    <span className="text-muted">Hide empty groups</span>
-                  </button>
-                  <button onClick={toggleHideDone} className="flex w-full items-center gap-2 rounded px-0 py-1 text-left hover:bg-background">
-                    <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${hideDone ? "border-accent bg-accent text-white" : "border-border"}`}>{hideDone && <I.check />}</span>
-                    <span className="text-muted">Hide done tasks</span>
-                  </button>
-                  <div className="border-t pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Filter</div>
-                  <label className="flex items-center justify-between gap-3"><span className="text-muted">Status</span><select value={filters.status} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value as FilterState["status"] }))} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="all">All</option>{STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}</select></label>
-                  <label className="flex items-center justify-between gap-3"><span className="text-muted">Assignee</span><select value={filters.assignee} onChange={(e) => setFilters((f) => ({ ...f, assignee: e.target.value }))} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="all">All</option><option value="unassigned">Unassigned</option><option value="waiting">⏳ Waiting on client</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
-                  <label className="flex items-center justify-between gap-3"><span className="text-muted">Priority</span><select value={filters.priority} onChange={(e) => setFilters((f) => ({ ...f, priority: e.target.value as FilterState["priority"] }))} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="all">All</option>{PRIORITY_ORDER.filter((p) => p !== "none").map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}</select></label>
-                  <div className="border-t pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Columns</div>
-                  <div className="grid grid-cols-2 gap-0.5">
-                    {LIST_COLUMNS.map((c) => (
-                      <button key={c.key} onClick={() => toggleCol(c.key)} className="flex items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-background">
-                        <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${visibleCols.includes(c.key) ? "border-accent bg-accent text-white" : "border-border"}`}>{visibleCols.includes(c.key) && <I.check />}</span>
-                        {c.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </>)}
+            <div className="flex items-center gap-1.5">
+              {followingControl}
+              {groupSortControl}
+              {filterMenuControl}
+              {columnsControl}
             </div>
           )}
 
@@ -4342,7 +4247,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             canAdmin={canAdmin} onAddProject={() => addProject(WORKSPACE_CLIENT_ID)} onRename={renameProject} onDelete={deleteProject}
             starredLists={starredLists} onToggleStarList={toggleStarList} />
         ) : personalView ? (
-          <GroupedList groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due", "priority", "comments"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} colOrder={colOrder} onReorderCols={reorderCols} />
+          <GroupedList meId={me.id} groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} colOrder={colOrder} onReorderCols={reorderCols} />
         ) : myWork && dashboardView === "completed" ? (
           // Relocated from the Clients directory (Derek: "makes more sense
           // there") — same completionLog data, day-grouped feed of who
@@ -4454,7 +4359,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     </ul>
                   </div>
                 )}
-                <GroupedList groups={buildPlaybookGroups(baseTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="" onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={false} colOrder={colOrder} onReorderCols={reorderCols} />
+                {activeFilterBar}
+                <GroupedList meId={me.id} groups={buildPlaybookGroups(baseTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="" onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={false} colOrder={colOrder} onReorderCols={reorderCols} />
                 <div className="mt-3 rounded-xl border bg-surface p-4">
                   <div className="text-[13px] font-semibold uppercase tracking-wide text-muted">Always running for you</div>
                   <ul className="mt-2 list-disc space-y-1 pl-5 text-[14px] text-muted">
@@ -4475,7 +4381,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               onCreateStage={() => createStage(activeProject)} onRenameStage={renameStage} onToggleStageIsDone={toggleStageIsDone} onDeleteStage={deleteStage}
               onReorderStages={(ids) => reorderStages(activeProject, ids)} />
           ) : (
-            <GroupedList groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
+            <>
+            {activeFilterBar}
+            <GroupedList meId={me.id} groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
+            </>
           )}
           </>
         )}
@@ -4523,7 +4432,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       {openTask && (
         <TaskDrawer task={openTask} clientById={clientById} projectById={projectById} contactById={contactById}
           full={drawerFull} onToggleFull={toggleDrawerFull}
-          navIndex={openTaskIdx} navTotal={navTaskIds.length} navTasks={navTasks} onOpenTask={setOpenTaskId} onAddSibling={(title) => addTaskToList(openTask.clientId, openTask.projectId, openTask.private, title)} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
+          navIndex={openTaskIdx} navTotal={navTaskIds.length} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(body, attachments) => addComment(openTask.id, body, attachments)}
           onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onDownloadAll={downloadAllAsZip} zippingIds={zippingIds} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { if (openTask.playbookStepKey) { pushToast("Playbook steps can't be moved to a different list."); return; } patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null })} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} onMarkChannelRead={(channel) => markTaskChannelRead(openTask.id, channel)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} onScheduleTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, scheduledAt, attachments, cc, bcc) => scheduleMessage(openTask.clientId, channel, subject, body, scheduledAt, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId)} draftingMessage={draftingMessage} onGetTaskLink={() => getClientShareUrl(openTask.clientId, { projectId: openTask.projectId, taskId: openTask.id })} canAdmin={canAdmin} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onCopyClientLink={() => copyClientShareLink(openTask.clientId, openTask.projectId)} onDraftDescription={draftDescription} draftingDescription={draftingDescription} onRegenerateAiSummary={() => regenerateAiSummary(openTask.clientId)} aiSummaryBusy={aiSummaryBusyId === openTask.clientId} pushToast={pushToast} />
       )}
@@ -4563,6 +4472,89 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           }}
           onCancel={() => setMergeClientState(null)} />
       )}
+      {settingsClient && (<>
+          <div className="fixed inset-0 z-40 bg-black/30" onClick={() => setClientSettingsOpen(false)} />
+          <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col overflow-hidden border-l bg-surface shadow-xl">
+            <div className="flex items-center justify-between border-b px-5 py-3">
+              <h2 className="text-[16px] font-semibold">Client settings — {settingsClient.name}</h2>
+              <button onClick={() => setClientSettingsOpen(false)} className="rounded-md p-1.5 text-muted hover:bg-background hover:text-foreground"><I.close /></button>
+            </div>
+            <div className="flex-1 space-y-5 overflow-y-auto p-5">
+              <div>
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Client portal</div>
+                <div className="space-y-3">
+                  <label className="flex items-start justify-between gap-3">
+                    <span><span className="block text-[14px] font-medium">Client can add requests</span><span className="block text-[13px] text-muted">They can submit new task requests from their portal link, not just reply to what we send.</span></span>
+                    <button onClick={() => toggleClientCanRequestNewTasks(activeClient)} className={`mt-0.5 flex h-5 w-9 shrink-0 items-center rounded-full transition ${settingsClient.canRequestNewTasks ? "bg-accent" : "bg-border"}`}><span className={`h-4 w-4 rounded-full bg-white shadow transition ${settingsClient.canRequestNewTasks ? "translate-x-4" : "translate-x-0.5"}`} /></button>
+                  </label>
+                  <label className="flex items-start justify-between gap-3">
+                    <span><span className="block text-[14px] font-medium">Client sees growth plan</span><span className="block text-[13px] text-muted">Their portal shows the Playbook progress card — what&apos;s done and what&apos;s next.</span></span>
+                    <button onClick={() => toggleClientShowGrowthPlan(activeClient)} className={`mt-0.5 flex h-5 w-9 shrink-0 items-center rounded-full transition ${settingsClient.showGrowthPlan ? "bg-accent" : "bg-border"}`}><span className={`h-4 w-4 rounded-full bg-white shadow transition ${settingsClient.showGrowthPlan ? "translate-x-4" : "translate-x-0.5"}`} /></button>
+                  </label>
+                  <label className="flex items-start justify-between gap-3">
+                    <span><span className="block text-[14px] font-medium">Client does A2P texting</span><span className="block text-[13px] text-muted">Includes the A2P registration steps in this client&apos;s Playbook checklist.</span></span>
+                    <button onClick={() => toggleClientDoesA2P(activeClient)} className={`mt-0.5 flex h-5 w-9 shrink-0 items-center rounded-full transition ${settingsClient.doesA2P ? "bg-accent" : "bg-border"}`}><span className={`h-4 w-4 rounded-full bg-white shadow transition ${settingsClient.doesA2P ? "translate-x-4" : "translate-x-0.5"}`} /></button>
+                  </label>
+                </div>
+                <button onClick={() => copyClientShareLink(activeClient)} className="mt-3 flex items-center gap-1.5 text-[13px] font-medium text-accent hover:underline"><I.link className="h-3.5 w-3.5" /> Copy portal link</button>
+              </div>
+              <div className="border-t pt-4">
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">GoHighLevel</div>
+                {settingsClient.linkedContactId ? (
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="inline-flex items-center gap-1.5 text-[14px] text-accent"><span className="h-2 w-2 rounded-full bg-accent" /> Connected</span>
+                    <span className="flex items-center gap-3">
+                      {ghlContactUrlFor(activeClient) && <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" className="text-[13px] font-medium text-accent hover:underline">Open in GHL</a>}
+                      {canAdmin && <button onClick={() => linkClientToContact(activeClient, null)} className="text-[13px] font-medium text-muted hover:text-danger">Unlink</button>}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="inline-flex items-center gap-1.5 text-[14px] text-muted"><span className="h-2 w-2 rounded-full bg-border" /> Not linked</span>
+                    {canAdmin && <button onClick={() => { setClientSettingsOpen(false); setGhlLinkSearch(""); setGhlLinkOpen(true); }} className="text-[13px] font-medium text-accent hover:underline">Link to GoHighLevel</button>}
+                  </div>
+                )}
+              </div>
+              <div className="border-t pt-4">
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Ownership</div>
+                {/* There's no separate "owner" field in the data model — Following
+                    (assignedTo) already IS what puts a client in someone's My Work
+                    queue (see assignedClientsFor), so it does double duty as
+                    ownership here rather than this sheet inventing a second field
+                    the brief's open question proposed but the app doesn't need. */}
+                <p className="mb-2 text-[13px] text-muted">Following decides whose My Work queue this client shows up in.</p>
+                {canAdmin ? (
+                  <div className="grid grid-cols-2 gap-0.5">
+                    {users.map((u) => {
+                      const on = (settingsClient.assignedTo ?? []).includes(u.id);
+                      return (
+                        <button key={u.id} onClick={() => toggleClientAssignment(activeClient, u.id)} className="flex items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-background">
+                          <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "border-accent bg-accent text-white" : "border-border"}`}>{on && <I.check />}</span>
+                          <Avatar id={u.id} size={18} /> <span className="truncate text-[13px]">{u.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-[13px] text-muted">{(settingsClient.assignedTo ?? []).length === 0 ? "Nobody yet" : (settingsClient.assignedTo ?? []).map((uid) => userById(uid)?.name).filter(Boolean).join(", ")}</div>
+                )}
+              </div>
+              {canAdmin && (
+                <div className="space-y-2 border-t pt-4">
+                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Danger zone</div>
+                  {activeClient.startsWith("cl_") && (
+                    <button onClick={() => { setClientSettingsOpen(false); setMergeClientState({ a: settingsClient }); }}
+                      className="flex w-full items-center gap-2 rounded-md border px-3 py-2 text-left text-[14px] hover:bg-background"><I.repeat /> Merge with another client…</button>
+                  )}
+                  {settingsClient.status !== "past_client" && (
+                    <button onClick={() => { setClientSettingsOpen(false); setConfirmDialog({ title: `Archive ${settingsClient.name}?`, message: "Marks this client Past Client. Their tasks and history stay intact — this just takes them out of active views.", confirmLabel: "Archive", danger: true, onConfirm: () => { setConfirmDialog(null); setClientStatus(activeClient, "past_client"); } }); }}
+                      className="flex w-full items-center gap-2 rounded-md border px-3 py-2 text-left text-[14px] text-danger hover:bg-red-50"><I.close /> Archive client</button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </>)}
       {linkModal && activeClient !== "all" && (
         <LinkFormModal
           initial={linkModal.initial ? { label: linkModal.initial.label, url: linkModal.initial.url, groupLabel: linkModal.initial.groupLabel, color: linkModal.initial.color } : undefined}

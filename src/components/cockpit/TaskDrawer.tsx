@@ -3,11 +3,11 @@
 // The task detail window (sidebar or full-page "document" view).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  users, labels, userById, labelById, timeAgo, isOverdue, formatDue, htmlToText, plainTextToHtml, clientStatusMeta,
+  users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, clientStatusMeta,
   STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
-import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId } from "./ui";
+import { I, Row, CollapsibleText, SearchableSelect, newId } from "./ui";
 import { AttachmentTile } from "./AttachmentTile";
 import { InlineAssignee, InlineDue } from "./GroupedList";
 import { RichTextEditor } from "./RichTextEditor";
@@ -46,10 +46,10 @@ function useDebouncedCommit(delayMs = 600) {
   return { schedule, flush };
 }
 
-export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, navTasks, onOpenTask, onAddSibling, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, onRegenerateAiSummary, aiSummaryBusy, pushToast }: {
+export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, onRegenerateAiSummary, aiSummaryBusy, pushToast }: {
   task: Task;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
-  full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; navTasks: Task[]; onOpenTask: (id: string) => void; onAddSibling: (title: string) => void; onPrev: () => void; onNext: () => void;
+  full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; onPrev: () => void; onNext: () => void;
   onClose: () => void; onPatch: (patch: Partial<Task>) => void; onDelete: () => void; onAddComment: (body: string, attachments?: Attachment[]) => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onDownloadFileAs: (path: string, filename: string) => void; onDownloadAll: (items: Attachment[], zipName: string, batchId: string) => void; zippingIds: Set<string>; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; onPushGhl: () => void; ghlBusy: boolean; ghlLinkable: boolean; onUnlinkGhl: () => void; allClients: Client[]; onMoveClient: (clientId: string) => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onRenameProject: () => void; onToggleSub: (sid: string) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onDeleteSub: (sid: string) => void; onPatchSub: (sid: string, patch: Partial<Subtask>) => void; onToggleLabel: (lid: string) => void; onCopyLink: () => void; onOpenMerge: () => void; onOpenClientList: () => void;
   templates: TaskTemplate[]; onApplyTemplate: (templateId: string) => void;
   onUploadCommentImage: (file: File) => Promise<Attachment | null>;
@@ -97,7 +97,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const ghlSub = linkedContact ? clientById(linkedContact.clientId) : null;
   const ghlContactUrl = linkedContact && ghlSub?.ghlLocationId ? `https://app.gohighlevel.com/v2/location/${ghlSub.ghlLocationId}/contacts/detail/${linkedContact.ghlContactId}` : null;
   const [subDraft, setSubDraft] = useState("");
-  const [siblingDraft, setSiblingDraft] = useState("");
   // Team-chat draft — lives here (not lifted to Cockpit.tsx) so typing it
   // only re-renders this drawer, not the whole app; see useDebouncedCommit's
   // comment above for the sibling title/description fix to the same root
@@ -196,9 +195,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // of silently keeping their "unchanged" value forever.
   const [activityW, setActivityW] = useState(480);
   useEffect(() => { try { const w = parseInt(localStorage.getItem("cut_activityW2") ?? "", 10); if (w >= 340 && w <= 760) setActivityW(w); } catch {} }, []);
-  const [siblingsCollapsed, setSiblingsCollapsed] = useState(false);
-  useEffect(() => { try { setSiblingsCollapsed(localStorage.getItem("cut_siblingsCollapsed") === "1"); } catch {} }, []);
-  useEffect(() => { try { localStorage.setItem("cut_siblingsCollapsed", siblingsCollapsed ? "1" : "0"); } catch {} }, [siblingsCollapsed]);
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault();
     const onMove = (ev: MouseEvent) => {
@@ -278,6 +274,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       title={task.playbookStepKey ? "Synced from the Owner Growth Plan — always the same for every business" : undefined}
       rows={1} className={`-mx-1 w-full resize-none rounded-md bg-transparent px-1 font-semibold leading-snug outline-none [field-sizing:content] transition focus:bg-background ${full ? "text-[28px]" : "text-[18px]"} ${task.playbookStepKey ? "cursor-default" : ""}`} />
   );
+  // Completion checkbox to the title's left (item 4) — the fastest way to
+  // close out a task without hunting for the Status chip.
+  const titleRow = (
+    <div className="flex items-start gap-2.5">
+      <button onClick={() => onPatch({ status: task.status === "done" ? "todo" : "done" })} title={task.status === "done" ? "Mark not done" : "Mark done"}
+        className={`mt-1.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition ${task.status === "done" ? "border-accent bg-accent text-white" : "border-border hover:border-accent"}`}>
+        {task.status === "done" && <I.check className="h-3 w-3" />}
+      </button>
+      <div className="min-w-0 flex-1">{titleBlock}</div>
+    </div>
+  );
   // Comment/event timestamps already cover every field-change and message —
   // the latest one is a true "last updated", not just a metadata guess.
   const lastActivityAt = task.comments.reduce((max, c) => (c.at > max ? c.at : max), task.createdAt);
@@ -302,56 +309,73 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       <span>This client has no linked GoHighLevel contact or location, so this task can&apos;t sync to GHL.</span>
     </div>
   ) : null;
-  const propsBlock = (
-    <div className="mt-4 rounded-xl border bg-surface p-4">
-    <div className="mb-3 text-[15px] font-semibold">Task Details</div>
-    <dl className={full ? "grid grid-cols-1 gap-x-12 gap-y-1.5 lg:grid-cols-2" : "space-y-2"}>
-      <Row label="Status" icon={<I.check />}>
-        <select value={task.status} onChange={(e) => onPatch({ status: e.target.value as TaskStatus })} className="rounded-md border border-transparent px-2 py-1 text-[14px] font-medium outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background" style={{ color: STATUS_META[task.status].dot }}>
+  // The old "Task Details" card (nine stacked form-field rows) is now one
+  // row of inline editable chips (item 4) — status, due date, assignee,
+  // type (reuses the priority field/scale — see the brief's own open
+  // question about splitting a real `type` field out of priority someday;
+  // no schema change here), and labels. Client/Project/Contact/GoHighLevel
+  // stay editable too, just folded into a smaller secondary "Details"
+  // block below instead of sharing top billing with the fields someone
+  // actually touches on every task.
+  const chipRow = (
+    <div className="mt-4 flex flex-wrap items-center gap-1.5">
+      <span className="inline-flex items-center rounded-full bg-background px-1 py-0.5" style={{ color: STATUS_META[task.status].dot }}>
+        <select value={task.status} onChange={(e) => onPatch({ status: e.target.value as TaskStatus })} className="rounded-full bg-transparent px-1.5 py-0.5 text-[13px] font-medium outline-none">
           {STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
         </select>
-      </Row>
-      <Row label="Due date" icon={<I.calendar />}>
-        <span className="inline-flex flex-wrap items-center gap-1.5">
-          <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} showRecurrenceLabel onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} />
-          {task.recurrence === "custom" && (
-            <span className="inline-flex items-center gap-1.5 text-[14px] text-muted">
-              {task.recurrenceUnit === "day-of-month" ? (
-                <>
-                  On day(s)
-                  <input type="text" placeholder="1, 15" defaultValue={(task.recurrenceDaysOfMonth ?? []).join(", ")}
-                    onBlur={(e) => onPatch({ recurrenceDaysOfMonth: parseDaysOfMonth(e.target.value) })}
-                    className="w-20 rounded-md border bg-background px-1.5 py-1 text-center text-[14px] outline-none focus:border-accent" />
-                  of the month
-                </>
-              ) : (
-                <>
-                  Every
-                  <input type="number" min={1} value={task.recurrenceInterval ?? 1} onChange={(e) => onPatch({ recurrenceInterval: Math.max(1, parseInt(e.target.value, 10) || 1) })} className="w-14 rounded-md border bg-background px-1.5 py-1 text-center text-[14px] outline-none focus:border-accent" />
-                </>
-              )}
-              <select value={task.recurrenceUnit ?? "week"} onChange={(e) => onPatch({ recurrenceUnit: e.target.value as RecurrenceUnit })} className="rounded-md border bg-background px-1.5 py-1 text-[14px] outline-none focus:border-accent">
-                <option value="day">day(s)</option>
-                <option value="week">week(s)</option>
-                <option value="month">month(s)</option>
-                <option value="day-of-month">day(s) of month</option>
-              </select>
-            </span>
+      </span>
+      <span className="inline-flex items-center rounded-full bg-background px-1 py-0.5">
+        <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} showRecurrenceLabel onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} />
+      </span>
+      {task.recurrence === "custom" && (
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-background px-2 py-1 text-[13px] text-muted">
+          {task.recurrenceUnit === "day-of-month" ? (
+            <>
+              On day(s)
+              <input type="text" placeholder="1, 15" defaultValue={(task.recurrenceDaysOfMonth ?? []).join(", ")}
+                onBlur={(e) => onPatch({ recurrenceDaysOfMonth: parseDaysOfMonth(e.target.value) })}
+                className="w-16 rounded-md border bg-surface px-1.5 py-0.5 text-center text-[13px] outline-none focus:border-accent" />
+              of month
+            </>
+          ) : (
+            <>
+              Every
+              <input type="number" min={1} value={task.recurrenceInterval ?? 1} onChange={(e) => onPatch({ recurrenceInterval: Math.max(1, parseInt(e.target.value, 10) || 1) })} className="w-12 rounded-md border bg-surface px-1.5 py-0.5 text-center text-[13px] outline-none focus:border-accent" />
+            </>
           )}
+          <select value={task.recurrenceUnit ?? "week"} onChange={(e) => onPatch({ recurrenceUnit: e.target.value as RecurrenceUnit })} className="rounded-md border bg-surface px-1.5 py-0.5 text-[13px] outline-none focus:border-accent">
+            <option value="day">day(s)</option>
+            <option value="week">week(s)</option>
+            <option value="month">month(s)</option>
+            <option value="day-of-month">day(s) of month</option>
+          </select>
         </span>
-      </Row>
-      <Row label="Priority" icon={<I.flag />}><select value={task.priority} onChange={(e) => onPatch({ priority: e.target.value as Priority })} className="rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background" style={{ color: PRIORITY_META[task.priority].color }}>{manualPriorityOptions(task.priority).map((p) => (<option key={p} value={p}>{PRIORITY_META[p].label}</option>))}</select></Row>
+      )}
       {/* w-full/min-w-0: a native <select> sizes itself to its WIDEST option,
           and "⏳ Waiting on {long business name}" pushed it clean out of the
           properties grid (Derek, 2026-08-11). Filling the cell instead keeps
           the layout stable no matter how long a client's name is. */}
-      <Row label="Assignee" icon={<I.user />}><select value={task.waitingOnClient ? "__waiting__" : (task.assigneeId ?? "")} onChange={(e) => { const v = e.target.value; if (v === "__waiting__") onPatch({ waitingOnClient: true, assigneeId: null }); else onPatch({ assigneeId: v || null, waitingOnClient: false }); }} className="w-full min-w-0 rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background"><option value="__waiting__">⏳ {client ? `Waiting on ${client.name}` : "Waiting on client"}</option><option value="">Unassigned</option>{users.map((u) => (<option key={u.id} value={u.id}>{u.name} {u.role === "va" ? "(VA)" : "(Admin)"}</option>))}</select></Row>
+      <span className="inline-flex max-w-[220px] items-center rounded-full bg-background px-1 py-0.5">
+        <select value={task.waitingOnClient ? "__waiting__" : (task.assigneeId ?? "")} onChange={(e) => { const v = e.target.value; if (v === "__waiting__") onPatch({ waitingOnClient: true, assigneeId: null }); else onPatch({ assigneeId: v || null, waitingOnClient: false }); }} className="w-full min-w-0 rounded-full bg-transparent px-1.5 py-0.5 text-[13px] outline-none"><option value="__waiting__">⏳ {client ? `Waiting on ${client.name}` : "Waiting on client"}</option><option value="">Unassigned</option>{users.map((u) => (<option key={u.id} value={u.id}>{u.name} {u.role === "va" ? "(VA)" : "(Admin)"}</option>))}</select>
+      </span>
+      <span className="inline-flex items-center rounded-full bg-background px-1 py-0.5" style={{ color: PRIORITY_META[task.priority].color }}>
+        <select value={task.priority} onChange={(e) => onPatch({ priority: e.target.value as Priority })} className="rounded-full bg-transparent px-1.5 py-0.5 text-[13px] outline-none">{manualPriorityOptions(task.priority).map((p) => (<option key={p} value={p}>{PRIORITY_META[p].label}</option>))}</select>
+      </span>
+      {task.labelIds.map((id) => { const l = labelById(id); return l ? (<button key={id} onClick={() => onToggleLabel(id)} className="group inline-flex items-center gap-1 rounded-full px-2 py-1 text-[13px] font-medium" style={{ background: l.color + "1a", color: l.color }}>{l.name} <span className="opacity-50 group-hover:opacity-100">×</span></button>) : null; })}
+      <div className="relative">
+        <button onClick={() => setLabelOpen((o) => !o)} className="inline-flex items-center gap-0.5 rounded-full border border-dashed px-2 py-1 text-[13px] text-muted hover:bg-background"><I.plus /> Label</button>
+        {labelOpen && (<div className="absolute z-30 mt-1 w-40 rounded-lg border bg-surface p-1 shadow-lg">{labels.map((l) => { const on = task.labelIds.includes(l.id); return (<button key={l.id} onClick={() => onToggleLabel(l.id)} className="flex w-full items-center gap-2 rounded px-2 py-1 text-[13px] hover:bg-background"><span className="h-2.5 w-2.5 rounded-full" style={{ background: l.color }} /> {l.name}{on && <I.check className="ml-auto text-accent" />}</button>); })}</div>)}
+      </div>
+    </div>
+  );
+  const detailsBlock = (
+    <div className="mt-3 rounded-xl border bg-surface p-4">
+    <div className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-muted">Details</div>
+    <dl className={full ? "grid grid-cols-1 gap-x-12 gap-y-1.5 lg:grid-cols-2" : "space-y-2"}>
       {/* Owner Growth Plan steps stay put — moving one to a different client or
           list would pull it out of that business's checklist (and its fixed
           position) entirely, which reconcilePlaybookTasks would just quietly
-          patch over by recreating the step, orphaning the moved task.
-          Status/priority/due/assignee above are untouched — only the
-          checklist's shape is locked. */}
+          patch over by recreating the step, orphaning the moved task. */}
       {task.playbookStepKey ? (
         <>
           <Row label="Client" icon={<I.folder />}><span title="Part of the Owner Growth Plan — can't be moved" className="px-2 py-1 text-[14px] text-muted">{client?.name ?? "—"}</span></Row>
@@ -367,15 +391,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         </>
       )}
       <Row label="Contact">{(() => { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return ct ? (<span className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[14px] text-muted"><I.user /> {ct.name}</span>) : <span className="text-[14px] text-muted">—</span>; })()}</Row>
-      <Row label="Labels" icon={<I.tag />}>
-        <div className="flex flex-wrap items-center gap-1.5">
-          {task.labelIds.map((id) => { const l = labelById(id); return l ? (<button key={id} onClick={() => onToggleLabel(id)} className="group inline-flex items-center gap-1 rounded px-1.5 py-0 text-[13px] font-medium" style={{ background: l.color + "1a", color: l.color }}>{l.name} <span className="opacity-50 group-hover:opacity-100">×</span></button>) : null; })}
-          <div className="relative">
-            <button onClick={() => setLabelOpen((o) => !o)} className="inline-flex items-center gap-0.5 rounded border border-dashed px-1.5 py-0.5 text-[13px] text-muted hover:bg-background"><I.plus /> Label</button>
-            {labelOpen && (<div className="absolute z-30 mt-1 w-40 rounded-lg border bg-surface p-1 shadow-lg">{labels.map((l) => { const on = task.labelIds.includes(l.id); return (<button key={l.id} onClick={() => onToggleLabel(l.id)} className="flex w-full items-center gap-2 rounded px-2 py-1 text-[13px] hover:bg-background"><span className="h-2.5 w-2.5 rounded-full" style={{ background: l.color }} /> {l.name}{on && <I.check className="ml-auto text-accent" />}</button>); })}</div>)}
-          </div>
-        </div>
-      </Row>
       <Row label="GoHighLevel" icon={<I.bolt />}>{task.ghlTaskId ? (
         <span className="inline-flex flex-wrap items-center gap-2">
           <span className="inline-flex items-center gap-1.5 rounded-md bg-success-soft px-2 py-1 text-[13px] font-medium text-success"><I.bolt /> Synced — changes push automatically</span>
@@ -608,34 +623,51 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         className={`grid grid-cols-3 gap-2 rounded-lg transition sm:grid-cols-4 md:grid-cols-5 ${attFileDragOver ? "outline-2 outline-dashed outline-accent bg-accent-soft/30" : ""}`}
       >
         {task.attachments.length === 0 && !uploadProgress && (<div className="col-span-full rounded-lg border border-dashed px-3 py-2 text-[13px] text-muted">Drop, paste, or click Attach · max 25MB each</div>)}
-        {sortedAttachments.map((a) => {
-          const isLink = a.kind !== "image" && !!a.url;
-          return (
-            <div key={a.id} className="flex flex-col gap-1">
-              <AttachmentTile
-                item={a}
-                url={a.kind === "image" && a.path ? attImageUrls[a.path] : undefined}
-                href={isLink ? a.url : undefined}
-                onOpen={a.kind === "image" && a.path ? () => openPreview(a) : !isLink && a.path ? () => onDownloadFile(a.path!) : undefined}
-                drag={attSort === "added" ? { dragging: dragAttId === a.id, onDragStart: () => setDragAttId(a.id), onDrop: () => reorderAttachments(a.id) } : undefined}
-                actions={
-                  <>
-                    {a.path && (
-                      <>
-                        <button onClick={() => onDownloadFileAs(a.path!, a.name)} title="Download" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.download className="h-3.5 w-3.5" /></button>
-                        <button onClick={() => onCopyAttachmentLink(a.path!)} title="Copy direct link" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-3.5 w-3.5" /></button>
-                      </>
-                    )}
-                    <button onClick={() => onRemoveFile(a)} title="Remove" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-red-500"><I.trash className="h-3.5 w-3.5" /></button>
-                  </>
-                }
-              />
-              <div className="truncate text-center text-[12px]" title={a.name}>{a.name}</div>
-              <div className="text-center text-[11px] text-muted">{a.size}</div>
-            </div>
-          );
-        })}
+        {sortedAttachments.filter((a) => a.kind === "image").map((a) => (
+          <div key={a.id} className="flex flex-col gap-1">
+            <AttachmentTile
+              item={a}
+              url={a.path ? attImageUrls[a.path] : undefined}
+              onOpen={a.path ? () => openPreview(a) : undefined}
+              drag={attSort === "added" ? { dragging: dragAttId === a.id, onDragStart: () => setDragAttId(a.id), onDrop: () => reorderAttachments(a.id) } : undefined}
+              actions={
+                <>
+                  {a.path && (
+                    <>
+                      <button onClick={() => onDownloadFileAs(a.path!, a.name)} title="Download" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.download className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => onCopyAttachmentLink(a.path!)} title="Copy direct link" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-3.5 w-3.5" /></button>
+                    </>
+                  )}
+                  <button onClick={() => onRemoveFile(a)} title="Remove" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-red-500"><I.trash className="h-3.5 w-3.5" /></button>
+                </>
+              }
+            />
+            <div className="truncate text-center text-[12px]" title={a.name}>{a.name}</div>
+            <div className="text-center text-[11px] text-muted">{a.size}</div>
+          </div>
+        ))}
       </div>
+      {/* Non-image attachments (docs, sheets, links) used to render as
+          empty-looking AttachmentTile boxes with no real thumbnail to show
+          — a compact link chip carries the same info (name, type, size)
+          without pretending there's a preview. */}
+      {sortedAttachments.some((a) => a.kind !== "image") && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {sortedAttachments.filter((a) => a.kind !== "image").map((a) => {
+            const isLink = !!a.url;
+            return (
+              <span key={a.id} className="group inline-flex items-center gap-1.5 rounded-full border bg-background py-1 pl-2.5 pr-1 text-[13px]">
+                <a href={isLink ? a.url! : undefined} onClick={!isLink && a.path ? () => onDownloadFile(a.path!) : undefined} target={isLink ? "_blank" : undefined} rel={isLink ? "noreferrer" : undefined}
+                  className="flex items-center gap-1.5 font-medium text-accent hover:underline">
+                  <I.link className="h-3.5 w-3.5" /> {a.name}{a.size && <span className="font-normal text-muted"> · {a.size}</span>}
+                </a>
+                {a.path && <button onClick={() => onDownloadFileAs(a.path!, a.name)} title="Download" className="rounded-full p-1 text-muted opacity-0 hover:bg-surface hover:text-foreground group-hover:opacity-100"><I.download className="h-3 w-3" /></button>}
+                <button onClick={() => onRemoveFile(a)} title="Remove" className="rounded-full p-1 text-muted opacity-0 hover:bg-surface hover:text-danger group-hover:opacity-100"><I.trash className="h-3 w-3" /></button>
+              </span>
+            );
+          })}
+        </div>
+      )}
       {previewAtt && (
         <>
           <div className="fixed inset-0 z-50 bg-black/70" onClick={() => setPreviewAtt(null)} />
@@ -677,56 +709,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       </>)}
     </div>
   );
-  // Quick-jump list of the *whole* list (project) this task belongs to,
-  // including itself (highlighted, not clickable) — so the completion
-  // fraction/bar below is accurate and you can see where this task sits
-  // among its siblings without leaving the drawer. Collapsed state
-  // persists per-browser, same pattern as activityW.
-  const listSiblings = useMemo(() => navTasks.filter((t) => t.projectId === task.projectId), [navTasks, task.projectId]);
-  const siblingsDone = listSiblings.filter((t) => t.status === "done").length;
-  const siblingsPct = listSiblings.length ? Math.round((siblingsDone / listSiblings.length) * 100) : 0;
-  const siblingsBlock = (
-    <div className="mt-6 border-t pt-5">
-      <button onClick={() => setSiblingsCollapsed((c) => !c)} className="mb-2 flex w-full items-center gap-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-muted hover:text-foreground">
-        <I.chevron className={`transition ${siblingsCollapsed ? "-rotate-90" : "rotate-180"}`} />
-        {project?.name ?? "This list"} · {siblingsDone} of {listSiblings.length} done · {siblingsPct}%
-      </button>
-      {!siblingsCollapsed && (<>
-        {listSiblings.length > 0 && (<div className="mb-2 h-2 overflow-hidden rounded-full bg-background"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${siblingsPct}%` }} /></div>)}
-        <div className="overflow-hidden rounded-lg border">
-          {listSiblings.map((t) => {
-            const active = t.id === task.id;
-            // The one badge per row: priority if it's Urgent (the thing most
-            // worth flagging), otherwise the task's status — matches the
-            // overdue treatment used everywhere else (InlineDue in the
-            // properties grid and the main list view), not a bespoke one.
-            const badge = t.priority === "urgent" ? { label: PRIORITY_META.urgent.label, color: PRIORITY_META.urgent.color } : { label: STATUS_META[t.status].label, color: STATUS_META[t.status].dot };
-            const overdue = isOverdue(t.due) && t.status !== "done";
-            return (
-              <button key={t.id} onClick={() => { if (!active) onOpenTask(t.id); }} disabled={active}
-                className={`flex w-full items-center gap-2.5 border-b px-3 py-2 text-left text-[15px] last:border-0 ${active ? "bg-accent-soft font-medium text-accent" : "hover:bg-background"}`}>
-                <Avatar id={t.assigneeId} size={18} />
-                <span className={`min-w-0 flex-1 truncate ${t.status === "done" ? "text-muted line-through" : ""}`}>{t.title}</span>
-                <span className="shrink-0 rounded px-1.5 py-0 text-[11px] font-semibold" style={{ background: badge.color + "1a", color: badge.color }}>{badge.label}</span>
-                {t.due && (
-                  <span className={`inline-flex shrink-0 items-center gap-1 text-[13px] ${overdue ? "font-medium text-danger" : "text-muted"}`}>
-                    {formatDue(t.due)}
-                    {overdue && <span className="rounded bg-danger-soft px-1 py-0 text-[10px] font-semibold uppercase text-danger">Overdue</span>}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-          <div className="flex items-center gap-2 border-t px-3 py-2">
-            <I.plus className="shrink-0 text-muted" />
-            <input value={siblingDraft} onChange={(e) => setSiblingDraft(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && siblingDraft.trim()) { onAddSibling(siblingDraft); setSiblingDraft(""); } }}
-              placeholder="Add task…" className="flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted" />
-          </div>
-        </div>
-      </>)}
-    </div>
-  );
+  // The embedded sibling-task list used to live here — deleted (item 4):
+  // the "N of M" pager (onPrev/onNext below) already does the same job of
+  // moving between tasks in this list, without duplicating a whole list
+  // view inside the drawer.
   // A task with no linked contact (so SMS/Email can never appear) and no
   // comments yet has nothing the messaging feed could show — in full-page
   // mode that's a ~400px column of dead space next to a document with room
@@ -783,11 +769,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             // reserving a wide empty column for it (see isLightTask above).
             <div className="flex-1 overflow-y-auto bg-background px-8 py-6 lg:px-12">
               <div className="mx-auto w-full max-w-4xl">
-                {titleBlock}
+                {titleRow}
                 {metaLine}
                 {ghlWarningBanner}
                 <div className="my-4 border-t" />
-                {propsBlock}
+                {chipRow}
+                {detailsBlock}
                 <div className="my-4 border-t" />
                 {playbookGuideBlock}
                 {clientResponseBlock}
@@ -795,7 +782,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 {subtasksBlock}
                 {attachmentsBlock}
                 {emptySectionsRow}
-                {siblingsBlock}
+
                 <div className="mt-5 border-t pt-4">
                   {feedArea}
                   <div className="mt-3">{composerFooter}</div>
@@ -809,11 +796,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
             <div className="min-w-0 flex-1 overflow-y-auto bg-background px-4 py-6 sm:px-8 lg:px-12">
               <div className="mx-auto w-full max-w-4xl">
-                {titleBlock}
+                {titleRow}
                 {metaLine}
                 {ghlWarningBanner}
                 <div className="my-4 border-t" />
-                {propsBlock}
+                {chipRow}
+                {detailsBlock}
                 <div className="my-4 border-t" />
                 {playbookGuideBlock}
                 {clientResponseBlock}
@@ -821,7 +809,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 {subtasksBlock}
                 {attachmentsBlock}
                 {emptySectionsRow}
-                {siblingsBlock}
+
               </div>
             </div>
             {/* Stacks below the document on mobile (each pane its own scroll);
@@ -865,17 +853,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         ) : (
           <>
             <div className="flex-1 overflow-y-auto bg-background px-5 py-4">
-              {titleBlock}
+              {titleRow}
               {metaLine}
               {ghlWarningBanner}
-              <div className="mt-5">{propsBlock}</div>
+              <div className="mt-5">{chipRow}{detailsBlock}</div>
               {playbookGuideBlock}
               {clientResponseBlock}
               {descriptionBlock}
               {subtasksBlock}
               {attachmentsBlock}
               {emptySectionsRow}
-              {siblingsBlock}
+
               <div className="mt-6">
                 {hasMessaging && (
                   <div className="mb-1.5 flex items-center justify-end gap-2 text-[12px]">
