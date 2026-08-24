@@ -58,14 +58,6 @@ export function ClientsDirectory({
   const [statusOpenId, setStatusOpenId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [completedBy, setCompletedBy] = useState<string>("all");
-  // Empty = show every title. Toggleable, multi-select — the completed log
-  // is dominated by a handful of repeated template step names (Playbook/
-  // sales-checklist steps stamped onto every client), which drowned out
-  // everything else in a flat chronological feed. Pills let you isolate
-  // just the titles you care about (Derek: "group these... filter with
-  // pills so it's useful").
-  const [selectedTitles, setSelectedTitles] = useState<Set<string>>(new Set());
-  const toggleTitle = (t: string) => setSelectedTitles((cur) => { const n = new Set(cur); if (n.has(t)) n.delete(t); else n.add(t); return n; });
   const toggleGroup = (key: string) => setCollapsed((cur) => { const n = new Set(cur); if (n.has(key)) n.delete(key); else n.add(key); return n; });
   const query = q.trim().toLowerCase();
   const matches = (c: Client) => !query || c.name.toLowerCase().includes(query) || clientCompany(c).toLowerCase().includes(query);
@@ -83,26 +75,25 @@ export function ClientsDirectory({
   // is a separate control (not the search box) since "who" is the whole
   // point of this tab.
   const completedMatches = (r: CompletionRow) => !query || r.taskTitle.toLowerCase().includes(query) || r.clientName.toLowerCase().includes(query);
-  // Person + search filters apply first — title pill counts reflect "of
-  // what's already showing," not the whole unfiltered log — then the title
-  // pills themselves narrow it further.
-  const personAndSearchFiltered = (completionLog ?? []).filter((r) => (completedBy === "all" || r.authorId === completedBy) && completedMatches(r));
-  const shownCompletions = personAndSearchFiltered.filter((r) => selectedTitles.size === 0 || selectedTitles.has(r.taskTitle));
+  const shownCompletions = (completionLog ?? []).filter((r) => (completedBy === "all" || r.authorId === completedBy) && completedMatches(r));
   // Filter dropdown options — every teammate who's actually completed
   // something in the log, not the full roster (no point offering someone
   // with zero rows to filter to).
   const completedByOptions = Array.from(new Map((completionLog ?? []).map((r) => [r.authorId, { id: r.authorId, name: r.authorName, color: r.authorColor }])).values())
     .sort((a, b) => a.name.localeCompare(b.name));
-  // Pills — busiest title first, so the noisiest bulk-template steps (the
-  // whole reason this needed pills) sort to the front where they're easiest
-  // to filter out.
-  const titleCounts = Array.from(personAndSearchFiltered.reduce((m, r) => m.set(r.taskTitle, (m.get(r.taskTitle) ?? 0) + 1), new Map<string, number>()).entries())
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  // Grouped by title, in that same busiest-first order — rows within a
-  // group keep their original chronological (most-recent-first) order.
-  const completedGroups = titleCounts
-    .map(([title]) => ({ title, rows: shownCompletions.filter((r) => r.taskTitle === title) }))
-    .filter((g) => g.rows.length > 0);
+  // Grouped by calendar day. completionLog is already sorted most-recent-first,
+  // so a Map preserves that order for both the days and the rows within each.
+  const today = new Date().toDateString();
+  const yesterday = new Date(Date.now() - 86400000).toDateString();
+  const dayLabel = (key: string) => key === today ? "Today" : key === yesterday ? "Yesterday" : new Date(key).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+  const dayGroups = (() => {
+    const map = new Map<string, CompletionRow[]>();
+    for (const r of shownCompletions) {
+      const key = new Date(r.at).toDateString();
+      (map.get(key) ?? map.set(key, []).get(key)!).push(r);
+    }
+    return Array.from(map.entries());
+  })();
 
   // Shared row — used by both the status buckets and the teammate buckets,
   // so the two grouping modes render identically aside from their headers.
@@ -203,25 +194,6 @@ export function ClientsDirectory({
         {canAdmin && groupBy !== "completed" && <button onClick={onAddClient} className="inline-flex items-center gap-1.5 rounded-lg border border-accent bg-accent px-3 py-2 text-[13px] font-medium text-white hover:opacity-90"><I.plus /> Add client</button>}
       </div>
 
-      {groupBy === "completed" && titleCounts.length > 0 && (
-        <div className="mb-3 flex flex-wrap items-center gap-1.5">
-          <button onClick={() => setSelectedTitles(new Set())}
-            className={`rounded-full border px-2.5 py-1 text-[12.5px] font-medium ${selectedTitles.size === 0 ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-surface"}`}>
-            All
-          </button>
-          {titleCounts.map(([title, count]) => {
-            const on = selectedTitles.has(title);
-            return (
-              <button key={title} onClick={() => toggleTitle(title)}
-                title={on ? "Click to remove this filter" : "Click to show only this"}
-                className={`rounded-full border px-2.5 py-1 text-[12.5px] font-medium ${on ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-surface"}`}>
-                {title} <span className={on ? "text-accent/70" : "text-muted/70"}>{count}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-
       {/* Same flat, column-aligned list surface as the task lists, but
           bucketed into colored, collapsible sections — either pipeline
           status or, in "By teammate" mode, one section per team member's
@@ -236,37 +208,30 @@ export function ClientsDirectory({
         )}
         {groupBy === "completed" ? (
           <div className="divide-y-8 divide-background">
-            {completedGroups.map((g) => {
-              const key = `title_${g.title}`;
-              const isOpen = !collapsed.has(key);
-              return (
-                <div key={key}>
-                  <button onClick={() => toggleGroup(key)} className="flex w-full items-center gap-2 border-y bg-background/40 px-4 py-2 text-left transition hover:bg-background/70">
-                    <I.chevron className={`text-muted transition ${isOpen ? "-rotate-90" : "rotate-180"}`} />
-                    <span className="truncate text-[15px] font-bold">{g.title}</span>
-                    <span className="rounded-full bg-border px-1.5 text-[13px] font-semibold normal-case tracking-normal text-foreground">{g.rows.length}</span>
-                  </button>
-                  {isOpen && g.rows.map((r) => (
-                    <div key={r.id} onClick={() => onOpenTask?.(r.clientId, r.taskId)}
-                      className="flex cursor-pointer items-center gap-3 border-b px-4 py-2.5 transition-colors last:border-0 hover:bg-accent-soft/50">
-                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ background: r.authorColor }} title={r.authorName}>{r.authorInitials}</span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[14.5px] font-medium">{r.clientName}</span>
-                        <span className="block truncate text-[12.5px] text-muted">{r.authorName}</span>
-                      </span>
-                      <span className="shrink-0 text-[12.5px] text-muted" title={timeAgo(r.at)}>
-                        {new Date(r.at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-                        {" · "}
-                        {new Date(r.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
-                      </span>
-                    </div>
-                  ))}
+            {dayGroups.map(([key, rows]) => (
+              <div key={key}>
+                <div className="flex items-center gap-2 border-y bg-background/40 px-4 py-2">
+                  <span className="text-[13px] font-bold">{dayLabel(key)}</span>
+                  <span className="rounded-full bg-border px-1.5 text-[12px] font-semibold text-foreground">{rows.length}</span>
                 </div>
-              );
-            })}
-            {completedGroups.length === 0 && (
+                {rows.map((r) => (
+                  <div key={r.id} onClick={() => onOpenTask?.(r.clientId, r.taskId)}
+                    className="flex cursor-pointer items-center gap-3 border-b px-4 py-2.5 transition-colors last:border-0 hover:bg-accent-soft/50">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ background: r.authorColor }} title={r.authorName}>{r.authorInitials}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[14.5px] font-medium">{r.taskTitle}</span>
+                      <span className="block truncate text-[12.5px] text-muted">{r.clientName} &middot; {r.authorName}</span>
+                    </span>
+                    <span className="shrink-0 text-[12.5px] text-muted" title={timeAgo(r.at)}>
+                      {new Date(r.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ))}
+            {dayGroups.length === 0 && (
               <div className="py-16 text-center text-[15px] text-muted">
-                {query || completedBy !== "all" || selectedTitles.size > 0 ? "No completions match." : "Nothing completed yet — this fills in as tasks get marked done."}
+                {query || completedBy !== "all" ? "No completions match." : "Nothing completed yet — this fills in as tasks get marked done."}
               </div>
             )}
           </div>
