@@ -6,15 +6,15 @@
 // Mine/All controls relocated from the sidebar, and an Add-client button.
 // Clicking a row opens that client's task list.
 import { useMemo, useState } from "react";
-import { CLIENT_STATUS_ORDER, CLIENT_STATUS_META, formatDue, isOverdue, type ClientStatus, type Client, type Task, type User } from "@/lib/data";
+import { formatDue, isOverdue, type Client, type Task, type User } from "@/lib/data";
 import { I } from "./ui";
 
 type ClientSort = "manual" | "az" | "tasks" | "recent" | "used" | "urgent" | "mine";
-type GroupBy = "status" | "team";
+type GroupBy = "flat" | "team";
 
 export function ClientsDirectory({
   clients, clientCompany, taskCount, tasksByClient, starred, onToggleStar, needsReview, onOpen,
-  canAdmin, onAddClient, onRename, onDelete, onSetStatus, sort, onSetSort, scope, onToggleScope,
+  canAdmin, onAddClient, onRename, onDelete, sort, onSetSort, scope, onToggleScope,
   groupBy, onSetGroupBy, teamGroups,
 }: {
   clients: Client[]; // already sorted + scoped by the caller
@@ -32,24 +32,24 @@ export function ClientsDirectory({
   onAddClient: () => void;
   onRename: (id: string) => void;
   onDelete: (id: string) => void;
-  onSetStatus: (id: string, status: ClientStatus) => void;
   sort: ClientSort;
   onSetSort: (s: ClientSort) => void;
   scope: "mine" | "all";
   onToggleScope: () => void;
-  // "By status" (default) buckets `clients` into the CLIENT_STATUS_ORDER
-  // sections below. "By teammate" ignores `clients`/`scope` entirely and
-  // instead renders `teamGroups` — one section per team member, each
-  // already scoped to their own active clients by the caller (Cockpit:
-  // "right now we're both in the dark what the other people are doing") —
-  // so reps can review the whole active roster side by side in one screen.
+  // "flat" (default) is a single alphabetical list, no status grouping —
+  // Derek: "we don't really need all these stages... drop the status
+  // column, flat alphabetical list." "By teammate" ignores `clients`/`scope`
+  // entirely and instead renders `teamGroups` — one section per team
+  // member, each already scoped to their own active clients by the caller
+  // (Cockpit: "right now we're both in the dark what the other people are
+  // doing") — so reps can review the whole active roster side by side in
+  // one screen.
   groupBy: GroupBy;
   onSetGroupBy: (g: GroupBy) => void;
   teamGroups?: { member: User; clients: Client[] }[];
 }) {
   const [q, setQ] = useState("");
   const [sortOpen, setSortOpen] = useState(false);
-  const [statusOpenId, setStatusOpenId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggleGroup = (key: string) => setCollapsed((cur) => { const n = new Set(cur); if (n.has(key)) n.delete(key); else n.add(key); return n; });
   const query = q.trim().toLowerCase();
@@ -58,13 +58,6 @@ export function ClientsDirectory({
   const shown = useMemo(() => clients.filter(matches),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [clients, query]);
-  // Preserves the caller's sort order within each bucket — just partitions
-  // `shown` by status rather than re-sorting. Empty buckets are skipped so
-  // e.g. a workspace with no Cancelled clients doesn't show a bare "0" header.
-  const statusGroups = useMemo(
-    () => CLIENT_STATUS_ORDER.map((s) => ({ status: s, clients: shown.filter((c) => c.status === s) })).filter((g) => g.clients.length > 0),
-    [shown]
-  );
   // Same search filtering applied per member, and same empty-bucket skip —
   // a teammate with nothing active right now just doesn't get a section,
   // rather than showing an empty "0" header for everyone every time.
@@ -77,7 +70,6 @@ export function ClientsDirectory({
   // Shared row — used by both the status buckets and the teammate buckets,
   // so the two grouping modes render identically aside from their headers.
   const clientRow = (c: Client) => {
-    const meta = CLIENT_STATUS_META[c.status] ?? CLIENT_STATUS_META.claimed;
     const count = taskCount(c.id);
     const company = clientCompany(c);
     const openTasks = tasksByClient?.get(c.id) ?? [];
@@ -85,33 +77,11 @@ export function ClientsDirectory({
     return (
       <div key={c.id} onClick={() => onOpen(c.id)}
         className="group flex min-h-[46px] cursor-pointer items-center gap-3 border-b px-4 py-2 transition-colors last:border-0 hover:bg-accent-soft/50">
-        <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: meta.dot }} title={meta.label} />
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2 truncate text-[15px] font-medium">{c.name}
             {needsReview(c.id) && <span className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold text-teal-600" style={{ background: "#14b8a61a" }}>Review</span>}
           </span>
           {company && <span className="block truncate text-[13px] text-muted">{company}</span>}
-        </span>
-        {/* Status pill — admins can change it inline (e.g. to move
-            a client into a different group) without opening it. */}
-        <span className="relative hidden w-32 shrink-0 sm:block" onClick={(e) => e.stopPropagation()}>
-          <button onClick={() => canAdmin && setStatusOpenId((v) => (v === c.id ? null : c.id))} disabled={!canAdmin}
-            title={canAdmin ? "Change status" : meta.label}
-            className={`inline-flex max-w-full items-center gap-1.5 truncate rounded-full border px-2 py-0.5 text-[12px] font-medium ${canAdmin ? "hover:bg-background" : "cursor-default"}`}>
-            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: meta.dot }} /> <span className="truncate">{meta.label}</span>
-          </button>
-          {statusOpenId === c.id && (<>
-            <div className="fixed inset-0 z-30" onClick={() => setStatusOpenId(null)} />
-            <div className="absolute right-0 top-full z-40 mt-1 w-40 rounded-lg border bg-surface p-1 shadow-soft-md">
-              {CLIENT_STATUS_ORDER.map((s) => (
-                <button key={s} onClick={() => { onSetStatus(c.id, s); setStatusOpenId(null); }}
-                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-background">
-                  <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: CLIENT_STATUS_META[s].dot }} />{CLIENT_STATUS_META[s].label}
-                  {c.status === s && <I.check className="ml-auto h-3.5 w-3.5 text-accent" />}
-                </button>
-              ))}
-            </div>
-          </>)}
         </span>
         <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); onToggleStar(c.id); }} title={starred.has(c.id) ? "Unstar" : "Star"}
           className={`shrink-0 rounded p-1 hover:bg-background ${starred.has(c.id) ? "text-amber-400" : "text-muted opacity-0 group-hover:opacity-100"}`}><I.star filled={starred.has(c.id)} /></span>
@@ -135,14 +105,14 @@ export function ClientsDirectory({
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search clients…"
             className="w-full rounded-lg border bg-surface py-2 pl-8 pr-3 text-[15px] outline-none focus:border-accent" />
         </div>
-        {/* Two grouping modes — status (pipeline) or team (who's on what). */}
+        {/* Two views — a flat alphabetical list, or grouped by teammate. */}
         <div className="flex overflow-hidden rounded-lg border">
-          {([["status", "By status"], ["team", "By teammate"]] as [GroupBy, string][]).map(([g, label]) => (
+          {([["flat", "A → Z"], ["team", "By teammate"]] as [GroupBy, string][]).map(([g, label]) => (
             <button key={g} onClick={() => onSetGroupBy(g)}
               className={`px-2.5 py-2 text-[13px] font-medium ${groupBy === g ? "bg-accent-soft text-accent" : "text-muted hover:bg-surface"}`}>{label}</button>
           ))}
         </div>
-        {groupBy === "status" && (
+        {groupBy === "flat" && (
           <button onClick={onToggleScope} title={scope === "mine" ? "Showing only clients with open work assigned to or followed by you" : "Showing every client"}
             className={`rounded-lg border px-2.5 py-2 text-[13px] font-medium ${scope === "mine" ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-surface"}`}>{scope === "mine" ? "My clients" : "All clients"}</button>
         )}
@@ -162,14 +132,12 @@ export function ClientsDirectory({
         {canAdmin && <button onClick={onAddClient} className="inline-flex items-center gap-1.5 rounded-lg border border-accent bg-accent px-3 py-2 text-[13px] font-medium text-white hover:opacity-90"><I.plus /> Add client</button>}
       </div>
 
-      {/* Same flat, column-aligned list surface as the task lists, but
-          bucketed into colored, collapsible sections — either pipeline
-          status or, in "By teammate" mode, one section per team member's
-          own active clients — instead of one long undifferentiated list. */}
+      {/* Same flat, column-aligned list surface as the task lists — a plain
+          alphabetical list, or (in "By teammate" mode) bucketed into one
+          section per team member's own active clients. */}
       <div className="overflow-hidden rounded-xl border bg-surface shadow-soft">
         <div className="hidden items-center gap-3 border-b bg-background/40 px-4 py-2 text-[12px] font-semibold uppercase tracking-wide text-muted sm:flex">
           <span className="flex-1">Client</span>
-          <span className="w-32">Status</span>
           <span className="w-28 text-right">Tasks</span>
         </div>
         <div className="divide-y-8 divide-background">
@@ -187,23 +155,9 @@ export function ClientsDirectory({
                 {isOpen && g.clients.map(clientRow)}
               </div>
             );
-          }) : statusGroups.map((g) => {
-            const meta = CLIENT_STATUS_META[g.status];
-            const isOpen = !collapsed.has(g.status);
-            return (
-              <div key={g.status}>
-                <button onClick={() => toggleGroup(g.status)} className="flex w-full items-center gap-2 border-y px-4 py-2 text-left transition" style={{ background: meta.dot + "22", borderColor: meta.dot + "40" }}>
-                  <I.chevron className={`text-muted transition ${isOpen ? "-rotate-90" : "rotate-180"}`} />
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: meta.dot }} />
-                  <span className="text-[15px] font-bold">{meta.label}</span>
-                  <span className="rounded-full px-1.5 text-[13px] font-semibold normal-case tracking-normal text-white" style={{ background: meta.dot }}>{g.clients.length}</span>
-                </button>
-                {isOpen && g.clients.map(clientRow)}
-              </div>
-            );
-          })}
+          }) : shown.map(clientRow)}
         </div>
-        {groupBy === "status" && shown.length === 0 && (
+        {groupBy === "flat" && shown.length === 0 && (
           <div className="py-16 text-center text-[15px] text-muted">{query ? "No clients match your search." : "No clients yet."}</div>
         )}
         {groupBy === "team" && filteredTeamGroups.length === 0 && (

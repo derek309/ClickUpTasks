@@ -453,7 +453,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // teamActiveClients below). Not persisted, same as clientListScope.
   // ("completed" used to live here too; moved under My Work — Derek: "makes
   // more sense there.")
-  const [clientsGroupBy, setClientsGroupBy] = useState<"status" | "team">("status");
+  const [clientsGroupBy, setClientsGroupBy] = useState<"flat" | "team">("flat");
   // Recently-used ordering: clientId → last-opened epoch, persisted locally.
   // Opening a client stamps it (see the effect below), floating it to the top
   // when the "Recently used" sort is active.
@@ -4449,7 +4449,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <ClientsDirectory clients={sortedClients} clientCompany={(c) => clientCompany(c)} taskCount={clientTaskCount} tasksByClient={openTasksByClient} starred={starred} onToggleStar={toggleStar}
             needsReview={(id) => clientNeedsReview(id, me.id)}
             onOpen={(id) => { setDirView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); setClientTab("tasks"); }}
-            canAdmin={canAdmin} onAddClient={() => setAddClientOpen(true)} onRename={renameClient} onDelete={deleteClient} onSetStatus={setClientStatus}
+            canAdmin={canAdmin} onAddClient={() => setAddClientOpen(true)} onRename={renameClient} onDelete={deleteClient}
             sort={clientSort} onSetSort={saveClientSort} scope={clientListScope} onToggleScope={() => setClientListScope((s) => (s === "mine" ? "all" : "mine"))}
             groupBy={clientsGroupBy} onSetGroupBy={setClientsGroupBy} teamGroups={teamActiveClients} />
         ) : dirView === "projects" ? (

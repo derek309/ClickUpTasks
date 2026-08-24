@@ -47,6 +47,11 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [dragColKey, setDragColKey] = useState<string | null>(null);
   const [dragOverTaskId, setDragOverTaskId] = useState<string | null>(null);
+  // Shift-click range select: click a checkbox, hold shift, click one 7 rows
+  // down — everything in between gets selected too, like Finder/Gmail. Anchor
+  // is the last row you plain-clicked (or shift-extended from), tracked as a
+  // ref since it doesn't need to trigger a re-render on its own.
+  const lastSelectedIdRef = useRef<string | null>(null);
 
   const filteredGroups = hideEmpty ? groups.filter((g) => g.tasks.length > 0) : groups;
   // hideEmpty must never hide the only way to add a first task — if filtering
@@ -54,6 +59,27 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   // group (empty, but its quick-add row is still reachable) instead of a
   // dead-end "No tasks yet." with no input anywhere.
   const visibleGroups = filteredGroups.length === 0 && canQuickAdd && groups.length > 0 ? [groups[0]] : filteredGroups;
+  // Flat visible order (collapsed groups excluded, they're not on screen) —
+  // what a shift-click range actually spans.
+  const flatVisibleTaskIds = visibleGroups.filter((g) => !collapsedG.has(g.key)).flatMap((g) => g.tasks.map((t) => t.id));
+  const handleSelectClick = (taskId: string, e: React.MouseEvent) => {
+    if (!onToggleSelect) return;
+    if (e.shiftKey && lastSelectedIdRef.current) {
+      const from = flatVisibleTaskIds.indexOf(lastSelectedIdRef.current);
+      const to = flatVisibleTaskIds.indexOf(taskId);
+      if (from !== -1 && to !== -1) {
+        const [lo, hi] = from < to ? [from, to] : [to, from];
+        for (let i = lo; i <= hi; i++) {
+          const id = flatVisibleTaskIds[i];
+          if (!selectedIds?.has(id)) onToggleSelect(id);
+        }
+        lastSelectedIdRef.current = taskId;
+        return;
+      }
+    }
+    onToggleSelect(taskId);
+    lastSelectedIdRef.current = taskId;
+  };
   // Any column missing from a saved colOrder (e.g. added after the order was
   // last persisted) falls back to LIST_COLUMNS' own position for it.
   const orderedColumns = colOrder
@@ -114,7 +140,7 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
                 <div>
                   {g.tasks.map((t) => (
                     <TaskRow key={t.id} task={t} template={template} cols={cols} showClient={showClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} onAddComment={onAddComment} delegated={!!highlightDelegateFor && t.assigneeId !== highlightDelegateFor && t.subtasks.some((s) => s.assigneeId === highlightDelegateFor)}
-                      selected={!!selectedIds?.has(t.id)} onToggleSelect={onToggleSelect ? () => onToggleSelect(t.id) : undefined}
+                      selected={!!selectedIds?.has(t.id)} onToggleSelect={onToggleSelect ? (e) => handleSelectClick(t.id, e) : undefined}
                       draggable={!!onDropInGroup || !!onMergeTasks} onDragStart={() => setDragTaskId(t.id)} onDragEnd={() => { setDragTaskId(null); setDragOverKey(null); setDragOverTaskId(null); }}
                       isMergeDropTarget={dragOverTaskId === t.id}
                       onRowDragOver={onMergeTasks && dragTaskId && dragTaskId !== t.id ? () => setDragOverTaskId(t.id) : undefined}
@@ -146,7 +172,7 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
 function TaskRow({ task, template, cols, showClient, clientById, projectById, contactById, onOpen, onPatch, onAddComment, delegated, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
   task: Task; template: string; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void; onAddComment: (taskId: string, body: string) => void; delegated?: boolean;
-  selected?: boolean; onToggleSelect?: () => void;
+  selected?: boolean; onToggleSelect?: (e: React.MouseEvent) => void;
   draggable?: boolean; onDragStart?: () => void; onDragEnd?: () => void;
   // Drop-onto-this-row-to-merge — independent of the drag-to-reorder-groups
   // above, so a row can be both a drag source and a merge target at once.
@@ -182,8 +208,8 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
         className={`group/tr flex flex-col gap-1.5 border-b px-4 py-3 transition-colors last:border-0 hover:bg-accent-soft/50 sm:grid sm:min-h-[46px] sm:items-center sm:gap-2 sm:py-2 ${delegated ? "border-l-[3px] border-l-accent bg-accent-soft/30" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${isMergeDropTarget ? "ring-2 ring-inset ring-accent" : ""}`} style={{ gridTemplateColumns: template }}>
         <div className="flex min-w-0 items-center gap-0.5">
           {onToggleSelect && (
-            <button onClick={(e) => { e.stopPropagation(); onToggleSelect(); }} title="Select"
-              className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition ${selected ? "border-accent bg-accent text-white opacity-100" : "border-border opacity-0 group-hover/tr:opacity-100"}`}>
+            <button onClick={(e) => { e.stopPropagation(); onToggleSelect(e); }} title="Select — shift-click to select a range"
+              className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition ${selected ? "border-accent bg-accent text-white" : "border-border"}`}>
               {selected && <I.check />}
             </button>
           )}
