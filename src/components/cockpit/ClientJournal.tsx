@@ -121,6 +121,10 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   const [editBody, setEditBody] = useState("");
   const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
   const { ref: feedRef, atBottom, checkAtBottom, scrollToBottom, followIfAtBottom } = useStickyBottom<HTMLDivElement>();
+  // A7a: month index — keyed by each day-divider's own key (a toDateString,
+  // already unique per calendar day) so "jump to month" can reuse the
+  // dividers already in the feed instead of tagging every row a second way.
+  const dayRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const msgBodyRef = useRef<HTMLTextAreaElement>(null);
   const draftPromptRef = useRef<HTMLTextAreaElement>(null);
   const [msgSubject, setMsgSubject] = useState("");
@@ -231,6 +235,33 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   const latestRecap = notes.filter((n) => n.type === "ai_summary").sort((a, b) => b.at.localeCompare(a.at))[0] ?? null;
   const pinnedRecap = latestRecap && segment === "all" && subFilter === "all" && !q ? latestRecap : null;
   const feedRows = buildFeedRows(pinnedRecap ? filteredItems.filter((it) => !(it.kind === "note" && it.note.id === pinnedRecap.id)) : filteredItems);
+
+  // A7a: one entry per month, newest first, each pointing at the day-divider
+  // key of that month's earliest entry (feedRows renders oldest-first, so
+  // that divider is the one to scroll to — it's the top of that month's
+  // block). Built from feedRows itself so the index only ever lists months
+  // actually present under the current segment/sub-filter/search.
+  const nowKey = new Date().toISOString().slice(0, 7);
+  const monthGroups = (() => {
+    const counts = new Map<string, number>();
+    for (const it of filteredItems) {
+      const d = new Date(it.at);
+      const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      counts.set(mKey, (counts.get(mKey) ?? 0) + 1);
+    }
+    const anchors = new Map<string, { anchorDayKey: string; label: string }>();
+    for (const row of feedRows) {
+      if (row.kind !== "divider") continue;
+      const d = new Date(row.key);
+      const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      if (!anchors.has(mKey)) anchors.set(mKey, { anchorDayKey: row.key, label: d.toLocaleDateString(undefined, { month: "long", year: "numeric" }) });
+    }
+    return Array.from(counts.entries())
+      .map(([key, count]) => ({ key, count, anchorDayKey: anchors.get(key)?.anchorDayKey, label: anchors.get(key)?.label ?? key }))
+      .filter((g): g is { key: string; count: number; anchorDayKey: string; label: string } => !!g.anchorDayKey)
+      .sort((a, b) => b.key.localeCompare(a.key));
+  })();
+  const jumpToMonth = (anchorDayKey: string) => dayRefs.current.get(anchorDayKey)?.scrollIntoView({ behavior: "smooth", block: "start" });
 
   const canModify = (n: ClientNote) => me.role === "admin" || n.authorId === me.id;
 
@@ -510,7 +541,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                 // accidentally clicked the delete file button"). A full-width
                 // rule in normal flow can't overlap anything below it.
                 return (
-                  <div key={row.key} className="flex items-center gap-3 py-2">
+                  <div key={row.key} ref={(el) => { if (el) dayRefs.current.set(row.key, el); else dayRefs.current.delete(row.key); }} className="flex items-center gap-3 py-2">
                     <span className="shrink-0 text-[12px] font-semibold uppercase tracking-wide text-muted">{row.label}</span>
                     <div className="h-px flex-1 bg-border" />
                   </div>
@@ -642,6 +673,24 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
         </div>
         <JumpToLatestButton show={!atBottom && filteredItems.length > 0} onClick={() => scrollToBottom()} />
         </div>
+
+        {/* A7a: month index — desktop-only side rail, not part of the mobile
+            layout (which stacks the composer under the feed already). */}
+        {monthGroups.length > 0 && (
+          <div className="hidden w-32 shrink-0 overflow-y-auto border-l px-2 py-3 md:block">
+            <div className="mb-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Months</div>
+            {monthGroups.map((g) => (
+              <button
+                key={g.key}
+                onClick={() => jumpToMonth(g.anchorDayKey)}
+                className={`flex w-full items-center justify-between gap-1 rounded-[5px] px-1.5 py-1 text-left text-[12px] font-medium transition ${g.key === nowKey ? "bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}
+              >
+                <span className="truncate">{g.label}</span>
+                <span className="shrink-0 text-[11px] opacity-70">{g.count}</span>
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Full-width and stacked under the feed on mobile; fixed, resizable
             side column at md+. The inline width rides a CSS var so a Tailwind
