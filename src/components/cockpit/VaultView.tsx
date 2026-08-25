@@ -112,7 +112,25 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(() => new Set(["__none__"]));
   const toggleProjectCollapsed = (key: string) => setCollapsedProjects((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; });
 
-  const images = displayed.filter((a) => a.kind === "image");
+  // B5: client-side filter (28 items, not worth a server search endpoint for)
+  // across file names, link titles/domains, and project names. Filtering
+  // `displayed` itself — rather than post-filtering rendered groups — is what
+  // makes empty groups disappear for free and matching ones keep their
+  // heading, with no separate "flatten results" code path to maintain.
+  const [searchQuery, setSearchQuery] = useState("");
+  const q = searchQuery.trim().toLowerCase();
+  const matched = !q ? displayed : displayed.filter((a) => {
+    if (a.name.toLowerCase().includes(q)) return true;
+    if (a.projectName?.toLowerCase().includes(q)) return true;
+    if (a.kind === "link") {
+      const { title, domain } = deriveLinkTitle(a);
+      if (title.toLowerCase().includes(q)) return true;
+      if (domain?.toLowerCase().includes(q)) return true;
+    }
+    return false;
+  });
+
+  const images = matched.filter((a) => a.kind === "image");
 
   // Drag-to-reorder within one kind-group — same splice-before-target idiom
   // as FolderRail/ClientLinks. Vault items are a merge of three
@@ -298,7 +316,7 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
   const projectGroups = (() => {
     if (groupBy !== "project") return [];
     const byProject = new Map<string, VaultItem[]>();
-    for (const a of displayed) {
+    for (const a of matched) {
       const key = a.projectId ?? "__none__";
       if (!byProject.has(key)) byProject.set(key, []);
       byProject.get(key)!.push(a);
@@ -381,19 +399,28 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
               {o.label}
             </button>
           ))}
+          <div className="relative ml-auto">
+            <I.search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted" />
+            <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search…"
+              className="w-32 rounded-md border bg-background py-1.5 pl-7 pr-2 text-[13px] outline-none placeholder:text-muted focus:w-48 focus:border-accent sm:w-40 sm:focus:w-56" />
+          </div>
         </div>
 
         <div className="space-y-8">
-        {displayed.length === 0 && (
+        {matched.length === 0 && (
           <div className="flex flex-col items-center gap-2 py-16 text-center text-muted">
             <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent-soft text-accent"><I.clipboard /></span>
-            <span className="text-[15px] font-medium">{selectedFolder === null ? "Nothing in the vault yet" : "Nothing filed here yet"}</span>
-            <span className="max-w-[280px] text-[13px] leading-relaxed">{selectedFolder === null ? "Every image, doc, sheet, and link attached to a task or posted in Chat shows up here automatically — or drag files in, or click Add files." : "Move an item here from its ‹⋯› menu."}</span>
+            {q ? (
+              <span className="text-[15px] font-medium">No results for &quot;{searchQuery.trim()}&quot;</span>
+            ) : (<>
+              <span className="text-[15px] font-medium">{selectedFolder === null ? "Nothing in the vault yet" : "Nothing filed here yet"}</span>
+              <span className="max-w-[280px] text-[13px] leading-relaxed">{selectedFolder === null ? "Every image, doc, sheet, and link attached to a task or posted in Chat shows up here automatically — or drag files in, or click Add files." : "Move an item here from its ‹⋯› menu."}</span>
+            </>)}
           </div>
         )}
 
-        {groupBy === "type" && renderKindGroups(displayed, "__all__", "position")}
-        {groupBy === "recent" && renderKindGroups(displayed, "__all__", "recent")}
+        {groupBy === "type" && renderKindGroups(matched, "__all__", "position")}
+        {groupBy === "recent" && renderKindGroups(matched, "__all__", "recent")}
         {groupBy === "project" && projectGroups.map((g) => {
           const collapsed = collapsedProjects.has(g.key);
           return (
