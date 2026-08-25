@@ -197,7 +197,12 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin,
     onDeleteMessage, onEditMessage, onRegenerateAiSummary, aiSummaryBusy, hasMessaging } = p;
 
-  const [visibleChannels, setVisibleChannels] = useState<Set<Channel>>(new Set(["activity", "chat", "email", "sms"]));
+  // C3: was a Set of independently-toggled channels (all four on by default),
+  // which is how "the active tab reads Chat while the pane shows an email
+  // and field changes" happened — with everything simultaneously "active,"
+  // there was no single answer to "which tab is on." One exclusive filter
+  // has exactly one right answer at all times.
+  const [activeFilter, setActiveFilter] = useState<Channel | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [replyingTo, setReplyingTo] = useState<{ id: string; channel: Channel } | null>(null);
   const [composingChannel, setComposingChannel] = useState<Channel | null>(null);
@@ -298,6 +303,13 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
 
   // Admin-only correction for a message that already sent wrong.
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  // C4: Reply/Edit/Delete used to be 3 always-visible buttons crammed into
+  // the card header alongside the channel badge, direction label, avatar,
+  // and timestamp — broke badly at ~500px. One overflow trigger, keyed per
+  // message so only one card's menu is ever open at a time.
+  const [openMsgMenuId, setOpenMsgMenuId] = useState<string | null>(null);
+  const [openEventGroups, setOpenEventGroups] = useState<Set<string>>(new Set());
+  const toggleEventGroup = (key: string) => setOpenEventGroups((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; });
   const [editDraft, setEditDraft] = useState("");
   const startEditMessage = (m: Message) => { setEditingMsgId(m.id); setEditDraft(looksLikeHtml(m.body) ? htmlToText(m.body) : m.body); };
   const saveEditMessage = (m: Message) => {
@@ -318,18 +330,43 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
     setEmailFocusNonce((n) => n + 1);
     onPatch({ draftEmail: null });
   };
+  // C1: same subject + same body as something already sent to this client
+  // is exactly what C0 turned up — a draft staged 11s before it went out via
+  // a path that never cleared task.draftEmail, leaving a stale card behind.
+  // Catching that here is what would have caught C0 on its own.
+  const normalizeEmailText = (s: string) => htmlToText(s).replace(/\s+/g, " ").trim().toLowerCase();
+  const draftSentAlready = task.draftEmail ? (messages ?? []).find((m) =>
+    m.channel === "email" && m.direction === "outbound" &&
+    normalizeEmailText(m.subject ?? "") === normalizeEmailText(task.draftEmail!.subject) &&
+    normalizeEmailText(m.body) === normalizeEmailText(task.draftEmail!.body)
+  ) ?? null : null;
+  // "The thread it continues" — the most recent email either direction, so
+  // the card can name and link to what this draft is following up on.
+  const latestPriorEmail = task.draftEmail
+    ? [...(messages ?? [])].filter((m) => m.channel === "email").sort((a, b) => b.at.localeCompare(a.at))[0] ?? null
+    : null;
   const draftEmailCard = task.draftEmail ? (
-    <div className="mb-3 rounded-xl border border-accent/30 bg-accent-soft/20 p-4">
-      <div className="mb-1 flex items-center gap-1.5 text-[16px] font-semibold text-accent"><span aria-hidden>✉️</span> Draft email ready</div>
-      <div className="truncate text-[15px] font-medium">{task.draftEmail.subject || "(no subject)"}</div>
-      <div className="mt-0.5 line-clamp-2 text-[14px] text-muted">{htmlToText(task.draftEmail.body)}</div>
+    <div className="mb-2 rounded-xl border border-accent/30 bg-accent-soft/20 p-3">
+      <div className="mb-1 flex items-center gap-1.5 text-[15px] font-semibold text-accent"><span aria-hidden>✉️</span> Draft email ready</div>
+      <div className="truncate text-[14px] font-medium">{task.draftEmail.subject || "(no subject)"}</div>
+      <div className="mt-0.5 line-clamp-2 text-[13px] text-muted">{htmlToText(task.draftEmail.body)}</div>
+      {latestPriorEmail && (
+        <button onClick={() => selectFilter("email")} className="mt-1 block text-[12px] font-medium text-accent hover:underline">
+          Continues the email conversation from {timeAgo(latestPriorEmail.at)} · see thread
+        </button>
+      )}
+      {draftSentAlready && (
+        <div className="mt-1.5 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[12px] font-medium text-amber-800">
+          ⚠️ Looks like this was sent {timeAgo(draftSentAlready.at)} — check before sending again.
+        </div>
+      )}
       <div className="mt-2 flex items-center gap-2">
         {hasMessaging ? (
-          <button onClick={openDraftEmail} className="rounded-md bg-accent px-2.5 py-1.5 text-[14px] font-medium text-white">Review &amp; send</button>
+          <button onClick={openDraftEmail} className="rounded-md bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white">Review &amp; send</button>
         ) : (
           <span className="text-[13px] text-muted" title="No linked GoHighLevel contact to send to yet">Can&apos;t send — no linked contact for this client</span>
         )}
-        <button onClick={() => onPatch({ draftEmail: null })} className="rounded-md px-2.5 py-1.5 text-[14px] font-medium text-muted hover:bg-background hover:text-foreground">Discard</button>
+        <button onClick={() => onPatch({ draftEmail: null })} className="rounded-md px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">Discard</button>
       </div>
     </div>
   ) : null;
@@ -542,6 +579,32 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
     | { at: string; kind: "comment" | "event"; channel: "activity"; comment: Comment }
     | { at: string; kind: "message"; channel: "chat" | "email" | "sms"; message: Message; dupeCount?: number };
 
+  // C2: a display-only row shape layered on top of FeedItem — consecutive
+  // same-field audit events (three due-date changes in a row) collapse into
+  // one summarized row with a disclosure, instead of each occupying the same
+  // visual weight as a real client email.
+  type DisplayRow = FeedItem | { kind: "event-group"; key: string; field: string; events: Comment[] };
+  function groupConsecutiveEvents(items: FeedItem[]): DisplayRow[] {
+    const rows: DisplayRow[] = [];
+    for (const item of items) {
+      if (item.kind === "event") {
+        const field = parseEventDiff(item.comment.body)?.field ?? item.comment.body;
+        const last = rows[rows.length - 1];
+        if (last && last.kind === "event-group" && last.field === field) { last.events.push(item.comment); continue; }
+        if (last && "kind" in last && last.kind === "event" && (parseEventDiff(last.comment.body)?.field ?? last.comment.body) === field) {
+          rows[rows.length - 1] = { kind: "event-group", key: `eg_${last.comment.id}`, field, events: [last.comment, item.comment] };
+          continue;
+        }
+      }
+      rows.push(item);
+    }
+    return rows;
+  }
+  // Natural phrasing per field — "Due date moved 3×" reads better than
+  // "updated due date to 3×". Falls back to a generic verb for any field
+  // that isn't one of the common ones.
+  const FIELD_VERB: Record<string, string> = { status: "Status changed", priority: "Priority changed", assignee: "Assignee changed", "due date": "Due date moved" };
+
   // Two byte-identical sends (a genuine GHL double-send, not just a display
   // quirk — see the item-2 write-up) shouldn't read as two separate
   // messages. Collapses only truly adjacent messages in the sorted feed —
@@ -568,9 +631,9 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
 
   const q = searchQuery.trim().toLowerCase();
   const mergedFeedItems: FeedItem[] = collapseDuplicateMessages([
-    ...(visibleChannels.has("activity") ? task.comments.map((c) => ({ at: c.at, kind: (c.kind === "event" ? "event" : "comment") as "event" | "comment", channel: "activity" as const, comment: c })) : []),
+    ...(activeFilter === "all" || activeFilter === "activity" ? task.comments.map((c) => ({ at: c.at, kind: (c.kind === "event" ? "event" : "comment") as "event" | "comment", channel: "activity" as const, comment: c })) : []),
     ...(messages ?? [])
-      .filter((m): m is Message & { channel: "chat" | "email" | "sms" } => m.channel !== "call" && visibleChannels.has(m.channel))
+      .filter((m): m is Message & { channel: "chat" | "email" | "sms" } => m.channel !== "call" && (activeFilter === "all" || activeFilter === m.channel))
       .map((m) => ({ at: m.at, kind: "message" as const, channel: m.channel, message: m })),
   ]
     .filter((item) => {
@@ -580,39 +643,48 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
       return false;
     })
     .sort((a, b) => a.at.localeCompare(b.at)));
+  const displayRows: DisplayRow[] = groupConsecutiveEvents(mergedFeedItems);
 
-  const commentCount = task.comments.filter((c) => c.kind !== "event").length;
+  // C3: "activity" bundles both team notes AND field-change audit events (see
+  // mergedFeedItems above) — its filter count has to reflect everything that
+  // filter actually reveals, not just the notes, or picking it would show
+  // more rows than its own count promised.
+  const activityCount = task.comments.length;
   const chatMsgCount = (messages ?? []).filter((m) => m.channel === "chat").length;
   const emailMsgCount = (messages ?? []).filter((m) => m.channel === "email").length;
   const smsMsgCount = (messages ?? []).filter((m) => m.channel === "sms").length;
   const chatUnread = (messages ?? []).some((m) => m.channel === "chat" && m.direction === "inbound" && !m.read);
   const emailUnread = (messages ?? []).some((m) => m.channel === "email" && m.direction === "inbound" && !m.read);
   const smsUnread = (messages ?? []).some((m) => m.channel === "sms" && m.direction === "inbound" && !m.read);
+  const totalCount = activityCount + chatMsgCount + emailMsgCount + smsMsgCount;
 
-  const channelMeta: Record<Channel, { label: string; unread: boolean; icon: React.ReactNode }> = {
-    activity: { label: `Note · ${commentCount}`, unread: false, icon: <I.comment /> },
-    chat: { label: `Chat${chatMsgCount ? ` · ${chatMsgCount}` : ""}`, unread: chatUnread, icon: <I.chatBubbles /> },
-    email: { label: `Email${emailMsgCount ? ` · ${emailMsgCount}` : ""}`, unread: emailUnread, icon: <I.mail /> },
-    sms: { label: `SMS${smsMsgCount ? ` · ${smsMsgCount}` : ""}`, unread: smsUnread, icon: <I.phone /> },
+  const channelMeta: Record<Channel, { label: string; count: number; unread: boolean; icon: React.ReactNode }> = {
+    activity: { label: "Activity", count: activityCount, unread: false, icon: <I.comment /> },
+    chat: { label: "Chat", count: chatMsgCount, unread: chatUnread, icon: <I.chatBubbles /> },
+    email: { label: "Email", count: emailMsgCount, unread: emailUnread, icon: <I.mail /> },
+    sms: { label: "SMS", count: smsMsgCount, unread: smsUnread, icon: <I.phone /> },
   };
-  const toggleChannel = (ch: Channel) => setVisibleChannels((s) => {
-    const next = new Set(s);
-    if (next.has(ch)) next.delete(ch); else next.add(ch);
-    if (next.size === 0) next.add(ch); // never allow filtering to zero channels
-    if (ch !== "activity" && !s.has(ch)) onMarkChannelRead?.(ch); // opening a channel on clears its unread dot
-    return next;
-  });
+  const selectFilter = (f: Channel | "all") => {
+    setActiveFilter(f);
+    if (f !== "activity" && f !== "all") onMarkChannelRead?.(f); // selecting a channel clears its unread dot
+  };
 
+  // C3: one exclusive filter — "All" plus only the channels that actually
+  // have content, so nothing reads as a tab advertising its own emptiness.
   const filterBar = (
     <div className="mb-3 flex flex-wrap items-center gap-1.5">
-      {(["activity", "chat", "email", "sms"] as Channel[]).filter((ch) => ch === "activity" || hasMessaging).map((ch) => {
-        const active = visibleChannels.has(ch);
+      <button onClick={() => selectFilter("all")}
+        className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[14px] font-medium ${activeFilter === "all" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>
+        All · {totalCount}
+      </button>
+      {(["activity", "chat", "email", "sms"] as Channel[]).filter((ch) => (ch === "activity" || hasMessaging) && channelMeta[ch].count > 0).map((ch) => {
+        const active = activeFilter === ch;
         const color = channelColor[ch];
         return (
-          <button key={ch} onClick={() => toggleChannel(ch)}
+          <button key={ch} onClick={() => selectFilter(ch)}
             className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[14px] font-medium ${active ? "" : "text-muted hover:text-foreground"}`}
             style={active ? { background: color + "1a", color } : undefined}>
-            {channelMeta[ch].icon} {channelMeta[ch].label}
+            {channelMeta[ch].icon} {channelMeta[ch].label} · {channelMeta[ch].count}
             {channelMeta[ch].unread && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color }} />}
           </button>
         );
@@ -677,7 +749,7 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
               <span className="inline-flex items-center gap-1 rounded px-1.5 py-0 font-medium" style={{ background: dotColor + "1a", color: dotColor }}>{channelLabel}</span>
               <span className="font-medium" style={{ color: m.direction === "inbound" ? "var(--highlight)" : "var(--accent)" }}>{m.direction === "inbound" ? "Received" : "Sent"}</span>
               {m.direction === "outbound" && m.createdBy && (
-                <span className="inline-flex items-center gap-1"><Avatar id={m.createdBy} size={14} /> {userById(m.createdBy)?.name ?? "Unknown"}</span>
+                <span className="inline-flex min-w-0 shrink items-center gap-1 truncate"><Avatar id={m.createdBy} size={14} /> <span className="truncate">{userById(m.createdBy)?.name ?? "Unknown"}</span></span>
               )}
               <span>· {timeAgo(m.at)}</span>
               {dupeCount && dupeCount > 1 && (
@@ -688,19 +760,27 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
                   <span className="h-1.5 w-1.5 rounded-full bg-accent" /> New
                 </span>
               )}
-              <span className="ml-auto flex shrink-0 items-center gap-1">
-                {replyableChannel(m.channel) && onSendTaskMessage && editingMsgId !== m.id && (
-                  <button onClick={() => openReply(m.id, replyableChannel(m.channel)!, m.subject)} className="rounded-md border border-accent/30 px-2 py-0.5 text-[13px] font-medium text-accent hover:bg-accent-soft">Reply</button>
-                )}
-                {canAdmin && onEditMessage && editingMsgId !== m.id && (
-                  <button onClick={() => startEditMessage(m)} title="Edit (this doesn't unsend anything already delivered)" className="rounded-md border px-2 py-0.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">Edit</button>
-                )}
-                {canAdmin && onDeleteMessage && (
-                  <button
-                    onClick={() => { if (window.confirm("Delete this message? This only removes it from ClickUpTasks and the client's waiting page — it does not unsend a real email or text already delivered.")) onDeleteMessage(m.id); }}
-                    title="Delete" className="rounded-md border px-2 py-0.5 text-[13px] font-medium text-muted hover:border-red-300 hover:bg-red-50 hover:text-red-600">Delete</button>
-                )}
-              </span>
+              {editingMsgId !== m.id && (replyableChannel(m.channel) && onSendTaskMessage || (canAdmin && (onEditMessage || onDeleteMessage))) && (
+                <span className="relative ml-auto shrink-0">
+                  <button onClick={() => setOpenMsgMenuId((id) => (id === m.id ? null : m.id))} title="More" className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground"><I.dots /></button>
+                  {openMsgMenuId === m.id && (<>
+                    <div className="fixed inset-0 z-30" onClick={() => setOpenMsgMenuId(null)} />
+                    <div className="absolute right-0 top-full z-40 mt-1 w-40 overflow-hidden rounded-lg border bg-surface py-1 shadow-lg">
+                      {replyableChannel(m.channel) && onSendTaskMessage && (
+                        <button onClick={() => { setOpenMsgMenuId(null); openReply(m.id, replyableChannel(m.channel)!, m.subject); }} className="block w-full px-3 py-1.5 text-left text-[13px] font-medium text-accent hover:bg-background">Reply</button>
+                      )}
+                      {canAdmin && onEditMessage && (
+                        <button onClick={() => { setOpenMsgMenuId(null); startEditMessage(m); }} title="This doesn't unsend anything already delivered" className="block w-full px-3 py-1.5 text-left text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">Edit</button>
+                      )}
+                      {canAdmin && onDeleteMessage && (
+                        <button
+                          onClick={() => { setOpenMsgMenuId(null); if (window.confirm("Delete this message? This only removes it from ClickUpTasks and the client's waiting page — it does not unsend a real email or text already delivered.")) onDeleteMessage(m.id); }}
+                          className="block w-full px-3 py-1.5 text-left text-[13px] font-medium text-muted hover:bg-red-50 hover:text-red-600">Delete</button>
+                      )}
+                    </div>
+                  </>)}
+                </span>
+              )}
             </div>
             {m.subject && <div className="mt-1 text-[16px] font-medium">{m.subject}</div>}
             {((m.cc && m.cc.length > 0) || (m.bcc && m.bcc.length > 0)) && (
@@ -729,7 +809,15 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
               <div className="mt-1 text-[15px] italic text-muted">No content synced from GoHighLevel for this message.</div>
             ) : (
               <>
-                {cleanText && <CollapsibleText text={cleanText} className="mt-1 text-[16px]" />}
+                {/* C5: inbound renders in full up to ~12 lines before truncating —
+                    it's the client/prospect's words, worth reading in full.
+                    Outbound truncates at 2 — it's what the user themselves
+                    wrote, so a "Show more" on their own message is noise. */}
+                {cleanText && (
+                  <CollapsibleText text={cleanText} className="mt-1 text-[16px]"
+                    maxLines={m.direction === "inbound" ? 12 : 2}
+                    maxChars={m.direction === "inbound" ? 900 : 180} />
+                )}
                 {imageUrls.length > 0 && (
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
                     {imageUrls.map((url) => <UrlImageCard key={url} url={url} />)}
@@ -776,25 +864,47 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
     );
   };
 
+  const renderEventRow = (c: Comment, gap: string) => {
+    const u = userById(c.authorId); const diff = parseEventDiff(c.body);
+    return (
+      <div key={c.id} className={`relative flex gap-3 ${gap}`}>
+        <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface" style={{ background: diff ? eventAccentColor(diff) : "var(--muted)" }} /></div>
+        <div className="min-w-0 flex-1 pt-1.5 text-[16px] text-muted">
+          <span className="font-medium text-foreground">{u?.name}</span>{" "}
+          {diff ? <>updated {diff.field} to <EventValuePill diff={diff} /></> : c.body}
+          {" · "}<span className="text-[15px]">{timeAgo(c.at)}</span>
+        </div>
+      </div>
+    );
+  };
+
   const commentsFeed = (
     <div className="relative">
       {mergedFeedItems.length > 0 && <div className="absolute bottom-2 left-4 top-2 w-px bg-border" />}
-      {mergedFeedItems.map((item, i) => {
-        const gap = i === mergedFeedItems.length - 1 ? "" : "pb-3";
+      {displayRows.map((item, i) => {
+        const gap = i === displayRows.length - 1 ? "" : "pb-3";
         if (item.kind === "message") return renderMessageItem(item.message, gap, item.dupeCount);
-        if (item.kind === "event") {
-          const c = item.comment; const u = userById(c.authorId); const diff = parseEventDiff(c.body);
+        if (item.kind === "event-group") {
+          // C2: three consecutive same-field changes collapse into one quiet
+          // row — grey, no avatar, no timeline dot — with a disclosure that
+          // expands back into the individual changes on demand.
+          const last = item.events[item.events.length - 1];
+          const lastDiff = parseEventDiff(last.body);
+          const open = openEventGroups.has(item.key);
           return (
-            <div key={c.id} className={`relative flex gap-3 ${gap}`}>
-              <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface" style={{ background: diff ? eventAccentColor(diff) : "var(--muted)" }} /></div>
-              <div className="min-w-0 flex-1 pt-1.5 text-[16px] text-muted">
-                <span className="font-medium text-foreground">{u?.name}</span>{" "}
-                {diff ? <>updated {diff.field} to <EventValuePill diff={diff} /></> : c.body}
-                {" · "}<span className="text-[15px]">{timeAgo(c.at)}</span>
+            <div key={item.key} className={gap}>
+              <div className="flex gap-3">
+                <div className="w-8 shrink-0" />
+                <button onClick={() => toggleEventGroup(item.key)} className="flex min-w-0 flex-1 items-center gap-1.5 pt-1 text-left text-[15px] text-muted hover:text-foreground">
+                  <I.chevron className={`h-3 w-3 shrink-0 transition-transform ${open ? "rotate-90" : "rotate-180"}`} />
+                  <span>{FIELD_VERB[item.field] ?? `${item.field} changed`} {item.events.length}×{lastDiff ? <> → <EventValuePill diff={lastDiff} /></> : null} · {timeAgo(last.at)}</span>
+                </button>
               </div>
+              {open && <div className="mt-1 space-y-1">{item.events.map((c) => renderEventRow(c, ""))}</div>}
             </div>
           );
         }
+        if (item.kind === "event") return renderEventRow(item.comment, gap);
         const c = item.comment;
         const u = userById(c.authorId);
         return (
@@ -831,11 +941,18 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
           </div>
         );
       })}
+      {/* C6: a short thread otherwise leaves a few hundred blank px below the
+          last entry, which reads as a stuck load rather than a finished
+          history. Top-anchored on purpose — bottom-anchoring was tried and
+          reverted (short threads looked broken); don't reintroduce it. */}
+      {mergedFeedItems.length > 0 && (
+        <div className="pt-3 text-center text-[13px] text-muted">Start of your conversation with {client.name}</div>
+      )}
       {mergedFeedItems.length === 0 && (
         <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted">
           <I.comment />
-          <span className="text-[16px]">{(visibleChannels.size < 4 || q) ? "No messages match these filters" : "No activity yet"}</span>
-          <span className="text-[14px]">{(visibleChannels.size < 4 || q) ? "Try a different filter or search." : "Type @ to mention a teammate, or use a button below to reach out."}</span>
+          <span className="text-[16px]">{(activeFilter !== "all" || q) ? "No messages match these filters" : "No activity yet"}</span>
+          <span className="text-[14px]">{(activeFilter !== "all" || q) ? "Try a different filter or search." : "Type @ to mention a teammate, or use a button below to reach out."}</span>
         </div>
       )}
     </div>
@@ -855,7 +972,6 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
 
   const feedArea = (
     <>
-      {draftEmailCard}
       {filterBar}
       {commentsFeed}
       {aiSlideOver}
@@ -867,9 +983,17 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
   // otherwise the compose buttons. Keeping the buttons here rather than at
   // the end of the feed is what makes them always reachable without
   // scrolling a long thread first.
-  const composerFooter = composingChannel
-    ? (composingChannel === "activity" ? teamComposer : channelComposer(composingChannel, closeComposers))
-    : ctaRow;
+  // C1: a draft is what hasn't happened yet, never a peer of the sent
+  // messages in the feed above — it lives here, in the composer region,
+  // above whichever composer/CTA row is currently showing.
+  const composerFooter = (
+    <>
+      {draftEmailCard}
+      {composingChannel
+        ? (composingChannel === "activity" ? teamComposer : channelComposer(composingChannel, closeComposers))
+        : ctaRow}
+    </>
+  );
 
   void mentionMatch; void mentionCands; // reserved: team @-mention affordance can be reintroduced here if needed
 

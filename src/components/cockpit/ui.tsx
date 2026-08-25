@@ -308,22 +308,27 @@ const LONG_TEXT_CHAR_THRESHOLD = 150;
 // the card tall and clunky — well before it hits the character limit above.
 // Whichever limit is crossed first decides how the preview gets truncated.
 const LONG_TEXT_LINE_THRESHOLD = 6;
-export function CollapsibleText({ text, className }: { text: string; className?: string }) {
+// `maxChars`/`maxLines` default to the thresholds above — every existing
+// caller keeps its current behavior. C5: a conversation pane distinguishes
+// inbound (generous, ~12 lines) from outbound (tight, ~2 lines — the user
+// wrote it, they don't need "Show more" on their own message) by passing
+// wider or narrower limits, rather than every caller getting one fixed rule.
+export function CollapsibleText({ text, className, maxChars = LONG_TEXT_CHAR_THRESHOLD, maxLines = LONG_TEXT_LINE_THRESHOLD }: { text: string; className?: string; maxChars?: number; maxLines?: number }) {
   const [expanded, setExpanded] = useState(false);
   const trimmed = text.trim();
   const lines = trimmed.split("\n");
-  const overCharLimit = trimmed.length > LONG_TEXT_CHAR_THRESHOLD;
-  const overLineLimit = lines.length > LONG_TEXT_LINE_THRESHOLD;
+  const overCharLimit = trimmed.length > maxChars;
+  const overLineLimit = lines.length > maxLines;
   const isLong = overCharLimit || overLineLimit;
   // Cut on a word boundary so the preview doesn't end mid-word.
   const charPreview = () => {
-    const cut = trimmed.slice(0, LONG_TEXT_CHAR_THRESHOLD);
+    const cut = trimmed.slice(0, maxChars);
     const lastSpace = cut.lastIndexOf(" ");
-    return (lastSpace > LONG_TEXT_CHAR_THRESHOLD * 0.6 ? cut.slice(0, lastSpace) : cut).trimEnd();
+    return (lastSpace > maxChars * 0.6 ? cut.slice(0, lastSpace) : cut).trimEnd();
   };
   const shown = !isLong || expanded
     ? text
-    : (overCharLimit ? charPreview() : lines.slice(0, LONG_TEXT_LINE_THRESHOLD).join("\n")) + "…";
+    : (overCharLimit ? charPreview() : lines.slice(0, maxLines).join("\n")) + "…";
   const toggle = (e: React.SyntheticEvent) => { e.stopPropagation(); setExpanded((x) => !x); };
   // break-words so a long unbroken string (a long URL, most commonly) wraps
   // instead of forcing the whole feed to scroll horizontally.
