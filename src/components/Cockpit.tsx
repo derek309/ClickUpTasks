@@ -2016,14 +2016,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     () => (activeClient === "all" ? [] : vaultFolders.filter((f) => f.clientId === activeClient)),
     [activeClient, vaultFolders]
   );
+  // B2: every task carries a projectId already; a note's is optional (unset
+  // = client-wide Journal, not scoped to any one project) — that's exactly
+  // the "Not in a project" bucket the Vault's By-project grouping needs.
   const vaultItems: VaultItem[] = useMemo(() => (activeClient === "all" ? [] : [
-    ...baseTasks.flatMap((t) => t.attachments.map((a) => ({ ...a, at: t.createdAt, sourceLabel: t.title, onOpenSource: () => { setClientTab("tasks"); setOpenTaskId(t.id); }, onSetFolder: (folderId: string | null) => setTaskAttachmentFolder(t.id, a.id, folderId) }))),
-    ...baseTasks.flatMap((t) => t.comments.flatMap((c) => (c.attachments ?? []).map((a) => ({ ...a, at: c.at, sourceLabel: t.title, onOpenSource: () => { setClientTab("tasks"); setOpenTaskId(t.id); }, onSetFolder: (folderId: string | null) => setCommentAttachmentFolder(t.id, c.id, a.id, folderId) })))),
+    ...baseTasks.flatMap((t) => t.attachments.map((a) => ({ ...a, at: t.createdAt, projectId: t.projectId, projectName: projects.find((p) => p.id === t.projectId)?.name ?? null, sourceLabel: t.title, onOpenSource: () => { setClientTab("tasks"); setOpenTaskId(t.id); }, onSetFolder: (folderId: string | null) => setTaskAttachmentFolder(t.id, a.id, folderId) }))),
+    ...baseTasks.flatMap((t) => t.comments.flatMap((c) => (c.attachments ?? []).map((a) => ({ ...a, at: c.at, projectId: t.projectId, projectName: projects.find((p) => p.id === t.projectId)?.name ?? null, sourceLabel: t.title, onOpenSource: () => { setClientTab("tasks"); setOpenTaskId(t.id); }, onSetFolder: (folderId: string | null) => setCommentAttachmentFolder(t.id, c.id, a.id, folderId) })))),
     ...clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId))
-      .flatMap((n) => (n.attachments ?? []).map((a) => ({ ...a, at: n.at, sourceLabel: "Journal", onOpenSource: () => setClientTab("chat"), onSetFolder: (folderId: string | null) => setNoteAttachmentFolder(n, a.id, folderId) }))),
+      .flatMap((n) => (n.attachments ?? []).map((a) => ({ ...a, at: n.at, projectId: n.projectId ?? null, projectName: n.projectId ? (projects.find((p) => p.id === n.projectId)?.name ?? null) : null, sourceLabel: "Journal", onOpenSource: () => setClientTab("chat"), onSetFolder: (folderId: string | null) => setNoteAttachmentFolder(n, a.id, folderId) }))),
   ]),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeClient, activeProject, baseTasks, clientNotes]
+    [activeClient, activeProject, baseTasks, clientNotes, projects]
   );
   const projectsForClient = (clientId: string) => projects.filter((p) => p.clientId === clientId);
   const foldersForClient = (clientId: string) => folders.filter((f) => f.clientId === clientId).sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt));

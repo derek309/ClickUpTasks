@@ -19,7 +19,7 @@ import { AttachmentTile } from "./AttachmentTile";
 // available signal for "when was this filed," used for the Links rows' age
 // column. Not a stored attachment timestamp (Attachment has none), just
 // threaded through from whichever row owns it (see Cockpit.tsx's vaultItems).
-export type VaultItem = Attachment & { at: string; sourceLabel: string; onOpenSource: () => void; onSetFolder: (folderId: string | null) => void };
+export type VaultItem = Attachment & { at: string; projectId: string | null; projectName: string | null; sourceLabel: string; onOpenSource: () => void; onSetFolder: (folderId: string | null) => void };
 
 const FILE_KIND_ORDER: Attachment["kind"][] = ["pdf", "doc", "sheet"];
 
@@ -101,13 +101,18 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
   const [selectedFolder, setSelectedFolder] = useState<string | "unfiled" | null>(initialFolderId ?? null);
   const displayed = selectedFolder === null ? items : selectedFolder === "unfiled" ? items.filter((a) => !a.folderId) : items.filter((a) => a.folderId === selectedFolder);
 
+  // B2: what people actually reach for is "show me the mailer assets," not
+  // "show me all my PDFs" — group by project by default, kind-based grouping
+  // (the old default) and a flat recency view stay one click away.
+  const [groupBy, setGroupBy] = useState<"project" | "type" | "recent">("project");
+  useEffect(() => { try { const v = localStorage.getItem("cut_vaultGroupBy"); if (v === "project" || v === "type" || v === "recent") setGroupBy(v); } catch {} }, []);
+  const setGroupByPersist = (v: "project" | "type" | "recent") => { setGroupBy(v); try { localStorage.setItem("cut_vaultGroupBy", v); } catch {} };
+  // "Not in a project" collapsed by default — the brief's explicit ask, since
+  // it's the catch-all bucket rather than a project someone's actively in.
+  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(() => new Set(["__none__"]));
+  const toggleProjectCollapsed = (key: string) => setCollapsedProjects((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; });
+
   const images = displayed.filter((a) => a.kind === "image");
-  const photos = sortByPosition(images.filter((a) => !SCREENSHOT_RE.test(a.name)));
-  const screenshots = sortByPosition(images.filter((a) => SCREENSHOT_RE.test(a.name)));
-  // B1: files (pdf/doc/sheet) get thumbnail cards, links get dense rows —
-  // one uniform card grid wastes ~17,000px² per link on a 20px "URL" chip.
-  const files = sortByPosition(displayed.filter((a) => FILE_KIND_ORDER.includes(a.kind)));
-  const links = sortByPosition(displayed.filter((a) => a.kind === "link"));
 
   // Drag-to-reorder within one kind-group — same splice-before-target idiom
   // as FolderRail/ClientLinks. Vault items are a merge of three
@@ -152,7 +157,7 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imagePaths]);
 
-  const [screenshotsOpen, setScreenshotsOpen] = useState(false);
+  const [screenshotsOpenMap, setScreenshotsOpenMap] = useState<Record<string, boolean>>({});
   const [preview, setPreview] = useState<VaultItem | null>(null);
   const [addingFolder, setAddingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
@@ -168,6 +173,145 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
     if (renameValue.trim()) onRenameFolder(folderId, renameValue.trim());
     setRenamingFolder(null);
   };
+
+  const sortItems = (list: VaultItem[], mode: "position" | "recent") =>
+    mode === "recent" ? [...list].sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0)) : sortByPosition(list);
+
+  // Shared by all three grouping modes — "type" and "recent" call this once
+  // over the whole `displayed` set, "project" calls it once per project
+  // group, so it needs its own key (for the Screenshots collapse state) and
+  // sort mode (position for everything except the flat Recent view).
+  const renderKindGroups = (groupItems: VaultItem[], groupKey: string, sortMode: "position" | "recent") => {
+    const gImages = groupItems.filter((a) => a.kind === "image");
+    const gPhotos = sortItems(gImages.filter((a) => !SCREENSHOT_RE.test(a.name)), sortMode);
+    const gScreenshots = sortItems(gImages.filter((a) => SCREENSHOT_RE.test(a.name)), sortMode);
+    const gFiles = sortItems(groupItems.filter((a) => FILE_KIND_ORDER.includes(a.kind)), sortMode);
+    const gLinks = sortItems(groupItems.filter((a) => a.kind === "link"), sortMode);
+    const screenshotsOpen = !!screenshotsOpenMap[groupKey];
+    return (
+      <>
+        {gPhotos.length > 0 && (
+          <div>
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Photos · {gPhotos.length}</div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+              {gPhotos.map((a) => (
+                // B6: the source-label caption used to overlay the bottom of
+                // the image (a live bug — it printed over a QR code's own
+                // bottom edge, obscuring it). A caption below the tile, in
+                // normal flow, can't overlap image content.
+                <div key={a.id} className="flex flex-col gap-1">
+                  <AttachmentTile item={a} url={a.path ? urls[a.path] : undefined} onOpen={() => setPreview(a)}
+                    drag={{ dragging: dragItemId === a.id, onDragStart: () => setDragItemId(a.id), onDrop: () => reorderGroup(gPhotos, a.id) }}
+                    actions={
+                      <>
+                        <FolderMenu item={a} folders={folders} triggerClassName="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80" />
+                        {a.path && (
+                          <button onClick={(e) => { e.stopPropagation(); onCopyLink(a.path!); }} title="Copy link" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-3.5 w-3.5" /></button>
+                        )}
+                      </>
+                    }
+                  />
+                  {a.sourceLabel && <div className="truncate text-center text-[12px] text-muted" title={a.sourceLabel}>{a.sourceLabel}</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {gScreenshots.length > 0 && (
+          <div>
+            <button onClick={() => setScreenshotsOpenMap((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }))} className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted hover:text-foreground">
+              <I.chevron className={`h-3 w-3 shrink-0 transition-transform ${screenshotsOpen ? "rotate-90" : "rotate-180"}`} /> Screenshots · {gScreenshots.length}
+            </button>
+            {screenshotsOpen && (
+              <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-6 md:grid-cols-8">
+                {gScreenshots.map((a) => (
+                  <AttachmentTile key={a.id} item={a} url={a.path ? urls[a.path] : undefined} onOpen={() => setPreview(a)} small
+                    drag={{ dragging: dragItemId === a.id, onDragStart: () => setDragItemId(a.id), onDrop: () => reorderGroup(gScreenshots, a.id) }}
+                    actions={a.path && (
+                      <button onClick={(e) => { e.stopPropagation(); onCopyLink(a.path!); }} title="Copy link" className="flex h-5 w-5 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-2.5 w-2.5" /></button>
+                    )}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {gFiles.length > 0 && (
+          <div>
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Files · {gFiles.length}</div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+              {gFiles.map((a) => (
+                <div key={a.id} className="flex flex-col gap-1">
+                  <AttachmentTile
+                    item={a}
+                    href={a.url || undefined}
+                    onOpen={!a.url && a.path ? () => onDownloadFile(a.path!) : undefined}
+                    drag={{ dragging: dragItemId === a.id, onDragStart: () => setDragItemId(a.id), onDrop: () => reorderGroup(gFiles, a.id) }}
+                    actions={
+                      <>
+                        <FolderMenu item={a} folders={folders} triggerClassName="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80" />
+                        {a.path && (
+                          <button onClick={(e) => { e.stopPropagation(); onCopyLink(a.path!); }} title="Copy link" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-3.5 w-3.5" /></button>
+                        )}
+                      </>
+                    }
+                  />
+                  <div className="truncate text-center text-[12px]" title={a.name}>{a.name}</div>
+                  <button onClick={a.onOpenSource} className="truncate text-center text-[11px] text-muted hover:text-foreground hover:underline">{a.sourceLabel}</button>
+                  {a.size && <div className="text-center text-[11px] text-muted">{a.size}</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {gLinks.length > 0 && (
+          <div>
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Links · {gLinks.length}</div>
+            <div className="divide-y rounded-lg border bg-surface">
+              {gLinks.map((a) => {
+                const display = deriveLinkTitle(a);
+                return (
+                  <div key={a.id} className="group/link flex items-center gap-2.5 px-3 py-2.5">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-accent-soft text-accent"><I.link className="h-3 w-3" /></span>
+                    <a href={a.url ?? undefined} target="_blank" rel="noopener noreferrer" title={a.url ?? a.name} className="min-w-0 flex-1 truncate text-[13px] font-medium hover:underline">{display.title}</a>
+                    {display.domain && <span className="hidden max-w-[160px] shrink-0 truncate text-[12px] text-muted sm:block">{display.domain}</span>}
+                    <span className="shrink-0 text-[11px] text-muted">{timeAgo(a.at)}</span>
+                    <span className="hidden shrink-0 items-center gap-0.5 group-hover/link:inline-flex">
+                      <FolderMenu item={a} folders={folders} triggerClassName="rounded-md p-1 text-muted hover:bg-background hover:text-foreground" />
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </>
+    );
+  };
+
+  // B2: group headers need a count and a last-added date — computed once per
+  // render rather than inside JSX so the sort below can use it too.
+  // "Not in a project" (no projectId) always sorts last, per the brief.
+  const projectGroups = (() => {
+    if (groupBy !== "project") return [];
+    const byProject = new Map<string, VaultItem[]>();
+    for (const a of displayed) {
+      const key = a.projectId ?? "__none__";
+      if (!byProject.has(key)) byProject.set(key, []);
+      byProject.get(key)!.push(a);
+    }
+    const groups = Array.from(byProject.entries()).map(([key, its]) => ({
+      key,
+      label: key === "__none__" ? "Not in a project" : (its[0].projectName ?? "Untitled project"),
+      items: its,
+      lastAdded: its.reduce((max, a) => Math.max(max, Date.parse(a.at) || 0), 0),
+    }));
+    groups.sort((a, b) => (a.key === "__none__" ? 1 : b.key === "__none__" ? -1 : b.lastAdded - a.lastAdded));
+    return groups;
+  })();
 
   return (
     <div
@@ -222,6 +366,23 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
           <button onClick={() => fileInputRef.current?.click()} className="ml-auto inline-flex items-center gap-1 rounded-[5px] border border-dashed px-3 py-1 text-[13px] font-medium text-muted hover:bg-surface"><I.plus className="h-3 w-3" /> Add files</button>
         </div>
 
+        <div className="mb-5 flex items-center gap-1.5">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">Group by</span>
+          {([
+            { key: "project", label: "Project" },
+            { key: "type", label: "Type" },
+            { key: "recent", label: "Recent" },
+          ] as { key: "project" | "type" | "recent"; label: string }[]).map((o) => (
+            <button
+              key={o.key}
+              onClick={() => setGroupByPersist(o.key)}
+              className={`rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${groupBy === o.key ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+
         <div className="space-y-8">
         {displayed.length === 0 && (
           <div className="flex flex-col items-center gap-2 py-16 text-center text-muted">
@@ -231,104 +392,21 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
           </div>
         )}
 
-        {photos.length > 0 && (
-          <div>
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Photos · {photos.length}</div>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
-              {photos.map((a) => (
-                // B6: the source-label caption used to overlay the bottom of
-                // the image (a live bug — it printed over a QR code's own
-                // bottom edge, obscuring it). A caption below the tile, in
-                // normal flow, can't overlap image content.
-                <div key={a.id} className="flex flex-col gap-1">
-                  <AttachmentTile item={a} url={a.path ? urls[a.path] : undefined} onOpen={() => setPreview(a)}
-                    drag={{ dragging: dragItemId === a.id, onDragStart: () => setDragItemId(a.id), onDrop: () => reorderGroup(photos, a.id) }}
-                    actions={
-                      <>
-                        <FolderMenu item={a} folders={folders} triggerClassName="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80" />
-                        {a.path && (
-                          <button onClick={(e) => { e.stopPropagation(); onCopyLink(a.path!); }} title="Copy link" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-3.5 w-3.5" /></button>
-                        )}
-                      </>
-                    }
-                  />
-                  {a.sourceLabel && <div className="truncate text-center text-[12px] text-muted" title={a.sourceLabel}>{a.sourceLabel}</div>}
-                </div>
-              ))}
+        {groupBy === "type" && renderKindGroups(displayed, "__all__", "position")}
+        {groupBy === "recent" && renderKindGroups(displayed, "__all__", "recent")}
+        {groupBy === "project" && projectGroups.map((g) => {
+          const collapsed = collapsedProjects.has(g.key);
+          return (
+            <div key={g.key}>
+              <button onClick={() => toggleProjectCollapsed(g.key)} className="mb-2 flex w-full items-center gap-1.5 text-left">
+                <I.chevron className={`h-3 w-3 shrink-0 text-muted transition-transform ${collapsed ? "rotate-180" : "rotate-90"}`} />
+                <span className="text-[13px] font-semibold text-foreground">{g.label}</span>
+                <span className="text-[12px] text-muted">{g.items.length} · last added {g.lastAdded ? timeAgo(new Date(g.lastAdded).toISOString()) : "—"}</span>
+              </button>
+              {!collapsed && <div className="space-y-8 pl-1">{renderKindGroups(g.items, g.key, "position")}</div>}
             </div>
-          </div>
-        )}
-
-        {screenshots.length > 0 && (
-          <div>
-            <button onClick={() => setScreenshotsOpen((o) => !o)} className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted hover:text-foreground">
-              <I.chevron className={`h-3 w-3 shrink-0 transition-transform ${screenshotsOpen ? "rotate-90" : "rotate-180"}`} /> Screenshots · {screenshots.length}
-            </button>
-            {screenshotsOpen && (
-              <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-6 md:grid-cols-8">
-                {screenshots.map((a) => (
-                  <AttachmentTile key={a.id} item={a} url={a.path ? urls[a.path] : undefined} onOpen={() => setPreview(a)} small
-                    drag={{ dragging: dragItemId === a.id, onDragStart: () => setDragItemId(a.id), onDrop: () => reorderGroup(screenshots, a.id) }}
-                    actions={a.path && (
-                      <button onClick={(e) => { e.stopPropagation(); onCopyLink(a.path!); }} title="Copy link" className="flex h-5 w-5 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-2.5 w-2.5" /></button>
-                    )}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {files.length > 0 && (
-          <div>
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Files · {files.length}</div>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-              {files.map((a) => (
-                <div key={a.id} className="flex flex-col gap-1">
-                  <AttachmentTile
-                    item={a}
-                    href={a.url || undefined}
-                    onOpen={!a.url && a.path ? () => onDownloadFile(a.path!) : undefined}
-                    drag={{ dragging: dragItemId === a.id, onDragStart: () => setDragItemId(a.id), onDrop: () => reorderGroup(files, a.id) }}
-                    actions={
-                      <>
-                        <FolderMenu item={a} folders={folders} triggerClassName="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80" />
-                        {a.path && (
-                          <button onClick={(e) => { e.stopPropagation(); onCopyLink(a.path!); }} title="Copy link" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-3.5 w-3.5" /></button>
-                        )}
-                      </>
-                    }
-                  />
-                  <div className="truncate text-center text-[12px]" title={a.name}>{a.name}</div>
-                  <button onClick={a.onOpenSource} className="truncate text-center text-[11px] text-muted hover:text-foreground hover:underline">{a.sourceLabel}</button>
-                  {a.size && <div className="text-center text-[11px] text-muted">{a.size}</div>}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {links.length > 0 && (
-          <div>
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Links · {links.length}</div>
-            <div className="divide-y rounded-lg border bg-surface">
-              {links.map((a) => {
-                const display = deriveLinkTitle(a);
-                return (
-                  <div key={a.id} className="group/link flex items-center gap-2.5 px-3 py-2.5">
-                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-accent-soft text-accent"><I.link className="h-3 w-3" /></span>
-                    <a href={a.url ?? undefined} target="_blank" rel="noopener noreferrer" title={a.url ?? a.name} className="min-w-0 flex-1 truncate text-[13px] font-medium hover:underline">{display.title}</a>
-                    {display.domain && <span className="hidden max-w-[160px] shrink-0 truncate text-[12px] text-muted sm:block">{display.domain}</span>}
-                    <span className="shrink-0 text-[11px] text-muted">{timeAgo(a.at)}</span>
-                    <span className="hidden shrink-0 items-center gap-0.5 group-hover/link:inline-flex">
-                      <FolderMenu item={a} folders={folders} triggerClassName="rounded-md p-1 text-muted hover:bg-background hover:text-foreground" />
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
+          );
+        })}
         </div>
       </div>
 
