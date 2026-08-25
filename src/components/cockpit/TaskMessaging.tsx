@@ -163,14 +163,20 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
   const [showCcBcc, setShowCcBcc] = useState(false);
   const [pendingMsgAtts, setPendingMsgAtts] = useState<Attachment[]>([]);
   const [uploadingMsgAtt, setUploadingMsgAtt] = useState(false);
+  // A "Review & send" from a staged draftEmail is a one-off, not the start
+  // of a back-and-forth — sending it should close the composer like a reply
+  // does, instead of leaving an empty box open that needed a manual Cancel
+  // (Derek, 2026-08-24: "it sent but didn't close").
+  const [isDraftReviewCompose, setIsDraftReviewCompose] = useState(false);
 
   const resetComposer = () => {
     setMsgSubject(""); setMsgBody(""); setPendingMsgAtts([]); setMsgCc([]); setMsgBcc([]); setShowCcBcc(false); setDraftPrompt("");
   };
-  const closeComposers = () => { setReplyingTo(null); setComposingChannel(null); resetComposer(); };
+  const closeComposers = () => { setReplyingTo(null); setComposingChannel(null); setIsDraftReviewCompose(false); resetComposer(); };
 
   const openReply = (id: string, channel: Channel, subject?: string | null) => {
     setComposingChannel(null);
+    setIsDraftReviewCompose(false);
     resetComposer();
     if (channel === "email") {
       setMsgSubject((subject ?? "").trim() ? (/^re:/i.test((subject ?? "").trim()) ? (subject ?? "").trim() : `Re: ${(subject ?? "").trim()}`) : "");
@@ -181,6 +187,7 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
   };
   const openCompose = (channel: Channel) => {
     setReplyingTo(null);
+    setIsDraftReviewCompose(false);
     resetComposer();
     if (channel === "email") setEmailFocusNonce((n) => n + 1);
     if (channel !== "activity") onMarkChannelRead?.(channel);
@@ -224,7 +231,7 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
     const bcc = channel === "email" ? msgBcc : undefined;
     const subject = channel === "email" ? (msgSubject.trim() || task.title) : msgSubject;
     onSendTaskMessage(channel, subject, channel === "email" ? msgBody : msgBody.trim(), pendingMsgAtts.length ? pendingMsgAtts : undefined, cc, bcc);
-    if (replyingTo) closeComposers(); else resetComposer();
+    if (replyingTo || isDraftReviewCompose) closeComposers(); else resetComposer();
   };
   const submitScheduledTaskMessage = (whenIso: string) => {
     const channel = activeComposeChannel;
@@ -233,7 +240,7 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
     const bcc = channel === "email" ? msgBcc : undefined;
     const subject = channel === "email" ? (msgSubject.trim() || task.title) : msgSubject;
     onScheduleTaskMessage(channel, subject, channel === "email" ? msgBody : msgBody.trim(), whenIso, pendingMsgAtts.length ? pendingMsgAtts : undefined, cc, bcc);
-    if (replyingTo) closeComposers(); else resetComposer();
+    if (replyingTo || isDraftReviewCompose) closeComposers(); else resetComposer();
   };
 
   // Admin-only correction for a message that already sent wrong.
@@ -252,6 +259,7 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
   const openDraftEmail = () => {
     if (!task.draftEmail) return;
     openCompose("email");
+    setIsDraftReviewCompose(true);
     setMsgSubject(task.draftEmail.subject);
     setMsgBody(task.draftEmail.body);
     setEmailFocusNonce((n) => n + 1);
