@@ -150,7 +150,7 @@ export function ClientsDirectory({
                   <I.chevron className={`text-muted transition ${isOpen ? "-rotate-90" : "rotate-180"}`} />
                   <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white" style={{ background: g.member.color }}>{g.member.initials}</span>
                   <span className="text-[15px] font-bold">{g.member.name}</span>
-                  <span className="rounded-full px-1.5 text-[13px] font-semibold normal-case tracking-normal text-white" style={{ background: g.member.color }}>{g.clients.length}</span>
+                  <span className="rounded-[5px] px-1.5 text-[13px] font-semibold normal-case tracking-normal text-white" style={{ background: g.member.color }}>{g.clients.length}</span>
                 </button>
                 {isOpen && g.clients.map(clientRow)}
               </div>

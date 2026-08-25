@@ -3850,15 +3850,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const activeFilterBar = filtersActive ? (
     <div className="mb-2 flex flex-wrap items-center gap-1.5 px-4 sm:px-0">
       {filters.status !== "all" && (
-        <span className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-[13px]">Status: {STATUS_META[filters.status].label}
+        <span className="inline-flex items-center gap-1 rounded-[5px] border bg-background px-2 py-0.5 text-[13px]">Status: {STATUS_META[filters.status].label}
           <button onClick={() => setFilters((f) => ({ ...f, status: "all" }))} className="text-muted hover:text-foreground"><I.close className="h-3 w-3" /></button></span>
       )}
       {filters.assignee !== "all" && (
-        <span className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-[13px]">Assignee: {filters.assignee === "unassigned" ? "Unassigned" : filters.assignee === "waiting" ? "Waiting on client" : userById(filters.assignee)?.name ?? filters.assignee}
+        <span className="inline-flex items-center gap-1 rounded-[5px] border bg-background px-2 py-0.5 text-[13px]">Assignee: {filters.assignee === "unassigned" ? "Unassigned" : filters.assignee === "waiting" ? "Waiting on client" : userById(filters.assignee)?.name ?? filters.assignee}
           <button onClick={() => setFilters((f) => ({ ...f, assignee: "all" }))} className="text-muted hover:text-foreground"><I.close className="h-3 w-3" /></button></span>
       )}
       {filters.priority !== "all" && (
-        <span className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-[13px]">Priority: {PRIORITY_META[filters.priority].label}
+        <span className="inline-flex items-center gap-1 rounded-[5px] border bg-background px-2 py-0.5 text-[13px]">Priority: {PRIORITY_META[filters.priority].label}
           <button onClick={() => setFilters((f) => ({ ...f, priority: "all" }))} className="text-muted hover:text-foreground"><I.close className="h-3 w-3" /></button></span>
       )}
       <button onClick={() => setFilters({ status: "all", assignee: "all", priority: "all" })} className="text-[13px] font-medium text-accent hover:underline">Clear</button>

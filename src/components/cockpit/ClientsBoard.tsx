@@ -48,7 +48,7 @@ export function ClientsBoard({ groups, clientTaskCount, projectTaskCount, hasUnr
               <div className="flex items-center gap-2 border-y px-4 py-2" style={{ background: g.color + "22", borderColor: g.color + "40" }}>
                 <span className="h-2.5 w-2.5 rounded-full" style={{ background: g.color }} />
                 <span className="text-[15px] font-bold">{g.label}</span>
-                <span className="rounded-full px-1.5 text-[13px] font-semibold normal-case tracking-normal text-white" style={{ background: g.color }}>{g.items.length}</span>
+                <span className="rounded-[5px] px-1.5 text-[13px] font-semibold normal-case tracking-normal text-white" style={{ background: g.color }}>{g.items.length}</span>
               </div>
               <div>
                 {g.items.map((it) => it.kind === "client"

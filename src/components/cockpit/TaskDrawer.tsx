@@ -321,12 +321,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // discrete control against the page's bg-background — plain bg-background
   // chips over a bg-background page were invisible, reading as bare native
   // selects in a row instead of chips (Derek: "seems clunky").
-  const chip = "inline-flex items-center rounded-full border bg-surface shadow-sm px-1 py-0.5";
+  // Phase 1 tokens: "radius … pill 5" — pills are 5px, not fully rounded.
+  const chip = "inline-flex items-center rounded-[5px] border bg-surface shadow-sm px-1 py-0.5";
   const chipRow = (
     <div className="mt-4 flex flex-wrap items-center gap-1.5">
       <span className={chip} style={{ borderColor: STATUS_META[task.status].dot + "55" }}>
         <span className="ml-2 h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: STATUS_META[task.status].dot }} />
-        <select value={task.status} onChange={(e) => onPatch({ status: e.target.value as TaskStatus })} className="rounded-full bg-transparent py-0.5 pl-1.5 pr-1 text-[13px] font-medium outline-none" style={{ color: STATUS_META[task.status].dot }}>
+        <select value={task.status} onChange={(e) => onPatch({ status: e.target.value as TaskStatus })} className="rounded-[5px] bg-transparent py-0.5 pl-1.5 pr-1 text-[13px] font-medium outline-none" style={{ color: STATUS_META[task.status].dot }}>
           {STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
         </select>
       </span>
@@ -363,15 +364,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           the layout stable no matter how long a client's name is. */}
       <span className={`${chip} max-w-[220px] gap-1`}>
         <I.user className="ml-1.5 shrink-0 text-muted" />
-        <select value={task.waitingOnClient ? "__waiting__" : (task.assigneeId ?? "")} onChange={(e) => { const v = e.target.value; if (v === "__waiting__") onPatch({ waitingOnClient: true, assigneeId: null }); else onPatch({ assigneeId: v || null, waitingOnClient: false }); }} className="w-full min-w-0 rounded-full bg-transparent py-0.5 pl-0.5 pr-1 text-[13px] outline-none"><option value="__waiting__">⏳ {client ? `Waiting on ${client.name}` : "Waiting on client"}</option><option value="">Unassigned</option>{users.map((u) => (<option key={u.id} value={u.id}>{u.name} {u.role === "va" ? "(VA)" : "(Admin)"}</option>))}</select>
+        <select value={task.waitingOnClient ? "__waiting__" : (task.assigneeId ?? "")} onChange={(e) => { const v = e.target.value; if (v === "__waiting__") onPatch({ waitingOnClient: true, assigneeId: null }); else onPatch({ assigneeId: v || null, waitingOnClient: false }); }} className="w-full min-w-0 rounded-[5px] bg-transparent py-0.5 pl-0.5 pr-1 text-[13px] outline-none"><option value="__waiting__">⏳ {client ? `Waiting on ${client.name}` : "Waiting on client"}</option><option value="">Unassigned</option>{users.map((u) => (<option key={u.id} value={u.id}>{u.name} {u.role === "va" ? "(VA)" : "(Admin)"}</option>))}</select>
       </span>
       <span className={chip} style={{ borderColor: PRIORITY_META[task.priority].color + "55" }}>
         <span className="ml-1.5 shrink-0" style={{ color: PRIORITY_META[task.priority].color }}><I.flag /></span>
-        <select value={task.priority} onChange={(e) => onPatch({ priority: e.target.value as Priority })} className="rounded-full bg-transparent py-0.5 pl-1 pr-1 text-[13px] outline-none" style={{ color: PRIORITY_META[task.priority].color }}>{manualPriorityOptions(task.priority).map((p) => (<option key={p} value={p}>{PRIORITY_META[p].label}</option>))}</select>
+        <select value={task.priority} onChange={(e) => onPatch({ priority: e.target.value as Priority })} className="rounded-[5px] bg-transparent py-0.5 pl-1 pr-1 text-[13px] outline-none" style={{ color: PRIORITY_META[task.priority].color }}>{manualPriorityOptions(task.priority).map((p) => (<option key={p} value={p}>{PRIORITY_META[p].label}</option>))}</select>
       </span>
-      {task.labelIds.map((id) => { const l = labelById(id); return l ? (<button key={id} onClick={() => onToggleLabel(id)} className="group inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[13px] font-medium" style={{ background: l.color + "1a", color: l.color, borderColor: l.color + "40" }}>{l.name} <span className="opacity-50 group-hover:opacity-100">×</span></button>) : null; })}
+      {task.labelIds.map((id) => { const l = labelById(id); return l ? (<button key={id} onClick={() => onToggleLabel(id)} className="group inline-flex items-center gap-1 rounded-[5px] border px-2 py-1 text-[13px] font-medium" style={{ background: l.color + "1a", color: l.color, borderColor: l.color + "40" }}>{l.name} <span className="opacity-50 group-hover:opacity-100">×</span></button>) : null; })}
       <div className="relative">
-        <button onClick={() => setLabelOpen((o) => !o)} className="inline-flex items-center gap-0.5 rounded-full border border-dashed px-2 py-1 text-[13px] text-muted hover:bg-surface"><I.plus /> Label</button>
+        <button onClick={() => setLabelOpen((o) => !o)} className="inline-flex items-center gap-0.5 rounded-[5px] border border-dashed px-2 py-1 text-[13px] text-muted hover:bg-surface"><I.plus /> Label</button>
         {labelOpen && (<div className="absolute z-30 mt-1 w-40 rounded-lg border bg-surface p-1 shadow-lg">{labels.map((l) => { const on = task.labelIds.includes(l.id); return (<button key={l.id} onClick={() => onToggleLabel(l.id)} className="flex w-full items-center gap-2 rounded px-2 py-1 text-[13px] hover:bg-background"><span className="h-2.5 w-2.5 rounded-full" style={{ background: l.color }} /> {l.name}{on && <I.check className="ml-auto text-accent" />}</button>); })}</div>)}
       </div>
     </div>
@@ -664,7 +665,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           {sortedAttachments.filter((a) => a.kind !== "image").map((a) => {
             const isLink = !!a.url;
             return (
-              <span key={a.id} className="group inline-flex items-center gap-1.5 rounded-full border bg-background py-1 pl-2.5 pr-1 text-[13px]">
+              <span key={a.id} className="group inline-flex items-center gap-1.5 rounded-[5px] border bg-background py-1 pl-2.5 pr-1 text-[13px]">
                 <a href={isLink ? a.url! : undefined} onClick={!isLink && a.path ? () => onDownloadFile(a.path!) : undefined} target={isLink ? "_blank" : undefined} rel={isLink ? "noreferrer" : undefined}
                   className="flex items-center gap-1.5 font-medium text-accent hover:underline">
                   <I.link className="h-3.5 w-3.5" /> {a.name}{a.size && <span className="font-normal text-muted"> · {a.size}</span>}

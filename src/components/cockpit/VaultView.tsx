@@ -136,7 +136,7 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
       <div className="mx-auto w-full max-w-5xl">
         {/* Folder rail */}
         <div className="mb-5 flex flex-wrap items-center gap-1.5">
-          <button onClick={() => setSelectedFolder(null)} className={`rounded-full border px-3 py-1 text-[13px] font-medium ${selectedFolder === null ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-surface"}`}>All · {items.length}</button>
+          <button onClick={() => setSelectedFolder(null)} className={`rounded-[5px] border px-3 py-1 text-[13px] font-medium ${selectedFolder === null ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-surface"}`}>All · {items.length}</button>
           {folders.map((f) => {
             const count = items.filter((a) => a.folderId === f.id).length;
             const active = selectedFolder === f.id;
@@ -144,9 +144,9 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
               <input key={f.id} autoFocus value={renameValue} onChange={(e) => setRenameValue(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") submitRename(f.id); if (e.key === "Escape") setRenamingFolder(null); }}
                 onBlur={() => submitRename(f.id)}
-                className="w-32 rounded-full border border-accent bg-surface px-3 py-1 text-[13px] outline-none" />
+                className="w-32 rounded-[5px] border border-accent bg-surface px-3 py-1 text-[13px] outline-none" />
             ) : (
-              <div key={f.id} className={`group/folder inline-flex items-center gap-1 rounded-full border pl-3 pr-1.5 py-1 text-[13px] font-medium ${active ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-surface"}`}>
+              <div key={f.id} className={`group/folder inline-flex items-center gap-1 rounded-[5px] border pl-3 pr-1.5 py-1 text-[13px] font-medium ${active ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-surface"}`}>
                 <button onClick={() => setSelectedFolder(f.id)} title={f.name}>{f.name} · {count}</button>
                 <span className="hidden items-center gap-0.5 group-hover/folder:inline-flex">
                   <button onClick={() => onCopyFolderLink(f.id)} title="Copy link to this folder" className="rounded p-0.5 hover:bg-background hover:text-foreground"><I.link className="h-2.5 w-2.5" /></button>
@@ -157,17 +157,17 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
             );
           })}
           {items.some((a) => !a.folderId) && (
-            <button onClick={() => setSelectedFolder("unfiled")} className={`rounded-full border px-3 py-1 text-[13px] font-medium ${selectedFolder === "unfiled" ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-surface"}`}>Unfiled · {items.filter((a) => !a.folderId).length}</button>
+            <button onClick={() => setSelectedFolder("unfiled")} className={`rounded-[5px] border px-3 py-1 text-[13px] font-medium ${selectedFolder === "unfiled" ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-surface"}`}>Unfiled · {items.filter((a) => !a.folderId).length}</button>
           )}
           {addingFolder ? (
             <input autoFocus value={newFolderName} onChange={(e) => setNewFolderName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") submitNewFolder(); if (e.key === "Escape") setAddingFolder(false); }}
               onBlur={submitNewFolder} placeholder="Folder name…"
-              className="w-32 rounded-full border border-accent bg-surface px-3 py-1 text-[13px] outline-none" />
+              className="w-32 rounded-[5px] border border-accent bg-surface px-3 py-1 text-[13px] outline-none" />
           ) : (
-            <button onClick={() => setAddingFolder(true)} className="inline-flex items-center gap-1 rounded-full border border-dashed px-3 py-1 text-[13px] font-medium text-muted hover:bg-surface"><I.plus className="h-3 w-3" /> New folder</button>
+            <button onClick={() => setAddingFolder(true)} className="inline-flex items-center gap-1 rounded-[5px] border border-dashed px-3 py-1 text-[13px] font-medium text-muted hover:bg-surface"><I.plus className="h-3 w-3" /> New folder</button>
           )}
-          <button onClick={() => fileInputRef.current?.click()} className="ml-auto inline-flex items-center gap-1 rounded-full border border-dashed px-3 py-1 text-[13px] font-medium text-muted hover:bg-surface"><I.plus className="h-3 w-3" /> Add files</button>
+          <button onClick={() => fileInputRef.current?.click()} className="ml-auto inline-flex items-center gap-1 rounded-[5px] border border-dashed px-3 py-1 text-[13px] font-medium text-muted hover:bg-surface"><I.plus className="h-3 w-3" /> Add files</button>
         </div>
 
         <div className="space-y-8">
