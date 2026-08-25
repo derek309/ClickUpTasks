@@ -24,6 +24,7 @@ import {
   DUE_BUCKETS,
   dueBucketOf,
   NURTURE_CHECK_IN_DAYS,
+  GOING_QUIET_DAYS,
   TRIAL_DAYS,
   STATUS_META,
   STATUS_ORDER,
@@ -103,6 +104,7 @@ import { ClientJournal } from "./cockpit/ClientJournal";
 import { QuickAddTask } from "./cockpit/QuickAddTask";
 import { VaultView, type VaultItem } from "./cockpit/VaultView";
 import { ClientsBoard, type WorkBoardGroup, type WorkItem } from "./cockpit/ClientsBoard";
+import { MyWorkReasonBoard, MyWorkSignalStrip, type ClientReasonRow } from "./cockpit/MyWorkReasonBoard";
 import { ClientsDirectory } from "./cockpit/ClientsDirectory";
 import { CompletedLog } from "./cockpit/CompletedLog";
 import { ProjectsDirectory } from "./cockpit/ProjectsDirectory";
@@ -1792,11 +1794,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // assignedClientsFor/assignedProjectsFor/clientUrgencyKey/projectUrgencyKey/
   // hasOpenConversationTask/clientNeedsReview/projectNeedsReview, which all
   // close over tasks/scopedTasks/clients/projects/canAdmin/me.id.
-  const myWorkGroups: WorkBoardGroup[] = useMemo(() => {
+  // Phase 2, 2.2: clients used to be one more row kind mixed into this same
+  // date-tiered board. They now get their own reason-grouped board (see
+  // myWorkClientReasons below) — this one is projects + your own private
+  // tasks only, same date-tier logic as before, unchanged for them since the
+  // brief's reshape is specifically about client triage.
+  const myWorkOtherGroups: WorkBoardGroup[] = useMemo(() => {
     const defs: [number, string, string][] = [
-      [0, "Review", "#14b8a6"],
-      [1, "New message", "#8b5cf6"],
-      [2, "Overdue", "#ef4444"],
       [3, "Due today", "#f59e0b"],
       [4, "Due tomorrow", "#eab308"],
       [5, "Due this week", "#3b82f6"],
@@ -1806,13 +1810,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       [9, "No due date", "#94a3b8"],
       [10, "No open tasks", "#cbd5e1"],
     ];
-    const clientKeys = assignedClientsFor(myWorkUser).map((c) => ({ kind: "client" as const, item: { kind: "client" as const, client: c }, name: c.name, k: clientUrgencyKey(c.id, myWorkUser) }));
     // Excludes the Personal pseudo-project — its tasks appear individually
     // below instead of folded into one undifferentiated "Personal" tile.
     const projectKeys = assignedProjectsFor(myWorkUser).filter((p) => p.id !== PERSONAL_PROJECT_ID).map((p) => ({ kind: "project" as const, item: { kind: "project" as const, project: p, clientName: clientById(p.clientId)?.name ?? "—" } as WorkItem, name: p.name, k: projectUrgencyKey(p.id, myWorkUser) }));
     const taskKeys = tasks.filter((t) => t.assigneeId === myWorkUser && t.private && t.status !== "done")
       .map((t) => ({ kind: "task" as const, item: { kind: "task" as const, task: t } as WorkItem, name: t.title, k: taskUrgencyKey(t) }));
-    const withKey = [...clientKeys, ...projectKeys, ...taskKeys];
+    const withKey = [...projectKeys, ...taskKeys];
     return defs
       .map(([tier, label, color]) => ({
         key: String(tier),
@@ -1826,6 +1829,56 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       .filter((g) => g.items.length > 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks, scopedTasks, clients, projects, myWorkUser]);
+  // Newest message per client, from the already-loaded `messages` array —
+  // "the newest message on this client, across all channels" (pass-1 1.2).
+  const lastMessageAtByClientId = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const msg of messages) {
+      const cur = m.get(msg.clientId);
+      if (!cur || msg.at > cur) m.set(msg.clientId, msg.at);
+    }
+    return m;
+  }, [messages]);
+  // Phase 2, 2.2: "a client appears only if it has a reason." Waiting-on-
+  // your-reply is deliberately not built — see the pass-1 report — so this
+  // is Overdue / Needs review / Going quiet / All clear. Overdue beats
+  // review beats quiet when a client could technically land in more than
+  // one (a client with a genuinely overdue task isn't "going quiet").
+  // goingQuiet's "zero open tasks" is read as zero open NON-Playbook
+  // tasks — every client always has open Playbook steps, so the literal
+  // reading makes this group permanently empty on real data (checked live).
+  const myWorkClientReasons = useMemo(() => {
+    const overdue: ClientReasonRow[] = [];
+    const review: ClientReasonRow[] = [];
+    const quiet: ClientReasonRow[] = [];
+    const clear: Client[] = [];
+    for (const c of assignedClientsFor(myWorkUser)) {
+      const open = scopedTasksByClientId.get(c.id) ?? [];
+      const openReal = open.filter((t) => t.status !== "done" && !t.playbookStepKey);
+      const overdueTasks = openReal.filter((t) => t.due && t.due < TODAY).sort((a, b) => a.due!.localeCompare(b.due!));
+      if (overdueTasks.length > 0) {
+        const oldest = overdueTasks[0];
+        overdue.push({ client: c, kind: "overdue", reasonText: oldest.title, ageDays: daysBetween(oldest.due!, TODAY) });
+        continue;
+      }
+      if (clientNeedsReview(c.id, myWorkUser)) {
+        const lastReviewed = c.reviewedAt ? daysBetween(c.reviewedAt, TODAY) : null;
+        review.push({ client: c, kind: "review", reasonText: openReal.length > 0 ? "Open work with no due date" : "Nurture check-in due", ageDays: lastReviewed ?? 0 });
+        continue;
+      }
+      const lastAt = lastMessageAtByClientId.get(c.id);
+      const quietDays = lastAt ? daysBetween(lastAt.slice(0, 10), TODAY) : Infinity;
+      if (openReal.length === 0 && quietDays >= GOING_QUIET_DAYS) {
+        quiet.push({ client: c, kind: "quiet", reasonText: lastAt ? `No message in ${quietDays} days` : "No message on file", ageDays: quietDays === Infinity ? 999 : quietDays });
+        continue;
+      }
+      clear.push(c);
+    }
+    overdue.sort((a, b) => b.ageDays - a.ageDays);
+    quiet.sort((a, b) => b.ageDays - a.ageDays);
+    return { rows: [...overdue, ...review, ...quiet], overdueCount: overdue.length, reviewCount: review.length, quietCount: quiet.length, clear };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopedTasksByClientId, lastMessageAtByClientId, clients, myWorkUser]);
   // The Monday "set up your week" queue: my clients/projects currently in the
   // Review tier, in the same order My Work shows them. Drives the header
   // "Review next" button so you can click through them one at a time (the
@@ -4254,7 +4307,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           // finished what and when.
           <CompletedLog rows={completionLog} onOpenTask={(_clientId, taskId) => setOpenTaskId(taskId)} />
         ) : myWork ? (
-          <ClientsBoard groups={myWorkGroups} clientTaskCount={clientTaskCount} projectTaskCount={projectTaskCount} hasUnreadMessage={hasUnreadMessage} onOpenTask={setOpenTaskId}
+          <ClientsBoard groups={myWorkOtherGroups} clientTaskCount={clientTaskCount} projectTaskCount={projectTaskCount} hasUnreadMessage={hasUnreadMessage} onOpenTask={setOpenTaskId}
+            emptyLabel="No other tasks or projects assigned."
+            header={<>
+              <MyWorkSignalStrip overdue={myWorkClientReasons.overdueCount} review={myWorkClientReasons.reviewCount} quiet={myWorkClientReasons.quietCount} clear={myWorkClientReasons.clear.length} />
+              <div className="mb-5">
+                <MyWorkReasonBoard rows={myWorkClientReasons.rows} clearClients={myWorkClientReasons.clear}
+                  onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }}
+                  onCheckIn={(id) => {
+                    setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null);
+                    if (canMessageClient(id)) { setClientTab("chat"); setComposeIntent((c) => ({ mode: "email", nonce: (c?.nonce ?? 0) + 1 })); }
+                  }} />
+              </div>
+              {myWorkOtherGroups.length > 0 && <div className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-muted">Your tasks &amp; projects</div>}
+            </>}
             onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }}
             onOpenProject={(id) => {
               if (id === PERSONAL_PROJECT_ID) { setMyWork(false); setPersonalView(true); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setOpenTaskId(null); return; }

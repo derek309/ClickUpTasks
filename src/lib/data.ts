@@ -178,6 +178,13 @@ export const CLIENT_STATUS_ORDER: ClientStatus[] = ["claimed", "interview", "onb
  * them in the Review tier once this long has passed since their last review.
  * Monthly for now (confirmed with Derek/Justin), tunable later. */
 export const NURTURE_CHECK_IN_DAYS = 30;
+/** Phase 2's `goingQuiet`: no message in either direction for this many days
+ * AND zero open non-Playbook tasks (see My Work's client-reason board in
+ * Cockpit.tsx). 30 is a placeholder per the build brief — real data (Aug
+ * 2026) shows 13 of 33 active clients cross a 30-day silence threshold, a
+ * non-degenerate split, so it's a reasonable starting point rather than a
+ * guess. Not yet a per-user setting. */
+export const GOING_QUIET_DAYS = 30;
 /** How many days without a Sales/Playbook step completing before a business
  * counts as "stalled" — the Playbook stall-check cron
  * (playbookCheckinsServer.ts) and the Businesses page's Priority sort both

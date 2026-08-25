@@ -23,7 +23,7 @@ export interface WorkBoardGroup {
   items: WorkItem[];
 }
 
-export function ClientsBoard({ groups, clientTaskCount, projectTaskCount, hasUnreadMessage, onOpenClient, onOpenProject, onOpenTask }: {
+export function ClientsBoard({ groups, clientTaskCount, projectTaskCount, hasUnreadMessage, onOpenClient, onOpenProject, onOpenTask, header, emptyLabel = "Nothing here yet." }: {
   groups: WorkBoardGroup[];
   clientTaskCount: (id: string) => number;
   projectTaskCount: (id: string) => number;
@@ -31,11 +31,17 @@ export function ClientsBoard({ groups, clientTaskCount, projectTaskCount, hasUnr
   onOpenClient: (id: string) => void;
   onOpenProject: (id: string) => void;
   onOpenTask: (id: string) => void;
+  // Phase 2: My Work's reason-grouped client board renders above this
+  // component's own groups (projects/personal tasks) inside the same
+  // scroll container, so the two don't double up on padding/scroll.
+  header?: React.ReactNode;
+  emptyLabel?: string;
 }) {
   return (
     <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">
+      {header}
       <div className="overflow-hidden rounded-xl border bg-surface shadow-soft">
-        {groups.length === 0 && <div className="px-4 py-10 text-center text-[13px] text-muted">Nothing here yet.</div>}
+        {groups.length === 0 && <div className="px-4 py-10 text-center text-[13px] text-muted">{emptyLabel}</div>}
         <div className="divide-y-8 divide-background">
           {groups.map((g) => (
             <div key={g.key}>
