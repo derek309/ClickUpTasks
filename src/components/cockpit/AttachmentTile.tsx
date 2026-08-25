@@ -10,7 +10,7 @@ import { type ReactNode } from "react";
 import { type Attachment } from "@/lib/data";
 import { FileBadge } from "./ui";
 
-export function AttachmentTile({ item, url, href, onOpen, small, overlayCaption, actions, drag }: {
+export function AttachmentTile({ item, url, href, onOpen, small, actions, drag }: {
   item: Attachment;
   /** Resolved thumbnail URL for kind==="image"; omit to show the FileBadge fallback. */
   url?: string;
@@ -19,8 +19,6 @@ export function AttachmentTile({ item, url, href, onOpen, small, overlayCaption,
   /** Click handler when not rendered as a link (e.g. open preview, download). */
   onOpen?: () => void;
   small?: boolean;
-  /** Bottom gradient caption shown on hover, images only. */
-  overlayCaption?: string;
   /** Hover-revealed action buttons, top-right corner. */
   actions?: ReactNode;
   /** Drag-to-reorder wiring — same splice-before-target idiom as FolderRail/ClientLinks. Omit to disable dragging on this tile. */
@@ -34,9 +32,6 @@ export function AttachmentTile({ item, url, href, onOpen, small, overlayCaption,
         <img src={url} alt={item.name} className="h-full w-full object-cover transition group-hover:scale-105" />
       ) : (
         <span className="flex h-full w-full items-center justify-center"><FileBadge kind={item.kind} /></span>
-      )}
-      {isImage && !small && overlayCaption && (
-        <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent px-2 py-1.5 text-[12px] text-white opacity-0 transition group-hover:opacity-100">{overlayCaption}</span>
       )}
     </>
   );

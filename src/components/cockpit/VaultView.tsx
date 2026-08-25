@@ -184,17 +184,24 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
             <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Photos · {photos.length}</div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
               {photos.map((a) => (
-                <AttachmentTile key={a.id} item={a} url={a.path ? urls[a.path] : undefined} onOpen={() => setPreview(a)} overlayCaption={a.sourceLabel}
-                  drag={{ dragging: dragItemId === a.id, onDragStart: () => setDragItemId(a.id), onDrop: () => reorderGroup(photos, a.id) }}
-                  actions={
-                    <>
-                      <FolderMenu item={a} folders={folders} triggerClassName="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80" />
-                      {a.path && (
-                        <button onClick={(e) => { e.stopPropagation(); onCopyLink(a.path!); }} title="Copy link" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-3.5 w-3.5" /></button>
-                      )}
-                    </>
-                  }
-                />
+                // B6: the source-label caption used to overlay the bottom of
+                // the image (a live bug — it printed over a QR code's own
+                // bottom edge, obscuring it). A caption below the tile, in
+                // normal flow, can't overlap image content.
+                <div key={a.id} className="flex flex-col gap-1">
+                  <AttachmentTile item={a} url={a.path ? urls[a.path] : undefined} onOpen={() => setPreview(a)}
+                    drag={{ dragging: dragItemId === a.id, onDragStart: () => setDragItemId(a.id), onDrop: () => reorderGroup(photos, a.id) }}
+                    actions={
+                      <>
+                        <FolderMenu item={a} folders={folders} triggerClassName="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80" />
+                        {a.path && (
+                          <button onClick={(e) => { e.stopPropagation(); onCopyLink(a.path!); }} title="Copy link" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-3.5 w-3.5" /></button>
+                        )}
+                      </>
+                    }
+                  />
+                  {a.sourceLabel && <div className="truncate text-center text-[12px] text-muted" title={a.sourceLabel}>{a.sourceLabel}</div>}
+                </div>
               ))}
             </div>
           </div>
