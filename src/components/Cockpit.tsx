@@ -101,7 +101,6 @@ import { TaskDrawer } from "./cockpit/TaskDrawer";
 import { QuickLinksBar } from "./cockpit/ClientLinks";
 import { ClientJournal } from "./cockpit/ClientJournal";
 import { QuickAddTask } from "./cockpit/QuickAddTask";
-import { VaultView, type VaultItem } from "./cockpit/VaultView";
 import { ClientsBoard, type WorkBoardGroup, type WorkItem } from "./cockpit/ClientsBoard";
 import { ClientsDirectory } from "./cockpit/ClientsDirectory";
 import { CompletedLog } from "./cockpit/CompletedLog";
@@ -115,7 +114,7 @@ import { FolderRail } from "./cockpit/FolderRail";
 //   ?view=inbox[&dm=<userId>]              team chat, optionally a DM thread
 //   ?client=<id>[&project=<id>]   a client (optionally scoped to one project)
 //   ?task=<id>                    the task drawer (layers over any of the above)
-type NavState = { view: "work" | "personal" | "inbox" | "clients" | "projects" | "settings" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | "vault" | null; vaultFolder: string | null; dm: string | null };
+type NavState = { view: "work" | "personal" | "inbox" | "clients" | "projects" | "settings" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | null; vaultFolder: string | null; dm: string | null };
 function buildSearch(s: NavState): string {
   const p = new URLSearchParams();
   if (s.view) {
@@ -142,7 +141,9 @@ function parseSearch(search: string): NavState {
     client: p.get("client") ?? "all",
     project: p.get("project"),
     task: p.get("task"),
-    clientTab: tab === "chat" || tab === "vault" ? tab : null,
+    // "vault" was a separate tab pre-merge — old bookmarked/shared links
+    // still resolve it into Journal (now the only place attachments live).
+    clientTab: tab === "chat" || tab === "vault" ? "chat" : null,
     vaultFolder: p.get("folder"),
     dm: p.get("dm"),
   };
@@ -188,9 +189,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [vaultFolders, setVaultFolders] = useState<VaultFolder[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [stages, setStages] = useState<Stage[]>([]);
-  const [clientTab, setClientTab] = useState<"tasks" | "chat" | "vault">("tasks");
-  // Set once from a deep link's ?folder= param (see applyNav); VaultView
-  // reads it only as its initial selected-folder value, not a live prop.
+  const [clientTab, setClientTab] = useState<"tasks" | "chat">("tasks");
+  // Set once from a deep link's ?folder= param (see applyNav); ClientJournal
+  // reads it only as its initial folder-filter value, not a live prop.
   const [initialVaultFolder, setInitialVaultFolder] = useState<string | null>(null);
   const [linkModal, setLinkModal] = useState<{ initial?: ClientLink } | null>(null);
   const [ghlLinkOpen, setGhlLinkOpen] = useState(false); // "Link to GHL" contact-picker
@@ -1077,10 +1078,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const url = `${window.location.origin}${window.location.pathname}${buildSearch(nav)}`;
     navigator.clipboard?.writeText(url).then(() => pushToast("🔗 Link copied"), () => pushToast("⚠️ Couldn't copy link"));
   };
-  // A folder link is just the current client/project link with tab=vault
+  // A folder link is just the current client/project link with tab=chat
   // and folder=<id> layered on — built fresh at click time, not mirrored
   // into the live URL bar as you browse (see currentNav's vaultFolder note).
-  const copyFolderLink = (folderId: string) => copyLink({ ...currentNav(), view: null, clientTab: "vault", vaultFolder: folderId });
+  const copyFolderLink = (folderId: string) => copyLink({ ...currentNav(), view: null, clientTab: "chat", vaultFolder: folderId });
   // Public "here's what we need from you" link for this client — see
   // supabase/client-share-token.sql. Unlike copyLink above, this is a share
   // link, not an app deep-link: it needs to keep working (and copy to the
@@ -1925,66 +1926,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       pushToast("Couldn't copy to clipboard.");
     }
   };
-  // Vault folder assignment — three different write-back paths since an
-  // attachment can live on a task, nested inside one of that task's
-  // comments, or on a Chat note, and none of those three has an existing
-  // per-attachment patch mutator. All three go through the full-row
-  // update()/upsertClientNote path (no atomic RPC like append_comment) —
-  // not worth building one for a rare, low-collision action, unlike live
-  // commenting.
-  const setTaskAttachmentFolder = (taskId: string, attId: string, folderId: string | null) => {
-    const t = tasks.find((x) => x.id === taskId);
-    if (!t) return;
-    update(taskId, { attachments: t.attachments.map((a) => (a.id === attId ? { ...a, folderId: folderId ?? undefined } : a)) });
-  };
-  const setCommentAttachmentFolder = (taskId: string, commentId: string, attId: string, folderId: string | null) => {
-    const t = tasks.find((x) => x.id === taskId);
-    if (!t) return;
-    const comments = t.comments.map((c) => (c.id !== commentId ? c : { ...c, attachments: (c.attachments ?? []).map((a) => (a.id === attId ? { ...a, folderId: folderId ?? undefined } : a)) }));
-    update(taskId, { comments });
-  };
+  // Note-attachment folder filing — the one Vault capability that survives
+  // the merge into Journal (see AttachmentThumbs' folders/onSetFolder props).
+  // Task/comment attachments never had this in the Journal feed to begin
+  // with (Journal only ever showed note+message attachments), so their
+  // Vault-only folder mutators went with the tab.
   const setNoteAttachmentFolder = (note: ClientNote, attId: string, folderId: string | null) => {
     const updated: ClientNote = { ...note, attachments: (note.attachments ?? []).map((a) => (a.id === attId ? { ...a, folderId: folderId ?? undefined } : a)) };
     setClientNotes((ns) => ns.map((n) => (n.id === note.id ? updated : n)));
     upsertClientNote(updated);
-  };
-  // Vault drag-to-reorder — same three write-back paths as the folder
-  // mutators above, writing Attachment.position instead of folderId. Vault
-  // items are a merge of three independently-ordered owning rows, so
-  // reordering can't just splice one array the way a task's own attachment
-  // grid can; each item carries its own bound setter (see vaultItems below)
-  // and VaultView renumbers a whole kind-group after a drop.
-  // Persist a whole Vault kind-group's new order at once. A group mixes
-  // attachments from many owning rows (several tasks, their comments, notes),
-  // and multiple attachments can share ONE owner — so we group the new
-  // positions by owner and issue a SINGLE write per owner with its complete
-  // attachments array. (Writing per-attachment, or twice to the same task for
-  // its attachments + its comments, would each read the pre-write state and
-  // clobber the earlier change — every task write is a full-row upsert.)
-  const reorderVaultGroup = (orderedIds: string[]) => {
-    const posOf = new Map(orderedIds.map((id, i) => [id, i] as const));
-    baseTasks.forEach((t) => {
-      const patch: Partial<Task> = {};
-      if (t.attachments.some((a) => posOf.has(a.id)))
-        patch.attachments = t.attachments.map((a) => (posOf.has(a.id) ? { ...a, position: posOf.get(a.id) } : a));
-      if (t.comments.some((c) => (c.attachments ?? []).some((a) => posOf.has(a.id))))
-        patch.comments = t.comments.map((c) => ({ ...c, attachments: (c.attachments ?? []).map((a) => (posOf.has(a.id) ? { ...a, position: posOf.get(a.id) } : a)) }));
-      if (Object.keys(patch).length) update(t.id, patch);
-    });
-    clientNotes.forEach((n) => {
-      if (!(n.attachments ?? []).some((a) => posOf.has(a.id))) return;
-      const updated: ClientNote = { ...n, attachments: (n.attachments ?? []).map((a) => (posOf.has(a.id) ? { ...a, position: posOf.get(a.id) } : a)) };
-      setClientNotes((ns) => ns.map((x) => (x.id === n.id ? updated : x)));
-      upsertClientNote(updated);
-    });
-  };
-  // Drop files directly onto the Vault (no owning task/note yet) — reuses
-  // the same no-owning-row upload path as Chat/Journal paste-attach, then
-  // files the result as a bodyless client note. Slots straight into
-  // vaultItems' existing clientNotes branch below with no new table.
-  const addVaultFiles = async (clientId: string, projectId: string | null, files: FileList) => {
-    const uploaded = (await Promise.all(Array.from(files).map((f) => uploadOneImage("vault", f)))).filter((a): a is Attachment => !!a);
-    if (uploaded.length) addNote(clientId, "note", "", projectId, uploaded);
   };
   const createVaultFolder = (clientId: string, name: string) => {
     const f: VaultFolder = { id: newId("vf_"), clientId, projectId: null, name, createdAt: new Date().toISOString() };
@@ -2004,29 +1954,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setVaultFolders((fs) => fs.filter((f) => f.id !== id));
     deleteVaultFolderDb(id);
   };
-  // Every attachment anywhere in the current client/project scope — task
-  // attachments, task comment images, and Chat message images — collected
-  // into one flat list for the Vault tab. Only computed when the Vault tab
-  // is reachable at all (a real client, not "All tasks"/My Work/etc.).
-  // Memoized: the Tasks/Journal/Vault switcher shows this count on every
-  // sub-tab (not just Vault), so it can't be gated on clientTab === "vault"
-  // — but it doesn't need to redo the attachment/comment flatMap on every
-  // unrelated Cockpit render either, only when the underlying data changes.
+  // This client's Vault folders — Journal reads them for its Filter menu's
+  // Folder section now that the Vault tab itself is gone.
   const activeVaultFolders = useMemo(
     () => (activeClient === "all" ? [] : vaultFolders.filter((f) => f.clientId === activeClient)),
     [activeClient, vaultFolders]
-  );
-  // B2: every task carries a projectId already; a note's is optional (unset
-  // = client-wide Journal, not scoped to any one project) — that's exactly
-  // the "Not in a project" bucket the Vault's By-project grouping needs.
-  const vaultItems: VaultItem[] = useMemo(() => (activeClient === "all" ? [] : [
-    ...baseTasks.flatMap((t) => t.attachments.map((a) => ({ ...a, at: t.createdAt, projectId: t.projectId, projectName: projects.find((p) => p.id === t.projectId)?.name ?? null, sourceLabel: t.title, onOpenSource: () => { setClientTab("tasks"); setOpenTaskId(t.id); }, onSetFolder: (folderId: string | null) => setTaskAttachmentFolder(t.id, a.id, folderId) }))),
-    ...baseTasks.flatMap((t) => t.comments.flatMap((c) => (c.attachments ?? []).map((a) => ({ ...a, at: c.at, projectId: t.projectId, projectName: projects.find((p) => p.id === t.projectId)?.name ?? null, sourceLabel: t.title, onOpenSource: () => { setClientTab("tasks"); setOpenTaskId(t.id); }, onSetFolder: (folderId: string | null) => setCommentAttachmentFolder(t.id, c.id, a.id, folderId) })))),
-    ...clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId))
-      .flatMap((n) => (n.attachments ?? []).map((a) => ({ ...a, at: n.at, projectId: n.projectId ?? null, projectName: n.projectId ? (projects.find((p) => p.id === n.projectId)?.name ?? null) : null, sourceLabel: "Journal", onOpenSource: () => setClientTab("chat"), onSetFolder: (folderId: string | null) => setNoteAttachmentFolder(n, a.id, folderId) }))),
-  ]),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeClient, activeProject, baseTasks, clientNotes, projects]
   );
   const projectsForClient = (clientId: string) => projects.filter((p) => p.clientId === clientId);
   const foldersForClient = (clientId: string) => folders.filter((f) => f.clientId === clientId).sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt));
@@ -3672,7 +3604,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // so the popovers never double-render on screen.
   const headerTitleText = settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Team Chat") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "My Work" : activeClient === "all" ? "All Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? ""));
   const isClientDetail = !myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && !!clientById(activeClient);
-  const showFilterControl = !inboxView && !dirView && !myWork && !settingsView && !(activeClient !== "all" && (clientTab === "chat" || clientTab === "vault"));
+  const showFilterControl = !inboxView && !dirView && !myWork && !settingsView && !(activeClient !== "all" && clientTab === "chat");
   const bellControl = (
     <div className="relative">
       <button onClick={() => { const opening = !bellOpen; setBellOpen(opening); if (opening) { setNotifications((ns) => ns.map((n) => (n.recipientId === me.id ? { ...n, read: true } : n))); markNotifsReadDb(me.id); } }} aria-label="Notifications" className="relative rounded-lg border bg-background p-2 text-muted hover:text-foreground">
@@ -4004,7 +3936,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <div className="flex flex-1 rounded-lg bg-background p-0.5">
                 <button onClick={() => setClientTab("tasks")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${clientTab === "tasks" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Tasks</button>
                 <button onClick={() => setClientTab("chat")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${clientTab === "chat" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Journal</button>
-                <button onClick={() => setClientTab("vault")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${clientTab === "vault" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Vault</button>
               </div>
               {clientTab === "tasks" && (
                 <div className="flex items-center gap-1.5">
@@ -4096,7 +4027,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 const activityCount = baseTasks.reduce((sum, t) => sum + t.comments.filter((c) => c.kind !== "event" || isCompletionEvent(c.body)).length, 0);
                 return noteCount + messageCount + activityCount;
               })()}</button>
-              <button onClick={() => setClientTab("vault")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "vault" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Vault · {vaultItems.length}</button>
             </div>
           )}
           {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && clientById(activeClient) && (
@@ -4160,7 +4090,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 </button>
               )}
             </div>
-          ) : !personalView && (clientTab === "chat" || clientTab === "vault") ? null : (
+          ) : !personalView && clientTab === "chat" ? null : (
             <div className="flex items-center gap-1.5">
               {followingControl}
               {groupSortControl}
@@ -4298,16 +4228,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             refreshingMessages={refreshingMessages}
             onWhatsNext={activeProject ? undefined : () => regenerateAiSummary(activeClient)}
             whatsNextBusy={aiSummaryBusyId === activeClient}
-          />
-        ) : activeClient !== "all" && clientTab === "vault" ? (
-          <VaultView items={vaultItems} folders={activeVaultFolders} onDownloadFile={downloadFile} onGetSignedUrl={signedUrlForFile} onCopyLink={copyAttachmentLink}
-            onCopyFolderLink={copyFolderLink}
+            folders={activeVaultFolders}
             onCreateFolder={(name) => createVaultFolder(activeClient, name)}
             onRenameFolder={(id, name) => { const f = vaultFolders.find((x) => x.id === id); if (f) renameVaultFolder(f, name); }}
             onDeleteFolder={deleteVaultFolder}
-            onAddFiles={(files) => addVaultFiles(activeClient, activeProject, files)}
-            onReorder={reorderVaultGroup}
-            initialFolderId={initialVaultFolder} />
+            onCopyFolderLink={copyFolderLink}
+            onSetNoteAttachmentFolder={setNoteAttachmentFolder}
+            initialFolderFilter={initialVaultFolder}
+          />
         ) : (
           <>
           {activeClient !== "all" && (() => {

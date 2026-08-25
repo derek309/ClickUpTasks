@@ -7,14 +7,17 @@
 // email/SMS conversation — sent via GHL from right here, received via the
 // inbound webhook — so there's no gap and no need to poll GHL for updates.
 // Claude (via the MCP server's list_notes/add_note tools) reads and posts to
-// the notes side of this too. Every image attached here also shows up in the
-// Vault tab. The composer is one segmented control (Note/Email/SMS) instead
-// of separate note and message composers, so writing here is a single
-// "what kind of entry is this" decision rather than switching views first.
+// the notes side of this too. The composer is one segmented control
+// (Note/Email/SMS) instead of separate note and message composers, so
+// writing here is a single "what kind of entry is this" decision rather
+// than switching views first. The Filter menu's Photos/Links/Files plus a
+// folder filter (see onSetNoteAttachmentFolder) are what a standalone Vault
+// tab used to be — folded in here instead of keeping a whole second tab
+// alive just to browse/file attachments.
 import { useEffect, useRef, useState } from "react";
 import {
   users, userById, timeAgo, dayLabel, isCompletionEvent, NOTE_TYPE_META, NOTE_TYPE_ORDER, MANUAL_NOTE_TYPES, noteTypeMeta, htmlToText, looksLikeHtml, plainTextToHtml,
-  type ClientNote, type NoteType, type Task, type Comment, type Message, type MessageChannel, type MessageDirection, type Me, type Attachment, type Contact, type ScheduledMessage,
+  type ClientNote, type NoteType, type Task, type Comment, type Message, type MessageChannel, type MessageDirection, type Me, type Attachment, type Contact, type ScheduledMessage, type VaultFolder,
 } from "@/lib/data";
 import { I, Avatar, CollapsibleText, newId, useStickyBottom, JumpToLatestButton } from "./ui";
 import { ConfirmModal, type ConfirmSpec } from "./modals";
@@ -70,7 +73,7 @@ function buildFeedRows(items: JournalItem[]): FeedRow[] {
   return rows;
 }
 
-export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, onScheduleMessage, scheduled, onLoadScheduled, onCancelScheduled, toContact, ccContacts, sendingMessage, onUploadImage, onOpenFile, canAdmin, canMessage, onToggleCanMessage, onDraftMessage, draftingMessage, onRefreshContact, refreshingContact, onRefreshMessages, refreshingMessages, onWhatsNext, whatsNextBusy, composeIntent }: {
+export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, onScheduleMessage, scheduled, onLoadScheduled, onCancelScheduled, toContact, ccContacts, sendingMessage, onUploadImage, onOpenFile, canAdmin, canMessage, onToggleCanMessage, onDraftMessage, draftingMessage, onRefreshContact, refreshingContact, onRefreshMessages, refreshingMessages, onWhatsNext, whatsNextBusy, composeIntent, folders, onCreateFolder, onRenameFolder, onDeleteFolder, onCopyFolderLink, onSetNoteAttachmentFolder, initialFolderFilter }: {
   notes: ClientNote[];
   tasks: Task[]; // already scoped by the caller to the current client/project
   messages?: Message[] | null; // null/undefined = no linked GHL contact at this scope, so no Email/SMS
@@ -109,9 +112,27 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   // mode. `nonce` bumps on every click so the effect re-fires even when the
   // Journal is already open (the component isn't remounted then).
   composeIntent?: { mode: "email" | "sms"; nonce: number } | null;
+  // Vault→Journal merge: the Filter menu's Photos/Links/Files already covers
+  // "browse by kind" — folders are the one Vault capability without an
+  // equivalent here, so they're folded straight into the same menu instead
+  // of keeping a whole separate tab alive just for filing. Only note
+  // attachments support filing (Vault never covered message attachments
+  // either — see Cockpit.tsx's old vaultItems comment).
+  folders?: VaultFolder[];
+  onCreateFolder?: (name: string) => void;
+  onRenameFolder?: (folderId: string, name: string) => void;
+  onDeleteFolder?: (folderId: string) => void;
+  onCopyFolderLink?: (folderId: string) => void;
+  onSetNoteAttachmentFolder?: (note: ClientNote, attachmentId: string, folderId: string | null) => void;
+  // From a deep link's ?folder= param — read once as the initial folder
+  // filter, not a live-controlled prop (this component owns it after that).
+  initialFolderFilter?: string | null;
 }) {
   const [segment, setSegment] = useState<JournalSegment>("all");
   const [subFilter, setSubFilter] = useState<JournalSubFilter>("all");
+  const [folderFilter, setFolderFilter] = useState<string | "unfiled" | "all">(initialFolderFilter ?? "all");
+  const [addingFolder, setAddingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [composeMode, setComposeMode] = useState<"note" | "email" | "sms">("note");
@@ -222,6 +243,15 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
       : it.kind === "message" ? (it.message.attachments ?? [])
       : [];
   const hasKind = (it: JournalItem, kinds: string[]) => itemAtts(it).some((a) => kinds.includes(a.kind));
+  // Only note attachments carry a folderId (see onSetNoteAttachmentFolder) —
+  // an active folder filter naturally excludes messages/activity, same as
+  // it did in Vault when an item had no folder concept at all.
+  const passesFolder = (it: JournalItem) => {
+    if (folderFilter === "all") return true;
+    if (it.kind !== "note") return false;
+    const atts = it.note.attachments ?? [];
+    return folderFilter === "unfiled" ? atts.some((a) => !a.folderId) : atts.some((a) => a.folderId === folderFilter);
+  };
   const filteredItems = journalItems.filter((it) => {
     const passesSegment = segment === "all" ? true
       : segment === "conversation" ? it.kind === "message"
@@ -232,14 +262,14 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
       : subFilter === "links" ? hasKind(it, ["link"])
       : subFilter === "files" ? hasKind(it, ["pdf", "doc", "sheet"])
       : (it.kind === "note" && it.note.type === subFilter);
-    return passesSegment && passesSub && matchesSearch(it);
+    return passesSegment && passesSub && passesFolder(it) && matchesSearch(it);
   });
   // Newest AI recap ("recently done / next up") — pinned as a highlighted
   // card atop the unfiltered feed so the freshest "where does this stand"
   // read is always one glance away. Excluded from the chronological list
   // while pinned so it isn't shown twice; older recaps still flow inline.
   const latestRecap = notes.filter((n) => n.type === "ai_summary").sort((a, b) => b.at.localeCompare(a.at))[0] ?? null;
-  const pinnedRecap = latestRecap && segment === "all" && subFilter === "all" && !q ? latestRecap : null;
+  const pinnedRecap = latestRecap && segment === "all" && subFilter === "all" && folderFilter === "all" && !q ? latestRecap : null;
   const feedRows = buildFeedRows(pinnedRecap ? filteredItems.filter((it) => !(it.kind === "note" && it.note.id === pinnedRecap.id)) : filteredItems);
 
   // A7a: one entry per month, newest first, each pointing at the day-divider
@@ -434,17 +464,21 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
           <div className="relative">
             <button
               onClick={() => setFilterMenuOpen((v) => !v)}
-              className={`inline-flex items-center gap-1 rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${subFilter !== "all" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}
+              className={`inline-flex items-center gap-1 rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${subFilter !== "all" || folderFilter !== "all" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}
             >
-              <I.filter /> {subFilter === "all" ? "Filter" : subFilter === "photos" ? "Photos" : subFilter === "links" ? "Links" : subFilter === "files" ? "Files" : noteTypeMeta(subFilter as NoteType).label}
+              <I.filter /> {subFilter !== "all"
+                ? (subFilter === "photos" ? "Photos" : subFilter === "links" ? "Links" : subFilter === "files" ? "Files" : noteTypeMeta(subFilter as NoteType).label)
+                : folderFilter !== "all"
+                ? (folderFilter === "unfiled" ? "Unfiled" : (folders ?? []).find((f) => f.id === folderFilter)?.name ?? "Filter")
+                : "Filter"}
             </button>
             {filterMenuOpen && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setFilterMenuOpen(false)} />
-                <div className="absolute left-0 top-full z-20 mt-1 w-44 rounded-[5px] border bg-surface p-1 shadow-lg">
+                <div className="absolute left-0 top-full z-20 mt-1 w-52 rounded-[5px] border bg-surface p-1 shadow-lg">
                   <button
-                    onClick={() => { setSubFilter("all"); setFilterMenuOpen(false); }}
-                    className={`block w-full rounded-[5px] px-2.5 py-1.5 text-left text-[13px] font-medium transition ${subFilter === "all" ? "bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}
+                    onClick={() => { setSubFilter("all"); setFolderFilter("all"); setFilterMenuOpen(false); }}
+                    className={`block w-full rounded-[5px] px-2.5 py-1.5 text-left text-[13px] font-medium transition ${subFilter === "all" && folderFilter === "all" ? "bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}
                   >
                     All
                   </button>
@@ -481,6 +515,49 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                   >
                     <I.clip /> Files
                   </button>
+                  {folders && (
+                    <>
+                      <div className="my-1 h-px bg-border" />
+                      <div className="px-2.5 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Folder</div>
+                      <button
+                        onClick={() => { setFolderFilter("unfiled"); setFilterMenuOpen(false); }}
+                        className={`block w-full rounded-[5px] px-2.5 py-1.5 text-left text-[13px] font-medium transition ${folderFilter === "unfiled" ? "bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}
+                      >
+                        Unfiled
+                      </button>
+                      {folders.map((f) => (
+                        <div key={f.id} className={`group/jf flex items-center gap-1 rounded-[5px] pr-1 ${folderFilter === f.id ? "bg-accent-soft" : "hover:bg-background"}`}>
+                          <button
+                            onClick={() => { setFolderFilter(f.id); setFilterMenuOpen(false); }}
+                            className={`min-w-0 flex-1 truncate px-2.5 py-1.5 text-left text-[13px] font-medium ${folderFilter === f.id ? "text-accent" : "text-muted"}`}
+                          >
+                            {f.name}
+                          </button>
+                          {onDeleteFolder && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); if (folderFilter === f.id) setFolderFilter("all"); onDeleteFolder(f.id); }}
+                              title="Delete folder" className="hidden shrink-0 rounded p-1 text-muted hover:text-danger group-hover/jf:block"
+                            >
+                              <I.trash className="h-3 w-3" />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      {onCreateFolder && (
+                        addingFolder ? (
+                          <input autoFocus value={newFolderName} onChange={(e) => setNewFolderName(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter" && newFolderName.trim()) { onCreateFolder(newFolderName.trim()); setNewFolderName(""); setAddingFolder(false); } if (e.key === "Escape") setAddingFolder(false); }}
+                            onBlur={() => { if (newFolderName.trim()) onCreateFolder(newFolderName.trim()); setNewFolderName(""); setAddingFolder(false); }}
+                            placeholder="Folder name…"
+                            className="mt-0.5 w-full rounded-[5px] border border-accent bg-background px-2.5 py-1.5 text-[13px] outline-none" />
+                        ) : (
+                          <button onClick={() => setAddingFolder(true)} className="flex w-full items-center gap-1.5 rounded-[5px] px-2.5 py-1.5 text-left text-[13px] font-medium text-muted hover:bg-background">
+                            <I.plus className="h-3 w-3" /> New folder
+                          </button>
+                        )
+                      )}
+                    </>
+                  )}
                 </div>
               </>
             )}
@@ -607,7 +684,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                       ) : (<>
                         {n.body && <CollapsibleText text={n.body} className="mt-1 whitespace-pre-wrap text-[15px]" />}
                         {n.attachments && n.attachments.length > 0 && (
-                          <div className="mt-1.5"><AttachmentThumbs items={n.attachments} onOpen={onOpenFile} /></div>
+                          <div className="mt-1.5"><AttachmentThumbs items={n.attachments} onOpen={onOpenFile} folders={folders} onSetFolder={onSetNoteAttachmentFolder ? (attId, folderId) => onSetNoteAttachmentFolder(n, attId, folderId) : undefined} /></div>
                         )}
                       </>)}
                     </div>
