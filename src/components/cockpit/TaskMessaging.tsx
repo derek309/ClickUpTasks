@@ -197,7 +197,12 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin,
     onDeleteMessage, onEditMessage, onRegenerateAiSummary, aiSummaryBusy, hasMessaging } = p;
 
-  const [visibleChannels, setVisibleChannels] = useState<Set<Channel>>(new Set(["activity", "chat", "email", "sms"]));
+  // C3: was a Set of independently-toggled channels (all four on by default),
+  // which is how "the active tab reads Chat while the pane shows an email
+  // and field changes" happened — with everything simultaneously "active,"
+  // there was no single answer to "which tab is on." One exclusive filter
+  // has exactly one right answer at all times.
+  const [activeFilter, setActiveFilter] = useState<Channel | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [replyingTo, setReplyingTo] = useState<{ id: string; channel: Channel } | null>(null);
   const [composingChannel, setComposingChannel] = useState<Channel | null>(null);
@@ -568,9 +573,9 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
 
   const q = searchQuery.trim().toLowerCase();
   const mergedFeedItems: FeedItem[] = collapseDuplicateMessages([
-    ...(visibleChannels.has("activity") ? task.comments.map((c) => ({ at: c.at, kind: (c.kind === "event" ? "event" : "comment") as "event" | "comment", channel: "activity" as const, comment: c })) : []),
+    ...(activeFilter === "all" || activeFilter === "activity" ? task.comments.map((c) => ({ at: c.at, kind: (c.kind === "event" ? "event" : "comment") as "event" | "comment", channel: "activity" as const, comment: c })) : []),
     ...(messages ?? [])
-      .filter((m): m is Message & { channel: "chat" | "email" | "sms" } => m.channel !== "call" && visibleChannels.has(m.channel))
+      .filter((m): m is Message & { channel: "chat" | "email" | "sms" } => m.channel !== "call" && (activeFilter === "all" || activeFilter === m.channel))
       .map((m) => ({ at: m.at, kind: "message" as const, channel: m.channel, message: m })),
   ]
     .filter((item) => {
@@ -581,38 +586,46 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
     })
     .sort((a, b) => a.at.localeCompare(b.at)));
 
-  const commentCount = task.comments.filter((c) => c.kind !== "event").length;
+  // C3: "activity" bundles both team notes AND field-change audit events (see
+  // mergedFeedItems above) — its filter count has to reflect everything that
+  // filter actually reveals, not just the notes, or picking it would show
+  // more rows than its own count promised.
+  const activityCount = task.comments.length;
   const chatMsgCount = (messages ?? []).filter((m) => m.channel === "chat").length;
   const emailMsgCount = (messages ?? []).filter((m) => m.channel === "email").length;
   const smsMsgCount = (messages ?? []).filter((m) => m.channel === "sms").length;
   const chatUnread = (messages ?? []).some((m) => m.channel === "chat" && m.direction === "inbound" && !m.read);
   const emailUnread = (messages ?? []).some((m) => m.channel === "email" && m.direction === "inbound" && !m.read);
   const smsUnread = (messages ?? []).some((m) => m.channel === "sms" && m.direction === "inbound" && !m.read);
+  const totalCount = activityCount + chatMsgCount + emailMsgCount + smsMsgCount;
 
-  const channelMeta: Record<Channel, { label: string; unread: boolean; icon: React.ReactNode }> = {
-    activity: { label: `Note · ${commentCount}`, unread: false, icon: <I.comment /> },
-    chat: { label: `Chat${chatMsgCount ? ` · ${chatMsgCount}` : ""}`, unread: chatUnread, icon: <I.chatBubbles /> },
-    email: { label: `Email${emailMsgCount ? ` · ${emailMsgCount}` : ""}`, unread: emailUnread, icon: <I.mail /> },
-    sms: { label: `SMS${smsMsgCount ? ` · ${smsMsgCount}` : ""}`, unread: smsUnread, icon: <I.phone /> },
+  const channelMeta: Record<Channel, { label: string; count: number; unread: boolean; icon: React.ReactNode }> = {
+    activity: { label: "Activity", count: activityCount, unread: false, icon: <I.comment /> },
+    chat: { label: "Chat", count: chatMsgCount, unread: chatUnread, icon: <I.chatBubbles /> },
+    email: { label: "Email", count: emailMsgCount, unread: emailUnread, icon: <I.mail /> },
+    sms: { label: "SMS", count: smsMsgCount, unread: smsUnread, icon: <I.phone /> },
   };
-  const toggleChannel = (ch: Channel) => setVisibleChannels((s) => {
-    const next = new Set(s);
-    if (next.has(ch)) next.delete(ch); else next.add(ch);
-    if (next.size === 0) next.add(ch); // never allow filtering to zero channels
-    if (ch !== "activity" && !s.has(ch)) onMarkChannelRead?.(ch); // opening a channel on clears its unread dot
-    return next;
-  });
+  const selectFilter = (f: Channel | "all") => {
+    setActiveFilter(f);
+    if (f !== "activity" && f !== "all") onMarkChannelRead?.(f); // selecting a channel clears its unread dot
+  };
 
+  // C3: one exclusive filter — "All" plus only the channels that actually
+  // have content, so nothing reads as a tab advertising its own emptiness.
   const filterBar = (
     <div className="mb-3 flex flex-wrap items-center gap-1.5">
-      {(["activity", "chat", "email", "sms"] as Channel[]).filter((ch) => ch === "activity" || hasMessaging).map((ch) => {
-        const active = visibleChannels.has(ch);
+      <button onClick={() => selectFilter("all")}
+        className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[14px] font-medium ${activeFilter === "all" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>
+        All · {totalCount}
+      </button>
+      {(["activity", "chat", "email", "sms"] as Channel[]).filter((ch) => (ch === "activity" || hasMessaging) && channelMeta[ch].count > 0).map((ch) => {
+        const active = activeFilter === ch;
         const color = channelColor[ch];
         return (
-          <button key={ch} onClick={() => toggleChannel(ch)}
+          <button key={ch} onClick={() => selectFilter(ch)}
             className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[14px] font-medium ${active ? "" : "text-muted hover:text-foreground"}`}
             style={active ? { background: color + "1a", color } : undefined}>
-            {channelMeta[ch].icon} {channelMeta[ch].label}
+            {channelMeta[ch].icon} {channelMeta[ch].label} · {channelMeta[ch].count}
             {channelMeta[ch].unread && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color }} />}
           </button>
         );
@@ -834,8 +847,8 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
       {mergedFeedItems.length === 0 && (
         <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted">
           <I.comment />
-          <span className="text-[16px]">{(visibleChannels.size < 4 || q) ? "No messages match these filters" : "No activity yet"}</span>
-          <span className="text-[14px]">{(visibleChannels.size < 4 || q) ? "Try a different filter or search." : "Type @ to mention a teammate, or use a button below to reach out."}</span>
+          <span className="text-[16px]">{(activeFilter !== "all" || q) ? "No messages match these filters" : "No activity yet"}</span>
+          <span className="text-[14px]">{(activeFilter !== "all" || q) ? "Try a different filter or search." : "Type @ to mention a teammate, or use a button below to reach out."}</span>
         </div>
       )}
     </div>
