@@ -443,9 +443,15 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
             )}
             {feedRows.map((row) => {
               if (row.kind === "divider") {
+                // A4: this used to be a `sticky` pill floating over whatever
+                // scrolled underneath it — on a short entry, the pill covered
+                // real text (a live bug: the "Aug 10" chip sat on top of "I
+                // accidentally clicked the delete file button"). A full-width
+                // rule in normal flow can't overlap anything below it.
                 return (
-                  <div key={row.key} className="sticky top-0 z-[5] flex items-center justify-center py-1">
-                    <span className="rounded-[5px] border bg-background px-3 py-0.5 text-[12px] font-medium text-muted shadow-soft">{row.label}</span>
+                  <div key={row.key} className="flex items-center gap-3 py-2">
+                    <span className="shrink-0 text-[12px] font-semibold uppercase tracking-wide text-muted">{row.label}</span>
+                    <div className="h-px flex-1 bg-border" />
                   </div>
                 );
               }
