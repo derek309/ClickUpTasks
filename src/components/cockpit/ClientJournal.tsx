@@ -115,6 +115,11 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [composeMode, setComposeMode] = useState<"note" | "email" | "sms">("note");
+  // A6: the composer is permanently expanded today — ~40% of a tab whose job
+  // is reading. Collapsed by default; expanding/collapsing never touches the
+  // draft state below (draft/msgSubject/msgBody/etc), so a half-written
+  // email survives a collapse-and-reopen for free.
+  const [composerCollapsed, setComposerCollapsed] = useState(true);
   const [draftType, setDraftType] = useState<NoteType>("note");
   const [draft, setDraft] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -141,6 +146,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   useEffect(() => {
     if (composeIntent && onSendMessage) {
       setComposeMode(composeIntent.mode);
+      setComposerCollapsed(false);
       setComposeFocusNonce((n) => n + 1);
       requestAnimationFrame(() => msgBodyRef.current?.focus());
     }
@@ -333,6 +339,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   };
   const replyToEmail = (m: Message) => {
     setComposeMode("email");
+    setComposerCollapsed(false);
     const subj = m.subject ?? "";
     setMsgSubject(/^re:/i.test(subj) ? subj : `Re: ${subj}`.trim());
     setMsgBody("");
@@ -344,6 +351,28 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   // which .trim() alone doesn't catch), same reasoning behind htmlToText's
   // other callers.
   const hasComposedBody = composeMode === "email" ? !!htmlToText(msgBody).trim() : !!msgBody.trim();
+  const hasDraftInProgress = composeMode === "note" ? (draft.trim() !== "" || pendingAtts.length > 0) : (hasComposedBody || !!msgSubject.trim());
+  const expandComposer = (mode?: "note" | "email" | "sms") => { if (mode) switchComposeMode(mode); setComposerCollapsed(false); };
+  // A6: N/E/S jump straight into a fresh channel from anywhere on the tab —
+  // guarded off whenever the event started in a text field, so typing those
+  // letters normally never gets hijacked. Esc collapses regardless of focus
+  // (typing "half an email" then hitting Esc should collapse, not be eaten).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !composerCollapsed) { setComposerCollapsed(true); return; }
+      if (!composerCollapsed) return;
+      const target = e.target as HTMLElement | null;
+      const typing = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || !!target?.isContentEditable;
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k === "n") { e.preventDefault(); expandComposer("note"); }
+      else if (k === "e" && onSendMessage) { e.preventDefault(); expandComposer("email"); }
+      else if (k === "s" && onSendMessage) { e.preventDefault(); expandComposer("sms"); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composerCollapsed, onSendMessage]);
   const submitMessage = () => {
     if (!hasComposedBody || !onSendMessage || (composeMode !== "email" && composeMode !== "sms")) return;
     // Cc/Bcc ride along only on email; SMS ignores them.
@@ -698,17 +727,48 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
             always win). */}
         <div className="relative flex w-full flex-col border-t bg-surface md:w-[var(--composer-w)] md:shrink-0 md:border-l md:border-t-0"
           style={{ "--composer-w": `${composerW}px` } as React.CSSProperties}>
-          <div onMouseDown={startComposerResize} title="Drag to resize"
-            className="absolute inset-y-0 -left-1 z-10 hidden w-2 cursor-col-resize hover:bg-accent/30 active:bg-accent/40 md:block" />
+          {!composerCollapsed && (
+            <div onMouseDown={startComposerResize} title="Drag to resize"
+              className="absolute inset-y-0 -left-1 z-10 hidden w-2 cursor-col-resize hover:bg-accent/30 active:bg-accent/40 md:block" />
+          )}
+          {composerCollapsed ? (
+            // A6: rest state — one bar, ≤64px. Same draft state as the
+            // expanded composer underneath, just not rendered — collapsing
+            // never touches draft/msgSubject/msgBody, so it's still there on
+            // reopen.
+            <div className="flex h-14 shrink-0 items-center gap-1.5 px-3">
+              {onSendMessage ? (
+                <div className="inline-flex shrink-0 overflow-hidden rounded-md border">
+                  <button onClick={() => expandComposer("note")} className={`px-2 py-1 text-[12px] font-medium ${composeMode === "note" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Note</button>
+                  <button onClick={() => expandComposer("email")} className={`px-2 py-1 text-[12px] font-medium ${composeMode === "email" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Email</button>
+                  <button onClick={() => expandComposer("sms")} className={`px-2 py-1 text-[12px] font-medium ${composeMode === "sms" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>SMS</button>
+                </div>
+              ) : (
+                <span className="shrink-0 text-[13px] font-semibold text-muted">Write</span>
+              )}
+              <button onClick={() => expandComposer()} className="flex min-w-0 flex-1 items-center gap-1.5 truncate rounded-md border bg-background px-2.5 py-1.5 text-left text-[13px] text-muted hover:border-accent hover:text-foreground">
+                {hasDraftInProgress && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" title="Draft in progress" />}
+                <span className="truncate">
+                  {composeMode === "note" ? (draft.split("\n")[0] || "Write a note…")
+                    : composeMode === "email" ? (msgSubject || htmlToText(msgBody).split("\n")[0] || "Write an email…")
+                    : (msgBody.split("\n")[0] || "Write a text…")}
+                </span>
+              </button>
+              <button onClick={() => expandComposer()} className="shrink-0 rounded-md border border-accent bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white">Draft</button>
+            </div>
+          ) : (<>
           <div className="flex items-center justify-between border-b px-3 py-2.5">
             <span className="text-[13px] font-semibold text-muted">Write</span>
-            {onSendMessage && (
-              <div className="inline-flex overflow-hidden rounded-md border">
-                <button onClick={() => switchComposeMode("note")} className={`px-2 py-1 text-[12px] font-medium ${composeMode === "note" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Note</button>
-                <button onClick={() => switchComposeMode("email")} className={`px-2 py-1 text-[12px] font-medium ${composeMode === "email" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Email</button>
-                <button onClick={() => switchComposeMode("sms")} className={`px-2 py-1 text-[12px] font-medium ${composeMode === "sms" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>SMS</button>
-              </div>
-            )}
+            <div className="flex items-center gap-1.5">
+              {onSendMessage && (
+                <div className="inline-flex overflow-hidden rounded-md border">
+                  <button onClick={() => switchComposeMode("note")} className={`px-2 py-1 text-[12px] font-medium ${composeMode === "note" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Note</button>
+                  <button onClick={() => switchComposeMode("email")} className={`px-2 py-1 text-[12px] font-medium ${composeMode === "email" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Email</button>
+                  <button onClick={() => switchComposeMode("sms")} className={`px-2 py-1 text-[12px] font-medium ${composeMode === "sms" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>SMS</button>
+                </div>
+              )}
+              <button onClick={() => setComposerCollapsed(true)} title="Collapse (Esc)" className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground"><I.chevron className="h-3.5 w-3.5 rotate-[-90deg]" /></button>
+            </div>
           </div>
           {composeMode === "note" ? (
             <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files.length) handleNoteFiles(e.dataTransfer.files); }}
@@ -770,8 +830,13 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                 })()}
               </div>
               {onDraftMessage && (
-                <div className="mb-2 flex shrink-0 items-start gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
-                  <span aria-hidden className="pt-1 pl-1 text-[13px]">✨</span>
+                // A6: fixed while in here — the icon/textarea/button used
+                // mismatched alignment (items-start container, but self-
+                // center on the textarea and a top margin on the button),
+                // which let the button visually collide with the textarea
+                // once it grew past one line. One items-center row fixes it.
+                <div className="mb-2 flex shrink-0 items-center gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
+                  <span aria-hidden className="shrink-0 text-[13px]">✨</span>
                   <textarea ref={draftPromptRef} value={draftPrompt} rows={1}
                     onChange={(e) => { setDraftPrompt(e.target.value); e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`; }}
                     onKeyDown={(e) => {
@@ -780,10 +845,10 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                       runDraft();
                     }}
                     placeholder="Tell Claude what to say… (Enter to write, Shift+Enter for a new line)"
-                    className="max-h-[200px] min-w-0 flex-1 resize-none self-center overflow-y-auto bg-transparent px-1 py-1 text-[13px] leading-snug outline-none placeholder:text-muted" />
+                    className="max-h-[200px] min-w-0 flex-1 resize-none overflow-y-auto bg-transparent px-1 py-1 text-[13px] leading-snug outline-none placeholder:text-muted" />
                   <button onClick={runDraft}
                     disabled={draftingMessage} title={draftPrompt.trim() ? "Draft this with Claude" : "Draft a status update from recent activity — review before sending"}
-                    className="mt-0.5 shrink-0 rounded-md border border-accent/40 bg-surface px-2.5 py-1 text-[13px] font-medium text-accent disabled:opacity-40">
+                    className="shrink-0 rounded-md border border-accent/40 bg-surface px-2.5 py-1 text-[13px] font-medium text-accent disabled:opacity-40">
                     {draftingMessage ? "Drafting…" : draftPrompt.trim() ? "Write it" : "Status update"}
                   </button>
                 </div>
@@ -835,6 +900,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
               </div>
             </div>
           )}
+          </>)}
         </div>
       </div>
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
