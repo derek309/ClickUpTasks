@@ -330,18 +330,43 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
     setEmailFocusNonce((n) => n + 1);
     onPatch({ draftEmail: null });
   };
+  // C1: same subject + same body as something already sent to this client
+  // is exactly what C0 turned up — a draft staged 11s before it went out via
+  // a path that never cleared task.draftEmail, leaving a stale card behind.
+  // Catching that here is what would have caught C0 on its own.
+  const normalizeEmailText = (s: string) => htmlToText(s).replace(/\s+/g, " ").trim().toLowerCase();
+  const draftSentAlready = task.draftEmail ? (messages ?? []).find((m) =>
+    m.channel === "email" && m.direction === "outbound" &&
+    normalizeEmailText(m.subject ?? "") === normalizeEmailText(task.draftEmail!.subject) &&
+    normalizeEmailText(m.body) === normalizeEmailText(task.draftEmail!.body)
+  ) ?? null : null;
+  // "The thread it continues" — the most recent email either direction, so
+  // the card can name and link to what this draft is following up on.
+  const latestPriorEmail = task.draftEmail
+    ? [...(messages ?? [])].filter((m) => m.channel === "email").sort((a, b) => b.at.localeCompare(a.at))[0] ?? null
+    : null;
   const draftEmailCard = task.draftEmail ? (
-    <div className="mb-3 rounded-xl border border-accent/30 bg-accent-soft/20 p-4">
-      <div className="mb-1 flex items-center gap-1.5 text-[16px] font-semibold text-accent"><span aria-hidden>✉️</span> Draft email ready</div>
-      <div className="truncate text-[15px] font-medium">{task.draftEmail.subject || "(no subject)"}</div>
-      <div className="mt-0.5 line-clamp-2 text-[14px] text-muted">{htmlToText(task.draftEmail.body)}</div>
+    <div className="mb-2 rounded-xl border border-accent/30 bg-accent-soft/20 p-3">
+      <div className="mb-1 flex items-center gap-1.5 text-[15px] font-semibold text-accent"><span aria-hidden>✉️</span> Draft email ready</div>
+      <div className="truncate text-[14px] font-medium">{task.draftEmail.subject || "(no subject)"}</div>
+      <div className="mt-0.5 line-clamp-2 text-[13px] text-muted">{htmlToText(task.draftEmail.body)}</div>
+      {latestPriorEmail && (
+        <button onClick={() => selectFilter("email")} className="mt-1 block text-[12px] font-medium text-accent hover:underline">
+          Continues the email conversation from {timeAgo(latestPriorEmail.at)} · see thread
+        </button>
+      )}
+      {draftSentAlready && (
+        <div className="mt-1.5 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[12px] font-medium text-amber-800">
+          ⚠️ Looks like this was sent {timeAgo(draftSentAlready.at)} — check before sending again.
+        </div>
+      )}
       <div className="mt-2 flex items-center gap-2">
         {hasMessaging ? (
-          <button onClick={openDraftEmail} className="rounded-md bg-accent px-2.5 py-1.5 text-[14px] font-medium text-white">Review &amp; send</button>
+          <button onClick={openDraftEmail} className="rounded-md bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white">Review &amp; send</button>
         ) : (
           <span className="text-[13px] text-muted" title="No linked GoHighLevel contact to send to yet">Can&apos;t send — no linked contact for this client</span>
         )}
-        <button onClick={() => onPatch({ draftEmail: null })} className="rounded-md px-2.5 py-1.5 text-[14px] font-medium text-muted hover:bg-background hover:text-foreground">Discard</button>
+        <button onClick={() => onPatch({ draftEmail: null })} className="rounded-md px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">Discard</button>
       </div>
     </div>
   ) : null;
@@ -947,7 +972,6 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
 
   const feedArea = (
     <>
-      {draftEmailCard}
       {filterBar}
       {commentsFeed}
       {aiSlideOver}
@@ -959,9 +983,17 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
   // otherwise the compose buttons. Keeping the buttons here rather than at
   // the end of the feed is what makes them always reachable without
   // scrolling a long thread first.
-  const composerFooter = composingChannel
-    ? (composingChannel === "activity" ? teamComposer : channelComposer(composingChannel, closeComposers))
-    : ctaRow;
+  // C1: a draft is what hasn't happened yet, never a peer of the sent
+  // messages in the feed above — it lives here, in the composer region,
+  // above whichever composer/CTA row is currently showing.
+  const composerFooter = (
+    <>
+      {draftEmailCard}
+      {composingChannel
+        ? (composingChannel === "activity" ? teamComposer : channelComposer(composingChannel, closeComposers))
+        : ctaRow}
+    </>
+  );
 
   void mentionMatch; void mentionCands; // reserved: team @-mention affordance can be reintroduced here if needed
 
