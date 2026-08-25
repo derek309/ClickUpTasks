@@ -303,6 +303,11 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
 
   // Admin-only correction for a message that already sent wrong.
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  // C4: Reply/Edit/Delete used to be 3 always-visible buttons crammed into
+  // the card header alongside the channel badge, direction label, avatar,
+  // and timestamp — broke badly at ~500px. One overflow trigger, keyed per
+  // message so only one card's menu is ever open at a time.
+  const [openMsgMenuId, setOpenMsgMenuId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const startEditMessage = (m: Message) => { setEditingMsgId(m.id); setEditDraft(looksLikeHtml(m.body) ? htmlToText(m.body) : m.body); };
   const saveEditMessage = (m: Message) => {
@@ -690,7 +695,7 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
               <span className="inline-flex items-center gap-1 rounded px-1.5 py-0 font-medium" style={{ background: dotColor + "1a", color: dotColor }}>{channelLabel}</span>
               <span className="font-medium" style={{ color: m.direction === "inbound" ? "var(--highlight)" : "var(--accent)" }}>{m.direction === "inbound" ? "Received" : "Sent"}</span>
               {m.direction === "outbound" && m.createdBy && (
-                <span className="inline-flex items-center gap-1"><Avatar id={m.createdBy} size={14} /> {userById(m.createdBy)?.name ?? "Unknown"}</span>
+                <span className="inline-flex min-w-0 shrink items-center gap-1 truncate"><Avatar id={m.createdBy} size={14} /> <span className="truncate">{userById(m.createdBy)?.name ?? "Unknown"}</span></span>
               )}
               <span>· {timeAgo(m.at)}</span>
               {dupeCount && dupeCount > 1 && (
@@ -701,19 +706,27 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
                   <span className="h-1.5 w-1.5 rounded-full bg-accent" /> New
                 </span>
               )}
-              <span className="ml-auto flex shrink-0 items-center gap-1">
-                {replyableChannel(m.channel) && onSendTaskMessage && editingMsgId !== m.id && (
-                  <button onClick={() => openReply(m.id, replyableChannel(m.channel)!, m.subject)} className="rounded-md border border-accent/30 px-2 py-0.5 text-[13px] font-medium text-accent hover:bg-accent-soft">Reply</button>
-                )}
-                {canAdmin && onEditMessage && editingMsgId !== m.id && (
-                  <button onClick={() => startEditMessage(m)} title="Edit (this doesn't unsend anything already delivered)" className="rounded-md border px-2 py-0.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">Edit</button>
-                )}
-                {canAdmin && onDeleteMessage && (
-                  <button
-                    onClick={() => { if (window.confirm("Delete this message? This only removes it from ClickUpTasks and the client's waiting page — it does not unsend a real email or text already delivered.")) onDeleteMessage(m.id); }}
-                    title="Delete" className="rounded-md border px-2 py-0.5 text-[13px] font-medium text-muted hover:border-red-300 hover:bg-red-50 hover:text-red-600">Delete</button>
-                )}
-              </span>
+              {editingMsgId !== m.id && (replyableChannel(m.channel) && onSendTaskMessage || (canAdmin && (onEditMessage || onDeleteMessage))) && (
+                <span className="relative ml-auto shrink-0">
+                  <button onClick={() => setOpenMsgMenuId((id) => (id === m.id ? null : m.id))} title="More" className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground"><I.dots /></button>
+                  {openMsgMenuId === m.id && (<>
+                    <div className="fixed inset-0 z-30" onClick={() => setOpenMsgMenuId(null)} />
+                    <div className="absolute right-0 top-full z-40 mt-1 w-40 overflow-hidden rounded-lg border bg-surface py-1 shadow-lg">
+                      {replyableChannel(m.channel) && onSendTaskMessage && (
+                        <button onClick={() => { setOpenMsgMenuId(null); openReply(m.id, replyableChannel(m.channel)!, m.subject); }} className="block w-full px-3 py-1.5 text-left text-[13px] font-medium text-accent hover:bg-background">Reply</button>
+                      )}
+                      {canAdmin && onEditMessage && (
+                        <button onClick={() => { setOpenMsgMenuId(null); startEditMessage(m); }} title="This doesn't unsend anything already delivered" className="block w-full px-3 py-1.5 text-left text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">Edit</button>
+                      )}
+                      {canAdmin && onDeleteMessage && (
+                        <button
+                          onClick={() => { setOpenMsgMenuId(null); if (window.confirm("Delete this message? This only removes it from ClickUpTasks and the client's waiting page — it does not unsend a real email or text already delivered.")) onDeleteMessage(m.id); }}
+                          className="block w-full px-3 py-1.5 text-left text-[13px] font-medium text-muted hover:bg-red-50 hover:text-red-600">Delete</button>
+                      )}
+                    </div>
+                  </>)}
+                </span>
+              )}
             </div>
             {m.subject && <div className="mt-1 text-[16px] font-medium">{m.subject}</div>}
             {((m.cc && m.cc.length > 0) || (m.bcc && m.bcc.length > 0)) && (
