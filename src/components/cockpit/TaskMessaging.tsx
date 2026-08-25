@@ -844,6 +844,13 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
           </div>
         );
       })}
+      {/* C6: a short thread otherwise leaves a few hundred blank px below the
+          last entry, which reads as a stuck load rather than a finished
+          history. Top-anchored on purpose — bottom-anchoring was tried and
+          reverted (short threads looked broken); don't reintroduce it. */}
+      {mergedFeedItems.length > 0 && (
+        <div className="pt-3 text-center text-[13px] text-muted">Start of your conversation with {client.name}</div>
+      )}
       {mergedFeedItems.length === 0 && (
         <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted">
           <I.comment />
