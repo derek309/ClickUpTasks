@@ -3998,7 +3998,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           pinned and shrinking the list's scroll area). Views with their own
           internal scroll (Journal, Vault, directories) are flex-1 min-h-0, so
           they still scroll inside and this overflow never engages for them. */}
-      <main className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-background">
+      <main className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-background pb-16 md:pb-0">
         {/* Mobile header (Option A) — compact title bar + full-width segmented
             tabs. Reuses the shared bell/filter/overflow controls. The full
             desktop header below is hidden on phones. */}
@@ -4403,8 +4403,29 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         )}
       </main>
 
+      {/* Part B: <768 bottom tab bar — the primary way to switch views on a
+          phone. The off-canvas hamburger sidebar (still reachable via the
+          mobile header's menu button) stays the "everything else" surface
+          (Personal, Pinned, Settings, sign out) — this bar covers only the
+          four destinations the brief calls out, each a real 56px-tall tap
+          target with the real device UI drawn on top of it, not under a
+          drawn-on fake one. */}
+      <nav className="fixed inset-x-0 bottom-0 z-40 flex h-14 border-t bg-surface pb-[env(safe-area-inset-bottom)] md:hidden">
+        {([
+          { key: "dashboard" as const, label: "My Work", icon: <I.grid />, active: myWork },
+          { key: "clients" as const, label: "Clients", icon: <I.user />, active: dirView === "clients" || (!myWork && !personalView && !inboxView && !dirView && !settingsView && activeClient.startsWith("cl_") && activeClient !== WORKSPACE_CLIENT_ID) },
+          { key: "teamchat" as const, label: "Chat", icon: <I.comment />, active: inboxView },
+          { key: "projects" as const, label: "Projects", icon: <I.folder />, active: dirView === "projects" || (!myWork && !personalView && !inboxView && !dirView && !settingsView && activeClient === WORKSPACE_CLIENT_ID) },
+        ]).map((t) => (
+          <button key={t.key} onClick={() => goToView(t.key)} className={`relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium ${t.active ? "text-accent" : "text-muted"}`}>
+            <span className="relative">{t.icon}{t.key === "teamchat" && teamChatUnread && <span className="absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full bg-accent" />}</span>
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
       {selectedTaskIds.size > 0 && (
-        <div className="fixed bottom-4 left-1/2 z-30 flex -translate-x-1/2 flex-wrap items-center gap-2 rounded-xl border bg-surface px-3 py-2 shadow-xl">
+        <div className="fixed bottom-20 left-1/2 z-30 flex -translate-x-1/2 flex-wrap items-center gap-2 rounded-xl border bg-surface px-3 py-2 shadow-xl md:bottom-4">
           <span className="text-[15px] font-medium">{selectedTaskIds.size} selected</span>
           <select defaultValue="" onChange={(e) => {
             const v = e.target.value;
@@ -4636,7 +4657,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         />
       )}
 
-      <div className="pointer-events-none fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 flex-col items-center gap-2">
+      <div className="pointer-events-none fixed bottom-20 left-1/2 z-50 flex -translate-x-1/2 flex-col items-center gap-2 md:bottom-4">
         {toasts.map((t) => (<div key={t.id} className="flex items-center gap-3 rounded-lg bg-foreground px-3.5 py-2 text-[15px] font-medium text-[color:var(--surface)] shadow-lg"><span>{t.text}</span>{t.action && (<button onClick={() => { t.action!.run(); dismissToast(t.id); }} className="shrink-0 rounded-md border border-[color:var(--surface)]/35 px-2 py-0.5 text-[14px] font-semibold hover:bg-[color:var(--surface)]/15">{t.action.label}</button>)}{t.secondaryAction && (<button onClick={() => { t.secondaryAction!.run(); dismissToast(t.id); }} className="shrink-0 rounded-md bg-[color:var(--surface)] px-2 py-0.5 text-[14px] font-semibold text-foreground hover:opacity-90">{t.secondaryAction.label}</button>)}</div>))}
       </div>
     </div>
