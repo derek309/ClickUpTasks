@@ -236,7 +236,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [filters, setFilters] = useState<FilterState>({ status: "all", assignee: "all", priority: "all" });
   const [sortBy, setSortBy] = useState<SortBy>("due");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
-  const [visibleCols, setVisibleCols] = useState<string[]>(["status", "due", "contact"]);
+  const [visibleCols, setVisibleCols] = useState<string[]>(["status", "priority", "due"]);
   // Manual drag order for list columns — persisted like the other view
   // toggles below. Any key not yet in a saved order (e.g. after adding a new
   // column) falls back to LIST_COLUMNS' own order in reorderCols/colOrder use.
