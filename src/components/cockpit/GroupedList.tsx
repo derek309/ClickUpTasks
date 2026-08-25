@@ -226,7 +226,13 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
           {(task.waitingOnClient || (task.assigneeId && task.assigneeId !== meId)) && (
             <InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a, waitingOnClient: false })} onSetWaiting={() => onPatch(task.id, { waitingOnClient: true, assigneeId: null })} size={30} />
           )}
-          <button onClick={onOpen} className="flex min-w-0 flex-1 flex-col justify-center py-0.5 pl-1 text-left">
+          {/* A real <button> here used to wrap InlineComments, which renders
+              its own <button> trigger — invalid HTML (button-in-button),
+              flagged live as a hydration error. role="button" on a <div>
+              gets the same click/keyboard-activation semantics without
+              nesting an interactive element inside another one. */}
+          <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
+            className="flex min-w-0 flex-1 cursor-pointer flex-col justify-center py-0.5 pl-1 text-left">
             {/* Project crumb is redundant once the Client column is already
                 shown (My Work, All tasks) — keep it only in single-client
                 views where there's no other column carrying that context. */}
@@ -236,13 +242,13 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
               <span className="line-clamp-none min-w-0 flex-1 break-words text-[15px] font-medium leading-snug sm:line-clamp-2" title={task.title}>{task.title}</span>
               {task.recurrence !== "none" && <span title={describeRecurrence(task.recurrence, task.recurrenceInterval, task.recurrenceUnit, task.recurrenceDaysOfMonth)}><I.repeat className="shrink-0 text-muted" /></span>}
               {task.attachments.length > 0 && <I.clip className="shrink-0 text-muted" />}
-              {commentCount > 0 && <InlineComments task={task} onAddComment={onAddComment} />}
+              {commentCount > 0 && <span onClick={(e) => e.stopPropagation()}><InlineComments task={task} onAddComment={onAddComment} /></span>}
               {task.subtasks.length > 0 && <span className="inline-flex shrink-0 items-center gap-0.5 text-[11px] text-muted"><I.check />{doneSubs}/{task.subtasks.length}</span>}
             </span>
             {playbookStep?.youGet && task.status !== "done" && (
               <span className="block truncate text-[12px] text-muted" title={playbookStep.youGet}>📈 {playbookStep.youGet}</span>
             )}
-          </button>
+          </div>
         </div>
         {/* On mobile these wrap into a chip row under the title (indented past
             the avatar); on sm+ `contents` dissolves the wrapper so each cell
