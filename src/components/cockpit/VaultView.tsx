@@ -11,14 +11,17 @@
 // Folders are a pure organizational overlay — filing an item into a folder
 // never moves the underlying file, just tags it (see Attachment.folderId).
 import { useEffect, useRef, useState } from "react";
-import { type Attachment, type VaultFolder } from "@/lib/data";
+import { type Attachment, type VaultFolder, timeAgo } from "@/lib/data";
 import { I } from "./ui";
 import { AttachmentTile } from "./AttachmentTile";
 
-export type VaultItem = Attachment & { sourceLabel: string; onOpenSource: () => void; onSetFolder: (folderId: string | null) => void };
+// B1: `at` is when the owning task/comment/note was created — the closest
+// available signal for "when was this filed," used for the Links rows' age
+// column. Not a stored attachment timestamp (Attachment has none), just
+// threaded through from whichever row owns it (see Cockpit.tsx's vaultItems).
+export type VaultItem = Attachment & { at: string; sourceLabel: string; onOpenSource: () => void; onSetFolder: (folderId: string | null) => void };
 
-const OTHER_KIND_ORDER: Attachment["kind"][] = ["pdf", "doc", "sheet", "link"];
-const KIND_LABEL: Record<Attachment["kind"], string> = { image: "Images", pdf: "PDFs", doc: "Docs", sheet: "Sheets", link: "Links" };
+const FILE_KIND_ORDER: Attachment["kind"][] = ["pdf", "doc", "sheet"];
 
 // The Attachment type carries no dimensions/EXIF/upload-source — filename
 // is the only signal available to tell a screenshot from a real photo.
@@ -101,7 +104,10 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
   const images = displayed.filter((a) => a.kind === "image");
   const photos = sortByPosition(images.filter((a) => !SCREENSHOT_RE.test(a.name)));
   const screenshots = sortByPosition(images.filter((a) => SCREENSHOT_RE.test(a.name)));
-  const otherGroups = OTHER_KIND_ORDER.map((k) => ({ kind: k, label: KIND_LABEL[k], items: sortByPosition(displayed.filter((a) => a.kind === k)) })).filter((g) => g.items.length > 0);
+  // B1: files (pdf/doc/sheet) get thumbnail cards, links get dense rows —
+  // one uniform card grid wastes ~17,000px² per link on a 20px "URL" chip.
+  const files = sortByPosition(displayed.filter((a) => FILE_KIND_ORDER.includes(a.kind)));
+  const links = sortByPosition(displayed.filter((a) => a.kind === "link"));
 
   // Drag-to-reorder within one kind-group — same splice-before-target idiom
   // as FolderRail/ClientLinks. Vault items are a merge of three
@@ -273,38 +279,56 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
           </div>
         )}
 
-        {otherGroups.map((g) => (
-          <div key={g.kind}>
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">{g.label} · {g.items.length}</div>
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
-              {g.items.map((a) => {
-                const display = a.kind === "link" ? deriveLinkTitle(a) : { title: a.name, domain: null };
+        {files.length > 0 && (
+          <div>
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Files · {files.length}</div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+              {files.map((a) => (
+                <div key={a.id} className="flex flex-col gap-1">
+                  <AttachmentTile
+                    item={a}
+                    href={a.url || undefined}
+                    onOpen={!a.url && a.path ? () => onDownloadFile(a.path!) : undefined}
+                    drag={{ dragging: dragItemId === a.id, onDragStart: () => setDragItemId(a.id), onDrop: () => reorderGroup(files, a.id) }}
+                    actions={
+                      <>
+                        <FolderMenu item={a} folders={folders} triggerClassName="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80" />
+                        {a.path && (
+                          <button onClick={(e) => { e.stopPropagation(); onCopyLink(a.path!); }} title="Copy link" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-3.5 w-3.5" /></button>
+                        )}
+                      </>
+                    }
+                  />
+                  <div className="truncate text-center text-[12px]" title={a.name}>{a.name}</div>
+                  <button onClick={a.onOpenSource} className="truncate text-center text-[11px] text-muted hover:text-foreground hover:underline">{a.sourceLabel}</button>
+                  {a.size && <div className="text-center text-[11px] text-muted">{a.size}</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {links.length > 0 && (
+          <div>
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Links · {links.length}</div>
+            <div className="divide-y rounded-lg border bg-surface">
+              {links.map((a) => {
+                const display = deriveLinkTitle(a);
                 return (
-                  <div key={a.id} className="flex flex-col gap-1">
-                    <AttachmentTile
-                      item={a}
-                      href={a.url || undefined}
-                      onOpen={!a.url && a.path ? () => onDownloadFile(a.path!) : undefined}
-                      drag={{ dragging: dragItemId === a.id, onDragStart: () => setDragItemId(a.id), onDrop: () => reorderGroup(g.items, a.id) }}
-                      actions={
-                        <>
-                          <FolderMenu item={a} folders={folders} triggerClassName="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80" />
-                          {a.path && (
-                            <button onClick={(e) => { e.stopPropagation(); onCopyLink(a.path!); }} title="Copy link" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-3.5 w-3.5" /></button>
-                          )}
-                        </>
-                      }
-                    />
-                    <div className="truncate text-center text-[12px]" title={a.url ?? a.name}>{display.title}</div>
-                    {display.domain && <div className="truncate text-center text-[11px] text-muted">{display.domain}</div>}
-                    <button onClick={a.onOpenSource} className="truncate text-center text-[11px] text-muted hover:text-foreground hover:underline">{a.sourceLabel}</button>
-                    {a.size && <div className="text-center text-[11px] text-muted">{a.size}</div>}
+                  <div key={a.id} className="group/link flex items-center gap-2.5 px-3 py-2.5">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-accent-soft text-accent"><I.link className="h-3 w-3" /></span>
+                    <a href={a.url ?? undefined} target="_blank" rel="noopener noreferrer" title={a.url ?? a.name} className="min-w-0 flex-1 truncate text-[13px] font-medium hover:underline">{display.title}</a>
+                    {display.domain && <span className="hidden max-w-[160px] shrink-0 truncate text-[12px] text-muted sm:block">{display.domain}</span>}
+                    <span className="shrink-0 text-[11px] text-muted">{timeAgo(a.at)}</span>
+                    <span className="hidden shrink-0 items-center gap-0.5 group-hover/link:inline-flex">
+                      <FolderMenu item={a} folders={folders} triggerClassName="rounded-md p-1 text-muted hover:bg-background hover:text-foreground" />
+                    </span>
                   </div>
                 );
               })}
             </div>
           </div>
-        ))}
+        )}
         </div>
       </div>
 
