@@ -165,8 +165,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   };
   // Gallery grid needs every visible image thumbnail up front, not resolved
   // one at a time on click like openPreview above — batch-fetch in
-  // parallel, mirroring VaultView's identical pattern. Includes message
-  // attachments (e.g. a photo the client sent over chat) and comment
+  // parallel. Includes message attachments (e.g. a photo the client sent
+  // over chat) and comment
   // attachments (a screenshot dropped into the Activity tab) so those render
   // as real thumbnails in the feed too, not just a filename chip.
   const attImagePaths = useMemo(

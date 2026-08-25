@@ -7,14 +7,17 @@
 // email/SMS conversation — sent via GHL from right here, received via the
 // inbound webhook — so there's no gap and no need to poll GHL for updates.
 // Claude (via the MCP server's list_notes/add_note tools) reads and posts to
-// the notes side of this too. Every image attached here also shows up in the
-// Vault tab. The composer is one segmented control (Note/Email/SMS) instead
-// of separate note and message composers, so writing here is a single
-// "what kind of entry is this" decision rather than switching views first.
+// the notes side of this too. The composer is one segmented control
+// (Note/Email/SMS) instead of separate note and message composers, so
+// writing here is a single "what kind of entry is this" decision rather
+// than switching views first. The Filter menu's Photos/Links/Files plus a
+// folder filter (see onSetNoteAttachmentFolder) are what a standalone Vault
+// tab used to be — folded in here instead of keeping a whole second tab
+// alive just to browse/file attachments.
 import { useEffect, useRef, useState } from "react";
 import {
   users, userById, timeAgo, dayLabel, isCompletionEvent, NOTE_TYPE_META, NOTE_TYPE_ORDER, MANUAL_NOTE_TYPES, noteTypeMeta, htmlToText, looksLikeHtml, plainTextToHtml,
-  type ClientNote, type NoteType, type Task, type Comment, type Message, type MessageChannel, type MessageDirection, type Me, type Attachment, type Contact, type ScheduledMessage,
+  type ClientNote, type NoteType, type Task, type Comment, type Message, type MessageChannel, type MessageDirection, type Me, type Attachment, type Contact, type ScheduledMessage, type VaultFolder,
 } from "@/lib/data";
 import { I, Avatar, CollapsibleText, newId, useStickyBottom, JumpToLatestButton } from "./ui";
 import { ConfirmModal, type ConfirmSpec } from "./modals";
@@ -23,7 +26,13 @@ import { RichTextEditor } from "./RichTextEditor";
 import { RecipientField } from "./TaskMessaging";
 import { SchedulePopover } from "./SchedulePopover";
 
-type JournalFilter = "all" | NoteType | "message" | "activity" | "photos" | "links" | "files";
+// A2: the old ten equal pills (note kinds, Message, Task Activity, attachment
+// types) mixed three different axes into one row. Split into a primary
+// segment (what family of entry) and a secondary sub-filter (which kind
+// within it, or which attachment type) — two independent controls instead
+// of one flat list.
+type JournalSegment = "all" | "conversation" | "decisions" | "activity";
+type JournalSubFilter = "all" | NoteType | "photos" | "links" | "files";
 
 type JournalItem =
   | { kind: "note"; at: string; note: ClientNote }
@@ -64,7 +73,7 @@ function buildFeedRows(items: JournalItem[]): FeedRow[] {
   return rows;
 }
 
-export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, onScheduleMessage, scheduled, onLoadScheduled, onCancelScheduled, toContact, ccContacts, sendingMessage, onUploadImage, onOpenFile, canAdmin, canMessage, onToggleCanMessage, onDraftMessage, draftingMessage, onRefreshContact, refreshingContact, onRefreshMessages, refreshingMessages, onWhatsNext, whatsNextBusy, composeIntent }: {
+export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, onScheduleMessage, scheduled, onLoadScheduled, onCancelScheduled, toContact, ccContacts, sendingMessage, onUploadImage, onOpenFile, canAdmin, canMessage, onToggleCanMessage, onDraftMessage, draftingMessage, onRefreshContact, refreshingContact, onRefreshMessages, refreshingMessages, onWhatsNext, whatsNextBusy, composeIntent, folders, onCreateFolder, onRenameFolder, onDeleteFolder, onCopyFolderLink, onSetNoteAttachmentFolder, initialFolderFilter }: {
   notes: ClientNote[];
   tasks: Task[]; // already scoped by the caller to the current client/project
   messages?: Message[] | null; // null/undefined = no linked GHL contact at this scope, so no Email/SMS
@@ -103,16 +112,45 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   // mode. `nonce` bumps on every click so the effect re-fires even when the
   // Journal is already open (the component isn't remounted then).
   composeIntent?: { mode: "email" | "sms"; nonce: number } | null;
+  // Vault→Journal merge: the Filter menu's Photos/Links/Files already covers
+  // "browse by kind" — folders are the one Vault capability without an
+  // equivalent here, so they're folded straight into the same menu instead
+  // of keeping a whole separate tab alive just for filing. Only note
+  // attachments support filing (Vault never covered message attachments
+  // either — see Cockpit.tsx's old vaultItems comment).
+  folders?: VaultFolder[];
+  onCreateFolder?: (name: string) => void;
+  onRenameFolder?: (folderId: string, name: string) => void;
+  onDeleteFolder?: (folderId: string) => void;
+  onCopyFolderLink?: (folderId: string) => void;
+  onSetNoteAttachmentFolder?: (note: ClientNote, attachmentId: string, folderId: string | null) => void;
+  // From a deep link's ?folder= param — read once as the initial folder
+  // filter, not a live-controlled prop (this component owns it after that).
+  initialFolderFilter?: string | null;
 }) {
-  const [filter, setFilter] = useState<JournalFilter>("all");
+  const [segment, setSegment] = useState<JournalSegment>("all");
+  const [subFilter, setSubFilter] = useState<JournalSubFilter>("all");
+  const [folderFilter, setFolderFilter] = useState<string | "unfiled" | "all">(initialFolderFilter ?? "all");
+  const [addingFolder, setAddingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [composeMode, setComposeMode] = useState<"note" | "email" | "sms">("note");
+  // A6: the composer is permanently expanded today — ~40% of a tab whose job
+  // is reading. Collapsed by default; expanding/collapsing never touches the
+  // draft state below (draft/msgSubject/msgBody/etc), so a half-written
+  // email survives a collapse-and-reopen for free.
+  const [composerCollapsed, setComposerCollapsed] = useState(true);
   const [draftType, setDraftType] = useState<NoteType>("note");
   const [draft, setDraft] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editBody, setEditBody] = useState("");
   const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
   const { ref: feedRef, atBottom, checkAtBottom, scrollToBottom, followIfAtBottom } = useStickyBottom<HTMLDivElement>();
+  // A7a: month index — keyed by each day-divider's own key (a toDateString,
+  // already unique per calendar day) so "jump to month" can reuse the
+  // dividers already in the feed instead of tagging every row a second way.
+  const dayRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const msgBodyRef = useRef<HTMLTextAreaElement>(null);
   const draftPromptRef = useRef<HTMLTextAreaElement>(null);
   const [msgSubject, setMsgSubject] = useState("");
@@ -129,6 +167,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   useEffect(() => {
     if (composeIntent && onSendMessage) {
       setComposeMode(composeIntent.mode);
+      setComposerCollapsed(false);
       setComposeFocusNonce((n) => n + 1);
       requestAnimationFrame(() => msgBodyRef.current?.focus());
     }
@@ -204,23 +243,61 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
       : it.kind === "message" ? (it.message.attachments ?? [])
       : [];
   const hasKind = (it: JournalItem, kinds: string[]) => itemAtts(it).some((a) => kinds.includes(a.kind));
+  // Only note attachments carry a folderId (see onSetNoteAttachmentFolder) —
+  // an active folder filter naturally excludes messages/activity, same as
+  // it did in Vault when an item had no folder concept at all.
+  const passesFolder = (it: JournalItem) => {
+    if (folderFilter === "all") return true;
+    if (it.kind !== "note") return false;
+    const atts = it.note.attachments ?? [];
+    return folderFilter === "unfiled" ? atts.some((a) => !a.folderId) : atts.some((a) => a.folderId === folderFilter);
+  };
   const filteredItems = journalItems.filter((it) => {
-    const passesType = filter === "all" ? true
-      : filter === "message" ? it.kind === "message"
-      : filter === "activity" ? (it.kind === "activity" || it.kind === "completion")
-      : filter === "photos" ? hasKind(it, ["image"])
-      : filter === "links" ? hasKind(it, ["link"])
-      : filter === "files" ? hasKind(it, ["pdf", "doc", "sheet"])
-      : (it.kind === "note" && it.note.type === filter);
-    return passesType && matchesSearch(it);
+    const passesSegment = segment === "all" ? true
+      : segment === "conversation" ? it.kind === "message"
+      : segment === "decisions" ? it.kind === "note"
+      : (it.kind === "activity" || it.kind === "completion"); // "activity"
+    const passesSub = subFilter === "all" ? true
+      : subFilter === "photos" ? hasKind(it, ["image"])
+      : subFilter === "links" ? hasKind(it, ["link"])
+      : subFilter === "files" ? hasKind(it, ["pdf", "doc", "sheet"])
+      : (it.kind === "note" && it.note.type === subFilter);
+    return passesSegment && passesSub && passesFolder(it) && matchesSearch(it);
   });
   // Newest AI recap ("recently done / next up") — pinned as a highlighted
   // card atop the unfiltered feed so the freshest "where does this stand"
   // read is always one glance away. Excluded from the chronological list
   // while pinned so it isn't shown twice; older recaps still flow inline.
   const latestRecap = notes.filter((n) => n.type === "ai_summary").sort((a, b) => b.at.localeCompare(a.at))[0] ?? null;
-  const pinnedRecap = latestRecap && filter === "all" && !q ? latestRecap : null;
+  const pinnedRecap = latestRecap && segment === "all" && subFilter === "all" && folderFilter === "all" && !q ? latestRecap : null;
   const feedRows = buildFeedRows(pinnedRecap ? filteredItems.filter((it) => !(it.kind === "note" && it.note.id === pinnedRecap.id)) : filteredItems);
+
+  // A7a: one entry per month, newest first, each pointing at the day-divider
+  // key of that month's earliest entry (feedRows renders oldest-first, so
+  // that divider is the one to scroll to — it's the top of that month's
+  // block). Built from feedRows itself so the index only ever lists months
+  // actually present under the current segment/sub-filter/search.
+  const nowKey = new Date().toISOString().slice(0, 7);
+  const monthGroups = (() => {
+    const counts = new Map<string, number>();
+    for (const it of filteredItems) {
+      const d = new Date(it.at);
+      const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      counts.set(mKey, (counts.get(mKey) ?? 0) + 1);
+    }
+    const anchors = new Map<string, { anchorDayKey: string; label: string }>();
+    for (const row of feedRows) {
+      if (row.kind !== "divider") continue;
+      const d = new Date(row.key);
+      const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      if (!anchors.has(mKey)) anchors.set(mKey, { anchorDayKey: row.key, label: d.toLocaleDateString(undefined, { month: "long", year: "numeric" }) });
+    }
+    return Array.from(counts.entries())
+      .map(([key, count]) => ({ key, count, anchorDayKey: anchors.get(key)?.anchorDayKey, label: anchors.get(key)?.label ?? key }))
+      .filter((g): g is { key: string; count: number; anchorDayKey: string; label: string } => !!g.anchorDayKey)
+      .sort((a, b) => b.key.localeCompare(a.key));
+  })();
+  const jumpToMonth = (anchorDayKey: string) => dayRefs.current.get(anchorDayKey)?.scrollIntoView({ behavior: "smooth", block: "start" });
 
   const canModify = (n: ClientNote) => me.role === "admin" || n.authorId === me.id;
 
@@ -292,6 +369,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   };
   const replyToEmail = (m: Message) => {
     setComposeMode("email");
+    setComposerCollapsed(false);
     const subj = m.subject ?? "";
     setMsgSubject(/^re:/i.test(subj) ? subj : `Re: ${subj}`.trim());
     setMsgBody("");
@@ -303,6 +381,28 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   // which .trim() alone doesn't catch), same reasoning behind htmlToText's
   // other callers.
   const hasComposedBody = composeMode === "email" ? !!htmlToText(msgBody).trim() : !!msgBody.trim();
+  const hasDraftInProgress = composeMode === "note" ? (draft.trim() !== "" || pendingAtts.length > 0) : (hasComposedBody || !!msgSubject.trim());
+  const expandComposer = (mode?: "note" | "email" | "sms") => { if (mode) switchComposeMode(mode); setComposerCollapsed(false); };
+  // A6: N/E/S jump straight into a fresh channel from anywhere on the tab —
+  // guarded off whenever the event started in a text field, so typing those
+  // letters normally never gets hijacked. Esc collapses regardless of focus
+  // (typing "half an email" then hitting Esc should collapse, not be eaten).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !composerCollapsed) { setComposerCollapsed(true); return; }
+      if (!composerCollapsed) return;
+      const target = e.target as HTMLElement | null;
+      const typing = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || !!target?.isContentEditable;
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k === "n") { e.preventDefault(); expandComposer("note"); }
+      else if (k === "e" && onSendMessage) { e.preventDefault(); expandComposer("email"); }
+      else if (k === "s" && onSendMessage) { e.preventDefault(); expandComposer("sms"); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composerCollapsed, onSendMessage]);
   const submitMessage = () => {
     if (!hasComposedBody || !onSendMessage || (composeMode !== "email" && composeMode !== "sms")) return;
     // Cc/Bcc ride along only on email; SMS ignores them.
@@ -346,24 +446,122 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
     <div className="flex flex-1 flex-col overflow-hidden bg-background">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b bg-surface px-4 py-2 sm:px-5">
         <div className="flex flex-wrap items-center gap-1.5">
-          <button onClick={() => setFilter("all")} className={`rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${filter === "all" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}>All</button>
-          {NOTE_TYPE_ORDER.map((t) => {
-            const m = NOTE_TYPE_META[t];
-            const on = filter === t;
-            return (
-              <button key={t} onClick={() => setFilter(t)} className={`inline-flex items-center gap-1.5 rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${on ? "text-white" : "border-transparent text-muted hover:bg-background"}`} style={on ? { background: m.color, borderColor: m.color } : {}}>
-                <span className="h-1.5 w-1.5 rounded-full" style={{ background: on ? "#fff" : m.color }} /> {m.label}
-              </button>
-            );
-          })}
-          {messages != null && (
-            <button onClick={() => setFilter("message")} className={`rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${filter === "message" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}>Message</button>
-          )}
-          <button onClick={() => setFilter("activity")} className={`rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${filter === "activity" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}>Task Activity</button>
+          {([
+            { key: "all", label: "Everything" },
+            ...(messages != null ? [{ key: "conversation", label: "Conversation" } as const] : []),
+            { key: "decisions", label: "Decisions" },
+            { key: "activity", label: "Activity" },
+          ] as { key: JournalSegment; label: string }[]).map((s) => (
+            <button
+              key={s.key}
+              onClick={() => setSegment(s.key)}
+              className={`rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${segment === s.key ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}
+            >
+              {s.label}
+            </button>
+          ))}
           <span className="mx-0.5 h-4 w-px bg-border" />
-          <button onClick={() => setFilter("photos")} className={`inline-flex items-center gap-1 rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${filter === "photos" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}>Photos</button>
-          <button onClick={() => setFilter("links")} className={`inline-flex items-center gap-1 rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${filter === "links" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}><I.link /> Links</button>
-          <button onClick={() => setFilter("files")} className={`inline-flex items-center gap-1 rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${filter === "files" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}><I.clip /> Files</button>
+          <div className="relative">
+            <button
+              onClick={() => setFilterMenuOpen((v) => !v)}
+              className={`inline-flex items-center gap-1 rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${subFilter !== "all" || folderFilter !== "all" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}
+            >
+              <I.filter /> {subFilter !== "all"
+                ? (subFilter === "photos" ? "Photos" : subFilter === "links" ? "Links" : subFilter === "files" ? "Files" : noteTypeMeta(subFilter as NoteType).label)
+                : folderFilter !== "all"
+                ? (folderFilter === "unfiled" ? "Unfiled" : (folders ?? []).find((f) => f.id === folderFilter)?.name ?? "Filter")
+                : "Filter"}
+            </button>
+            {filterMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setFilterMenuOpen(false)} />
+                <div className="absolute left-0 top-full z-20 mt-1 w-52 rounded-[5px] border bg-surface p-1 shadow-lg">
+                  <button
+                    onClick={() => { setSubFilter("all"); setFolderFilter("all"); setFilterMenuOpen(false); }}
+                    className={`block w-full rounded-[5px] px-2.5 py-1.5 text-left text-[13px] font-medium transition ${subFilter === "all" && folderFilter === "all" ? "bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}
+                  >
+                    All
+                  </button>
+                  <div className="my-1 h-px bg-border" />
+                  {NOTE_TYPE_ORDER.map((t) => {
+                    const m = NOTE_TYPE_META[t];
+                    const on = subFilter === t;
+                    return (
+                      <button
+                        key={t}
+                        onClick={() => { setSubFilter(t); setFilterMenuOpen(false); }}
+                        className={`flex w-full items-center gap-1.5 rounded-[5px] px-2.5 py-1.5 text-left text-[13px] font-medium transition ${on ? "bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}
+                      >
+                        <span className="h-1.5 w-1.5 rounded-full" style={{ background: m.color }} /> {m.label}
+                      </button>
+                    );
+                  })}
+                  <div className="my-1 h-px bg-border" />
+                  <button
+                    onClick={() => { setSubFilter("photos"); setFilterMenuOpen(false); }}
+                    className={`block w-full rounded-[5px] px-2.5 py-1.5 text-left text-[13px] font-medium transition ${subFilter === "photos" ? "bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}
+                  >
+                    Photos
+                  </button>
+                  <button
+                    onClick={() => { setSubFilter("links"); setFilterMenuOpen(false); }}
+                    className={`flex w-full items-center gap-1.5 rounded-[5px] px-2.5 py-1.5 text-left text-[13px] font-medium transition ${subFilter === "links" ? "bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}
+                  >
+                    <I.link /> Links
+                  </button>
+                  <button
+                    onClick={() => { setSubFilter("files"); setFilterMenuOpen(false); }}
+                    className={`flex w-full items-center gap-1.5 rounded-[5px] px-2.5 py-1.5 text-left text-[13px] font-medium transition ${subFilter === "files" ? "bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}
+                  >
+                    <I.clip /> Files
+                  </button>
+                  {folders && (
+                    <>
+                      <div className="my-1 h-px bg-border" />
+                      <div className="px-2.5 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Folder</div>
+                      <button
+                        onClick={() => { setFolderFilter("unfiled"); setFilterMenuOpen(false); }}
+                        className={`block w-full rounded-[5px] px-2.5 py-1.5 text-left text-[13px] font-medium transition ${folderFilter === "unfiled" ? "bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}
+                      >
+                        Unfiled
+                      </button>
+                      {folders.map((f) => (
+                        <div key={f.id} className={`group/jf flex items-center gap-1 rounded-[5px] pr-1 ${folderFilter === f.id ? "bg-accent-soft" : "hover:bg-background"}`}>
+                          <button
+                            onClick={() => { setFolderFilter(f.id); setFilterMenuOpen(false); }}
+                            className={`min-w-0 flex-1 truncate px-2.5 py-1.5 text-left text-[13px] font-medium ${folderFilter === f.id ? "text-accent" : "text-muted"}`}
+                          >
+                            {f.name}
+                          </button>
+                          {onDeleteFolder && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); if (folderFilter === f.id) setFolderFilter("all"); onDeleteFolder(f.id); }}
+                              title="Delete folder" className="hidden shrink-0 rounded p-1 text-muted hover:text-danger group-hover/jf:block"
+                            >
+                              <I.trash className="h-3 w-3" />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      {onCreateFolder && (
+                        addingFolder ? (
+                          <input autoFocus value={newFolderName} onChange={(e) => setNewFolderName(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter" && newFolderName.trim()) { onCreateFolder(newFolderName.trim()); setNewFolderName(""); setAddingFolder(false); } if (e.key === "Escape") setAddingFolder(false); }}
+                            onBlur={() => { if (newFolderName.trim()) onCreateFolder(newFolderName.trim()); setNewFolderName(""); setAddingFolder(false); }}
+                            placeholder="Folder name…"
+                            className="mt-0.5 w-full rounded-[5px] border border-accent bg-background px-2.5 py-1.5 text-[13px] outline-none" />
+                        ) : (
+                          <button onClick={() => setAddingFolder(true)} className="flex w-full items-center gap-1.5 rounded-[5px] px-2.5 py-1.5 text-left text-[13px] font-medium text-muted hover:bg-background">
+                            <I.plus className="h-3 w-3" /> New folder
+                          </button>
+                        )
+                      )}
+                    </>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <div className="relative">
@@ -443,9 +641,15 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
             )}
             {feedRows.map((row) => {
               if (row.kind === "divider") {
+                // A4: this used to be a `sticky` pill floating over whatever
+                // scrolled underneath it — on a short entry, the pill covered
+                // real text (a live bug: the "Aug 10" chip sat on top of "I
+                // accidentally clicked the delete file button"). A full-width
+                // rule in normal flow can't overlap anything below it.
                 return (
-                  <div key={row.key} className="sticky top-0 z-[5] flex items-center justify-center py-1">
-                    <span className="rounded-[5px] border bg-background px-3 py-0.5 text-[12px] font-medium text-muted shadow-soft">{row.label}</span>
+                  <div key={row.key} ref={(el) => { if (el) dayRefs.current.set(row.key, el); else dayRefs.current.delete(row.key); }} className="flex items-center gap-3 py-2">
+                    <span className="shrink-0 text-[12px] font-semibold uppercase tracking-wide text-muted">{row.label}</span>
+                    <div className="h-px flex-1 bg-border" />
                   </div>
                 );
               }
@@ -480,7 +684,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                       ) : (<>
                         {n.body && <CollapsibleText text={n.body} className="mt-1 whitespace-pre-wrap text-[15px]" />}
                         {n.attachments && n.attachments.length > 0 && (
-                          <div className="mt-1.5"><AttachmentThumbs items={n.attachments} onOpen={onOpenFile} /></div>
+                          <div className="mt-1.5"><AttachmentThumbs items={n.attachments} onOpen={onOpenFile} folders={folders} onSetFolder={onSetNoteAttachmentFolder ? (attId, folderId) => onSetNoteAttachmentFolder(n, attId, folderId) : undefined} /></div>
                         )}
                       </>)}
                     </div>
@@ -576,23 +780,72 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
         <JumpToLatestButton show={!atBottom && filteredItems.length > 0} onClick={() => scrollToBottom()} />
         </div>
 
+        {/* A7a: month index — desktop-only side rail, not part of the mobile
+            layout (which stacks the composer under the feed already). */}
+        {monthGroups.length > 0 && (
+          <div className="hidden w-32 shrink-0 overflow-y-auto border-l px-2 py-3 md:block">
+            <div className="mb-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Months</div>
+            {monthGroups.map((g) => (
+              <button
+                key={g.key}
+                onClick={() => jumpToMonth(g.anchorDayKey)}
+                className={`flex w-full items-center justify-between gap-1 rounded-[5px] px-1.5 py-1 text-left text-[12px] font-medium transition ${g.key === nowKey ? "bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}
+              >
+                <span className="truncate">{g.label}</span>
+                <span className="shrink-0 text-[11px] opacity-70">{g.count}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Full-width and stacked under the feed on mobile; fixed, resizable
             side column at md+. The inline width rides a CSS var so a Tailwind
             responsive class can override it below md (inline styles otherwise
             always win). */}
         <div className="relative flex w-full flex-col border-t bg-surface md:w-[var(--composer-w)] md:shrink-0 md:border-l md:border-t-0"
           style={{ "--composer-w": `${composerW}px` } as React.CSSProperties}>
-          <div onMouseDown={startComposerResize} title="Drag to resize"
-            className="absolute inset-y-0 -left-1 z-10 hidden w-2 cursor-col-resize hover:bg-accent/30 active:bg-accent/40 md:block" />
+          {!composerCollapsed && (
+            <div onMouseDown={startComposerResize} title="Drag to resize"
+              className="absolute inset-y-0 -left-1 z-10 hidden w-2 cursor-col-resize hover:bg-accent/30 active:bg-accent/40 md:block" />
+          )}
+          {composerCollapsed ? (
+            // A6: rest state — one bar, ≤64px. Same draft state as the
+            // expanded composer underneath, just not rendered — collapsing
+            // never touches draft/msgSubject/msgBody, so it's still there on
+            // reopen.
+            <div className="flex h-14 shrink-0 items-center gap-1.5 px-3">
+              {onSendMessage ? (
+                <div className="inline-flex shrink-0 overflow-hidden rounded-md border">
+                  <button onClick={() => expandComposer("note")} className={`px-2 py-1 text-[12px] font-medium ${composeMode === "note" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Note</button>
+                  <button onClick={() => expandComposer("email")} className={`px-2 py-1 text-[12px] font-medium ${composeMode === "email" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Email</button>
+                  <button onClick={() => expandComposer("sms")} className={`px-2 py-1 text-[12px] font-medium ${composeMode === "sms" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>SMS</button>
+                </div>
+              ) : (
+                <span className="shrink-0 text-[13px] font-semibold text-muted">Write</span>
+              )}
+              <button onClick={() => expandComposer()} className="flex min-w-0 flex-1 items-center gap-1.5 truncate rounded-md border bg-background px-2.5 py-1.5 text-left text-[13px] text-muted hover:border-accent hover:text-foreground">
+                {hasDraftInProgress && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" title="Draft in progress" />}
+                <span className="truncate">
+                  {composeMode === "note" ? (draft.split("\n")[0] || "Write a note…")
+                    : composeMode === "email" ? (msgSubject || htmlToText(msgBody).split("\n")[0] || "Write an email…")
+                    : (msgBody.split("\n")[0] || "Write a text…")}
+                </span>
+              </button>
+              <button onClick={() => expandComposer()} className="shrink-0 rounded-md border border-accent bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white">Draft</button>
+            </div>
+          ) : (<>
           <div className="flex items-center justify-between border-b px-3 py-2.5">
             <span className="text-[13px] font-semibold text-muted">Write</span>
-            {onSendMessage && (
-              <div className="inline-flex overflow-hidden rounded-md border">
-                <button onClick={() => switchComposeMode("note")} className={`px-2 py-1 text-[12px] font-medium ${composeMode === "note" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Note</button>
-                <button onClick={() => switchComposeMode("email")} className={`px-2 py-1 text-[12px] font-medium ${composeMode === "email" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Email</button>
-                <button onClick={() => switchComposeMode("sms")} className={`px-2 py-1 text-[12px] font-medium ${composeMode === "sms" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>SMS</button>
-              </div>
-            )}
+            <div className="flex items-center gap-1.5">
+              {onSendMessage && (
+                <div className="inline-flex overflow-hidden rounded-md border">
+                  <button onClick={() => switchComposeMode("note")} className={`px-2 py-1 text-[12px] font-medium ${composeMode === "note" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Note</button>
+                  <button onClick={() => switchComposeMode("email")} className={`px-2 py-1 text-[12px] font-medium ${composeMode === "email" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>Email</button>
+                  <button onClick={() => switchComposeMode("sms")} className={`px-2 py-1 text-[12px] font-medium ${composeMode === "sms" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>SMS</button>
+                </div>
+              )}
+              <button onClick={() => setComposerCollapsed(true)} title="Collapse (Esc)" className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground"><I.chevron className="h-3.5 w-3.5 rotate-[-90deg]" /></button>
+            </div>
           </div>
           {composeMode === "note" ? (
             <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files.length) handleNoteFiles(e.dataTransfer.files); }}
@@ -654,8 +907,13 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                 })()}
               </div>
               {onDraftMessage && (
-                <div className="mb-2 flex shrink-0 items-start gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
-                  <span aria-hidden className="pt-1 pl-1 text-[13px]">✨</span>
+                // A6: fixed while in here — the icon/textarea/button used
+                // mismatched alignment (items-start container, but self-
+                // center on the textarea and a top margin on the button),
+                // which let the button visually collide with the textarea
+                // once it grew past one line. One items-center row fixes it.
+                <div className="mb-2 flex shrink-0 items-center gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
+                  <span aria-hidden className="shrink-0 text-[13px]">✨</span>
                   <textarea ref={draftPromptRef} value={draftPrompt} rows={1}
                     onChange={(e) => { setDraftPrompt(e.target.value); e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`; }}
                     onKeyDown={(e) => {
@@ -664,10 +922,10 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                       runDraft();
                     }}
                     placeholder="Tell Claude what to say… (Enter to write, Shift+Enter for a new line)"
-                    className="max-h-[200px] min-w-0 flex-1 resize-none self-center overflow-y-auto bg-transparent px-1 py-1 text-[13px] leading-snug outline-none placeholder:text-muted" />
+                    className="max-h-[200px] min-w-0 flex-1 resize-none overflow-y-auto bg-transparent px-1 py-1 text-[13px] leading-snug outline-none placeholder:text-muted" />
                   <button onClick={runDraft}
                     disabled={draftingMessage} title={draftPrompt.trim() ? "Draft this with Claude" : "Draft a status update from recent activity — review before sending"}
-                    className="mt-0.5 shrink-0 rounded-md border border-accent/40 bg-surface px-2.5 py-1 text-[13px] font-medium text-accent disabled:opacity-40">
+                    className="shrink-0 rounded-md border border-accent/40 bg-surface px-2.5 py-1 text-[13px] font-medium text-accent disabled:opacity-40">
                     {draftingMessage ? "Drafting…" : draftPrompt.trim() ? "Write it" : "Status update"}
                   </button>
                 </div>
@@ -719,6 +977,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
               </div>
             </div>
           )}
+          </>)}
         </div>
       </div>
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
