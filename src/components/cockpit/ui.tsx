@@ -342,14 +342,14 @@ export function CollapsibleText({ text, className }: { text: string; className?:
 
 export type FilterState = { status: TaskStatus | "all"; assignee: string; priority: Priority | "all" };
 export type SortBy = "manual" | "due" | "priority" | "title" | "status" | "assignee" | "comments";
-// Priority and Comments used to be their own columns — priority now renders
-// as a 3px colour bar on the row's leading edge (it just repeated the group
-// heading when grouped by priority), and the comment count moved inline
-// next to the task title, shown only when non-zero. Both stay sortable via
-// onSort even without a column header — Cockpit's sort menu still offers
-// them.
+// Comments moved inline next to the task title, shown only when non-zero —
+// stays sortable via onSort even without a column header (Cockpit's sort
+// menu still offers it). Priority came back as a real column (Derek,
+// 2026-08-24): the leading-edge color bar alone left no way to change a
+// task's priority from the row.
 export const LIST_COLUMNS: { key: string; label: string; sortable: boolean }[] = [
   { key: "status", label: "Stage", sortable: true },
+  { key: "priority", label: "Priority", sortable: true },
   { key: "due", label: "Due date", sortable: true },
   { key: "contact", label: "Contact", sortable: false },
   { key: "labels", label: "Labels", sortable: false },
