@@ -8,7 +8,7 @@ import {
   PERSONAL_CLIENT_ID, WORKSPACE_CLIENT_ID,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
-import { I, CollapsibleText, SearchableSelect, newId } from "./ui";
+import { I, CollapsibleText, SearchableSelect, newId, splitBareUrls, UrlImageCard, UrlLinkChip } from "./ui";
 import { AttachmentTile } from "./AttachmentTile";
 import { InlineAssignee, InlineDue } from "./GroupedList";
 import { RichTextEditor } from "./RichTextEditor";
@@ -105,6 +105,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const ghlSub = linkedContact ? clientById(linkedContact.clientId) : null;
   const ghlContactUrl = linkedContact && ghlSub?.ghlLocationId ? `https://app.gohighlevel.com/v2/location/${ghlSub.ghlLocationId}/contacts/detail/${linkedContact.ghlContactId}` : null;
   const [subDraft, setSubDraft] = useState("");
+  // A5: which checklist item is in raw-text edit mode — everything else
+  // shows the URL-parsed display (image card / domain chip) instead of a
+  // raw link. Click-to-edit swaps a row back to the plain textarea.
+  const [editingSubId, setEditingSubId] = useState<string | null>(null);
   // Team-chat draft — lives here (not lifted to Cockpit.tsx) so typing it
   // only re-renders this drawer, not the whole app; see useDebouncedCommit's
   // comment above for the sibling title/description fix to the same root
@@ -558,7 +562,29 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {task.subtasks.length > 0 && (<div className="mb-2 h-2 overflow-hidden rounded-full bg-background"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${(doneSubs / task.subtasks.length) * 100}%` }} /></div>)}
       <div className="space-y-1">{task.subtasks.map((s) => (
         <div key={s.id}>
-          <div className="group/sub flex items-start gap-2 rounded-md px-1 py-1 hover:bg-background"><button onClick={() => onToggleSub(s.id)} className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${s.done ? "border-accent bg-accent text-white" : "border-border"}`}>{s.done && <I.check />}</button><textarea value={s.title} onChange={(e) => onRenameSub(s.id, e.target.value)} rows={1} className={`-mx-1 mt-0.5 flex-1 resize-none rounded bg-transparent px-1 text-[15px] leading-snug outline-none [field-sizing:content] transition focus:bg-background ${s.done ? "text-muted line-through" : ""}`} /><InlineDue value={s.due ?? null} overdue={isOverdue(s.due ?? null) && !s.done} onChange={(d) => onPatchSub(s.id, { due: d })} /><InlineAssignee value={s.assigneeId ?? null} onChange={(a) => onPatchSub(s.id, { assigneeId: a })} size={20} /><button onClick={() => onDeleteSub(s.id)} title="Delete checklist item" className="mt-0.5 shrink-0 text-muted opacity-0 hover:text-red-500 group-hover/sub:opacity-100"><I.trash /></button></div>
+          <div className="group/sub flex items-start gap-2 rounded-md px-1 py-1 hover:bg-background">
+            <button onClick={() => onToggleSub(s.id)} className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${s.done ? "border-accent bg-accent text-white" : "border-border"}`}>{s.done && <I.check />}</button>
+            {editingSubId === s.id ? (
+              <textarea autoFocus value={s.title} onChange={(e) => onRenameSub(s.id, e.target.value)} onBlur={() => setEditingSubId(null)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); setEditingSubId(null); } }}
+                rows={1} className={`-mx-1 mt-0.5 flex-1 resize-none rounded bg-transparent px-1 text-[15px] leading-snug outline-none [field-sizing:content] transition focus:bg-background ${s.done ? "text-muted line-through" : ""}`} />
+            ) : (() => {
+              // A5: a checklist item used to render a raw URL (e.g. a
+              // 60-char GHL attachment link) straight in the textarea — same
+              // treatment as message bodies now: image links become a small
+              // thumbnail, other links become a domain chip, never raw text.
+              const { cleanText, imageUrls, linkUrls } = splitBareUrls(s.title);
+              return (
+                <button onClick={() => setEditingSubId(s.id)} className="-mx-1 mt-0.5 flex min-w-0 flex-1 flex-wrap items-center gap-1.5 rounded px-1 py-0.5 text-left">
+                  {cleanText && <span className={`text-[15px] leading-snug ${s.done ? "text-muted line-through" : ""}`}>{cleanText}</span>}
+                  {!cleanText && imageUrls.length === 0 && linkUrls.length === 0 && <span className="text-[15px] leading-snug text-muted">Untitled</span>}
+                  {imageUrls.map((url) => <UrlImageCard key={url} url={url} />)}
+                  {linkUrls.map((url) => <UrlLinkChip key={url} url={url} />)}
+                </button>
+              );
+            })()}
+            <InlineDue value={s.due ?? null} overdue={isOverdue(s.due ?? null) && !s.done} onChange={(d) => onPatchSub(s.id, { due: d })} /><InlineAssignee value={s.assigneeId ?? null} onChange={(a) => onPatchSub(s.id, { assigneeId: a })} size={20} /><button onClick={() => onDeleteSub(s.id)} title="Delete checklist item" className="mt-0.5 shrink-0 text-muted opacity-0 hover:text-red-500 group-hover/sub:opacity-100"><I.trash /></button>
+          </div>
           {s.assigneeId && (
             <div className="mb-1 ml-7 flex items-center gap-1.5">
               <span className="rounded bg-accent-soft px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-accent">Delegated</span>

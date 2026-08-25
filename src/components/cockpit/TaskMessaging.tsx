@@ -13,7 +13,7 @@ import {
   users, userById, timeAgo, htmlToText, looksLikeHtml, plainTextToHtml, parseEventDiff, STATUS_META, PRIORITY_META,
   type Task, type Client, type Contact, type Attachment, type MessageChannel, type Message, type Comment,
 } from "@/lib/data";
-import { I, Avatar, CollapsibleText } from "./ui";
+import { I, Avatar, CollapsibleText, splitBareUrls, UrlImageCard, UrlLinkChip } from "./ui";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 import { AttachmentTile } from "./AttachmentTile";
 import { RichTextEditor } from "./RichTextEditor";
@@ -41,59 +41,6 @@ function EventValuePill({ diff }: { diff: { field: string; to: string } }) {
   const color = eventAccentColor(diff);
   return (
     <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[15px] font-medium" style={{ background: color + "1a", color }}>{diff.to}</span>
-  );
-}
-
-// GHL message bodies routinely embed a raw media URL inline in the text
-// (e.g. a logo/invoice send is "Location logo [https://storage...png]
-// INVOICE FOR BRIAN Hi..."), which used to render as three lines of URL
-// ahead of one line of actual content. Pulled out here so any bare URL
-// becomes either an image card or a domain chip instead of raw text.
-const URL_RE = /https?:\/\/[^\s<>"')\]]+/gi;
-const IMAGE_URL_RE = /\.(png|jpe?g|gif|webp|svg|bmp|heic)(\?[^\s]*)?$/i;
-
-function splitMessageUrls(rawText: string): { cleanText: string; imageUrls: string[]; linkUrls: string[] } {
-  const imageUrls: string[] = [];
-  const linkUrls: string[] = [];
-  const cleanText = rawText
-    .replace(URL_RE, (url) => {
-      (IMAGE_URL_RE.test(url) ? imageUrls : linkUrls).push(url);
-      return "";
-    })
-    .replace(/[ \t]{2,}/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .split("\n").map((l) => l.trim()).join("\n")
-    .trim();
-  return { cleanText, imageUrls, linkUrls };
-}
-
-function urlFilename(url: string): string {
-  try { return decodeURIComponent(new URL(url).pathname.split("/").pop() || url); } catch { return url; }
-}
-function urlDomain(url: string): string {
-  try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return url; }
-}
-
-// An attachment card for a bare image URL found in a message body — same
-// visual language as a real Attachment, but there's no Attachment record
-// behind it (it's text GHL embedded, not a file we stored), so this is a
-// lighter-weight standalone tile rather than reusing AttachmentTile.
-function UrlImageCard({ url }: { url: string }) {
-  return (
-    <a href={url} target="_blank" rel="noreferrer" className="group relative block h-16 w-16 overflow-hidden rounded-lg border bg-background" title={urlFilename(url)}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={url} alt={urlFilename(url)} className="h-full w-full object-cover" />
-      <span className="absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 py-0.5 text-[10px] text-white opacity-0 group-hover:opacity-100">{urlFilename(url)}</span>
-    </a>
-  );
-}
-// Any other bare URL in a body → a small chip naming just the domain,
-// never the raw link text (acceptance: no raw URL over 40 chars visible).
-function UrlLinkChip({ url }: { url: string }) {
-  return (
-    <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-[13px] font-medium text-accent hover:underline">
-      <I.link className="h-3 w-3" /> {urlDomain(url)}
-    </a>
   );
 }
 
@@ -659,7 +606,7 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
     const channelLabel = m.channel === "email" ? "Email" : m.channel === "chat" ? "Chat" : "SMS";
     const isReplyingHere = replyingTo?.id === m.id;
     const rawBodyText = m.body?.trim() ? (looksLikeHtml(m.body) ? htmlToText(m.body) : m.body) : "";
-    const { cleanText, imageUrls, linkUrls } = splitMessageUrls(rawBodyText);
+    const { cleanText, imageUrls, linkUrls } = splitBareUrls(rawBodyText);
     return (
       <div key={m.id} className={`relative ${gap}`}>
         <div className="relative flex gap-3">
