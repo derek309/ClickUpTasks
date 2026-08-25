@@ -308,6 +308,8 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
   // and timestamp — broke badly at ~500px. One overflow trigger, keyed per
   // message so only one card's menu is ever open at a time.
   const [openMsgMenuId, setOpenMsgMenuId] = useState<string | null>(null);
+  const [openEventGroups, setOpenEventGroups] = useState<Set<string>>(new Set());
+  const toggleEventGroup = (key: string) => setOpenEventGroups((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; });
   const [editDraft, setEditDraft] = useState("");
   const startEditMessage = (m: Message) => { setEditingMsgId(m.id); setEditDraft(looksLikeHtml(m.body) ? htmlToText(m.body) : m.body); };
   const saveEditMessage = (m: Message) => {
@@ -552,6 +554,32 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
     | { at: string; kind: "comment" | "event"; channel: "activity"; comment: Comment }
     | { at: string; kind: "message"; channel: "chat" | "email" | "sms"; message: Message; dupeCount?: number };
 
+  // C2: a display-only row shape layered on top of FeedItem — consecutive
+  // same-field audit events (three due-date changes in a row) collapse into
+  // one summarized row with a disclosure, instead of each occupying the same
+  // visual weight as a real client email.
+  type DisplayRow = FeedItem | { kind: "event-group"; key: string; field: string; events: Comment[] };
+  function groupConsecutiveEvents(items: FeedItem[]): DisplayRow[] {
+    const rows: DisplayRow[] = [];
+    for (const item of items) {
+      if (item.kind === "event") {
+        const field = parseEventDiff(item.comment.body)?.field ?? item.comment.body;
+        const last = rows[rows.length - 1];
+        if (last && last.kind === "event-group" && last.field === field) { last.events.push(item.comment); continue; }
+        if (last && "kind" in last && last.kind === "event" && (parseEventDiff(last.comment.body)?.field ?? last.comment.body) === field) {
+          rows[rows.length - 1] = { kind: "event-group", key: `eg_${last.comment.id}`, field, events: [last.comment, item.comment] };
+          continue;
+        }
+      }
+      rows.push(item);
+    }
+    return rows;
+  }
+  // Natural phrasing per field — "Due date moved 3×" reads better than
+  // "updated due date to 3×". Falls back to a generic verb for any field
+  // that isn't one of the common ones.
+  const FIELD_VERB: Record<string, string> = { status: "Status changed", priority: "Priority changed", assignee: "Assignee changed", "due date": "Due date moved" };
+
   // Two byte-identical sends (a genuine GHL double-send, not just a display
   // quirk — see the item-2 write-up) shouldn't read as two separate
   // messages. Collapses only truly adjacent messages in the sorted feed —
@@ -590,6 +618,7 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
       return false;
     })
     .sort((a, b) => a.at.localeCompare(b.at)));
+  const displayRows: DisplayRow[] = groupConsecutiveEvents(mergedFeedItems);
 
   // C3: "activity" bundles both team notes AND field-change audit events (see
   // mergedFeedItems above) — its filter count has to reflect everything that
@@ -810,25 +839,47 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
     );
   };
 
+  const renderEventRow = (c: Comment, gap: string) => {
+    const u = userById(c.authorId); const diff = parseEventDiff(c.body);
+    return (
+      <div key={c.id} className={`relative flex gap-3 ${gap}`}>
+        <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface" style={{ background: diff ? eventAccentColor(diff) : "var(--muted)" }} /></div>
+        <div className="min-w-0 flex-1 pt-1.5 text-[16px] text-muted">
+          <span className="font-medium text-foreground">{u?.name}</span>{" "}
+          {diff ? <>updated {diff.field} to <EventValuePill diff={diff} /></> : c.body}
+          {" · "}<span className="text-[15px]">{timeAgo(c.at)}</span>
+        </div>
+      </div>
+    );
+  };
+
   const commentsFeed = (
     <div className="relative">
       {mergedFeedItems.length > 0 && <div className="absolute bottom-2 left-4 top-2 w-px bg-border" />}
-      {mergedFeedItems.map((item, i) => {
-        const gap = i === mergedFeedItems.length - 1 ? "" : "pb-3";
+      {displayRows.map((item, i) => {
+        const gap = i === displayRows.length - 1 ? "" : "pb-3";
         if (item.kind === "message") return renderMessageItem(item.message, gap, item.dupeCount);
-        if (item.kind === "event") {
-          const c = item.comment; const u = userById(c.authorId); const diff = parseEventDiff(c.body);
+        if (item.kind === "event-group") {
+          // C2: three consecutive same-field changes collapse into one quiet
+          // row — grey, no avatar, no timeline dot — with a disclosure that
+          // expands back into the individual changes on demand.
+          const last = item.events[item.events.length - 1];
+          const lastDiff = parseEventDiff(last.body);
+          const open = openEventGroups.has(item.key);
           return (
-            <div key={c.id} className={`relative flex gap-3 ${gap}`}>
-              <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface" style={{ background: diff ? eventAccentColor(diff) : "var(--muted)" }} /></div>
-              <div className="min-w-0 flex-1 pt-1.5 text-[16px] text-muted">
-                <span className="font-medium text-foreground">{u?.name}</span>{" "}
-                {diff ? <>updated {diff.field} to <EventValuePill diff={diff} /></> : c.body}
-                {" · "}<span className="text-[15px]">{timeAgo(c.at)}</span>
+            <div key={item.key} className={gap}>
+              <div className="flex gap-3">
+                <div className="w-8 shrink-0" />
+                <button onClick={() => toggleEventGroup(item.key)} className="flex min-w-0 flex-1 items-center gap-1.5 pt-1 text-left text-[15px] text-muted hover:text-foreground">
+                  <I.chevron className={`h-3 w-3 shrink-0 transition-transform ${open ? "rotate-90" : "rotate-180"}`} />
+                  <span>{FIELD_VERB[item.field] ?? `${item.field} changed`} {item.events.length}×{lastDiff ? <> → <EventValuePill diff={lastDiff} /></> : null} · {timeAgo(last.at)}</span>
+                </button>
               </div>
+              {open && <div className="mt-1 space-y-1">{item.events.map((c) => renderEventRow(c, ""))}</div>}
             </div>
           );
         }
+        if (item.kind === "event") return renderEventRow(item.comment, gap);
         const c = item.comment;
         const u = userById(c.authorId);
         return (
