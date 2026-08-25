@@ -3707,7 +3707,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             </div>
           )}
           {canAdmin && (
-            <div className="grid grid-cols-2 gap-0.5">
+            <div className="flex flex-col gap-0.5">
               {users.map((u) => {
                 const on = (clientById(activeClient)!.assignedTo ?? []).includes(u.id);
                 return (
@@ -3779,7 +3779,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         <div className="fixed inset-0 z-30" onClick={() => setColumnsOpen(false)} />
         <div className="absolute right-0 z-40 mt-1 w-56 max-w-[calc(100vw-1.5rem)] rounded-xl border bg-surface p-3 shadow-xl">
           <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Columns</div>
-          <div className="grid grid-cols-2 gap-0.5">
+          <div className="flex flex-col gap-0.5">
             {LIST_COLUMNS.map((c) => (
               <button key={c.key} onClick={() => toggleCol(c.key)} className="flex items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-background">
                 <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${visibleCols.includes(c.key) ? "border-accent bg-accent text-white" : "border-border"}`}>{visibleCols.includes(c.key) && <I.check />}</span>
@@ -4537,7 +4537,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     the brief's open question proposed but the app doesn't need. */}
                 <p className="mb-2 text-[13px] text-muted">Following decides whose My Work queue this client shows up in.</p>
                 {canAdmin ? (
-                  <div className="grid grid-cols-2 gap-0.5">
+                  <div className="flex flex-col gap-0.5">
                     {users.map((u) => {
                       const on = (settingsClient.assignedTo ?? []).includes(u.id);
                       return (
