@@ -143,7 +143,7 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
                 <I.chevron className={`text-muted transition ${collapsedG.has(g.key) ? "rotate-180" : "-rotate-90"}`} />
                 <span className="h-2.5 w-2.5 rounded-full" style={{ background: g.color }} />
                 <span className="text-[15px] font-bold">{g.label}</span>
-                <span className="rounded-full px-1.5 text-[13px] font-semibold normal-case tracking-normal text-white" style={{ background: g.color }}>{g.tasks.length}</span>
+                <span className="rounded-[5px] px-1.5 text-[13px] font-semibold normal-case tracking-normal text-white" style={{ background: g.color }}>{g.tasks.length}</span>
               </button>
               {!collapsedG.has(g.key) && (
                 <div>
@@ -228,9 +228,11 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
             </button>
           )}
           <button onClick={onToggleExpand} className={`shrink-0 rounded p-0.5 text-muted hover:text-foreground ${task.subtasks.length ? "" : "opacity-0 group-hover/tr:opacity-40"}`} title="Subtasks"><I.chevron className={`transition ${expanded ? "-rotate-90" : "rotate-180"}`} /></button>
-          {(task.waitingOnClient || (task.assigneeId && task.assigneeId !== meId)) && (
-            <InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a, waitingOnClient: false })} onSetWaiting={() => onPatch(task.id, { waitingOnClient: true, assigneeId: null })} size={30} />
-          )}
+          {/* Always visible (Derek, 2026-08-24): hiding it whenever the
+              assignee was you left most rows on a client's own list with no
+              assignee shown at all, since most tasks are assigned to the
+              admin viewing the list. */}
+          <InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a, waitingOnClient: false })} onSetWaiting={() => onPatch(task.id, { waitingOnClient: true, assigneeId: null })} size={30} />
           {/* A real <button> here used to wrap InlineComments, which renders
               its own <button> trigger — invalid HTML (button-in-button),
               flagged live as a hydration error. role="button" on a <div>

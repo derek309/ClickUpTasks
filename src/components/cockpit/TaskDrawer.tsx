@@ -674,7 +674,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           {sortedAttachments.filter((a) => a.kind !== "image").map((a) => {
             const isLink = !!a.url;
             return (
-              <span key={a.id} className="group inline-flex items-center gap-1.5 rounded-full border bg-background py-1 pl-2.5 pr-1 text-[13px]">
+              <span key={a.id} className="group inline-flex items-center gap-1.5 rounded-[5px] border bg-background py-1 pl-2.5 pr-1 text-[13px]">
                 <a href={isLink ? a.url! : undefined} onClick={!isLink && a.path ? () => onDownloadFile(a.path!) : undefined} target={isLink ? "_blank" : undefined} rel={isLink ? "noreferrer" : undefined}
                   className="flex items-center gap-1.5 font-medium text-accent hover:underline">
                   <I.link className="h-3.5 w-3.5" /> {a.name}{a.size && <span className="font-normal text-muted"> · {a.size}</span>}

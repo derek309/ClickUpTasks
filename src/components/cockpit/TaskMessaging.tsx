@@ -40,7 +40,7 @@ function eventAccentColor(diff: { field: string; to: string }): string {
 function EventValuePill({ diff }: { diff: { field: string; to: string } }) {
   const color = eventAccentColor(diff);
   return (
-    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[15px] font-medium" style={{ background: color + "1a", color }}>{diff.to}</span>
+    <span className="inline-flex items-center rounded-[5px] px-2 py-0.5 text-[15px] font-medium" style={{ background: color + "1a", color }}>{diff.to}</span>
   );
 }
 
@@ -620,10 +620,10 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
               )}
               <span>· {timeAgo(m.at)}</span>
               {dupeCount && dupeCount > 1 && (
-                <span className="inline-flex items-center rounded-full bg-background px-1.5 py-0 text-[12px] font-semibold text-muted" title={`Collapsed ${dupeCount} identical sends within 10 minutes`}>sent {dupeCount}×</span>
+                <span className="inline-flex items-center rounded-[5px] bg-background px-1.5 py-0 text-[12px] font-semibold text-muted" title={`Collapsed ${dupeCount} identical sends within 10 minutes`}>sent {dupeCount}×</span>
               )}
               {!m.read && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-1.5 py-0 text-[12px] font-semibold text-accent">
+                <span className="inline-flex items-center gap-1 rounded-[5px] bg-accent-soft px-1.5 py-0 text-[12px] font-semibold text-accent">
                   <span className="h-1.5 w-1.5 rounded-full bg-accent" /> New
                 </span>
               )}
