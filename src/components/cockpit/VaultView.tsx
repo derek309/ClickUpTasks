@@ -156,7 +156,10 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
               </div>
             );
           })}
-          {items.some((a) => !a.folderId) && (
+          {/* B4: with no folders yet, every item is unfiled, so "Unfiled" would
+              always exactly duplicate the "All" count right next to it — only
+              worth showing once folders exist to actually be excluded from. */}
+          {folders.length > 0 && items.some((a) => !a.folderId) && (
             <button onClick={() => setSelectedFolder("unfiled")} className={`rounded-[5px] border px-3 py-1 text-[13px] font-medium ${selectedFolder === "unfiled" ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-surface"}`}>Unfiled · {items.filter((a) => !a.folderId).length}</button>
           )}
           {addingFolder ? (
