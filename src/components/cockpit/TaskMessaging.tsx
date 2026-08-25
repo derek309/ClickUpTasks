@@ -742,7 +742,15 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
               <div className="mt-1 text-[15px] italic text-muted">No content synced from GoHighLevel for this message.</div>
             ) : (
               <>
-                {cleanText && <CollapsibleText text={cleanText} className="mt-1 text-[16px]" />}
+                {/* C5: inbound renders in full up to ~12 lines before truncating —
+                    it's the client/prospect's words, worth reading in full.
+                    Outbound truncates at 2 — it's what the user themselves
+                    wrote, so a "Show more" on their own message is noise. */}
+                {cleanText && (
+                  <CollapsibleText text={cleanText} className="mt-1 text-[16px]"
+                    maxLines={m.direction === "inbound" ? 12 : 2}
+                    maxChars={m.direction === "inbound" ? 900 : 180} />
+                )}
                 {imageUrls.length > 0 && (
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
                     {imageUrls.map((url) => <UrlImageCard key={url} url={url} />)}
