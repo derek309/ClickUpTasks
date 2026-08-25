@@ -5,10 +5,10 @@
 import { useRef, useState } from "react";
 import {
   users, formatDue, isOverdue, TODAY, timeAgo, userById, clientInitials,
-  PRIORITY_META,
+  PRIORITY_META, manualPriorityOptions,
   STATUS_META, STATUS_ORDER, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence, parseDaysOfMonth,
   PLAYBOOK_STEP_BY_KEY,
-  type Task, type Recurrence, type Client, type Project, type TaskStatus,
+  type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, LabelChips, CollapsibleText, COL_WIDTHS, LIST_COLUMNS } from "./ui";
 
@@ -206,6 +206,7 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
   const cell = (key: string) => {
     if (key === "status") return <InlineStatus value={task.status} onChange={(s) => onPatch(task.id, { status: s })} />;
     if (key === "assignee") return <InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a, waitingOnClient: false })} onSetWaiting={() => onPatch(task.id, { waitingOnClient: true, assigneeId: null })} />;
+    if (key === "priority") return <InlinePriority value={task.priority} onChange={(p) => onPatch(task.id, { priority: p })} />;
     if (key === "due") return <InlineDue value={task.due} overdue={overdue} recurrence={task.recurrence} onChange={(d) => onPatch(task.id, { due: d })} onRecurrenceChange={(r) => onPatch(task.id, { recurrence: r })} />;
     if (key === "contact") { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return <span className="truncate text-[11px] text-muted">{ct?.name ?? "—"}</span>; }
     if (key === "labels") return <LabelChips ids={task.labelIds} />;
@@ -305,6 +306,33 @@ function InlineStatus({ value, onChange }: { value: TaskStatus; onChange: (s: Ta
           {STATUS_ORDER.map((s) => (
             <button key={s} onClick={(e) => { e.stopPropagation(); onChange(s); setOpen(false); }} className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[15px] hover:bg-background">
               <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[s].dot }} /> {STATUS_META[s].label}
+            </button>
+          ))}
+        </div>
+      </>)}
+    </div>
+  );
+}
+
+// Brought back as a real column (Derek, 2026-08-24): the leading-edge color
+// bar alone wasn't enough on a single-client list — no way to actually
+// change a task's priority from the row without opening it.
+function InlinePriority({ value, onChange }: { value: Priority; onChange: (p: Priority) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const options = manualPriorityOptions(value);
+  return (
+    <div className="relative">
+      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 128, options.length * 32 + 8)); setOpen((o) => !o); }} className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-[13px] font-medium hover:bg-background" style={{ color: value === "none" ? "var(--muted)" : PRIORITY_META[value].color }}>
+        {value === "none" ? "—" : (<><I.flag />{PRIORITY_META[value].label}</>)}
+      </button>
+      {open && (<>
+        <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
+        <div style={{ position: "fixed", top: pos.top, left: pos.left, width: 128 }} className="z-40 rounded-lg border bg-surface p-1 shadow-lg">
+          {options.map((p) => (
+            <button key={p} onClick={(e) => { e.stopPropagation(); onChange(p); setOpen(false); }} className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[15px] hover:bg-background" style={{ color: p === "none" ? "var(--muted)" : PRIORITY_META[p].color }}>
+              {p !== "none" && <I.flag />} {PRIORITY_META[p].label}
             </button>
           ))}
         </div>
