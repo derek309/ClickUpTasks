@@ -23,7 +23,13 @@ import { RichTextEditor } from "./RichTextEditor";
 import { RecipientField } from "./TaskMessaging";
 import { SchedulePopover } from "./SchedulePopover";
 
-type JournalFilter = "all" | NoteType | "message" | "activity" | "photos" | "links" | "files";
+// A2: the old ten equal pills (note kinds, Message, Task Activity, attachment
+// types) mixed three different axes into one row. Split into a primary
+// segment (what family of entry) and a secondary sub-filter (which kind
+// within it, or which attachment type) — two independent controls instead
+// of one flat list.
+type JournalSegment = "all" | "conversation" | "decisions" | "activity";
+type JournalSubFilter = "all" | NoteType | "photos" | "links" | "files";
 
 type JournalItem =
   | { kind: "note"; at: string; note: ClientNote }
@@ -104,7 +110,9 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   // Journal is already open (the component isn't remounted then).
   composeIntent?: { mode: "email" | "sms"; nonce: number } | null;
 }) {
-  const [filter, setFilter] = useState<JournalFilter>("all");
+  const [segment, setSegment] = useState<JournalSegment>("all");
+  const [subFilter, setSubFilter] = useState<JournalSubFilter>("all");
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [composeMode, setComposeMode] = useState<"note" | "email" | "sms">("note");
   const [draftType, setDraftType] = useState<NoteType>("note");
@@ -205,21 +213,23 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
       : [];
   const hasKind = (it: JournalItem, kinds: string[]) => itemAtts(it).some((a) => kinds.includes(a.kind));
   const filteredItems = journalItems.filter((it) => {
-    const passesType = filter === "all" ? true
-      : filter === "message" ? it.kind === "message"
-      : filter === "activity" ? (it.kind === "activity" || it.kind === "completion")
-      : filter === "photos" ? hasKind(it, ["image"])
-      : filter === "links" ? hasKind(it, ["link"])
-      : filter === "files" ? hasKind(it, ["pdf", "doc", "sheet"])
-      : (it.kind === "note" && it.note.type === filter);
-    return passesType && matchesSearch(it);
+    const passesSegment = segment === "all" ? true
+      : segment === "conversation" ? it.kind === "message"
+      : segment === "decisions" ? it.kind === "note"
+      : (it.kind === "activity" || it.kind === "completion"); // "activity"
+    const passesSub = subFilter === "all" ? true
+      : subFilter === "photos" ? hasKind(it, ["image"])
+      : subFilter === "links" ? hasKind(it, ["link"])
+      : subFilter === "files" ? hasKind(it, ["pdf", "doc", "sheet"])
+      : (it.kind === "note" && it.note.type === subFilter);
+    return passesSegment && passesSub && matchesSearch(it);
   });
   // Newest AI recap ("recently done / next up") — pinned as a highlighted
   // card atop the unfiltered feed so the freshest "where does this stand"
   // read is always one glance away. Excluded from the chronological list
   // while pinned so it isn't shown twice; older recaps still flow inline.
   const latestRecap = notes.filter((n) => n.type === "ai_summary").sort((a, b) => b.at.localeCompare(a.at))[0] ?? null;
-  const pinnedRecap = latestRecap && filter === "all" && !q ? latestRecap : null;
+  const pinnedRecap = latestRecap && segment === "all" && subFilter === "all" && !q ? latestRecap : null;
   const feedRows = buildFeedRows(pinnedRecap ? filteredItems.filter((it) => !(it.kind === "note" && it.note.id === pinnedRecap.id)) : filteredItems);
 
   const canModify = (n: ClientNote) => me.role === "admin" || n.authorId === me.id;
@@ -346,24 +356,75 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
     <div className="flex flex-1 flex-col overflow-hidden bg-background">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b bg-surface px-4 py-2 sm:px-5">
         <div className="flex flex-wrap items-center gap-1.5">
-          <button onClick={() => setFilter("all")} className={`rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${filter === "all" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}>All</button>
-          {NOTE_TYPE_ORDER.map((t) => {
-            const m = NOTE_TYPE_META[t];
-            const on = filter === t;
-            return (
-              <button key={t} onClick={() => setFilter(t)} className={`inline-flex items-center gap-1.5 rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${on ? "text-white" : "border-transparent text-muted hover:bg-background"}`} style={on ? { background: m.color, borderColor: m.color } : {}}>
-                <span className="h-1.5 w-1.5 rounded-full" style={{ background: on ? "#fff" : m.color }} /> {m.label}
-              </button>
-            );
-          })}
-          {messages != null && (
-            <button onClick={() => setFilter("message")} className={`rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${filter === "message" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}>Message</button>
-          )}
-          <button onClick={() => setFilter("activity")} className={`rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${filter === "activity" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}>Task Activity</button>
+          {([
+            { key: "all", label: "Everything" },
+            ...(messages != null ? [{ key: "conversation", label: "Conversation" } as const] : []),
+            { key: "decisions", label: "Decisions" },
+            { key: "activity", label: "Activity" },
+          ] as { key: JournalSegment; label: string }[]).map((s) => (
+            <button
+              key={s.key}
+              onClick={() => setSegment(s.key)}
+              className={`rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${segment === s.key ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}
+            >
+              {s.label}
+            </button>
+          ))}
           <span className="mx-0.5 h-4 w-px bg-border" />
-          <button onClick={() => setFilter("photos")} className={`inline-flex items-center gap-1 rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${filter === "photos" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}>Photos</button>
-          <button onClick={() => setFilter("links")} className={`inline-flex items-center gap-1 rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${filter === "links" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}><I.link /> Links</button>
-          <button onClick={() => setFilter("files")} className={`inline-flex items-center gap-1 rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${filter === "files" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}><I.clip /> Files</button>
+          <div className="relative">
+            <button
+              onClick={() => setFilterMenuOpen((v) => !v)}
+              className={`inline-flex items-center gap-1 rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${subFilter !== "all" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}
+            >
+              <I.filter /> {subFilter === "all" ? "Filter" : subFilter === "photos" ? "Photos" : subFilter === "links" ? "Links" : subFilter === "files" ? "Files" : noteTypeMeta(subFilter as NoteType).label}
+            </button>
+            {filterMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setFilterMenuOpen(false)} />
+                <div className="absolute left-0 top-full z-20 mt-1 w-44 rounded-[5px] border bg-surface p-1 shadow-lg">
+                  <button
+                    onClick={() => { setSubFilter("all"); setFilterMenuOpen(false); }}
+                    className={`block w-full rounded-[5px] px-2.5 py-1.5 text-left text-[13px] font-medium transition ${subFilter === "all" ? "bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}
+                  >
+                    All
+                  </button>
+                  <div className="my-1 h-px bg-border" />
+                  {NOTE_TYPE_ORDER.map((t) => {
+                    const m = NOTE_TYPE_META[t];
+                    const on = subFilter === t;
+                    return (
+                      <button
+                        key={t}
+                        onClick={() => { setSubFilter(t); setFilterMenuOpen(false); }}
+                        className={`flex w-full items-center gap-1.5 rounded-[5px] px-2.5 py-1.5 text-left text-[13px] font-medium transition ${on ? "bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}
+                      >
+                        <span className="h-1.5 w-1.5 rounded-full" style={{ background: m.color }} /> {m.label}
+                      </button>
+                    );
+                  })}
+                  <div className="my-1 h-px bg-border" />
+                  <button
+                    onClick={() => { setSubFilter("photos"); setFilterMenuOpen(false); }}
+                    className={`block w-full rounded-[5px] px-2.5 py-1.5 text-left text-[13px] font-medium transition ${subFilter === "photos" ? "bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}
+                  >
+                    Photos
+                  </button>
+                  <button
+                    onClick={() => { setSubFilter("links"); setFilterMenuOpen(false); }}
+                    className={`flex w-full items-center gap-1.5 rounded-[5px] px-2.5 py-1.5 text-left text-[13px] font-medium transition ${subFilter === "links" ? "bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}
+                  >
+                    <I.link /> Links
+                  </button>
+                  <button
+                    onClick={() => { setSubFilter("files"); setFilterMenuOpen(false); }}
+                    className={`flex w-full items-center gap-1.5 rounded-[5px] px-2.5 py-1.5 text-left text-[13px] font-medium transition ${subFilter === "files" ? "bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}
+                  >
+                    <I.clip /> Files
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <div className="relative">
