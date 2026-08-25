@@ -30,6 +30,49 @@ const SCREENSHOT_RE = /^(screenshot|screen shot|cleanshot|snip)/i;
 // else drag-sort exists in this app (folders/lists).
 const sortByPosition = (list: VaultItem[]) => [...list].sort((a, b) => (a.position ?? Infinity) - (b.position ?? Infinity));
 
+// B3: Attachment has no dedicated title field — `name` does double duty,
+// and several link-creation paths (TaskDrawer's addLink, waitingAttachments)
+// fall back to the raw URL when the user leaves the label blank. Detect that
+// case and derive a real title instead of ever rendering the URL itself.
+function isUrlLikeName(name: string, url: string): boolean {
+  if (!name) return true;
+  const stripped = url.replace(/^https?:\/\//i, "").replace(/\/$/, "");
+  const n = name.replace(/\/$/, "");
+  if (n === stripped) return true;
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    if (n === host || n.startsWith(host)) return true;
+  } catch { /* not a URL — treat name as-is */ }
+  return false;
+}
+function deslugify(seg: string): string {
+  const s = decodeURIComponent(seg).replace(/[-_+]+/g, " ").trim();
+  return s.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+// Excludes pure numbers, near-empty fragments, and opaque ID-looking tokens
+// (long, no separators, mixed letters+digits — e.g. a Gmail thread id).
+function isMeaningfulSegment(seg: string): boolean {
+  if (!seg || seg.length <= 2) return false;
+  if (/^\d+$/.test(seg)) return false;
+  if (!/[-_ ]/.test(seg) && /\d/.test(seg) && /[a-zA-Z]/.test(seg) && seg.length > 10) return false;
+  return true;
+}
+export function deriveLinkTitle(item: { name: string; url?: string | null }): { title: string; domain: string | null } {
+  const url = item.url;
+  if (!url) return { title: item.name, domain: null };
+  let domain = url;
+  try { domain = new URL(url).hostname.replace(/^www\./, ""); } catch { /* keep raw as last resort */ }
+  if (!isUrlLikeName(item.name, url)) return { title: item.name, domain };
+  try {
+    const u = new URL(url);
+    const hashSegs = u.hash.replace(/^#/, "").split("/").filter(Boolean).reverse();
+    const pathSegs = u.pathname.split("/").filter(Boolean).reverse();
+    const meaningful = [...hashSegs, ...pathSegs].find(isMeaningfulSegment);
+    if (meaningful) return { title: deslugify(meaningful), domain };
+  } catch { /* fall through to domain-only */ }
+  return { title: domain, domain: null };
+}
+
 export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCopyLink, onCopyFolderLink, onCreateFolder, onRenameFolder, onDeleteFolder, onAddFiles, onReorder, initialFolderId }: {
   items: VaultItem[];
   folders: VaultFolder[];
@@ -234,27 +277,31 @@ export function VaultView({ items, folders, onDownloadFile, onGetSignedUrl, onCo
           <div key={g.kind}>
             <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">{g.label} · {g.items.length}</div>
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
-              {g.items.map((a) => (
-                <div key={a.id} className="flex flex-col gap-1">
-                  <AttachmentTile
-                    item={a}
-                    href={a.url || undefined}
-                    onOpen={!a.url && a.path ? () => onDownloadFile(a.path!) : undefined}
-                    drag={{ dragging: dragItemId === a.id, onDragStart: () => setDragItemId(a.id), onDrop: () => reorderGroup(g.items, a.id) }}
-                    actions={
-                      <>
-                        <FolderMenu item={a} folders={folders} triggerClassName="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80" />
-                        {a.path && (
-                          <button onClick={(e) => { e.stopPropagation(); onCopyLink(a.path!); }} title="Copy link" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-3.5 w-3.5" /></button>
-                        )}
-                      </>
-                    }
-                  />
-                  <div className="truncate text-center text-[12px]" title={a.name}>{a.name}</div>
-                  <button onClick={a.onOpenSource} className="truncate text-center text-[11px] text-muted hover:text-foreground hover:underline">{a.sourceLabel}</button>
-                  {a.size && <div className="text-center text-[11px] text-muted">{a.size}</div>}
-                </div>
-              ))}
+              {g.items.map((a) => {
+                const display = a.kind === "link" ? deriveLinkTitle(a) : { title: a.name, domain: null };
+                return (
+                  <div key={a.id} className="flex flex-col gap-1">
+                    <AttachmentTile
+                      item={a}
+                      href={a.url || undefined}
+                      onOpen={!a.url && a.path ? () => onDownloadFile(a.path!) : undefined}
+                      drag={{ dragging: dragItemId === a.id, onDragStart: () => setDragItemId(a.id), onDrop: () => reorderGroup(g.items, a.id) }}
+                      actions={
+                        <>
+                          <FolderMenu item={a} folders={folders} triggerClassName="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80" />
+                          {a.path && (
+                            <button onClick={(e) => { e.stopPropagation(); onCopyLink(a.path!); }} title="Copy link" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-3.5 w-3.5" /></button>
+                          )}
+                        </>
+                      }
+                    />
+                    <div className="truncate text-center text-[12px]" title={a.url ?? a.name}>{display.title}</div>
+                    {display.domain && <div className="truncate text-center text-[11px] text-muted">{display.domain}</div>}
+                    <button onClick={a.onOpenSource} className="truncate text-center text-[11px] text-muted hover:text-foreground hover:underline">{a.sourceLabel}</button>
+                    {a.size && <div className="text-center text-[11px] text-muted">{a.size}</div>}
+                  </div>
+                );
+              })}
             </div>
           </div>
         ))}
