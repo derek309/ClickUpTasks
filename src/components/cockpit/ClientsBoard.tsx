@@ -35,7 +35,9 @@ export function ClientsBoard({ groups, clientTaskCount, projectTaskCount, hasUnr
   return (
     <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">
       <div className="overflow-hidden rounded-xl border bg-surface shadow-soft">
-        {groups.length === 0 && <div className="px-4 py-10 text-center text-[13px] text-muted">Nothing here yet.</div>}
+        {/* A6: "nothing outstanding" is a real, good state, not an
+            apologetic blank — name it as one. */}
+        {groups.length === 0 && <div className="px-4 py-10 text-center text-[15px] font-medium text-muted">You are clear.</div>}
         <div className="divide-y-8 divide-background">
           {groups.map((g) => (
             <div key={g.key}>

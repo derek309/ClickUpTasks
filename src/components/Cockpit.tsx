@@ -3811,6 +3811,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       <button onClick={() => setFilters({ status: "all", assignee: "all", priority: "all" })} className="text-[13px] font-medium text-accent hover:underline">Clear</button>
     </div>
   ) : null;
+  // A6: "filtered to nothing" gets its own message naming which filter did
+  // it, distinct from "genuinely no work" — the two used to render the same
+  // "No tasks yet." with no way to tell which one you were looking at.
+  const filteredEmptyMessage = !filtersActive ? undefined : (() => {
+    const names = [
+      filters.status !== "all" && STATUS_META[filters.status].label,
+      filters.assignee !== "all" && (filters.assignee === "unassigned" ? "Unassigned" : filters.assignee === "waiting" ? "Waiting on client" : userById(filters.assignee)?.name ?? filters.assignee),
+      filters.priority !== "all" && PRIORITY_META[filters.priority].label,
+    ].filter((n): n is string => !!n);
+    return (
+      <>No tasks match {names.join(" + ")}. <button onClick={() => setFilters({ status: "all", assignee: "all", priority: "all" })} className="font-medium text-accent hover:underline">Clear filters</button></>
+    );
+  })();
   // Hoisted rather than looked up inline inside the settings sheet's JSX —
   // an IIFE returning JSX there confused the React Compiler into treating it
   // as a component defined during render.
@@ -4383,7 +4396,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           ) : (
             <>
             {activeFilterBar}
-            <GroupedList meId={me.id} groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
+            <GroupedList meId={me.id} groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} emptyMessage={filteredEmptyMessage} />
             </>
           )}
           </>

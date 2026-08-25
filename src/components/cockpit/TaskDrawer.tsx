@@ -559,7 +559,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           </div>
         )}
       </div>
-      {task.subtasks.length > 0 && (<div className="mb-2 h-2 overflow-hidden rounded-full bg-background"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${(doneSubs / task.subtasks.length) * 100}%` }} /></div>)}
+      {/* A6: a bar for one item is just a binary light switch dressed up as a
+          progress bar — plain "0/1" text instead. */}
+      {task.subtasks.length > 1 && (<div className="mb-2 h-2 overflow-hidden rounded-full bg-background"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${(doneSubs / task.subtasks.length) * 100}%` }} /></div>)}
       <div className="space-y-1">{task.subtasks.map((s) => (
         <div key={s.id}>
           <div className="group/sub flex items-start gap-2 rounded-md px-1 py-1 hover:bg-background">
@@ -738,7 +740,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // regardless of comment count — there's no conversation pane possible for
   // them (no linkable contact by construction), so unlike a real client
   // task there's nothing that ever earns a dedicated right-hand column.
-  const isLightTask = full && (internalMode || (!hasMessaging && task.comments.length === 0));
+  // A6: a pane holding nothing but audit events (status/due/assignee change
+  // lines, no real note or message anyone wrote) earns the same fold as a
+  // genuinely empty one — a wide dedicated column for "Derek changed status
+  // to Done" is the same problem as an empty column, just with one line of
+  // content instead of zero.
+  const hasRealActivity = task.comments.some((c) => c.kind !== "event");
+  const isLightTask = full && (internalMode || (!hasMessaging && !hasRealActivity));
 
   return (
     <>

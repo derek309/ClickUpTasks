@@ -14,7 +14,7 @@ import { I, Avatar, LabelChips, CollapsibleText, COL_WIDTHS, LIST_COLUMNS } from
 
 // --- grouped list view (ClickUp-style: group, quick-add, expandable subtasks) --
 
-export function GroupedList({ groups, showClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onDeleteSub, onAddComment, hideEmpty, highlightDelegateFor, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId }: {
+export function GroupedList({ groups, showClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onDeleteSub, onAddComment, hideEmpty, highlightDelegateFor, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId, emptyMessage }: {
   groups: { key: string; label: string; color: string; tasks: Task[] }[];
   // The signed-in user — the row's assignee avatar only renders when the
   // task is assigned to someone else; seeing your own face on every one of
@@ -40,6 +40,11 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   // When set, each row gets a selection checkbox for bulk edit; the caller
   // owns the selected-id set and renders its own bulk-action bar.
   selectedIds?: Set<string>; onToggleSelect?: (taskId: string) => void;
+  // A6: "filtered to nothing" and "genuinely empty" used to render the same
+  // "No tasks yet." — the caller passes this when active filters produced
+  // zero rows, naming which filter did it (via activeFilterBar's own text)
+  // instead of leaving someone to guess whether the list is broken.
+  emptyMessage?: React.ReactNode;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -166,7 +171,7 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
             </div>
           ))}
         </div>
-        {visibleGroups.length === 0 && <div className="px-4 py-10 text-center text-[13px] text-muted">No tasks yet.</div>}
+        {visibleGroups.length === 0 && <div className="px-4 py-10 text-center text-[13px] text-muted">{emptyMessage ?? "No tasks yet."}</div>}
       </div>
       {!canQuickAdd && quickAddHint && <div className="mt-3 text-center text-[13px] text-muted">{quickAddHint}</div>}
     </div>
