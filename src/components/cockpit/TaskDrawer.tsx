@@ -8,7 +8,7 @@ import {
   PERSONAL_CLIENT_ID, WORKSPACE_CLIENT_ID,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
-import { I, Row, CollapsibleText, SearchableSelect, newId } from "./ui";
+import { I, CollapsibleText, SearchableSelect, newId } from "./ui";
 import { AttachmentTile } from "./AttachmentTile";
 import { InlineAssignee, InlineDue } from "./GroupedList";
 import { RichTextEditor } from "./RichTextEditor";
@@ -132,6 +132,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     setLinkUrl(""); setLinkLabel(""); setLinkOpen(false);
   };
   const [labelOpen, setLabelOpen] = useState(false);
+  const [ghlMenuOpen, setGhlMenuOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [descDraftPrompt, setDescDraftPrompt] = useState("");
@@ -382,45 +383,34 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         <button onClick={() => setLabelOpen((o) => !o)} className="inline-flex items-center gap-0.5 rounded-full border border-dashed px-2 py-1 text-[13px] text-muted hover:bg-surface"><I.plus /> Label</button>
         {labelOpen && (<div className="absolute z-30 mt-1 w-40 rounded-lg border bg-surface p-1 shadow-lg">{labels.map((l) => { const on = task.labelIds.includes(l.id); return (<button key={l.id} onClick={() => onToggleLabel(l.id)} className="flex w-full items-center gap-2 rounded px-2 py-1 text-[13px] hover:bg-background"><span className="h-2.5 w-2.5 rounded-full" style={{ background: l.color }} /> {l.name}{on && <I.check className="ml-auto text-accent" />}</button>); })}</div>)}
       </div>
-    </div>
-  );
-  const detailsBlock = (
-    <div className="mt-3 rounded-xl border bg-surface p-4">
-    <div className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-muted">Details</div>
-    <dl className={full ? "grid grid-cols-1 gap-x-12 gap-y-1.5 lg:grid-cols-2" : "space-y-2"}>
-      {/* Owner Growth Plan steps stay put — moving one to a different client or
-          list would pull it out of that business's checklist (and its fixed
-          position) entirely, which reconcilePlaybookTasks would just quietly
-          patch over by recreating the step, orphaning the moved task. */}
+      {/* A3: Client/Project/Contact used to be the "Details" card below —
+          absorbed into this same chip row so a task page has exactly one
+          metadata region (per the phase-3 brief), not three. GoHighLevel
+          moved to the header's ⋯ menu instead of living here — it's a
+          connection/action, not a property of the task the way these are. */}
       {task.playbookStepKey ? (
-        <>
-          <Row label="Client" icon={<I.folder />}><span title="Part of the Owner Growth Plan — can't be moved" className="px-2 py-1 text-[14px] text-muted">{client?.name ?? "—"}</span></Row>
-          <Row label="Project" icon={<I.list />}><span title="Part of the Owner Growth Plan — can't be moved" className="px-2 py-1 text-[14px] text-muted">{project?.name ?? "—"}</span></Row>
-        </>
+        <span className={`${chip} gap-1.5 px-2 py-1 text-[13px] text-muted`} title="Part of the Owner Growth Plan — can't be moved">
+          <I.folder className="text-muted" /> {client?.name ?? "—"}
+        </span>
       ) : (
-        <>
-          {/* Type-to-filter rather than a plain select: this list is every
-              client on the account, which is far past the point where
-              scrolling a native dropdown is the fast way to find one. */}
-          <Row label="Client" icon={<I.folder />}><div className="w-[200px]"><SearchableSelect value={task.clientId} onChange={onMoveClient} options={clientSelectOptions} searchPlaceholder="Search clients…" className="rounded-md border border-transparent px-2 py-1 text-[14px] transition hover:border-border hover:bg-background" /></div></Row>
-          <Row label="Project" icon={<I.list />}><select value={task.projectId} onChange={(e) => { if (e.target.value === "__new") onNewProject(); else onSetProject(e.target.value); }} className="max-w-[200px] rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background">{clientProjects.map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}{clientProjects.every((p) => p.id !== task.projectId) && <option value={task.projectId}>{project?.name ?? "—"}</option>}<option value="__new">+ New project…</option></select></Row>
-        </>
+        <span className={chip}>
+          <I.folder className="ml-1.5 shrink-0 text-muted" />
+          <div className="w-[140px]"><SearchableSelect value={task.clientId} onChange={onMoveClient} options={clientSelectOptions} searchPlaceholder="Search clients…" className="rounded-full bg-transparent py-0.5 pl-1 pr-1 text-[13px]" /></div>
+        </span>
       )}
-      <Row label="Contact">{(() => { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return ct ? (<span className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[14px] text-muted"><I.user /> {ct.name}</span>) : <span className="text-[14px] text-muted">—</span>; })()}</Row>
-      {!internalMode && (
-        <Row label="GoHighLevel" icon={<I.bolt />}>{task.ghlTaskId ? (
-          <span className="inline-flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 rounded-md bg-success-soft px-2 py-1 text-[13px] font-medium text-success"><I.bolt /> Synced — changes push automatically</span>
-            {ghlContactUrl && <a href={ghlContactUrl} target="_blank" rel="noopener noreferrer" className="text-[13px] font-medium text-accent hover:underline">Open contact ↗</a>}
-            <button onClick={onUnlinkGhl} className="text-[13px] text-muted hover:text-danger">Unlink</button>
-          </span>
-        ) : ghlLinkable ? (
-          <button onClick={onPushGhl} disabled={ghlBusy} className="inline-flex items-center gap-1.5 rounded-md border border-accent px-2.5 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft disabled:opacity-50"><I.bolt /> {ghlBusy ? "Pushing…" : "Push to GHL"}</button>
-        ) : (
-          <span className="inline-flex items-center gap-1.5 rounded-md bg-background px-2 py-1 text-[13px] text-muted" title="This client has no linked GHL contact/location, so this task can't sync to GoHighLevel."><I.bolt className="opacity-40" /> Not linkable</span>
-        )}</Row>
+      {task.playbookStepKey ? (
+        <span className={`${chip} gap-1.5 px-2 py-1 text-[13px] text-muted`} title="Part of the Owner Growth Plan — can't be moved">
+          <I.list className="text-muted" /> {project?.name ?? "—"}
+        </span>
+      ) : (
+        <span className={`${chip} max-w-[160px]`}>
+          <I.list className="ml-1.5 shrink-0 text-muted" />
+          <select value={task.projectId} onChange={(e) => { if (e.target.value === "__new") onNewProject(); else onSetProject(e.target.value); }} className="w-full min-w-0 rounded-full bg-transparent py-0.5 pl-1 pr-1 text-[13px] outline-none">{clientProjects.map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}{clientProjects.every((p) => p.id !== task.projectId) && <option value={task.projectId}>{project?.name ?? "—"}</option>}<option value="__new">+ New project…</option></select>
+        </span>
       )}
-    </dl>
+      {(() => { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return ct ? (
+        <span className={`${chip} gap-1.5 px-2 py-1 text-[13px] text-muted`}><I.user /> {ct.name}</span>
+      ) : null; })()}
     </div>
   );
   // The client's own reply, submitted through the public /waiting/[token]
@@ -771,6 +761,30 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               </a>
             )}
             <button onClick={onCopyLink} title="Copy a shareable link to this task" className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground"><I.link /></button>
+            {!internalMode && (
+              <div className="relative">
+                <button onClick={() => setGhlMenuOpen((o) => !o)} title="GoHighLevel" className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground"><I.dots /></button>
+                {ghlMenuOpen && (<>
+                  <div className="fixed inset-0 z-30" onClick={() => setGhlMenuOpen(false)} />
+                  <div className="absolute right-0 top-full z-40 mt-1 w-64 rounded-lg border bg-surface p-2 shadow-lg">
+                    <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">GoHighLevel</div>
+                    {task.ghlTaskId ? (
+                      <div className="space-y-1.5">
+                        <span className="inline-flex items-center gap-1.5 rounded-md bg-success-soft px-2 py-1 text-[13px] font-medium text-success"><I.bolt /> Synced — changes push automatically</span>
+                        <div className="flex items-center gap-2">
+                          {ghlContactUrl && <a href={ghlContactUrl} target="_blank" rel="noopener noreferrer" className="text-[13px] font-medium text-accent hover:underline">Open contact ↗</a>}
+                          <button onClick={() => { onUnlinkGhl(); setGhlMenuOpen(false); }} className="text-[13px] text-muted hover:text-danger">Unlink</button>
+                        </div>
+                      </div>
+                    ) : ghlLinkable ? (
+                      <button onClick={() => { onPushGhl(); setGhlMenuOpen(false); }} disabled={ghlBusy} className="flex w-full items-center gap-1.5 rounded-md border border-accent px-2.5 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft disabled:opacity-50"><I.bolt /> {ghlBusy ? "Pushing…" : "Push to GHL"}</button>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 rounded-md bg-background px-2 py-1 text-[13px] text-muted" title="This client has no linked GHL contact/location, so this task can't sync to GoHighLevel."><I.bolt className="opacity-40" /> Not linkable</span>
+                    )}
+                  </div>
+                </>)}
+              </div>
+            )}
             {task.priority === "conversation" && (
               <button onClick={onOpenMerge} title="Merge this conversation into an existing task" className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
                 <I.repeat /> <span className="hidden sm:inline">Merge</span>
@@ -796,7 +810,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 {ghlWarningBanner}
                 <div className="my-4 border-t" />
                 {chipRow}
-                {detailsBlock}
                 <div className="my-4 border-t" />
                 {playbookGuideBlock}
                 {clientResponseBlock}
@@ -823,7 +836,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 {ghlWarningBanner}
                 <div className="my-4 border-t" />
                 {chipRow}
-                {detailsBlock}
                 <div className="my-4 border-t" />
                 {playbookGuideBlock}
                 {clientResponseBlock}
@@ -878,7 +890,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               {titleRow}
               {metaLine}
               {ghlWarningBanner}
-              <div className="mt-5">{chipRow}{detailsBlock}</div>
+              <div className="mt-5">{chipRow}</div>
               {playbookGuideBlock}
               {clientResponseBlock}
               {descriptionBlock}
