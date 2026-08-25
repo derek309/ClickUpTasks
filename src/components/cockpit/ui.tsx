@@ -243,7 +243,7 @@ export function JumpToLatestButton({ show, onClick }: { show: boolean; onClick: 
   if (!show) return null;
   return (
     <button onClick={onClick} title="Jump to the latest message"
-      className="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-[13px] font-medium text-white shadow-soft-md hover:opacity-90">
+      className="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-[5px] bg-accent px-3 py-1.5 text-[13px] font-medium text-white shadow-soft-md hover:opacity-90">
       <I.chevron className="rotate-90" /> Jump to latest
     </button>
   );

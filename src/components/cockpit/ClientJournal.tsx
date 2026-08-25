@@ -346,24 +346,24 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
     <div className="flex flex-1 flex-col overflow-hidden bg-background">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b bg-surface px-4 py-2 sm:px-5">
         <div className="flex flex-wrap items-center gap-1.5">
-          <button onClick={() => setFilter("all")} className={`rounded-full border px-2.5 py-1 text-[13px] font-medium transition ${filter === "all" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}>All</button>
+          <button onClick={() => setFilter("all")} className={`rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${filter === "all" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}>All</button>
           {NOTE_TYPE_ORDER.map((t) => {
             const m = NOTE_TYPE_META[t];
             const on = filter === t;
             return (
-              <button key={t} onClick={() => setFilter(t)} className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[13px] font-medium transition ${on ? "text-white" : "border-transparent text-muted hover:bg-background"}`} style={on ? { background: m.color, borderColor: m.color } : {}}>
+              <button key={t} onClick={() => setFilter(t)} className={`inline-flex items-center gap-1.5 rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${on ? "text-white" : "border-transparent text-muted hover:bg-background"}`} style={on ? { background: m.color, borderColor: m.color } : {}}>
                 <span className="h-1.5 w-1.5 rounded-full" style={{ background: on ? "#fff" : m.color }} /> {m.label}
               </button>
             );
           })}
           {messages != null && (
-            <button onClick={() => setFilter("message")} className={`rounded-full border px-2.5 py-1 text-[13px] font-medium transition ${filter === "message" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}>Message</button>
+            <button onClick={() => setFilter("message")} className={`rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${filter === "message" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}>Message</button>
           )}
-          <button onClick={() => setFilter("activity")} className={`rounded-full border px-2.5 py-1 text-[13px] font-medium transition ${filter === "activity" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}>Task Activity</button>
+          <button onClick={() => setFilter("activity")} className={`rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${filter === "activity" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}>Task Activity</button>
           <span className="mx-0.5 h-4 w-px bg-border" />
-          <button onClick={() => setFilter("photos")} className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[13px] font-medium transition ${filter === "photos" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}>Photos</button>
-          <button onClick={() => setFilter("links")} className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[13px] font-medium transition ${filter === "links" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}><I.link /> Links</button>
-          <button onClick={() => setFilter("files")} className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[13px] font-medium transition ${filter === "files" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}><I.clip /> Files</button>
+          <button onClick={() => setFilter("photos")} className={`inline-flex items-center gap-1 rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${filter === "photos" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}>Photos</button>
+          <button onClick={() => setFilter("links")} className={`inline-flex items-center gap-1 rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${filter === "links" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}><I.link /> Links</button>
+          <button onClick={() => setFilter("files")} className={`inline-flex items-center gap-1 rounded-[5px] border px-2.5 py-1 text-[13px] font-medium transition ${filter === "files" ? "border-accent bg-accent-soft text-accent" : "border-transparent text-muted hover:bg-background"}`}><I.clip /> Files</button>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <div className="relative">
@@ -445,7 +445,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
               if (row.kind === "divider") {
                 return (
                   <div key={row.key} className="sticky top-0 z-[5] flex items-center justify-center py-1">
-                    <span className="rounded-full border bg-background px-3 py-0.5 text-[12px] font-medium text-muted shadow-soft">{row.label}</span>
+                    <span className="rounded-[5px] border bg-background px-3 py-0.5 text-[12px] font-medium text-muted shadow-soft">{row.label}</span>
                   </div>
                 );
               }
@@ -526,7 +526,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                                 <span className="inline-flex items-center gap-1"><Avatar id={m.createdBy} size={14} /> {userById(m.createdBy)?.name ?? "Unknown"}</span>
                               )}
                               {unreadAtOpen.has(m.id) && (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-1.5 py-0 text-[11px] font-semibold text-accent">
+                                <span className="inline-flex items-center gap-1 rounded-[5px] bg-accent-soft px-1.5 py-0 text-[11px] font-semibold text-accent">
                                   <span className="h-1.5 w-1.5 rounded-full bg-accent" /> New
                                 </span>
                               )}

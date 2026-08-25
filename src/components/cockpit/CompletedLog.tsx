@@ -65,7 +65,7 @@ export function CompletedLog({ rows, onOpenTask }: { rows: CompletionRow[]; onOp
             <div key={key}>
               <div className="flex items-center gap-2 border-y bg-background/40 px-4 py-2">
                 <span className="text-[13px] font-bold">{dayLabel(key)}</span>
-                <span className="rounded-full bg-border px-1.5 text-[12px] font-semibold text-foreground">{dayRows.length}</span>
+                <span className="rounded-[5px] bg-border px-1.5 text-[12px] font-semibold text-foreground">{dayRows.length}</span>
               </div>
               {dayRows.map((r) => (
                 <div key={r.id} onClick={() => onOpenTask?.(r.clientId, r.taskId)}

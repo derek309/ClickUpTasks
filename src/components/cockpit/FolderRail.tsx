@@ -65,7 +65,7 @@ export function FolderRail({
       draggable={canAdmin && !!drag} onDragStart={drag?.onDragStart}
       onDragOver={(e) => { if (canAdmin && drag) e.preventDefault(); }} onDrop={(e) => { if (drag) { e.preventDefault(); drag.onDrop(); } }}>
       <button onClick={onClick}
-        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] font-medium ${active ? "border-accent bg-accent-soft text-accent" : "bg-surface text-muted hover:text-foreground"}`}>
+        className={`inline-flex items-center gap-1.5 rounded-[5px] border px-3 py-1 text-[13px] font-medium ${active ? "border-accent bg-accent-soft text-accent" : "bg-surface text-muted hover:text-foreground"}`}>
         {label}
         {canAdmin && menuKey && (
           <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); setMenu((m) => (m === menuKey ? null : menuKey)); }}
@@ -89,7 +89,7 @@ export function FolderRail({
       {playbookList && (
         <span className="relative inline-flex shrink-0">
           <button onClick={() => onSelectList(playbookList.id)}
-            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] font-medium ${activeProject === playbookList.id ? "border-white ring-2 ring-white/50" : "border-transparent"}`}
+            className={`inline-flex items-center gap-1.5 rounded-[5px] border px-3 py-1 text-[13px] font-medium ${activeProject === playbookList.id ? "border-white ring-2 ring-white/50" : "border-transparent"}`}
             style={{ background: "#1e3a5f", color: "#fff" }}>
             {playbookList.name}
           </button>
@@ -128,8 +128,8 @@ export function FolderRail({
       ))}
       {canAdmin && (
         <span className="ml-1 inline-flex shrink-0 gap-1">
-          <button onClick={onCreateFolder} title="New folder" className="inline-flex items-center gap-1 rounded-full border border-dashed px-2.5 py-1 text-[13px] text-muted hover:text-foreground"><I.folder className="h-3.5 w-3.5" /> +</button>
-          <button onClick={() => onCreateList(activeFolder)} title={activeFolder ? "New list in this folder" : "New list"} className="inline-flex items-center gap-1 rounded-full border border-dashed px-2.5 py-1 text-[13px] text-muted hover:text-foreground"><I.plus className="h-3.5 w-3.5" /> List</button>
+          <button onClick={onCreateFolder} title="New folder" className="inline-flex items-center gap-1 rounded-[5px] border border-dashed px-2.5 py-1 text-[13px] text-muted hover:text-foreground"><I.folder className="h-3.5 w-3.5" /> +</button>
+          <button onClick={() => onCreateList(activeFolder)} title={activeFolder ? "New list in this folder" : "New list"} className="inline-flex items-center gap-1 rounded-[5px] border border-dashed px-2.5 py-1 text-[13px] text-muted hover:text-foreground"><I.plus className="h-3.5 w-3.5" /> List</button>
         </span>
       )}
     </div>
