@@ -6,7 +6,7 @@ import { useRef, useState } from "react";
 import {
   users, formatDue, isOverdue, TODAY, timeAgo, userById, clientInitials,
   PRIORITY_META,
-  STATUS_META, STATUS_ORDER, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence,
+  STATUS_META, STATUS_ORDER, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence, parseDaysOfMonth,
   PLAYBOOK_STEP_BY_KEY,
   type Task, type Recurrence, type Client, type Project, type TaskStatus,
 } from "@/lib/data";
@@ -400,7 +400,13 @@ function friendlyDue(iso: string): string {
 // for the prominent header control). `strong` styles a set value in accent
 // (and gives the empty state a visible affordance) instead of muted grey —
 // for surfaces where the date is a primary action, not a table cell.
-export function InlineDue({ value, overdue, recurrence = "none", recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth, onChange, onRecurrenceChange, emptyLabel = "—", strong = false, showRecurrenceLabel = false }: { value: string | null; overdue: boolean; recurrence?: Recurrence; recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[]; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; emptyLabel?: string; strong?: boolean; showRecurrenceLabel?: boolean }) {
+export function InlineDue({ value, overdue, recurrence = "none", recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth, onChange, onRecurrenceChange, onRecurrenceDetailChange, emptyLabel = "—", strong = false, showRecurrenceLabel = false }: { value: string | null; overdue: boolean; recurrence?: Recurrence; recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[]; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void;
+  // A4: the "Every [1] [week(s)]" custom-recurrence editor used to always
+  // render as its own always-visible block next to the due date, at the
+  // same visual weight as status. Folded into this popover instead — only
+  // reachable while actually setting the date, not permanently on screen.
+  onRecurrenceDetailChange?: (patch: { recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[] }) => void;
+  emptyLabel?: string; strong?: boolean; showRecurrenceLabel?: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0, width: 440 });
@@ -439,15 +445,16 @@ export function InlineDue({ value, overdue, recurrence = "none", recurrenceInter
         {value ? friendlyDue(value) : emptyLabel}
         {recurrence !== "none" && <I.repeat className="text-accent" />}
         {recurrence !== "none" && showRecurrenceLabel && (
-          <span className="text-accent">{describeRecurrence(recurrence, recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth)}</span>
+          <span className="text-accent">· {describeRecurrence(recurrence, recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth).toLowerCase()}</span>
         )}
       </button>
-      {open && <DatePopover pos={pos} value={value} recurrence={recurrence} onSelect={(d) => { onChange(d); setOpen(false); }} onRecurrenceChange={onRecurrenceChange} onClose={() => setOpen(false)} />}
+      {open && <DatePopover pos={pos} value={value} recurrence={recurrence} recurrenceInterval={recurrenceInterval} recurrenceUnit={recurrenceUnit} recurrenceDaysOfMonth={recurrenceDaysOfMonth}
+        onSelect={(d) => { onChange(d); setOpen(false); }} onRecurrenceChange={onRecurrenceChange} onRecurrenceDetailChange={onRecurrenceDetailChange} onClose={() => setOpen(false)} />}
     </>
   );
 }
 
-function DatePopover({ pos, value, recurrence, onSelect, onRecurrenceChange, onClose }: { pos: { top: number; left: number; width: number }; value: string | null; recurrence: Recurrence; onSelect: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; onClose: () => void }) {
+function DatePopover({ pos, value, recurrence, recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth, onSelect, onRecurrenceChange, onRecurrenceDetailChange, onClose }: { pos: { top: number; left: number; width: number }; value: string | null; recurrence: Recurrence; recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[]; onSelect: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; onRecurrenceDetailChange?: (patch: { recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[] }) => void; onClose: () => void }) {
   const [ym, setYm] = useState(() => { const [y, m] = (value ?? TODAY).split("-").map(Number); return { y, m: m - 1 }; });
   const dow = dowIso(TODAY);
   const quicks: [string, string][] = [
@@ -476,6 +483,30 @@ function DatePopover({ pos, value, recurrence, onSelect, onRecurrenceChange, onC
               <select value={recurrence} onClick={(e) => e.stopPropagation()} onChange={(e) => onRecurrenceChange(e.target.value as Recurrence)} className="w-full rounded border bg-background px-1.5 py-1 text-[15px] outline-none">
                 {RECURRENCE_ORDER.map((r) => <option key={r} value={r}>{RECURRENCE_LABEL[r]}</option>)}
               </select>
+              {recurrence === "custom" && onRecurrenceDetailChange && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[13px] text-muted" onClick={(e) => e.stopPropagation()}>
+                  {recurrenceUnit === "day-of-month" ? (
+                    <>
+                      On day(s)
+                      <input type="text" placeholder="1, 15" defaultValue={(recurrenceDaysOfMonth ?? []).join(", ")}
+                        onBlur={(e) => onRecurrenceDetailChange({ recurrenceDaysOfMonth: parseDaysOfMonth(e.target.value) })}
+                        className="w-16 rounded-md border bg-background px-1.5 py-0.5 text-center text-[13px] outline-none focus:border-accent" />
+                      of month
+                    </>
+                  ) : (
+                    <>
+                      Every
+                      <input type="number" min={1} value={recurrenceInterval ?? 1} onChange={(e) => onRecurrenceDetailChange({ recurrenceInterval: Math.max(1, parseInt(e.target.value, 10) || 1) })} className="w-12 rounded-md border bg-background px-1.5 py-0.5 text-center text-[13px] outline-none focus:border-accent" />
+                    </>
+                  )}
+                  <select value={recurrenceUnit ?? "week"} onChange={(e) => onRecurrenceDetailChange({ recurrenceUnit: e.target.value as import("@/lib/data").RecurrenceUnit })} className="rounded-md border bg-background px-1.5 py-0.5 text-[13px] outline-none focus:border-accent">
+                    <option value="day">day(s)</option>
+                    <option value="week">week(s)</option>
+                    <option value="month">month(s)</option>
+                    <option value="day-of-month">day(s) of month</option>
+                  </select>
+                </div>
+              )}
             </div>
           )}
         </div>

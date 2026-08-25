@@ -4,9 +4,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, clientStatusMeta,
-  STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY,
+  STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, PLAYBOOK_STEP_BY_KEY,
   PERSONAL_CLIENT_ID, WORKSPACE_CLIENT_ID,
-  type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
+  type Task, type Client, type Project, type Contact, type Attachment, type Priority, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, CollapsibleText, SearchableSelect, newId } from "./ui";
 import { AttachmentTile } from "./AttachmentTile";
@@ -340,32 +340,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         </select>
       </span>
       <span className={chip}>
-        <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} showRecurrenceLabel={task.recurrence !== "custom"} onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} />
+        {/* A4: the custom-recurrence editor ("Every [1] [week(s)]") used to
+            always render as its own sibling chip at the same visual weight
+            as status — folded into InlineDue's own popover instead (see
+            onRecurrenceDetailChange in GroupedList.tsx), so the header shows
+            no always-visible number input. */}
+        <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} showRecurrenceLabel onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} onRecurrenceDetailChange={(patch) => onPatch(patch)} />
       </span>
-      {task.recurrence === "custom" && (
-        <span className={`${chip} gap-1.5 px-2 py-1 text-[13px] text-muted`}>
-          {task.recurrenceUnit === "day-of-month" ? (
-            <>
-              On day(s)
-              <input type="text" placeholder="1, 15" defaultValue={(task.recurrenceDaysOfMonth ?? []).join(", ")}
-                onBlur={(e) => onPatch({ recurrenceDaysOfMonth: parseDaysOfMonth(e.target.value) })}
-                className="w-16 rounded-md border bg-background px-1.5 py-0.5 text-center text-[13px] outline-none focus:border-accent" />
-              of month
-            </>
-          ) : (
-            <>
-              Every
-              <input type="number" min={1} value={task.recurrenceInterval ?? 1} onChange={(e) => onPatch({ recurrenceInterval: Math.max(1, parseInt(e.target.value, 10) || 1) })} className="w-12 rounded-md border bg-background px-1.5 py-0.5 text-center text-[13px] outline-none focus:border-accent" />
-            </>
-          )}
-          <select value={task.recurrenceUnit ?? "week"} onChange={(e) => onPatch({ recurrenceUnit: e.target.value as RecurrenceUnit })} className="rounded-md border bg-background px-1.5 py-0.5 text-[13px] outline-none focus:border-accent">
-            <option value="day">day(s)</option>
-            <option value="week">week(s)</option>
-            <option value="month">month(s)</option>
-            <option value="day-of-month">day(s) of month</option>
-          </select>
-        </span>
-      )}
       {/* w-full/min-w-0: a native <select> sizes itself to its WIDEST option,
           and "⏳ Waiting on {long business name}" pushed it clean out of the
           properties grid (Derek, 2026-08-11). Filling the cell instead keeps
