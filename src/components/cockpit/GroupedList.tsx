@@ -157,7 +157,7 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
                   )}
                   {g.tasks.map((t) => (
                     <TaskRow key={t.id} task={t} template={template} cols={cols} showClient={showClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} onAddComment={onAddComment} meId={meId} delegated={!!highlightDelegateFor && t.assigneeId !== highlightDelegateFor && t.subtasks.some((s) => s.assigneeId === highlightDelegateFor)}
-                      selected={!!selectedIds?.has(t.id)} onToggleSelect={onToggleSelect ? (e) => handleSelectClick(t.id, e) : undefined} anySelected={!!selectedIds?.size}
+                      selected={!!selectedIds?.has(t.id)} onToggleSelect={onToggleSelect ? (e) => handleSelectClick(t.id, e) : undefined}
                       draggable={!!onDropInGroup || !!onMergeTasks} onDragStart={() => setDragTaskId(t.id)} onDragEnd={() => { setDragTaskId(null); setDragOverKey(null); setDragOverTaskId(null); }}
                       isMergeDropTarget={dragOverTaskId === t.id}
                       onRowDragOver={onMergeTasks && dragTaskId && dragTaskId !== t.id ? () => setDragOverTaskId(t.id) : undefined}
@@ -178,10 +178,10 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   );
 }
 
-function TaskRow({ task, template, cols, showClient, clientById, projectById, contactById, onOpen, onPatch, onAddComment, meId, delegated, selected, onToggleSelect, anySelected, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
+function TaskRow({ task, template, cols, showClient, clientById, projectById, contactById, onOpen, onPatch, onAddComment, meId, delegated, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
   task: Task; template: string; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void; onAddComment: (taskId: string, body: string) => void; meId?: string; delegated?: boolean;
-  selected?: boolean; onToggleSelect?: (e: React.MouseEvent) => void; anySelected?: boolean;
+  selected?: boolean; onToggleSelect?: (e: React.MouseEvent) => void;
   draggable?: boolean; onDragStart?: () => void; onDragEnd?: () => void;
   // Drop-onto-this-row-to-merge — independent of the drag-to-reorder-groups
   // above, so a row can be both a drag source and a merge target at once.
@@ -219,29 +219,12 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
         onDragOver={(e) => { if (onRowDragOver) { e.preventDefault(); onRowDragOver(); } }}
         onDragLeave={onRowDragLeave}
         onDrop={(e) => { if (onRowDrop) { e.preventDefault(); onRowDrop(); } }}
-        className={`group/tr flex flex-col gap-1 border-b border-l-[3px] px-4 py-2 transition-colors last:border-0 hover:bg-accent-soft/50 sm:grid sm:min-h-[40px] sm:items-center sm:gap-2 sm:py-1.5 ${delegated ? "border-l-accent bg-accent-soft/30" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${isMergeDropTarget ? "ring-2 ring-inset ring-accent" : ""}`}
+        className={`group/tr flex flex-col gap-1 border-b border-l-[3px] px-4 py-2 transition-colors last:border-0 hover:bg-accent-soft/50 sm:grid sm:min-h-[40px] sm:items-center sm:gap-2 sm:py-1.5 ${delegated ? "border-l-accent bg-accent-soft/30" : ""} ${selected ? "bg-accent-soft" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${isMergeDropTarget ? "ring-2 ring-inset ring-accent" : ""}`}
         style={{ gridTemplateColumns: template, borderLeftColor: delegated ? undefined : priorityBarColor }}>
         <div className="flex min-w-0 items-center gap-0.5">
-          {onToggleSelect && (
-            // Fades in on row hover instead of sitting there permanently
-            // (Derek, 2026-08-26: "the check and done together seems odd").
-            // Two checkbox-shaped controls side by side read as clutter no
-            // matter how differently they're shaped, and completing a task is
-            // the far more common of the two. Still opacity-0 rather than
-            // hidden, so the row doesn't jump sideways on hover, and it stays
-            // visible while a selection is in progress — you can't hover every
-            // row at once, and the ones you already picked have to keep showing
-            // their state. Tailwind scopes group-hover to @media (hover:
-            // hover), so a touch device would otherwise never reveal it at
-            // all — hence the explicit hover:none override.
-            <button onClick={(e) => { e.stopPropagation(); onToggleSelect(e); }} title="Select — shift-click to select a range"
-              className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition focus-visible:opacity-100 group-hover/tr:opacity-100 [@media(hover:none)]:opacity-100 ${selected || anySelected ? "opacity-100" : "opacity-0"} ${selected ? "border-accent bg-accent text-white" : "border-border"}`}>
-              {selected && <I.check />}
-            </button>
-          )}
-          {/* One-click complete (Derek, 2026-08-26). Deliberately a circle
-              next to the square select box above — two checkbox-shaped
-              controls side by side would read as the same thing. It only
+          {/* One-click complete (Derek, 2026-08-26) — now the only control
+              at the row's leading edge, since bulk select moved onto the row
+              itself (shift/⌘-click). It only
               flips between Done and To do; every other stage still goes
               through the Stage column's picker, which is why this isn't a
               cycle-through-statuses button. */}
@@ -261,7 +244,19 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
               flagged live as a hydration error. role="button" on a <div>
               gets the same click/keyboard-activation semantics without
               nesting an interactive element inside another one. */}
-          <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
+          {/* Multi-select lives on the row itself now (Derek, 2026-08-26:
+              "remove the multiple checkboxes and just make it shift and
+              select multi"). Shift-click extends a range from the last row
+              you touched, ⌘/Ctrl-click toggles one row on its own, and a
+              plain click still opens the task — so the common action keeps
+              the bare click and selection costs a modifier instead of a
+              permanent column of checkboxes. */}
+          <div role="button" tabIndex={0}
+            onClick={(e) => {
+              if (onToggleSelect && (e.shiftKey || e.metaKey || e.ctrlKey)) { e.preventDefault(); e.stopPropagation(); onToggleSelect(e); return; }
+              onOpen();
+            }}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
             className="flex min-w-0 flex-1 cursor-pointer flex-col justify-center py-0.5 pl-1 text-left">
             {/* Project crumb is redundant once the Client column is already
                 shown (My Work, All tasks) — keep it only in single-client
