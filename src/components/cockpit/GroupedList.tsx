@@ -436,7 +436,7 @@ function friendlyDue(iso: string): string {
 // for the prominent header control). `strong` styles a set value in accent
 // (and gives the empty state a visible affordance) instead of muted grey —
 // for surfaces where the date is a primary action, not a table cell.
-export function InlineDue({ value, overdue, recurrence = "none", recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth, onChange, onRecurrenceChange, emptyLabel = "—", strong = false, showRecurrenceLabel = false }: { value: string | null; overdue: boolean; recurrence?: Recurrence; recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[]; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; emptyLabel?: string; strong?: boolean; showRecurrenceLabel?: boolean }) {
+export function InlineDue({ value, overdue, recurrence = "none", recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth, onChange, onRecurrenceChange, emptyLabel = "—", strong = false, showRecurrenceLabel = false }: { value: string | null; overdue: boolean; recurrence?: Recurrence; recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[]; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; emptyLabel?: React.ReactNode; strong?: boolean; showRecurrenceLabel?: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0, width: 440 });
