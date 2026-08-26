@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/serverAuth";
-import { appendSignatureHtml } from "@/lib/emailSignature";
+import { appendSignatureHtml, appendSignatureText } from "@/lib/emailSignature";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { sendGmailAs, googleConfigured } from "@/lib/googleMail";
 import { TASK_FILES_BUCKET } from "@/lib/db";
@@ -96,10 +96,8 @@ export async function POST(req: NextRequest) {
   const signature = ((prof?.email_signature as string | null) ?? "").trim();
   // The composers send real HTML; the plain-text branch is only for older/AI
   // callers, where googleMail escapes the whole body itself — so the
-  // signature has to be appended as plain text there, not as markup.
-  const bodyWithSignature = !signature ? body
-    : isHtml ? appendSignatureHtml(body, signature)
-    : `${body}\n\n${signature}`;
+  // signature has to arrive as text there, not as markup.
+  const bodyWithSignature = isHtml ? appendSignatureHtml(body, signature) : appendSignatureText(body, signature);
 
   // Fetch attachment bytes from the private task-files bucket and base64 them
   // for the MIME parts. Cap the combined size — Gmail rejects > ~25MB raw, and
