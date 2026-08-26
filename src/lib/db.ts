@@ -206,7 +206,10 @@ function withSlot<T>(run: () => PromiseLike<T>): Promise<T> {
   return new Promise<void>((resolve) => waiting.push(resolve)).then(start);
 }
 
-async function fetchAllRows(table: string, orderCol?: string, ascending = true) {
+// Soft-deleted rows (see soft-delete.sql) stay in clients/projects/tasks for
+// 30 days so Trash can restore them — the live app must never see them,
+// so every fetch of those three tables passes excludeDeleted.
+async function fetchAllRows(table: string, orderCol?: string, ascending = true, excludeDeleted = false) {
   const PAGE_SIZE = 1000;
   // Paging without a deterministic total order is how you silently drop or
   // duplicate rows: Postgres makes no ordering promise between the separate
@@ -215,6 +218,7 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true) 
   // common — so always break ties on the primary key.
   const fetchPage = (from: number) => {
     let q = supabase.from(table).select("*").range(from, from + PAGE_SIZE - 1);
+    if (excludeDeleted) q = q.is("deleted_at", null);
     if (orderCol) q = q.order(orderCol, { ascending });
     return q.order("id", { ascending: true });
   };
@@ -237,8 +241,11 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true) 
   // just falls back to unknown-size paging — fire one page, then let the
   // existing safety-tail loop below keep going until a short page — instead
   // of failing the whole table.
-  const { count, error: countError } = await withSlot(() =>
-    supabase.from(table).select("*", { count: "exact", head: true }));
+  const { count, error: countError } = await withSlot(() => {
+    let q = supabase.from(table).select("*", { count: "exact", head: true });
+    if (excludeDeleted) q = q.is("deleted_at", null);
+    return q;
+  });
   const knownPages = countError ? 1 : Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
   const firstResults = await Promise.all(
     Array.from({ length: knownPages }, (_, i) => withSlot(() => fetchPage(i * PAGE_SIZE))));
@@ -265,10 +272,10 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true) 
 
 export async function fetchAll() {
   const [c, ct, p, t, n, cl, cn, m, tt, vf, fd, um, sg, tm, pb, dm, gu] = await Promise.all([
-    fetchAllRows("clients", "created_at"),
+    fetchAllRows("clients", "created_at", true, true),
     fetchAllRows("contacts"),
-    fetchAllRows("projects"),
-    fetchAllRows("tasks", "created_at"),
+    fetchAllRows("projects", undefined, true, true),
+    fetchAllRows("tasks", "created_at", true, true),
     fetchAllRows("notifications", "created_at", false),
     // Fetched separately from the hard-fail set below: these tables ship via a
     // manually-run migration (client-links-notes.sql / messages.sql),
@@ -368,7 +375,14 @@ export const bulkUpsertTasks = (ts: Task[]) => (ts.length ? supabase.from("tasks
 // avoids the read-then-full-row-replace race that a plain upsertTask() would
 // have if two teammates comment on the same task within the same window.
 export const appendCommentDb = (taskId: string, comment: Comment) => supabase.rpc("append_comment", { task_id: taskId, comment }).then(logErr);
-export const deleteTaskDb = (id: string) => supabase.from("tasks").delete().eq("id", id).then(logErr);
+// Soft delete — see soft-delete.sql. Sets deleted_at instead of removing the
+// row; fetchAll's excludeDeleted filter is what actually hides it from the
+// live app. Restored via restoreTaskDb, purged for good after 30 days by
+// the /api/cron/purge-trash sweep (trashCleanupServer.ts), or immediately
+// via hardDeleteTaskDb from the Trash panel's "Delete forever".
+export const deleteTaskDb = (id: string) => supabase.from("tasks").update({ deleted_at: new Date().toISOString() }).eq("id", id).then(logErr);
+export const restoreTaskDb = (id: string) => supabase.from("tasks").update({ deleted_at: null }).eq("id", id).then(logErr);
+export const hardDeleteTaskDb = (id: string) => supabase.from("tasks").delete().eq("id", id).then(logErr);
 export const upsertClient = (c: Client) => supabase.from("clients").upsert(clientToRow(c)).then(logErr);
 // Bumped whenever a Playbook step completes (patchTask here; the owner
 // toggle route has its own server-side twin) — see playbookLastProgressAt's
@@ -377,8 +391,57 @@ export const touchPlaybookProgress = (clientId: string) => supabase.from("client
 // One request for many new clients at once instead of N separate round trips.
 export const bulkUpsertClients = (cs: Client[]) => (cs.length ? supabase.from("clients").upsert(cs.map(clientToRow)).then(logErr) : Promise.resolve());
 export const upsertProject = (p: Project) => supabase.from("projects").upsert(projectToRow(p)).then(logErr);
-export const deleteProjectDb = (id: string) => supabase.from("projects").delete().eq("id", id).then(logErr);
-export const deleteClientDb = (id: string) => supabase.from("clients").delete().eq("id", id).then(logErr);
+// Soft delete, cascading to this project's own not-yet-deleted tasks (parity
+// with the old ON DELETE CASCADE — a project's tasks disappear with it, and
+// come back with it via restoreProjectDb). See deleteTaskDb's comment.
+export const deleteProjectDb = async (id: string) => {
+  const deletedAt = new Date().toISOString();
+  await supabase.from("tasks").update({ deleted_at: deletedAt }).eq("project_id", id).is("deleted_at", null).then(logErr);
+  return supabase.from("projects").update({ deleted_at: deletedAt }).eq("id", id).then(logErr);
+};
+export const restoreProjectDb = async (id: string) => {
+  await supabase.from("tasks").update({ deleted_at: null }).eq("project_id", id).then(logErr);
+  return supabase.from("projects").update({ deleted_at: null }).eq("id", id).then(logErr);
+};
+export const hardDeleteProjectDb = (id: string) => supabase.from("projects").delete().eq("id", id).then(logErr);
+// Cascades to this client's own not-yet-deleted projects AND tasks — a
+// client's whole tree goes to Trash together and comes back together.
+export const deleteClientDb = async (id: string) => {
+  const deletedAt = new Date().toISOString();
+  await supabase.from("tasks").update({ deleted_at: deletedAt }).eq("client_id", id).is("deleted_at", null).then(logErr);
+  await supabase.from("projects").update({ deleted_at: deletedAt }).eq("client_id", id).is("deleted_at", null).then(logErr);
+  return supabase.from("clients").update({ deleted_at: deletedAt }).eq("id", id).then(logErr);
+};
+export const restoreClientDb = async (id: string) => {
+  await supabase.from("tasks").update({ deleted_at: null }).eq("client_id", id).then(logErr);
+  await supabase.from("projects").update({ deleted_at: null }).eq("client_id", id).then(logErr);
+  return supabase.from("clients").update({ deleted_at: null }).eq("id", id).then(logErr);
+};
+export const hardDeleteClientDb = (id: string) => supabase.from("clients").delete().eq("id", id).then(logErr);
+
+export interface TrashEntry { id: string; name: string; deletedAt: string }
+// Trash panel's data source — deliberately not routed through
+// rowToTask/rowToProject/rowToClient (which the live app's excludeDeleted
+// fetches already cover): this only ever needs an id/name/deletedAt to list
+// and act on, not the full row shape.
+export async function fetchTrash(): Promise<{ clients: TrashEntry[]; projects: TrashEntry[]; tasks: TrashEntry[] }> {
+  const [c, p, t] = await Promise.all([
+    supabase.from("clients").select("id,name,deleted_at").not("deleted_at", "is", null).order("deleted_at", { ascending: false }),
+    supabase.from("projects").select("id,name,deleted_at").not("deleted_at", "is", null).order("deleted_at", { ascending: false }),
+    supabase.from("tasks").select("id,title,deleted_at").not("deleted_at", "is", null).order("deleted_at", { ascending: false }),
+  ]);
+  const toEntry = (r: { id: string; deleted_at: string; name?: string; title?: string }): TrashEntry =>
+    ({ id: r.id, name: r.name ?? r.title ?? "(untitled)", deletedAt: r.deleted_at });
+  return {
+    clients: (c.data ?? []).map(toEntry),
+    projects: (p.data ?? []).map(toEntry),
+    tasks: (t.data ?? []).map(toEntry),
+  };
+}
+// The daily 30-day sweep itself runs server-side with the service-role key
+// (see trashCleanupServer.ts / /api/cron/purge-trash) — a browser-side bulk
+// DELETE across every expired row regardless of owner isn't something the
+// anon-key client here should be trusted to do.
 // Atomic client merge (see supabase/client-merge.sql) — repoints every table
 // off the source client, absorbs its contact-routing identity, deletes the
 // source. Awaited (not fire-and-forget) so the caller can refetch on success.
