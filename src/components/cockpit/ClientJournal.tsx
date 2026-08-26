@@ -133,6 +133,13 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   const [folderFilter, setFolderFilter] = useState<string | "unfiled" | "all">(initialFolderFilter ?? "all");
   const [addingFolder, setAddingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
+  // Fall back to "all" once the filtered-on folder is actually gone. Driven
+  // off `folders` rather than off the delete click, so cancelling the
+  // delete confirm leaves the current filter alone.
+  useEffect(() => {
+    if (folderFilter === "all" || folderFilter === "unfiled") return;
+    if (folders && !folders.some((f) => f.id === folderFilter)) setFolderFilter("all");
+  }, [folders, folderFilter]);
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [composeMode, setComposeMode] = useState<"note" | "email" | "sms">("note");
@@ -535,7 +542,11 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                           </button>
                           {onDeleteFolder && (
                             <button
-                              onClick={(e) => { e.stopPropagation(); if (folderFilter === f.id) setFolderFilter("all"); onDeleteFolder(f.id); }}
+                              // Clearing the filter here would fire even if the
+                              // delete confirm is cancelled — the folder row
+                              // disappearing from `folders` is what resets it
+                              // (see the effect below), so only ask to delete.
+                              onClick={(e) => { e.stopPropagation(); onDeleteFolder(f.id); }}
                               title="Delete folder" className="hidden shrink-0 rounded p-1 text-muted hover:text-danger group-hover/jf:block"
                             >
                               <I.trash className="h-3 w-3" />

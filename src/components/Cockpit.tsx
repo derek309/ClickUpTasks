@@ -1982,8 +1982,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // their folderId just stops matching anything and they fall back to
   // "Unfiled." No cascade needed; JSONB isn't relationally enforced anyway.
   const deleteVaultFolder = (id: string) => {
-    setVaultFolders((fs) => fs.filter((f) => f.id !== id));
-    deleteVaultFolderDb(id);
+    const f = vaultFolders.find((x) => x.id === id);
+    setConfirmDialog({
+      title: `Delete folder “${f?.name ?? "this folder"}”?`,
+      message: "Its attachments are kept — they just fall back to Unfiled.",
+      confirmLabel: "Delete",
+      onConfirm: () => {
+        setConfirmDialog(null);
+        setVaultFolders((fs) => fs.filter((x) => x.id !== id));
+        deleteVaultFolderDb(id);
+      },
+    });
   };
   // This client's Vault folders — Journal reads them for its Filter menu's
   // Folder section now that the Vault tab itself is gone.
@@ -2706,12 +2715,23 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!res.ok) { pushToast(`Couldn't upload ${file.name} — is the "task-files" storage bucket set up?`); return null; }
     return { id: newId("a_"), name: file.name, size: formatBytes(file.size), kind: kindFromName(file.name), path };
   };
+  // Confirmed, not immediate: this permanently deletes the stored file, and
+  // unlike a task it has no Trash to fall back on (Derek: "include a
+  // confirmation step when deleting an upload on a task").
   const removeFile = (id: string, att: Attachment) => {
     const t = tasks.find((x) => x.id === id);
     if (!t) return;
-    if (att.path) deleteTaskFile(att.path);
-    update(id, { attachments: t.attachments.filter((a) => a.id !== att.id) });
-    pushToast("Attachment removed");
+    setConfirmDialog({
+      title: `Delete “${att.name}”?`,
+      message: "This permanently deletes the file. It can't be undone.",
+      confirmLabel: "Delete",
+      onConfirm: () => {
+        setConfirmDialog(null);
+        if (att.path) deleteTaskFile(att.path);
+        update(id, { attachments: t.attachments.filter((a) => a.id !== att.id) });
+        pushToast("Attachment removed");
+      },
+    });
   };
   // --- GoHighLevel task sync -----------------------------------------------
   // A client is a GHL contact (cl_<localContactId>). To act on its GHL tasks we
@@ -2956,7 +2976,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   };
   const addSub = (taskId: string, title: string) => { const t = tasks.find((x) => x.id === taskId); if (t && title.trim()) update(taskId, { subtasks: [...t.subtasks, { id: newId("s_"), title: title.trim(), done: false }] }); };
   const renameSub = (taskId: string, subId: string, title: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, title } : s)) }); };
-  const deleteSub = (taskId: string, subId: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { subtasks: t.subtasks.filter((s) => s.id !== subId) }); };
+  const deleteSub = (taskId: string, subId: string) => {
+    const t = tasks.find((x) => x.id === taskId);
+    const s = t?.subtasks.find((x) => x.id === subId);
+    if (!t || !s) return;
+    setConfirmDialog({
+      title: `Delete “${s.title || "this checklist item"}”?`,
+      message: "This can't be undone.",
+      confirmLabel: "Delete",
+      onConfirm: () => { setConfirmDialog(null); update(taskId, { subtasks: t.subtasks.filter((x) => x.id !== subId) }); },
+    });
+  };
   const patchSub = (taskId: string, subId: string, patch: Partial<Subtask>) => {
     const t = tasks.find((x) => x.id === taskId);
     if (!t) return;
@@ -3020,8 +3050,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     upsertTaskTemplate(t);
   };
   const deleteTemplate = (id: string) => {
-    setTaskTemplates((ts) => ts.filter((t) => t.id !== id));
-    deleteTaskTemplateDb(id);
+    const t = taskTemplates.find((x) => x.id === id);
+    setConfirmDialog({
+      title: `Delete template “${t?.name ?? "this template"}”?`,
+      message: "Tasks already created from it are not affected. This can't be undone.",
+      confirmLabel: "Delete",
+      onConfirm: () => {
+        setConfirmDialog(null);
+        setTaskTemplates((ts) => ts.filter((x) => x.id !== id));
+        deleteTaskTemplateDb(id);
+      },
+    });
   };
   // Appends a template's checklist items onto an existing task as new,
   // unchecked subtasks — one patch, not a loop of addSub calls, so it's a
@@ -3057,8 +3096,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     upsertPlaybook(p);
   };
   const deletePlaybook = (id: string) => {
-    setPlaybooks((ps) => ps.filter((p) => p.id !== id));
-    deletePlaybookDb(id);
+    const pb = playbooks.find((x) => x.id === id);
+    setConfirmDialog({
+      title: `Delete playbook “${pb?.name ?? "this playbook"}”?`,
+      message: "Tasks already loaded from it are not affected. This can't be undone.",
+      confirmLabel: "Delete",
+      onConfirm: () => {
+        setConfirmDialog(null);
+        setPlaybooks((ps) => ps.filter((x) => x.id !== id));
+        deletePlaybookDb(id);
+      },
+    });
   };
   // Manual for now, per Derek: author + load here; auto-loading a playbook
   // when a client enters a given stage is planned but not wired up yet — no
@@ -3571,9 +3619,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       }
     });
   };
+  // Confirmed like the client-facing message delete in TaskMessaging — team
+  // chat had no prompt at all, so a mis-click silently destroyed a message
+  // for everyone.
   const deleteTeamMessage = (id: string) => {
-    setTeamMessages((ms) => ms.filter((m) => m.id !== id));
-    deleteTeamMessageDb(id);
+    setConfirmDialog({
+      title: "Delete this message?",
+      message: "It disappears for everyone in Team Chat. This can't be undone.",
+      confirmLabel: "Delete",
+      onConfirm: () => {
+        setConfirmDialog(null);
+        setTeamMessages((ms) => ms.filter((m) => m.id !== id));
+        deleteTeamMessageDb(id);
+      },
+    });
   };
   // Pin is a shared team curation flag, not message ownership — any teammate
   // can toggle it (see chat-reply-attachments-pins.sql's team_messages_update
@@ -3604,8 +3663,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     notify(otherUserId, `${me.name} sent you a message`, null, { kind: "dm", skipEmail: !firstOfBurst });
   };
   const deleteDmMessage = (id: string) => {
-    setDmMessages((ms) => ms.filter((m) => m.id !== id));
-    deleteDmMessageDb(id);
+    setConfirmDialog({
+      title: "Delete this message?",
+      message: "It disappears for both of you. This can't be undone.",
+      confirmLabel: "Delete",
+      onConfirm: () => {
+        setConfirmDialog(null);
+        setDmMessages((ms) => ms.filter((m) => m.id !== id));
+        deleteDmMessageDb(id);
+      },
+    });
   };
   // Both participants (or admin) can pin — matches dm_messages_update's RLS
   // predicate exactly (the same people who can already read the thread).
