@@ -315,7 +315,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // set identical state by construction rather than by two hand-maintained
   // copies that quietly drift — and so adding a view later is one edit, not
   // five. NAV_KEY_VIEWS maps the number keys onto these.
-  const goToView = (view: "dashboard" | "clients" | "projects" | "personal" | "teamchat") => {
+  const goToView = (view: "dashboard" | "alltasks" | "clients" | "projects" | "personal" | "teamchat") => {
     setMyWork(view === "dashboard");
     setPersonalView(view === "personal");
     setInboxView(view === "teamchat");
@@ -330,6 +330,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // Dashboard/Personal/Chat and back.
     if (view === "clients" || view === "projects") setActiveProject(null);
     if (view === "teamchat") markTeamChatRead();
+    // All Tasks is the flat everything-list, so it can't stay scoped to one
+    // client or project. It opens grouped and sorted by due date (Derek,
+    // 2026-08-26: "just want to see all tasks as well by due date") — the
+    // point of the view is what's coming up, not which client it belongs to.
+    // groupBy isn't persisted, and the vault folder picker already sets it on
+    // navigation the same way, so this is a starting point you can change
+    // from the Group by control, not a preference being overwritten.
+    if (view === "alltasks") {
+      setActiveClient("all");
+      setActiveProject(null);
+      setGroupBy("due");
+      setSortBy("due");
+      setSortDir("asc");
+    }
   };
   // Team Chat is a real view now, not an overlay — open the page on its Chat
   // tab and clear the unread dot. Used by both the sidebar item and the
@@ -1022,11 +1036,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // away when the account block replaced the sidebar's branding header. Kept
   // as a lookup so the render below stays unchanged.
   const navVisible: Record<string, boolean> = { inbox: true, work: true, personal: true };
-  // All Tasks dropped out of the sidebar (Derek: "I want everyone to use the
-  // dashboard" — the sidebar should steer people there, not offer a
-  // parallel flat-list home). Still reachable, just de-emphasized — a small
-  // button on the Dashboard header, not a primary nav item.
-  const openAllTasks = () => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient("all"); setSidebarOpen(false); setOpenTaskId(null); };
+  // All Tasks is back as a primary nav item under My Work (Derek,
+  // 2026-08-26) after a spell as a de-emphasized button on the Dashboard
+  // header. It's a plain goToView case now rather than its own hand-rolled
+  // copy of the same flag resets — that copy had already drifted, forgetting
+  // to clear activeProject, so arriving from inside a project left the
+  // "everything" list still filtered down to it.
+  const openAllTasks = () => goToView("alltasks");
 
   useEffect(() => {
     (async () => {
@@ -3712,6 +3728,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // mobile header below so the bell / filter / overflow popovers aren't
   // duplicated in source. Only one header is ever visible (CSS breakpoint),
   // so the popovers never double-render on screen.
+  // "All Tasks" is the flat list with no other view claiming the screen —
+  // the same condition headerTitleText falls through to below.
+  const allTasksView = !settingsView && !inboxView && !dirView && !personalView && !myWork && activeClient === "all";
   const headerTitleText = settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Team Chat") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "My Work" : activeClient === "all" ? "All Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? ""));
   const isClientDetail = !myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && !!clientById(activeClient);
   const showFilterControl = !inboxView && !dirView && !myWork && !settingsView && !(activeClient !== "all" && clientTab === "chat");
@@ -3957,6 +3976,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             not deleted, just admin-toggled off by default. */}
         <nav className="shrink-0 space-y-0.5 px-2">
           {navVisible.work && <SideItem active={myWork} title="My Work (press 1)" onClick={() => goToView("dashboard")}><I.grid className="text-muted" /> <span>My Work</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + myAssignedProjects.length}</span></SideItem>}
+          {/* Directly under My Work, which stays exactly as it was — this is
+              a second way in, not a replacement. Deliberately has no number
+              shortcut: NAV_KEY_VIEWS is documented as sidebar order, and
+              slotting All Tasks in at 2 would have shifted Team Chat through
+              Personal down one and broken existing muscle memory for a key
+              nobody asked for. */}
+          {navVisible.work && <SideItem active={allTasksView} title="Every task across all clients, by due date" onClick={() => goToView("alltasks")}><I.list className="text-muted" /> <span>All Tasks</span></SideItem>}
           {/* "Client replies" nav item removed (Derek, 2026-08-09) — My Work
               and Follow Up already surface an open conversation-priority
               task each their own way (hasOpenConversationTask / Follow Up's
