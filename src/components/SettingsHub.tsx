@@ -22,8 +22,9 @@ import TemplatesPanel from "./TemplatesPanel";
 import PlaybooksPanel from "./PlaybooksPanel";
 import ApiTokensPanel from "./ApiTokensPanel";
 import NotificationPrefsPanel from "./NotificationPrefsPanel";
+import TrashPanel from "./TrashPanel";
 
-export type TabKey = "integrations" | "team" | "templates" | "playbooks" | "tokens" | "notifications";
+export type TabKey = "integrations" | "team" | "templates" | "playbooks" | "tokens" | "notifications" | "trash";
 
 export default function SettingsHub({
   initialTab = "integrations",
@@ -44,6 +45,12 @@ export default function SettingsHub({
   onLoadPlaybook,
   dmEnabled,
   onSetDmEnabled,
+  onRestoreClient,
+  onRestoreProject,
+  onRestoreTask,
+  onPurgeClient,
+  onPurgeProject,
+  onPurgeTask,
 }: {
   initialTab?: TabKey;
   me: Me;
@@ -66,6 +73,12 @@ export default function SettingsHub({
   // used to be a switch right next to the Chat section.
   dmEnabled: boolean;
   onSetDmEnabled: (v: boolean) => void;
+  onRestoreClient: (id: string) => Promise<void> | void;
+  onRestoreProject: (id: string) => Promise<void> | void;
+  onRestoreTask: (id: string) => Promise<void> | void;
+  onPurgeClient: (id: string) => Promise<void> | void;
+  onPurgeProject: (id: string) => Promise<void> | void;
+  onPurgeTask: (id: string) => Promise<void> | void;
 }) {
   const tabs: { key: TabKey; label: string; icon: keyof typeof I; visible: boolean }[] = [
     { key: "integrations", label: "Integrations", icon: "gear", visible: canAdmin },
@@ -74,6 +87,9 @@ export default function SettingsHub({
     { key: "playbooks", label: "Playbooks", icon: "bookmark", visible: canAdmin },
     { key: "tokens", label: "API tokens", icon: "key", visible: true },
     { key: "notifications", label: "Notifications", icon: "bell", visible: true },
+    // Restoring/purging touches other people's clients/projects/tasks, same
+    // trust level as the admin-only tabs above.
+    { key: "trash", label: "Trash", icon: "trash", visible: canAdmin },
   ];
   const visibleTabs = tabs.filter((t) => t.visible);
   const [tab, setTab] = useState<TabKey>(visibleTabs.some((t) => t.key === initialTab) ? initialTab : visibleTabs[0]?.key ?? "tokens");
@@ -104,6 +120,10 @@ export default function SettingsHub({
             )}
             {tab === "tokens" && <ApiTokensPanel />}
             {tab === "notifications" && <NotificationPrefsPanel />}
+            {tab === "trash" && canAdmin && (
+              <TrashPanel onRestoreClient={onRestoreClient} onRestoreProject={onRestoreProject} onRestoreTask={onRestoreTask}
+                onPurgeClient={onPurgeClient} onPurgeProject={onPurgeProject} onPurgeTask={onPurgeTask} />
+            )}
       </div>
     </div>
   );

@@ -86,7 +86,7 @@ import {
   normalizeState,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, deleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, touchPlaybookProgress, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, touchPlaybookProgress, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import TeamChat from "./TeamChat";
@@ -2651,7 +2651,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const lockedStep = tasksRef.current.find((x) => x.id === id);
     if (lockedStep?.playbookStepKey) { pushToast("Playbook steps can't be deleted."); return; }
     setConfirmDialog({
-      title: "Delete this task?", message: "This can't be undone.", confirmLabel: "Delete",
+      title: "Delete this task?", message: "Moves to Trash — restorable there for 30 days.", confirmLabel: "Delete",
       onConfirm: () => {
         setConfirmDialog(null);
         const t = tasksRef.current.find((x) => x.id === id);
@@ -2659,7 +2659,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setTasks((ts) => ts.filter((t) => t.id !== id));
         setOpenTaskId(null);
         deleteTaskDb(id);
-        pushToast("Task deleted");
+        pushToast("Task moved to Trash");
       },
     });
   };
@@ -3181,7 +3181,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const n = tasks.filter((t) => t.clientId === id).length;
     setConfirmDialog({
       title: `Remove “${c?.name}”?`,
-      message: `${n ? `This also removes its ${n} task${n === 1 ? "" : "s"}. ` : ""}The GoHighLevel contact itself stays untouched.`,
+      message: `${n ? `This also moves its ${n} task${n === 1 ? "" : "s"} to Trash. ` : ""}Restorable from Trash for 30 days. The GoHighLevel contact itself stays untouched.`,
       confirmLabel: "Remove",
       onConfirm: () => {
         setConfirmDialog(null);
@@ -3195,6 +3195,23 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       },
     });
   };
+
+  // --- Trash (Settings tab) -----------------------------------------------
+  // Restoring only ever affects clients/projects/tasks (the three tables
+  // soft-delete covers — see soft-delete.sql), so a targeted re-fetch of
+  // just those three is enough; no need for a full fetchAll()-and-replace-
+  // everything reload.
+  const refreshTrashables = async () => {
+    const d = await fetchAll();
+    setClients(d.clients); setProjects(d.projects); setTasks(d.tasks);
+  };
+  const restoreClient = async (id: string) => { await restoreClientDb(id); await refreshTrashables(); pushToast("Client restored"); };
+  const restoreProjectFromTrash = async (id: string) => { await restoreProjectDb(id); await refreshTrashables(); pushToast("Project restored"); };
+  const restoreTaskFromTrash = async (id: string) => { await restoreTaskDb(id); await refreshTrashables(); pushToast("Task restored"); };
+  const purgeClient = async (id: string) => { await hardDeleteClientDb(id); };
+  const purgeProject = async (id: string) => { await hardDeleteProjectDb(id); };
+  const purgeTask = async (id: string) => { await hardDeleteTaskDb(id); };
+
   // --- client dedup + merge ------------------------------------------------
   // The same real business can be a contact in more than one GHL sub-account
   // (agency + directory); if each got promoted, you'd get two client records
@@ -3580,7 +3597,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const n = tasks.filter((t) => t.projectId === id).length;
     setConfirmDialog({
       title: `Delete “${p?.name}”?`,
-      message: n ? `This also deletes its ${n} task${n === 1 ? "" : "s"}.` : "This can't be undone.",
+      message: `${n ? `This also moves its ${n} task${n === 1 ? "" : "s"} to Trash. ` : ""}Restorable from Trash for 30 days.`,
       confirmLabel: "Delete",
       onConfirm: () => {
         setConfirmDialog(null);
@@ -4271,6 +4288,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onSaveTemplate={saveTemplate} onDeleteTemplate={deleteTemplate} onUseTemplateAsTask={useTemplateAsTask}
             playbooks={playbooks} onSavePlaybook={savePlaybook} onDeletePlaybook={deletePlaybook} onLoadPlaybook={loadPlaybook}
             dmEnabled={dmEnabled} onSetDmEnabled={setDmEnabled}
+            onRestoreClient={restoreClient} onRestoreProject={restoreProjectFromTrash} onRestoreTask={restoreTaskFromTrash}
+            onPurgeClient={purgeClient} onPurgeProject={purgeProject} onPurgeTask={purgeTask}
           />
         ) : inboxView && dmUserId ? (
           // A DM thread has no "Activity" sub-view (that's a Team Chat-page
