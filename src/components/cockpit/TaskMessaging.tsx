@@ -227,8 +227,15 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
   // (Derek, 2026-08-24: "it sent but didn't close").
   const [isDraftReviewCompose, setIsDraftReviewCompose] = useState(false);
 
+  // The nonce bump is what actually clears the EMAIL body on screen:
+  // RichTextEditor takes `value` as boot-time content only and never
+  // re-reads it, so setMsgBody("") alone left the just-sent text sitting in
+  // the editor (Derek: "after sending an email the field to write an email
+  // should clear out but it is not"). Remounting via its `key` is the
+  // documented way to reset it — see RichTextEditor's own comment.
   const resetComposer = () => {
     setMsgSubject(""); setMsgBody(""); setPendingMsgAtts([]); setMsgCc([]); setMsgBcc([]); setShowCcBcc(false); setDraftPrompt("");
+    setEmailFocusNonce((n) => n + 1);
   };
   const closeComposers = () => { setReplyingTo(null); setComposingChannel(null); setIsDraftReviewCompose(false); resetComposer(); };
 
