@@ -1456,10 +1456,27 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // to see done tasks and then hiding them would show nothing.
     (!hideDone || filters.status === "done" || t.status !== "done");
 
+  // Tasks quick-added in this list, newest first, held at the top of their
+  // group instead of being sorted into place the moment they're created
+  // (Derek, 2026-08-26: "otherwise it sorts away you know"). A task you just
+  // typed almost always needs a due date or a priority set next, and it can't
+  // be given one if hitting Enter files it out of sight.
+  //
+  // Stored with the list it belongs to rather than cleared by an effect, so
+  // it expires on its own: change client, project, grouping, sort column or
+  // direction and the key stops matching, the pins evaporate, and you get the
+  // ordering you just asked for. No cleanup call to forget at a future call
+  // site, and no setState-in-effect.
+  const listKey = `${activeClient}|${activeProject ?? ""}|${groupBy}|${sortBy}|${sortDir}`;
+  const [justAdded, setJustAdded] = useState<{ key: string; ids: string[] }>({ key: "", ids: [] });
+  const pinnedIds = justAdded.key === listKey ? justAdded.ids : [];
+  const pinJustAdded = (taskId: string) =>
+    setJustAdded((prev) => ({ key: listKey, ids: [taskId, ...(prev.key === listKey ? prev.ids : [])] }));
+
   const sortTasks = (list: Task[]) => {
-    if (sortBy === "manual") return list;
-    const dir = sortDir === "desc" ? -1 : 1;
     const arr = [...list];
+    if (sortBy === "manual") return hoistPinned(arr);
+    const dir = sortDir === "desc" ? -1 : 1;
     if (sortBy === "due") arr.sort((a, b) => ((a.due ?? "9999").localeCompare(b.due ?? "9999")) * dir);
     else if (sortBy === "priority") arr.sort((a, b) => {
       // A live reply thread outranks every priority tier. Derived from the
@@ -1473,8 +1490,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     else if (sortBy === "status") arr.sort((a, b) => (STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status)) * dir);
     else if (sortBy === "assignee") arr.sort((a, b) => ((userById(a.assigneeId)?.name ?? "~").localeCompare(userById(b.assigneeId)?.name ?? "~")) * dir);
     else if (sortBy === "comments") arr.sort((a, b) => (b.comments.length - a.comments.length) * dir);
-    return arr;
+    return hoistPinned(arr);
   };
+  // Pull the just-added tasks to the front, in the order they were pinned
+  // (newest first, so each new one lands directly under the Add task row).
+  // Order-preserving for everything else, and a no-op once nothing is pinned.
+  function hoistPinned(arr: Task[]): Task[] {
+    if (pinnedIds.length === 0) return arr;
+    const pinned = pinnedIds.map((id) => arr.find((t) => t.id === id)).filter((t): t is Task => !!t);
+    if (pinned.length === 0) return arr;
+    const pinnedSet = new Set(pinned.map((t) => t.id));
+    return [...pinned, ...arr.filter((t) => !pinnedSet.has(t.id))];
+  }
   const sortByCol = (key: string) => {
     const map: Record<string, SortBy> = { priority: "priority", assignee: "assignee", due: "due", task: "title", status: "status", comments: "comments" };
     const sb = map[key] ?? "manual";
@@ -2342,6 +2369,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       recurrence: "none", labelIds: [], ghlTaskId: null, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
       createdBy: me.id,
     };
+    pinJustAdded(t.id);
     setTasks((ts) => [...ts, t]);
     if (projectWrite) projectWrite.then(() => upsertTask(t, me.id));
     else upsertTask(t, me.id);
@@ -2401,6 +2429,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       recurrence: "none", labelIds: [], ghlTaskId: null, private: true, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
       createdBy: me.id,
     };
+    pinJustAdded(t.id);
     setTasks((ts) => [...ts, t]);
     upsertTask(t, me.id);
     maybeCleanupTaskTitle(t.id, t.title, t.description);
