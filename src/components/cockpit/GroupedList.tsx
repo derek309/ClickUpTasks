@@ -142,6 +142,19 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
               </button>
               {!collapsedG.has(g.key) && (
                 <div>
+                  {/* Quick-add sits at the TOP of the group, not the bottom
+                      (Derek: "move the add task to the top of the list") — on
+                      a long group the bottom row was off screen, so adding a
+                      task meant scrolling past everything first. border-b
+                      rather than border-t since it now divides downward. */}
+                  {canQuickAdd && (
+                    <div className="flex items-center gap-2 border-b px-4 py-1.5">
+                      <I.plus className="text-muted" />
+                      <input value={draft[g.key] ?? ""} onChange={(e) => setDraft((d) => ({ ...d, [g.key]: e.target.value }))}
+                        onKeyDown={(e) => { if (e.key === "Enter") { onQuickAdd(g.key, draft[g.key] ?? ""); setDraft((d) => ({ ...d, [g.key]: "" })); } }}
+                        placeholder="Add task…" className="flex-1 bg-transparent py-1 text-[15px] outline-none placeholder:text-muted" />
+                    </div>
+                  )}
                   {g.tasks.map((t) => (
                     <TaskRow key={t.id} task={t} template={template} cols={cols} showClient={showClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} onAddComment={onAddComment} meId={meId} delegated={!!highlightDelegateFor && t.assigneeId !== highlightDelegateFor && t.subtasks.some((s) => s.assigneeId === highlightDelegateFor)}
                       selected={!!selectedIds?.has(t.id)} onToggleSelect={onToggleSelect ? (e) => handleSelectClick(t.id, e) : undefined}
@@ -153,14 +166,6 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
                       expanded={expanded.has(t.id)} onToggleExpand={() => toggle(t.id)} onToggleSub={onToggleSub} onAddSub={onAddSub} onDeleteSub={onDeleteSub}
                       subDraft={subDraft[t.id] ?? ""} setSubDraft={(v) => setSubDraft((s) => ({ ...s, [t.id]: v }))} />
                   ))}
-                  {canQuickAdd && (
-                    <div className="flex items-center gap-2 border-t px-4 py-1.5">
-                      <I.plus className="text-muted" />
-                      <input value={draft[g.key] ?? ""} onChange={(e) => setDraft((d) => ({ ...d, [g.key]: e.target.value }))}
-                        onKeyDown={(e) => { if (e.key === "Enter") { onQuickAdd(g.key, draft[g.key] ?? ""); setDraft((d) => ({ ...d, [g.key]: "" })); } }}
-                        placeholder="Add task…" className="flex-1 bg-transparent py-1 text-[15px] outline-none placeholder:text-muted" />
-                    </div>
-                  )}
                 </div>
               )}
             </div>
