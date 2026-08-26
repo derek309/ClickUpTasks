@@ -7,12 +7,13 @@
 // eventually trigger a playbook automatically when a client enters a given
 // stage, but that trigger doesn't exist yet.
 import { useState } from "react";
-import { PRIORITY_META, PRIORITY_ORDER, type Playbook, type PlaybookTask, type Priority, type Client, type Project } from "@/lib/data";
+import { PRIORITY_META, PRIORITY_ORDER, isManuallyAssignable, type Playbook, type PlaybookTask, type Priority, type Client, type Project } from "@/lib/data";
 import { I, SearchableSelect } from "./cockpit/ui";
 
 // Playbook tasks are only ever manually assigned in the editor UI — never
-// "conversation", which is reserved/auto-created only.
-const ASSIGNABLE_PRIORITIES = PRIORITY_ORDER.filter((p) => p !== "conversation");
+// one of the reserved auto-created tiers. Goes through isManuallyAssignable
+// so a newly added auto tier is excluded here automatically.
+const ASSIGNABLE_PRIORITIES = PRIORITY_ORDER.filter(isManuallyAssignable);
 
 type DraftTask = { title: string; dueOffsetDays: string; priority: Priority };
 const emptyDraftTask = (): DraftTask => ({ title: "", dueOffsetDays: "", priority: "normal" });

@@ -1445,9 +1445,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const arr = [...list];
     if (sortBy === "due") arr.sort((a, b) => ((a.due ?? "9999").localeCompare(b.due ?? "9999")) * dir);
     else if (sortBy === "priority") arr.sort((a, b) => {
-      // 4 sits one above "conversation"'s rank of 3 — a live reply thread
-      // outranks even an auto-created GHL conversation task.
-      const rank = (t: Task) => (hasUnreadReply(t) ? 4 : PRIORITY_META[t.priority].rank);
+      // A live reply thread outranks every priority tier. Derived from the
+      // table rather than hardcoded — it used to be a literal 4, which
+      // silently became a TIE when "client_request" was added at rank 4.
+      const unreadRank = Math.max(...Object.values(PRIORITY_META).map((m) => m.rank)) + 1;
+      const rank = (t: Task) => (hasUnreadReply(t) ? unreadRank : PRIORITY_META[t.priority].rank);
       return (rank(b) - rank(a)) * dir;
     });
     else if (sortBy === "title") arr.sort((a, b) => a.title.localeCompare(b.title) * dir);

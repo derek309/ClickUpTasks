@@ -121,7 +121,7 @@ export interface Me {
   canSendMessages: boolean; // admins always true; VAs only when an admin grants it
 }
 export type TaskStatus = "todo" | "in_progress" | "review" | "changes_requested" | "waiting" | "done";
-export type Priority = "conversation" | "urgent" | "normal" | "none";
+export type Priority = "client_request" | "conversation" | "urgent" | "normal" | "none";
 export type Recurrence = "none" | "daily" | "weekday" | "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly" | "custom";
 export const RECURRENCE_ORDER: Recurrence[] = ["none", "daily", "weekday", "weekly", "biweekly", "monthly", "quarterly", "yearly", "custom"];
 export type RecurrenceUnit = "day" | "week" | "month" | "day-of-month";
@@ -1581,18 +1581,26 @@ export function isCompletionEvent(body: string): boolean {
 // client activity surfaces before anything else. The underlying value stays
 // "conversation" (not renamed) — it's load-bearing across the DB, the MCP
 // tool schema, and the Python importer; only the display label changed.
+// "client_request" is the same shape of thing one tier higher: set only by
+// the public client link when a client raises a task themselves (see
+// /api/waiting/[token]/request). It ranks above everything so a request the
+// client is waiting on can't sink in among our own work (Derek: "they need
+// to be sorted out so they don't just mix in with everything we're working
+// on") — those tasks used to land as "No priority", i.e. dead last.
 export const PRIORITY_META: Record<Priority, { label: string; color: string; rank: number }> = {
+  client_request: { label: "Client request", color: "#f97316", rank: 4 },
   conversation: { label: "Interaction", color: "#8b5cf6", rank: 3 },
   urgent: { label: "Urgent", color: "#ef4444", rank: 2 },
   normal: { label: "Normal", color: "#3b82f6", rank: 1 },
   none: { label: "No priority", color: "#cbd5e1", rank: 0 },
 };
-export const PRIORITY_ORDER: Priority[] = ["conversation", "urgent", "normal", "none"];
+export const PRIORITY_ORDER: Priority[] = ["client_request", "conversation", "urgent", "normal", "none"];
 
-// Single source of truth for "conversation is auto-assigned only" — used by
+// Single source of truth for "this tier is auto-assigned only" — used by
 // every manual priority-setting surface (pickers, quick-add, drag-and-drop)
-// so a future one can't forget the guard.
-export const isManuallyAssignable = (p: Priority): boolean => p !== "conversation";
+// so a future one can't forget the guard. Both auto tiers mean "something
+// happened", so letting someone hand-pick one would be a lie about origin.
+export const isManuallyAssignable = (p: Priority): boolean => p !== "conversation" && p !== "client_request";
 // A priority picker's option list: every manually-assignable tier, plus the
 // current value even if it's Conversation (so an existing auto-created task
 // can still show/reselect its own tier, just not switch *into* it).

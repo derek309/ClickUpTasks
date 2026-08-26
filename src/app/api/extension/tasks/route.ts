@@ -51,9 +51,10 @@ export async function POST(req: NextRequest) {
     ...(link ? [{ id: "at_" + randomUUID(), name: "Source link", kind: "link", size: "", url: link }] : []),
     ...screenshotPaths.map((path: string, i: number) => ({ id: "at_" + randomUUID(), name: screenshotPaths.length > 1 ? `Screenshot ${i + 1}` : "Screenshot", kind: "image", size: "", path })),
   ];
-  // "conversation" is auto-assigned only (see isManuallyAssignable in
-  // src/lib/data.ts) — reject it here rather than silently downgrading it,
-  // same spirit as the MCP tool's create_task excluding it from its enum.
+  // The auto-assigned-only tiers ("conversation", "client_request" — see
+  // isManuallyAssignable in src/lib/data.ts) are rejected here rather than
+  // silently downgraded, same spirit as the MCP create_task enum. This is a
+  // whitelist, so a future auto tier stays excluded by default.
   const ALLOWED_PRIORITIES = new Set(["none", "normal", "urgent"]);
   const priority = typeof body.priority === "string" && ALLOWED_PRIORITIES.has(body.priority) ? body.priority : "normal";
 

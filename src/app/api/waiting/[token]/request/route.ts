@@ -86,7 +86,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   const nowIso = new Date().toISOString();
   const { error } = await supabaseAdmin.from("tasks").insert({
     id: taskId, project_id: projectId, client_id: scope.clientId, title, description: "",
-    status: "todo", priority: "none", assignee_id: assignee,
+    // Top priority tier, above Urgent — a client is waiting on this. These
+    // used to land as "No priority" and sort dead last, mixed in with our
+    // own backlog. assignee falls back to the first admin when nobody owns
+    // the client (see resolveNotifyRecipient), so it is never unassigned.
+    status: "todo", priority: "client_request", assignee_id: assignee,
     contact_id: contactId,
     due: todayIso(),
     client_response: { body: text, attachments, submittedAt: nowIso },
