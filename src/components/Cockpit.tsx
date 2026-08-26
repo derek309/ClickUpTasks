@@ -823,10 +823,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     }
   };
   useEffect(() => {
+    let localStarred: string[] = [];
+    let localStarredLists: string[] = [];
     try {
       const s = localStorage.getItem("cut_clientSort"); if (s) setClientSort(s as ClientSort);
-      const st = localStorage.getItem("cut_starred"); if (st) setStarred(new Set(JSON.parse(st)));
-      const stl = localStorage.getItem("cut_starredLists"); if (stl) setStarredLists(new Set(JSON.parse(stl)));
+      const st = localStorage.getItem("cut_starred"); if (st) { localStarred = JSON.parse(st); setStarred(new Set(localStarred)); }
+      const stl = localStorage.getItem("cut_starredLists"); if (stl) { localStarredLists = JSON.parse(stl); setStarredLists(new Set(localStarredLists)); }
       const fp = localStorage.getItem("cut_fabPos"); if (fp) setFabPos(JSON.parse(fp));
       const mo = localStorage.getItem("cut_clientOrder"); if (mo) setManualOrder(JSON.parse(mo));
       const he = localStorage.getItem("cut_hideEmpty"); if (he !== null) setHideEmpty(he === "1");
@@ -834,6 +836,30 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       const colo = localStorage.getItem("cut_colOrder"); if (colo) setColOrder(JSON.parse(colo));
       const cu = localStorage.getItem("cut_clientUsed"); if (cu) setClientUsed(JSON.parse(cu));
     } catch { /* fresh browser */ }
+    // Pinned clients/lists used to live only in localStorage — invisible
+    // from a cross-origin iframe (the app loaded as a GHL custom menu link
+    // gets its own partitioned storage, even though the same login/session
+    // works fine there). DB-backed now (see supabase/pins.sql); this is the
+    // one-time migration off localStorage, run from whichever context still
+    // has the old values, so nobody's existing pins just vanish.
+    (async () => {
+      try {
+        const res = await authedFetch("/api/pins");
+        if (!res.ok) return;
+        const j = await res.json();
+        const dbStarred: string[] = j.starredClientIds ?? [];
+        const dbStarredLists: string[] = j.starredListIds ?? [];
+        if (dbStarred.length || dbStarredLists.length) {
+          setStarred(new Set(dbStarred));
+          setStarredLists(new Set(dbStarredLists));
+        } else if (localStarred.length || localStarredLists.length) {
+          authedFetch("/api/pins", {
+            method: "PATCH", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ starredClientIds: localStarred, starredListIds: localStarredLists }),
+          }).catch(() => {});
+        }
+      } catch { /* pins fetch is best-effort; localStorage values (if any) stay as the local fallback */ }
+    })();
   }, []);
   // Stamp a client's last-opened time whenever it becomes the active client,
   // by any path (sidebar, ⌘K, board, deep link) — so "Recently used" ordering
@@ -845,14 +871,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const toggleHideEmpty = () => setHideEmpty((v) => { const n = !v; try { localStorage.setItem("cut_hideEmpty", n ? "1" : "0"); } catch {} return n; });
   const toggleHideDone = () => setHideDone((v) => { const n = !v; try { localStorage.setItem("cut_hideDone", n ? "1" : "0"); } catch {} return n; });
   const saveClientSort = (v: ClientSort) => { setClientSort(v); try { localStorage.setItem("cut_clientSort", v); } catch {} };
+  // localStorage write kept alongside the DB one — harmless, and it's what
+  // still seeds `starred` synchronously on the very next mount before the
+  // /api/pins fetch above resolves.
   const toggleStar = (id: string) => setStarred((prev) => {
     const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id);
     try { localStorage.setItem("cut_starred", JSON.stringify([...n])); } catch {}
+    authedFetch("/api/pins", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ starredClientIds: [...n] }) }).catch(() => {});
     return n;
   });
   const toggleStarList = (id: string) => setStarredLists((prev) => {
     const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id);
     try { localStorage.setItem("cut_starredLists", JSON.stringify([...n])); } catch {}
+    authedFetch("/api/pins", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ starredListIds: [...n] }) }).catch(() => {});
     return n;
   });
   const [drawerFull, setDrawerFull] = useState(false);
