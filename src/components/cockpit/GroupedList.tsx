@@ -447,7 +447,7 @@ export function InlineDue({ value, overdue, recurrence = "none", recurrenceInter
   // same visual weight as status. Folded into this popover instead — only
   // reachable while actually setting the date, not permanently on screen.
   onRecurrenceDetailChange?: (patch: { recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[] }) => void;
-  emptyLabel?: string; strong?: boolean; showRecurrenceLabel?: boolean }) {
+  emptyLabel?: React.ReactNode; strong?: boolean; showRecurrenceLabel?: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0, width: 440 });

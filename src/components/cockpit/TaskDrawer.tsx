@@ -350,7 +350,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             as status — folded into InlineDue's own popover instead (see
             onRecurrenceDetailChange in GroupedList.tsx), so the header shows
             no always-visible number input. */}
-        <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} showRecurrenceLabel onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} onRecurrenceDetailChange={(patch) => onPatch(patch)} />
+        <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} showRecurrenceLabel onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} onRecurrenceDetailChange={(patch) => onPatch(patch)} emptyLabel={<I.calendar className="h-3.5 w-3.5" />} />
       </span>
       {/* w-full/min-w-0: a native <select> sizes itself to its WIDEST option,
           and "⏳ Waiting on {long business name}" pushed it clean out of the
