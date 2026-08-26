@@ -20,7 +20,7 @@
 //     SettingsHub. Currently unused; kept because it's a few lines and the
 //     obvious shape for a future quick-peek from another view.
 import { useEffect, useRef, useState } from "react";
-import { type Me, type User, type Attachment, type TeamMessage, type DmMessage, users, userById, timeAgo } from "@/lib/data";
+import { type Me, type User, type Attachment, type TeamMessage, type DmMessage, users, userById, timeAgo, mentionCandidates, applyMention } from "@/lib/data";
 import { I, Avatar, renderRichText, useStickyBottom, JumpToLatestButton } from "./cockpit/ui";
 import { AttachmentThumbs } from "./cockpit/AttachmentThumbs";
 import { AttachmentTile } from "./cockpit/AttachmentTile";
@@ -143,10 +143,9 @@ export default function TeamChat({ me, scope, messages, onSend, onDelete, onPin,
   // ("derek@", "me@clickuplocal.com") never opens the picker and never gets
   // its Enter key hijacked into a name completion.
   const [mentionDismissed, setMentionDismissed] = useState(false);
-  const mentionMatch = scope.type === "team" ? /(^|\s)@([\w]*)$/.exec(draft) : null;
-  const mentionCands = mentionMatch && !mentionDismissed ? users.filter((u) => u.name.toLowerCase().includes(mentionMatch[2].toLowerCase())) : [];
+  const mentionCands = scope.type === "team" && !mentionDismissed ? mentionCandidates(draft, users) : [];
   const mentionOpen = mentionCands.length > 0;
-  const pickMention = (name: string) => setDraft(draft.replace(/(^|\s)@([\w]*)$/, (_m, pre: string) => `${pre}@${name} `));
+  const pickMention = (name: string) => setDraft(applyMention(draft, name));
 
   // The feed + composer, identical in both modes — only the chrome around
   // them differs (page pane vs centered modal).

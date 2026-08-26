@@ -18,6 +18,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   users, userById, timeAgo, dayLabel, isCompletionEvent, NOTE_TYPE_META, NOTE_TYPE_ORDER, MANUAL_NOTE_TYPES, noteTypeMeta, htmlToText, looksLikeHtml, plainTextToHtml,
   type ClientNote, type NoteType, type Task, type Comment, type Message, type MessageChannel, type MessageDirection, type Me, type Attachment, type Contact, type ScheduledMessage, type VaultFolder,
+  mentionCandidates, applyMention,
 } from "@/lib/data";
 import { I, Avatar, CollapsibleText, newId, useStickyBottom, JumpToLatestButton } from "./ui";
 import { ConfirmModal, type ConfirmSpec } from "./modals";
@@ -310,8 +311,8 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
 
   // Same @mention pattern as task comments: type @ to search teammates, pick
   // one to insert "@Name ", and onAdd's caller notifies them on send.
-  const mentionMatch = /@([\w]*)$/.exec(draft);
-  const mentionCands = mentionMatch ? users.filter((u) => u.name.toLowerCase().includes(mentionMatch[1].toLowerCase())) : [];
+  const mentionCands = mentionCandidates(draft, users);
+  const mentionOpen = mentionCands.length > 0;
 
   // Auto-follow the newest entry — but only while already at the bottom, so
   // scrolling up to read history isn't fought by a new note/message/comment
@@ -872,17 +873,17 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                 </div>
               )}
               <div className="relative min-h-0 flex-1">
-                {mentionMatch && mentionCands.length > 0 && (
+                {mentionOpen && (
                   <div className="absolute bottom-full left-0 z-20 mb-1 w-full overflow-hidden rounded-lg border bg-surface shadow-lg">
                     {mentionCands.map((u) => (
-                      <button key={u.id} onClick={() => setDraft(draft.replace(/@([\w]*)$/, `@${u.name} `))} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[15px] hover:bg-background">
+                      <button key={u.id} onClick={() => setDraft(applyMention(draft, u.name))} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[15px] hover:bg-background">
                         <Avatar id={u.id} size={22} /> <span className="min-w-0 flex-1 truncate">{u.name}</span>{u.role === "va" && <span className="shrink-0 text-[13px] text-muted">VA</span>}
                       </button>
                     ))}
                   </div>
                 )}
                 <textarea value={draft} onChange={(e) => setDraft(e.target.value)} onPaste={handlePaste}
-                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !(mentionMatch && mentionCands.length)) { e.preventDefault(); submit(); } }}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !mentionOpen) { e.preventDefault(); submit(); } }}
                   placeholder="Message the team… (Enter to send, Shift+Enter for a new line, type @ to mention, paste or drop a file to attach). Or add just a link below."
                   className="h-full min-h-[160px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
               </div>

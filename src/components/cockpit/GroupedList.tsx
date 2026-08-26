@@ -195,6 +195,7 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
   const doneSubs = task.subtasks.filter((x) => x.done).length;
   const crumb = project && project.name !== "Tasks" ? project.name : "";
   const commentCount = task.comments.filter((c) => c.kind !== "event").length;
+  const isDone = task.status === "done";
   // Priority used to be its own column; it's now a 3px bar on the row's
   // leading edge so it reads at a glance without repeating the group
   // heading when a view is already grouped by priority.
@@ -227,6 +228,17 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
               {selected && <I.check />}
             </button>
           )}
+          {/* One-click complete (Derek, 2026-08-26). Deliberately a circle
+              next to the square select box above — two checkbox-shaped
+              controls side by side would read as the same thing. It only
+              flips between Done and To do; every other stage still goes
+              through the Stage column's picker, which is why this isn't a
+              cycle-through-statuses button. */}
+          <button onClick={(e) => { e.stopPropagation(); onPatch(task.id, { status: isDone ? "todo" : "done" }); }}
+            title={isDone ? "Mark as not done" : "Mark done"} aria-pressed={isDone}
+            className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border transition ${isDone ? "border-success bg-success text-white" : "border-border text-transparent hover:border-success hover:text-success"}`}>
+            <I.check />
+          </button>
           <button onClick={onToggleExpand} className={`shrink-0 rounded p-0.5 text-muted hover:text-foreground ${task.subtasks.length ? "" : "opacity-0 group-hover/tr:opacity-40"}`} title="Subtasks"><I.chevron className={`transition ${expanded ? "-rotate-90" : "rotate-180"}`} /></button>
           {/* Always visible (Derek, 2026-08-24): hiding it whenever the
               assignee was you left most rows on a client's own list with no
@@ -246,7 +258,7 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
             {!showClient && crumb && <span className="truncate text-[11px] leading-tight text-muted">{crumb}</span>}
             <span className="flex min-w-0 items-center gap-1.5">
               {delegated && <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">Delegated</span>}
-              <span className="line-clamp-none min-w-0 flex-1 break-words text-[15px] font-medium leading-snug sm:line-clamp-2" title={task.title}>{task.title}</span>
+              <span className={`line-clamp-none min-w-0 flex-1 break-words text-[15px] font-medium leading-snug sm:line-clamp-2 ${isDone ? "text-muted line-through" : ""}`} title={task.title}>{task.title}</span>
               {task.recurrence !== "none" && <span title={describeRecurrence(task.recurrence, task.recurrenceInterval, task.recurrenceUnit, task.recurrenceDaysOfMonth)}><I.repeat className="shrink-0 text-muted" /></span>}
               {task.attachments.length > 0 && <I.clip className="shrink-0 text-muted" />}
               {commentCount > 0 && <span onClick={(e) => e.stopPropagation()}><InlineComments task={task} onAddComment={onAddComment} /></span>}

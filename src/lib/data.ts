@@ -1646,6 +1646,51 @@ export const users: User[] = [
   { id: "u_derek", name: "Derek Fox", initials: "DF", color: "#a855f7", role: "admin" },
 ];
 
+// --- @mentions --------------------------------------------------------------
+// One definition of "what counts as a mention", shared by every composer that
+// offers the picker (task comments, Client Journal, Team Chat) and by every
+// notifier that scans a sent body for one. They used to be six separate
+// inline regexes that had already drifted: Team Chat guarded against email
+// addresses opening the picker and matched names case-insensitively on a word
+// boundary, task comments did neither — so "@michaella" notified nobody and
+// "derek@" popped the picker mid-address.
+
+/** The half-typed "@quer" at the very end of a draft, or null. The @ must
+ *  start the draft or follow whitespace so an email address never triggers
+ *  the picker (and never gets its Enter key hijacked into a completion). */
+export function mentionQuery(text: string): string | null {
+  const m = /(^|\s)@([\w]*)$/.exec(text);
+  return m ? m[2] : null;
+}
+
+/** Teammates matching the half-typed query, or [] when there's no query. */
+export function mentionCandidates(text: string, roster: User[] = users, excludeId?: string): User[] {
+  const q = mentionQuery(text);
+  if (q === null) return [];
+  return roster.filter((u) => u.id !== excludeId && u.name.toLowerCase().includes(q.toLowerCase()));
+}
+
+/** Complete the half-typed mention with a full name, keeping the whitespace
+ *  that preceded the @ and leaving a trailing space to keep typing after. */
+export function applyMention(text: string, name: string): string {
+  return text.replace(/(^|\s)@([\w]*)$/, (_m, pre: string) => `${pre}@${name} `);
+}
+
+/** Does a sent body actually mention this person? Word-boundary, not bare
+ *  substring, so "@Samantha" doesn't also notify a "Sam" on the roster.
+ *  Case-insensitive so a hand-typed "@derek fox" still lands; the picker
+ *  inserts the exact name anyway. A bare first name never matches — that's
+ *  what the picker is for. */
+export function mentionsUser(body: string, name: string): boolean {
+  const lower = body.toLowerCase();
+  const at = "@" + name.toLowerCase();
+  for (let from = lower.indexOf(at); from !== -1; from = lower.indexOf(at, from + 1)) {
+    const after = lower[from + at.length];
+    if (after === undefined || !/[\w]/.test(after)) return true;
+  }
+  return false;
+}
+
 export function initialsOf(name: string): string {
   const p = name.trim().split(/\s+/);
   return ((p[0]?.[0] ?? "") + (p[1]?.[0] ?? "")).toUpperCase() || "?";

@@ -17,6 +17,10 @@ import {
   playbookCompletionByCategory,
   PLAYBOOK_ALL_STEPS,
   applyWaitingStatusSync,
+  mentionQuery,
+  mentionCandidates,
+  applyMention,
+  mentionsUser,
   TODAY,
   type User,
   type Task,
@@ -352,5 +356,56 @@ describe("normalizeState", () => {
   });
   it("passes through unrecognized values uppercased, rather than throwing", () => {
     expect(normalizeState("Dallas")).toBe("DALLAS");
+  });
+});
+
+describe("@mentions", () => {
+  const roster = [
+    { id: "u_derek", name: "Derek Fox", initials: "DF", color: "#a855f7", role: "admin" as const },
+    { id: "u_mich", name: "Michaella Pastrana", initials: "MP", color: "#0ea5e9", role: "va" as const },
+    { id: "u_sam", name: "Sam", initials: "S", color: "#22c55e", role: "admin" as const },
+  ];
+
+  it("opens on a half-typed name at the end of the draft", () => {
+    expect(mentionQuery("@mich")).toBe("mich");
+    expect(mentionQuery("look at this @mich")).toBe("mich");
+    expect(mentionQuery("@")).toBe("");
+  });
+
+  it("stays shut mid-email-address and mid-sentence", () => {
+    expect(mentionQuery("derek@")).toBeNull();
+    expect(mentionQuery("me@clickuplocal.com")).toBeNull();
+    expect(mentionQuery("@mich can you look")).toBeNull();
+  });
+
+  it("matches teammates case-insensitively on the typed fragment", () => {
+    expect(mentionCandidates("@mich", roster).map((u) => u.name)).toEqual(["Michaella Pastrana"]);
+    expect(mentionCandidates("@PASTRANA", roster).map((u) => u.name)).toEqual(["Michaella Pastrana"]);
+    expect(mentionCandidates("@", roster)).toHaveLength(3);
+    expect(mentionCandidates("no mention here", roster)).toEqual([]);
+  });
+
+  it("leaves the author out of their own picker", () => {
+    expect(mentionCandidates("@", roster, "u_derek").map((u) => u.name)).not.toContain("Derek Fox");
+  });
+
+  it("completes to the full name, keeping preceding text and adding a trailing space", () => {
+    expect(applyMention("@mich", "Michaella Pastrana")).toBe("@Michaella Pastrana ");
+    expect(applyMention("hey @mich", "Michaella Pastrana")).toBe("hey @Michaella Pastrana ");
+  });
+
+  it("notifies on a full name in any casing", () => {
+    expect(mentionsUser("@Michaella Pastrana can you take this", "Michaella Pastrana")).toBe(true);
+    expect(mentionsUser("@michaella pastrana can you take this", "Michaella Pastrana")).toBe(true);
+    expect(mentionsUser("thanks @Michaella Pastrana", "Michaella Pastrana")).toBe(true);
+  });
+
+  it("does not notify on a bare first name — that is what the picker is for", () => {
+    expect(mentionsUser("@michaella can you take this", "Michaella Pastrana")).toBe(false);
+  });
+
+  it("does not let a longer name notify the shorter one it starts with", () => {
+    expect(mentionsUser("@Samantha Reed took it", "Sam")).toBe(false);
+    expect(mentionsUser("@Sam took it", "Sam")).toBe(true);
   });
 });

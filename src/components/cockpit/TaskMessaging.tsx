@@ -11,6 +11,7 @@
 import { useRef, useState } from "react";
 import {
   users, userById, timeAgo, htmlToText, looksLikeHtml, plainTextToHtml, parseEventDiff, STATUS_META, PRIORITY_META,
+  mentionCandidates, applyMention,
   type Task, type Client, type Contact, type Attachment, type MessageChannel, type Message, type Comment,
 } from "@/lib/data";
 import { I, Avatar, CollapsibleText } from "./ui";
@@ -547,19 +548,27 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
     setComment("");
     setPendingCommentAtts([]);
   };
-  const mentionMatch = /@([\w]*)$/.exec(comment);
-  const mentionCands = mentionMatch ? users.filter((u) => u.name.toLowerCase().includes(mentionMatch[1].toLowerCase())) : [];
+  const mentionCands = mentionCandidates(comment, users);
+  const mentionOpen = mentionCands.length > 0;
+  const pickMention = (name: string) => setComment(applyMention(comment, name));
   const teamComposer = (
-    <div className="relative max-h-[50vh] shrink-0 overflow-y-auto rounded-xl border-t-2 p-3" style={{ borderTopColor: channelColor.activity, background: "color-mix(in srgb, var(--accent) 5%, transparent)" }}>
-      {mentionMatch && mentionCands.length > 0 && (
-        <div className="absolute bottom-full left-3 mb-1 w-56 overflow-hidden rounded-lg border bg-surface shadow-lg">
+    // The picker lives OUTSIDE the scrolling box (Derek, 2026-08-26 — "@ is
+    // not working"). It was rendering all along, but `bottom-full` puts it
+    // above the composer's top edge and the composer is an overflow-y-auto
+    // scroll container, which clips in both axes — so the list was drawn and
+    // immediately cut off, and there was no way to pick the exact "@Full
+    // Name" the notifier looks for. Same shape ClientJournal already used.
+    <div className="relative shrink-0">
+      {mentionOpen && (
+        <div className="absolute bottom-full left-3 z-20 mb-1 w-56 overflow-hidden rounded-lg border bg-surface shadow-lg">
           {mentionCands.map((u) => (
-            <button key={u.id} onClick={() => setComment(comment.replace(/@([\w]*)$/, `@${u.name} `))} className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-background">
+            <button key={u.id} onClick={() => pickMention(u.name)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-background">
               <Avatar id={u.id} size={22} /> <span className="min-w-0 flex-1 truncate">{u.name}</span>{u.role === "va" && <span className="shrink-0 text-[14px] text-muted">VA</span>}
             </button>
           ))}
         </div>
       )}
+    <div className="max-h-[50vh] overflow-y-auto rounded-xl border-t-2 p-3" style={{ borderTopColor: channelColor.activity, background: "color-mix(in srgb, var(--accent) 5%, transparent)" }}>
       <div className="mb-2 shrink-0 text-[14px] text-muted">Note — internal only, nobody outside the team sees this.</div>
       {(pendingCommentAtts.length > 0 || uploadingCommentAtt) && (
         <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
@@ -568,8 +577,13 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
         </div>
       )}
       <textarea value={comment} onChange={(e) => setComment(e.target.value)} onPaste={handleCommentPaste} autoFocus
-        onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitComment(); } }}
-        placeholder="Write a team message… (⌘↵ to send, paste to attach an image)"
+        onKeyDown={(e) => {
+          // ⌘↵ always sends, checked first — so mentioning someone as the
+          // last thing you type can still be sent without picking.
+          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitComment(); return; }
+          if (e.key === "Enter" && !e.shiftKey && mentionOpen) { e.preventDefault(); pickMention(mentionCands[0].name); }
+        }}
+        placeholder="Write a team message… (type @ to mention a teammate, ⌘↵ to send, paste to attach an image)"
         className="min-h-[100px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[16px] outline-none placeholder:text-muted focus:border-accent" />
       <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
         <span className="text-[14px] text-muted">{wordCount(comment)} word{wordCount(comment) === 1 ? "" : "s"}</span>
@@ -578,6 +592,7 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
           <button onClick={submitComment} disabled={!comment.trim() && pendingCommentAtts.length === 0} className="rounded-lg bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">Send</button>
         </span>
       </div>
+    </div>
     </div>
   );
 
@@ -1002,7 +1017,6 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
     </>
   );
 
-  void mentionMatch; void mentionCands; // reserved: team @-mention affordance can be reintroduced here if needed
 
   return { feedArea, composerFooter };
 }

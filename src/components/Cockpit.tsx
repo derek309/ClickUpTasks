@@ -28,6 +28,7 @@ import {
   STATUS_META,
   STATUS_ORDER,
   applyWaitingStatusSync,
+  mentionsUser,
   isCompletionEvent,
   CLIENT_STATUS_META,
   CLIENT_STATUS_ORDER,
@@ -2602,7 +2603,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // always hears about new comments on their task (unless they wrote it).
     const mentioned = new Set<string>();
     users.forEach((u) => {
-      if (u.id !== me.id && body.includes("@" + u.name)) {
+      if (u.id !== me.id && mentionsUser(body, u.name)) {
         mentioned.add(u.id);
         notify(u.id, `${me.name} mentioned you in “${t.title}”`, id, { kind: "message", skipEmail: true });
         pushToast(`Notified ${u.name}`);
@@ -3609,16 +3610,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // Word-boundary match, not a bare substring: "@Samantha" must not also
     // notify a "Sam" on the roster. Case-insensitive so a hand-typed
     // "@derek fox" still lands; the picker inserts the exact name anyway.
-    const lower = body.toLowerCase();
     users.forEach((u) => {
-      if (u.id === me.id) return;
-      const at = "@" + u.name.toLowerCase();
-      let from = lower.indexOf(at);
-      while (from !== -1) {
-        const after = lower[from + at.length];
-        if (after === undefined || !/[\w]/.test(after)) { notify(u.id, `${me.name} mentioned you in Team Chat`, null, { kind: "message" }); return; }
-        from = lower.indexOf(at, from + 1);
-      }
+      if (u.id !== me.id && mentionsUser(body, u.name)) notify(u.id, `${me.name} mentioned you in Team Chat`, null, { kind: "message" });
     });
   };
   // Confirmed like the client-facing message delete in TaskMessaging — team
@@ -3693,7 +3686,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // people back into this feed instead of it going stale and unread.
     const where = projectId ? projectById(projectId)?.name : clientById(clientId)?.name;
     users.forEach((u) => {
-      if (u.id !== me.id && body.includes("@" + u.name)) notify(u.id, `${me.name} mentioned you in the ${where ?? "team"} chat`, null, { clientId, projectId, kind: "message" });
+      if (u.id !== me.id && mentionsUser(body, u.name)) notify(u.id, `${me.name} mentioned you in the ${where ?? "team"} chat`, null, { clientId, projectId, kind: "message" });
     });
   };
   const editNote = (note: ClientNote, body: string) => {
@@ -3929,7 +3922,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   );
 
   return (
-    <div className="flex h-screen w-full overflow-hidden text-[15px]">
+    // --drawer-left is where the docked TaskDrawer starts: the sidebar's right
+    // edge, or the window's left edge when the sidebar is collapsed. Set here
+    // (rather than read inside the drawer) so the one place that owns the
+    // sidebar's width owns this too.
+    <div className="flex h-screen w-full overflow-hidden text-[15px]" style={{ "--drawer-left": sidebarHidden ? "0px" : "16rem" } as React.CSSProperties}>
       {/* mobile backdrop */}
       {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={() => setSidebarOpen(false)} />}
 

@@ -723,17 +723,23 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // moving between tasks in this list, without duplicating a whole list
   // view inside the drawer.
   // A task with no linked contact (so SMS/Email can never appear) and no
-  // comments yet has nothing the messaging feed could show — in full-page
-  // mode that's a ~400px column of dead space next to a document with room
-  // to spare. Fold it into the document column instead of reserving a wide
+  // comments yet has nothing the messaging feed could show — that's a
+  // ~400px column of dead space next to a document with room to spare. Fold it into the document column instead of reserving a wide
   // empty rail for it; the moment it has a linked contact or a first
   // comment, it's no longer "light" and gets the full two-column layout.
-  const isLightTask = full && !hasMessaging && task.comments.length === 0;
+  const isLightTask = !hasMessaging && task.comments.length === 0;
 
   return (
     <>
       <div className={`fixed inset-0 bg-black/20 ${full ? "z-40" : "z-10"}`} onClick={onClose} />
-      <aside onPaste={handlePaste} className={full ? "fixed inset-0 z-50 flex flex-col bg-surface" : "fixed inset-y-0 right-0 z-20 flex w-full max-w-[460px] flex-col border-l bg-surface shadow-xl"}>
+      {/* Docked mode is no longer a narrow rail (Derek, 2026-08-26): it spans
+          everything from the sidebar's right edge to the window's, so the
+          task gets the same two-column document/activity layout full mode
+          has instead of a 460px column that squeezed both. --drawer-left is
+          set by Cockpit and follows the sidebar (16rem, or 0 when hidden);
+          below md the sidebar is an overlay, so the drawer is full width.
+          left + right define the box there, hence md:w-auto over w-full. */}
+      <aside onPaste={handlePaste} className={full ? "fixed inset-0 z-50 flex flex-col bg-surface" : "fixed inset-y-0 right-0 z-20 flex w-full flex-col border-l bg-surface shadow-xl md:left-[var(--drawer-left,16rem)] md:w-auto"}>
         <div className="flex flex-wrap items-center gap-2 border-b px-5 py-3 text-[13px] text-muted">
           <span className="flex min-w-0 items-center gap-2">
             <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: client.color }} />
@@ -771,8 +777,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           </div>
         </div>
 
-        {full ? (
-          isLightTask ? (
+        {isLightTask ? (
             // No linked contact and no comments yet — nothing the messaging
             // feed could show, so fold it into the document instead of
             // reserving a wide empty column for it (see isLightTask above).
@@ -858,37 +863,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               {composerFooter}
             </div>
           </div>
-          )
-        ) : (
-          <>
-            <div className="flex-1 overflow-y-auto bg-background px-5 py-4">
-              {titleRow}
-              {metaLine}
-              {ghlWarningBanner}
-              <div className="mt-5">{chipRow}{detailsBlock}</div>
-              {playbookGuideBlock}
-              {clientResponseBlock}
-              {descriptionBlock}
-              {subtasksBlock}
-              {attachmentsBlock}
-              {emptySectionsRow}
-
-              <div className="mt-6">
-                {hasMessaging && (
-                  <div className="mb-1.5 flex items-center justify-end gap-2 text-[12px]">
-                    {messageDest?.phone ? (
-                      <a href={`tel:${messageDest.phone}`} className="font-medium text-accent hover:underline">Call</a>
-                    ) : (
-                      <span title="No phone on file" className="cursor-not-allowed text-muted opacity-40">Call</span>
-                    )}
-                    {onCopyClientLink && <button onClick={onCopyClientLink} className="font-medium text-accent hover:underline">Copy client link</button>}
-                  </div>
-                )}
-                {feedArea}
-              </div>
-            </div>
-            {composerFooter}
-          </>
         )}
       </aside>
     </>
