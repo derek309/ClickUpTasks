@@ -6,11 +6,19 @@
 // tracking, and correct for a Vercel serverless function — there's no
 // guarantee two requests in the same "session" land on the same instance.
 //
-// Auth: claude.ai sends whatever bearer token you enter when adding the
-// connector — checked against MCP_CONNECTOR_SECRET here. This is NOT the
-// Supabase service-role key; that stays server-side (env), never sent to
-// claude.ai. Acts as a single shared identity (CLICKUPTASKS_MEMBER_ID,
-// defaulting to "u_claude") — not per-person auth, same as the stdio server.
+// Auth: checked against MCP_CONNECTOR_SECRET. This is NOT the Supabase
+// service-role key; that stays server-side (env), never sent to claude.ai.
+// Acts as a single shared identity (CLICKUPTASKS_MEMBER_ID, defaulting to
+// "u_claude") — not per-person auth, same as the stdio server.
+//
+// claude.ai's "Add custom connector" dialog only offers a URL field plus
+// optional OAuth Client ID/Secret — no plain bearer-token/API-key field, so
+// there's nowhere to paste an Authorization header. Accepting the token as
+// a ?token= query param on the URL itself is the standard workaround (still
+// checks a real Authorization header first, for the stdio-style callers
+// that can send one). The tradeoff: a URL query string can end up in access
+// logs — acceptable here (single internal team, high-entropy, revocable),
+// not something to reuse for anything more sensitive.
 import { NextRequest } from "next/server";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createServer } from "../../../../mcp/core.mjs";
@@ -24,8 +32,9 @@ function unauthorized() {
 async function handle(req: NextRequest): Promise<Response> {
   const secret = process.env.MCP_CONNECTOR_SECRET;
   if (!secret) return new Response(JSON.stringify({ error: "MCP_CONNECTOR_SECRET not configured." }), { status: 501, headers: { "Content-Type": "application/json" } });
-  const auth = req.headers.get("authorization") ?? "";
-  if (auth !== `Bearer ${secret}`) return unauthorized();
+  const authHeader = req.headers.get("authorization") ?? "";
+  const queryToken = req.nextUrl.searchParams.get("token") ?? "";
+  if (authHeader !== `Bearer ${secret}` && queryToken !== secret) return unauthorized();
 
   const server = createServer({
     url: process.env.NEXT_PUBLIC_SUPABASE_URL,
