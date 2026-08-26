@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { tokenForLocation } from "@/lib/ghlTokens";
 import { requireUser } from "@/lib/serverAuth";
+import { appendSignatureHtml } from "@/lib/emailSignature";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -87,13 +88,15 @@ export async function POST(req: NextRequest) {
   let fromEmail: string | undefined;
   let fromName: string | undefined;
   let ghlUserId: string | undefined;
+  let signature = "";
   if (channel === "email") {
-    const { data: prof } = await supabaseAdmin.from("profiles").select("send_from_email, ghl_user_id, name").eq("id", caller.id).maybeSingle();
+    const { data: prof } = await supabaseAdmin.from("profiles").select("send_from_email, ghl_user_id, name, email_signature").eq("id", caller.id).maybeSingle();
     const e = (prof?.send_from_email as string | null)?.trim();
     const uid = (prof?.ghl_user_id as string | null)?.trim();
     if (e) fromEmail = e;
     if (uid) ghlUserId = uid;
     if (e || uid) fromName = (prof?.name as string | null)?.trim() || undefined;
+    signature = ((prof?.email_signature as string | null) ?? "").trim();
   }
 
   // Historically the composer/AI draft only ever produced PLAIN TEXT with \n
@@ -102,7 +105,9 @@ export async function POST(req: NextRequest) {
   // every paragraph break is lost. The Journal's email composer now sends
   // real HTML directly (isHtml) and skips that conversion. SMS is plain text
   // either way, left untouched.
-  const emailHtml = isHtml ? body : escapeHtml(body).replace(/\r\n|\r|\n/g, "<br>");
+  // Signature is appended after that conversion so it is escaped exactly once,
+  // whichever branch the body came from. Email only — never SMS.
+  const emailHtml = appendSignatureHtml(isHtml ? body : escapeHtml(body).replace(/\r\n|\r|\n/g, "<br>"), signature);
   const payload = channel === "sms"
     ? { type: "SMS", contactId: ghlContactId, message: body, ...(attachmentUrls ? { attachments: attachmentUrls } : {}) }
     : { type: "Email", contactId: ghlContactId, subject: (subject || "").slice(0, 200), html: emailHtml,

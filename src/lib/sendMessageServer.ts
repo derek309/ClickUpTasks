@@ -11,6 +11,7 @@ import { supabaseAdmin } from "./supabaseAdmin";
 import { sendGmailAs, googleConfigured } from "./googleMail";
 import { tokenForLocation } from "./ghlTokens";
 import { TASK_FILES_BUCKET } from "./db";
+import { appendSignatureHtml } from "./emailSignature";
 
 const GHL = "https://services.leadconnectorhq.com";
 const SEND_DOMAIN = "clickuplocal.com";
@@ -70,7 +71,10 @@ export async function sendScheduledMessageNow(input: ScheduledSendInput): Promis
   const contact = await resolveContact(input.clientId);
   if (!contact) return { ok: false, error: "This client isn't linked to a GHL contact." };
 
-  const { data: authorProfile } = await supabaseAdmin.from("profiles").select("email, name").eq("member_id", input.createdBy).maybeSingle();
+  const { data: authorProfile } = await supabaseAdmin.from("profiles").select("email, name, email_signature").eq("member_id", input.createdBy).maybeSingle();
+  // Scheduled sends never pass through a composer, so the signature has to be
+  // applied here too or a queued email goes out unsigned. Email only.
+  const signature = input.channel === "email" ? ((authorProfile?.email_signature as string | null) ?? "").trim() : "";
   const authorEmail = (authorProfile?.email as string | null) ?? null;
   const sender = (input.fromEmail?.trim() || authorEmail || "").trim();
 
@@ -92,7 +96,7 @@ export async function sendScheduledMessageNow(input: ScheduledSendInput): Promis
       try {
         const { id: gmailMessageId, threadId: gmailThreadId } = await sendGmailAs(sender, {
           to: contact.email, cc: input.cc.length ? input.cc : undefined, bcc: input.bcc.length ? input.bcc : undefined,
-          subject: (input.subject || "").slice(0, 200), body: input.body, isHtml: true,
+          subject: (input.subject || "").slice(0, 200), body: appendSignatureHtml(input.body, signature), isHtml: true,
           fromName: (authorProfile?.name as string | null)?.trim() || undefined,
           attachments: attParts.length ? attParts : undefined,
         });
@@ -117,7 +121,7 @@ export async function sendScheduledMessageNow(input: ScheduledSendInput): Promis
     const { data } = await supabaseAdmin.storage.from(TASK_FILES_BUCKET).createSignedUrl(a.path, 60 * 60);
     if (data?.signedUrl) attachmentUrls.push(data.signedUrl);
   }
-  const emailHtml = escapeHtml(input.body).replace(/\r\n|\r|\n/g, "<br>");
+  const emailHtml = appendSignatureHtml(escapeHtml(input.body).replace(/\r\n|\r|\n/g, "<br>"), signature);
   const payload = input.channel === "sms"
     ? { type: "SMS", contactId: contact.ghlContactId, message: input.body, ...(attachmentUrls.length ? { attachments: attachmentUrls } : {}) }
     : { type: "Email", contactId: contact.ghlContactId, subject: (input.subject || "").slice(0, 200), html: emailHtml,

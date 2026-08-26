@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/serverAuth";
+import { appendSignatureHtml } from "@/lib/emailSignature";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { sendGmailAs, googleConfigured } from "@/lib/googleMail";
 import { TASK_FILES_BUCKET } from "@/lib/db";
@@ -88,8 +89,17 @@ export async function POST(req: NextRequest) {
 
   // Display name for the From header ("Derek Fox <derek@…>") — for the actual
   // sender (which may be another teammate when an admin sets fromEmail).
-  const { data: prof } = await supabaseAdmin.from("profiles").select("name").ilike("email", sender).maybeSingle();
+  // Signature belongs to the SENDING identity, not necessarily the caller —
+  // an admin sending as another teammate signs off as that teammate.
+  const { data: prof } = await supabaseAdmin.from("profiles").select("name, email_signature").ilike("email", sender).maybeSingle();
   const fromName = (prof?.name as string | null)?.trim() || undefined;
+  const signature = ((prof?.email_signature as string | null) ?? "").trim();
+  // The composers send real HTML; the plain-text branch is only for older/AI
+  // callers, where googleMail escapes the whole body itself — so the
+  // signature has to be appended as plain text there, not as markup.
+  const bodyWithSignature = !signature ? body
+    : isHtml ? appendSignatureHtml(body, signature)
+    : `${body}\n\n${signature}`;
 
   // Fetch attachment bytes from the private task-files bucket and base64 them
   // for the MIME parts. Cap the combined size — Gmail rejects > ~25MB raw, and
@@ -121,7 +131,7 @@ export async function POST(req: NextRequest) {
       cc: ccList?.length ? ccList : undefined,
       bcc: bccList?.length ? bccList : undefined,
       subject: (subject || "").slice(0, 200),
-      body,
+      body: bodyWithSignature,
       isHtml,
       fromName,
       attachments: attParts.length ? attParts : undefined,

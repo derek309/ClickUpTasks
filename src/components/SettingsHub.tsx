@@ -22,9 +22,10 @@ import TemplatesPanel from "./TemplatesPanel";
 import PlaybooksPanel from "./PlaybooksPanel";
 import ApiTokensPanel from "./ApiTokensPanel";
 import NotificationPrefsPanel from "./NotificationPrefsPanel";
+import SignaturePanel from "./SignaturePanel";
 import TrashPanel from "./TrashPanel";
 
-export type TabKey = "integrations" | "team" | "templates" | "playbooks" | "tokens" | "notifications" | "trash";
+export type TabKey = "integrations" | "team" | "templates" | "playbooks" | "tokens" | "notifications" | "signature" | "trash";
 
 export default function SettingsHub({
   initialTab = "integrations",
@@ -87,6 +88,8 @@ export default function SettingsHub({
     { key: "playbooks", label: "Playbooks", icon: "bookmark", visible: canAdmin },
     { key: "tokens", label: "API tokens", icon: "key", visible: true },
     { key: "notifications", label: "Notifications", icon: "bell", visible: true },
+    // Per-person, not team management — same footing as Notifications.
+    { key: "signature", label: "Email signature", icon: "mail", visible: true },
     // Restoring/purging touches other people's clients/projects/tasks, same
     // trust level as the admin-only tabs above.
     { key: "trash", label: "Trash", icon: "trash", visible: canAdmin },
@@ -120,6 +123,7 @@ export default function SettingsHub({
             )}
             {tab === "tokens" && <ApiTokensPanel />}
             {tab === "notifications" && <NotificationPrefsPanel />}
+            {tab === "signature" && <SignaturePanel />}
             {tab === "trash" && canAdmin && (
               <TrashPanel onRestoreClient={onRestoreClient} onRestoreProject={onRestoreProject} onRestoreTask={onRestoreTask}
                 onPurgeClient={onPurgeClient} onPurgeProject={onPurgeProject} onPurgeTask={onPurgeTask} />
