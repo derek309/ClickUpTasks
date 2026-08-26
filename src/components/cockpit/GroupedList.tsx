@@ -157,7 +157,7 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
                   )}
                   {g.tasks.map((t) => (
                     <TaskRow key={t.id} task={t} template={template} cols={cols} showClient={showClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} onAddComment={onAddComment} meId={meId} delegated={!!highlightDelegateFor && t.assigneeId !== highlightDelegateFor && t.subtasks.some((s) => s.assigneeId === highlightDelegateFor)}
-                      selected={!!selectedIds?.has(t.id)} onToggleSelect={onToggleSelect ? (e) => handleSelectClick(t.id, e) : undefined}
+                      selected={!!selectedIds?.has(t.id)} onToggleSelect={onToggleSelect ? (e) => handleSelectClick(t.id, e) : undefined} anySelected={!!selectedIds?.size}
                       draggable={!!onDropInGroup || !!onMergeTasks} onDragStart={() => setDragTaskId(t.id)} onDragEnd={() => { setDragTaskId(null); setDragOverKey(null); setDragOverTaskId(null); }}
                       isMergeDropTarget={dragOverTaskId === t.id}
                       onRowDragOver={onMergeTasks && dragTaskId && dragTaskId !== t.id ? () => setDragOverTaskId(t.id) : undefined}
@@ -178,10 +178,10 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   );
 }
 
-function TaskRow({ task, template, cols, showClient, clientById, projectById, contactById, onOpen, onPatch, onAddComment, meId, delegated, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
+function TaskRow({ task, template, cols, showClient, clientById, projectById, contactById, onOpen, onPatch, onAddComment, meId, delegated, selected, onToggleSelect, anySelected, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
   task: Task; template: string; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void; onAddComment: (taskId: string, body: string) => void; meId?: string; delegated?: boolean;
-  selected?: boolean; onToggleSelect?: (e: React.MouseEvent) => void;
+  selected?: boolean; onToggleSelect?: (e: React.MouseEvent) => void; anySelected?: boolean;
   draggable?: boolean; onDragStart?: () => void; onDragEnd?: () => void;
   // Drop-onto-this-row-to-merge — independent of the drag-to-reorder-groups
   // above, so a row can be both a drag source and a merge target at once.
@@ -223,8 +223,19 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
         style={{ gridTemplateColumns: template, borderLeftColor: delegated ? undefined : priorityBarColor }}>
         <div className="flex min-w-0 items-center gap-0.5">
           {onToggleSelect && (
+            // Fades in on row hover instead of sitting there permanently
+            // (Derek, 2026-08-26: "the check and done together seems odd").
+            // Two checkbox-shaped controls side by side read as clutter no
+            // matter how differently they're shaped, and completing a task is
+            // the far more common of the two. Still opacity-0 rather than
+            // hidden, so the row doesn't jump sideways on hover, and it stays
+            // visible while a selection is in progress — you can't hover every
+            // row at once, and the ones you already picked have to keep showing
+            // their state. Tailwind scopes group-hover to @media (hover:
+            // hover), so a touch device would otherwise never reveal it at
+            // all — hence the explicit hover:none override.
             <button onClick={(e) => { e.stopPropagation(); onToggleSelect(e); }} title="Select — shift-click to select a range"
-              className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition ${selected ? "border-accent bg-accent text-white" : "border-border"}`}>
+              className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition focus-visible:opacity-100 group-hover/tr:opacity-100 [@media(hover:none)]:opacity-100 ${selected || anySelected ? "opacity-100" : "opacity-0"} ${selected ? "border-accent bg-accent text-white" : "border-border"}`}>
               {selected && <I.check />}
             </button>
           )}
