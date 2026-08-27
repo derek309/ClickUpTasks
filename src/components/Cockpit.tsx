@@ -1454,7 +1454,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     (filters.priority === "all" || t.priority === filters.priority) &&
     // Explicitly filtering to Done overrides the hide-done toggle — asking
     // to see done tasks and then hiding them would show nothing.
-    (!hideDone || filters.status === "done" || t.status !== "done");
+    (!hideDone || filters.status === "done" || t.status !== "done" || lingeringDone.has(t.id));
 
   // Tasks quick-added in this list, newest first, held at the top of their
   // group instead of being sorted into place the moment they're created
@@ -1468,6 +1468,21 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // ordering you just asked for. No cleanup call to forget at a future call
   // site, and no setState-in-effect.
   const listKey = `${activeClient}|${activeProject ?? ""}|${groupBy}|${sortBy}|${sortDir}`;
+  // A task you just ticked off stays on screen, struck through, instead of
+  // vanishing under the hide-done filter the instant you click (Derek: "check
+  // it but leave it until they leave the page, that way if they want to
+  // reverse they can, otherwise you check it's gone and you're like oops and
+  // lose it"). The row itself is the undo — click the circle again.
+  //
+  // Keyed to the page, not the list ordering: re-sorting shouldn't yank a row
+  // you're still looking at, but navigating away is the "I'm done here" signal
+  // that lets them go. Same self-expiring idiom as justAdded above, so there's
+  // no cleanup call for a future call site to forget.
+  const pageKey = `${activeClient}|${activeProject ?? ""}|${myWork}|${personalView}|${inboxView}|${dirView ?? ""}|${settingsView}`;
+  const [justCompleted, setJustCompleted] = useState<{ key: string; ids: string[] }>({ key: "", ids: [] });
+  const lingeringDone = new Set(justCompleted.key === pageKey ? justCompleted.ids : []);
+  const keepDoneVisible = (taskId: string) =>
+    setJustCompleted((prev) => ({ key: pageKey, ids: [taskId, ...(prev.key === pageKey ? prev.ids.filter((x) => x !== taskId) : [])] }));
   const [justAdded, setJustAdded] = useState<{ key: string; ids: string[] }>({ key: "", ids: [] });
   const pinnedIds = justAdded.key === listKey ? justAdded.ids : [];
   const pinJustAdded = (taskId: string) =>
@@ -2457,6 +2472,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       clone = { ...cur, id: newId("t_"), status: "todo", due: nextDue, subtasks: cur.subtasks.map((s) => ({ ...s, id: newId("s_"), done: false })), comments: [], attachments: [...cur.attachments], ghlTaskId: null };
       pushToast(`🔁 Recurring — next occurrence created for ${formatDue(nextDue)}`);
     }
+    if (cur && synced.status === "done" && cur.status !== "done") keepDoneVisible(id);
     setTasks((ts) => { let next = ts.map((t) => (t.id === id ? { ...t, ...synced } : t)); if (clone) next = [...next, clone]; return next; });
     if (cur) { const merged = { ...cur, ...synced }; upsertTask(merged, me.id); syncGhlIfLinked(merged, patch); if (clone) upsertTask(clone, me.id); }
   };
@@ -2495,6 +2511,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       clone = { ...before, id: newId("t_"), status: "todo", due: nextDue, subtasks: before.subtasks.map((s) => ({ ...s, id: newId("s_"), done: false })), comments: [], attachments: [...before.attachments], ghlTaskId: null };
       pushToast(`🔁 Recurring — next occurrence created for ${formatDue(nextDue)}`);
     }
+    if (synced.status === "done" && before.status !== "done") keepDoneVisible(id);
     setTasks((prev) => { let next = prev.map((x) => (x.id === id ? updated : x)); if (clone) next = [...next, clone]; return next; });
     upsertTask(updated, me.id);
     syncGhlIfLinked(updated, synced);
