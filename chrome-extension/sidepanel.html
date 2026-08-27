@@ -47,7 +47,13 @@
   #workspace button { margin-top: 0; padding: 6px 10px; font-size: 12px; width: auto; }
   #workspace .ghost { background: #fff; color: #1B3A5C; border: 1px solid #d0dce8; }
   #wsActions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-  .ws-tab { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 12px; color: #334155; }
+  /* The panel's global rules are written for full-width form fields:
+     `select, input, textarea { width: 100% }` blows a checkbox up to the full
+     row and squeezes the title out of existence, and `label` carries
+     display:block plus a top margin and bold weight. Both need undoing here,
+     since a row is a label wrapping a checkbox and a line of text. */
+  .ws-tab { display: flex; align-items: center; gap: 6px; margin: 0; padding: 3px 0; font-size: 12px; font-weight: 400; color: #334155; }
+  .ws-tab input[type="checkbox"] { width: auto; flex: none; margin: 0; padding: 0; border: none; }
   .ws-tab .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ws-tab .from { flex: none; font-size: 10px; color: #94a3b8; }
   .ws-warn { margin-top: 6px; font-size: 11px; color: #b45309; }
