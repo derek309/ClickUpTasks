@@ -806,14 +806,20 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
               <div className="mt-1 text-[15px] italic text-muted">No content synced from GoHighLevel for this message.</div>
             ) : (
               <>
-                {/* C5: inbound renders in full up to ~12 lines before truncating —
-                    it's the client/prospect's words, worth reading in full.
-                    Outbound truncates at 2 — it's what the user themselves
-                    wrote, so a "Show more" on their own message is noise. */}
+                {/* Inbound gets a longer leash than outbound — it's the
+                    client's words, not yours, so a preview worth reading
+                    beats a two-line stub. Tightened from 12 lines/900 chars
+                    to 6/400 (Derek, 2026-08-26: "make sure if it's long
+                    there is a read more so not to take up all the space"):
+                    those numbers were set when newlines still collapsed into
+                    one block, so "12 lines" was rarely 12 lines on screen.
+                    Now that line breaks actually render, the old limit let a
+                    single email fill the pane. Outbound stays at 2 — you
+                    wrote it, a "Show more" on your own message is noise. */}
                 {cleanText && (
                   <CollapsibleText text={cleanText} className="mt-1 text-[16px]"
-                    maxLines={m.direction === "inbound" ? 12 : 2}
-                    maxChars={m.direction === "inbound" ? 900 : 180} />
+                    maxLines={m.direction === "inbound" ? 6 : 2}
+                    maxChars={m.direction === "inbound" ? 400 : 180} />
                 )}
                 {imageUrls.length > 0 && (
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
