@@ -39,6 +39,19 @@
   .mode-toggle { display: flex; gap: 6px; margin-top: 8px; }
   .mode-btn { flex: 1; padding: 6px; border: 1px solid #d0dce8; border-radius: 6px; background: #fff; color: #1B3A5C; font-size: 12px; font-weight: 600; cursor: pointer; text-align: center; }
   .mode-btn.active { background: #1B3A5C; color: #fff; }
+  /* Work contexts — the saved tab set for this client (and optionally this
+     task). Sits directly under the client picker because it's scoped by the
+     same selection. */
+  #workspace { margin-top: 14px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; background: #f8fafc; }
+  #workspace h2 { margin: 0 0 6px; font-size: 12px; font-weight: 700; color: #1B3A5C; text-transform: none; }
+  #workspace button { margin-top: 0; padding: 6px 10px; font-size: 12px; width: auto; }
+  #workspace .ghost { background: #fff; color: #1B3A5C; border: 1px solid #d0dce8; }
+  #wsActions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .ws-tab { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 12px; color: #334155; }
+  .ws-tab .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ws-tab .from { flex: none; font-size: 10px; color: #94a3b8; }
+  .ws-warn { margin-top: 6px; font-size: 11px; color: #b45309; }
+  #wsList { max-height: 220px; overflow-y: auto; }
 </style>
 </head>
 <body>
@@ -53,6 +66,20 @@
     <div id="addContact" style="display:none;margin-top:6px;">
       <select id="subAccountSel"></select>
       <button id="addContactBtn" type="button" style="margin-top:6px;background:#fff;color:#1B3A5C;border:1px solid #d0dce8;">+ Add "<span id="addContactName"></span>" as a contact</button>
+    </div>
+
+    <div id="workspace" style="display:none;">
+      <h2>Workspace tabs</h2>
+      <div class="mode-toggle">
+        <button id="wsScopeClient" type="button" class="mode-btn active">This client</button>
+        <button id="wsScopeTask" type="button" class="mode-btn">This task</button>
+      </div>
+      <div id="wsList"></div>
+      <div id="wsWarn" class="ws-warn" style="display:none;"></div>
+      <div id="wsActions">
+        <button id="wsOpen" type="button">Open tabs</button>
+        <button id="wsCapture" type="button" class="ghost">Save open tabs…</button>
+      </div>
     </div>
 
     <div class="mode-toggle">
@@ -107,6 +134,6 @@
   <div id="needsToken">
     No API token configured yet. <a href="#" id="openOptions">Open settings</a> to paste one.
   </div>
-  <script src="sidepanel.js"></script>
+  <script type="module" src="sidepanel.js"></script>
 </body>
 </html>
