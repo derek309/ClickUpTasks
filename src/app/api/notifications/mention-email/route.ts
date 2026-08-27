@@ -41,12 +41,31 @@ export async function POST(req: NextRequest) {
   const link = `${APP_URL}/?task=${encodeURIComponent(taskId)}`;
   const quoted = commentBody.trim().slice(0, 1000);
 
+  // HTML, with the message itself and a real reply button (Derek: "I want it
+  // to email him the message and a button to reply and take him to the task
+  // to respond"). Table-based with inline styles and no flexbox, because
+  // Outlook and the Gmail app strip or ignore modern layout CSS. The button
+  // is a padded anchor rather than a <button>, which mail clients drop.
+  const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const who = esc(senderName ?? "Someone");
+  const html = `
+<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:16px;line-height:1.5;color:#1f1f1f;max-width:560px">
+  <p style="margin:0 0 4px"><strong>${who}</strong> mentioned you on</p>
+  <p style="margin:0 0 16px;font-size:18px;font-weight:600">${esc(title)}</p>
+  <blockquote style="margin:0 0 20px;padding:12px 16px;border-left:3px solid #1b3a5c;background:#f4f7fb;white-space:pre-wrap">${esc(quoted)}</blockquote>
+  <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 18px"><tr><td style="border-radius:6px;background:#1b3a5c">
+    <a href="${link}" style="display:inline-block;padding:12px 22px;font-size:16px;font-weight:600;color:#ffffff;text-decoration:none">Reply in ClickUpTasks</a>
+  </td></tr></table>
+  <p style="margin:0;font-size:14px;color:#5f6368">Replying to this email will reach ${who} directly, not the task.</p>
+</div>`.trim();
+
   try {
     const { id } = await sendGmailAs(caller.email, {
       to: recipient.email,
       subject: `${senderName ?? "Someone"} mentioned you in "${title}"`.slice(0, 200),
       fromName: senderName,
-      body: `${senderName ?? "Someone"} mentioned you in a comment on "${title}":\n\n"${quoted}"\n\nView the task: ${link}`,
+      isHtml: true,
+      body: html,
     });
     return NextResponse.json({ ok: true, gmailMessageId: id });
   } catch (e) {
