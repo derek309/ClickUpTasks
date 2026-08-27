@@ -495,6 +495,16 @@ export default function WaitingView({ token }: { token: string }) {
   // out of the main list and tucked behind a closed-by-default toggle at
   // the bottom instead of sorted inline with what's still open.
   const [completedOpen, setCompletedOpen] = useState(false);
+  // "What we're working on" starts collapsed (Derek, 2026-08-26: "we'll
+  // definitely want to toggle off what we're working on as default"). What
+  // needs the client is the point of this page; our own in-flight work is
+  // context, and with sees-all-tasks on it can be long enough to push the
+  // actionable half off the screen.
+  const [inProgressOpen, setInProgressOpen] = useState(false);
+  // Project filter. "" is everything; otherwise one project's id. A
+  // project-scoped share link already only carries its own project, so the
+  // chips simply don't render in that case.
+  const [projectFilter, setProjectFilter] = useState("");
 
   // Shared "add a link" popover — only one open at a time, keyed by task id
   // or the "__new__" sentinel for the "Need something else?" composer, so
@@ -596,13 +606,29 @@ export default function WaitingView({ token }: { token: string }) {
   // that's the actionable half of the page, then "what we're working on"
   // (everything else still open) below it — each still broken out by
   // project underneath, same as before.
-  const open = useMemo(() => (tasks ?? []).filter((t) => t.status !== "done"), [tasks]);
+  // Counts are of OPEN work, not everything: a chip reading "Website · 4" is
+  // answering "how much is live over there", which is what someone scanning
+  // this page wants to know.
+  const openCountByProject = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const t of tasks ?? []) {
+      if (t.status === "done") continue;
+      const k = t.projectId ?? "__other__";
+      m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return m;
+  }, [tasks]);
+  const inFilter = useMemo(
+    () => (t: { projectId: string | null }) => !projectFilter || t.projectId === projectFilter,
+    [projectFilter],
+  );
+  const open = useMemo(() => (tasks ?? []).filter((t) => t.status !== "done").filter(inFilter), [tasks, inFilter]);
   const needsResponseGroups = useMemo(() => groupByProject(open.filter((t) => t.needsResponse)), [open, projects]);
   const inProgressGroups = useMemo(() => groupByProject(open.filter((t) => !t.needsResponse)), [open, projects]);
   const totalOpen = open.length;
   // Completed items are their own flat list (not grouped) since there's
   // rarely more than a handful — shown behind the collapsed toggle below.
-  const completedTasks = useMemo(() => (tasks ?? []).filter((t) => t.status === "done").sort(sortFn), [tasks]);
+  const completedTasks = useMemo(() => (tasks ?? []).filter((t) => t.status === "done").filter(inFilter).sort(sortFn), [tasks, inFilter]);
   // Looked up from the full list, not a filtered one — a task opened via a
   // deep link should still open in detail regardless of which section it's
   // actually in.
@@ -625,11 +651,19 @@ export default function WaitingView({ token }: { token: string }) {
   const scrolledToProject = useRef(false);
   useEffect(() => {
     if (!initialProjectId || scrolledToProject.current) return;
-    const el = groupRefs.current[`req-${initialProjectId}`] ?? groupRefs.current[`wip-${initialProjectId}`];
+    const req = groupRefs.current[`req-${initialProjectId}`];
+    // Nothing needs them in this project, so the link's target is inside the
+    // now-collapsed "What we're working on". Open it, or the scroll lands on
+    // a display:none element and the page just sits at the top looking empty.
+    if (!req && groupRefs.current[`wip-${initialProjectId}`] && !inProgressOpen) {
+      setInProgressOpen(true);
+      return; // re-runs once the section is actually on screen
+    }
+    const el = req ?? groupRefs.current[`wip-${initialProjectId}`];
     if (!el) return;
     scrolledToProject.current = true;
     el.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [needsResponseGroups, inProgressGroups, initialProjectId]);
+  }, [needsResponseGroups, inProgressGroups, initialProjectId, inProgressOpen]);
 
   const updateBody = (taskId: string, body: string) =>
     setDrafts((prev) => ({ ...prev, [taskId]: { ...(prev[taskId] ?? { attachments: [] }), body } }));
@@ -930,6 +964,25 @@ export default function WaitingView({ token }: { token: string }) {
                 </div>
               ))}
 
+              {/* Project navigation. Only when there's more than one to move
+                  between — a single-project client, or a list-scoped share
+                  link, has nothing to choose. */}
+              {projects.length > 1 && (
+                <div className="mb-5 flex flex-wrap gap-1.5">
+                  <button onClick={() => setProjectFilter("")}
+                    className={`rounded-full border px-3 py-1 text-[13px] font-medium transition ${projectFilter === "" ? "border-foreground bg-foreground text-background" : "border-border text-muted hover:text-foreground"}`}>
+                    Everything
+                  </button>
+                  {projects.map((p) => (
+                    <button key={p.id} onClick={() => setProjectFilter(p.id)}
+                      className={`rounded-full border px-3 py-1 text-[13px] font-medium transition ${projectFilter === p.id ? "border-foreground bg-foreground text-background" : "border-border text-muted hover:text-foreground"}`}>
+                      {p.name}
+                      {openCountByProject.get(p.id) ? <span className="ml-1.5 opacity-60">{openCountByProject.get(p.id)}</span> : null}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {isEmpty ? emptyState : (
                 <div className="space-y-7">
                   {needsResponseGroups.length > 0 && (
@@ -949,8 +1002,17 @@ export default function WaitingView({ token }: { token: string }) {
                   )}
                   {inProgressGroups.length > 0 && (
                     <div>
-                      <div className="mb-2.5 text-[13px] font-bold uppercase tracking-wide text-muted">What we&apos;re working on</div>
-                      <div className="space-y-5">
+                      {/* Collapsed by default, same treatment as Completed
+                          below: this is our work, not theirs, and it should
+                          never push what needs them off the screen. The count
+                          is on the header so it's still answering "is anything
+                          happening" while shut. */}
+                      <button onClick={() => setInProgressOpen((o) => !o)}
+                        className="mb-2.5 flex items-center gap-1.5 text-[13px] font-bold uppercase tracking-wide text-muted transition hover:text-foreground">
+                        <span className={`inline-block transition-transform ${inProgressOpen ? "rotate-90" : ""}`} aria-hidden>›</span>
+                        What we&apos;re working on · {inProgressGroups.reduce((n, g) => n + g.tasks.length, 0)}
+                      </button>
+                      <div className={`space-y-5 ${inProgressOpen ? "" : "hidden"}`}>
                         {inProgressGroups.map((g) => (
                           <div key={g.project?.id ?? "__other__"} ref={g.project ? (el) => { groupRefs.current[`wip-${g.project!.id}`] = el; } : undefined}>
                             {projects.length > 1 && (
