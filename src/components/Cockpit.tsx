@@ -4375,13 +4375,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               )}
             </div>
           ) : !personalView && clientTab === "chat" ? null : (
+            // Order is fixed on purpose (Derek, 2026-08-26: "put these on the
+            // far right before the alert bell so it's always consistent").
+            // The two that only appear on a client view sit at the END, right
+            // before the bell, rather than at the front where their coming and
+            // going shifted every other icon sideways between pages.
             <div className="flex items-center gap-1.5">
-              {clientView && bulkAddControl}
-              {clientView && copyForClaudeControl}
               {followingControl}
               {groupSortControl}
               {filterMenuControl}
               {columnsControl}
+              {clientView && bulkAddControl}
+              {clientView && copyForClaudeControl}
             </div>
           )}
 
