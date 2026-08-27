@@ -114,7 +114,12 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   return (
     <div className="bg-background p-4 sm:p-5">
       <div className="overflow-x-auto rounded-xl border bg-surface shadow-soft">
-        <div className="hidden items-center gap-2 border-b bg-background/40 px-4 py-2 text-[12px] font-semibold uppercase tracking-wide text-muted sm:grid" style={{ gridTemplateColumns: template }}>
+        {/* No `uppercase` here (Derek, 2026-08-26: "make CLIENT spell
+            Client"). Buttons don't inherit text-transform, so it only ever
+            hit the labels that aren't sort buttons — Client and any
+            non-sortable column — leaving one shouted header in a row of
+            normal ones rather than styling the row as a whole. */}
+        <div className="hidden items-center gap-2 border-b bg-background/40 px-4 py-2 text-[12px] font-semibold tracking-wide text-muted sm:grid" style={{ gridTemplateColumns: template }}>
           <button onClick={() => onSort("task")} className="flex items-center gap-1 text-left hover:text-foreground">Name <Arrow col="task" /></button>
           {showClient && <span>Client</span>}
           {cols.map((c) => (
