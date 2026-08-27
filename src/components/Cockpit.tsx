@@ -94,6 +94,7 @@ import AddClientModal from "./AddClientModal";
 
 
 import { I, Avatar, SideItem, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFromName, LIST_COLUMNS, SearchableSelect, type FilterState, type SortBy, type Toast } from "./cockpit/ui";
+import { BulkAddModal, type ParsedRow } from "./cockpit/BulkAddModal";
 import { ConfirmModal, PromptModal, LinkFormModal, MergeTaskModal, MergeClientModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
 import { CommandK } from "./cockpit/CommandK";
 import { GroupedList, InlineDue } from "./cockpit/GroupedList";
@@ -697,6 +698,64 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // never spends money. The server route (/api/ai/summary) does the actual
   // Supabase write; this just reflects that result into local state.
   const [aiSummaryBusyId, setAiSummaryBusyId] = useState<string | null>(null);
+  // "Add tasks from a list" — paste notes, AI splits them, you review, then
+  // they're created (Derek, 2026-08-26). Parsing and creating are separate
+  // steps by design: nothing reaches the database until it's been seen.
+  const [bulkAddOpen, setBulkAddOpen] = useState(false);
+  const [bulkAddBusy, setBulkAddBusy] = useState(false);
+  const parseTaskList = async (text: string): Promise<ParsedRow[] | null> => {
+    setBulkAddBusy(true);
+    try {
+      const res = await authedFetch("/api/ai/parse-tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, roster: users.map((u) => u.name), clientName: clientById(activeClient)?.name ?? "", today: TODAY }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { pushToast(j.error || "Couldn't read that list."); return null; }
+      return (j.tasks as ParsedRow[]).map((t) => ({ ...t, keep: true }));
+    } catch {
+      pushToast("Couldn't read that list.");
+      return null;
+    } finally {
+      setBulkAddBusy(false);
+    }
+  };
+  // One shared list resolution for the whole batch, so 12 tasks can't race
+  // each other into creating 12 copies of a missing "Tasks" list.
+  const createTasksFromList = (rows: ParsedRow[]) => {
+    if (!rows.length || !activeClient.startsWith("cl_")) return;
+    let projectId: string;
+    let projectWrite: PromiseLike<unknown> | null = null;
+    if (activeProject) projectId = activeProject;
+    else {
+      const existing = projects.find((pr) => pr.clientId === activeClient);
+      if (existing) projectId = existing.id;
+      else { const pr: Project = { id: newId("p_"), clientId: activeClient, name: "Tasks", description: "" }; setProjects((ps) => [...ps, pr]); projectWrite = upsertProject(pr); projectId = pr.id; }
+    }
+    const now = new Date().toISOString();
+    const made: Task[] = rows.map((r) => {
+      const waiting = r.assignee === "client";
+      const member = r.assignee && r.assignee !== "client" ? users.find((u) => u.name === r.assignee) : null;
+      return {
+        id: newId("t_"), projectId, clientId: activeClient, title: r.title.trim(), description: r.description.trim() ? plainTextToHtml(r.description.trim()) : "",
+        status: waiting ? "todo" : "todo",
+        priority: r.priority, assigneeId: waiting ? null : (member?.id ?? null), waitingOnClient: waiting,
+        contactId: activeClient.slice(3), due: r.due, recurrence: "none", labelIds: [], ghlTaskId: null,
+        private: false, subtasks: [], attachments: [], comments: [], createdAt: now, createdBy: me.id,
+      } as Task;
+    });
+    // waiting/status must move together — the one rule that owns that lives in
+    // applyWaitingStatusSync, so route each one through it rather than hand
+    // rolling it here.
+    const synced = made.map((t) => ({ ...t, ...applyWaitingStatusSync({ status: t.status, waitingOnClient: t.waitingOnClient }, { waitingOnClient: t.waitingOnClient }) }));
+    setTasks((ts) => [...ts, ...synced]);
+    const write = () => synced.forEach((t) => upsertTask(t, me.id));
+    if (projectWrite) projectWrite.then(write); else write();
+    setBulkAddOpen(false);
+    pushToast(`Created ${synced.length} task${synced.length === 1 ? "" : "s"}`);
+    synced.forEach((t) => { if (t.assigneeId && t.assigneeId !== me.id) notify(t.assigneeId, `${me.name} assigned you “${t.title}”`, t.id); });
+  };
   const regenerateAiSummary = async (clientId: string) => {
     setAiSummaryBusyId(clientId);
     try {
@@ -3931,6 +3990,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // an IIFE returning JSX there confused the React Compiler into treating it
   // as a component defined during render.
   const settingsClient = clientSettingsOpen && activeClient !== "all" ? clientById(activeClient) : null;
+  const bulkAddControl = (
+    <button onClick={() => setBulkAddOpen(true)} title="Paste a list and let AI create the tasks"
+      className="rounded-md border bg-background px-2 py-1.5 text-[13px] leading-none text-muted hover:text-foreground">
+      <span aria-hidden>📋</span>
+    </button>
+  );
   const copyForClaudeControl = (
     <button onClick={copyClientForClaude} title="Copy this list as a brief for Claude"
       className="rounded-md border bg-background px-2 py-1.5 text-[13px] leading-none text-muted hover:text-foreground">
@@ -4294,6 +4359,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             </div>
           ) : !personalView && clientTab === "chat" ? null : (
             <div className="flex items-center gap-1.5">
+              {clientView && bulkAddControl}
               {clientView && copyForClaudeControl}
               {followingControl}
               {groupSortControl}
@@ -4566,6 +4632,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         </div>
       )}
 
+      {bulkAddOpen && (
+        <BulkAddModal
+          clientName={clientById(activeClient)?.name ?? "this client"}
+          listName={activeProject ? (projectById(activeProject)?.name ?? "Tasks") : "Tasks"}
+          busy={bulkAddBusy}
+          onParse={parseTaskList}
+          onCreate={createTasksFromList}
+          onCancel={() => setBulkAddOpen(false)}
+        />
+      )}
       {openTask && (
         <TaskDrawer task={openTask} clientById={clientById} projectById={projectById} contactById={contactById}
           full={drawerFull} onToggleFull={toggleDrawerFull}
