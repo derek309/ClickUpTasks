@@ -4148,6 +4148,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeProject && projectById(activeProject) ? (<>
               <h1 className="flex items-center gap-1.5 truncate text-[20px] font-semibold"><I.folder className="shrink-0 text-muted" /> {projectById(activeProject)!.name}</h1>
               <p className="hidden items-center gap-1.5 text-[13px] text-muted sm:flex">
+                <button onClick={() => goToView("dashboard")} className="hover:text-foreground hover:underline">My Work</button>
+                <span>›</span>
                 <button onClick={() => { setDirView("clients"); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
                 <span>›</span>
                 <button onClick={() => setActiveProject(null)} className="hover:text-foreground hover:underline">{clientById(activeClient)?.name}</button>
@@ -4169,7 +4171,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <p className="hidden items-center gap-1.5 text-[13px] text-muted sm:flex">
                 {/* Breadcrumb back to the Clients directory — only meaningful
                     when a specific client is the thing being viewed. */}
-                {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && (<>
+                {clientView && (<>
+                  <button onClick={() => goToView("dashboard")} className="hover:text-foreground hover:underline">My Work</button>
+                  <span>›</span>
                   <button onClick={() => { setDirView("clients"); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
                   <span>›</span>
                 </>)}
@@ -4179,18 +4183,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </div>
 
           <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
-          {/* Way back to My Work from a client or project (t_mtatk31d0).
-              The existing breadcrumbs sit top LEFT and only walk up to the
-              Clients directory, and they're hidden below sm — so with the
-              sidebar collapsed there was no route back to the dashboard at
-              all. First in the right-hand cluster rather than last, so it
-              never displaces the bell from the actual corner. */}
-          {clientView && (
-            <button onClick={() => goToView("dashboard")} title="Back to My Work"
-              className="inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-[13px] font-medium text-muted hover:bg-accent-soft hover:text-accent">
-              <span aria-hidden="true">←</span> My Work
-            </button>
-          )}
           {/* This is the "All Tasks" scope toggle — it belongs there only. */}
           {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient === "all" && canAdmin && (
             <div className="inline-flex overflow-hidden rounded-md border" title="VAs only ever see their own tasks here regardless of this toggle">
