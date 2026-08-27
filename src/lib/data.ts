@@ -124,7 +124,7 @@ export type TaskStatus = "todo" | "in_progress" | "review" | "changes_requested"
 export type Priority = "client_request" | "conversation" | "urgent" | "normal" | "none";
 export type Recurrence = "none" | "daily" | "weekday" | "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly" | "custom";
 export const RECURRENCE_ORDER: Recurrence[] = ["none", "daily", "weekday", "weekly", "biweekly", "monthly", "quarterly", "yearly", "custom"];
-export type RecurrenceUnit = "day" | "week" | "month" | "day-of-month";
+export type RecurrenceUnit = "day" | "week" | "month" | "day-of-month" | "nth-weekday";
 /** Parses free-typed "1, 15" style input into a clean, deduped, sorted list
  * of valid calendar days (1-31) — used by the custom-recurrence day-of-month
  * picker, where a comma-separated text field is simplest for entering an
@@ -1460,6 +1460,13 @@ export interface Task {
    * — recur on these specific calendar days each month (e.g. [1, 15]) instead
    * of "every N units". recurrenceInterval is ignored in this mode. */
   recurrenceDaysOfMonth?: number[];
+  /** Only meaningful when recurrence === "custom" && recurrenceUnit === "nth-weekday".
+   *  Which occurrence in the month: 1..4, or -1 for the last one. "3rd Monday"
+   *  is nth 3 + weekday 1. Deliberately no 5th: most months don't have one, so
+   *  offering it would silently skip months (Derek asked for "3rd Monday"). */
+  recurrenceNth?: number;
+  /** 0 = Sunday .. 6 = Saturday, matching Date#getUTCDay. */
+  recurrenceWeekday?: number;
   labelIds: string[];
   ghlTaskId: string | null;
   /** A private task is visible only to its own assignee, enforced by RLS —
@@ -1621,14 +1628,38 @@ export const RECURRENCE_LABEL: Record<Recurrence, string> = {
   yearly: "Every year",
   custom: "Custom…",
 };
-// "day-of-month" never reaches this table (describeRecurrence branches on it
-// before UNIT_LABEL is consulted) — present only so the Record type is total.
-const UNIT_LABEL: Record<RecurrenceUnit, [string, string]> = { day: ["day", "days"], week: ["week", "weeks"], month: ["month", "months"], "day-of-month": ["day", "days"] };
+// "day-of-month" and "nth-weekday" never reach this table (describeRecurrence
+// branches on both before UNIT_LABEL is consulted) — present only so the
+// Record type is total.
+const UNIT_LABEL: Record<RecurrenceUnit, [string, string]> = { day: ["day", "days"], week: ["week", "weeks"], month: ["month", "months"], "day-of-month": ["day", "days"], "nth-weekday": ["month", "months"] };
 // RECURRENCE_LABEL's "custom" entry is just the picker option text — this
 // resolves the actual "every N units" wording once a task's interval/unit
 // are set, for display in the drawer and list row.
-export function describeRecurrence(rec: Recurrence, interval?: number, unit?: RecurrenceUnit, daysOfMonth?: number[]): string {
+export const WEEKDAY_LABEL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+export const NTH_LABEL: Record<number, string> = { 1: "1st", 2: "2nd", 3: "3rd", 4: "4th", [-1]: "last" };
+
+/** The day-of-month for the nth given weekday of a month, or null when that
+ *  occurrence doesn't exist (a 5th Monday in a month that hasn't got one).
+ *  nth of -1 means the last one, which every month has. UTC throughout, to
+ *  match how every other date in this file is handled — a local-time version
+ *  would land on the wrong day for anyone west of Greenwich. */
+export function nthWeekdayOfMonth(year: number, monthIdx: number, weekday: number, nth: number): number | null {
+  if (nth === -1) {
+    const last = lastDayOfUtcMonth(year, monthIdx);
+    const lastDow = new Date(Date.UTC(year, monthIdx, last)).getUTCDay();
+    return last - ((lastDow - weekday + 7) % 7);
+  }
+  const firstDow = new Date(Date.UTC(year, monthIdx, 1)).getUTCDay();
+  const day = 1 + ((weekday - firstDow + 7) % 7) + (nth - 1) * 7;
+  return day <= lastDayOfUtcMonth(year, monthIdx) ? day : null;
+}
+
+export function describeRecurrence(rec: Recurrence, interval?: number, unit?: RecurrenceUnit, daysOfMonth?: number[], nth?: number, weekday?: number): string {
   if (rec !== "custom") return RECURRENCE_LABEL[rec];
+  if (unit === "nth-weekday") {
+    const n = NTH_LABEL[nth ?? 1] ?? "1st";
+    return `Monthly on the ${n} ${WEEKDAY_LABEL[weekday ?? 1]}`;
+  }
   if (unit === "day-of-month") {
     const days = daysOfMonth ?? [];
     if (days.length === 0) return "Monthly on selected day(s)";
@@ -2024,7 +2055,7 @@ function lastDayOfUtcMonth(y: number, m: number): number {
   return new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
 }
 /** Advance an ISO due date by one recurrence step (deterministic — no now()). */
-export function advanceDue(iso: string | null, rec: Recurrence, interval?: number, unit?: RecurrenceUnit, daysOfMonth?: number[]): string | null {
+export function advanceDue(iso: string | null, rec: Recurrence, interval?: number, unit?: RecurrenceUnit, daysOfMonth?: number[], nth?: number, weekday?: number): string | null {
   if (!iso || rec === "none") return iso;
   const [y, m, d] = iso.split("-").map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d));
@@ -2035,6 +2066,26 @@ export function advanceDue(iso: string | null, rec: Recurrence, interval?: numbe
   else if (rec === "monthly") dt.setUTCMonth(dt.getUTCMonth() + 1);
   else if (rec === "quarterly") dt.setUTCMonth(dt.getUTCMonth() + 3);
   else if (rec === "yearly") dt.setUTCFullYear(dt.getUTCFullYear() + 1);
+  else if (rec === "custom" && unit === "nth-weekday") {
+    // "the 3rd Monday": this month's if it's still ahead of the current due
+    // date, otherwise next month's. Walks forward rather than assuming the
+    // occurrence exists, so a "last" rule and any future 5th-style option
+    // can't silently produce an invalid date. Twelve tries is far more than
+    // needed and guarantees termination.
+    const n = nth ?? 1;
+    const wd = ((weekday ?? 1) % 7 + 7) % 7;
+    let y2 = dt.getUTCFullYear();
+    let m2 = dt.getUTCMonth();
+    for (let i = 0; i < 12; i++) {
+      const day = nthWeekdayOfMonth(y2, m2, wd, n);
+      if (day !== null && !(i === 0 && day <= dt.getUTCDate())) {
+        return `${y2}-${String(m2 + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      }
+      m2 += 1;
+      if (m2 > 11) { m2 = 0; y2 += 1; }
+    }
+    return iso;
+  }
   else if (rec === "custom" && unit === "day-of-month") {
     const days = [...new Set((daysOfMonth ?? []).filter((n) => n >= 1 && n <= 31))].sort((a, b) => a - b);
     if (days.length === 0) { dt.setUTCDate(1); dt.setUTCMonth(dt.getUTCMonth() + 1); }

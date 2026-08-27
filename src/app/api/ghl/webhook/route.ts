@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
   // can absolutely have a ghl_task_id (it's pushed to GHL like any other),
   // so skipping this would silently stop those from ever recreating.
   if (patch.status === "done" && row.recurrence && row.recurrence !== "none") {
-    const nextDue = advanceDue((patch.due as string | undefined) ?? (row.due as string | null), row.recurrence as Recurrence, row.recurrence_interval as number | undefined, row.recurrence_unit as RecurrenceUnit | undefined, row.recurrence_days_of_month as number[] | undefined);
+    const nextDue = advanceDue((patch.due as string | undefined) ?? (row.due as string | null), row.recurrence as Recurrence, row.recurrence_interval as number | undefined, row.recurrence_unit as RecurrenceUnit | undefined, row.recurrence_days_of_month as number[] | undefined, row.recurrence_nth as number | undefined, row.recurrence_weekday as number | undefined);
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { created_at, ...rest } = row;
     await supabaseAdmin.from("tasks").insert({

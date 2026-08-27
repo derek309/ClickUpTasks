@@ -293,7 +293,7 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
             <span className="flex min-w-0 items-center gap-1.5">
               {delegated && <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">Delegated</span>}
               <span className={`line-clamp-none min-w-0 flex-1 break-words text-[15px] font-medium leading-snug sm:line-clamp-2 ${isDone ? "text-muted line-through" : ""}`} title={task.title}>{task.title}</span>
-              {task.recurrence !== "none" && <span title={describeRecurrence(task.recurrence, task.recurrenceInterval, task.recurrenceUnit, task.recurrenceDaysOfMonth)}><I.repeat className="shrink-0 text-muted" /></span>}
+              {task.recurrence !== "none" && <span title={describeRecurrence(task.recurrence, task.recurrenceInterval, task.recurrenceUnit, task.recurrenceDaysOfMonth, task.recurrenceNth, task.recurrenceWeekday)}><I.repeat className="shrink-0 text-muted" /></span>}
               {task.attachments.length > 0 && <I.clip className="shrink-0 text-muted" />}
               {commentCount > 0 && <span onClick={(e) => e.stopPropagation()}><InlineComments task={task} onAddComment={onAddComment} /></span>}
               {task.subtasks.length > 0 && <span className="inline-flex shrink-0 items-center gap-0.5 text-[11px] text-muted"><I.check />{doneSubs}/{task.subtasks.length}</span>}
@@ -487,7 +487,7 @@ function friendlyDue(iso: string): string {
 // for the prominent header control). `strong` styles a set value in accent
 // (and gives the empty state a visible affordance) instead of muted grey —
 // for surfaces where the date is a primary action, not a table cell.
-export function InlineDue({ value, overdue, recurrence = "none", recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth, onChange, onRecurrenceChange, emptyLabel = "—", strong = false, showRecurrenceLabel = false }: { value: string | null; overdue: boolean; recurrence?: Recurrence; recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[]; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; emptyLabel?: React.ReactNode; strong?: boolean; showRecurrenceLabel?: boolean }) {
+export function InlineDue({ value, overdue, recurrence = "none", recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth, recurrenceNth, recurrenceWeekday, onChange, onRecurrenceChange, emptyLabel = "—", strong = false, showRecurrenceLabel = false }: { value: string | null; overdue: boolean; recurrence?: Recurrence; recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[]; recurrenceNth?: number; recurrenceWeekday?: number; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; emptyLabel?: React.ReactNode; strong?: boolean; showRecurrenceLabel?: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0, width: 440 });
@@ -526,7 +526,7 @@ export function InlineDue({ value, overdue, recurrence = "none", recurrenceInter
         {value ? friendlyDue(value) : emptyLabel}
         {recurrence !== "none" && <I.repeat className="text-accent" />}
         {recurrence !== "none" && showRecurrenceLabel && (
-          <span className="text-accent">{describeRecurrence(recurrence, recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth)}</span>
+          <span className="text-accent">{describeRecurrence(recurrence, recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth, recurrenceNth, recurrenceWeekday)}</span>
         )}
       </button>
       {open && <DatePopover pos={pos} value={value} recurrence={recurrence} onSelect={(d) => { onChange(d); setOpen(false); }} onRecurrenceChange={onRecurrenceChange} onClose={() => setOpen(false)} />}

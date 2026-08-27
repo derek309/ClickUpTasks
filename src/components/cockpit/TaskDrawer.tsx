@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, clientStatusMeta,
-  STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY,
+  STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY, WEEKDAY_LABEL,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Row, CollapsibleText, SearchableSelect, newId } from "./ui";
@@ -330,11 +330,28 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         </select>
       </span>
       <span className={chip}>
-        <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} showRecurrenceLabel={task.recurrence !== "custom"} onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} emptyLabel={<I.calendar className="h-3.5 w-3.5" />} />
+        <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} recurrenceNth={task.recurrenceNth} recurrenceWeekday={task.recurrenceWeekday} showRecurrenceLabel={task.recurrence !== "custom"} onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} emptyLabel={<I.calendar className="h-3.5 w-3.5" />} />
       </span>
       {task.recurrence === "custom" && (
         <span className={`${chip} gap-1.5 px-2 py-1 text-[13px] text-muted`}>
-          {task.recurrenceUnit === "day-of-month" ? (
+          {task.recurrenceUnit === "nth-weekday" ? (
+            <>
+              On the
+              <select value={task.recurrenceNth ?? 1} onChange={(e) => onPatch({ recurrenceNth: parseInt(e.target.value, 10) })}
+                className="rounded-md border bg-background px-1.5 py-0.5 text-[13px] outline-none focus:border-accent">
+                <option value={1}>1st</option>
+                <option value={2}>2nd</option>
+                <option value={3}>3rd</option>
+                <option value={4}>4th</option>
+                <option value={-1}>last</option>
+              </select>
+              <select value={task.recurrenceWeekday ?? 1} onChange={(e) => onPatch({ recurrenceWeekday: parseInt(e.target.value, 10) })}
+                className="rounded-md border bg-background px-1.5 py-0.5 text-[13px] outline-none focus:border-accent">
+                {WEEKDAY_LABEL.map((d, i) => <option key={d} value={i}>{d}</option>)}
+              </select>
+              of the month
+            </>
+          ) : task.recurrenceUnit === "day-of-month" ? (
             <>
               On day(s)
               <input type="text" placeholder="1, 15" defaultValue={(task.recurrenceDaysOfMonth ?? []).join(", ")}
@@ -353,6 +370,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             <option value="week">week(s)</option>
             <option value="month">month(s)</option>
             <option value="day-of-month">day(s) of month</option>
+            {/* No 5th on offer: most months haven't got one, so a "5th Monday"
+                rule would silently skip months rather than repeat monthly. */}
+            <option value="nth-weekday">nth weekday of month</option>
           </select>
         </span>
       )}

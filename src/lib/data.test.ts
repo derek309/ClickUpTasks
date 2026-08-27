@@ -21,6 +21,8 @@ import {
   mentionCandidates,
   applyMention,
   mentionsUser,
+  nthWeekdayOfMonth,
+  describeRecurrence,
   TODAY,
   type User,
   type Task,
@@ -407,5 +409,69 @@ describe("@mentions", () => {
   it("does not let a longer name notify the shorter one it starts with", () => {
     expect(mentionsUser("@Samantha Reed took it", "Sam")).toBe(false);
     expect(mentionsUser("@Sam took it", "Sam")).toBe(true);
+  });
+});
+
+describe("nth weekday of month", () => {
+  // August 2026 starts on a Saturday. Mondays: 3, 10, 17, 24, 31.
+  it("finds the nth Monday", () => {
+    expect(nthWeekdayOfMonth(2026, 7, 1, 1)).toBe(3);
+    expect(nthWeekdayOfMonth(2026, 7, 1, 3)).toBe(17);
+    expect(nthWeekdayOfMonth(2026, 7, 1, 4)).toBe(24);
+  });
+  it("finds the last one, which is not always the 4th", () => {
+    expect(nthWeekdayOfMonth(2026, 7, 1, -1)).toBe(31); // 5 Mondays in Aug 2026
+    expect(nthWeekdayOfMonth(2026, 8, 1, -1)).toBe(28); // 4 Mondays in Sep 2026
+  });
+  it("returns null when that occurrence doesn't exist", () => {
+    expect(nthWeekdayOfMonth(2026, 8, 1, 5)).toBeNull(); // no 5th Monday in Sep
+  });
+  it("handles a month that begins on the target weekday", () => {
+    // June 2026 starts on a Monday.
+    expect(nthWeekdayOfMonth(2026, 5, 1, 1)).toBe(1);
+    expect(nthWeekdayOfMonth(2026, 5, 1, 3)).toBe(15);
+  });
+  it("handles February in a leap year", () => {
+    expect(nthWeekdayOfMonth(2028, 1, 1, -1)).toBe(28); // Feb 2028 has 29 days
+  });
+});
+
+describe("advanceDue for the nth weekday", () => {
+  const third = (iso: string) => advanceDue(iso, "custom", undefined, "nth-weekday", undefined, 3, 1);
+  it("moves to next month once this month's has passed", () => {
+    expect(third("2026-08-17")).toBe("2026-09-21"); // 3rd Mon of Sep 2026
+  });
+  it("stays in this month when the occurrence is still ahead", () => {
+    expect(third("2026-08-05")).toBe("2026-08-17");
+  });
+  it("rolls the year over from December", () => {
+    expect(third("2026-12-21")).toBe("2027-01-18");
+  });
+  it("never returns a date on or before the one it was given", () => {
+    for (const d of ["2026-08-01", "2026-08-17", "2026-08-31", "2026-02-28", "2026-12-31"]) {
+      const next = third(d);
+      expect(next, `from ${d}`).not.toBeNull();
+      expect(next! > d, `${next} should be after ${d}`).toBe(true);
+    }
+  });
+  it("always lands on the right weekday", () => {
+    let cur = "2026-01-05";
+    for (let i = 0; i < 24; i++) {
+      cur = third(cur)!;
+      const [y, m, d] = cur.split("-").map(Number);
+      expect(new Date(Date.UTC(y, m - 1, d)).getUTCDay(), cur).toBe(1);
+    }
+  });
+  it("handles the last-weekday rule across a short month", () => {
+    const lastFri = (iso: string) => advanceDue(iso, "custom", undefined, "nth-weekday", undefined, -1, 5);
+    expect(lastFri("2026-01-30")).toBe("2026-02-27");
+  });
+});
+
+describe("describeRecurrence for the nth weekday", () => {
+  it("reads the way someone would say it", () => {
+    expect(describeRecurrence("custom", undefined, "nth-weekday", undefined, 3, 1)).toBe("Monthly on the 3rd Monday");
+    expect(describeRecurrence("custom", undefined, "nth-weekday", undefined, 1, 2)).toBe("Monthly on the 1st Tuesday");
+    expect(describeRecurrence("custom", undefined, "nth-weekday", undefined, -1, 5)).toBe("Monthly on the last Friday");
   });
 });

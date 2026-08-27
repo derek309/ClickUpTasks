@@ -57,7 +57,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   // client-approved work, so skipping it here would silently stop recurring
   // client-review tasks from ever recreating themselves.
   if (status === "done" && task.recurrence && task.recurrence !== "none") {
-    const nextDue = advanceDue(task.due as string | null, task.recurrence as Recurrence, task.recurrence_interval as number | undefined, task.recurrence_unit as RecurrenceUnit | undefined, task.recurrence_days_of_month as number[] | undefined);
+    const nextDue = advanceDue(task.due as string | null, task.recurrence as Recurrence, task.recurrence_interval as number | undefined, task.recurrence_unit as RecurrenceUnit | undefined, task.recurrence_days_of_month as number[] | undefined, task.recurrence_nth as number | undefined, task.recurrence_weekday as number | undefined);
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { created_at, ...rest } = task;
     const clone = {

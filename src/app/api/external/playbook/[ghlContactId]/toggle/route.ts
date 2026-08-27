@@ -80,7 +80,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ ghl
   // Only the single monthly_proof_report step is ever recurring — cheap to
   // check unconditionally rather than special-case the key.
   if (newStatus === "done" && task.recurrence && task.recurrence !== "none") {
-    const nextDue = advanceDue(task.due, task.recurrence, task.recurrence_interval, task.recurrence_unit, task.recurrence_days_of_month);
+    const nextDue = advanceDue(task.due, task.recurrence, task.recurrence_interval, task.recurrence_unit, task.recurrence_days_of_month, task.recurrence_nth, task.recurrence_weekday);
     await supabaseAdmin.from("tasks").insert({
       id: "t_" + crypto.randomUUID(), project_id: task.project_id, client_id: task.client_id, title: task.title,
       status: "todo", priority: task.priority, contact_id: task.contact_id, due: nextDue,
