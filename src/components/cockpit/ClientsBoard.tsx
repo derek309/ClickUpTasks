@@ -7,7 +7,7 @@
 // then due today, and so on. Clients and projects are interleaved together
 // within each tier, not split into separate sections — a project qualifies
 // (and sorts) exactly the same way a client does.
-import { clientStatusMeta, formatDue, isOverdue, type Client, type Project, type Task } from "@/lib/data";
+import { formatDue, isOverdue, type Client, type Project, type Task } from "@/lib/data";
 import { I } from "./ui";
 
 // A personal to-do isn't a client or project — it's its own thing, so it
@@ -68,7 +68,6 @@ function ClientRow({ client, taskCount, unread, onOpen }: {
   const business = client.id.startsWith("cl_") ? (client.ghlLocationId ?? "") : "";
   return (
     <button onClick={onOpen} className="flex w-full items-center gap-3 border-b px-4 py-3 text-left transition-colors last:border-0 hover:bg-accent-soft/50">
-      <span className="h-2.5 w-2.5 shrink-0 rounded-full" title={clientStatusMeta(client.status).label} style={{ background: clientStatusMeta(client.status).dot }} />
       <span className="h-8 w-8 shrink-0 rounded-full text-center text-[13px] font-semibold leading-8 text-white" style={{ background: client.color }}>
         {client.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}
       </span>
