@@ -359,6 +359,14 @@ export const LIST_COLUMNS: { key: string; label: string; sortable: boolean }[] =
   { key: "contact", label: "Contact", sortable: false },
   { key: "labels", label: "Labels", sortable: false },
 ];
+// One row in the Clients or Projects directory. Both files carried an
+// identical copy of this string, so tightening one silently left the other
+// bulky — they're the same row to a reader, so they're one constant now.
+// Tightened 2026-08-26 (t_mtaue1ew9, Derek: "they're a little big and
+// bulky"): the task list's own rows are min-h-[40px]/py-1.5, so these were
+// the outlier. Spacing only, no smaller type.
+export const DIR_ROW = "group flex min-h-[38px] cursor-pointer items-center gap-2.5 border-b px-4 py-1.5 transition-colors last:border-0 hover:bg-accent-soft/50";
+
 export const COL_WIDTHS: Record<string, string> = { status: "128px", due: "96px", priority: "104px", comments: "84px", assignee: "72px", contact: "160px", labels: "150px" };
 // `action` powers undo: a bulk edit hands back a one-click revert instead of
 // leaving someone to re-set every task by hand. Toasts carrying an action

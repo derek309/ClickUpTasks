@@ -7,7 +7,7 @@
 // Clicking a row opens that client's task list.
 import { useMemo, useState } from "react";
 import { formatDue, isOverdue, type Client, type Task, type User } from "@/lib/data";
-import { I } from "./ui";
+import { I, DIR_ROW } from "./ui";
 
 type ClientSort = "manual" | "az" | "tasks" | "recent" | "used" | "urgent" | "mine";
 type GroupBy = "flat" | "team";
@@ -76,12 +76,12 @@ export function ClientsDirectory({
     const nextDue = openTasks.reduce<string | null>((soonest, t) => (t.due && (!soonest || t.due < soonest) ? t.due : soonest), null);
     return (
       <div key={c.id} onClick={() => onOpen(c.id)}
-        className="group flex min-h-[46px] cursor-pointer items-center gap-3 border-b px-4 py-2 transition-colors last:border-0 hover:bg-accent-soft/50">
+        className={DIR_ROW}>
         <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-2 truncate text-[15px] font-medium">{c.name}
+          <span className="flex items-center gap-2 truncate text-[15px] font-medium leading-tight">{c.name}
             {needsReview(c.id) && <span className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold text-teal-600" style={{ background: "#14b8a61a" }}>Review</span>}
           </span>
-          {company && <span className="block truncate text-[13px] text-muted">{company}</span>}
+          {company && <span className="block truncate text-[13px] leading-tight text-muted">{company}</span>}
         </span>
         <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); onToggleStar(c.id); }} title={starred.has(c.id) ? "Unstar" : "Star"}
           className={`shrink-0 rounded p-1 hover:bg-background ${starred.has(c.id) ? "text-amber-400" : "text-muted opacity-0 group-hover:opacity-100"}`}><I.star filled={starred.has(c.id)} /></span>

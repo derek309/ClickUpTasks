@@ -6,7 +6,7 @@
 // Clicking a row opens that project's task list.
 import { useState } from "react";
 import { type Project } from "@/lib/data";
-import { I } from "./ui";
+import { I, DIR_ROW } from "./ui";
 
 export function ProjectsDirectory({
   projects, openCount, onOpen, canAdmin, onAddProject, onRename, onDelete, starredLists, onToggleStarList,
@@ -45,7 +45,7 @@ export function ProjectsDirectory({
         </div>
         {shown.map((p) => (
           <div key={p.id} onClick={() => onOpen(p.id)}
-            className="group flex min-h-[46px] cursor-pointer items-center gap-3 border-b px-4 py-2 transition-colors last:border-0 hover:bg-accent-soft/50">
+            className={DIR_ROW}>
             <I.folder className="shrink-0 text-muted" />
             <span className="min-w-0 flex-1 truncate text-[15px] font-medium">{p.name}</span>
             <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); onToggleStarList(p.id); }} title={starredLists.has(p.id) ? "Unpin from sidebar" : "Pin to sidebar"}
