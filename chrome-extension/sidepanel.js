@@ -725,7 +725,10 @@ function wsScopeTaskId() {
 async function loadWorkspace(force = false) {
   if (!selectedClientId) { wsEl.style.display = "none"; return; }
   wsEl.style.display = "";
-  wsScopeTaskBtn.disabled = !selectedTaskId;
+  // Deliberately NOT disabled when there's no task yet: a greyed button gave
+  // no clue that the way to enable it is to switch to "Add to existing task"
+  // and pick one. Clicking it now takes you there.
+  wsScopeTaskBtn.classList.toggle("needs-task", !selectedTaskId);
   if (!selectedTaskId && wsScope === "task") setWsScope("client");
   const token = await getToken();
   if (!token) return;
@@ -808,7 +811,7 @@ function renderWorkspace() {
       wsListEl.append(el);
     });
   }
-  wsOpenBtn.textContent = `Open ${shown.length} tab${shown.length === 1 ? "" : "s"}`;
+  wsOpenBtn.textContent = shown.length ? `Open ${shown.length} tab${shown.length === 1 ? "" : "s"}` : "Open tabs";
   wsOpenBtn.disabled = shown.length === 0;
   wsCaptureBtn.textContent = "Save open tabs…";
 }
@@ -923,6 +926,14 @@ async function openWorkspace() {
 }
 
 wsScopeClientBtn.addEventListener("click", () => setWsScope("client"));
-wsScopeTaskBtn.addEventListener("click", () => { if (selectedTaskId) setWsScope("task"); });
+wsScopeTaskBtn.addEventListener("click", () => {
+  if (selectedTaskId) { setWsScope("task"); return; }
+  // No task chosen yet — send them to the picker rather than doing nothing.
+  setMode("existing");
+  taskSearchInput.focus();
+  taskSearchInput.scrollIntoView({ block: "center" });
+  statusEl.textContent = "Pick a task below, then choose “This task” again.";
+  statusEl.className = "";
+});
 wsCaptureBtn.addEventListener("click", () => { if (wsCapture) { wsCapture = null; renderWorkspace(); } else startCapture(); });
 wsOpenBtn.addEventListener("click", () => { if (wsCapture) saveCapture(); else openWorkspace(); });

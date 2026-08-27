@@ -39,6 +39,9 @@
   .mode-toggle { display: flex; gap: 6px; margin-top: 8px; }
   .mode-btn { flex: 1; padding: 6px; border: 1px solid #d0dce8; border-radius: 6px; background: #fff; color: #1B3A5C; font-size: 12px; font-weight: 600; cursor: pointer; text-align: center; }
   .mode-btn.active { background: #1B3A5C; color: #fff; }
+  /* "This task" before a task is chosen: dimmed so it reads as not-yet-usable,
+     but still clickable, because clicking it is how you get to the picker. */
+  .mode-btn.needs-task:not(.active) { color: #94a3b8; }
   /* Work contexts — the saved tab set for this client (and optionally this
      task). Sits directly under the client picker because it's scoped by the
      same selection. */

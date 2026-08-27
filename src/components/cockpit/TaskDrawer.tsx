@@ -805,7 +805,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           // ClickUp-style split: task content (document) on the left, the
           // merged communications feed in its own column on the right with
           // an active composer (if any) pinned to the bottom.
-          <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
+          // Splits at 1100px, not md (768px). The activity rail is a fixed
+          // 480px, so on an iPad at 1024 the document column was left about
+          // 330px: the title wrapped to two lines, the DETAILS fields were
+          // squeezed and "Push to GHL" broke across three. Below 1100 the two
+          // stack instead, which reads far better on a tablet.
+          <div className="flex flex-1 flex-col overflow-hidden min-[1100px]:flex-row">
             <div className="min-w-0 flex-1 overflow-y-auto bg-background px-4 py-6 sm:px-8 lg:px-12">
               <div className="mx-auto w-full max-w-4xl">
                 {titleRow}
@@ -827,10 +832,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             {/* Stacks below the document on mobile (each pane its own scroll);
                 fixed, resizable side column at md+. Width rides a CSS var so a
                 responsive class can override the inline value below md. */}
-            <div className="relative flex min-h-0 flex-1 flex-col border-t-4 bg-[color-mix(in_srgb,var(--background)_50%,transparent)] md:w-[var(--activity-w)] md:flex-none md:border-l-4 md:border-t-0"
+            <div className="relative flex min-h-0 flex-1 flex-col border-t-4 bg-[color-mix(in_srgb,var(--background)_50%,transparent)] min-[1100px]:w-[var(--activity-w)] min-[1100px]:flex-none min-[1100px]:border-l-4 min-[1100px]:border-t-0"
               style={{ "--activity-w": `${activityW}px` } as React.CSSProperties}>
               <div onMouseDown={startResize} title="Drag to resize"
-                className="absolute inset-y-0 -left-1 z-10 hidden w-2 cursor-col-resize hover:bg-accent/30 active:bg-accent/40 md:block" />
+                className="absolute inset-y-0 -left-1 z-10 hidden w-2 cursor-col-resize hover:bg-accent/30 active:bg-accent/40 min-[1100px]:block" />
               {hasMessaging && (
                 <div className="border-b bg-surface px-3 py-2.5">
                   <div className="flex items-center gap-2">
