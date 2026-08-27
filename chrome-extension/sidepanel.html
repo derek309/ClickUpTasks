@@ -59,6 +59,12 @@
   .ws-tab input[type="checkbox"] { width: auto; flex: none; margin: 0; padding: 0; border: none; }
   .ws-tab .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ws-tab .from { flex: none; font-size: 10px; color: #94a3b8; }
+  /* Overrides the panel's global full-width button rule, same reason the
+     checkbox above needs one. Only shows on row hover so a list of saved
+     tabs reads as a list, not a row of delete buttons. */
+  .ws-x { width: auto; margin: 0; padding: 0 4px; background: none; border: none; color: #94a3b8; font-size: 15px; line-height: 1; cursor: pointer; opacity: 0; }
+  .ws-tab:hover .ws-x, .ws-x:focus-visible { opacity: 1; }
+  .ws-x:hover { color: #c5221f; }
   .ws-warn { margin-top: 6px; font-size: 11px; color: #b45309; }
   #wsList { max-height: 220px; overflow-y: auto; }
 </style>

@@ -1,4 +1,4 @@
-import { layerContexts, prepareCapture, contextKey, isCapturable, SOFT_MAX_TABS, HARD_MAX_TABS } from "./lib/context.js";
+import { layerContexts, prepareCapture, contextKey, isCapturable, normalizeUrl, SOFT_MAX_TABS, HARD_MAX_TABS } from "./lib/context.js";
 
 const API_BASE = "https://clickuptasks.vercel.app";
 
@@ -803,10 +803,24 @@ function renderWorkspace() {
       const t = document.createElement("span");
       t.className = "t"; t.textContent = tab.title || tab.url; t.title = tab.url;
       el.append(t);
-      if (wsScope === "task" && inherited.has(tab.url)) {
+      // A task row that came from the client's baseline can't be removed from
+      // here: it isn't in this task's set, and deleting it would have to mean
+      // editing the client's set out from under every other task. Labelled
+      // instead, with the × withheld so the button never lies about what it
+      // will do.
+      const isInherited = wsScope === "task" && inherited.has(tab.url);
+      if (isInherited) {
         const f = document.createElement("span");
         f.className = "from"; f.textContent = "from client";
         el.append(f);
+      } else {
+        const x = document.createElement("button");
+        x.className = "ws-x";
+        x.type = "button";
+        x.textContent = "×";
+        x.title = "Remove this tab from the saved set";
+        x.addEventListener("click", () => removeSavedTab(tab.url));
+        el.append(x);
       }
       wsListEl.append(el);
     });
@@ -826,6 +840,31 @@ function renderCaptureCount() {
   if (n > SOFT_MAX_TABS) msgs.push(`${n} tabs is a lot to reopen at once — consider a task-level set.`);
   wsWarnEl.textContent = msgs.join(" ");
   wsWarnEl.style.display = msgs.length ? "" : "none";
+}
+
+/** Drop one tab from whichever scope is showing, then write the set back.
+ *  Removes by normalized URL so a trailing slash or a stray query can't leave
+ *  the row on screen after a "successful" delete. */
+async function removeSavedTab(url) {
+  const token = await getToken();
+  if (!token) return;
+  const target = normalizeUrl(url);
+  const current = wsScope === "task" ? wsTaskTabs : wsClientTabs;
+  const next = current.filter((t) => normalizeUrl(t.url) !== target);
+  if (next.length === current.length) return;
+  try {
+    await apiFetch("/api/extension/tabs", token, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: selectedClientId, task_id: wsScopeTaskId() || undefined, tabs: next }),
+    });
+    if (wsScope === "task") wsTaskTabs = next; else wsClientTabs = next;
+    await chrome.storage.local.remove(["workTabsCache", "workTabsCacheAt"]);
+    renderWorkspace();
+  } catch (e) {
+    statusEl.textContent = e instanceof Error ? e.message : "Couldn't remove that tab.";
+    statusEl.className = "err";
+  }
 }
 
 async function startCapture() {
