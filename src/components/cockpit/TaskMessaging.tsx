@@ -8,7 +8,7 @@
 // — feedArea always scrolls with whatever's around it, composerFooter is a
 // pinned element that sits OUTSIDE that scroll area — so TaskDrawer places
 // the two pieces itself rather than this module dictating layout.
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   users, userById, timeAgo, htmlToText, looksLikeHtml, plainTextToHtml, parseEventDiff, STATUS_META, PRIORITY_META,
   mentionCandidates, applyMention,
@@ -359,29 +359,50 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
   const latestPriorEmail = task.draftEmail
     ? [...(messages ?? [])].filter((m) => m.channel === "email").sort((a, b) => b.at.localeCompare(a.at))[0] ?? null
     : null;
+  const [draftOpen, setDraftOpen] = useState(false);
+  // A draft whose subject AND body already went out is spent — it can only
+  // cause a duplicate send from here. It used to sit there warning about that
+  // forever, which is why Derek found a 2-day-old card still on screen
+  // ("taking up a lot of space, not sure why that's there in the first
+  // place"). Retire it instead of nagging. Idempotent, so two people with the
+  // task open both writing null is harmless.
+  useEffect(() => {
+    if (task.draftEmail && draftSentAlready) onPatch({ draftEmail: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task.id, !!task.draftEmail, draftSentAlready?.id]);
+
+  // Collapsed to one row by default (Derek, 2026-08-26 — on an iPad the old
+  // card stacked heading, subject, two-line preview, thread link and a button
+  // row, eating most of a narrow messaging column). Subject and both actions
+  // stay on the row; the preview and thread link are one tap away.
   const draftEmailCard = task.draftEmail ? (
-    <div className="mb-2 rounded-xl border border-accent/30 bg-accent-soft/20 p-3">
-      <div className="mb-1 flex items-center gap-1.5 text-[15px] font-semibold text-accent"><span aria-hidden>✉️</span> Draft email ready</div>
-      <div className="truncate text-[14px] font-medium">{task.draftEmail.subject || "(no subject)"}</div>
-      <div className="mt-0.5 line-clamp-2 text-[13px] text-muted">{htmlToText(task.draftEmail.body)}</div>
-      {latestPriorEmail && (
-        <button onClick={() => selectFilter("email")} className="mt-1 block text-[12px] font-medium text-accent hover:underline">
-          Continues the email conversation from {timeAgo(latestPriorEmail.at)} · see thread
+    <div className="mb-2 rounded-xl border border-accent/30 bg-accent-soft/20 px-3 py-2">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+        <button onClick={() => setDraftOpen((o) => !o)} className="flex min-w-0 flex-1 items-center gap-1.5 text-left" title={draftOpen ? "Hide the draft" : "Show the draft"}>
+          <span aria-hidden>✉️</span>
+          <span className="shrink-0 text-[15px] font-semibold text-accent">Draft email</span>
+          <span className="min-w-0 flex-1 truncate text-[14px] text-muted">{task.draftEmail.subject || "(no subject)"}</span>
+          <I.chevron className={`shrink-0 text-muted transition ${draftOpen ? "-rotate-90" : "rotate-180"}`} />
         </button>
-      )}
-      {draftSentAlready && (
-        <div className="mt-1.5 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[12px] font-medium text-amber-800">
-          ⚠️ Looks like this was sent {timeAgo(draftSentAlready.at)} — check before sending again.
-        </div>
-      )}
-      <div className="mt-2 flex items-center gap-2">
-        {hasMessaging ? (
-          <button onClick={openDraftEmail} className="rounded-md bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white">Review &amp; send</button>
-        ) : (
-          <span className="text-[13px] text-muted" title="No linked GoHighLevel contact to send to yet">Can&apos;t send — no linked contact for this client</span>
-        )}
-        <button onClick={() => onPatch({ draftEmail: null })} className="rounded-md px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">Discard</button>
+        <span className="flex shrink-0 items-center gap-1.5">
+          {hasMessaging ? (
+            <button onClick={openDraftEmail} className="rounded-md bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white">Review &amp; send</button>
+          ) : (
+            <span className="text-[13px] text-muted" title="No linked GoHighLevel contact to send to yet">No linked contact</span>
+          )}
+          <button onClick={() => onPatch({ draftEmail: null })} className="rounded-md px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">Discard</button>
+        </span>
       </div>
+      {draftOpen && (
+        <>
+          <div className="mt-1.5 whitespace-pre-wrap text-[13px] text-muted">{htmlToText(task.draftEmail.body)}</div>
+          {latestPriorEmail && (
+            <button onClick={() => selectFilter("email")} className="mt-1 block text-[12px] font-medium text-accent hover:underline">
+              Continues the email conversation from {timeAgo(latestPriorEmail.at)} · see thread
+            </button>
+          )}
+        </>
+      )}
     </div>
   ) : null;
 
