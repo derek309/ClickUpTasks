@@ -61,6 +61,14 @@ function splitMessageUrls(rawText: string): { cleanText: string; imageUrls: stri
       (IMAGE_URL_RE.test(url) ? imageUrls : linkUrls).push(url);
       return "";
     })
+    // Gmail (and most clients) build the text/plain half of an HTML email by
+    // marking bold as *like this*, so an inbound email arrived reading
+    // "*Hi Derek!* *I'm currently updating...*" — the markers are noise, not
+    // punctuation (Derek: "the format is broken making it hard to read").
+    // Conservative on purpose: the * must hug non-space on both sides, so a
+    // "* " bullet at the start of a line survives, and a lone asterisk or a
+    // 3 * 4 stays put.
+    .replace(/\*(\S(?:[^*\n]*\S)?)\*/g, "$1")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .split("\n").map((l) => l.trim()).join("\n")

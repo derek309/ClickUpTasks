@@ -332,8 +332,14 @@ export function CollapsibleText({ text, className, maxChars = LONG_TEXT_CHAR_THR
   const toggle = (e: React.SyntheticEvent) => { e.stopPropagation(); setExpanded((x) => !x); };
   // break-words so a long unbroken string (a long URL, most commonly) wraps
   // instead of forcing the whole feed to scroll horizontally.
+  // whitespace-pre-wrap because renderRichText emits inline spans, so every
+  // newline in a stored body was collapsing to a space and a paragraphed
+  // email arrived as one run-on wall of text. The bodies already carry their
+  // line breaks; nothing was ever rendering them. Safe to turn on here rather
+  // than per caller: splitMessageUrls already caps runs at one blank line, so
+  // this can't open up a gap-riddled card.
   return (
-    <div className={`break-words ${className ?? ""}`}>
+    <div className={`whitespace-pre-wrap break-words ${className ?? ""}`}>
       {renderRichText(shown)}
       {isLong && (
         <span role="button" tabIndex={0} onClick={toggle} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(e); } }}
