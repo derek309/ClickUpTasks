@@ -616,6 +616,23 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     upsertClient(nc);
     pushToast(on ? `${c.name} can now add their own requests.` : `${c.name} can no longer add their own requests.`);
   };
+  // How much of the account the client portal shows. Off means the portal
+  // shows only what involves them (waiting on their input, or already
+  // replied to); on means every non-private task on the account, which is
+  // real exposure — internal work becomes readable by the client. Per client
+  // for that reason, never global. Admin only, same as the toggles around it:
+  // clients_write RLS is is_admin(), and the portal route re-reads the column
+  // itself, so this toggle is the decision and never the enforcement.
+  const toggleClientPortalShowsAllTasks = (clientId: string) => {
+    const c = clientById(clientId);
+    if (!c) return;
+    const on = c.portalShowsAllTasks !== true;
+    const nc = { ...c, portalShowsAllTasks: on };
+    setClients((cs) => cs.map((x) => (x.id === clientId ? nc : x)));
+    markOwnClientWrite(nc.id);
+    upsertClient(nc);
+    pushToast(on ? `${c.name} now sees every task on their account.` : `${c.name} now only sees what involves them.`);
+  };
   // Whether this client's Playbook includes the A2P texting setup steps and
   // the dedicated email domain step. Off by default (see
   // playbookStepsForClient in data.ts): not every business does SMS
@@ -4699,6 +4716,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   <label className="flex items-start justify-between gap-3">
                     <span><span className="block text-[14px] font-medium">Client can add requests</span><span className="block text-[13px] text-muted">They can submit new task requests from their portal link, not just reply to what we send.</span></span>
                     <button onClick={() => toggleClientCanRequestNewTasks(activeClient)} className={`mt-0.5 flex h-5 w-9 shrink-0 items-center rounded-full transition ${settingsClient.canRequestNewTasks ? "bg-accent" : "bg-border"}`}><span className={`h-4 w-4 rounded-full bg-white shadow transition ${settingsClient.canRequestNewTasks ? "translate-x-4" : "translate-x-0.5"}`} /></button>
+                  </label>
+                  <label className="flex items-start justify-between gap-3">
+                    <span><span className="block text-[14px] font-medium">Client sees all tasks</span><span className="block text-[13px] text-muted">Their portal also lists what the team is working on and what&apos;s been completed, not just what needs them. Every non-private task on this account becomes readable by the client.</span></span>
+                    <button onClick={() => toggleClientPortalShowsAllTasks(activeClient)} className={`mt-0.5 flex h-5 w-9 shrink-0 items-center rounded-full transition ${settingsClient.portalShowsAllTasks ? "bg-accent" : "bg-border"}`}><span className={`h-4 w-4 rounded-full bg-white shadow transition ${settingsClient.portalShowsAllTasks ? "translate-x-4" : "translate-x-0.5"}`} /></button>
                   </label>
                   <label className="flex items-start justify-between gap-3">
                     <span><span className="block text-[14px] font-medium">Client sees growth plan</span><span className="block text-[13px] text-muted">Their portal shows the Playbook progress card — what&apos;s done and what&apos;s next.</span></span>

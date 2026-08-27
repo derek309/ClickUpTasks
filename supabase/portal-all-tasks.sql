@@ -1,0 +1,11 @@
+-- ClickUpTasks — per-client switch for how much the client portal shows.
+-- Run once in the Supabase SQL editor.
+--
+-- Off by default, deliberately. The portal has always shown a client only the
+-- tasks that involve them: ones waiting on their input, plus ones they have
+-- already replied to. Turning this on shows them EVERY non-private task on
+-- their account, including internal work they were never meant to read. That
+-- is a per-client decision about that relationship, not a global default.
+--
+-- is_private tasks stay hidden either way (see the portal route's filter).
+alter table clients add column if not exists portal_shows_all_tasks boolean not null default false;

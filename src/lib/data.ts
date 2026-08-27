@@ -328,6 +328,9 @@ export interface Client {
    * existing clientsSeed literals don't need editing; read as `=== true`
    * everywhere. */
   showGrowthPlan?: boolean;
+  /** Portal shows every non-private task on the account, not just the ones
+   *  waiting on the client. Off by default — see supabase/portal-all-tasks.sql. */
+  portalShowsAllTasks?: boolean;
 }
 
 /** A quick-access link on a client's page (live site, WP admin, etc.), stored

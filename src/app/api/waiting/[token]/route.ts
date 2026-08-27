@@ -89,7 +89,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     if (scope.projectId) q = q.eq("project_id", scope.projectId);
     return q;
   };
-  const [{ data: waiting }, { data: responded }, { data: deepLinked }] = await Promise.all([
+  // With portal_shows_all_tasks on, the client also sees the rest of the
+  // account: everything still open (so they can see what the team is working
+  // on) plus a recent slice of what's finished. Capped because "done" grows
+  // without bound and the portal renders it as one flat list — 25 is enough
+  // to answer "did you do the thing" without turning the page into an
+  // archive. Still never private tasks, and a project-scoped token still
+  // only ever reaches its own project.
+  const DONE_LIMIT = 25;
+  const [{ data: waiting }, { data: responded }, { data: deepLinked }, { data: allOpen }, { data: recentDone }] = await Promise.all([
     scopedTaskQuery().eq("waiting_on_client", true),
     scopedTaskQuery().not("client_response", "is", null),
     // Proven to belong to this client (and this project, if scoped) before
@@ -98,9 +106,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     deepLinkTaskId
       ? scopedTaskQuery().eq("id", deepLinkTaskId)
       : Promise.resolve({ data: [] as Row[] }),
+    scope.showAllTasks
+      ? scopedTaskQuery().neq("status", "done")
+      : Promise.resolve({ data: [] as Row[] }),
+    scope.showAllTasks
+      ? scopedTaskQuery().eq("status", "done").order("due", { ascending: false, nullsFirst: false }).limit(DONE_LIMIT)
+      : Promise.resolve({ data: [] as Row[] }),
   ]);
   const byId = new Map<string, Row>();
-  [...(waiting ?? []), ...(responded ?? []), ...(deepLinked ?? [])].forEach((t) => byId.set((t as Row).id, t as Row));
+  [...(waiting ?? []), ...(responded ?? []), ...(deepLinked ?? []), ...(allOpen ?? []), ...(recentDone ?? [])].forEach((t) => byId.set((t as Row).id, t as Row));
   const rows = [...byId.values()].sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999"));
 
   // Resolve any attachment's storage path to a short-lived signed URL — used
