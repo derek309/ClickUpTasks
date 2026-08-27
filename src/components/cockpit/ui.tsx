@@ -143,6 +143,12 @@ export function SearchableSelect({
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [idx, setIdx] = useState(0);
+  // Which way the popover opens. It used to be hardcoded below the trigger,
+  // which broke the moment a caller sat near the bottom of the window — the
+  // bulk-action bar is pinned there, so "Move to…" dropped its list straight
+  // off the screen (Derek, 2026-08-26). Decided when it opens, from the space
+  // actually available, so it works wherever a caller puts it.
+  const [dropUp, setDropUp] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const selected = options.find((o) => o.value === value);
@@ -166,6 +172,20 @@ export function SearchableSelect({
   }, [idx, open]);
 
   const close = () => { setOpen(false); setQ(""); setIdx(0); };
+  // Search row (~44px) plus the list's max-h-64 (256px) plus a little margin:
+  // the tallest the popover can get. Flip up only when below genuinely can't
+  // fit AND above has more room, so a trigger in a short window doesn't flip
+  // into an even tighter gap.
+  const POPOVER_MAX_H = 312;
+  const openMenu = () => {
+    const r = wrapRef.current?.getBoundingClientRect();
+    if (r) {
+      const below = window.innerHeight - r.bottom;
+      setDropUp(below < POPOVER_MAX_H && r.top > below);
+    }
+    setOpen(true);
+    setIdx(0);
+  };
   const pick = (v: string) => { onChange(v); close(); };
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") { e.preventDefault(); setIdx((i) => Math.min(i + 1, shown.length - 1)); }
@@ -177,13 +197,13 @@ export function SearchableSelect({
   return (
     <div ref={wrapRef} className="relative min-w-0">
       <button type="button" disabled={disabled} title={title}
-        onClick={() => { if (open) close(); else { setOpen(true); setIdx(0); } }}
+        onClick={() => { if (open) close(); else openMenu(); }}
         className={`flex w-full items-center gap-1.5 text-left outline-none disabled:opacity-50 ${className}`}>
         <span className={`min-w-0 flex-1 truncate ${selected ? "" : "text-muted"}`}>{selected?.label ?? placeholder}</span>
         <I.chevron className="shrink-0 -rotate-90 text-muted" />
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-1 w-full min-w-[220px] overflow-hidden rounded-lg border bg-surface shadow-soft-md">
+        <div className={`absolute left-0 z-50 w-full min-w-[220px] overflow-hidden rounded-lg border bg-surface shadow-soft-md ${dropUp ? "bottom-full mb-1" : "top-full mt-1"}`}>
           <div className="flex items-center gap-1.5 border-b px-2.5 py-2">
             <I.search className="shrink-0 text-muted" />
             <input autoFocus value={q} onChange={(e) => { setQ(e.target.value); setIdx(0); }} onKeyDown={onKey}
@@ -373,7 +393,10 @@ export const LIST_COLUMNS: { key: string; label: string; sortable: boolean }[] =
 // the outlier. Spacing only, no smaller type.
 export const DIR_ROW = "group flex min-h-[38px] cursor-pointer items-center gap-2.5 border-b px-4 py-1.5 transition-colors last:border-0 hover:bg-accent-soft/50";
 
-export const COL_WIDTHS: Record<string, string> = { status: "128px", due: "96px", priority: "104px", comments: "84px", assignee: "72px", contact: "160px", labels: "150px" };
+// status is wider than the label needs: the one-click done toggle sits beside
+// it (see GroupedList's doneToggle), and at 128px "Changes" plus the circle
+// clipped.
+export const COL_WIDTHS: Record<string, string> = { status: "152px", due: "96px", priority: "104px", comments: "84px", assignee: "72px", contact: "160px", labels: "150px" };
 // `action` powers undo: a bulk edit hands back a one-click revert instead of
 // leaving someone to re-set every task by hand. Toasts carrying an action
 // stay on screen longer (see pushToast) so there's time to actually hit it.
