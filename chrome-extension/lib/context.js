@@ -68,8 +68,18 @@ export function layerContexts(baseline = [], taskTabs = []) {
  *  reopened and flagging what probably shouldn't be. The caller shows these
  *  for review — nothing is ever saved without being seen. */
 export function prepareCapture(tabs = []) {
+  // Deduped: people keep the same page open in two tabs all the time (a
+  // second ClickUpTasks, a stray copy of the client's WP admin). Saving both
+  // means reopening both forever, so collapse them here, keeping the first.
+  const seen = new Set();
   return tabs
-    .filter((t) => t && isCapturable(t.url))
+    .filter((t) => {
+      if (!t || !isCapturable(t.url)) return false;
+      const key = normalizeUrl(t.url);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
     .map((t) => ({
       url: t.url,
       title: typeof t.title === "string" ? t.title : "",

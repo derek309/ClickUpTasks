@@ -98,3 +98,30 @@ describe("contextKey", () => {
     expect(contextKey("cl_1", undefined)).toBe(contextKey("cl_1", ""));
   });
 });
+
+describe("duplicate tabs", () => {
+  it("collapses the same page open in two tabs at capture time", () => {
+    const rows = prepareCapture([
+      { url: "https://clickuptasks.vercel.app/", title: "ClickUpTasks" },
+      { url: "https://clickuptasks.vercel.app/?client=cl_1", title: "ClickUpTasks again" },
+      { url: "https://clickuplocal.com/", title: "ClickUpLocal" },
+    ]);
+    expect(rows.map((r) => r.title)).toEqual(["ClickUpTasks", "ClickUpLocal"]);
+  });
+  it("keeps the first occurrence, not the last", () => {
+    const rows = prepareCapture([
+      { url: "https://x.com/a", title: "first" },
+      { url: "https://x.com/a/", title: "second" },
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].title).toBe("first");
+  });
+  it("dedupes a client-only set too, with no task set in play", () => {
+    const out = layerContexts([
+      { url: "https://x.com/a", title: "A" },
+      { url: "https://x.com/a#hash", title: "A dupe" },
+      { url: "https://x.com/b", title: "B" },
+    ]);
+    expect(out.map((t) => t.title)).toEqual(["A", "B"]);
+  });
+});

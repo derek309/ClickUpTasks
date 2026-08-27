@@ -786,7 +786,7 @@ function renderWorkspace() {
     return;
   }
 
-  const shown = wsScope === "task" ? layerContexts(wsClientTabs, wsTaskTabs) : wsClientTabs;
+  const shown = wsScope === "task" ? layerContexts(wsClientTabs, wsTaskTabs) : layerContexts(wsClientTabs);
   if (shown.length === 0) {
     const empty = document.createElement("div");
     empty.className = "ws-tab";
@@ -885,7 +885,7 @@ async function collapseOtherGroups(keepKey) {
 }
 
 async function openWorkspace() {
-  const tabs = wsScope === "task" ? layerContexts(wsClientTabs, wsTaskTabs) : wsClientTabs;
+  const tabs = wsScope === "task" ? layerContexts(wsClientTabs, wsTaskTabs) : layerContexts(wsClientTabs);
   if (!tabs.length) return;
   const key = contextKey(selectedClientId, wsScopeTaskId());
   const label = (allClients.find((c) => c.id === selectedClientId)?.name) || "Workspace";
