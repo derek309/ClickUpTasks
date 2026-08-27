@@ -46,6 +46,10 @@ export async function POST(req: NextRequest) {
   // to respond"). Table-based with inline styles and no flexbox, because
   // Outlook and the Gmail app strip or ignore modern layout CSS. The button
   // is a padded anchor rather than a <button>, which mail clients drop.
+  // The footer steers people away from replying by mail (Derek: "I would
+  // rather it say do NOT reply directly, click Reply in ClickUpTasks"). A
+  // direct reply currently just lands in the mentioner's inbox and never
+  // reaches the task, so an answer typed there is invisible to everyone else.
   const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   const who = esc(senderName ?? "Someone");
   const html = `
@@ -56,7 +60,7 @@ export async function POST(req: NextRequest) {
   <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 18px"><tr><td style="border-radius:6px;background:#1b3a5c">
     <a href="${link}" style="display:inline-block;padding:12px 22px;font-size:16px;font-weight:600;color:#ffffff;text-decoration:none">Reply in ClickUpTasks</a>
   </td></tr></table>
-  <p style="margin:0;font-size:14px;color:#5f6368">Replying to this email will reach ${who} directly, not the task.</p>
+  <p style="margin:0;font-size:14px;color:#5f6368">Please do not reply to this email. Use the button above so your answer lands on the task where the whole team can see it.</p>
 </div>`.trim();
 
   try {
