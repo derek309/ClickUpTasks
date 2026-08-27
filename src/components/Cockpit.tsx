@@ -486,6 +486,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const [manualOrder, setManualOrder] = useState<string[]>([]);
   const [headerMoreOpen, setHeaderMoreOpen] = useState(false);
+  const [copiedForClaude, setCopiedForClaude] = useState(false);
   // New Client settings sheet (item 7) — replaces the three standing toggles
   // that used to live directly in the kebab menu (a menu mixing persistent
   // toggles with one-shot actions gave no signal about what closes it).
@@ -2013,6 +2014,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     ].filter(Boolean).join("\n");
     try {
       await navigator.clipboard.writeText(brief);
+      setCopiedForClaude(true);
+      setTimeout(() => setCopiedForClaude(false), 1800);
       pushToast("Copied client brief for Claude.");
     } catch {
       pushToast("Couldn't copy to clipboard.");
@@ -3928,6 +3931,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // an IIFE returning JSX there confused the React Compiler into treating it
   // as a component defined during render.
   const settingsClient = clientSettingsOpen && activeClient !== "all" ? clientById(activeClient) : null;
+  const copyForClaudeControl = (
+    <button onClick={copyClientForClaude} title="Copy this list as a brief for Claude"
+      className="rounded-md border bg-background px-2 py-1.5 text-[13px] leading-none text-muted hover:text-foreground">
+      <span aria-hidden>{copiedForClaude ? "✓" : "✳"}</span>
+    </button>
+  );
   const overflowControl = (
     <div className="relative">
       <button onClick={() => setHeaderMoreOpen((o) => !o)} title="More actions"
@@ -3973,13 +3982,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <button onClick={() => { setHeaderMoreOpen(false); linkClientToContact(activeClient, null); }}
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-muted hover:bg-background hover:text-danger"><I.close /> Unlink from GoHighLevel</button>
           )}
+          <button onClick={() => { setHeaderMoreOpen(false); copyClientForClaude(); }}
+            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background sm:hidden"><span aria-hidden>✳</span> Copy for Claude</button>
           <div className="mt-1 border-t px-2.5 pb-0.5 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Manage</div>
           {canAdmin && activeClient !== "all" && !activeProject && clientById(activeClient) && (
             <button onClick={() => { setHeaderMoreOpen(false); setClientSettingsOpen(true); }}
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.gear /> Client settings</button>
           )}
-          <button onClick={() => { setHeaderMoreOpen(false); copyClientForClaude(); }}
-            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><span aria-hidden>✳</span> Copy for Claude</button>
           {canAdmin && !activeProject && activeClient.startsWith("cl_") && clientById(activeClient) && (
             <button onClick={() => { setHeaderMoreOpen(false); setMergeClientState({ a: clientById(activeClient)! }); }}
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-danger hover:bg-background"><I.repeat /> Merge with another client…</button>
@@ -4285,6 +4294,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             </div>
           ) : !personalView && clientTab === "chat" ? null : (
             <div className="flex items-center gap-1.5">
+              {clientView && copyForClaudeControl}
               {followingControl}
               {groupSortControl}
               {filterMenuControl}
