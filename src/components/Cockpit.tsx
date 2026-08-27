@@ -3757,6 +3757,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // mobile header below so the bell / filter / overflow popovers aren't
   // duplicated in source. Only one header is ever visible (CSS breakpoint),
   // so the popovers never double-render on screen.
+  // Viewing one specific client, or one of its projects — the condition the
+  // header's client-only controls already spell out inline in several places.
+  const clientView = !settingsView && !inboxView && !dirView && !personalView && !myWork && activeClient !== "all";
   // "All Tasks" is the flat list with no other view claiming the screen —
   // the same condition headerTitleText falls through to below.
   const allTasksView = !settingsView && !inboxView && !dirView && !personalView && !myWork && activeClient === "all";
@@ -4176,6 +4179,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </div>
 
           <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
+          {/* Way back to My Work from a client or project (t_mtatk31d0).
+              The existing breadcrumbs sit top LEFT and only walk up to the
+              Clients directory, and they're hidden below sm — so with the
+              sidebar collapsed there was no route back to the dashboard at
+              all. First in the right-hand cluster rather than last, so it
+              never displaces the bell from the actual corner. */}
+          {clientView && (
+            <button onClick={() => goToView("dashboard")} title="Back to My Work"
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-[13px] font-medium text-muted hover:bg-accent-soft hover:text-accent">
+              <span aria-hidden="true">←</span> My Work
+            </button>
+          )}
           {/* This is the "All Tasks" scope toggle — it belongs there only. */}
           {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient === "all" && canAdmin && (
             <div className="inline-flex overflow-hidden rounded-md border" title="VAs only ever see their own tasks here regardless of this toggle">
