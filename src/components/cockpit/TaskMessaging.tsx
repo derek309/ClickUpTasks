@@ -188,7 +188,6 @@ export interface TaskMessagingProps {
   onDeleteMessage?: (id: string) => void;
   onEditMessage?: (id: string, body: string, subject?: string | null) => void;
   onRegenerateAiSummary?: () => void;
-  aiSummaryBusy?: boolean;
   hasMessaging: boolean;
 }
 
@@ -196,7 +195,7 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
   const { task, client, comment, setComment, onPatch, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, ccContacts, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin,
-    onDeleteMessage, onEditMessage, onRegenerateAiSummary, aiSummaryBusy, hasMessaging } = p;
+    onDeleteMessage, onEditMessage, hasMessaging } = p;
 
   // C3: was a Set of independently-toggled channels (all four on by default),
   // which is how "the active tab reads Chat while the pane shows an email
@@ -207,7 +206,6 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
   const [searchQuery, setSearchQuery] = useState("");
   const [replyingTo, setReplyingTo] = useState<{ id: string; channel: Channel } | null>(null);
   const [composingChannel, setComposingChannel] = useState<Channel | null>(null);
-  const [aiPanelOpen, setAiPanelOpen] = useState(false);
 
   // One shared composer-state bundle — reply and fresh-compose are kept
   // mutually exclusive (opening one clears the other) rather than each
@@ -711,43 +709,12 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
           </button>
         );
       })}
-      {onRegenerateAiSummary && (
-        <button onClick={() => setAiPanelOpen(true)} className="ml-auto rounded-md border border-accent/30 px-2.5 py-1.5 text-[14px] font-medium text-accent hover:bg-accent-soft">✨ AI summary</button>
-      )}
-      <div className="relative w-full sm:w-auto sm:flex-1 sm:min-w-[140px]">
+      <div className="relative w-full sm:ml-auto sm:w-auto sm:flex-1 sm:min-w-[140px]">
         <I.search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted" />
         <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search messages…"
           className="w-full rounded-md border bg-background py-1.5 pl-7 pr-2 text-[14px] outline-none focus:border-accent" />
       </div>
     </div>
-  );
-
-  const aiSlideOver = aiPanelOpen && (
-    <>
-      <div className="fixed inset-0 z-40 bg-black/20" onClick={() => setAiPanelOpen(false)} />
-      <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-[380px] flex-col border-l bg-surface shadow-xl">
-        <div className="flex items-center justify-between border-b px-4 py-3">
-          <span className="text-[16px] font-semibold">✨ AI summary</span>
-          <button onClick={() => setAiPanelOpen(false)} className="rounded-md p-1 text-muted hover:bg-background"><I.close /></button>
-        </div>
-        <div className="flex-1 overflow-y-auto px-5 py-4">
-          <div className="mb-3 flex items-center justify-between">
-            <span className="text-[14px] font-medium text-muted">{client.aiSummaryAt ? `Updated ${timeAgo(client.aiSummaryAt)}` : "No summary yet"}</span>
-            <button onClick={onRegenerateAiSummary} disabled={aiSummaryBusy} className="inline-flex items-center gap-1.5 rounded-md border border-accent px-2.5 py-1 text-[14px] font-medium text-accent hover:bg-accent-soft disabled:opacity-50">
-              {aiSummaryBusy ? "Summarizing…" : client.aiSummary ? "Regenerate" : "Summarize"}
-            </button>
-          </div>
-          {client.aiSummary ? (
-            <p className="whitespace-pre-wrap text-[16px] leading-relaxed">{client.aiSummary}</p>
-          ) : (
-            <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted">
-              <span className="text-[16px]">No AI summary yet</span>
-              <span className="text-[14px]">Pulls from this client&apos;s recent messages and tasks.</span>
-            </div>
-          )}
-        </div>
-      </div>
-    </>
   );
 
   // Chat has no compose surface of its own on this side, so a reply to a
@@ -996,7 +963,6 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
     <>
       {filterBar}
       {commentsFeed}
-      {aiSlideOver}
       <input ref={msgFileRef} type="file" multiple accept="image/*" className="hidden" onChange={(e) => { handleMsgFileSelect(e.target.files); e.target.value = ""; }} />
     </>
   );
