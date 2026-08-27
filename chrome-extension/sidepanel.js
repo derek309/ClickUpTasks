@@ -262,7 +262,12 @@ function renderClientResults(query) {
       }
       // mousedown, not click — fires before the input's blur event, so the
       // selection registers before the dropdown gets hidden by the blur handler.
-      row.addEventListener("mousedown", (e) => { e.preventDefault(); selectClient(c.id); });
+      row.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        selectClient(c.id);
+        rememberClientForSender(senderEmail, c.id);
+        maybeAutoEnrich();
+      });
       clientResultsEl.appendChild(row);
     }
   }
@@ -326,6 +331,54 @@ addContactBtn.addEventListener("click", async () => {
     addContactBtn.disabled = false;
   }
 });
+
+// Tomorrow, yyyy-mm-dd, in the user's own timezone — toISOString() would
+// hand back UTC and land on the wrong day for anyone west of Greenwich after
+// late afternoon, which is every one of us (Derek, 2026-08-26: "auto adding
+// the due date for tomorrow").
+// Learned sender -> client memory (Derek, 2026-08-26: "as I use it in Gmail
+// can it start to remember the client and auto select it?"). The server-side
+// match-client lookup only knows contacts and company domains; this records
+// what you actually picked, so a correction sticks for that sender next time.
+// Kept in chrome.storage.local, never synced: it's a convenience cache keyed
+// to email addresses, not something worth putting on Google's servers.
+const SENDER_MEMORY_KEY = "senderClientMap";
+const SENDER_MEMORY_MAX = 200;
+
+async function rememberClientForSender(email, clientEntryId) {
+  if (!email || !clientEntryId) return;
+  try {
+    const store = await chrome.storage.local.get(SENDER_MEMORY_KEY);
+    const map = store[SENDER_MEMORY_KEY] || {};
+    map[email.toLowerCase()] = { id: clientEntryId, at: Date.now() };
+    // Prune oldest first so a long-lived install can't grow without bound.
+    const keys = Object.keys(map);
+    if (keys.length > SENDER_MEMORY_MAX) {
+      keys.sort((a, b) => (map[a].at || 0) - (map[b].at || 0))
+          .slice(0, keys.length - SENDER_MEMORY_MAX)
+          .forEach((k) => delete map[k]);
+    }
+    await chrome.storage.local.set({ [SENDER_MEMORY_KEY]: map });
+  } catch { /* storage unavailable — the picker still works by hand */ }
+}
+
+async function recalledClientForSender(email) {
+  if (!email) return null;
+  try {
+    const store = await chrome.storage.local.get(SENDER_MEMORY_KEY);
+    const hit = (store[SENDER_MEMORY_KEY] || {})[email.toLowerCase()];
+    // Only honour it if that client is still on the roster — one may have been
+    // renamed, merged, or removed since we wrote it down.
+    return hit && allClients.some((c) => c.id === hit.id) ? hit.id : null;
+  } catch { return null; }
+}
+
+function tomorrowIso() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
 
 function selectClient(id) {
   const c = allClients.find((x) => x.id === id);
@@ -417,6 +470,7 @@ async function init(forceClientRefresh = false) {
     return;
   }
   formEl.style.display = "";
+  autoEnrichDone = false;
   needsTokenEl.style.display = "none";
   statusEl.textContent = "";
   statusEl.className = "";
@@ -424,7 +478,7 @@ async function init(forceClientRefresh = false) {
   addContactEl.style.display = "none";
   selectedClientId = "";
   clientSearchInput.value = "";
-  dueInput.value = "";
+  dueInput.value = tomorrowIso();
   prioritySel.value = "normal";
   assigneeSel.value = "";
   clearScreenshots();
@@ -462,6 +516,14 @@ async function init(forceClientRefresh = false) {
   }
 
   if (senderEmail) {
+    const recalled = await recalledClientForSender(senderEmail);
+    if (recalled) {
+      // Beats the server lookup on purpose — you picked this yourself last
+      // time for this exact sender, which outranks a contact or domain guess.
+      selectClient(recalled);
+      matchHintEl.textContent = "Auto-selected — remembered from last time";
+      return;
+    }
     try {
       const { match } = await apiFetch(`/api/extension/match-client?email=${encodeURIComponent(senderEmail)}`, token);
       if (match) {
@@ -495,7 +557,27 @@ async function init(forceClientRefresh = false) {
 
 refreshBtn.addEventListener("click", () => init(true));
 
-enrichBtn.addEventListener("click", async () => {
+// Set once a capture has been enriched, so picking a different client
+// afterwards doesn't fire the AI again and overwrite what's on screen.
+// Cleared whenever the form is reset or repopulated.
+let autoEnrichDone = false;
+
+// Fires when a client is picked from the dropdown (Derek: "make it so enrich
+// with AI auto runs when we select a contact from the dropdown"). Deliberately
+// NOT wired to the auto-match on panel open: that would spend an AI call every
+// time the panel is opened, including the times you open it and close it
+// again. Skipped when there's nothing to work with, and skipped once it has
+// already run for this capture, since it overwrites Title and Notes and would
+// otherwise wipe edits made after the first run. The button re-runs it by hand
+// any time.
+function maybeAutoEnrich() {
+  if (autoEnrichDone || enrichBtn.disabled) return;
+  if (!titleInput.value.trim() && !notesInput.value.trim()) return;
+  autoEnrichDone = true;
+  runEnrich();
+}
+
+async function runEnrich() {
   const token = await getToken();
   if (!token) return;
   enrichBtn.disabled = true;
@@ -515,15 +597,18 @@ enrichBtn.addEventListener("click", async () => {
     enrichBtn.disabled = false;
     enrichBtn.textContent = "✨ Enrich with AI";
   }
-});
+}
+
+enrichBtn.addEventListener("click", () => { autoEnrichDone = true; runEnrich(); });
 
 function resetFormAfterSubmit() {
+  autoEnrichDone = false;
   titleInput.value = "";
   notesInput.value = "";
   selectedClientId = "";
   clientSearchInput.value = "";
   projectSel.value = "";
-  dueInput.value = "";
+  dueInput.value = tomorrowIso();
   prioritySel.value = "normal";
   assigneeSel.value = "";
   matchHintEl.textContent = "";
