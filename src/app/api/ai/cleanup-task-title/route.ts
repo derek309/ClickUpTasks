@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/serverAuth";
 
 // Rewrites an over-long, typed-in-a-hurry task title into a real title and
-// hands back whatever detail got squeezed out so the caller can append it to
-// the description. Same Gemini call shape and TITLE:/DESCRIPTION: parsing as
+// hands back the full original text, proofread, so the caller can append it
+// to the description — the long thought someone dumped into the title box is
+// usually the actual brief, so it's preserved rather than summarised away
+// (Derek, 2026-08-26: "keep it as close as possible to original message,
+// just grammar and spelling check"). Same Gemini call shape and TITLE:/DESCRIPTION: parsing as
 // /api/extension/enrich, but with no Supabase reads at all: everything it
 // needs arrives in the request body, because this runs unattended right after
 // a task is created rather than from a button the user is waiting on.
@@ -37,12 +40,15 @@ export async function POST(req: NextRequest) {
     "You are tidying up a task title that someone typed in a hurry into a project management tool.",
     "The title below is too long because they dumped the whole thought into it.",
     "Rewrite it as a real task title: short, specific, and clear about the action, under 70 characters.",
-    "Everything that does not belong in a title but is worth keeping goes into the description instead.",
-    "Preserve the original meaning exactly. Never invent details that are not in the text below.",
+    "Then write the original text out in full as the description, so nothing they typed is lost.",
+    "The description is a proofread, NOT a summary and NOT a rewrite. Correct spelling, grammar,",
+    "capitalisation and punctuation, and nothing else. Keep their own words, their own phrasing and",
+    "their own order. Do not shorten it, do not tighten it, do not merge sentences, do not add a",
+    "single word of your own, and never invent detail that is not already in the text.",
     "Never use a hyphen, an em dash, an en dash, or any other dash punctuation anywhere in your response. Write plain sentences instead.",
     "Respond in EXACTLY this format, plain text only, no markdown and no preamble:",
     "TITLE: <the shortened title>",
-    "DESCRIPTION: <the detail that did not fit in the title, one or two short sentences, or the word NONE if the title already carries everything>",
+    "DESCRIPTION: <the full original text, spelling and grammar corrected, otherwise word for word>",
     "",
     `Title as typed: ${title}`,
     description ? `Description already on the task (do not repeat any of this):\n${description}` : "The task has no description yet.",
@@ -71,8 +77,10 @@ export async function POST(req: NextRequest) {
     const descMatch = text.match(/DESCRIPTION:\s*([\s\S]+)/i);
     const cleaned = titleMatch?.[1]?.trim() || title;
     const extracted = descMatch?.[1]?.trim() ?? "";
-    // "NONE" is the prompt's own way of saying nothing was left over, so it
-    // must never reach the task as literal description text.
+    // The prompt no longer offers NONE now that the description is a full
+    // proofread copy rather than leftover detail, but the guard stays: a
+    // model that answers with it anyway must never write the literal word
+    // into someone's task.
     return NextResponse.json({ title: cleaned, description: /^none\.?$/i.test(extracted) ? "" : extracted });
   } catch (e) {
     // Covers the AbortSignal timeout too (a TimeoutError DOMException), which

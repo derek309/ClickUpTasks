@@ -778,7 +778,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         // whatever description the task already has, not a replacement for it.
         if (extracted) patch.description = current.description + plainTextToHtml(extracted);
         patchTask(taskId, patch);
-        pushToast("Cleaned up a long title");
+        pushToast(extracted ? "Shortened the title, full text moved to the description" : "Cleaned up a long title");
       } catch {
         // Network dropped mid-request. Same as every other failure here: the
         // task keeps the title as typed and the user hears nothing about it.
