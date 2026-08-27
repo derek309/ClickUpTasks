@@ -106,11 +106,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     deepLinkTaskId
       ? scopedTaskQuery().eq("id", deepLinkTaskId)
       : Promise.resolve({ data: [] as Row[] }),
+    // Playbook step tasks are excluded from the all-tasks expansion on
+    // purpose (Derek: "do not show the playbook in the client link"). There
+    // are ~28 of them per client, they're generated rather than written for
+    // the client to read, and they already have their own client-facing
+    // surface: the growth plan card, with its own separate toggle. Without
+    // this filter, switching "sees all tasks" on buried the real work under
+    // the entire Playbook checklist.
     scope.showAllTasks
-      ? scopedTaskQuery().neq("status", "done")
+      ? scopedTaskQuery().is("playbook_step_key", null).neq("status", "done")
       : Promise.resolve({ data: [] as Row[] }),
     scope.showAllTasks
-      ? scopedTaskQuery().eq("status", "done").order("due", { ascending: false, nullsFirst: false }).limit(DONE_LIMIT)
+      ? scopedTaskQuery().is("playbook_step_key", null).eq("status", "done").order("due", { ascending: false, nullsFirst: false }).limit(DONE_LIMIT)
       : Promise.resolve({ data: [] as Row[] }),
   ]);
   const byId = new Map<string, Row>();
