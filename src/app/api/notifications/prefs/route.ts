@@ -6,6 +6,10 @@ import { requireUser } from "@/lib/serverAuth";
 // /api/tokens: a caller can only ever read/write their own row (auth.uid()),
 // never someone else's. Only gates the best-effort EMAIL companion to a
 // notification (see Cockpit.tsx's notify()); the in-app bell always fires.
+//
+// Also carries the Team Chat read marker. It rides along here rather than in
+// its own route because it is the same thing: a per-user column on the
+// caller's own profile row, written only by that caller.
 
 export async function GET(req: NextRequest) {
   if (!adminConfigured) return NextResponse.json({ error: "Service role key not configured." }, { status: 501 });
@@ -13,7 +17,7 @@ export async function GET(req: NextRequest) {
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { data, error } = await supabaseAdmin
     .from("profiles")
-    .select("email_notify_activity, email_notify_message, email_notify_dm")
+    .select("email_notify_activity, email_notify_message, email_notify_dm, team_chat_last_read_at")
     .eq("id", caller.id)
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
@@ -21,6 +25,7 @@ export async function GET(req: NextRequest) {
     emailNotifyActivity: data?.email_notify_activity ?? true,
     emailNotifyMessage: data?.email_notify_message ?? true,
     emailNotifyDm: data?.email_notify_dm ?? true,
+    teamChatLastReadAt: data?.team_chat_last_read_at ?? null,
   });
 }
 
@@ -29,10 +34,15 @@ export async function PATCH(req: NextRequest) {
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const body = await req.json().catch(() => ({}));
-  const patch: Record<string, boolean> = {};
+  const patch: Record<string, boolean | string> = {};
   if (typeof body.emailNotifyActivity === "boolean") patch.email_notify_activity = body.emailNotifyActivity;
   if (typeof body.emailNotifyMessage === "boolean") patch.email_notify_message = body.emailNotifyMessage;
   if (typeof body.emailNotifyDm === "boolean") patch.email_notify_dm = body.emailNotifyDm;
+  // An ISO timestamp, validated rather than trusted: this lands straight in a
+  // timestamptz column.
+  if (typeof body.teamChatLastReadAt === "string" && !Number.isNaN(Date.parse(body.teamChatLastReadAt))) {
+    patch.team_chat_last_read_at = new Date(body.teamChatLastReadAt).toISOString();
+  }
   if (Object.keys(patch).length === 0) return NextResponse.json({ error: "No valid fields to update." }, { status: 400 });
   const { error } = await supabaseAdmin.from("profiles").update(patch).eq("id", caller.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });

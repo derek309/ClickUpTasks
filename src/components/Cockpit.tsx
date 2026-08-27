@@ -169,6 +169,10 @@ const NAV_KEY_VIEWS: Record<string, "dashboard" | "clients" | "projects" | "pers
 // already asks Gemini for, so both paths agree on what a good title looks like.
 const LONG_TITLE_THRESHOLD = 80;
 
+// Deep link straight to Team Chat, for notification emails. ?view=inbox is
+// what parseUrl maps onto inboxView (see NavState above).
+const TEAM_CHAT_LINK = "?view=inbox";
+
 export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [clients, setClients] = useState<Client[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -277,19 +281,38 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Which half of the Team Chat page is showing. Chat leads — per Derek, the
   // inbox "is really what team chat was supposed to be": talk to the team
   // first, review the task comments/mentions addressed to you second.
-  // Per-user "last seen" timestamp for the unread dot — local-only, same
-  // idiom as cut_starred/cut_sidebarHidden (no server-side read-state needed
-  // for a lightweight badge).
+  // Per-user "last seen" timestamp for the unread badge. Server-side now
+  // (profiles.team_chat_last_read_at, see supabase/team-chat-read-state.sql):
+  // as a localStorage value it was per-browser, so reading the channel on a
+  // laptop left the badge showing on a phone, and clearing site data made
+  // every message unread again. localStorage is kept as an instant local echo
+  // so the badge clears without waiting on a round trip.
   const [teamChatLastRead, setTeamChatLastRead] = useState<string>("");
-  // One-time localStorage hydration on mount — same accepted pattern as
-  // ClientJournal's composerW / TaskDrawer's activityW/siblingsCollapsed
-  // (already tolerated elsewhere in this file), not a new class of issue.
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { try { setTeamChatLastRead(localStorage.getItem("cut_teamChatLastRead") ?? ""); } catch {} }, []);
+  // Then the server's value, which wins when it's newer — another device may
+  // have read the channel since this tab last wrote its local copy.
+  useEffect(() => {
+    let cancelled = false;
+    authedFetch("/api/notifications/prefs")
+      .then((r) => r.json())
+      .then((j) => {
+        const remote: string | null = j?.teamChatLastReadAt ?? null;
+        if (cancelled || !remote) return;
+        setTeamChatLastRead((local) => (remote > local ? remote : local));
+      })
+      .catch(() => { /* offline — the local echo still works */ });
+    return () => { cancelled = true; };
+  }, []);
   const markTeamChatRead = () => {
     const now = new Date().toISOString();
     setTeamChatLastRead(now);
     try { localStorage.setItem("cut_teamChatLastRead", now); } catch {}
+    authedFetch("/api/notifications/prefs", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teamChatLastReadAt: now }),
+    }).catch(() => { /* best effort — the local echo already cleared it here */ });
   };
   // Which DM thread (if any) is open — the Chat hub's "Conversations" row
   // and each teammate's row are mutually exclusive, so a non-null value here
@@ -353,8 +376,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Memoized — .some over teamMessages every render, and it also sits in a
   // useEffect's dependency array below, so an unstable value here re-ran
   // that effect on every render too.
+  // A count, not a boolean. Team Chat was the only nav item showing a bare
+  // dot while My Work, Clients, Projects and Personal all showed a number —
+  // a dot says "something happened", a number says how much you've missed
+  // (Derek: make it so "people see it and use it more").
   const teamChatUnread = useMemo(
-    () => teamMessages.some((m) => m.authorId !== me.id && m.at > teamChatLastRead),
+    () => teamMessages.filter((m) => m.authorId !== me.id && m.at > teamChatLastRead).length,
     [teamMessages, me.id, teamChatLastRead]
   );
   // Chat is always on screen now (the whole Conversations page is Chat, full
@@ -1477,7 +1504,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // skipEmail is set only by the one call site that already fires its own
   // richer, quoted-comment email (sendMentionEmail, task-comment mentions) —
   // every other notification gets this plain generic email automatically.
-  const notify = (recipientId: string, text: string, taskId: string | null, extra?: { clientId?: string | null; projectId?: string | null; kind?: NotificationKind; skipEmail?: boolean }) => {
+  const notify = (recipientId: string, text: string, taskId: string | null, extra?: { clientId?: string | null; projectId?: string | null; kind?: NotificationKind; skipEmail?: boolean; link?: string }) => {
     // A private task's title must never leave its owner. RLS keeps the task row
     // itself unreadable, but notification text is plain and unprotected, and it
     // doubles as the EMAIL SUBJECT — so without this, marking a personal task
@@ -1491,7 +1518,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setNotifications((ns) => [n, ...ns]);
     insertNotif(n);
     if (!extra?.skipEmail) {
-      const link = taskId ? `?task=${encodeURIComponent(taskId)}` : extra?.clientId ? `?client=${encodeURIComponent(extra.clientId)}` : undefined;
+      // extra.link wins: a caller with no task or client to point at (Team
+      // Chat) would otherwise send an email whose only link is the app root.
+      const link = extra?.link ?? (taskId ? `?task=${encodeURIComponent(taskId)}` : extra?.clientId ? `?client=${encodeURIComponent(extra.clientId)}` : undefined);
       sendNotificationEmail(recipientId, text, link, extra?.kind ?? "activity");
     }
   };
@@ -3751,8 +3780,30 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // Word-boundary match, not a bare substring: "@Samantha" must not also
     // notify a "Sam" on the roster. Case-insensitive so a hand-typed
     // "@derek fox" still lands; the picker inserts the exact name anyway.
+    // Who gets told, and how loudly. Before this, ONLY an exact @Full Name
+    // match notified anyone — so posting without mentioning someone reached
+    // nobody at all until they happened to open the page, which is most of
+    // why the channel went quiet (Derek: "how can we implement team chat more
+    // so people see it and use it").
+    //
+    // Three tiers, loudest first:
+    //   mentioned      — you were named. Bell + email.
+    //   replied to     — someone quoted your message. Bell + email; being
+    //                    answered is as direct as being named.
+    //   everyone else  — bell only. "the people involved in the chat or chat
+    //                    thread" get the email (Derek); the rest get the
+    //                    badge, because emailing the whole team on every
+    //                    message is how a channel gets muted for good.
+    const repliedToAuthorId = replyToId ? teamMessages.find((x) => x.id === replyToId)?.authorId ?? null : null;
     users.forEach((u) => {
-      if (u.id !== me.id && mentionsUser(body, u.name)) notify(u.id, `${me.name} mentioned you in Team Chat`, null, { kind: "message" });
+      if (u.id === me.id) return;
+      if (mentionsUser(body, u.name)) {
+        notify(u.id, `${me.name} mentioned you in Team Chat`, null, { kind: "message", link: TEAM_CHAT_LINK });
+      } else if (u.id === repliedToAuthorId) {
+        notify(u.id, `${me.name} replied to you in Team Chat`, null, { kind: "message", link: TEAM_CHAT_LINK });
+      } else {
+        notify(u.id, `${me.name} posted in Team Chat`, null, { kind: "message", skipEmail: true, link: TEAM_CHAT_LINK });
+      }
     });
   };
   // Confirmed like the client-facing message delete in TaskMessaging — team
@@ -4129,11 +4180,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               own task-driven tiers); a third place to check the same signal
               was redundant, not additional coverage. */}
           {navVisible.inbox && (<>
-            <SideItem active={inboxView && dmUserId === null} title="Team Chat (press 2)" onClick={openTeamChat}><I.comment className="text-muted" /> <span>Team Chat</span>{teamChatUnread && (
+            <SideItem active={inboxView && dmUserId === null} title="Team Chat (press 2)" onClick={openTeamChat}><I.comment className="text-muted" /> <span>Team Chat</span>{teamChatUnread > 0 && (
               // Literal unread team-chat messages only — general notifications
               // (task assignments, client replies, etc.) have their own home
-              // on the bell, not this nav item (Derek, Aug 4).
-              <span title="Unread conversations" className="ml-auto h-2 w-2 rounded-full bg-accent" />
+              // on the bell, not this nav item (Derek, Aug 4). Capped display
+              // so a long weekend doesn't stretch the sidebar row.
+              <span title={`${teamChatUnread} unread message${teamChatUnread === 1 ? "" : "s"}`} className="ml-auto rounded-full bg-accent px-1.5 text-[12px] font-semibold leading-[18px] text-white">{teamChatUnread > 99 ? "99+" : teamChatUnread}</span>
             )}</SideItem>
             {dmEnabled && users.filter((u) => u.id !== me.id).map((u) => (
               <SideItem key={u.id} active={inboxView && dmUserId === u.id} onClick={() => openDm(u.id)}>
