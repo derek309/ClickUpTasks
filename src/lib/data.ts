@@ -1981,6 +1981,48 @@ export function dueCountdown(iso: string | null, today: string = TODAY): string 
   return `${months} months left`;
 }
 
+/** How much of the created-to-due window has been used up, 0 to 1, or null
+ *  when there's no due date to measure against. A window that is zero days or
+ *  inverted (a due date set before the task existed, which really happens)
+ *  counts as fully burnt rather than dividing by zero. */
+export function windowBurn(createdAt: string, due: string | null, today: string = TODAY): number | null {
+  if (!due) return null;
+  const created = createdAt.slice(0, 10);
+  const total = daysUntilDue(due, created);
+  const gone = daysUntilDue(today, created);
+  if (total === null || gone === null) return null;
+  if (total <= 0) return 1;
+  return Math.max(0, Math.min(1, gone / total));
+}
+
+/** "Do I need to touch this now?" — the honest version of the question, built
+ *  from what's already recorded rather than from an effort estimate nobody
+ *  fills in (Derek: "the hard part is between the create date and the due
+ *  date, how do we know when to work on it").
+ *
+ *  The third fact, alongside created and due, is whether anyone has STARTED.
+ *  A task 25 days into a 30-day window still sitting in To do is the one
+ *  shouting; the same task marked Progress is fine and stays quiet. So this
+ *  only ever fires on work that hasn't been picked up.
+ *
+ *  BURN_THRESHOLD at 0.7: late enough that ignoring it is a real risk, early
+ *  enough that there's still time to act. Below that, a countdown is enough. */
+export const BURN_THRESHOLD = 0.7;
+export function startSignal(
+  task: { createdAt: string; due: string | null; status: TaskStatus },
+  today: string = TODAY,
+): { level: "none" | "start" | "late"; label: string } {
+  const NONE = { level: "none" as const, label: "" };
+  if (task.status !== "todo") return NONE; // started, or past starting
+  if (!task.due) return NONE;              // nothing to be late for
+  const left = daysUntilDue(task.due, today);
+  if (left === null) return NONE;
+  if (left < 0) return { level: "late", label: "Not started" };
+  const burn = windowBurn(task.createdAt, task.due, today);
+  if (burn !== null && burn >= BURN_THRESHOLD) return { level: "start", label: "Start now" };
+  return NONE;
+}
+
 export function isOverdue(iso: string | null): boolean {
   return !!iso && iso < TODAY;
 }

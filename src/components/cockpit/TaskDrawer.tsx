@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, clientStatusMeta,
-  STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY, WEEKDAY_LABEL,
+  STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY, WEEKDAY_LABEL, windowBurn, startSignal, dueCountdown,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Row, CollapsibleText, SearchableSelect, newId } from "./ui";
@@ -290,7 +290,29 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     : task.createdBy === "client" ? "the client"
     : task.createdBy ? (userById(task.createdBy)?.name ?? null) : null;
   const metaLine = (
+    <>
     <div className="-mt-0.5 mb-1 text-[13px] text-muted">Created {new Date(task.createdAt).toLocaleDateString()}{creatorName ? ` by ${creatorName}` : ""} · Updated {timeAgo(lastActivityAt)}</div>
+    {/* The window, spelled out where there's room for it. The list row only
+        has space for the verdict; this says how it was reached, so the chip
+        never looks arbitrary. */}
+    {task.due && (() => {
+      const burn = windowBurn(task.createdAt, task.due);
+      const sig = startSignal(task);
+      if (burn === null) return null;
+      const pct = Math.round(burn * 100);
+      return (
+        <div className="mb-2 flex items-center gap-2 text-[13px]">
+          <span className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-border">
+            <span className={`block h-full rounded-full ${sig.level === "late" ? "bg-danger" : sig.level === "start" ? "bg-amber-500" : "bg-accent"}`} style={{ width: `${Math.max(2, pct)}%` }} />
+          </span>
+          <span className="text-muted">{pct}% of the way from created to due · {dueCountdown(task.due)}</span>
+          {sig.level !== "none" && (
+            <span className={`rounded px-1.5 py-0.5 text-[12px] font-semibold ${sig.level === "late" ? "bg-danger/10 text-danger" : "bg-amber-500/15 text-amber-700"}`}>{sig.label}</span>
+          )}
+        </div>
+      );
+    })()}
+    </>
   );
   // Used to be its own 6-button grid, wrapping to two cramped, hard-to-read
   // rows in the drawer's narrow (non-full) width — the exact thing that

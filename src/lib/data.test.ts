@@ -23,6 +23,8 @@ import {
   mentionsUser,
   nthWeekdayOfMonth,
   daysUntilDue,
+  windowBurn,
+  startSignal,
   dueCountdown,
   describeRecurrence,
   TODAY,
@@ -508,5 +510,40 @@ describe("due countdown", () => {
     for (const d of ["2026-09-30", "2026-12-25", "2027-06-01", "2029-01-01"]) {
       expect(dueCountdown(d, today), d).not.toBe("");
     }
+  });
+});
+
+describe("window burn and the start signal", () => {
+  const today = "2026-08-28";
+  const T = (createdAt: string, due: string | null, status: "todo" | "in_progress" | "done" = "todo") =>
+    ({ createdAt, due, status } as { createdAt: string; due: string | null; status: import("./data").TaskStatus });
+
+  it("measures how much of the window is gone", () => {
+    expect(windowBurn("2026-08-18", "2026-08-28", today)).toBe(1);    // day 10 of 10
+    expect(windowBurn("2026-08-18", "2026-09-07", today)).toBe(0.5);  // day 10 of 20
+    expect(windowBurn("2026-08-27", "2026-09-26", today)).toBeCloseTo(1 / 30, 5);
+    expect(windowBurn("2026-08-18", null, today)).toBeNull();
+  });
+  it("treats a same-day or inverted window as fully burnt rather than dividing by zero", () => {
+    expect(windowBurn("2026-08-28", "2026-08-28", today)).toBe(1);
+    expect(windowBurn("2026-08-28", "2026-08-20", today)).toBe(1); // due before created — 7 of these exist
+  });
+
+  it("says start now once most of the window is gone and nothing has begun", () => {
+    // 30-day window, day 25 — past the 0.7 threshold
+    expect(startSignal(T("2026-08-03", "2026-09-02"), today).level).toBe("start");
+  });
+  it("stays quiet early in the window", () => {
+    expect(startSignal(T("2026-08-27", "2026-09-26"), today).level).toBe("none");
+  });
+  it("stays quiet once the work has actually started", () => {
+    expect(startSignal(T("2026-08-03", "2026-09-02", "in_progress"), today).level).toBe("none");
+    expect(startSignal(T("2026-08-03", "2026-09-02", "done"), today).level).toBe("none");
+  });
+  it("calls out overdue work that was never started", () => {
+    expect(startSignal(T("2026-08-01", "2026-08-25"), today)).toEqual({ level: "late", label: "Not started" });
+  });
+  it("never fires without a due date — there is nothing to be late for", () => {
+    expect(startSignal(T("2026-01-01", null), today).level).toBe("none");
   });
 });
