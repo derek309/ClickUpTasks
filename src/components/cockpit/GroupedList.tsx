@@ -511,7 +511,11 @@ function friendlyDue(iso: string): string {
 // for the prominent header control). `strong` styles a set value in accent
 // (and gives the empty state a visible affordance) instead of muted grey —
 // for surfaces where the date is a primary action, not a table cell.
-export function InlineDue({ value, overdue, followUpAt = null, recurrence = "none", recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth, recurrenceNth, recurrenceWeekday, onChange, onRecurrenceChange, emptyLabel = "—", strong = false, showRecurrenceLabel = false }: { value: string | null; overdue: boolean; followUpAt?: string | null; recurrence?: Recurrence; recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[]; recurrenceNth?: number; recurrenceWeekday?: number; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; emptyLabel?: React.ReactNode; strong?: boolean; showRecurrenceLabel?: boolean }) {
+// Anchoring maths for the date popover, shared by InlineDue and InlineDate so
+// the two triggers can't drift apart. Both had to solve the same two problems:
+// never run off the right edge of a phone, and flip above the trigger when
+// there's no room below without pushing the panel off the top.
+function useDatePopover() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0, width: 440 });
@@ -522,23 +526,48 @@ export function InlineDue({ value, overdue, followUpAt = null, recurrence = "non
       // Never wider than the viewport (with an 8px gutter each side) so the
       // picker can't run off the right edge of a phone.
       const width = Math.min(440, window.innerWidth - 16);
-      // Anchor to the trigger's own left edge (same formula as menuPos
-      // below) instead of its right edge minus the popover width — that
-      // right-aligned math went negative for a trigger sitting close to the
-      // left edge of the content area (e.g. the header's follow-up-date
-      // pill right next to the sidebar), clamping to the viewport's 8px
-      // gutter and rendering the popover behind the sidebar instead of
-      // under the button that opened it.
+      // Anchor to the trigger's own left edge instead of its right edge minus
+      // the popover width — that right-aligned math went negative for a
+      // trigger sitting close to the left edge of the content area (e.g. the
+      // header's follow-up-date pill right next to the sidebar), clamping to
+      // the viewport's 8px gutter and rendering the popover behind the
+      // sidebar instead of under the button that opened it.
       const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
       // Prefer opening below the trigger; flip above it if there's no room
       // below, but clamp so a trigger near the top of a short window (a
-      // header control, a split/docked browser) never pushes the panel's
-      // top above y=0 and off-screen.
+      // header control, a split/docked browser) never pushes the panel's top
+      // above y=0 and off-screen.
       const top = r.bottom + 300 > window.innerHeight ? Math.max(8, r.top - 304) : r.bottom + 4;
       setPos({ top, left, width });
     }
     setOpen(true);
   };
+  return { open, setOpen, ref, pos, openIt };
+}
+
+// A plain date value that opens the same calendar as the due date. Exists so
+// the follow-up date in the task drawer stops being a bare <input type=date>:
+// that rendered "08/31/2026" in native widget chrome beside a "Jul 22"
+// created date, in a taller box that knocked the whole row out of alignment.
+export function InlineDate({ value, onChange, onClear, className = "", emptyLabel = "—" }: { value: string | null; onChange: (d: string | null) => void; onClear?: () => void; className?: string; emptyLabel?: React.ReactNode }) {
+  const { open, setOpen, ref, pos, openIt } = useDatePopover();
+  return (
+    <>
+      <span className="flex min-w-0 items-center gap-1">
+        <button ref={ref} onClick={openIt} className={`min-w-0 truncate rounded px-1 py-0.5 text-left hover:bg-surface ${className}`}>
+          {value ? friendlyDue(value) : emptyLabel}
+        </button>
+        {value && onClear && (
+          <button onClick={onClear} title="Clear the date" className="shrink-0 px-0.5 text-muted hover:text-danger">×</button>
+        )}
+      </span>
+      {open && <DatePopover pos={pos} value={value} recurrence="none" onSelect={(d) => { onChange(d); setOpen(false); }} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+export function InlineDue({ value, overdue, followUpAt = null, recurrence = "none", recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth, recurrenceNth, recurrenceWeekday, onChange, onRecurrenceChange, emptyLabel = "—", strong = false, showRecurrenceLabel = false }: { value: string | null; overdue: boolean; followUpAt?: string | null; recurrence?: Recurrence; recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[]; recurrenceNth?: number; recurrenceWeekday?: number; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; emptyLabel?: React.ReactNode; strong?: boolean; showRecurrenceLabel?: boolean }) {
+  const { open, setOpen, ref, pos, openIt } = useDatePopover();
   // Amber only for a genuinely near date — not "any date that isn't
   // overdue," which would paint every far-future due date the same urgent
   // color as one due tomorrow.

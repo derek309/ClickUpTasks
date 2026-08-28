@@ -9,7 +9,7 @@ import {
 } from "@/lib/data";
 import { I, Row, CollapsibleText, SearchableSelect, newId } from "./ui";
 import { AttachmentTile } from "./AttachmentTile";
-import { InlineAssignee, InlineDue } from "./GroupedList";
+import { InlineAssignee, InlineDate, InlineDue } from "./GroupedList";
 import { RichTextEditor } from "./RichTextEditor";
 import { useTaskMessaging } from "./TaskMessaging";
 
@@ -44,6 +44,35 @@ function useDebouncedCommit(delayMs = 600) {
   }, [flush, delayMs]);
   useEffect(() => flush, [flush]); // flush on unmount rather than drop a trailing edit
   return { schedule, flush };
+}
+
+// Each date gets an identity colour: follow-up amber, due red, created
+// green (Derek's call). The colour marks WHICH date you're looking at, not
+// how urgent it is — a soft tint and a coloured rule, never the value
+// itself. The due value still turns red only when it's actually overdue,
+// so painting the whole column red would have destroyed the one signal
+// that column carries.
+const DATE_TONES = {
+  followUp: { rule: "#f59e0b", key: "text-amber-700", tint: "rgba(245,158,11,0.055)" },
+  due: { rule: "var(--danger)", key: "text-danger", tint: "rgba(239,68,68,0.05)" },
+  created: { rule: "var(--success)", key: "text-[#15803d]", tint: "rgba(22,163,74,0.05)" },
+  } as const;
+const DATE_CELL = "relative min-w-0 flex-1 overflow-hidden rounded-lg px-3 pb-2.5 pt-2.5";
+const DATE_KEY = "mb-1 block text-[12px] font-semibold uppercase tracking-wide";
+// Hoisted out of TaskDrawer deliberately. Declared inside the component body
+// this was a fresh component type on every render, so React remounted all
+// three columns each time — which would have slammed the date picker shut the
+// moment anything else in the drawer changed.
+function DateCol({ tone, label, children }: { tone: typeof DATE_TONES[keyof typeof DATE_TONES]; label: string; children: React.ReactNode }) {
+  return (
+    <div className={DATE_CELL} style={{ background: tone.tint }}>
+      {/* The colour lands as a rule down the left edge rather than on the
+          text, so it identifies the column without competing with the value. */}
+      <span className="absolute inset-y-1.5 left-0 w-[3px] rounded-full" style={{ background: tone.rule }} />
+      <span className={`${DATE_KEY} ${tone.key}`}>{label}</span>
+      {children}
+    </div>
+  );
 }
 
 export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast }: {
@@ -121,9 +150,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onPatch({ attachments: [...task.attachments, { id: newId("at_"), name: linkLabel.trim() || href.replace(/^https?:\/\//, ""), kind: "link", size: "", url: href }] });
     setLinkUrl(""); setLinkLabel(""); setLinkOpen(false);
   };
-  // Anchors the native date picker for the "+ Follow up" button, which has no
-  // visible input of its own until a date is actually set.
-  const followUpRef = useRef<HTMLInputElement | null>(null);
   const [labelOpen, setLabelOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -250,11 +276,37 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         if (file) images.push(file);
       }
     }
-    if (images.length === 0) return;
+    if (images.length > 0) {
+      e.preventDefault();
+      const dt = new DataTransfer();
+      images.forEach((f) => dt.items.add(f));
+      onAddFiles(dt.files);
+      return;
+    }
+    // A pasted URL attaches itself, no "+ Attach → Link → Add" trip (Derek:
+    // "if I copy and paste a link just attach it"). Guarded hard, because the
+    // failure mode is stealing an ordinary paste:
+    //   - only when focus is NOT in a field you can type into, so pasting a
+    //     URL into the description, the title or a comment still just types
+    //     it, which is almost always what you meant there;
+    //   - only for a single bare http(s) URL with no surrounding prose, so
+    //     pasting a paragraph that happens to contain a link is untouched;
+    //   - and not for one already attached, which would otherwise stack
+    //     duplicates every time you pasted the same thing twice.
+    const text = e.clipboardData?.getData("text/plain")?.trim();
+    if (!text) return;
+    const el = document.activeElement as HTMLElement | null;
+    const tag = el?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || el?.isContentEditable) return;
+    if (!/^https?:\/\/[^\s]+$/i.test(text)) return;
+    if (task.attachments.some((a) => a.url === text)) {
+      pushToast?.("That link is already attached");
+      e.preventDefault();
+      return;
+    }
     e.preventDefault();
-    const dt = new DataTransfer();
-    images.forEach((f) => dt.items.add(f));
-    onAddFiles(dt.files);
+    onPatch({ attachments: [...task.attachments, { id: newId("at_"), name: text.replace(/^https?:\/\//, ""), kind: "link", size: "", url: text }] });
+    pushToast?.("Link attached");
   };
   const doneSubs = task.subtasks.filter((s) => s.done).length;
 
@@ -277,21 +329,31 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   );
   // Completion checkbox to the title's left (item 4) — the fastest way to
   // close out a task without hunting for the Status chip.
-  const titleRow = (
-    <div className="flex items-start gap-2.5">
-      <button onClick={() => onPatch({ status: task.status === "done" ? "todo" : "done" })} title={task.status === "done" ? "Mark not done" : "Mark done"}
-        className={`mt-1.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition ${task.status === "done" ? "border-accent bg-accent text-white" : "border-border hover:border-accent"}`}>
-        {task.status === "done" && <I.check className="h-3 w-3" />}
-      </button>
-      <div className="min-w-0 flex-1">{titleBlock}</div>
-    </div>
-  );
   // Comment/event timestamps already cover every field-change and message —
   // the latest one is a true "last updated", not just a metadata guess.
   const lastActivityAt = task.comments.reduce((max, c) => (c.at > max ? c.at : max), task.createdAt);
   const creatorName = task.createdBy === "u_claude" ? "Automated"
     : task.createdBy === "client" ? "the client"
     : task.createdBy ? (userById(task.createdBy)?.name ?? null) : null;
+  // The done circle sits in the left gutter rather than in the flow, so the
+  // title starts at the same x as the dates band and everything below it.
+  // In the flow it pushed the title 28px right of every other block, which
+  // read as a broken indent (Derek: "move the check circle outside the left
+  // box so that the text lines up"). The gutter is the container's own px-8,
+  // so it can't collide with anything.
+  const titleRow = (
+    <div className="relative flex items-start gap-2.5">
+      <button onClick={() => onPatch({ status: task.status === "done" ? "todo" : "done" })} title={task.status === "done" ? "Mark not done" : "Mark done"}
+        className={`absolute -left-7 top-1.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition ${task.status === "done" ? "border-accent bg-accent text-white" : "border-border hover:border-accent"}`}>
+        {task.status === "done" && <I.check className="h-3 w-3" />}
+      </button>
+      <div className="min-w-0 flex-1">{titleBlock}</div>
+      {/* Rides the title line rather than sitting under it (Derek: "combine
+          into one line"). It's provenance, not something you act on, so it
+          shouldn't cost a row of its own above the dates band. */}
+      <span className="mt-1.5 hidden shrink-0 text-[13px] text-muted sm:block">{creatorName ? `Added by ${creatorName} · ` : ""}Updated {timeAgo(lastActivityAt)}</span>
+    </div>
+  );
   // The three dates used to live in three unrelated places: created as grey
   // subtitle text, due as an unlabelled calendar icon, follow-up as a wide
   // chip. One idea presented three ways, and the most important of the three
@@ -300,55 +362,39 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Order is Follow up, Due, Created, which is not chronological on purpose.
   // Created never changes and due rarely does; the follow-up date is the one
   // Derek re-dates every week, so it gets the leading position.
-  const dateCell = "min-w-0 flex-1 border-l px-3.5 first:border-l-0 first:pl-0";
-  const dateKey = "mb-0.5 block text-[12px] font-medium uppercase tracking-wide text-muted";
+  const dateVal = "block truncate text-[15px] font-semibold leading-6";
   const dateSub = "mt-0.5 block truncate text-[13px] text-muted";
-  const dateSet = "text-[15px] text-accent underline underline-offset-[3px] hover:text-foreground";
+  // Quiet, not loud. As an underlined accent link, "Set a due date" was the
+  // brightest thing in the band — the empty state outshouting the real dates
+  // beside it.
+  const dateSet = "text-[15px] font-medium text-muted decoration-dotted underline-offset-[4px] hover:text-foreground hover:underline";
   const createdDay = task.createdAt.slice(0, 10);
   const ageDays = -(daysUntilDue(createdDay) ?? 0);
   const snoozeDays = task.followUpAt ? daysUntilDue(task.followUpAt) : null;
+  // Recessed, not raised: an inset shadow against a tinted ground reads as a
+  // well carved into the white drawer, which is what a reference panel should
+  // look like. A raised white card would have been invisible on a white pane
+  // anyway (Derek: "add some visual depth").
   const metaLine = (
-    <>
-    <div className="-mt-0.5 mb-2 text-[13px] text-muted">{creatorName ? `Added by ${creatorName} · ` : ""}Updated {timeAgo(lastActivityAt)}</div>
-    <div className="mb-1 rounded-[10px] border bg-background px-3.5 py-3">
-      <div className="flex items-stretch">
-        <div className={dateCell}>
-          <span className={dateKey}>Follow up</span>
-          {task.followUpAt ? (
-            <>
-              <span className="flex items-center gap-1">
-                <input ref={followUpRef} type="date" value={task.followUpAt} onChange={(e) => onPatch({ followUpAt: e.target.value || null })}
-                  className={`min-w-0 rounded-md border border-transparent bg-transparent py-0.5 text-[15px] font-semibold outline-none hover:border-border focus:border-accent focus:bg-surface ${isSnoozed(task) ? "text-accent" : ""}`} />
-                <button onClick={() => onPatch({ followUpAt: null })} title="Clear the follow-up date" className="shrink-0 px-0.5 text-muted hover:text-danger">×</button>
-              </span>
-              <span className={dateSub}>{snoozeDays !== null && snoozeDays > 0 ? `quiet for ${snoozeDays} more day${snoozeDays === 1 ? "" : "s"}` : "back on your plate"}</span>
-            </>
-          ) : (
-            <>
-              {/* The input stays mounted but unlaid-out so the native picker
-                  has an anchor, without an empty mm/dd/yyyy field sitting in
-                  the band looking like something you forgot to fill in. */}
-              <span className="relative flex">
-                <button onClick={() => { const el = followUpRef.current; if (!el) return; if (el.showPicker) el.showPicker(); else el.focus(); }} className={dateSet}>Set a follow up</button>
-                <input ref={followUpRef} type="date" value="" onChange={(e) => onPatch({ followUpAt: e.target.value || null })}
-                  className="pointer-events-none absolute bottom-0 left-0 h-0 w-0 opacity-0" tabIndex={-1} aria-hidden />
-              </span>
-              <span className={dateSub}>not parked</span>
-            </>
-          )}
-        </div>
-        <div className={dateCell}>
-          <span className={dateKey}>Due</span>
-          <span className="flex min-w-0 text-[15px] font-semibold">
+    <div className="mb-1 rounded-xl border bg-background p-1.5 shadow-[inset_0_2px_5px_rgba(20,24,40,0.07),inset_0_0_0_1px_rgba(255,255,255,0.5)]">
+      <div className="flex items-stretch gap-1.5">
+        {/* Follow up leads. Created never changes and due rarely does; the
+            follow-up date is the one that gets re-dated every week. */}
+        <DateCol tone={DATE_TONES.followUp} label="Follow up">
+          <InlineDate value={task.followUpAt ?? null} onChange={(d) => onPatch({ followUpAt: d })} onClear={() => onPatch({ followUpAt: null })}
+            className={`${dateVal} -ml-1 ${isSnoozed(task) ? "text-amber-700" : ""}`} emptyLabel={<span className={dateSet}>Set a follow up</span>} />
+          <span className={dateSub}>{snoozeDays !== null && snoozeDays > 0 ? `quiet for ${snoozeDays} more day${snoozeDays === 1 ? "" : "s"}` : task.followUpAt ? "back on your plate" : "not parked"}</span>
+        </DateCol>
+        <DateCol tone={DATE_TONES.due} label="Due">
+          <span className={`${dateVal} -ml-1 flex`}>
             <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} recurrenceNth={task.recurrenceNth} recurrenceWeekday={task.recurrenceWeekday} showRecurrenceLabel={task.recurrence !== "custom"} onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} emptyLabel={<span className={dateSet}>Set a due date</span>} />
           </span>
           <span className={dateSub}>{task.due ? dueCountdown(task.due) : "nothing promised"}</span>
-        </div>
-        <div className={dateCell}>
-          <span className={dateKey}>Created</span>
-          <span className="block text-[15px] font-semibold">{formatDue(createdDay)}</span>
+        </DateCol>
+        <DateCol tone={DATE_TONES.created} label="Created">
+          <span className={dateVal}>{formatDue(createdDay)}</span>
           <span className={dateSub}>{ageDays <= 0 ? "today" : `${ageDays} day${ageDays === 1 ? "" : "s"} ago`}</span>
-        </div>
+        </DateCol>
       </div>
       {/* The runway, spelled out where there's room for it. The list row only
           has space for the verdict; this says how it was reached, so the chip
@@ -363,9 +409,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         const total = Math.max(1, daysUntilDue(task.due, createdDay) ?? 1);
         const used = Math.min(total, Math.max(0, total - (daysUntilDue(task.due) ?? 0)));
         return (
-          <div className="mt-3 flex items-center gap-2 border-t pt-2.5 text-[13px]">
-            <span className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-border">
-              <span className={`block h-full rounded-full ${sig.level === "late" ? "bg-danger" : sig.level !== "none" ? "bg-amber-500" : "bg-accent"}`} style={{ width: `${Math.max(2, pct)}%` }} />
+          <div className="mt-1.5 flex items-center gap-2 px-3 pb-1 pt-2.5 text-[13px]" style={{ borderTop: "1px solid var(--border)" }}>
+            {/* Green to red left to right, matching the created and due rules
+                either side of it, so the bar reads as the distance between
+                those two columns rather than as its own unrelated gauge. */}
+            <span className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-border shadow-[inset_0_1px_1px_rgba(20,24,40,0.12)]">
+              <span className="block h-full rounded-full" style={{ width: `${Math.max(2, pct)}%`, background: sig.level === "late" ? "var(--danger)" : "linear-gradient(90deg,var(--success),#f59e0b)" }} />
             </span>
             {/* Deliberately does NOT repeat the countdown the Due column
                 already shows. This answers a different question: how much of
@@ -378,7 +427,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         );
       })()}
     </div>
-    </>
   );
   // Used to be its own 6-button grid, wrapping to two cramped, hard-to-read
   // rows in the drawer's narrow (non-full) width — the exact thing that
