@@ -18,6 +18,14 @@
   #status { font-size: 12px; margin-top: 8px; }
   /* Attachments found on the open Gmail message. Same row shape as the
      workspace tab list, so the two read as one idiom. */
+  /* Existing task(s) already made from this page. Amber rather than the
+     neutral grey of the other blocks: this is the one thing on the panel
+     that should stop you before you press Create. */
+  #alreadyClipped { margin-top: 10px; border: 1px solid #fcd9a4; border-radius: 8px; padding: 8px 10px; background: #fffaf0; }
+  #alreadyClipped h2 { margin: 0 0 4px; font-size: 12px; font-weight: 700; color: #b45309; }
+  .clip-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 12px; color: #334155; }
+  .clip-row .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .clip-row a, .clip-row button.linkish { flex: none; width: auto; margin: 0; padding: 0 0 0 6px; background: none; border: none; color: #b45309; font-size: 12px; font-weight: 600; text-decoration: underline; cursor: pointer; }
   #emailAtts { margin-top: 10px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; background: #f8fafc; }
   #emailAtts h2 { margin: 0 0 4px; font-size: 12px; font-weight: 700; color: #1B3A5C; }
   .att-row { display: flex; align-items: center; gap: 6px; margin: 0; padding: 3px 0; font-size: 12px; font-weight: 400; color: #334155; }
@@ -91,6 +99,11 @@
     <div id="addContact" style="display:none;margin-top:6px;">
       <select id="subAccountSel"></select>
       <button id="addContactBtn" type="button" style="margin-top:6px;background:#fff;color:#1B3A5C;border:1px solid #d0dce8;">+ Add "<span id="addContactName"></span>" as a contact</button>
+    </div>
+
+    <div id="alreadyClipped" style="display:none;">
+      <h2>Already clipped</h2>
+      <div id="alreadyClippedList"></div>
     </div>
 
     <div id="emailAtts" style="display:none;">

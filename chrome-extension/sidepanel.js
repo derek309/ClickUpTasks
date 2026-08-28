@@ -30,6 +30,8 @@ const notesInput = document.getElementById("notes");
 const statusEl = document.getElementById("status");
 const createBtn = document.getElementById("create");
 const enrichBtn = document.getElementById("enrich");
+const clippedEl = document.getElementById("alreadyClipped");
+const clippedListEl = document.getElementById("alreadyClippedList");
 const emailAttsEl = document.getElementById("emailAtts");
 const emailAttsListEl = document.getElementById("emailAttsList");
 const wsEl = document.getElementById("workspace");
@@ -496,6 +498,8 @@ async function init(forceClientRefresh = false) {
   if (wsEl) { wsEl.style.display = "none"; wsCapture = null; }
   emailAttachments = [];
   renderEmailAttachments();
+  clippedListEl.innerHTML = "";
+  clippedEl.style.display = "none";
   dueInput.value = tomorrowIso();
   prioritySel.value = "normal";
   assigneeSel.value = "";
@@ -528,6 +532,7 @@ async function init(forceClientRefresh = false) {
     // attachments so we can see them"). Untick to leave one behind.
     emailAttachments = (email.attachments || []).map((a) => ({ ...a, keep: true }));
     renderEmailAttachments(true);
+    void showAlreadyClipped(permalink);
   } else {
     // Any other page — title/URL are native tab properties (needs the
     // "tabs" permission), no scraping or click needed for these two fields.
@@ -538,6 +543,7 @@ async function init(forceClientRefresh = false) {
     renderEmailAttachments();
     notesInput.value = "";
     permalink = tab?.url || null;
+    void showAlreadyClipped(permalink);
   }
 
   if (senderEmail) {
@@ -638,6 +644,8 @@ function resetFormAfterSubmit() {
   if (wsEl) { wsEl.style.display = "none"; wsCapture = null; }
   emailAttachments = [];
   renderEmailAttachments();
+  clippedListEl.innerHTML = "";
+  clippedEl.style.display = "none";
   projectSel.value = "";
   dueInput.value = tomorrowIso();
   prioritySel.value = "normal";
@@ -984,6 +992,56 @@ async function uploadEmailAttachments(token, clientId) {
     }
   }
   return { files, skipped };
+}
+
+/** Show the task(s) this page was already clipped into, rather than letting
+ *  you make another copy without knowing. Best effort: a failed lookup leaves
+ *  the panel exactly as it was, since a missing warning is a far smaller
+ *  problem than a blocked capture. */
+async function showAlreadyClipped(link) {
+  clippedListEl.innerHTML = "";
+  clippedEl.style.display = "none";
+  if (!link) return;
+  const token = await getToken();
+  if (!token) return;
+  let tasks = [];
+  try {
+    ({ tasks } = await apiFetch(`/api/extension/tasks/by-link?link=${encodeURIComponent(link)}`, token));
+  } catch { return; }
+  if (!tasks?.length) return;
+
+  clippedEl.style.display = "";
+  for (const t of tasks) {
+    const row = document.createElement("div");
+    row.className = "clip-row";
+    const title = document.createElement("span");
+    title.className = "t";
+    title.textContent = t.title;
+    title.title = t.title;
+    const open = document.createElement("a");
+    open.href = `${API_BASE}/?task=${encodeURIComponent(t.id)}`;
+    open.target = "_blank";
+    open.rel = "noopener noreferrer";
+    open.textContent = "Open";
+    // Straight into "add a comment to this task" with it already chosen —
+    // the thing you almost always want when a page is already clipped.
+    const addTo = document.createElement("button");
+    addTo.type = "button";
+    addTo.className = "linkish";
+    addTo.textContent = "Add to it";
+    addTo.addEventListener("click", async () => {
+      if (t.clientId && t.clientId !== selectedClientId) {
+        selectClient(t.clientId);
+        await loadTasksFor(t.clientId);
+      }
+      setMode("existing");
+      selectedTaskId = t.id;
+      taskSearchInput.value = t.title;
+      notesInput.focus();
+    });
+    row.append(title, open, addTo);
+    clippedListEl.append(row);
+  }
 }
 
 async function startCapture() {
