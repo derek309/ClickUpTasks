@@ -4045,6 +4045,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       </>)}
     </div>
   ) : null;
+  // "Days left" and "Due date" are ONE option, not two (Derek asked for days
+  // left; the label now says so). Days left is due date minus today, so the
+  // two produce an identical ordering — offering both would be two menu
+  // entries that do exactly the same thing, which is worse than one named
+  // for what the column visibly shows. Created is listed here too: it was
+  // sortable by clicking the column header but was missing from this menu.
   const groupSortControl = (
     <div className="relative">
       <button onClick={() => setGroupSortOpen((o) => !o)} title="Group & sort" className="rounded-md border bg-background p-2 text-muted hover:text-foreground"><I.list /></button>
@@ -4056,7 +4062,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             {(sortBy !== "due" || groupBy !== "priority") && <button onClick={() => { setGroupBy("priority"); setSortBy("due"); }} className="text-[13px] font-medium text-accent">Reset</button>}
           </div>
           <label className="flex items-center justify-between gap-3"><span className="text-muted">Group by</span><select value={groupBy} onChange={(e) => setGroupBy(e.target.value as typeof groupBy)} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="status">Status</option><option value="priority">Priority</option><option value="due">Due date</option><option value="project">Project</option></select></label>
-          <label className="flex items-center justify-between gap-3"><span className="text-muted">Sort</span><select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="manual">Manual</option><option value="due">Due date</option><option value="priority">Priority</option><option value="title">Task name</option><option value="status">Status</option><option value="assignee">Assignee</option></select></label>
+          <label className="flex items-center justify-between gap-3"><span className="text-muted">Sort</span><select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="manual">Manual</option><option value="due">Days left (due date)</option><option value="created">Created (oldest first)</option><option value="priority">Priority</option><option value="title">Task name</option><option value="status">Status</option><option value="assignee">Assignee</option></select></label>
           <button onClick={toggleHideEmpty} className="flex w-full items-center gap-2 rounded px-0 py-1 text-left hover:bg-background">
             <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${hideEmpty ? "border-accent bg-accent text-white" : "border-border"}`}>{hideEmpty && <I.check />}</span>
             <span className="text-muted">Hide empty groups</span>
