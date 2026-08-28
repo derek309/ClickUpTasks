@@ -47,8 +47,27 @@ export async function POST(req: NextRequest) {
   // The extension can attach more than one screenshot per task (e.g. several
   // areas of a page under review) — each becomes its own image attachment.
   const screenshotPaths: string[] = Array.isArray(body.screenshot_paths) ? body.screenshot_paths.filter((p: unknown): p is string => typeof p === "string" && p.trim().length > 0) : [];
+  // Real files carried over from the source (Gmail's own attachments), as
+  // opposed to screenshots. Kept separate because these have a genuine
+  // filename and type worth preserving — "Screenshot 2" is fine for a
+  // capture, useless for contract-v3.pdf.
+  const files: { path: string; name: string; kind: string }[] = Array.isArray(body.files)
+    ? body.files
+        .filter((f: unknown): f is Record<string, unknown> => !!f && typeof f === "object")
+        .map((f: Record<string, unknown>) => ({
+          path: typeof f.path === "string" ? f.path : "",
+          name: typeof f.name === "string" && f.name.trim() ? f.name.trim().slice(0, 200) : "Attachment",
+          kind: f.kind === "image" ? "image" : "file",
+        }))
+        .filter((f: { path: string }) => f.path.length > 0)
+        .slice(0, 20)
+    : [];
   const attachments = [
-    ...(link ? [{ id: "at_" + randomUUID(), name: "Source link", kind: "link", size: "", url: link }] : []),
+    // Named for what it does, not what it is: this is the one-click route
+    // back to the original email (Derek: "I want the link to be easy to get
+    // back to so I can reply quickly").
+    ...(link ? [{ id: "at_" + randomUUID(), name: link.startsWith("https://mail.google.com/") ? "Open the email in Gmail" : "Source link", kind: "link", size: "", url: link }] : []),
+    ...files.map((f) => ({ id: "at_" + randomUUID(), name: f.name, kind: f.kind, size: "", path: f.path })),
     ...screenshotPaths.map((path: string, i: number) => ({ id: "at_" + randomUUID(), name: screenshotPaths.length > 1 ? `Screenshot ${i + 1}` : "Screenshot", kind: "image", size: "", path })),
   ];
   // The auto-assigned-only tiers ("conversation", "client_request" — see

@@ -16,6 +16,14 @@
   #enrich { margin-top: 8px; background: #fff; color: #E87722; border: 1px solid #E87722; }
   #matchHint { font-size: 11px; margin-top: 3px; color: #64748b; }
   #status { font-size: 12px; margin-top: 8px; }
+  /* Attachments found on the open Gmail message. Same row shape as the
+     workspace tab list, so the two read as one idiom. */
+  #emailAtts { margin-top: 10px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; background: #f8fafc; }
+  #emailAtts h2 { margin: 0 0 4px; font-size: 12px; font-weight: 700; color: #1B3A5C; }
+  .att-row { display: flex; align-items: center; gap: 6px; margin: 0; padding: 3px 0; font-size: 12px; font-weight: 400; color: #334155; }
+  .att-row input[type="checkbox"] { width: auto; flex: none; margin: 0; padding: 0; border: none; }
+  .att-row .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .att-row .s { flex: none; font-size: 10px; color: #94a3b8; }
   .created-link { color: #1B3A5C; font-weight: 600; text-decoration: underline; }
   .created-link:hover { opacity: .8; }
   .ok { color: #16a34a; }
@@ -83,6 +91,11 @@
     <div id="addContact" style="display:none;margin-top:6px;">
       <select id="subAccountSel"></select>
       <button id="addContactBtn" type="button" style="margin-top:6px;background:#fff;color:#1B3A5C;border:1px solid #d0dce8;">+ Add "<span id="addContactName"></span>" as a contact</button>
+    </div>
+
+    <div id="emailAtts" style="display:none;">
+      <h2>Attachments on this email</h2>
+      <div id="emailAttsList"></div>
     </div>
 
     <div id="workspace" style="display:none;">

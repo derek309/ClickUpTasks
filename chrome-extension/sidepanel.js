@@ -1,6 +1,8 @@
 import { layerContexts, prepareCapture, contextKey, isCapturable, normalizeUrl, SOFT_MAX_TABS, HARD_MAX_TABS } from "./lib/context.js";
 
 const API_BASE = "https://clickuptasks.vercel.app";
+// Matches the /api/extension/upload route's own limit.
+const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 
 const formEl = document.getElementById("form");
 const needsTokenEl = document.getElementById("needsToken");
@@ -28,6 +30,8 @@ const notesInput = document.getElementById("notes");
 const statusEl = document.getElementById("status");
 const createBtn = document.getElementById("create");
 const enrichBtn = document.getElementById("enrich");
+const emailAttsEl = document.getElementById("emailAtts");
+const emailAttsListEl = document.getElementById("emailAttsList");
 const wsEl = document.getElementById("workspace");
 const wsListEl = document.getElementById("wsList");
 const wsWarnEl = document.getElementById("wsWarn");
@@ -490,6 +494,8 @@ async function init(forceClientRefresh = false) {
   selectedClientId = "";
   clientSearchInput.value = "";
   if (wsEl) { wsEl.style.display = "none"; wsCapture = null; }
+  emailAttachments = [];
+  renderEmailAttachments();
   dueInput.value = tomorrowIso();
   prioritySel.value = "normal";
   assigneeSel.value = "";
@@ -517,12 +523,19 @@ async function init(forceClientRefresh = false) {
     const fromLine = senderName || senderEmail ? `From: ${senderName || ""}${senderEmail ? ` <${senderEmail}>` : ""}` : "";
     notesInput.value = [fromLine, email.snippet || ""].filter(Boolean).join("\n\n");
     permalink = email.permalink || null;
+    // Ticked by default: if you're clipping an email that has attachments,
+    // wanting them on the task is the common case (Derek: "add all the
+    // attachments so we can see them"). Untick to leave one behind.
+    emailAttachments = (email.attachments || []).map((a) => ({ ...a, keep: true }));
+    renderEmailAttachments();
   } else {
     // Any other page — title/URL are native tab properties (needs the
     // "tabs" permission), no scraping or click needed for these two fields.
     titleInput.value = tab?.title || "";
     senderName = null;
     senderEmail = null;
+    emailAttachments = [];
+    renderEmailAttachments();
     notesInput.value = "";
     permalink = tab?.url || null;
   }
@@ -623,6 +636,8 @@ function resetFormAfterSubmit() {
   // it sits there showing the previous client's saved tabs with no client
   // selected, and "Open tabs" would act on a client you can no longer see.
   if (wsEl) { wsEl.style.display = "none"; wsCapture = null; }
+  emailAttachments = [];
+  renderEmailAttachments();
   projectSel.value = "";
   dueInput.value = tomorrowIso();
   prioritySel.value = "normal";
@@ -661,6 +676,9 @@ createBtn.addEventListener("click", async () => {
   try {
     const screenshotPaths = [];
     for (const dataUrl of capturedScreenshots) screenshotPaths.push(await uploadScreenshot(token, dataUrl, clientId));
+    const attCount = emailAttachments.filter((a) => a.keep).length;
+    if (attCount) { statusEl.textContent = `Fetching ${attCount} attachment${attCount === 1 ? "" : "s"}…`; }
+    const { files, skipped } = await uploadEmailAttachments(token, clientId);
 
     if (mode === "new") {
       const created = await apiFetch("/api/extension/tasks", token, {
@@ -668,7 +686,7 @@ createBtn.addEventListener("click", async () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           client_id: clientId, project_id: projectSel.value || undefined, title: titleInput.value.trim(), description: notesInput.value.trim(), link: permalink,
-          due: dueInput.value || undefined, priority: prioritySel.value, assignee_id: assigneeSel.value || undefined, screenshot_paths: screenshotPaths,
+          due: dueInput.value || undefined, priority: prioritySel.value, assignee_id: assigneeSel.value || undefined, screenshot_paths: screenshotPaths, files,
         }),
       });
       // Link straight to what was just made (Derek: "make a link to it so I
@@ -676,7 +694,7 @@ createBtn.addEventListener("click", async () => {
       // this, so without a link the task you just created is gone from view
       // with nothing to click. Opens in a new tab: this is a side panel, and
       // navigating it away would close the form you're still working in.
-      showCreatedLink(created?.id, created?.title || titleInput.value.trim());
+      showCreatedLink(created?.id, created?.title || titleInput.value.trim(), skipped);
     } else {
       await apiFetch(`/api/extension/tasks/${encodeURIComponent(selectedTaskId)}/comment`, token, {
         method: "POST",
@@ -719,6 +737,10 @@ init();
 // chrome.tabs.remove() skips beforeunload and would silently bin an unsaved
 // draft. See supabase/work-contexts.sql and lib/context.js.
 // ---------------------------------------------------------------------------
+
+// Attachments found on the open Gmail message: [{ name, mime, url, keep }].
+// Downloaded only on submit, and only the ticked ones.
+let emailAttachments = [];
 
 let wsScope = "client";        // "client" | "task"
 let wsClientTabs = [];         // the client's baseline
@@ -879,7 +901,7 @@ async function removeSavedTab(url) {
 /** "Task created" plus a link to the thing itself. Built as real DOM rather
  *  than innerHTML so a task title containing < or & can't inject markup into
  *  the panel. Falls back to plain text if the API didn't hand back an id. */
-function showCreatedLink(taskId, title) {
+function showCreatedLink(taskId, title, skipped = []) {
   statusEl.textContent = "";
   statusEl.className = "ok";
   if (!taskId) { statusEl.textContent = "Task created."; return; }
@@ -891,6 +913,65 @@ function showCreatedLink(taskId, title) {
   a.textContent = title ? `Open “${title.length > 40 ? title.slice(0, 40).trimEnd() + "…" : title}”` : "Open it";
   a.className = "created-link";
   statusEl.append(a);
+  // Named, not counted: "1 attachment skipped" leaves you wondering which.
+  if (skipped.length) {
+    const warn = document.createElement("div");
+    warn.style.cssText = "margin-top:4px;color:#b45309;font-size:11px";
+    warn.textContent = `Couldn't attach: ${skipped.join("; ")}`;
+    statusEl.append(warn);
+  }
+}
+
+const prettySize = (bytes) => (bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
+
+function renderEmailAttachments() {
+  emailAttsListEl.innerHTML = "";
+  if (!emailAttachments.length) { emailAttsEl.style.display = "none"; return; }
+  emailAttsEl.style.display = "";
+  emailAttachments.forEach((a, i) => {
+    const row = document.createElement("label");
+    row.className = "att-row";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = a.keep;
+    cb.addEventListener("change", () => { emailAttachments[i].keep = cb.checked; });
+    const n = document.createElement("span");
+    n.className = "n";
+    n.textContent = a.name;
+    n.title = a.name;
+    row.append(cb, n);
+    emailAttsListEl.append(row);
+  });
+}
+
+/** Pull the ticked attachments through the content script (the only place
+ *  Gmail's cookies apply) and upload each one. Failures are reported and
+ *  skipped rather than aborting the whole task creation — losing the task
+ *  because one file wouldn't download would be the worse outcome. */
+async function uploadEmailAttachments(token, clientId) {
+  const wanted = emailAttachments.filter((a) => a.keep);
+  if (!wanted.length) return { files: [], skipped: [] };
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const files = [];
+  const skipped = [];
+  for (const a of wanted) {
+    try {
+      const res = await chrome.tabs.sendMessage(tab.id, { type: "CLICKUPTASKS_FETCH_ATTACHMENT", url: a.url });
+      if (!res || res.error || !res.dataUrl) { skipped.push(`${a.name} (${res?.error || "couldn't download"})`); continue; }
+      if (res.size > MAX_ATTACHMENT_BYTES) { skipped.push(`${a.name} (${prettySize(res.size)}, over the ${prettySize(MAX_ATTACHMENT_BYTES)} limit)`); continue; }
+      const blob = await (await fetch(res.dataUrl)).blob();
+      const form = new FormData();
+      form.set("client_id", clientId);
+      form.set("file", new File([blob], a.name, { type: res.type || a.mime || "application/octet-stream" }));
+      const up = await fetch(`${API_BASE}/api/extension/upload`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form });
+      const json = await up.json().catch(() => ({}));
+      if (!up.ok || !json.path) { skipped.push(`${a.name} (${json.error || "upload failed"})`); continue; }
+      files.push({ path: json.path, name: a.name, kind: (res.type || a.mime || "").startsWith("image/") ? "image" : "file" });
+    } catch (e) {
+      skipped.push(`${a.name} (${e instanceof Error ? e.message : "failed"})`);
+    }
+  }
+  return { files, skipped };
 }
 
 async function startCapture() {
