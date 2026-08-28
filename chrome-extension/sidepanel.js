@@ -527,7 +527,7 @@ async function init(forceClientRefresh = false) {
     // wanting them on the task is the common case (Derek: "add all the
     // attachments so we can see them"). Untick to leave one behind.
     emailAttachments = (email.attachments || []).map((a) => ({ ...a, keep: true }));
-    renderEmailAttachments();
+    renderEmailAttachments(true);
   } else {
     // Any other page — title/URL are native tab properties (needs the
     // "tabs" permission), no scraping or click needed for these two fields.
@@ -924,9 +924,21 @@ function showCreatedLink(taskId, title, skipped = []) {
 
 const prettySize = (bytes) => (bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
 
-function renderEmailAttachments() {
+function renderEmailAttachments(onGmail = false) {
   emailAttsListEl.innerHTML = "";
-  if (!emailAttachments.length) { emailAttsEl.style.display = "none"; return; }
+  if (!emailAttachments.length) {
+    // On a Gmail message, say so out loud rather than hiding the block. A
+    // silently-absent list is indistinguishable from a broken scrape, which
+    // is exactly the confusion that cost Derek a round of testing.
+    emailAttsEl.style.display = onGmail ? "" : "none";
+    if (onGmail) {
+      const none = document.createElement("div");
+      none.className = "att-row";
+      none.textContent = "No attachments found on this email.";
+      emailAttsListEl.append(none);
+    }
+    return;
+  }
   emailAttsEl.style.display = "";
   emailAttachments.forEach((a, i) => {
     const row = document.createElement("label");

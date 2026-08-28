@@ -72,10 +72,21 @@ function scrapeSender() {
 // input for the "Enrich with AI" button, which needs real content to work
 // with, not just a couple hundred characters.
 function scrapeSnippet() {
-  const known = document.querySelectorAll(".a3s.aiL");
-  const lastKnown = known[known.length - 1];
-  if (lastKnown?.textContent?.trim()) return lastKnown.textContent.trim().slice(0, 2000);
-  return null;
+  // `.a3s` is the message body. It used to be matched as `.a3s.aiL`, but only
+  // `.a3s` is stable — the second class varies by Gmail build and view, and
+  // when it stopped matching every clipped email arrived with an empty body,
+  // which also left "Enrich with AI" writing descriptions about how there was
+  // no message text (Derek, 2026-08-28). Matching the pair was never worth
+  // the fragility: `.a3s` alone is specific enough.
+  const bodies = [...document.querySelectorAll(".a3s")].filter((el) => el.offsetParent !== null);
+  const body = bodies[bodies.length - 1];
+  if (!body) return null;
+  // Drop the quoted history: on a reply it is usually longer than the new
+  // message and would crowd out the part that actually matters.
+  const clone = body.cloneNode(true);
+  clone.querySelectorAll(".gmail_quote, blockquote").forEach((q) => q.remove());
+  const text = (clone.textContent || "").trim() || (body.textContent || "").trim();
+  return text ? text.slice(0, 2000) : null;
 }
 
 // Gmail's own attachments on the open message. `download_url` is an
@@ -86,6 +97,9 @@ function scrapeSnippet() {
 // rather than guessed at.
 function scrapeAttachments() {
   const out = [];
+  // download_url is Gmail's own attribute on each attachment tile. Anchors
+  // carrying view=att are the fallback for builds that don't set it — the
+  // filename is less reliable there, so it's second choice, not first.
   for (const el of document.querySelectorAll("[download_url]")) {
     const raw = el.getAttribute("download_url") || "";
     // Anchor on the URL rather than counting colons. Splitting on the first
@@ -102,6 +116,19 @@ function scrapeAttachments() {
     if (!name) continue;
     if (out.some((a) => a.url === url)) continue; // Gmail renders some tiles twice
     out.push({ name, mime, url });
+  }
+  if (out.length === 0) {
+    for (const a of document.querySelectorAll('a[href*="view=att"]')) {
+      const url = a.href;
+      if (!url || out.some((x) => x.url === url)) continue;
+      // Gmail puts the filename on a nearby .aV3 span; fall back to the link
+      // text, then to something obviously placeholder rather than "".
+      const name = a.closest(".aQH, .aZo, span")?.querySelector(".aV3")?.textContent?.trim()
+        || a.getAttribute("download")
+        || a.textContent?.trim()
+        || "Attachment";
+      out.push({ name, mime: "", url });
+    }
   }
   return out;
 }
