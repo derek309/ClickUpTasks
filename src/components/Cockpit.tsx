@@ -300,10 +300,22 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       .then((j) => {
         const remote: string | null = j?.teamChatLastReadAt ?? null;
         if (cancelled || !remote) return;
-        setTeamChatLastRead((local) => (remote > local ? remote : local));
+        setTeamChatLastRead((local) => (Date.parse(remote) > (local ? Date.parse(local) : 0) ? remote : local));
       })
       .catch(() => { /* offline — the local echo still works */ });
     return () => { cancelled = true; };
+  }, []);
+  // Another tab reading the channel clears this one too. Without this a
+  // second window keeps showing a badge for messages you've already read,
+  // which looks exactly like a phantom notification — the server value is
+  // only fetched once, at mount, so nothing else would ever tell this tab.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== "cut_teamChatLastRead" || !e.newValue) return;
+      setTeamChatLastRead((local) => (Date.parse(e.newValue!) > (local ? Date.parse(local) : 0) ? e.newValue! : local));
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
   const markTeamChatRead = () => {
     const now = new Date().toISOString();
@@ -381,10 +393,28 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // dot while My Work, Clients, Projects and Personal all showed a number —
   // a dot says "something happened", a number says how much you've missed
   // (Derek: make it so "people see it and use it more").
-  const teamChatUnread = useMemo(
-    () => teamMessages.filter((m) => m.authorId !== me.id && m.at > teamChatLastRead).length,
-    [teamMessages, me.id, teamChatLastRead]
-  );
+  //
+  // Two rules, both from Derek chasing a badge that lit with nothing new to
+  // read: "you should only notify when there's a new message from a team
+  // member only."
+  //
+  // 1. Compare instants, not strings. The read marker can arrive in either of
+  //    two spellings of the same moment — "…277Z" when this browser wrote it,
+  //    "…277+00:00" when Postgres handed it back — and `>` on those compares
+  //    characters, not time. Date.parse removes the whole class of problem.
+  // 2. Only messages from a real, current teammate count. An author who no
+  //    longer resolves on the roster (a removed teammate, or a non-human like
+  //    the u_claude bot row) is not someone you can go and read a reply from,
+  //    so it must never light the badge.
+  const teamChatUnread = useMemo(() => {
+    const readAt = teamChatLastRead ? Date.parse(teamChatLastRead) : 0;
+    return teamMessages.filter((m) => {
+      if (m.authorId === me.id) return false;
+      if (!users.some((u) => u.id === m.authorId)) return false;
+      const at = Date.parse(m.at);
+      return Number.isFinite(at) && at > readAt;
+    }).length;
+  }, [teamMessages, me.id, teamChatLastRead]);
   // Chat is always on screen now (the whole Conversations page is Chat, full
   // width), so this fires any time you're on that page at all. Messages
   // arriving while you're already there are already read — without this the
