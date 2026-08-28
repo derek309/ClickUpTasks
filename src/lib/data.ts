@@ -1949,6 +1949,30 @@ export function formatDue(iso: string | null): string {
   const [, m, d] = iso.split("-");
   return `${MONTHS[parseInt(m, 10) - 1]} ${parseInt(d, 10)}`;
 }
+/** Whole days from today to a due date. Positive is future, 0 is today,
+ *  negative is overdue. Date-only maths in UTC so it can't drift by one
+ *  either side of midnight the way a local-time subtraction does. */
+export function daysUntilDue(iso: string | null, today: string = TODAY): number | null {
+  if (!iso) return null;
+  const toUtc = (d: string) => { const [y, m, dd] = d.split("-").map(Number); return Date.UTC(y, m - 1, dd); };
+  const a = toUtc(iso), b = toUtc(today);
+  if (Number.isNaN(a) || Number.isNaN(b)) return null;
+  return Math.round((a - b) / 86400000);
+}
+
+/** The short "how long have I got" label that rides beside a due date
+ *  (Derek: "say hey you have this many days to get this done"). Deliberately
+ *  terse — it sits in a 96px column beside the date itself, so it adds the
+ *  urgency the date alone doesn't carry rather than repeating it. */
+export function dueCountdown(iso: string | null, today: string = TODAY): string {
+  const n = daysUntilDue(iso, today);
+  if (n === null) return "";
+  if (n < 0) return `${Math.abs(n)}d late`;
+  if (n === 0) return "due today";
+  if (n === 1) return "1 day left";
+  return `${n} days left`;
+}
+
 export function isOverdue(iso: string | null): boolean {
   return !!iso && iso < TODAY;
 }

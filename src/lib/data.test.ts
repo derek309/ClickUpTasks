@@ -22,6 +22,8 @@ import {
   applyMention,
   mentionsUser,
   nthWeekdayOfMonth,
+  daysUntilDue,
+  dueCountdown,
   describeRecurrence,
   TODAY,
   type User,
@@ -473,5 +475,28 @@ describe("describeRecurrence for the nth weekday", () => {
     expect(describeRecurrence("custom", undefined, "nth-weekday", undefined, 3, 1)).toBe("Monthly on the 3rd Monday");
     expect(describeRecurrence("custom", undefined, "nth-weekday", undefined, 1, 2)).toBe("Monthly on the 1st Tuesday");
     expect(describeRecurrence("custom", undefined, "nth-weekday", undefined, -1, 5)).toBe("Monthly on the last Friday");
+  });
+});
+
+describe("due countdown", () => {
+  const today = "2026-08-28";
+  it("counts whole days either side of today", () => {
+    expect(daysUntilDue("2026-08-28", today)).toBe(0);
+    expect(daysUntilDue("2026-08-29", today)).toBe(1);
+    expect(daysUntilDue("2026-09-04", today)).toBe(7);
+    expect(daysUntilDue("2026-08-27", today)).toBe(-1);
+    expect(daysUntilDue(null, today)).toBeNull();
+  });
+  it("crosses a month boundary without drifting", () => {
+    expect(daysUntilDue("2026-09-01", "2026-08-31")).toBe(1);
+    expect(daysUntilDue("2026-03-01", "2026-02-28")).toBe(1);
+    expect(daysUntilDue("2028-03-01", "2028-02-28")).toBe(2); // 2028 is a leap year
+  });
+  it("reads the way someone would say it", () => {
+    expect(dueCountdown("2026-08-28", today)).toBe("due today");
+    expect(dueCountdown("2026-08-29", today)).toBe("1 day left");
+    expect(dueCountdown("2026-09-01", today)).toBe("4 days left");
+    expect(dueCountdown("2026-08-25", today)).toBe("3d late");
+    expect(dueCountdown(null, today)).toBe("");
   });
 });

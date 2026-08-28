@@ -244,7 +244,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [filters, setFilters] = useState<FilterState>({ status: "all", assignee: "all", priority: "all" });
   const [sortBy, setSortBy] = useState<SortBy>("due");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
-  const [visibleCols, setVisibleCols] = useState<string[]>(["status", "priority", "due"]);
+  const [visibleCols, setVisibleCols] = useState<string[]>(["status", "priority", "due", "created"]);
   // Manual drag order for list columns — persisted like the other view
   // toggles below. Any key not yet in a saved order (e.g. after adding a new
   // column) falls back to LIST_COLUMNS' own order in reorderCols/colOrder use.
@@ -1668,6 +1668,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     else if (sortBy === "status") arr.sort((a, b) => (STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status)) * dir);
     else if (sortBy === "assignee") arr.sort((a, b) => ((userById(a.assigneeId)?.name ?? "~").localeCompare(userById(b.assigneeId)?.name ?? "~")) * dir);
     else if (sortBy === "comments") arr.sort((a, b) => (b.comments.length - a.comments.length) * dir);
+    // Oldest first when ascending — "what has been sitting longest" is the
+    // question a Created sort is asked to answer.
+    else if (sortBy === "created") arr.sort((a, b) => a.createdAt.localeCompare(b.createdAt) * dir);
     return hoistPinned(arr);
   };
   // Pull the just-added tasks to the front, in the order they were pinned
@@ -1681,7 +1684,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return [...pinned, ...arr.filter((t) => !pinnedSet.has(t.id))];
   }
   const sortByCol = (key: string) => {
-    const map: Record<string, SortBy> = { priority: "priority", assignee: "assignee", due: "due", task: "title", status: "status", comments: "comments" };
+    const map: Record<string, SortBy> = { priority: "priority", assignee: "assignee", due: "due", task: "title", status: "status", comments: "comments", created: "created" };
     const sb = map[key] ?? "manual";
     if (sortBy === sb) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else { setSortBy(sb); setSortDir("asc"); }

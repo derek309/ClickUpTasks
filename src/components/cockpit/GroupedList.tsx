@@ -4,7 +4,7 @@
 // expandable subtasks, and the inline cell editors (priority/assignee/due).
 import { useRef, useState } from "react";
 import {
-  users, formatDue, isOverdue, TODAY, timeAgo, userById, clientInitials,
+  users, formatDue, isOverdue, TODAY, timeAgo, userById, clientInitials, daysUntilDue, dueCountdown,
   PRIORITY_META, manualPriorityOptions,
   STATUS_META, STATUS_ORDER, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence,
   PLAYBOOK_STEP_BY_KEY,
@@ -230,6 +230,9 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
     if (key === "assignee") return <InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a, waitingOnClient: false })} onSetWaiting={() => onPatch(task.id, { waitingOnClient: true, assigneeId: null })} />;
     if (key === "priority") return <InlinePriority value={task.priority} onChange={(p) => onPatch(task.id, { priority: p })} />;
     if (key === "due") return <InlineDue value={task.due} overdue={overdue} recurrence={task.recurrence} onChange={(d) => onPatch(task.id, { due: d })} onRecurrenceChange={(r) => onPatch(task.id, { recurrence: r })} />;
+    if (key === "created") return (
+      <span className="truncate text-[11px] text-muted" title={`Created ${task.createdAt.slice(0, 10)}`}>{formatDue(task.createdAt.slice(0, 10))}</span>
+    );
     if (key === "contact") { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return <span className="truncate text-[11px] text-muted">{ct?.name ?? "—"}</span>; }
     if (key === "labels") return <LabelChips ids={task.labelIds} />;
     return null;
@@ -491,6 +494,15 @@ function friendlyDue(iso: string): string {
 // for the prominent header control). `strong` styles a set value in accent
 // (and gives the empty state a visible affordance) instead of muted grey —
 // for surfaces where the date is a primary action, not a table cell.
+/** Whether a due date is close enough for a countdown to mean anything.
+ *  A fortnight either side: beyond that "97 days left" is noise, and every
+ *  row carrying one would flatten the urgency the near ones are meant to
+ *  convey. */
+function countdownWorthShowing(iso: string): boolean {
+  const n = daysUntilDue(iso);
+  return n !== null && n >= -14 && n <= 14;
+}
+
 export function InlineDue({ value, overdue, recurrence = "none", recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth, recurrenceNth, recurrenceWeekday, onChange, onRecurrenceChange, emptyLabel = "—", strong = false, showRecurrenceLabel = false }: { value: string | null; overdue: boolean; recurrence?: Recurrence; recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[]; recurrenceNth?: number; recurrenceWeekday?: number; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; emptyLabel?: React.ReactNode; strong?: boolean; showRecurrenceLabel?: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
@@ -528,6 +540,14 @@ export function InlineDue({ value, overdue, recurrence = "none", recurrenceInter
     <>
       <button ref={ref} onClick={openIt} className={`inline-flex items-center gap-1 rounded px-1 py-0.5 text-[11px] hover:bg-background ${tone}`}>
         {value ? friendlyDue(value) : emptyLabel}
+        {/* "how long have I got", beside the date rather than instead of it
+            (Derek: "say hey you have this many days to get this done"). Only
+            within a fortnight either side — a date three months out doesn't
+            need a countdown, and showing one on everything would make the
+            genuinely urgent rows stop standing out. */}
+        {value && countdownWorthShowing(value) && (
+          <span className="shrink-0 opacity-70">{dueCountdown(value)}</span>
+        )}
         {recurrence !== "none" && <I.repeat className="text-accent" />}
         {recurrence !== "none" && showRecurrenceLabel && (
           <span className="text-accent">{describeRecurrence(recurrence, recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth, recurrenceNth, recurrenceWeekday)}</span>
