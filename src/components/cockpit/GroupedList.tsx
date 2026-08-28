@@ -566,13 +566,17 @@ export function InlineDate({ value, onChange, onClear, className = "", emptyLabe
   );
 }
 
-export function InlineDue({ value, overdue, followUpAt = null, recurrence = "none", recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth, recurrenceNth, recurrenceWeekday, onChange, onRecurrenceChange, emptyLabel = "—", strong = false, showRecurrenceLabel = false, showCountdown = true, formatValue = friendlyDue, textClass = "text-[11px]" }: { value: string | null; overdue: boolean; followUpAt?: string | null; recurrence?: Recurrence; recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[]; recurrenceNth?: number; recurrenceWeekday?: number; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; emptyLabel?: React.ReactNode; strong?: boolean; showRecurrenceLabel?: boolean; showCountdown?: boolean; formatValue?: (iso: string) => string; textClass?: string }) {
+export function InlineDue({ value, overdue, followUpAt = null, recurrence = "none", recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth, recurrenceNth, recurrenceWeekday, onChange, onRecurrenceChange, emptyLabel = "—", strong = false, showRecurrenceLabel = false, showCountdown = true, formatValue = friendlyDue, textClass = "text-[11px]", toneClass }: { value: string | null; overdue: boolean; followUpAt?: string | null; recurrence?: Recurrence; recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[]; recurrenceNth?: number; recurrenceWeekday?: number; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; emptyLabel?: React.ReactNode; strong?: boolean; showRecurrenceLabel?: boolean; showCountdown?: boolean; formatValue?: (iso: string) => string; textClass?: string; toneClass?: string }) {
   const { open, setOpen, ref, pos, openIt } = useDatePopover();
   // Amber only for a genuinely near date — not "any date that isn't
   // overdue," which would paint every far-future due date the same urgent
   // color as one due tomorrow.
   const dueThisWeek = !!value && !overdue && value >= TODAY && value <= addDaysIso(TODAY, 7);
-  const tone = overdue ? "font-medium text-danger" : strong ? (value ? "font-semibold text-accent" : "font-medium text-accent/70") : dueThisWeek ? "font-medium text-amber-600" : "text-muted";
+  // toneClass lets a caller take the colour decision back. The drawer's dates
+  // band does: it wants all three dates in plain foreground so they read as
+  // one set of facts, and carries the urgency on the countdown line beneath
+  // instead (Derek: "make all the dates black so they stick out").
+  const tone = toneClass ?? (overdue ? "font-medium text-danger" : strong ? (value ? "font-semibold text-accent" : "font-medium text-accent/70") : dueThisWeek ? "font-medium text-amber-600" : "text-muted");
   return (
     <>
       {/* Size comes from the caller. Baked in at 11px, the drawer's dates band

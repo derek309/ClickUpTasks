@@ -434,12 +434,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Created never changes and due rarely does; the follow-up date is the one
   // Derek re-dates every week, so it gets the leading position.
   // All three date values share one class, so they can't drift apart.
-  const dateVal = "block truncate text-[18px] font-semibold leading-7";
+  const dateVal = "block truncate text-[21px] font-semibold leading-8 text-foreground";
   const dateSub = "mt-0.5 block truncate text-[13px] text-muted";
   // Quiet, not loud. As an underlined accent link, "Set a due date" was the
   // brightest thing in the band — the empty state outshouting the real dates
   // beside it.
-  const dateSet = "text-[17px] font-medium text-muted decoration-dotted underline-offset-[4px] hover:text-foreground hover:underline";
+  const dateSet = "text-[19px] font-medium text-muted decoration-dotted underline-offset-[4px] hover:text-foreground hover:underline";
   const createdDay = task.createdAt.slice(0, 10);
   const ageDays = -(daysUntilDue(createdDay) ?? 0);
   const snoozeDays = task.followUpAt ? daysUntilDue(task.followUpAt) : null;
@@ -462,14 +462,16 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         </DateCol>
         <DateCol tone={DATE_TONES.followUp} label="Follow up">
           <InlineDate value={task.followUpAt ?? null} onChange={(d) => onPatch({ followUpAt: d })} onClear={() => onPatch({ followUpAt: null })}
-            className={`${dateVal} -ml-1 ${isSnoozed(task) ? "text-amber-700" : ""}`} formatValue={formatDue} emptyLabel={<span className={dateSet}>Set a follow up</span>} />
-          <span className={dateSub}>{snoozeDays !== null && snoozeDays > 0 ? `quiet for ${snoozeDays} more day${snoozeDays === 1 ? "" : "s"}` : task.followUpAt ? "back on your plate" : "not parked"}</span>
+            className={`${dateVal} -ml-1`} formatValue={formatDue} emptyLabel={<span className={dateSet}>Set a follow up</span>} />
+          <span className={`${dateSub} ${isSnoozed(task) ? "font-medium text-amber-700" : ""}`}>{snoozeDays !== null && snoozeDays > 0 ? `quiet for ${snoozeDays} more day${snoozeDays === 1 ? "" : "s"}` : task.followUpAt ? "back on your plate" : "not parked"}</span>
         </DateCol>
         <DateCol tone={DATE_TONES.due} label="Due">
           <span className={`${dateVal} -ml-1 flex`}>
-            <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} recurrenceNth={task.recurrenceNth} recurrenceWeekday={task.recurrenceWeekday} showRecurrenceLabel={task.recurrence !== "custom"} showCountdown={false} formatValue={formatDue} textClass="text-[18px] font-semibold leading-7" onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} emptyLabel={<span className={dateSet}>Set a due date</span>} />
+            <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} recurrenceNth={task.recurrenceNth} recurrenceWeekday={task.recurrenceWeekday} showRecurrenceLabel={task.recurrence !== "custom"} showCountdown={false} formatValue={formatDue} textClass="text-[21px] font-semibold leading-8" toneClass="text-foreground" onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} emptyLabel={<span className={dateSet}>Set a due date</span>} />
           </span>
-          <span className={dateSub}>{task.due ? dueCountdown(task.due) : "nothing promised"}</span>
+          {/* The urgency colour lives here now that the date itself is
+              plain, so overdue still shouts without the date being red. */}
+          <span className={`${dateSub} ${task.due && isOverdue(task.due) && task.status !== "done" ? "font-semibold text-danger" : ""}`}>{task.due ? dueCountdown(task.due) : "nothing promised"}</span>
         </DateCol>
       </div>
       {/* Falls back to the follow-up date as the endpoint when nothing is
@@ -979,7 +981,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               <div className="mx-auto w-full max-w-4xl">
                 {titleRow}
                 {metaLine}
-                <div className="my-4 border-t" />
                 {chipRow}
                 {detailsBlock}
                 <div className="my-4 border-t" />
@@ -1010,7 +1011,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               <div className="mx-auto w-full max-w-4xl">
                 {titleRow}
                 {metaLine}
-                <div className="my-4 border-t" />
                 {chipRow}
                 {detailsBlock}
                 <div className="my-4 border-t" />
