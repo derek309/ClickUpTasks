@@ -4,10 +4,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, clientStatusMeta,
+  TaskAction, TASK_ACTION_META,
   STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY, WEEKDAY_LABEL, startSignal, isSnoozed, daysUntilDue, formatDue, dueCountdown,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Row, CollapsibleText, SearchableSelect, newId } from "./ui";
+import { ActionDock } from "./ActionDock";
+import { fetchTaskActions, insertTaskAction, setNextStepDoneDb } from "@/lib/db";
 import { AttachmentTile } from "./AttachmentTile";
 import { InlineAssignee, InlineDate, InlineDue } from "./GroupedList";
 import { RichTextEditor } from "./RichTextEditor";
@@ -141,6 +144,12 @@ function RunwayBar({ createdDay, end, endIsDue, followUpAt, level, label }: {
   );
 }
 
+// Kept beside the drawer rather than in data.ts: these are presentation, and
+// data.ts stays free of anything that only makes sense on screen.
+const ACTION_ICON: Record<TaskAction["kind"], string> = {
+  note: "📝", team: "👥", chat: "🗨", email: "✉", sms: "💬", call: "☎", meeting: "📅",
+};
+
 function DateCol({ tone, label, children }: { tone: typeof DATE_TONES[keyof typeof DATE_TONES]; label: string; children: React.ReactNode }) {
   return (
     <div className={DATE_CELL} style={{ background: tone.tint }}>
@@ -153,7 +162,7 @@ function DateCol({ tone, label, children }: { tone: typeof DATE_TONES[keyof type
   );
 }
 
-export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast }: {
+export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast, meId }: {
   task: Task;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; onPrev: () => void; onNext: () => void;
@@ -187,6 +196,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   onDraftDescription?: (title: string, description: string, prompt?: string) => Promise<string | null>; // Gemini draft, never saves
   draftingDescription?: boolean;
   pushToast: (text: string, action?: { label: string; run: () => void }, secondaryAction?: { label: string; run: () => void }) => void;
+  meId: string;
 }) {
   const client = clientById(task.clientId)!;
   const project = projectById(task.projectId)!;
@@ -386,6 +396,26 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onPatch({ attachments: [...task.attachments, { id: newId("at_"), name: text.replace(/^https?:\/\//, ""), kind: "link", size: "", url: text }] });
     pushToast?.("Link attached");
   };
+  // Loaded here rather than with the initial payload: unlike tasks or clients
+  // this grows without bound and only one task's worth is ever on screen.
+  // Stored with the id it belongs to, and read back only when they match, so
+  // switching tasks shows nothing rather than the previous task's history for
+  // a frame. Clearing it with a setState in the effect body would do the same
+  // job at the cost of a cascading render.
+  const [loaded, setLoaded] = useState<{ id: string; rows: TaskAction[] }>({ id: "", rows: [] });
+  const actions = loaded.id === task.id ? loaded.rows : [];
+  useEffect(() => {
+    let live = true;
+    fetchTaskActions(task.id).then((rows) => { if (live) setLoaded({ id: task.id, rows }); });
+    return () => { live = false; };
+  }, [task.id]);
+  const logAction = (a: TaskAction) => { setLoaded((p) => ({ id: task.id, rows: [a, ...(p.id === task.id ? p.rows : [])] })); insertTaskAction(a); };
+  const setNextStepDone = (id: string, done: boolean) => {
+    const at = done ? new Date().toISOString() : null;
+    setLoaded((p) => ({ ...p, rows: p.rows.map((a) => (a.id === id ? { ...a, nextStepDoneAt: at } : a)) }));
+    setNextStepDoneDb(id, at);
+  };
+
   const doneSubs = task.subtasks.filter((s) => s.done).length;
 
   useEffect(() => {
@@ -899,6 +929,44 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // target, so dragging a file in still works when Attachments is collapsed
   // (the expanded block has its own dropzone).
   const addChip = "rounded-lg border border-dashed px-3 py-1.5 text-[13px] font-medium text-muted transition hover:bg-background hover:text-foreground";
+  // The outcome log. Reads as a chain of decisions rather than a list of
+  // things that happened: every entry carries the commitment it created and
+  // whether that commitment was kept.
+  const actionLog = actions.length === 0 ? null : (
+    <div className="mt-5">
+      <div className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-muted">Activity</div>
+      {actions.map((a) => {
+        const m = TASK_ACTION_META[a.kind];
+        const who = a.authorId ? (userById(a.authorId)?.name ?? "Someone") : "Someone";
+        const late = a.nextStepDue && !a.nextStepDoneAt && (daysUntilDue(a.nextStepDue) ?? 0) < 0;
+        return (
+          <div key={a.id} className="flex gap-3 border-t py-3.5">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent-soft text-[13px]" aria-hidden>{ACTION_ICON[a.kind]}</span>
+            <div className="min-w-0 flex-1">
+              <span className="text-[15px] font-semibold">{m.verb}</span>
+              <span className="text-[13px] text-muted"> · {who} · {formatDue(a.at.slice(0, 10))}</span>
+              {a.body && <div className="mt-0.5 whitespace-pre-wrap text-[15px]">{a.body}</div>}
+              {a.nextStep && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 rounded-r-lg border-l-[3px] bg-background px-2.5 py-1.5 text-[14px]">
+                  <span>↳ <b className="font-semibold">{a.nextStep}</b></span>
+                  {a.nextStepDue && <span className="text-muted">{formatDue(a.nextStepDue)}</span>}
+                  {a.nextStepDoneAt ? (
+                    <button onClick={() => setNextStepDone(a.id, false)} title="Reopen this next step"
+                      className="rounded bg-success-soft px-1.5 py-0.5 text-[11px] font-bold text-success">done</button>
+                  ) : (
+                    <>
+                      {late && <span className="rounded bg-danger/10 px-1.5 py-0.5 text-[11px] font-bold text-danger">{Math.abs(daysUntilDue(a.nextStepDue!) ?? 0)}d late</span>}
+                      <button onClick={() => setNextStepDone(a.id, true)} className="ml-auto rounded border bg-surface px-2 py-0.5 text-[13px] hover:bg-background">Mark done</button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
   const emptySectionsRow = (showDescription && showChecklist && showAttachments) ? null : (
     <div
       onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setAttFileDragOver(true); } }}
@@ -977,7 +1045,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             // No linked contact and no comments yet — nothing the messaging
             // feed could show, so fold it into the document instead of
             // reserving a wide empty column for it (see isLightTask above).
-            <div className="flex-1 overflow-y-auto bg-background px-8 py-6 lg:px-12">
+            <div className="flex-1 overflow-y-auto bg-background px-8 pb-32 pt-6 lg:px-12">
               <div className="mx-auto w-full max-w-4xl">
                 {titleRow}
                 {metaLine}
@@ -990,6 +1058,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 {subtasksBlock}
                 {attachmentsBlock}
                 {emptySectionsRow}
+                {actionLog}
 
                 <div className="mt-5 border-t pt-4">
                   {feedArea}
@@ -1007,7 +1076,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           // squeezed and "Push to GHL" broke across three. Below 1100 the two
           // stack instead, which reads far better on a tablet.
           <div className="flex flex-1 flex-col overflow-hidden min-[1100px]:flex-row">
-            <div className="min-w-0 flex-1 overflow-y-auto bg-background px-4 py-6 sm:px-8 lg:px-12">
+            <div className="min-w-0 flex-1 overflow-y-auto bg-background px-4 pb-32 pt-6 sm:px-8 lg:px-12">
               <div className="mx-auto w-full max-w-4xl">
                 {titleRow}
                 {metaLine}
@@ -1020,6 +1089,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 {subtasksBlock}
                 {attachmentsBlock}
                 {emptySectionsRow}
+                {actionLog}
 
               </div>
             </div>
@@ -1061,6 +1131,16 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             </div>
           </div>
         )}
+        {/* Fixed to the bottom of the drawer, so you can log from anywhere in
+            the scroll. Sitting after the feed, the action you take most often
+            was the furthest thing from you on a task with real history. */}
+        <ActionDock
+          task={task} client={client} contact={linkedContactInfo ?? null} actions={actions}
+          me={userById(meId) ?? null} users={users}
+          onLog={logAction} onSetNextStepDone={setNextStepDone} onPatch={onPatch} onAddComment={onAddComment}
+          onSendMessage={onSendTaskMessage ? (channel, subject, body) => onSendTaskMessage(channel, subject, plainTextToHtml(body)) : undefined}
+          pushToast={pushToast}
+        />
       </aside>
     </>
   );
