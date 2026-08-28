@@ -13,6 +13,7 @@ import {
   users, userById, timeAgo, htmlToText, looksLikeHtml, plainTextToHtml, parseEventDiff, STATUS_META, PRIORITY_META,
   mentionCandidates, applyMention,
   type Task, type Client, type Contact, type Attachment, type MessageChannel, type Message, type Comment,
+  TaskAction, TaskActionKind, TASK_ACTION_META, daysUntilDue, formatDue,
 } from "@/lib/data";
 import { I, Avatar, CollapsibleText } from "./ui";
 import { AttachmentThumbs } from "./AttachmentThumbs";
@@ -199,11 +200,17 @@ export interface TaskMessagingProps {
   hasMessaging: boolean;
 }
 
-export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.ReactNode; composerFooter: React.ReactNode } {
+// Presentation only, so data.ts stays free of anything that only makes sense
+// on screen. Mirrors the dock's own set.
+const ACTION_ICON: Record<TaskActionKind, string> = {
+  note: "📝", team: "👥", chat: "🗨", email: "✉", sms: "💬", call: "☎", meeting: "📅",
+};
+
+export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onSetNextStepDone?: (id: string, done: boolean) => void }): { feedArea: React.ReactNode; composerFooter: React.ReactNode } {
   const { task, client, comment, setComment, onPatch, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, ccContacts, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin,
-    onDeleteMessage, onEditMessage, hasMessaging } = p;
+    onDeleteMessage, onEditMessage, hasMessaging, actions, onSetNextStepDone } = p;
 
   // C3: was a Set of independently-toggled channels (all four on by default),
   // which is how "the active tab reads Chat while the pane shows an email
@@ -626,7 +633,12 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
   // ---- Merged feed ----
   type FeedItem =
     | { at: string; kind: "comment" | "event"; channel: "activity"; comment: Comment }
-    | { at: string; kind: "message"; channel: "chat" | "email" | "sms"; message: Message; dupeCount?: number };
+    | { at: string; kind: "message"; channel: "chat" | "email" | "sms"; message: Message; dupeCount?: number }
+    // An action logged from the dock. It sits in the same timeline as the
+    // messages because they are the same story: what happened to this task,
+    // in order. Keeping them in two lists forced you to read both and
+    // interleave them yourself.
+    | { at: string; kind: "action"; channel: "activity"; action: TaskAction };
 
   // C2: a display-only row shape layered on top of FeedItem — consecutive
   // same-field audit events (three due-date changes in a row) collapse into
@@ -684,14 +696,22 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
     ...(messages ?? [])
       .filter((m): m is Message & { channel: "chat" | "email" | "sms" } => m.channel !== "call" && (activeFilter === "all" || activeFilter === m.channel))
       .map((m) => ({ at: m.at, kind: "message" as const, channel: m.channel, message: m })),
+    ...(activeFilter === "all" || activeFilter === "activity"
+      ? (actions ?? []).map((a) => ({ at: a.at, kind: "action" as const, channel: "activity" as const, action: a }))
+      : []),
   ]
     .filter((item) => {
       if (!q) return true;
       if (item.kind === "message") return (item.message.subject ?? "").toLowerCase().includes(q) || htmlToText(item.message.body).toLowerCase().includes(q);
       if (item.kind === "comment") return item.comment.body.toLowerCase().includes(q);
+      if (item.kind === "action") return item.action.body.toLowerCase().includes(q) || (item.action.nextStep ?? "").toLowerCase().includes(q);
       return false;
     })
-    .sort((a, b) => a.at.localeCompare(b.at)));
+    // Newest first (Derek: "so we don't always have to scroll"). The chat
+    // convention of oldest-first only pays off when the composer is pinned to
+    // the bottom and you read downward into it; here the feed sits in the
+    // document column and the newest thing is what you opened the task for.
+    .sort((a, b) => b.at.localeCompare(a.at)));
   const displayRows: DisplayRow[] = groupConsecutiveEvents(mergedFeedItems);
 
   // C3: "activity" bundles both team notes AND field-change audit events (see
@@ -751,6 +771,40 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
   // replyToEmail carried. "call" has no compose surface at all.
   const replyableChannel = (ch: MessageChannel): Channel | undefined =>
     ch === "chat" ? "email" : ch === "email" || ch === "sms" ? ch : undefined;
+
+  // An action reads as a decision, not a note: what you did, and the
+  // commitment it left behind with whether that commitment was kept. The
+  // next-step strip is the part that makes the history worth scrolling.
+  const renderActionItem = (a: TaskAction, gap: string) => {
+    const meta = TASK_ACTION_META[a.kind];
+    const who = a.authorId ? (userById(a.authorId)?.name ?? "Someone") : "Someone";
+    const late = a.nextStepDue && !a.nextStepDoneAt && (daysUntilDue(a.nextStepDue) ?? 0) < 0;
+    return (
+      <div key={a.id} className={`flex gap-3 ${gap}`}>
+        <span className="z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-[14px]" aria-hidden>{ACTION_ICON[a.kind]}</span>
+        <div className="min-w-0 flex-1 pt-0.5">
+          <span className="text-[15px] font-semibold">{meta.verb}</span>
+          <span className="text-[13px] text-muted"> · {who} · {timeAgo(a.at)}</span>
+          {a.body && <div className="mt-0.5 whitespace-pre-wrap text-[15px]">{a.body}</div>}
+          {a.nextStep && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 rounded-r-lg border-l-[3px] bg-background px-2.5 py-1.5 text-[14px]">
+              <span>↳ <b className="font-semibold">{a.nextStep}</b></span>
+              {a.nextStepDue && <span className="text-muted">{formatDue(a.nextStepDue)}</span>}
+              {a.nextStepDoneAt ? (
+                <button onClick={() => onSetNextStepDone?.(a.id, false)} title="Reopen this next step"
+                  className="rounded bg-success-soft px-1.5 py-0.5 text-[11px] font-bold text-success">done</button>
+              ) : (
+                <>
+                  {late && <span className="rounded bg-danger/10 px-1.5 py-0.5 text-[11px] font-bold text-danger">{Math.abs(daysUntilDue(a.nextStepDue!) ?? 0)}d late</span>}
+                  <button onClick={() => onSetNextStepDone?.(a.id, true)} className="ml-auto rounded border bg-surface px-2 py-0.5 text-[13px] hover:bg-background">Mark done</button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   const renderMessageItem = (m: Message, gap: string, dupeCount?: number) => {
     const dotColor = m.channel === "email" ? "#3b82f6" : m.channel === "chat" ? "#e87722" : "#22c55e";
@@ -908,6 +962,7 @@ export function useTaskMessaging(p: TaskMessagingProps): { feedArea: React.React
       {displayRows.map((item, i) => {
         const gap = i === displayRows.length - 1 ? "" : "pb-3";
         if (item.kind === "message") return renderMessageItem(item.message, gap, item.dupeCount);
+        if (item.kind === "action") return renderActionItem(item.action, gap);
         if (item.kind === "event-group") {
           // C2: three consecutive same-field changes collapse into one quiet
           // row — grey, no avatar, no timeline dot — with a disclosure that

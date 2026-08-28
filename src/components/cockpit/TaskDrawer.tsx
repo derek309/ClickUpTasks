@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, clientStatusMeta,
-  TaskAction, TASK_ACTION_META,
+  TaskAction,
   STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY, WEEKDAY_LABEL, startSignal, isSnoozed, daysUntilDue, formatDue, dueCountdown,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
@@ -143,12 +143,6 @@ function RunwayBar({ createdDay, end, endIsDue, followUpAt, level, label }: {
     </div>
   );
 }
-
-// Kept beside the drawer rather than in data.ts: these are presentation, and
-// data.ts stays free of anything that only makes sense on screen.
-const ACTION_ICON: Record<TaskAction["kind"], string> = {
-  note: "📝", team: "👥", chat: "🗨", email: "✉", sms: "💬", call: "☎", meeting: "📅",
-};
 
 function DateCol({ tone, label, children }: { tone: typeof DATE_TONES[keyof typeof DATE_TONES]; label: string; children: React.ReactNode }) {
   return (
@@ -775,6 +769,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // a component (the three drawer layouts nest feedArea/composerFooter
   // differently, so this file controls placement, not TaskMessaging).
   const { feedArea, composerFooter } = useTaskMessaging({
+    actions, onSetNextStepDone: setNextStepDone,
     task, client, comment, setComment, onPatch, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, ccContacts, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin,
@@ -929,44 +924,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // target, so dragging a file in still works when Attachments is collapsed
   // (the expanded block has its own dropzone).
   const addChip = "rounded-lg border border-dashed px-3 py-1.5 text-[13px] font-medium text-muted transition hover:bg-background hover:text-foreground";
-  // The outcome log. Reads as a chain of decisions rather than a list of
-  // things that happened: every entry carries the commitment it created and
-  // whether that commitment was kept.
-  const actionLog = actions.length === 0 ? null : (
-    <div className="mt-5">
-      <div className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-muted">Activity</div>
-      {actions.map((a) => {
-        const m = TASK_ACTION_META[a.kind];
-        const who = a.authorId ? (userById(a.authorId)?.name ?? "Someone") : "Someone";
-        const late = a.nextStepDue && !a.nextStepDoneAt && (daysUntilDue(a.nextStepDue) ?? 0) < 0;
-        return (
-          <div key={a.id} className="flex gap-3 border-t py-3.5">
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent-soft text-[13px]" aria-hidden>{ACTION_ICON[a.kind]}</span>
-            <div className="min-w-0 flex-1">
-              <span className="text-[15px] font-semibold">{m.verb}</span>
-              <span className="text-[13px] text-muted"> · {who} · {formatDue(a.at.slice(0, 10))}</span>
-              {a.body && <div className="mt-0.5 whitespace-pre-wrap text-[15px]">{a.body}</div>}
-              {a.nextStep && (
-                <div className="mt-2 flex flex-wrap items-center gap-2 rounded-r-lg border-l-[3px] bg-background px-2.5 py-1.5 text-[14px]">
-                  <span>↳ <b className="font-semibold">{a.nextStep}</b></span>
-                  {a.nextStepDue && <span className="text-muted">{formatDue(a.nextStepDue)}</span>}
-                  {a.nextStepDoneAt ? (
-                    <button onClick={() => setNextStepDone(a.id, false)} title="Reopen this next step"
-                      className="rounded bg-success-soft px-1.5 py-0.5 text-[11px] font-bold text-success">done</button>
-                  ) : (
-                    <>
-                      {late && <span className="rounded bg-danger/10 px-1.5 py-0.5 text-[11px] font-bold text-danger">{Math.abs(daysUntilDue(a.nextStepDue!) ?? 0)}d late</span>}
-                      <button onClick={() => setNextStepDone(a.id, true)} className="ml-auto rounded border bg-surface px-2 py-0.5 text-[13px] hover:bg-background">Mark done</button>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
   const emptySectionsRow = (showDescription && showChecklist && showAttachments) ? null : (
     <div
       onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setAttFileDragOver(true); } }}
@@ -1058,7 +1015,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 {subtasksBlock}
                 {attachmentsBlock}
                 {emptySectionsRow}
-                {actionLog}
 
                 <div className="mt-5 border-t pt-4">
                   {feedArea}
@@ -1078,19 +1034,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           <div className="flex flex-1 flex-col overflow-hidden min-[1100px]:flex-row">
             <div className="min-w-0 flex-1 overflow-y-auto bg-background px-4 pb-32 pt-6 sm:px-8 lg:px-12">
               <div className="mx-auto w-full max-w-4xl">
+                {/* The columns are swapped from what this used to be. The
+                    conversation was in the side rail and the description had
+                    the main column, which is backwards: the feed is what you
+                    come back to, the description is what you consult. */}
                 {titleRow}
                 {metaLine}
                 {chipRow}
-                {detailsBlock}
-                <div className="my-4 border-t" />
                 {playbookGuideBlock}
                 {clientResponseBlock}
-                {descriptionBlock}
-                {subtasksBlock}
-                {attachmentsBlock}
-                {emptySectionsRow}
-                {actionLog}
-
+                <div className="mt-5 border-t pt-4">{feedArea}</div>
+                <div className="mt-3">{composerFooter}</div>
               </div>
             </div>
             {/* Stacks below the document on mobile (each pane its own scroll);
@@ -1126,8 +1080,16 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   above one lonely event). The filter bar and feed now sit
                   right under the header where they belong; composerFooter
                   stays pinned below, outside this scroll area. */}
-              <div className="flex flex-1 flex-col overflow-y-auto px-5 py-4">{feedArea}</div>
-              {composerFooter}
+              {/* Sticky reference: description, checklist and attachments
+                  stay on screen while the feed scrolls beside them, which is
+                  the one thing a single column genuinely loses. */}
+              <div className="flex flex-1 flex-col overflow-y-auto px-5 py-4">
+                {detailsBlock}
+                {descriptionBlock}
+                {subtasksBlock}
+                {attachmentsBlock}
+                {emptySectionsRow}
+              </div>
             </div>
           </div>
         )}
