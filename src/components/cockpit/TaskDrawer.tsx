@@ -75,11 +75,11 @@ function DateCol({ tone, label, children }: { tone: typeof DATE_TONES[keyof type
   );
 }
 
-export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, onPushGhl, ghlBusy, ghlLinkable, onUnlinkGhl, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast }: {
+export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast }: {
   task: Task;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; onPrev: () => void; onNext: () => void;
-  onClose: () => void; onPatch: (patch: Partial<Task>) => void; onDelete: () => void; onAddComment: (body: string, attachments?: Attachment[]) => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onDownloadFileAs: (path: string, filename: string) => void; onDownloadAll: (items: Attachment[], zipName: string, batchId: string) => void; zippingIds: Set<string>; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; onPushGhl: () => void; ghlBusy: boolean; ghlLinkable: boolean; onUnlinkGhl: () => void; allClients: Client[]; onMoveClient: (clientId: string) => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onRenameProject: () => void; onToggleSub: (sid: string) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onDeleteSub: (sid: string) => void; onPatchSub: (sid: string, patch: Partial<Subtask>) => void; onToggleLabel: (lid: string) => void; onCopyLink: () => void; onOpenMerge: () => void; onOpenClientList: () => void;
+  onClose: () => void; onPatch: (patch: Partial<Task>) => void; onDelete: () => void; onAddComment: (body: string, attachments?: Attachment[]) => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onDownloadFileAs: (path: string, filename: string) => void; onDownloadAll: (items: Attachment[], zipName: string, batchId: string) => void; zippingIds: Set<string>; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; allClients: Client[]; onMoveClient: (clientId: string) => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onRenameProject: () => void; onToggleSub: (sid: string) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onDeleteSub: (sid: string) => void; onPatchSub: (sid: string, patch: Partial<Subtask>) => void; onToggleLabel: (lid: string) => void; onCopyLink: () => void; onOpenMerge: () => void; onOpenClientList: () => void;
   templates: TaskTemplate[]; onApplyTemplate: (templateId: string) => void;
   onUploadCommentImage: (file: File) => Promise<Attachment | null>;
   onCopyAttachmentLink: (path: string) => void;
@@ -335,18 +335,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const creatorName = task.createdBy === "u_claude" ? "Automated"
     : task.createdBy === "client" ? "the client"
     : task.createdBy ? (userById(task.createdBy)?.name ?? null) : null;
-  // The done circle sits in the left gutter rather than in the flow, so the
-  // title starts at the same x as the dates band and everything below it.
-  // In the flow it pushed the title 28px right of every other block, which
-  // read as a broken indent (Derek: "move the check circle outside the left
-  // box so that the text lines up"). The gutter is the container's own px-8,
-  // so it can't collide with anything.
   const titleRow = (
-    <div className="relative flex items-start gap-2.5">
-      <button onClick={() => onPatch({ status: task.status === "done" ? "todo" : "done" })} title={task.status === "done" ? "Mark not done" : "Mark done"}
-        className={`absolute -left-7 top-1.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition ${task.status === "done" ? "border-accent bg-accent text-white" : "border-border hover:border-accent"}`}>
-        {task.status === "done" && <I.check className="h-3 w-3" />}
-      </button>
+    <div className="flex items-start gap-2.5">
+      {/* No done circle here. It never worked reliably from the drawer, and
+          the Stage control in the chip row below already sets Done — two
+          controls for one field, one of them broken. */}
       <div className="min-w-0 flex-1">{titleBlock}</div>
       {/* Rides the title line rather than sitting under it (Derek: "combine
           into one line"). It's provenance, not something you act on, so it
@@ -387,7 +380,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         </DateCol>
         <DateCol tone={DATE_TONES.due} label="Due">
           <span className={`${dateVal} -ml-1 flex`}>
-            <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} recurrenceNth={task.recurrenceNth} recurrenceWeekday={task.recurrenceWeekday} showRecurrenceLabel={task.recurrence !== "custom"} onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} emptyLabel={<span className={dateSet}>Set a due date</span>} />
+            <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} recurrenceNth={task.recurrenceNth} recurrenceWeekday={task.recurrenceWeekday} showRecurrenceLabel={task.recurrence !== "custom"} showCountdown={false} onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} emptyLabel={<span className={dateSet}>Set a due date</span>} />
           </span>
           <span className={dateSub}>{task.due ? dueCountdown(task.due) : "nothing promised"}</span>
         </DateCol>
@@ -434,15 +427,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Assignee, and everything else below now, same dropdown treatment (a
   // colored label, no chrome until you touch it), so Status stops being the
   // one field styled like a different app.
-  // Prominent warning, not just the compact badge buried in the properties
-  // grid below — a client with no linked GHL contact/location is a real
-  // gap (this task can never sync), worth catching at a glance.
-  const ghlWarningBanner = !task.ghlTaskId && !ghlLinkable ? (
-    <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[13px] text-amber-800">
-      <I.bolt className="mt-0.5 shrink-0 text-amber-500" />
-      <span>This client has no linked GoHighLevel contact or location, so this task can&apos;t sync to GHL.</span>
-    </div>
-  ) : null;
   // The old "Task Details" card (nine stacked form-field rows) is now one
   // row of inline editable chips (item 4) — status, due date, assignee,
   // type (reuses the priority field/scale — see the brief's own open
@@ -554,17 +538,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         </>
       )}
       <Row label="Contact">{(() => { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return ct ? (<span className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[14px] text-muted"><I.user /> {ct.name}</span>) : <span className="text-[14px] text-muted">—</span>; })()}</Row>
-      <Row label="GoHighLevel" icon={<I.bolt />}>{task.ghlTaskId ? (
-        <span className="inline-flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 rounded-md bg-success-soft px-2 py-1 text-[13px] font-medium text-success"><I.bolt /> Synced — changes push automatically</span>
-          {ghlContactUrl && <a href={ghlContactUrl} target="_blank" rel="noopener noreferrer" className="text-[13px] font-medium text-accent hover:underline">Open contact ↗</a>}
-          <button onClick={onUnlinkGhl} className="text-[13px] text-muted hover:text-danger">Unlink</button>
-        </span>
-      ) : ghlLinkable ? (
-        <button onClick={onPushGhl} disabled={ghlBusy} className="inline-flex items-center gap-1.5 rounded-md border border-accent px-2.5 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft disabled:opacity-50"><I.bolt /> {ghlBusy ? "Pushing…" : "Push to GHL"}</button>
-      ) : (
-        <span className="inline-flex items-center gap-1.5 rounded-md bg-background px-2 py-1 text-[13px] text-muted" title="This client has no linked GHL contact/location, so this task can't sync to GoHighLevel."><I.bolt className="opacity-40" /> Not linkable</span>
-      )}</Row>
+      {/* The "Push to GHL" row is gone. Reaching a client's GoHighLevel
+          account is only ever about emailing, texting or calling them, and
+          the header's "Open in GHL" link goes straight to the contact where
+          all three live. Creating a mirror task there just made a second
+          record that nobody worked in and that drifted out of date. */}
     </dl>
     </div>
   );
@@ -939,7 +917,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               <div className="mx-auto w-full max-w-4xl">
                 {titleRow}
                 {metaLine}
-                {ghlWarningBanner}
                 <div className="my-4 border-t" />
                 {chipRow}
                 {detailsBlock}
@@ -971,7 +948,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               <div className="mx-auto w-full max-w-4xl">
                 {titleRow}
                 {metaLine}
-                {ghlWarningBanner}
                 <div className="my-4 border-t" />
                 {chipRow}
                 {detailsBlock}

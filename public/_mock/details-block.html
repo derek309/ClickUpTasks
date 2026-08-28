@@ -1,0 +1,119 @@
+<title>Details Block</title>
+<style>
+:root{--background:#eef4fb;--surface:#fff;--foreground:#1c2030;--muted:#6b7280;--border:#d0dce8;
+--accent:#1b3a5c;--accent-soft:#e1eaf4;--danger:#ef4444;--success:#16a34a;
+--shadow-sm:0 1px 2px rgba(20,24,40,.04),0 1px 3px rgba(20,24,40,.05)}
+*{box-sizing:border-box}
+body{margin:0;padding:30px;background:var(--background);color:var(--foreground);
+font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif}
+.wrap{max-width:1180px;margin:0 auto}
+h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:26px 0 8px}
+.note{font-size:14px;color:var(--muted);margin:0 0 14px;max-width:80ch}
+.pane{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px 22px;box-shadow:var(--shadow-sm)}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:var(--surface);
+box-shadow:var(--shadow-sm);border-radius:5px;padding:5px 9px;font-size:13px;white-space:nowrap}
+.dash{border:1px dashed var(--border);background:none;box-shadow:none;color:var(--muted)}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+.card{margin-top:14px;border:1px solid var(--border);border-radius:12px;padding:16px 18px}
+.cap{font-size:12px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.grid{display:grid;grid-template-columns:auto 1fr;gap:9px 14px;align-items:center;margin-top:10px}
+.k{font-size:14px;color:var(--muted);display:flex;align-items:center;gap:7px}
+.v{font-size:15px}
+.sel{border:1px solid var(--border);border-radius:6px;padding:5px 9px;background:var(--surface);font-size:15px;display:inline-flex;align-items:center;gap:26px}
+.ghost{border:0;background:none;padding:5px 0;font-size:15px;display:inline-flex;align-items:center;gap:7px;cursor:pointer;border-radius:6px}
+.ghost:hover{background:var(--background);padding-left:8px;padding-right:8px;margin-left:-8px}
+.crumb{display:inline-flex;align-items:center;gap:7px;font-size:15px}
+.crumb b{font-weight:600}
+.slash{color:var(--border)}
+.btn{border:1px solid var(--border);background:var(--surface);border-radius:6px;padding:5px 10px;font-size:14px;box-shadow:var(--shadow-sm);cursor:pointer}
+.inline{display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px;margin-top:10px}
+.pair{display:flex;align-items:center;gap:8px;font-size:15px}
+.pair .k{font-size:13px}
+.warn{color:var(--danger)}
+</style>
+<div class="wrap">
+
+<h2>Now</h2>
+<p class="note">Four labelled rows in a bordered card for what is really one line of provenance. Client and Project are
+dropdowns styled unlike every other control on the screen, Contact is a dead row that just repeats the client's name,
+and GoHighLevel spends a whole row on one button.</p>
+<div class="pane">
+  <div class="row">
+    <span class="chip"><span class="dot" style="background:#9ca3af"></span>To do ⌄</span>
+    <span class="chip">Derek Fox (Admin) ⌄</span>
+    <span class="chip">🚩 Normal ⌄</span>
+    <span class="chip dash">+ Label</span>
+  </div>
+  <div class="card">
+    <span class="cap">Details</span>
+    <div class="grid">
+      <span class="k">🗀 Client</span><span><span class="sel">Brian Goodell ⌄</span></span>
+      <span class="k">☰ Project</span><span><span class="sel">Tasks ⌄</span></span>
+      <span class="k">Contact</span><span class="v" style="color:var(--muted)">Brian Goodell</span>
+      <span class="k">⚡ GoHighLevel</span><span><span class="btn">⚡ Push to GHL</span></span>
+    </div>
+  </div>
+</div>
+
+<h2>Option 1 · Breadcrumb</h2>
+<p class="note">Client and Project are one path, not two unrelated fields, so they read as one. Contact is dropped
+where it only repeats the client, and reappears only when it is genuinely a different person. GoHighLevel joins the
+chip row, since it is an action and everything else in that row is too. The card disappears entirely.</p>
+<div class="pane">
+  <div class="row">
+    <span class="chip"><span class="dot" style="background:#9ca3af"></span>To do ⌄</span>
+    <span class="chip">Derek Fox (Admin) ⌄</span>
+    <span class="chip">🚩 Normal ⌄</span>
+    <span class="chip dash">+ Label</span>
+    <span style="flex:1"></span>
+    <span class="chip">⚡ Push to GHL</span>
+  </div>
+  <div class="inline" style="border-top:1px solid var(--border);padding-top:12px;margin-top:14px">
+    <span class="crumb">🗀 <b>Brian Goodell</b> <span class="slash">/</span> <b>Tasks</b> <span style="color:var(--muted)">⌄</span></span>
+  </div>
+</div>
+
+<h2>Option 2 · Breadcrumb, with a contact that differs</h2>
+<p class="note">Same layout, showing what happens when the contact is not the client. It earns a spot only then.</p>
+<div class="pane">
+  <div class="row">
+    <span class="chip"><span class="dot" style="background:#3b82f6"></span>Progress ⌄</span>
+    <span class="chip">Michaella (VA) ⌄</span>
+    <span class="chip">🚩 Urgent ⌄</span>
+    <span class="chip" style="background:#fdece1;border-color:#f6c9a5;color:#a1490a">Website ×</span>
+    <span class="chip dash">+ Label</span>
+    <span style="flex:1"></span>
+    <span class="chip">⚡ Push to GHL</span>
+  </div>
+  <div class="inline" style="border-top:1px solid var(--border);padding-top:12px;margin-top:14px">
+    <span class="crumb">🗀 <b>Michael Swaleh</b> <span class="slash">/</span> <b>Tasks</b> <span style="color:var(--muted)">⌄</span></span>
+    <span class="pair"><span class="k">Contact</span> <span>Lynn Alvarez</span></span>
+  </div>
+</div>
+
+<h2>Option 3 · Keep the card, lose the chrome</h2>
+<p class="note">If you want the block to stay a block. Same four facts, but the selects lose their boxes until you
+touch them, so they stop looking like a form, and the whole thing is two columns instead of four stacked rows.</p>
+<div class="pane">
+  <div class="row">
+    <span class="chip"><span class="dot" style="background:#9ca3af"></span>To do ⌄</span>
+    <span class="chip">Derek Fox (Admin) ⌄</span>
+    <span class="chip">🚩 Normal ⌄</span>
+    <span class="chip dash">+ Label</span>
+  </div>
+  <div class="card" style="background:#f7fafd">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 32px">
+      <div class="grid" style="margin-top:0">
+        <span class="k">🗀 Client</span><span><span class="ghost">Brian Goodell <span style="color:var(--muted)">⌄</span></span></span>
+        <span class="k">☰ Project</span><span><span class="ghost">Tasks <span style="color:var(--muted)">⌄</span></span></span>
+      </div>
+      <div class="grid" style="margin-top:0">
+        <span class="k">Contact</span><span class="v" style="color:var(--muted)">same as client</span>
+        <span class="k">⚡ GoHighLevel</span><span><span class="btn">Push to GHL</span></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>

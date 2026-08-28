@@ -566,7 +566,7 @@ export function InlineDate({ value, onChange, onClear, className = "", emptyLabe
   );
 }
 
-export function InlineDue({ value, overdue, followUpAt = null, recurrence = "none", recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth, recurrenceNth, recurrenceWeekday, onChange, onRecurrenceChange, emptyLabel = "—", strong = false, showRecurrenceLabel = false }: { value: string | null; overdue: boolean; followUpAt?: string | null; recurrence?: Recurrence; recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[]; recurrenceNth?: number; recurrenceWeekday?: number; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; emptyLabel?: React.ReactNode; strong?: boolean; showRecurrenceLabel?: boolean }) {
+export function InlineDue({ value, overdue, followUpAt = null, recurrence = "none", recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth, recurrenceNth, recurrenceWeekday, onChange, onRecurrenceChange, emptyLabel = "—", strong = false, showRecurrenceLabel = false, showCountdown = true }: { value: string | null; overdue: boolean; followUpAt?: string | null; recurrence?: Recurrence; recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[]; recurrenceNth?: number; recurrenceWeekday?: number; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; emptyLabel?: React.ReactNode; strong?: boolean; showRecurrenceLabel?: boolean; showCountdown?: boolean }) {
   const { open, setOpen, ref, pos, openIt } = useDatePopover();
   // Amber only for a genuinely near date — not "any date that isn't
   // overdue," which would paint every far-future due date the same urgent
@@ -587,7 +587,10 @@ export function InlineDue({ value, overdue, followUpAt = null, recurrence = "non
             is, which you already know and can't do anything about today. */}
         {isSnoozed({ followUpAt }) ? (
           <span className="shrink-0 text-accent opacity-80">follow up {friendlyDue(followUpAt!)}</span>
-        ) : value ? (
+        ) : value && showCountdown ? (
+          // The drawer's dates band prints the countdown on its own sub-line,
+          // so it turns this one off. Left on, the Due column read "Mon
+          // 3 days left" with "3 days left" repeated directly underneath.
           <span className="shrink-0 opacity-70">{dueCountdown(value)}</span>
         ) : null}
         {recurrence !== "none" && <I.repeat className="text-accent" />}

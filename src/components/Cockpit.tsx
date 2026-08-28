@@ -11,7 +11,6 @@ import {
   advanceDue,
   isOverdue,
   timeAgo,
-  htmlToText,
   plainTextToHtml,
   TODAY,
   TOMORROW,
@@ -507,7 +506,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // mode. nonce bumps each click so it re-fires even when already on the Journal.
   const [composeIntent, setComposeIntent] = useState<{ mode: "email" | "sms"; nonce: number } | null>(null);
   const openCompose = (mode: "email" | "sms") => { setClientTab("chat"); setComposeIntent((c) => ({ mode, nonce: (c?.nonce ?? 0) + 1 })); };
-  const [ghlBusy, setGhlBusy] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
   const [promptDialog, setPromptDialog] = useState<PromptSpec | null>(null);
@@ -2682,7 +2680,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     }
     if (cur && synced.status === "done" && cur.status !== "done") keepDoneVisible(id);
     setTasks((ts) => { let next = ts.map((t) => (t.id === id ? { ...t, ...synced } : t)); if (clone) next = [...next, clone]; return next; });
-    if (cur) { const merged = { ...cur, ...synced }; upsertTask(merged, me.id); syncGhlIfLinked(merged, patch); if (clone) upsertTask(clone, me.id); }
+    if (cur) { const merged = { ...cur, ...synced }; upsertTask(merged, me.id); if (clone) upsertTask(clone, me.id); }
   };
 
   // Field changes on a task that are worth a line in its Activity feed. Stored
@@ -2722,7 +2720,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (synced.status === "done" && before.status !== "done") keepDoneVisible(id);
     setTasks((prev) => { let next = prev.map((x) => (x.id === id ? updated : x)); if (clone) next = [...next, clone]; return next; });
     upsertTask(updated, me.id);
-    syncGhlIfLinked(updated, synced);
     if (clone) upsertTask(clone, me.id);
     // Bumps clients.playbook_last_progress_at whenever a real Owner Growth
     // Plan step's status changes (done or reopened) — see playbookCheckinsServer.ts's
@@ -2826,10 +2823,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       confirmLabel: `Delete ${n} task${n === 1 ? "" : "s"}`,
       onConfirm: () => {
         setConfirmDialog(null);
-        deletable.forEach((id) => {
-          const t = tasksRef.current.find((x) => x.id === id);
-          if (t?.ghlTaskId) ghlCall("delete", t);
-        });
         const idSet = new Set(deletable);
         setTasks((ts) => ts.filter((t) => !idSet.has(t.id)));
         if (openTaskId && idSet.has(openTaskId)) setOpenTaskId(null);
@@ -2849,8 +2842,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       title: "Delete this task?", message: "Moves to Trash — restorable there for 30 days.", confirmLabel: "Delete",
       onConfirm: () => {
         setConfirmDialog(null);
-        const t = tasksRef.current.find((x) => x.id === id);
-        if (t?.ghlTaskId) ghlCall("delete", t); // also remove it from GoHighLevel
         setTasks((ts) => ts.filter((t) => t.id !== id));
         setOpenTaskId(null);
         deleteTaskDb(id);
@@ -3010,49 +3001,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // A client is a GHL contact (cl_<localContactId>). To act on its GHL tasks we
   // need the contact's GHL id + the sub-account's location id (+ its token,
   // resolved server-side). Returns null when the task isn't tied to a GHL contact.
-  const ghlTargetFor = (t: Task): { locationId: string; ghlContactId: string } | null => {
-    if (!t.clientId.startsWith("cl_")) return null;
-    const ct = contactById(t.clientId.slice(3));
-    if (!ct?.ghlContactId) return null;
-    const sub = clientById(ct.clientId);
-    if (!sub?.ghlLocationId) return null;
-    return { locationId: sub.ghlLocationId, ghlContactId: ct.ghlContactId };
-  };
-  const ghlCall = (op: "create" | "update" | "complete" | "delete", t: Task) => {
-    const target = ghlTargetFor(t);
-    if (!target) return Promise.resolve<{ error?: string; ghlTaskId?: string } | null>(null);
-    return authedFetch("/api/ghl/task", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ op, ...target, ghlTaskId: t.ghlTaskId, title: t.title, body: htmlToText(t.description), due: t.due, completed: t.status === "done" }),
-    }).then((r) => r.json()).catch(() => ({ error: "Network error reaching GoHighLevel." }));
-  };
-  // Fields that, when changed on an already-synced task, we mirror to GHL.
-  const GHL_SYNC_FIELDS: (keyof Task)[] = ["title", "description", "due", "status"];
-  const syncGhlIfLinked = (updated: Task, patch: Partial<Task>) => {
-    if (!updated.ghlTaskId) return;
-    if (!Object.keys(patch).some((k) => GHL_SYNC_FIELDS.includes(k as keyof Task))) return;
-    ghlCall("update", updated); // fire-and-forget; GHL stays eventually-consistent
-  };
-  const pushToGhl = async (id: string) => {
-    const t = tasks.find((x) => x.id === id);
-    if (!t) return;
-    if (!ghlTargetFor(t)) { pushToast("This client isn't linked to a GHL contact yet."); return; }
-    setGhlBusy(true);
-    try {
-      const j = await ghlCall("create", t);
-      if (j?.ghlTaskId) { update(id, { ghlTaskId: j.ghlTaskId }); pushToast("✓ Pushed to GoHighLevel"); }
-      else pushToast(j?.error ?? "GoHighLevel push failed.");
-    } finally { setGhlBusy(false); }
-  };
-  const unlinkGhl = async (id: string) => {
-    const t = tasks.find((x) => x.id === id);
-    if (!t?.ghlTaskId) return;
-    ghlCall("delete", t); // remove the task on GHL too
-    update(id, { ghlTaskId: null });
-    pushToast("Unlinked from GoHighLevel");
-  };
-
+  // Tasks are no longer pushed INTO GoHighLevel. The only reason to reach a
+  // client's GHL account is to email, text or call them, and the "Open in
+  // GHL" contact link already does that (Derek: "we don't need to make a task
+  // on their account"). A second copy of every task, living in a system
+  // nobody actually worked it in, just meant two records drifting apart.
+  //
+  // The PULL direction stays: api/ghl/import-tasks still reads a contact's
+  // GHL-native tasks in, and Task.ghlTaskId stays on the model because that
+  // import dedupes against it. Drop the field and a second import would
+  // duplicate every task ever imported.
   // --- GoHighLevel messages (email now, sms later) -------------------------
   // Same target-resolution shape as ghlTargetFor above, but keyed directly off
   // a Contact rather than a Task, since a message belongs to the person, not
@@ -3796,7 +3754,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // then vanished again the moment the resulting realtime echo (task_id →
     // null) landed.
     await reassignMessagesTaskDb(sourceId, targetId);
-    if (src.ghlTaskId) ghlCall("delete", src);
     setTasks((ts) => ts.filter((t) => t.id !== sourceId));
     setOpenTaskId((id) => (id === sourceId ? targetId : id));
     deleteTaskDb(sourceId);
@@ -4846,7 +4803,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={navTaskIds.length} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(body, attachments) => addComment(openTask.id, body, attachments)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onDownloadAll={downloadAllAsZip} zippingIds={zippingIds} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} onPushGhl={() => pushToGhl(openTask.id)} ghlBusy={ghlBusy} ghlLinkable={!!ghlTargetFor(openTask)} onUnlinkGhl={() => unlinkGhl(openTask.id)} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { if (openTask.playbookStepKey) { pushToast("Playbook steps can't be moved to a different list."); return; } patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null })} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} onMarkChannelRead={(channel) => markTaskChannelRead(openTask.id, channel)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} onScheduleTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, scheduledAt, attachments, cc, bcc) => scheduleMessage(openTask.clientId, channel, subject, body, scheduledAt, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId)} draftingMessage={draftingMessage} onGetTaskLink={() => getClientShareUrl(openTask.clientId, { projectId: openTask.projectId, taskId: openTask.id })} canAdmin={canAdmin} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onCopyClientLink={() => copyClientShareLink(openTask.clientId, openTask.projectId)} onDraftDescription={draftDescription} draftingDescription={draftingDescription} pushToast={pushToast} />
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onDownloadAll={downloadAllAsZip} zippingIds={zippingIds} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { if (openTask.playbookStepKey) { pushToast("Playbook steps can't be moved to a different list."); return; } patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null })} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(openTask.clientId); setActiveProject(openTask.projectId); setClientTab("tasks"); setOpenTaskId(null); }} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} onMarkChannelRead={(channel) => markTaskChannelRead(openTask.id, channel)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} onScheduleTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, scheduledAt, attachments, cc, bcc) => scheduleMessage(openTask.clientId, channel, subject, body, scheduledAt, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId)} draftingMessage={draftingMessage} onGetTaskLink={() => getClientShareUrl(openTask.clientId, { projectId: openTask.projectId, taskId: openTask.id })} canAdmin={canAdmin} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onCopyClientLink={() => copyClientShareLink(openTask.clientId, openTask.projectId)} onDraftDescription={draftDescription} draftingDescription={draftingDescription} pushToast={pushToast} />
       )}
 
       {addClientOpen && <AddClientModal subAccounts={subAccounts} contacts={contacts} existingIds={new Set(clients.map((c) => c.id))} onAdd={addClientContact} onClose={() => setAddClientOpen(false)} />}
