@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, clientStatusMeta,
-  STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY, WEEKDAY_LABEL, windowBurn, startSignal, dueCountdown, isSnoozed,
+  STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY, WEEKDAY_LABEL, windowBurn, startSignal, isSnoozed, daysUntilDue, formatDue,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Row, CollapsibleText, SearchableSelect, newId } from "./ui";
@@ -121,6 +121,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onPatch({ attachments: [...task.attachments, { id: newId("at_"), name: linkLabel.trim() || href.replace(/^https?:\/\//, ""), kind: "link", size: "", url: href }] });
     setLinkUrl(""); setLinkLabel(""); setLinkOpen(false);
   };
+  // Anchors the native date picker for the "+ Follow up" button, which has no
+  // visible input of its own until a date is actually set.
+  const followUpRef = useRef<HTMLInputElement | null>(null);
   const [labelOpen, setLabelOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -300,15 +303,21 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       const sig = startSignal(task);
       if (burn === null) return null;
       const pct = Math.round(burn * 100);
+      // Days read better than a percentage here: "9 of 11 days used" is a
+      // quantity you can act on, "82%" is one you have to translate.
+      const total = Math.max(1, daysUntilDue(task.due, task.createdAt.slice(0, 10)) ?? 1);
+      const used = Math.min(total, Math.max(0, total - (daysUntilDue(task.due) ?? 0)));
       return (
         <div className="mb-2 flex items-center gap-2 text-[13px]">
           <span className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-border">
             <span className={`block h-full rounded-full ${sig.level === "late" ? "bg-danger" : sig.level === "start" ? "bg-amber-500" : "bg-accent"}`} style={{ width: `${Math.max(2, pct)}%` }} />
           </span>
-          <span className="text-muted">
-            {pct}% of the way from created to due · {dueCountdown(task.due)}
-            {isSnoozed(task) ? ` · waiting until ${task.followUpAt}` : ""}
-          </span>
+          {/* Deliberately does NOT repeat the countdown: the due chip below
+              already says "2d late", and saying it twice in two lines was the
+              clutter Derek pointed at. This line answers a different
+              question — how much of the runway is gone. */}
+          <span className="text-muted">{used} of {total} day{total === 1 ? "" : "s"} used</span>
+          {isSnoozed(task) && <span className="text-accent">waiting until {formatDue(task.followUpAt!)}</span>}
           {sig.level !== "none" && (
             <span className={`rounded px-1.5 py-0.5 text-[12px] font-semibold ${sig.level === "late" ? "bg-danger/10 text-danger" : "bg-amber-500/15 text-amber-700"}`}>{sig.label}</span>
           )}
@@ -357,14 +366,29 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {/* Follow up sits beside Due, not instead of it: due is what you
           promised, follow-up is when you want it back. Overwriting the first
           to mean the second is exactly what this replaces. */}
-      <span className={`${chip} gap-1 px-2 py-1 text-[13px] ${isSnoozed(task) ? "text-accent" : "text-muted"}`} title="When this should come back to your attention. Until then it stays quiet.">
-        <span className="shrink-0">Follow up</span>
-        <input type="date" value={task.followUpAt ?? ""} onChange={(e) => onPatch({ followUpAt: e.target.value || null })}
-          className="rounded-md border border-transparent bg-transparent px-1 py-0.5 text-[13px] outline-none hover:border-border focus:border-accent focus:bg-background" />
-        {task.followUpAt && (
+      {/* Unset, this is a "+ Follow up" button matching "+ Label" — an empty
+          mm/dd/yyyy input was taking as much room as a real value and reading
+          as a field you'd forgotten to fill in (Derek: "how can we clean this
+          up"). Set, it shows the date and a way to clear it. */}
+      {task.followUpAt ? (
+        <span className={`${chip} gap-1 px-2 py-1 text-[13px] ${isSnoozed(task) ? "text-accent" : "text-muted"}`} title="When this comes back to your attention. Until then it stays quiet.">
+          <span className="shrink-0">Follow up</span>
+          <input ref={followUpRef} type="date" value={task.followUpAt} onChange={(e) => onPatch({ followUpAt: e.target.value || null })}
+            className="rounded-md border border-transparent bg-transparent px-1 py-0.5 text-[13px] outline-none hover:border-border focus:border-accent focus:bg-background" />
           <button onClick={() => onPatch({ followUpAt: null })} title="Clear the follow-up date" className="shrink-0 px-0.5 text-muted hover:text-danger">×</button>
-        )}
-      </span>
+        </span>
+      ) : (
+        <span className="relative">
+          <button onClick={() => { const el = followUpRef.current; if (!el) return; if (el.showPicker) el.showPicker(); else el.focus(); }}
+            title="Set a date for this to come back to you. Until then it stays quiet."
+            className="inline-flex items-center gap-0.5 rounded-[5px] border border-dashed px-2 py-1 text-[13px] text-muted hover:bg-surface"><I.plus /> Follow up</button>
+          {/* Present but not laid out, so the native picker has something to
+              anchor to without an empty field sitting in the row. */}
+          <input ref={followUpRef} type="date" value=""
+            onChange={(e) => onPatch({ followUpAt: e.target.value || null })}
+            className="pointer-events-none absolute bottom-0 left-0 h-0 w-0 opacity-0" tabIndex={-1} aria-hidden />
+        </span>
+      )}
       <span className={chip}>
         <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} recurrenceNth={task.recurrenceNth} recurrenceWeekday={task.recurrenceWeekday} showRecurrenceLabel={task.recurrence !== "custom"} onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} emptyLabel={<I.calendar className="h-3.5 w-3.5" />} />
       </span>

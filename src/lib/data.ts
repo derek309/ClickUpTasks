@@ -2041,7 +2041,12 @@ export function isSnoozed(task: { followUpAt?: string | null }, today: string = 
  *  itself is never overwritten — that was the whole problem with using one
  *  field for both. */
 export function effectiveDueDate(task: { due: string | null; followUpAt?: string | null }, today: string = TODAY): string | null {
-  return isSnoozed(task, today) ? task.followUpAt! : task.due;
+  if (isSnoozed(task, today)) return task.followUpAt!;
+  // Falling back to followUpAt matters for a task with a follow-up and no due
+  // date. Returning task.due alone would make it sort as undated on the very
+  // day it was supposed to come back, so the act of arriving would make it
+  // disappear. A past follow-up keeps surfacing until it is dealt with.
+  return task.due ?? task.followUpAt ?? null;
 }
 
 export function isOverdue(iso: string | null): boolean {

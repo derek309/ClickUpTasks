@@ -576,3 +576,21 @@ describe("follow-up date", () => {
     expect(startSignal({ ...snoozed, followUpAt: "2026-08-28" }, today).level).toBe("late");
   });
 });
+
+describe("effectiveDueDate with a follow-up but no due date", () => {
+  it("uses the follow-up date while it is still in the future", () => {
+    expect(effectiveDueDate({ due: null, followUpAt: "2026-09-05" }, "2026-08-28")).toBe("2026-09-05");
+  });
+  it("still uses it on the day it arrives, instead of going undated", () => {
+    expect(effectiveDueDate({ due: null, followUpAt: "2026-09-05" }, "2026-09-05")).toBe("2026-09-05");
+  });
+  it("keeps surfacing a follow-up that has passed", () => {
+    expect(effectiveDueDate({ due: null, followUpAt: "2026-08-20" }, "2026-08-28")).toBe("2026-08-20");
+  });
+  it("prefers a real due date once the snooze is over", () => {
+    expect(effectiveDueDate({ due: "2026-09-30", followUpAt: "2026-08-20" }, "2026-08-28")).toBe("2026-09-30");
+  });
+  it("is genuinely undated with neither", () => {
+    expect(effectiveDueDate({ due: null, followUpAt: null }, "2026-08-28")).toBeNull();
+  });
+});

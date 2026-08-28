@@ -30,6 +30,7 @@ import {
   applyWaitingStatusSync,
   mentionsUser,
   effectiveDueDate,
+  isSnoozed,
   isCompletionEvent,
   CLIENT_STATUS_META,
   CLIENT_STATUS_ORDER,
@@ -1955,7 +1956,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!c) return false;
     if (hasOpenConversationTask(clientId)) return false;
     const open = (scopedTasksByClientId.get(clientId) ?? []).filter((t) => t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
-    const hasAnyDate = open.some((t) => t.due);
+    // A task carrying only a follow-up date is dated — it has a day it comes
+    // back — so it must not drag the client into "nothing here has a date".
+    const hasAnyDate = open.some((t) => urgencyDateOf(t));
     const reviewedThisWeek = !!c.reviewedAt && c.reviewedAt >= THIS_MONDAY;
     if (open.length > 0 && !hasAnyDate && !reviewedThisWeek) return true; // (A)
     if (c.status === "nurture" && (!c.reviewedAt || daysBetween(c.reviewedAt, TODAY) >= NURTURE_CHECK_IN_DAYS)) return true; // (B)
@@ -1971,7 +1974,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // them and this condition would never fire. The client is already in
     // this person's board via assignedClientsFor (an assigned task, or
     // following the client), so it can't leak someone else's work in.
-    if (!reviewedThisWeek && waitingTasksFor(clientId).length > 0) return true;
+    // Snoozed waiting work is excluded: you already decided when to chase it,
+    // and raising it in Monday's review before that day is the app second
+    // guessing a call you made deliberately.
+    if (!reviewedThisWeek && waitingTasksFor(clientId).some((t) => !isSnoozed(t))) return true;
     return false;
   }
   /** Open tasks this client owes us an answer on. Unassigned by construction,
@@ -1985,7 +1991,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const p = projectById(projectId);
     if (!p) return false;
     const open = (scopedTasksByProjectId.get(projectId) ?? []).filter((t) => t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
-    const hasAnyDate = open.some((t) => t.due);
+    const hasAnyDate = open.some((t) => urgencyDateOf(t));
     const reviewedThisWeek = !!p.reviewedAt && p.reviewedAt >= THIS_MONDAY;
     return open.length > 0 && !hasAnyDate && !reviewedThisWeek;
   }
@@ -1993,6 +1999,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   //   0 Review · 1 New message · 2 Overdue · 3 Due today · 4 Due tomorrow ·
   //   5 Due this week · 6 Due next week · 7 Due this month · 8 Upcoming ·
   //   9 No due date · 10 No open tasks
+  // Which date My Work tiers a task by. A snoozed task counts at its
+  // follow-up, not its due date (Derek: "fix My Work so it honors the snooze
+  // too"). Two ways to do that and the choice matters: EXCLUDING snoozed
+  // tasks from the tiering would drop a client whose only open work is
+  // parked into "No open tasks", which is a lie — the work exists, it's just
+  // waiting. Counting it at the date it comes back keeps the client on the
+  // board, at the moment it's actually actionable, and it reappears in the
+  // right tier on its own with nothing to remember.
+  const urgencyDateOf = (t: Task): string | null => effectiveDueDate(t);
   function tierForDate(soonest: string): number {
     if (soonest < TODAY) return 2;
     if (soonest === TODAY) return 3;
@@ -2010,7 +2025,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (clientNeedsReview(clientId, forAssignee)) return { tier: 0, due: "", priorityRank: 0 };
     if (hasOpenConversationTask(clientId)) return { tier: 1, due: "", priorityRank: 0 };
     const open = (scopedTasksByClientId.get(clientId) ?? []).filter((t) => t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
-    const candidates: { date: string; priorityRank: number }[] = open.filter((t) => t.due).map((t) => ({ date: t.due!, priorityRank: PRIORITY_META[t.priority].rank }));
+    const candidates: { date: string; priorityRank: number }[] = open
+      .map((t) => ({ date: urgencyDateOf(t), priorityRank: PRIORITY_META[t.priority].rank }))
+      .filter((c): c is { date: string; priorityRank: number } => !!c.date);
     if (candidates.length === 0) {
       if (open.length === 0) return { tier: 10, due: "", priorityRank: 0 };
       return { tier: 9, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
@@ -2025,7 +2042,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   function projectUrgencyKey(projectId: string, forAssignee?: string): { tier: number; due: string; priorityRank: number } {
     if (projectNeedsReview(projectId, forAssignee)) return { tier: 0, due: "", priorityRank: 0 };
     const open = (scopedTasksByProjectId.get(projectId) ?? []).filter((t) => t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
-    const candidates: { date: string; priorityRank: number }[] = open.filter((t) => t.due).map((t) => ({ date: t.due!, priorityRank: PRIORITY_META[t.priority].rank }));
+    const candidates: { date: string; priorityRank: number }[] = open
+      .map((t) => ({ date: urgencyDateOf(t), priorityRank: PRIORITY_META[t.priority].rank }))
+      .filter((c): c is { date: string; priorityRank: number } => !!c.date);
     if (candidates.length === 0) {
       if (open.length === 0) return { tier: 10, due: "", priorityRank: 0 };
       return { tier: 9, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
@@ -2039,8 +2058,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // all, so this is just tierForDate off its own due date, falling back to
   // tier 9 (no due date) same as clientUrgencyKey/projectUrgencyKey do.
   function taskUrgencyKey(task: Task): { tier: number; due: string; priorityRank: number } {
-    if (!task.due) return { tier: 9, due: "", priorityRank: PRIORITY_META[task.priority].rank };
-    return { tier: tierForDate(task.due), due: task.due, priorityRank: PRIORITY_META[task.priority].rank };
+    const d = urgencyDateOf(task);
+    if (!d) return { tier: 9, due: "", priorityRank: PRIORITY_META[task.priority].rank };
+    return { tier: tierForDate(d), due: d, priorityRank: PRIORITY_META[task.priority].rank };
   }
   const projectTaskCount = (projectId: string) => (scopedTasksByProjectId.get(projectId) ?? []).filter((t) => t.status !== "done").length;
   // Same "Overdue first" urgency ordering the Clients section gets when
