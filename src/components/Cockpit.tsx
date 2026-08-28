@@ -29,6 +29,7 @@ import {
   STATUS_ORDER,
   applyWaitingStatusSync,
   mentionsUser,
+  effectiveDueDate,
   isCompletionEvent,
   CLIENT_STATUS_META,
   CLIENT_STATUS_ORDER,
@@ -1655,7 +1656,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const arr = [...list];
     if (sortBy === "manual") return hoistPinned(arr);
     const dir = sortDir === "desc" ? -1 : 1;
-    if (sortBy === "due") arr.sort((a, b) => ((a.due ?? "9999").localeCompare(b.due ?? "9999")) * dir);
+    if (sortBy === "due") arr.sort((a, b) => ((effectiveDueDate(a) ?? "9999").localeCompare(effectiveDueDate(b) ?? "9999")) * dir);
     else if (sortBy === "priority") arr.sort((a, b) => {
       // A live reply thread outranks every priority tier. Derived from the
       // table rather than hardcoded — it used to be a literal 4, which

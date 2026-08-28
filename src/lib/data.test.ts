@@ -24,6 +24,8 @@ import {
   nthWeekdayOfMonth,
   daysUntilDue,
   windowBurn,
+  isSnoozed,
+  effectiveDueDate,
   startSignal,
   dueCountdown,
   describeRecurrence,
@@ -545,5 +547,32 @@ describe("window burn and the start signal", () => {
   });
   it("never fires without a due date — there is nothing to be late for", () => {
     expect(startSignal(T("2026-01-01", null), today).level).toBe("none");
+  });
+});
+
+describe("follow-up date", () => {
+  const today = "2026-08-28";
+  it("is a snooze only while it's still ahead", () => {
+    expect(isSnoozed({ followUpAt: "2026-09-02" }, today)).toBe(true);
+    expect(isSnoozed({ followUpAt: "2026-08-28" }, today)).toBe(false); // today is the day it came back
+    expect(isSnoozed({ followUpAt: "2026-08-20" }, today)).toBe(false);
+    expect(isSnoozed({ followUpAt: null }, today)).toBe(false);
+    expect(isSnoozed({}, today)).toBe(false);
+  });
+  it("orders by the follow-up while snoozed, and never overwrites the due date", () => {
+    const t = { due: "2026-08-26", followUpAt: "2026-09-02" };
+    expect(effectiveDueDate(t, today)).toBe("2026-09-02");
+    expect(t.due).toBe("2026-08-26"); // the promise is still on record
+  });
+  it("goes back to the due date once the follow-up has arrived", () => {
+    expect(effectiveDueDate({ due: "2026-08-26", followUpAt: "2026-08-28" }, today)).toBe("2026-08-26");
+    expect(effectiveDueDate({ due: "2026-08-26", followUpAt: null }, today)).toBe("2026-08-26");
+  });
+  it("does not tell you to start something you're waiting on", () => {
+    // Overdue and untouched, but snoozed until next week — silent.
+    const snoozed = { createdAt: "2026-08-01", due: "2026-08-26", status: "todo" as const, followUpAt: "2026-09-02" };
+    expect(startSignal(snoozed, today).level).toBe("none");
+    // Same task once the follow-up lands — back to shouting.
+    expect(startSignal({ ...snoozed, followUpAt: "2026-08-28" }, today).level).toBe("late");
   });
 });

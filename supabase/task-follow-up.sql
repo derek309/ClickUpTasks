@@ -1,0 +1,13 @@
+-- ClickUpTasks — "follow up on" date, separate from due.
+-- Already applied to the live project; kept here so a fresh database can be
+-- built from these files.
+--
+-- Three dates, each answering a different question:
+--   created_at    when it started existing
+--   follow_up_at  when it should come back to your attention
+--   due           when it was promised
+--
+-- Before this, due was doing the last two jobs at once: pushing it out to
+-- mean "check back Thursday" destroyed the date that had actually been
+-- promised, so work that was a week late read as on time.
+alter table tasks add column if not exists follow_up_at date;

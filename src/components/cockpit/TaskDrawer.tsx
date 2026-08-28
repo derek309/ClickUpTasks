@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, clientStatusMeta,
-  STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY, WEEKDAY_LABEL, windowBurn, startSignal, dueCountdown,
+  STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY, WEEKDAY_LABEL, windowBurn, startSignal, dueCountdown, isSnoozed,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Row, CollapsibleText, SearchableSelect, newId } from "./ui";
@@ -305,7 +305,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           <span className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-border">
             <span className={`block h-full rounded-full ${sig.level === "late" ? "bg-danger" : sig.level === "start" ? "bg-amber-500" : "bg-accent"}`} style={{ width: `${Math.max(2, pct)}%` }} />
           </span>
-          <span className="text-muted">{pct}% of the way from created to due · {dueCountdown(task.due)}</span>
+          <span className="text-muted">
+            {pct}% of the way from created to due · {dueCountdown(task.due)}
+            {isSnoozed(task) ? ` · waiting until ${task.followUpAt}` : ""}
+          </span>
           {sig.level !== "none" && (
             <span className={`rounded px-1.5 py-0.5 text-[12px] font-semibold ${sig.level === "late" ? "bg-danger/10 text-danger" : "bg-amber-500/15 text-amber-700"}`}>{sig.label}</span>
           )}
@@ -350,6 +353,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         <select value={task.status} onChange={(e) => onPatch({ status: e.target.value as TaskStatus })} className="rounded-[5px] bg-transparent py-0.5 pl-1.5 pr-1 text-[13px] font-medium outline-none" style={{ color: STATUS_META[task.status].dot }}>
           {STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
         </select>
+      </span>
+      {/* Follow up sits beside Due, not instead of it: due is what you
+          promised, follow-up is when you want it back. Overwriting the first
+          to mean the second is exactly what this replaces. */}
+      <span className={`${chip} gap-1 px-2 py-1 text-[13px] ${isSnoozed(task) ? "text-accent" : "text-muted"}`} title="When this should come back to your attention. Until then it stays quiet.">
+        <span className="shrink-0">Follow up</span>
+        <input type="date" value={task.followUpAt ?? ""} onChange={(e) => onPatch({ followUpAt: e.target.value || null })}
+          className="rounded-md border border-transparent bg-transparent px-1 py-0.5 text-[13px] outline-none hover:border-border focus:border-accent focus:bg-background" />
+        {task.followUpAt && (
+          <button onClick={() => onPatch({ followUpAt: null })} title="Clear the follow-up date" className="shrink-0 px-0.5 text-muted hover:text-danger">×</button>
+        )}
       </span>
       <span className={chip}>
         <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} recurrenceNth={task.recurrenceNth} recurrenceWeekday={task.recurrenceWeekday} showRecurrenceLabel={task.recurrence !== "custom"} onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} emptyLabel={<I.calendar className="h-3.5 w-3.5" />} />

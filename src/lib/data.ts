@@ -1464,6 +1464,11 @@ export interface Task {
    *  Which occurrence in the month: 1..4, or -1 for the last one. "3rd Monday"
    *  is nth 3 + weekday 1. Deliberately no 5th: most months don't have one, so
    *  offering it would silently skip months (Derek asked for "3rd Monday"). */
+  /** When this should come back to your attention, as distinct from `due`,
+   *  which is what was promised. While it's in the future the task is
+   *  "snoozed": quiet in the list, out of the way on My Work, no late
+   *  styling. See supabase/task-follow-up.sql. */
+  followUpAt?: string | null;
   recurrenceNth?: number;
   /** 0 = Sunday .. 6 = Saturday, matching Date#getUTCDay. */
   recurrenceWeekday?: number;
@@ -2009,18 +2014,34 @@ export function windowBurn(createdAt: string, due: string | null, today: string 
  *  enough that there's still time to act. Below that, a countdown is enough. */
 export const BURN_THRESHOLD = 0.7;
 export function startSignal(
-  task: { createdAt: string; due: string | null; status: TaskStatus },
+  task: { createdAt: string; due: string | null; status: TaskStatus; followUpAt?: string | null },
   today: string = TODAY,
 ): { level: "none" | "start" | "late"; label: string } {
   const NONE = { level: "none" as const, label: "" };
   if (task.status !== "todo") return NONE; // started, or past starting
   if (!task.due) return NONE;              // nothing to be late for
+  if (isSnoozed(task, today)) return NONE; // waiting on someone else until then
   const left = daysUntilDue(task.due, today);
   if (left === null) return NONE;
   if (left < 0) return { level: "late", label: "Not started" };
   const burn = windowBurn(task.createdAt, task.due, today);
   if (burn !== null && burn >= BURN_THRESHOLD) return { level: "start", label: "Start now" };
   return NONE;
+}
+
+/** Waiting on someone else until a chosen day. A follow-up date in the past
+ *  is not a snooze — that's the day it came back. */
+export function isSnoozed(task: { followUpAt?: string | null }, today: string = TODAY): boolean {
+  return !!task.followUpAt && task.followUpAt > today;
+}
+
+/** The date the task should be ORDERED by. While snoozed that's the
+ *  follow-up, because acting on it before then isn't possible and sorting it
+ *  to the top by a due date you can't yet act on is just noise. The due date
+ *  itself is never overwritten — that was the whole problem with using one
+ *  field for both. */
+export function effectiveDueDate(task: { due: string | null; followUpAt?: string | null }, today: string = TODAY): string | null {
+  return isSnoozed(task, today) ? task.followUpAt! : task.due;
 }
 
 export function isOverdue(iso: string | null): boolean {
