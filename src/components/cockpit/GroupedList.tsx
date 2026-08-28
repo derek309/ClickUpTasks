@@ -549,13 +549,13 @@ function useDatePopover() {
 // the follow-up date in the task drawer stops being a bare <input type=date>:
 // that rendered "08/31/2026" in native widget chrome beside a "Jul 22"
 // created date, in a taller box that knocked the whole row out of alignment.
-export function InlineDate({ value, onChange, onClear, className = "", emptyLabel = "—" }: { value: string | null; onChange: (d: string | null) => void; onClear?: () => void; className?: string; emptyLabel?: React.ReactNode }) {
+export function InlineDate({ value, onChange, onClear, className = "", emptyLabel = "—", formatValue = friendlyDue }: { value: string | null; onChange: (d: string | null) => void; onClear?: () => void; className?: string; emptyLabel?: React.ReactNode; formatValue?: (iso: string) => string }) {
   const { open, setOpen, ref, pos, openIt } = useDatePopover();
   return (
     <>
       <span className="flex min-w-0 items-center gap-1">
         <button ref={ref} onClick={openIt} className={`min-w-0 truncate rounded px-1 py-0.5 text-left hover:bg-surface ${className}`}>
-          {value ? friendlyDue(value) : emptyLabel}
+          {value ? formatValue(value) : emptyLabel}
         </button>
         {value && onClear && (
           <button onClick={onClear} title="Clear the date" className="shrink-0 px-0.5 text-muted hover:text-danger">×</button>
@@ -566,7 +566,7 @@ export function InlineDate({ value, onChange, onClear, className = "", emptyLabe
   );
 }
 
-export function InlineDue({ value, overdue, followUpAt = null, recurrence = "none", recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth, recurrenceNth, recurrenceWeekday, onChange, onRecurrenceChange, emptyLabel = "—", strong = false, showRecurrenceLabel = false, showCountdown = true, formatValue = friendlyDue }: { value: string | null; overdue: boolean; followUpAt?: string | null; recurrence?: Recurrence; recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[]; recurrenceNth?: number; recurrenceWeekday?: number; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; emptyLabel?: React.ReactNode; strong?: boolean; showRecurrenceLabel?: boolean; showCountdown?: boolean; formatValue?: (iso: string) => string }) {
+export function InlineDue({ value, overdue, followUpAt = null, recurrence = "none", recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth, recurrenceNth, recurrenceWeekday, onChange, onRecurrenceChange, emptyLabel = "—", strong = false, showRecurrenceLabel = false, showCountdown = true, formatValue = friendlyDue, textClass = "text-[11px]" }: { value: string | null; overdue: boolean; followUpAt?: string | null; recurrence?: Recurrence; recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[]; recurrenceNth?: number; recurrenceWeekday?: number; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; emptyLabel?: React.ReactNode; strong?: boolean; showRecurrenceLabel?: boolean; showCountdown?: boolean; formatValue?: (iso: string) => string; textClass?: string }) {
   const { open, setOpen, ref, pos, openIt } = useDatePopover();
   // Amber only for a genuinely near date — not "any date that isn't
   // overdue," which would paint every far-future due date the same urgent
@@ -575,7 +575,11 @@ export function InlineDue({ value, overdue, followUpAt = null, recurrence = "non
   const tone = overdue ? "font-medium text-danger" : strong ? (value ? "font-semibold text-accent" : "font-medium text-accent/70") : dueThisWeek ? "font-medium text-amber-600" : "text-muted";
   return (
     <>
-      <button ref={ref} onClick={openIt} className={`inline-flex items-center gap-1 rounded px-1 py-0.5 text-[11px] hover:bg-background ${tone}`}>
+      {/* Size comes from the caller. Baked in at 11px, the drawer's dates band
+          rendered its Due value visibly smaller than the Created value one
+          column over, because this class won on specificity over the band's
+          own sizing (Derek: "make all the dates larger and the same size"). */}
+      <button ref={ref} onClick={openIt} className={`inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-background ${textClass} ${tone}`}>
         {/* friendlyDue by default, which says "Mon" for anything inside a
             week — right for a list row. The drawer's dates band overrides it,
             because "Mon" beside an "Aug 27" created date in the very next
