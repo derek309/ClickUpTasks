@@ -1,0 +1,254 @@
+<title>Outcome Log</title>
+<style>
+:root{--background:#eef4fb;--surface:#fff;--foreground:#1c2030;--muted:#6b7280;--border:#d0dce8;
+--accent:#1b3a5c;--accent-soft:#e1eaf4;--danger:#ef4444;--success:#16a34a;--amber:#b45309;
+--shadow-sm:0 1px 2px rgba(20,24,40,.04),0 1px 3px rgba(20,24,40,.05);
+--shadow-md:0 4px 12px rgba(20,24,40,.06),0 2px 4px rgba(20,24,40,.04)}
+*{box-sizing:border-box}
+body{margin:0;padding:26px;background:var(--background);color:var(--foreground);
+font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif}
+.wrap{max-width:1300px;margin:0 auto}
+h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
+.note{font-size:14px;color:var(--muted);margin:0 0 12px;max-width:46ch}
+.cols{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
+.col{flex:1;min-width:330px;max-width:400px}
+.pane{background:var(--surface);border:1px solid var(--border);border-radius:12px;
+box-shadow:var(--shadow-sm);overflow:hidden}
+.ph{padding:11px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
+.ph b{font-size:15px}
+.next{background:#fff8ec;border-bottom:1px solid #f3dcb4;padding:9px 14px;display:flex;gap:9px;align-items:flex-start}
+.next.late{background:#fef2f2;border-bottom-color:#f8caca}
+.next .kk{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--amber)}
+.next.late .kk{color:var(--danger)}
+.next .t{font-size:15px;font-weight:600;line-height:1.35}
+.next .w{font-size:13px;color:var(--muted)}
+.body{padding:13px 14px}
+.q{font-size:15px;font-weight:600;margin-bottom:9px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.oc{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:var(--surface);
+border-radius:20px;padding:6px 11px;font-size:13px;box-shadow:var(--shadow-sm);cursor:pointer;white-space:nowrap}
+.oc:hover{border-color:var(--accent);color:var(--accent)}
+.oc.on{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:none}
+.ta{width:100%;border:1px solid var(--border);border-radius:8px;padding:9px 10px;font:inherit;font-size:15px;
+margin-top:10px;resize:none;background:var(--surface)}
+.step2{margin-top:12px;border:1px solid var(--border);border-radius:10px;background:var(--background);
+padding:12px;box-shadow:inset 0 2px 5px rgba(20,24,40,.06)}
+.s2h{display:flex;align-items:center;gap:7px;font-size:14px;font-weight:700;margin-bottom:9px}
+.s2h .n{width:19px;height:19px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;
+display:flex;align-items:center;justify-content:center;font-weight:700}
+.lab{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:9px 0 4px;display:block}
+.inp{width:100%;border:1px solid var(--border);border-radius:7px;padding:7px 9px;font:inherit;font-size:15px;background:var(--surface)}
+.when{display:flex;gap:5px;flex-wrap:wrap}
+.wc{border:1px solid var(--border);background:var(--surface);border-radius:6px;padding:5px 9px;font-size:13px;cursor:pointer}
+.wc.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.act{display:flex;gap:8px;margin-top:12px;align-items:center}
+.btn{background:var(--accent);color:#fff;border:0;border-radius:7px;padding:8px 14px;font:inherit;font-size:15px;font-weight:600;cursor:pointer}
+.lnk{font-size:13px;color:var(--muted);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.feed{border-top:1px solid var(--border);padding:6px 0}
+.ev{padding:11px 14px;border-bottom:1px solid var(--border);display:flex;gap:10px}
+.ev:last-child{border-bottom:0}
+.ico{width:26px;height:26px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;
+font-size:13px;background:var(--accent-soft);color:var(--accent)}
+.ico.g{background:#dcfce7;color:#15803d}.ico.a{background:#fef3c7;color:var(--amber)}
+.ev .h{font-size:14px;font-weight:600}
+.ev .m{font-size:13px;color:var(--muted)}
+.ev .txt{font-size:14px;margin-top:3px;line-height:1.45}
+.arrow{margin-top:7px;padding:6px 9px;border-left:3px solid var(--border);background:var(--background);
+border-radius:0 7px 7px 0;font-size:13px}
+.arrow b{font-weight:600}
+.done{color:var(--success)}
+.badge{display:inline-block;border-radius:5px;padding:1px 6px;font-size:11px;font-weight:700}
+.b-g{background:#dcfce7;color:#15803d}.b-r{background:#fee2e2;color:var(--danger)}
+.hdr-tabs{display:flex;gap:4px;margin-left:auto}
+.tab{font-size:12px;padding:3px 8px;border-radius:5px;color:var(--muted);cursor:pointer}
+.tab.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+</style>
+<div class="wrap"><div class="cols">
+
+<div class="col">
+  <h2>1 · Log an outcome</h2>
+  <p class="note">Pick what happened. One tap, no typing required to get started.</p>
+  <div class="pane">
+    <div class="ph"><b>Brian Goodell</b><span class="hdr-tabs"><span class="tab on">Log</span><span class="tab">Email</span><span class="tab">All</span></span></div>
+    <div class="body">
+      <div class="q">What happened?</div>
+      <div class="chips">
+        <span class="oc">✉ Emailed client</span>
+        <span class="oc">☎ Called</span>
+        <span class="oc">↩ Client replied</span>
+        <span class="oc">✎ Made changes</span>
+        <span class="oc">⇄ Sent for review</span>
+        <span class="oc">👥 Meeting</span>
+        <span class="oc">⏳ Waiting on them</span>
+        <span class="oc">✓ Finished it</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="col">
+  <h2>2 · Then it asks what's next</h2>
+  <p class="note">The whole point. You cannot log an outcome and walk away with nothing scheduled, which is exactly
+  how the 93 tasks with no due date happened.</p>
+  <div class="pane">
+    <div class="ph"><b>Brian Goodell</b><span class="hdr-tabs"><span class="tab on">Log</span><span class="tab">Email</span><span class="tab">All</span></span></div>
+    <div class="body">
+      <div class="q">What happened?</div>
+      <div class="chips">
+        <span class="oc on">✉ Emailed client</span>
+        <span class="oc">☎ Called</span>
+        <span class="oc">↩ Client replied</span>
+        <span class="oc">✎ Made changes</span>
+      </div>
+      <textarea class="ta" rows="2">Sent the press release proofs, asked for the logo files.</textarea>
+
+      <div class="step2">
+        <div class="s2h"><span class="n">2</span> What's next?</div>
+        <input class="inp" value="Chase the logo files if no reply">
+        <span class="lab">Check back</span>
+        <div class="when">
+          <span class="wc">Tomorrow</span><span class="wc on">In 3 days</span><span class="wc">Next week</span><span class="wc">Pick a date</span>
+        </div>
+        <span class="lab">Stage</span>
+        <div class="when">
+          <span class="wc">To do</span><span class="wc">Progress</span><span class="wc on">Waiting</span><span class="wc">Done</span>
+        </div>
+      </div>
+
+      <div class="act"><button class="btn">Log it</button><span class="lnk">No next step needed</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="col">
+  <h2>3 · What it builds</h2>
+  <p class="note">Every entry carries the outcome and the next step it created, so the history reads as a chain of
+  decisions rather than a list of things that happened.</p>
+  <div class="pane">
+    <div class="next late">
+      <div><div class="kk">Next step · 2 days late</div>
+        <div class="t">Chase the logo files</div>
+        <div class="w">You set this Aug 27 after emailing Brian</div></div>
+    </div>
+    <div class="ph"><b>Brian Goodell</b><span class="hdr-tabs"><span class="tab on">Log</span><span class="tab">Email</span><span class="tab">All</span></span></div>
+    <div class="feed">
+      <div class="ev"><span class="ico">✉</span><div style="min-width:0">
+        <span class="h">Emailed client</span> <span class="m">· Derek · Aug 27</span>
+        <div class="txt">Sent the press release proofs, asked for the logo files.</div>
+        <div class="arrow">↳ <b>Chase the logo files</b> · Aug 31 <span class="badge b-r">2d late</span></div>
+      </div></div>
+      <div class="ev"><span class="ico a">⏳</span><div style="min-width:0">
+        <span class="h">Waiting on them</span> <span class="m">· Derek · Aug 26</span>
+        <div class="txt">Brian said he'd get sign-off from the board Thursday.</div>
+        <div class="arrow">↳ <b>Check in after the board meeting</b> · Aug 27 <span class="badge b-g">done</span></div>
+      </div></div>
+      <div class="ev"><span class="ico g">✎</span><div style="min-width:0">
+        <span class="h">Made changes</span> <span class="m">· Michaella · Aug 25</span>
+        <div class="txt">Rewrote the headline and swapped the hero image.</div>
+        <div class="arrow">↳ <b>Send proofs to Brian</b> · Aug 26 <span class="badge b-g">done</span></div>
+      </div></div>
+      <div class="ev"><span class="ico">＋</span><div style="min-width:0">
+        <span class="h">Task created</span> <span class="m">· Derek · Aug 27</span>
+      </div></div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+
+<div style="max-width:1000px;margin:34px auto 0">
+<h2>No right pane at all</h2>
+<p class="note" style="max-width:none">If the pane itself is the problem, the log does not need one. The task is a
+document and the log is the bottom of that document, full width, where a document's history belongs. Email threads
+still land in it as entries, so nothing is lost by dropping the split.</p>
+
+<div class="pane" style="max-width:none">
+  <div class="ph" style="background:#fbfcfe"><span class="m" style="font-size:13px;color:var(--muted)">Brian Goodell &nbsp;/&nbsp; Tasks</span>
+    <span class="hdr-tabs"><span class="tab">Copy for Claude</span><span class="tab on">Open in GHL</span></span></div>
+  <div style="padding:20px 22px">
+    <div style="display:flex;align-items:flex-start;gap:12px">
+      <h3 style="font-size:21px;font-weight:700;margin:0;flex:1">Tyvke Press Release</h3>
+      <span style="font-size:13px;color:var(--muted)">Updated 3m ago</span>
+    </div>
+
+    <div style="margin-top:12px;border:1px solid var(--border);border-radius:12px;background:var(--background);padding:6px;
+      box-shadow:inset 0 2px 5px rgba(20,24,40,.07)">
+      <div style="display:flex;gap:6px">
+        <div style="flex:1;position:relative;border-radius:8px;padding:10px 12px;background:rgba(22,163,74,.05)">
+          <span style="position:absolute;top:6px;bottom:6px;left:0;width:3px;border-radius:99px;background:var(--success)"></span>
+          <span style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#15803d;display:block;margin-bottom:3px">Created</span>
+          <span style="font-size:21px;font-weight:600;display:block">Aug 27</span><span style="font-size:13px;color:var(--muted)">1 day ago</span>
+        </div>
+        <div style="flex:1;position:relative;border-radius:8px;padding:10px 12px;background:rgba(245,158,11,.055)">
+          <span style="position:absolute;top:6px;bottom:6px;left:0;width:3px;border-radius:99px;background:#f59e0b"></span>
+          <span style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--amber);display:block;margin-bottom:3px">Follow up</span>
+          <span style="font-size:21px;font-weight:600;display:block">Aug 31</span><span style="font-size:13px;color:var(--amber);font-weight:500">quiet for 3 more days</span>
+        </div>
+        <div style="flex:1;position:relative;border-radius:8px;padding:10px 12px;background:rgba(239,68,68,.05)">
+          <span style="position:absolute;top:6px;bottom:6px;left:0;width:3px;border-radius:99px;background:var(--danger)"></span>
+          <span style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--danger);display:block;margin-bottom:3px">Due</span>
+          <span style="font-size:21px;font-weight:600;display:block">Sep 2</span><span style="font-size:13px;color:var(--muted)">5 days left</span>
+        </div>
+      </div>
+      <div style="margin-top:6px;padding:10px 12px 4px;border-top:1px solid var(--border)">
+        <div style="height:8px;border-radius:99px;background:var(--border);overflow:hidden;position:relative">
+          <div style="height:100%;width:22%;border-radius:99px;background:linear-gradient(90deg,#16a34a,#84cc16)"></div>
+          <span style="position:absolute;top:0;bottom:0;left:66%;width:3px;background:rgba(28,32,48,.7);border-radius:2px"></span>
+        </div>
+        <div style="font-size:13px;color:var(--muted);margin-top:6px">1 of 6 days used</div>
+      </div>
+    </div>
+
+    <div class="chips" style="margin-top:14px">
+      <span class="oc" style="border-radius:5px">● To do ⌄</span>
+      <span class="oc" style="border-radius:5px">Derek Fox (Admin) ⌄</span>
+      <span class="oc" style="border-radius:5px">🚩 Normal ⌄</span>
+      <span class="oc" style="border-radius:5px;border-style:dashed;color:var(--muted)">+ Label</span>
+      <span style="flex:1"></span>
+      <span class="oc" style="border-radius:5px">🗀 Brian Goodell / Tasks ⌄</span>
+    </div>
+
+    <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
+      <div class="next late" style="border:1px solid #f8caca;border-radius:10px;margin-bottom:14px">
+        <div><div class="kk">Next step · 2 days late</div>
+          <div class="t">Chase the logo files</div>
+          <div class="w">You set this Aug 27 after emailing Brian</div></div>
+      </div>
+
+      <div class="q">What happened?</div>
+      <div class="chips">
+        <span class="oc">✉ Emailed client</span><span class="oc">☎ Called</span><span class="oc">↩ Client replied</span>
+        <span class="oc">✎ Made changes</span><span class="oc">⇄ Sent for review</span><span class="oc">👥 Meeting</span>
+        <span class="oc">⏳ Waiting on them</span><span class="oc">✓ Finished it</span>
+      </div>
+
+      <div class="feed" style="margin-top:16px;border-top:1px solid var(--border)">
+        <div class="ev"><span class="ico">✉</span><div style="min-width:0;flex:1">
+          <span class="h">Emailed client</span> <span class="m">· Derek · Aug 27</span>
+          <div class="txt">Sent the press release proofs, asked for the logo files.</div>
+          <div class="arrow">↳ <b>Chase the logo files</b> · Aug 31 <span class="badge b-r">2d late</span></div>
+        </div></div>
+        <div class="ev"><span class="ico a">⏳</span><div style="min-width:0;flex:1">
+          <span class="h">Waiting on them</span> <span class="m">· Derek · Aug 26</span>
+          <div class="txt">Brian said he'd get sign-off from the board Thursday.</div>
+          <div class="arrow">↳ <b>Check in after the board meeting</b> · Aug 27 <span class="badge b-g">done</span></div>
+        </div></div>
+        <div class="ev"><span class="ico g">✎</span><div style="min-width:0;flex:1">
+          <span class="h">Made changes</span> <span class="m">· Michaella · Aug 25</span>
+          <div class="txt">Rewrote the headline and swapped the hero image.</div>
+          <div class="arrow">↳ <b>Send proofs to Brian</b> · Aug 26 <span class="badge b-g">done</span></div>
+        </div></div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+<div style="max-width:900px;margin:26px auto 0">
+<h2>Why this is worth doing</h2>
+<p class="note" style="max-width:none">The current right pane is a record of <em>what the app did</em> — priority changed, due date changed,
+assignee changed. Nobody reads that. This is a record of <em>what you decided</em>, and every entry ends with a
+dated commitment, which is the thing that feeds the Follow up date, My Work, and the Monday review you already have.
+It also closes the hole we found earlier: 93 of 179 open tasks have no due date, because nothing ever forced the question.</p>
+</div>
+</div>

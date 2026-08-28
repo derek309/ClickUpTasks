@@ -1,0 +1,380 @@
+<title>Single Column Task</title>
+<style>
+:root{--background:#eef4fb;--surface:#fff;--foreground:#1c2030;--muted:#6b7280;--border:#d0dce8;
+--accent:#1b3a5c;--accent-soft:#e1eaf4;--danger:#ef4444;--success:#16a34a;--amber:#b45309;
+--shadow-sm:0 1px 2px rgba(20,24,40,.04),0 1px 3px rgba(20,24,40,.05)}
+*{box-sizing:border-box}
+body{margin:0;padding:0;background:var(--background);color:var(--foreground);
+font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif}
+.topbar{background:#fbfcfe;border-bottom:1px solid var(--border);padding:9px 18px;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--muted)}
+.tb-r{margin-left:auto;display:flex;gap:6px;align-items:center}
+.tbtn{border:1px solid var(--border);background:var(--surface);border-radius:6px;padding:4px 9px;font-size:13px;color:var(--muted)}
+.tbtn.acc{border-color:var(--accent);color:var(--accent)}
+.page{max-width:880px;margin:0 auto;padding:26px 22px 190px}
+h1{font-size:24px;font-weight:700;margin:0;line-height:1.25;flex:1}
+.tl{display:flex;align-items:flex-start;gap:14px}
+.upd{font-size:13px;color:var(--muted);white-space:nowrap;padding-top:6px}
+
+.band{margin-top:14px;border:1px solid var(--border);border-radius:12px;background:var(--background);padding:6px;
+box-shadow:inset 0 2px 5px rgba(20,24,40,.07),inset 0 0 0 1px rgba(255,255,255,.5)}
+.cols{display:flex;gap:6px}
+.c{flex:1;position:relative;border-radius:8px;padding:10px 12px}
+.r{position:absolute;top:6px;bottom:6px;left:0;width:3px;border-radius:99px}
+.k{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;display:block;margin-bottom:3px}
+.v{font-size:21px;font-weight:600;display:block;line-height:1.35}
+.s{font-size:13px;color:var(--muted)}
+.runway{margin-top:6px;padding:10px 12px 4px;border-top:1px solid var(--border)}
+.rail{height:8px;border-radius:99px;background:var(--border);overflow:hidden;position:relative;box-shadow:inset 0 1px 2px rgba(20,24,40,.14)}
+.fill{height:100%;border-radius:99px;background:linear-gradient(90deg,#16a34a,#84cc16)}
+.pin{position:absolute;top:0;bottom:0;width:3px;background:rgba(28,32,48,.7);border-radius:2px}
+
+.chips{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:16px}
+.ch{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:var(--surface);
+box-shadow:var(--shadow-sm);border-radius:5px;padding:5px 9px;font-size:13px;white-space:nowrap}
+.ch.dash{border-style:dashed;background:none;box-shadow:none;color:var(--muted)}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+.crumb{margin-left:auto;font-size:14px;display:inline-flex;align-items:center;gap:7px}
+.crumb b{font-weight:600}
+
+.sec{margin-top:22px;padding-top:20px;border-top:1px solid var(--border)}
+.sh{font-size:12px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin-bottom:9px}
+.p{font-size:15px;margin:0 0 9px}
+.ck{display:flex;align-items:center;gap:9px;font-size:15px;padding:5px 0}
+.box{width:17px;height:17px;border:2px solid var(--border);border-radius:4px;flex:none}
+.box.on{background:var(--success);border-color:var(--success)}
+.att{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--border);border-radius:7px;padding:6px 10px;font-size:14px;background:var(--surface)}
+
+.next{border:1px solid #f8caca;background:#fef2f2;border-radius:10px;padding:11px 14px;margin-bottom:16px;display:flex;align-items:center;gap:12px}
+.next .kk{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--danger)}
+.next .t{font-size:16px;font-weight:600}
+.next .w{font-size:13px;color:var(--muted)}
+.next .done{margin-left:auto;border:1px solid var(--border);background:var(--surface);border-radius:7px;padding:6px 12px;font-size:14px;font-weight:600;white-space:nowrap}
+
+.q{font-size:16px;font-weight:600;margin-bottom:10px}
+.oc{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:var(--surface);
+border-radius:5px;padding:7px 13px;font-size:14px;box-shadow:var(--shadow-sm);white-space:nowrap}
+.feed{margin-top:20px}
+.ev{display:flex;gap:12px;padding:14px 0;border-top:1px solid var(--border)}
+.ico{width:30px;height:30px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--accent-soft);color:var(--accent)}
+.ico.g{background:#dcfce7;color:#15803d}.ico.a{background:#fef3c7;color:var(--amber)}.ico.e{background:#fdece1;color:#a1490a}
+.h{font-size:15px;font-weight:600}
+.m{font-size:13px;color:var(--muted)}
+.txt{font-size:15px;margin-top:3px}
+.arrow{margin-top:8px;padding:7px 11px;border-left:3px solid var(--border);background:var(--background);border-radius:0 8px 8px 0;font-size:14px}
+.badge{display:inline-block;border-radius:5px;padding:1px 7px;font-size:11px;font-weight:700}
+.b-g{background:#dcfce7;color:#15803d}.b-r{background:#fee2e2;color:var(--danger)}
+.quote{margin-top:6px;border:1px solid #f6c9a5;background:#fffaf5;border-radius:9px;padding:11px 13px;font-size:15px}
+.composer{margin-top:22px;border:1px solid var(--border);border-radius:11px;background:var(--surface);box-shadow:var(--shadow-sm);overflow:hidden}
+.ctabs{display:flex;gap:2px;padding:7px 9px;border-bottom:1px solid var(--border);background:#fbfcfe}
+.ct{font-size:14px;padding:5px 11px;border-radius:6px;color:var(--muted)}
+.ct.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.cbody{padding:12px 14px;font-size:15px;color:var(--muted)}
+</style>
+<style>
+.callrow{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.dial{display:inline-flex;align-items:center;gap:8px;background:var(--success);color:#fff;text-decoration:none;
+border-radius:9px;padding:9px 15px;font-size:15px;font-weight:600}
+</style>
+
+<style>
+.grp,.mrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.gl{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:6px}
+.mgrp{margin-bottom:12px}
+.mgrp:last-child{margin-bottom:2px}
+/* Sending and logging are the same gesture — "I did a thing to this task" —
+   so they share one menu. The fill marks the four that behave differently: a
+   send opens a composer and logs itself once the message goes out. */
+.dock .oc.send{background:var(--accent-soft);border-color:#b9cde3;color:var(--accent);font-weight:600}
+.dock .oc{cursor:pointer;border-radius:5px}
+.to{font-size:13px;color:var(--muted)}
+.to b{color:var(--foreground)}
+.lnk2{color:var(--accent);text-decoration:underline;text-underline-offset:3px;margin-left:8px;cursor:pointer}
+.s2h .n{background:var(--success)}
+.nx{display:flex;flex-direction:column;line-height:1.3}
+.nx-k{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--danger)}
+.nx-t{font-size:15px;font-weight:600}
+.ghost{border:1px solid var(--border);background:var(--surface);border-radius:7px;padding:5px 11px;font-size:13px;cursor:pointer;margin-left:12px}
+.dq{font-size:15px;font-weight:600}
+.back{color:var(--muted);font-size:19px;cursor:pointer;margin-right:4px}
+</style>
+
+<style>
+.grp{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+.gl{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-right:2px}
+.divide{width:1px;align-self:stretch;background:var(--border);margin:0 4px}
+/* Sending and logging are the same gesture — "I did a thing to this task" —
+   so they share one bar. The fill separates the two that behave differently:
+   a send opens a composer and logs itself once it goes out. */
+.dock .oc.send{background:var(--accent-soft);border-color:#b9cde3;color:var(--accent);font-weight:600}
+.dock .oc.send.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.to{font-size:13px;color:var(--muted)}
+.to b{color:var(--foreground)}
+.lnk2{color:var(--accent);text-decoration:underline;text-underline-offset:3px;margin-left:8px;cursor:pointer}
+.s2h .n{background:var(--success)}
+</style>
+
+<style>
+/* Floating action dock: pinned to the bottom of the viewport so you can log an
+   outcome from anywhere in the scroll, not only after reaching the end. */
+.dock{position:fixed;left:0;right:0;bottom:0;padding:0 22px 16px;pointer-events:none;z-index:20}
+.dock-inner{max-width:880px;margin:0 auto;background:rgba(255,255,255,.92);backdrop-filter:blur(12px);
+border:1px solid var(--border);border-radius:14px;box-shadow:0 12px 32px rgba(20,24,40,.14),0 2px 6px rgba(20,24,40,.08);
+padding:11px 14px;pointer-events:auto}
+.dock-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dq{font-size:14px;font-weight:600;white-space:nowrap}
+.ocs{display:flex;gap:6px;flex-wrap:wrap}
+.dock .oc{padding:5px 10px;font-size:13px;cursor:pointer}
+.dock .oc.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.dock-tabs{margin-left:auto;display:flex;gap:2px;padding-left:10px;border-left:1px solid var(--border)}
+.ct{font-size:13px;padding:4px 10px;border-radius:6px;color:var(--muted);cursor:pointer}
+.ct.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.x{cursor:pointer;color:var(--muted);font-size:15px;padding:0 4px}
+.ta{width:100%;border:1px solid var(--border);border-radius:9px;padding:9px 11px;font:inherit;font-size:15px;resize:none}
+.s2{margin-top:10px;border:1px solid var(--border);border-radius:10px;background:var(--background);padding:11px 12px;
+box-shadow:inset 0 2px 5px rgba(20,24,40,.06)}
+.s2h{display:flex;align-items:center;gap:7px;font-size:14px;font-weight:700;margin-bottom:8px}
+.s2h .n{width:19px;height:19px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center}
+.inp{width:100%;border:1px solid var(--border);border-radius:7px;padding:7px 9px;font:inherit;font-size:15px;background:var(--surface)}
+.s2row{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:9px}
+.lab{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.wc{border:1px solid var(--border);background:var(--surface);border-radius:6px;padding:4px 9px;font-size:13px;cursor:pointer}
+.wc.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.dock-act{display:flex;gap:12px;align-items:center;margin-top:11px}
+.btn{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:8px 16px;font:inherit;font-size:15px;font-weight:600;cursor:pointer}
+.lnk{font-size:13px;color:var(--muted);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+</style>
+
+
+<div class="topbar">Brian Goodell &nbsp;/&nbsp; Tasks
+  <span class="tb-r"><span class="m">2 of 6</span><span class="tbtn">Copy for Claude</span><span class="tbtn acc">⚡ Open in GHL</span><span class="tbtn">🔗</span><span class="tbtn">✕</span></span>
+</div>
+
+<div class="page">
+  <div class="tl"><h1>Tyvke Press Release</h1><span class="upd">Added by Derek Fox · Updated 3m ago</span></div>
+
+  <div class="band">
+    <div class="cols">
+      <div class="c" style="background:rgba(22,163,74,.05)"><span class="r" style="background:var(--success)"></span>
+        <span class="k" style="color:#15803d">Created</span><span class="v">Aug 27</span><span class="s">1 day ago</span></div>
+      <div class="c" style="background:rgba(245,158,11,.055)"><span class="r" style="background:#f59e0b"></span>
+        <span class="k" style="color:var(--amber)">Follow up</span><span class="v">Aug 31</span><span class="s" style="color:var(--amber);font-weight:500">quiet for 3 more days</span></div>
+      <div class="c" style="background:rgba(239,68,68,.05)"><span class="r" style="background:var(--danger)"></span>
+        <span class="k" style="color:var(--danger)">Due</span><span class="v">Sep 2</span><span class="s">5 days left</span></div>
+    </div>
+    <div class="runway"><div class="rail"><div class="fill" style="width:22%"></div><span class="pin" style="left:66%"></span></div>
+      <div class="s" style="margin-top:6px">1 of 6 days used</div></div>
+  </div>
+
+  <div class="chips">
+    <span class="ch"><span class="dot" style="background:#9ca3af"></span>To do ⌄</span>
+    <span class="ch">Derek Fox (Admin) ⌄</span>
+    <span class="ch">🚩 Normal ⌄</span>
+    <span class="ch dash">+ Label</span>
+    <span class="crumb">🗀 <b>Brian Goodell</b> <span style="color:var(--border)">/</span> <b>Tasks</b> ⌄</span>
+  </div>
+
+
+  <div class="sec">
+    <div class="sh">Activity</div>
+
+    <div class="feed">
+      <div class="ev"><span class="ico">✉</span><div style="flex:1;min-width:0">
+        <span class="h">Emailed client</span> <span class="m">· Derek · Aug 27</span>
+        <div class="txt">Sent the press release proofs, asked for the logo files.</div>
+        <div class="arrow">↳ <b>Chase the logo files</b> · Aug 31 <span class="badge b-r">2d late</span></div>
+      </div></div>
+
+      <div class="ev"><span class="ico e">📧</span><div style="flex:1;min-width:0">
+        <span class="h">Email received</span> <span class="m">· Brian Goodell · Aug 27</span>
+        <div class="quote">In case I forgot, we need to launch PR about our new Tyvek bibs. Customize it yourself, no art set ups, 48hr rush, free proofs…</div>
+      </div></div>
+
+      <div class="ev"><span class="ico a">⏳</span><div style="flex:1;min-width:0">
+        <span class="h">Waiting on them</span> <span class="m">· Derek · Aug 26</span>
+        <div class="txt">Brian said he'd get sign-off from the board Thursday.</div>
+        <div class="arrow">↳ <b>Check in after the board meeting</b> · Aug 27 <span class="badge b-g">done</span></div>
+      </div></div>
+
+      <div class="ev"><span class="ico g">✎</span><div style="flex:1;min-width:0">
+        <span class="h">Made changes</span> <span class="m">· Michaella · Aug 25</span>
+        <div class="txt">Rewrote the headline and swapped the hero image.</div>
+        <div class="arrow">↳ <b>Send proofs to Brian</b> · Aug 26 <span class="badge b-g">done</span></div>
+      </div></div>
+
+      <div class="ev"><span class="ico">＋</span><div style="flex:1;min-width:0">
+        <span class="h">Task created</span> <span class="m">· Derek · Aug 25</span></div></div>
+    </div>
+
+  <div class="sec">
+    <div class="sh">Description</div>
+    <p class="p">Launch PR for the new Tyvek bibs. 48 hour rush, free proofs. Pair with bibSNAPS and line up event sponsors to cover cost.</p>
+  </div>
+
+  <div class="sec">
+    <div class="sh">Checklist · 1 of 3</div>
+    <div class="ck"><span class="box on"></span><span style="color:var(--muted);text-decoration:line-through">Draft the release</span></div>
+    <div class="ck"><span class="box"></span><span>Get logo files from Brian</span></div>
+    <div class="ck"><span class="box"></span><span>Send to the trade list</span></div>
+  </div>
+
+  <div class="sec">
+    <div class="sh">Attachments · 1</div>
+    <span class="att">🔗 GHL conversation</span>
+  </div>
+  </div>
+</div>
+
+<div class="dock">
+  <div class="dock-inner">
+
+    <!-- Collapsed: one button, plus the commitment you already made. Keeping
+         eleven chips permanently on screen made the bar the loudest thing in
+         the drawer for an action you take a few times a day. -->
+    <div id="collapsed">
+      <div class="dock-row">
+        <span class="nx">
+          <span class="nx-k">Next step · 2 days late</span>
+          <span class="nx-t">Chase the logo files</span>
+        </span>
+        <span class="ghost">Mark done</span>
+        <span style="margin-left:auto"></span>
+        <button class="btn" onclick="show('menu')">＋ Log action</button>
+      </div>
+    </div>
+
+    <div id="menu" style="display:none">
+      <div class="dock-row" style="justify-content:space-between;margin-bottom:11px">
+        <span class="dq">What are you doing?</span><span class="x" onclick="hide()">✕</span>
+      </div>
+      <!-- One list, no "log what happened" half. Everything here is
+           something you DO from the task, and each one records itself when
+           it completes, so there is nothing left to write up by hand. -->
+      <div class="mrow">
+        <span class="oc send" onclick="show('note')">📝 Leave a note</span>
+        <span class="oc send" onclick="show('team')">👥 Message a teammate</span>
+        <span class="oc send" onclick="show('email')">🗨 Chat the client</span>
+        <span class="oc send" onclick="show('email')">✉ Email them</span>
+        <span class="oc send" onclick="show('email')">💬 Text them</span>
+        <span class="oc send" onclick="show('call')">☎ Call them</span>
+        <span class="oc send" onclick="show('book')">📅 Book a meeting</span>
+      </div>
+    </div>
+
+
+
+    <div id="team" style="display:none">
+      <div class="dock-row" style="justify-content:space-between;margin-bottom:9px">
+        <span class="dq"><span class="back" onclick="show('menu')">‹</span> 👥 Message a teammate</span><span class="x" onclick="hide()">✕</span>
+      </div>
+      <div class="to">Goes to their Team Chat and notifies them. Stays attached to this task.</div>
+      <div class="dock-row" style="margin-top:7px">
+        <span class="oc on" style="border-radius:5px">Michaella</span><span class="oc" style="border-radius:5px">Brandon</span><span class="oc" style="border-radius:5px">Nicole</span>
+      </div>
+      <textarea class="ta" rows="2" style="margin-top:7px">Can you soften the headline before this goes out? Board pushed back.</textarea>
+      <div class="dock-act"><button class="btn">Send</button><span class="lnk" onclick="hide()">Add a next step</span></div>
+    </div>
+
+    <div id="book" style="display:none">
+      <div class="dock-row" style="justify-content:space-between;margin-bottom:9px">
+        <span class="dq"><span class="back" onclick="show('menu')">‹</span> 📅 Book a meeting</span><span class="x" onclick="hide()">✕</span>
+      </div>
+      <div class="dock-row" style="margin-bottom:9px">
+        <span class="oc on" style="border-radius:5px">Book it now</span>
+        <span class="oc" style="border-radius:5px">Send them a booking link</span>
+      </div>
+      <div class="s2row" style="margin-top:0">
+        <span class="lab">Slot</span>
+        <span class="wc on">Tue 10:00</span><span class="wc">Tue 14:30</span><span class="wc">Wed 09:00</span><span class="wc">Pick a time</span>
+        <span class="lab" style="margin-left:14px">Length</span>
+        <span class="wc">15m</span><span class="wc on">30m</span><span class="wc">60m</span>
+      </div>
+      <input class="inp" style="margin-top:9px" value="Press release review with Brian">
+      <div class="s2">
+        <div class="s2h"><span class="n">✓</span> Sends the invite and logs it. What's next?</div>
+        <input class="inp" value="Prep the proof deck before the call">
+        <div class="s2row">
+          <span class="lab">Check back</span>
+          <span class="wc on">Day before</span><span class="wc">Tomorrow</span><span class="wc">Pick a date</span>
+          <span class="lab" style="margin-left:14px">Stage</span>
+          <span class="wc">To do</span><span class="wc on">Progress</span><span class="wc">Waiting</span>
+        </div>
+      </div>
+      <div class="dock-act"><button class="btn">Send invite</button><span class="lnk" onclick="hide()">No next step needed</span></div>
+    </div>
+
+    <div id="note" style="display:none">
+      <div class="dock-row" style="justify-content:space-between;margin-bottom:9px">
+        <span class="dq"><span class="back" onclick="show('menu')">‹</span> 📝 Leave a note</span><span class="x" onclick="hide()">✕</span>
+      </div>
+      <div class="to">Internal. The client never sees this. <span class="lnk2">@mention someone</span></div>
+      <textarea class="ta" rows="2" style="margin-top:7px" placeholder="Note for the team…">@Michaella the board wants the headline softened before this goes out.</textarea>
+      <div class="dock-act"><button class="btn">Post note</button><span class="lnk" onclick="show('menu')">Add a next step</span></div>
+    </div>
+
+    <div id="call" style="display:none">
+      <div class="dock-row" style="justify-content:space-between;margin-bottom:9px">
+        <span class="dq"><span class="back" onclick="show('menu')">‹</span> ☎ Call them</span><span class="x" onclick="hide()">✕</span>
+      </div>
+      <div class="callrow">
+        <a class="dial" href="tel:+15551234567">☎ Call Brian Goodell &nbsp;·&nbsp; (555) 123-4567</a>
+        <span class="lnk2">Call from GHL instead</span>
+      </div>
+      <textarea class="ta" rows="2" style="margin-top:9px" placeholder="How did it go?">Caught Brian, he'll dig out the logo files tonight.</textarea>
+      <div class="s2">
+        <div class="s2h"><span class="n">✓</span> Logs “Called”. What's next?</div>
+        <input class="inp" value="Check the logo files landed">
+        <div class="s2row">
+          <span class="lab">Check back</span>
+          <span class="wc on">Tomorrow</span><span class="wc">In 3 days</span><span class="wc">Next week</span><span class="wc">Pick a date</span>
+          <span class="lab" style="margin-left:14px">Stage</span>
+          <span class="wc">To do</span><span class="wc">Progress</span><span class="wc on">Waiting</span>
+        </div>
+      </div>
+      <div class="dock-act"><button class="btn">Log the call</button><span class="lnk" onclick="hide()">No next step needed</span></div>
+    </div>
+
+    <div id="email" style="display:none">
+      <div class="dock-row" style="justify-content:space-between;margin-bottom:9px">
+        <span class="dq"><span class="back" onclick="show('menu')">‹</span> ✉ Email client</span><span class="x" onclick="hide()">✕</span>
+      </div>
+      <div class="to">To <b>Brian Goodell</b> &lt;brian@tyvke.com&gt; <span class="lnk2">Cc</span> <span class="lnk2">Draft with AI</span></div>
+      <input class="inp" style="margin-top:7px" value="Press release proofs + logo files">
+      <textarea class="ta" rows="2" style="margin-top:7px">Hi Brian, proofs are attached. Could you send over the logo files when you get a minute?</textarea>
+      <div class="s2">
+        <div class="s2h"><span class="n">✓</span> Sending logs “Emailed client”. What's next?</div>
+        <input class="inp" value="Chase the logo files if no reply">
+        <div class="s2row">
+          <span class="lab">Check back</span>
+          <span class="wc">Tomorrow</span><span class="wc on">In 3 days</span><span class="wc">Next week</span><span class="wc">Pick a date</span>
+          <span class="lab" style="margin-left:14px">Stage</span>
+          <span class="wc">To do</span><span class="wc">Progress</span><span class="wc on">Waiting</span>
+        </div>
+      </div>
+      <div class="dock-act"><button class="btn">Send &amp; log</button><span class="lnk" onclick="hide()">Save as draft</span><span class="lnk" onclick="hide()">No next step needed</span></div>
+    </div>
+
+    <div id="log" style="display:none">
+      <div class="dock-row" style="justify-content:space-between;margin-bottom:9px">
+        <span class="dq"><span class="back" onclick="show('menu')">‹</span> ☎ Called</span><span class="x" onclick="hide()">✕</span>
+      </div>
+      <textarea class="ta" rows="2" placeholder="What happened on the call?">Caught Brian on the phone, he'll dig out the logo files tonight.</textarea>
+      <div class="s2">
+        <div class="s2h"><span class="n">2</span> What's next?</div>
+        <input class="inp" value="Check the logo files landed">
+        <div class="s2row">
+          <span class="lab">Check back</span>
+          <span class="wc on">Tomorrow</span><span class="wc">In 3 days</span><span class="wc">Next week</span><span class="wc">Pick a date</span>
+          <span class="lab" style="margin-left:14px">Stage</span>
+          <span class="wc">To do</span><span class="wc">Progress</span><span class="wc on">Waiting</span>
+        </div>
+      </div>
+      <div class="dock-act"><button class="btn">Log it</button><span class="lnk" onclick="hide()">No next step needed</span></div>
+    </div>
+
+  </div>
+</div>
+<script>
+function show(id){for(const k of ['collapsed','menu','note','team','book','call','email','log'])document.getElementById(k).style.display='none';
+document.getElementById(id).style.display='block';}
+function hide(){show('collapsed');}
+</script>

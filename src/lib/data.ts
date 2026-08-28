@@ -2047,6 +2047,55 @@ export function startSignal(
 
 /** Waiting on someone else until a chosen day. A follow-up date in the past
  *  is not a snooze — that's the day it came back. */
+// One thing a person did to a task, and the commitment it left behind.
+//
+// Separate from Comment (free-form team chatter) and Message (an actual
+// email/SMS/chat that went through GoHighLevel) because it answers a
+// different question: not "what was said" but "what was done, and what
+// happens next". A single action can have all three faces — sending an email
+// writes a Message for the content and a TaskAction for the decision.
+export type TaskActionKind = "note" | "team" | "chat" | "email" | "sms" | "call" | "meeting";
+
+export const TASK_ACTION_META: Record<TaskActionKind, { label: string; verb: string; icon: string; needsNextStep: boolean }> = {
+  // needsNextStep drives whether the "what's next?" panel opens pre-expanded.
+  // A note is the one action that genuinely may not need one — forcing a
+  // follow-up date on "FYI for Michaella" would train people to type junk.
+  note:    { label: "Leave a note",       verb: "Left a note",       icon: "note",    needsNextStep: false },
+  team:    { label: "Message a teammate", verb: "Messaged",          icon: "team",    needsNextStep: false },
+  chat:    { label: "Chat the client",    verb: "Chatted client",    icon: "chat",    needsNextStep: true },
+  email:   { label: "Email them",         verb: "Emailed client",    icon: "email",   needsNextStep: true },
+  sms:     { label: "Text them",          verb: "Texted client",     icon: "sms",     needsNextStep: true },
+  call:    { label: "Call them",          verb: "Called",            icon: "call",    needsNextStep: true },
+  meeting: { label: "Book a meeting",     verb: "Booked a meeting",  icon: "meeting", needsNextStep: true },
+};
+
+export const TASK_ACTION_ORDER: TaskActionKind[] = ["note", "team", "chat", "email", "sms", "call", "meeting"];
+
+export type TaskAction = {
+  id: string;
+  taskId: string;
+  kind: TaskActionKind;
+  authorId: string | null;
+  body: string;
+  at: string;
+  nextStep: string | null;
+  nextStepDue: string | null;
+  nextStepDoneAt: string | null;
+};
+
+// The one open commitment on a task: the newest action that set a next step
+// and hasn't had it ticked off. Newest wins because setting a new next step
+// is how you supersede an old one — you don't go back and cancel the
+// previous one first.
+export function openNextStep(actions: TaskAction[]): TaskAction | null {
+  let best: TaskAction | null = null;
+  for (const a of actions) {
+    if (!a.nextStep || a.nextStepDoneAt) continue;
+    if (!best || a.at > best.at) best = a;
+  }
+  return best;
+}
+
 export function isSnoozed(task: { followUpAt?: string | null }, today: string = TODAY): boolean {
   return !!task.followUpAt && task.followUpAt > today;
 }

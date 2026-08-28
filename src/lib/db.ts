@@ -34,6 +34,7 @@ import {
   type DmMessage,
   titleCase,
   PRIORITY_META,
+  TaskAction, TaskActionKind,
 } from "./data";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -135,6 +136,16 @@ const messageToRow = (m: Message) => ({
   subject: m.subject, body: m.body, ghl_message_id: m.ghlMessageId, gmail_message_id: m.gmailMessageId ?? null, gmail_thread_id: m.gmailThreadId ?? null, created_by: m.createdBy, read: m.read,
   attachments: m.attachments, cc: m.cc, bcc: m.bcc,
 });
+const taskActionToRow = (a: TaskAction) => ({
+  id: a.id, task_id: a.taskId, kind: a.kind, author_id: a.authorId, body: a.body, at: a.at,
+  next_step: a.nextStep, next_step_due: a.nextStepDue, next_step_done_at: a.nextStepDoneAt,
+});
+export const rowToTaskAction = (r: any): TaskAction => ({
+  id: r.id, taskId: r.task_id, kind: r.kind as TaskActionKind, authorId: r.author_id ?? null,
+  body: r.body ?? "", at: r.at, nextStep: r.next_step ?? null, nextStepDue: r.next_step_due ?? null,
+  nextStepDoneAt: r.next_step_done_at ?? null,
+});
+
 export const rowToMessage = (r: any): Message => ({
   id: r.id, contactId: r.contact_id, clientId: r.client_id, taskId: r.task_id ?? null, channel: (r.channel as MessageChannel) ?? "email",
   direction: r.direction as MessageDirection, subject: r.subject ?? null, body: r.body ?? "",
@@ -481,6 +492,22 @@ export const deleteStageDb = (id: string) => supabase.from("stages").delete().eq
 // the GHL send first (see Cockpit.tsx sendMessage) and only inserts an
 // outbound row after a confirmed success; this call itself is still
 // fire-and-forget from the UI's perspective, same as every other mutation here.
+// Insert-once, like messages: an action records something that already
+// happened, so there is nothing to re-save. The single exception is ticking
+// its next step done, which is the narrow update below.
+export const insertTaskAction = (a: TaskAction) => supabase.from("task_actions").insert(taskActionToRow(a)).then(logErr);
+export const setNextStepDoneDb = (id: string, doneAt: string | null) =>
+  supabase.from("task_actions").update({ next_step_done_at: doneAt }).eq("id", id).then(logErr);
+export const deleteTaskActionDb = (id: string) => supabase.from("task_actions").delete().eq("id", id).then(logErr);
+// Loaded per task rather than all at once. Unlike tasks or clients this grows
+// without bound and only one task's worth is ever on screen, so pulling the
+// whole table into the client at boot would cost more every week.
+export const fetchTaskActions = async (taskId: string): Promise<TaskAction[]> => {
+  const { data, error } = await supabase.from("task_actions").select("*").eq("task_id", taskId).order("at", { ascending: false });
+  if (error) { logErr({ error }); return []; }
+  return (data ?? []).map(rowToTaskAction);
+};
+
 export const insertMessage = (m: Message) => supabase.from("messages").insert(messageToRow(m)).then(logErr);
 // One write per opened conversation, not per message — flips every unread
 // inbound row for that contact in a single UPDATE.
