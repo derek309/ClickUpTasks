@@ -2016,16 +2016,32 @@ export const BURN_THRESHOLD = 0.7;
 export function startSignal(
   task: { createdAt: string; due: string | null; status: TaskStatus; followUpAt?: string | null },
   today: string = TODAY,
-): { level: "none" | "start" | "late"; label: string } {
+): { level: "none" | "start" | "wrap" | "late"; label: string } {
   const NONE = { level: "none" as const, label: "" };
-  if (task.status !== "todo") return NONE; // started, or past starting
+  if (task.status === "done") return NONE;
   if (!task.due) return NONE;              // nothing to be late for
   if (isSnoozed(task, today)) return NONE; // waiting on someone else until then
+  // Waiting is deliberately silent. You are blocked on someone else, so
+  // neither "start" nor "wrap up" is advice you can act on; the follow-up date
+  // is the tool for that stage.
+  if (task.status === "waiting") return NONE;
   const left = daysUntilDue(task.due, today);
   if (left === null) return NONE;
-  if (left < 0) return { level: "late", label: "Not started" };
   const burn = windowBurn(task.createdAt, task.due, today);
-  if (burn !== null && burn >= BURN_THRESHOLD) return { level: "start", label: "Start now" };
+  const burning = burn !== null && burn >= BURN_THRESHOLD;
+
+  if (task.status === "todo") {
+    if (left < 0) return { level: "late", label: "Not started" };
+    if (burning) return { level: "start", label: "Start now" };
+    return NONE;
+  }
+
+  // In progress, review and changes requested: work is underway, so the useful
+  // warning is that the runway is nearly gone. Past due gets no chip here on
+  // purpose. "Overdue" would only repeat what the due chip already says in
+  // red, whereas "Not started" above earns its place by pairing lateness with
+  // a stage that says nobody has picked it up.
+  if (left >= 0 && burning) return { level: "wrap", label: "Wrap up" };
   return NONE;
 }
 

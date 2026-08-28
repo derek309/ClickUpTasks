@@ -310,7 +310,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       return (
         <div className="mb-2 flex items-center gap-2 text-[13px]">
           <span className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-border">
-            <span className={`block h-full rounded-full ${sig.level === "late" ? "bg-danger" : sig.level === "start" ? "bg-amber-500" : "bg-accent"}`} style={{ width: `${Math.max(2, pct)}%` }} />
+            <span className={`block h-full rounded-full ${sig.level === "late" ? "bg-danger" : sig.level !== "none" ? "bg-amber-500" : "bg-accent"}`} style={{ width: `${Math.max(2, pct)}%` }} />
           </span>
           {/* Deliberately does NOT repeat the countdown: the due chip below
               already says "2d late", and saying it twice in two lines was the

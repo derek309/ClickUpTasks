@@ -538,8 +538,10 @@ describe("window burn and the start signal", () => {
   it("stays quiet early in the window", () => {
     expect(startSignal(T("2026-08-27", "2026-09-26"), today).level).toBe("none");
   });
-  it("stays quiet once the work has actually started", () => {
-    expect(startSignal(T("2026-08-03", "2026-09-02", "in_progress"), today).level).toBe("none");
+  // Superseded: started work used to be silent, and a task sitting in Progress
+  // at 95% of its window got no warning at all. It now says "Wrap up".
+  it("switches from Start now to Wrap up once the work has actually started", () => {
+    expect(startSignal(T("2026-08-03", "2026-09-02", "in_progress"), today)).toEqual({ level: "wrap", label: "Wrap up" });
     expect(startSignal(T("2026-08-03", "2026-09-02", "done"), today).level).toBe("none");
   });
   it("calls out overdue work that was never started", () => {
@@ -592,5 +594,44 @@ describe("effectiveDueDate with a follow-up but no due date", () => {
   });
   it("is genuinely undated with neither", () => {
     expect(effectiveDueDate({ due: null, followUpAt: null }, "2026-08-28")).toBeNull();
+  });
+});
+
+describe("startSignal across stages", () => {
+  // 10 day window, day 9 of 10, so burn is 90% and past the 70% threshold.
+  const burning = { createdAt: "2026-08-19T09:00:00Z", due: "2026-08-29" };
+  const today = "2026-08-28";
+  const early = { createdAt: "2026-08-19T09:00:00Z", due: "2026-10-30" };
+
+  it("says Start now on unstarted work with the runway nearly gone", () => {
+    expect(startSignal({ ...burning, status: "todo" }, today)).toEqual({ level: "start", label: "Start now" });
+  });
+  it("says Wrap up once the work is underway", () => {
+    for (const status of ["in_progress", "review", "changes_requested"] as const) {
+      expect(startSignal({ ...burning, status }, today)).toEqual({ level: "wrap", label: "Wrap up" });
+    }
+  });
+  it("stays quiet on Waiting, where neither instruction is actionable", () => {
+    expect(startSignal({ ...burning, status: "waiting" }, today).level).toBe("none");
+  });
+  it("stays quiet on Done", () => {
+    expect(startSignal({ ...burning, status: "done" }, today).level).toBe("none");
+  });
+  it("says Not started when To do work runs past due", () => {
+    expect(startSignal({ ...burning, due: "2026-08-26", status: "todo" }, today)).toEqual({ level: "late", label: "Not started" });
+  });
+  it("does not repeat lateness on started work, which the due chip already shows", () => {
+    expect(startSignal({ ...burning, due: "2026-08-26", status: "in_progress" }, today).level).toBe("none");
+  });
+  it("stays quiet early in the window at every stage", () => {
+    for (const status of ["todo", "in_progress", "review", "changes_requested"] as const) {
+      expect(startSignal({ ...early, status }, today).level).toBe("none");
+    }
+  });
+  it("stays quiet while snoozed, whatever the stage", () => {
+    expect(startSignal({ ...burning, status: "in_progress", followUpAt: "2026-09-10" }, today).level).toBe("none");
+  });
+  it("stays quiet with no due date", () => {
+    expect(startSignal({ createdAt: "2026-08-19T09:00:00Z", due: null, status: "in_progress" }, today).level).toBe("none");
   });
 });

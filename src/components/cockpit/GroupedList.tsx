@@ -296,17 +296,18 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
             <span className="flex min-w-0 items-center gap-1.5">
               {delegated && <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">Delegated</span>}
               <span className={`line-clamp-none min-w-0 flex-1 break-words text-[15px] font-medium leading-snug sm:line-clamp-2 ${isDone ? "text-muted line-through" : ""}`} title={task.title}>{task.title}</span>
-              {/* "You've had this a while, it's due soon, and nobody has
-                  started" — the one thing the created and due dates together
-                  can tell you that neither says alone. Only ever on unstarted
-                  work, so it can't nag about something already in hand. */}
+              {/* The one thing the created and due dates together can tell you
+                  that neither says alone: most of the runway is gone. Reads
+                  "Start now" on To do and "Wrap up" once work is underway,
+                  because the advice differs even though the maths doesn't.
+                  Waiting and Done never get a chip. */}
               {(() => {
                 const sig = startSignal(task);
                 if (sig.level === "none") return null;
                 const burn = windowBurn(task.createdAt, task.due);
                 return (
                   <span
-                    title={`${sig.label} — ${burn !== null ? `${Math.round(burn * 100)}% of the time from creation to due date has gone` : "overdue"}, and this is still To do`}
+                    title={`${sig.label}: ${burn !== null ? `${Math.round(burn * 100)}% of the time from creation to due date has gone` : "past due"}, and this is still ${STATUS_META[task.status].label}`}
                     className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold ${sig.level === "late" ? "bg-danger/10 text-danger" : "bg-amber-500/15 text-amber-700"}`}>
                     {sig.label}
                   </span>
