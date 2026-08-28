@@ -378,8 +378,12 @@ function InlinePriority({ value, onChange }: { value: Priority; onChange: (p: Pr
   const options = manualPriorityOptions(value);
   return (
     <div className="relative">
-      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 128, options.length * 32 + 8)); setOpen((o) => !o); }} className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-[13px] font-medium hover:bg-background" style={{ color: value === "none" ? "var(--muted)" : PRIORITY_META[value].color }}>
-        {value === "none" ? "—" : (<><I.flag />{PRIORITY_META[value].label}</>)}
+      {/* whitespace-nowrap + a shrink-proof flag: "Client request" is the
+          longest label and was wrapping onto two lines, which made its row
+          taller than every other row in the list (Derek, 2026-08-27). The
+          column is sized for it in COL_WIDTHS. */}
+      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 128, options.length * 32 + 8)); setOpen((o) => !o); }} className="inline-flex items-center gap-1 whitespace-nowrap rounded px-1 py-0.5 text-[13px] font-medium hover:bg-background" style={{ color: value === "none" ? "var(--muted)" : PRIORITY_META[value].color }}>
+        {value === "none" ? "—" : (<><I.flag className="shrink-0" />{PRIORITY_META[value].label}</>)}
       </button>
       {open && (<>
         <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />

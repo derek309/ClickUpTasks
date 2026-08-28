@@ -396,7 +396,7 @@ export const DIR_ROW = "group flex min-h-[38px] cursor-pointer items-center gap-
 // status is wider than the label needs: the one-click done toggle sits beside
 // it (see GroupedList's doneToggle), and at 128px "Changes" plus the circle
 // clipped.
-export const COL_WIDTHS: Record<string, string> = { status: "152px", due: "96px", priority: "104px", comments: "84px", assignee: "72px", contact: "160px", labels: "150px" };
+export const COL_WIDTHS: Record<string, string> = { status: "152px", due: "96px", priority: "132px", comments: "84px", assignee: "72px", contact: "160px", labels: "150px" };
 // `action` powers undo: a bulk edit hands back a one-click revert instead of
 // leaving someone to re-set every task by hand. Toasts carrying an action
 // stay on screen longer (see pushToast) so there's time to actually hit it.

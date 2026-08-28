@@ -95,6 +95,7 @@ import AddClientModal from "./AddClientModal";
 
 import { I, Avatar, SideItem, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFromName, LIST_COLUMNS, SearchableSelect, type FilterState, type SortBy, type Toast } from "./cockpit/ui";
 import { BulkAddModal, type ParsedRow } from "./cockpit/BulkAddModal";
+import { RemindClientModal } from "./cockpit/RemindClientModal";
 import { ConfirmModal, PromptModal, LinkFormModal, MergeTaskModal, MergeClientModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
 import { CommandK } from "./cockpit/CommandK";
 import { GroupedList, InlineDue } from "./cockpit/GroupedList";
@@ -745,6 +746,32 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // "Add tasks from a list" — paste notes, AI splits them, you review, then
   // they're created (Derek, 2026-08-26). Parsing and creating are separate
   // steps by design: nothing reaches the database until it's been seen.
+  // "We're still waiting on these" nudge, raised from the Review controls.
+  // The portal link is resolved when the modal is OPENED, not during render:
+  // getClientShareUrl mints and persists a share token the first time it's
+  // called for a client, so calling it from JSX would write to the database
+  // on every re-render.
+  const [remindClientId, setRemindClientId] = useState<string | null>(null);
+  const [remindLink, setRemindLink] = useState<string | null>(null);
+  const openRemindClient = (clientId: string) => {
+    setRemindLink(getClientShareUrl(clientId));
+    setRemindClientId(clientId);
+  };
+  const closeRemindClient = () => { setRemindClientId(null); setRemindLink(null); };
+  const [remindSending, setRemindSending] = useState(false);
+  const sendClientReminder = async (clientId: string, subject: string, body: string) => {
+    setRemindSending(true);
+    try {
+      // Goes through the ordinary send path on purpose: same can-message
+      // gating, same journal entry, same thread the client already replies
+      // into. A reminder that doesn't appear in the client's own history is
+      // a reminder nobody can later prove was sent.
+      await sendMessage(clientId, "email", subject, plainTextToHtml(body));
+      closeRemindClient();
+    } finally {
+      setRemindSending(false);
+    }
+  };
   const [bulkAddOpen, setBulkAddOpen] = useState(false);
   const [bulkAddBusy, setBulkAddBusy] = useState(false);
   const parseTaskList = async (text: string): Promise<ParsedRow[] | null> => {
@@ -1898,7 +1925,26 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const reviewedThisWeek = !!c.reviewedAt && c.reviewedAt >= THIS_MONDAY;
     if (open.length > 0 && !hasAnyDate && !reviewedThisWeek) return true; // (A)
     if (c.status === "nurture" && (!c.reviewedAt || daysBetween(c.reviewedAt, TODAY) >= NURTURE_CHECK_IN_DAYS)) return true; // (B)
+    // (C) Still waiting on the client for something. These were invisible on
+    // every dashboard: going "waiting on client" unassigns the task (see
+    // applyWaitingStatusSync), so it stops counting toward anyone's My Work
+    // and nothing ever brings it back up. A thing you're blocked on is
+    // exactly what a Monday review is for (Derek: "if we're waiting on a
+    // client task it should pop up to review").
+    //
+    // Deliberately NOT scoped by forAssignee — a waiting task has no
+    // assignee by construction, so scoping it would filter out every one of
+    // them and this condition would never fire. The client is already in
+    // this person's board via assignedClientsFor (an assigned task, or
+    // following the client), so it can't leak someone else's work in.
+    if (!reviewedThisWeek && waitingTasksFor(clientId).length > 0) return true;
     return false;
+  }
+  /** Open tasks this client owes us an answer on. Unassigned by construction,
+   *  so every caller has to look them up deliberately rather than expecting
+   *  them in an assignee-scoped list. */
+  function waitingTasksFor(clientId: string): Task[] {
+    return (scopedTasksByClientId.get(clientId) ?? []).filter((t) => t.status !== "done" && t.waitingOnClient);
   }
   // Projects have no status, so only condition (A) applies — no nurture cadence.
   function projectNeedsReview(projectId: string, forAssignee?: string): boolean {
@@ -4395,6 +4441,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     <button onClick={() => (scopedProject ? setProjectReviewed(scopedProject.id) : setClientReviewed(activeClient))}
                       title="Mark reviewed — clears this from the Review list until the next check-in"
                       className="inline-flex items-center gap-1 bg-teal-500/10 px-2.5 py-1.5 text-[13px] font-medium text-teal-600 hover:bg-teal-500/20"><I.check /> <span className="hidden sm:inline">Reviewed</span></button>
+                    {/* Only when there's actually something outstanding, and
+                        only for someone allowed to message this client. */}
+                    {!scopedProject && waitingTasksFor(activeClient).length > 0 && canMessageClient(activeClient) && (
+                      <button onClick={() => openRemindClient(activeClient)}
+                        title="Email this client the items we're still waiting on, with their portal link"
+                        className="border-l border-teal-500/40 bg-teal-500/10 px-2.5 py-1.5 text-[13px] font-medium text-teal-600 hover:bg-teal-500/20">
+                        Remind ({waitingTasksFor(activeClient).length})
+                      </button>
+                    )}
                     <button onClick={() => goToNextReview(activeClient, activeProject)}
                       title="Go to the next client/project that needs review"
                       className="border-l border-teal-500/40 bg-teal-500/10 px-2 py-1.5 text-[13px] font-medium text-teal-600 hover:bg-teal-500/20">Next ›</button>
@@ -4706,6 +4761,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         </div>
       )}
 
+      {remindClientId && (
+        <RemindClientModal
+          clientName={clientById(remindClientId)?.name ?? "this client"}
+          tasks={waitingTasksFor(remindClientId)}
+          link={remindLink}
+          sending={remindSending}
+          onSend={(subject, body) => sendClientReminder(remindClientId, subject, body)}
+          onCancel={closeRemindClient}
+        />
+      )}
       {bulkAddOpen && (
         <BulkAddModal
           clientName={clientById(activeClient)?.name ?? "this client"}
