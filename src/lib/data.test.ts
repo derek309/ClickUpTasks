@@ -499,4 +499,14 @@ describe("due countdown", () => {
     expect(dueCountdown("2026-08-25", today)).toBe("3d late");
     expect(dueCountdown(null, today)).toBe("");
   });
+  it("switches to months once days stop being a readable quantity", () => {
+    expect(dueCountdown("2026-10-27", today)).toBe("60 days left");   // still days at the boundary
+    expect(dueCountdown("2026-10-28", today)).toBe("2 months left");  // one past it
+    expect(dueCountdown("2027-03-28", today)).toBe("7 months left");
+  });
+  it("keeps counting however far out the date is", () => {
+    for (const d of ["2026-09-30", "2026-12-25", "2027-06-01", "2029-01-01"]) {
+      expect(dueCountdown(d, today), d).not.toBe("");
+    }
+  });
 });

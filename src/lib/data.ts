@@ -1970,7 +1970,15 @@ export function dueCountdown(iso: string | null, today: string = TODAY): string 
   if (n < 0) return `${Math.abs(n)}d late`;
   if (n === 0) return "due today";
   if (n === 1) return "1 day left";
-  return `${n} days left`;
+  // Past a couple of months, switch to months (Derek: "make the countdown
+  // show further out than 14 days"). No cutoff any more — a date always says
+  // how far off it is — but "213 days left" is a number nobody reads as a
+  // quantity, and at that range it would sit next to "2 days left" competing
+  // for the same attention. Coarser units keep it short and keep the near
+  // ones standing out.
+  if (n <= 60) return `${n} days left`;
+  const months = Math.round(n / 30);
+  return `${months} months left`;
 }
 
 export function isOverdue(iso: string | null): boolean {
