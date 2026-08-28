@@ -566,7 +566,7 @@ export function InlineDate({ value, onChange, onClear, className = "", emptyLabe
   );
 }
 
-export function InlineDue({ value, overdue, followUpAt = null, recurrence = "none", recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth, recurrenceNth, recurrenceWeekday, onChange, onRecurrenceChange, emptyLabel = "—", strong = false, showRecurrenceLabel = false, showCountdown = true }: { value: string | null; overdue: boolean; followUpAt?: string | null; recurrence?: Recurrence; recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[]; recurrenceNth?: number; recurrenceWeekday?: number; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; emptyLabel?: React.ReactNode; strong?: boolean; showRecurrenceLabel?: boolean; showCountdown?: boolean }) {
+export function InlineDue({ value, overdue, followUpAt = null, recurrence = "none", recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth, recurrenceNth, recurrenceWeekday, onChange, onRecurrenceChange, emptyLabel = "—", strong = false, showRecurrenceLabel = false, showCountdown = true, formatValue = friendlyDue }: { value: string | null; overdue: boolean; followUpAt?: string | null; recurrence?: Recurrence; recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[]; recurrenceNth?: number; recurrenceWeekday?: number; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; emptyLabel?: React.ReactNode; strong?: boolean; showRecurrenceLabel?: boolean; showCountdown?: boolean; formatValue?: (iso: string) => string }) {
   const { open, setOpen, ref, pos, openIt } = useDatePopover();
   // Amber only for a genuinely near date — not "any date that isn't
   // overdue," which would paint every far-future due date the same urgent
@@ -576,7 +576,11 @@ export function InlineDue({ value, overdue, followUpAt = null, recurrence = "non
   return (
     <>
       <button ref={ref} onClick={openIt} className={`inline-flex items-center gap-1 rounded px-1 py-0.5 text-[11px] hover:bg-background ${tone}`}>
-        {value ? friendlyDue(value) : emptyLabel}
+        {/* friendlyDue by default, which says "Mon" for anything inside a
+            week — right for a list row. The drawer's dates band overrides it,
+            because "Mon" beside an "Aug 27" created date in the very next
+            column reads as two different kinds of thing. */}
+        {value ? formatValue(value) : emptyLabel}
         {/* "how long have I got", beside the date rather than instead of it
             (Derek: "say hey you have this many days to get this done", then
             "make the countdown show further out than 14 days"). Always shown

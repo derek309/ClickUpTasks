@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, clientStatusMeta,
-  STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY, WEEKDAY_LABEL, windowBurn, startSignal, isSnoozed, daysUntilDue, formatDue, dueCountdown,
+  STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY, WEEKDAY_LABEL, startSignal, isSnoozed, daysUntilDue, formatDue, dueCountdown,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Row, CollapsibleText, SearchableSelect, newId } from "./ui";
@@ -63,6 +63,84 @@ const DATE_KEY = "mb-1 block text-[12px] font-semibold uppercase tracking-wide";
 // this was a fresh component type on every render, so React remounted all
 // three columns each time — which would have slammed the date picker shut the
 // moment anything else in the drawer changed.
+// Counts a number up to `to` over ~700ms, easing out, and skips the whole
+// thing when the OS asks for reduced motion. Used so the days-used figure
+// arrives with the bar rather than being pinned at its final value while the
+// bar is still growing underneath it.
+function useCountUp(to: number, run: boolean) {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    if (!run) return;
+    let raf = 0;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      // Still deferred a frame rather than set synchronously: a setState in
+      // the effect body triggers a cascading render.
+      raf = requestAnimationFrame(() => setN(to));
+      return () => cancelAnimationFrame(raf);
+    }
+    let start = 0;
+    const step = (t: number) => {
+      if (!start) start = t;
+      const p = Math.min(1, (t - start) / 700);
+      setN(Math.round(to * (1 - Math.pow(1 - p, 3))));
+      if (p < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [to, run]);
+  return n;
+}
+
+// The runway from created to due, drawn under the three date columns so it
+// reads left to right in the same order they do.
+//
+// The gradient lives on a full-width inner span inside a clipped outer span,
+// rather than on the fill itself. That way the colour at the fill's head is
+// genuinely the ramp's colour at that percentage — green early, amber in the
+// middle, red at the end. Putting the gradient on the fill would rescale it,
+// so a 10% fill would run the entire green-to-red ramp inside those 10px and
+// a barely-started task would show red.
+function RunwayBar({ createdDay, end, endIsDue, followUpAt, level, label }: {
+  createdDay: string; end: string; endIsDue: boolean; followUpAt?: string | null;
+  level: "none" | "start" | "wrap" | "late"; label: string;
+}) {
+  const [grown, setGrown] = useState(false);
+  useEffect(() => { const r = requestAnimationFrame(() => setGrown(true)); return () => cancelAnimationFrame(r); }, []);
+  const total = Math.max(1, daysUntilDue(end, createdDay) ?? 1);
+  const left = daysUntilDue(end) ?? 0;
+  const used = Math.min(total, Math.max(0, total - left));
+  const pct = Math.min(100, Math.max(2, Math.round((used / total) * 100)));
+  const shown = useCountUp(used, grown);
+  // Clamped, because a follow-up deliberately set past the due date is a real
+  // and interesting case — you promised Friday and parked it to Monday — and
+  // it should sit visibly at the end of the track, not vanish off it.
+  const followUpOffset = followUpAt ? daysUntilDue(followUpAt, createdDay) : null;
+  const pinPct = followUpOffset !== null && endIsDue
+    ? Math.min(100, Math.max(0, (followUpOffset / total) * 100))
+    : null;
+  return (
+    <div className="mt-1.5 px-3 pb-1 pt-2.5" style={{ borderTop: "1px solid var(--border)" }}>
+      <div className="relative h-2 w-full overflow-hidden rounded-full bg-border shadow-[inset_0_1px_2px_rgba(20,24,40,.14)]">
+        <div className="h-full overflow-hidden rounded-full transition-[width] duration-[900ms] ease-out motion-reduce:transition-none"
+          style={{ width: grown ? `${pct}%` : "0%" }}>
+          {/* Full track width, clipped by the parent. See the note above. */}
+          <div className="h-full rounded-full" style={{ width: `${(100 / pct) * 100}%`, background: "linear-gradient(90deg,#16a34a 0%,#84cc16 35%,#f59e0b 70%,#ef4444 100%)" }} />
+        </div>
+        {pinPct !== null && (
+          <span title={`Follow up ${formatDue(followUpAt!)}`} className="absolute inset-y-0 w-[3px] -translate-x-1/2 rounded-full bg-foreground/70 shadow-[0_0_0_1.5px_var(--surface)]"
+            style={{ left: `${pinPct}%` }} />
+        )}
+      </div>
+      <div className="mt-1.5 flex items-center gap-2 text-[13px]">
+        <span className="text-muted">{shown} of {total} day{total === 1 ? "" : "s"} used{endIsDue ? "" : " until follow up"}</span>
+        {level !== "none" && (
+          <span className={`ml-auto rounded px-1.5 py-0.5 text-[12px] font-semibold ${level === "late" ? "bg-danger/10 text-danger" : "bg-amber-500/15 text-amber-700"}`}>{label}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function DateCol({ tone, label, children }: { tone: typeof DATE_TONES[keyof typeof DATE_TONES]; label: string; children: React.ReactNode }) {
   return (
     <div className={DATE_CELL} style={{ background: tone.tint }}>
@@ -370,9 +448,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // anyway (Derek: "add some visual depth").
   const metaLine = (
     <div className="mb-1 rounded-xl border bg-background p-1.5 shadow-[inset_0_2px_5px_rgba(20,24,40,0.07),inset_0_0_0_1px_rgba(255,255,255,0.5)]">
+      {/* Chronological now — Created, Follow up, Due — so the runway bar
+          underneath reads left to right in the same order as the columns it
+          sits below (Derek: "so it in order and then the progress bar follows
+          that"). That supersedes the earlier edit-frequency ordering: a bar
+          that runs the opposite way to the labels above it is worse than a
+          follow-up date one column further right. */}
       <div className="flex items-stretch gap-1.5">
-        {/* Follow up leads. Created never changes and due rarely does; the
-            follow-up date is the one that gets re-dated every week. */}
+        <DateCol tone={DATE_TONES.created} label="Created">
+          <span className={dateVal}>{formatDue(createdDay)}</span>
+          <span className={dateSub}>{ageDays <= 0 ? "today" : `${ageDays} day${ageDays === 1 ? "" : "s"} ago`}</span>
+        </DateCol>
         <DateCol tone={DATE_TONES.followUp} label="Follow up">
           <InlineDate value={task.followUpAt ?? null} onChange={(d) => onPatch({ followUpAt: d })} onClear={() => onPatch({ followUpAt: null })}
             className={`${dateVal} -ml-1 ${isSnoozed(task) ? "text-amber-700" : ""}`} emptyLabel={<span className={dateSet}>Set a follow up</span>} />
@@ -380,44 +466,19 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         </DateCol>
         <DateCol tone={DATE_TONES.due} label="Due">
           <span className={`${dateVal} -ml-1 flex`}>
-            <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} recurrenceNth={task.recurrenceNth} recurrenceWeekday={task.recurrenceWeekday} showRecurrenceLabel={task.recurrence !== "custom"} showCountdown={false} onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} emptyLabel={<span className={dateSet}>Set a due date</span>} />
+            <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} recurrenceNth={task.recurrenceNth} recurrenceWeekday={task.recurrenceWeekday} showRecurrenceLabel={task.recurrence !== "custom"} showCountdown={false} formatValue={formatDue} onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} emptyLabel={<span className={dateSet}>Set a due date</span>} />
           </span>
           <span className={dateSub}>{task.due ? dueCountdown(task.due) : "nothing promised"}</span>
         </DateCol>
-        <DateCol tone={DATE_TONES.created} label="Created">
-          <span className={dateVal}>{formatDue(createdDay)}</span>
-          <span className={dateSub}>{ageDays <= 0 ? "today" : `${ageDays} day${ageDays === 1 ? "" : "s"} ago`}</span>
-        </DateCol>
       </div>
-      {/* The runway, spelled out where there's room for it. The list row only
-          has space for the verdict; this says how it was reached, so the chip
-          never looks arbitrary. */}
-      {task.due && (() => {
-        const burn = windowBurn(task.createdAt, task.due);
+      {/* Falls back to the follow-up date as the endpoint when nothing is
+          promised, so a parked task with no due date still gets a runway
+          instead of an empty band. */}
+      {(() => {
+        const end = task.due ?? task.followUpAt ?? null;
+        if (!end) return null;
         const sig = startSignal(task);
-        if (burn === null) return null;
-        const pct = Math.round(burn * 100);
-        // Days read better than a percentage here: "9 of 11 days used" is a
-        // quantity you can act on, "82%" is one you have to translate.
-        const total = Math.max(1, daysUntilDue(task.due, createdDay) ?? 1);
-        const used = Math.min(total, Math.max(0, total - (daysUntilDue(task.due) ?? 0)));
-        return (
-          <div className="mt-1.5 flex items-center gap-2 px-3 pb-1 pt-2.5 text-[13px]" style={{ borderTop: "1px solid var(--border)" }}>
-            {/* Green to red left to right, matching the created and due rules
-                either side of it, so the bar reads as the distance between
-                those two columns rather than as its own unrelated gauge. */}
-            <span className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-border shadow-[inset_0_1px_1px_rgba(20,24,40,0.12)]">
-              <span className="block h-full rounded-full" style={{ width: `${Math.max(2, pct)}%`, background: sig.level === "late" ? "var(--danger)" : "linear-gradient(90deg,var(--success),#f59e0b)" }} />
-            </span>
-            {/* Deliberately does NOT repeat the countdown the Due column
-                already shows. This answers a different question: how much of
-                the runway is gone. */}
-            <span className="text-muted">{used} of {total} day{total === 1 ? "" : "s"} used</span>
-            {sig.level !== "none" && (
-              <span className={`ml-auto rounded px-1.5 py-0.5 text-[12px] font-semibold ${sig.level === "late" ? "bg-danger/10 text-danger" : "bg-amber-500/15 text-amber-700"}`}>{sig.label}</span>
-            )}
-          </div>
-        );
+        return <RunwayBar key={`${task.id}:${createdDay}:${end}`} createdDay={createdDay} end={end} endIsDue={!!task.due} followUpAt={task.followUpAt} level={sig.level} label={sig.label} />;
       })()}
     </div>
   );
