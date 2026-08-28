@@ -619,6 +619,10 @@ function resetFormAfterSubmit() {
   notesInput.value = "";
   selectedClientId = "";
   clientSearchInput.value = "";
+  // The client is cleared, so the workspace block must go with it — otherwise
+  // it sits there showing the previous client's saved tabs with no client
+  // selected, and "Open tabs" would act on a client you can no longer see.
+  if (wsEl) { wsEl.style.display = "none"; wsCapture = null; }
   projectSel.value = "";
   dueInput.value = tomorrowIso();
   prioritySel.value = "normal";
@@ -659,7 +663,7 @@ createBtn.addEventListener("click", async () => {
     for (const dataUrl of capturedScreenshots) screenshotPaths.push(await uploadScreenshot(token, dataUrl, clientId));
 
     if (mode === "new") {
-      await apiFetch("/api/extension/tasks", token, {
+      const created = await apiFetch("/api/extension/tasks", token, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -667,7 +671,12 @@ createBtn.addEventListener("click", async () => {
           due: dueInput.value || undefined, priority: prioritySel.value, assignee_id: assigneeSel.value || undefined, screenshot_paths: screenshotPaths,
         }),
       });
-      statusEl.textContent = "Task created.";
+      // Link straight to what was just made (Derek: "make a link to it so I
+      // can click and go to it"). The panel clears itself immediately after
+      // this, so without a link the task you just created is gone from view
+      // with nothing to click. Opens in a new tab: this is a side panel, and
+      // navigating it away would close the form you're still working in.
+      showCreatedLink(created?.id, created?.title || titleInput.value.trim());
     } else {
       await apiFetch(`/api/extension/tasks/${encodeURIComponent(selectedTaskId)}/comment`, token, {
         method: "POST",
@@ -675,8 +684,8 @@ createBtn.addEventListener("click", async () => {
         body: JSON.stringify({ body: notesInput.value.trim(), screenshot_paths: screenshotPaths }),
       });
       statusEl.textContent = "Added to task.";
+      statusEl.className = "ok";
     }
-    statusEl.className = "ok";
     // The panel stays open (it's a sidebar, not a popup) — clear the form
     // instead of trying to close anything, ready for the next page.
     resetFormAfterSubmit();
@@ -865,6 +874,23 @@ async function removeSavedTab(url) {
     statusEl.textContent = e instanceof Error ? e.message : "Couldn't remove that tab.";
     statusEl.className = "err";
   }
+}
+
+/** "Task created" plus a link to the thing itself. Built as real DOM rather
+ *  than innerHTML so a task title containing < or & can't inject markup into
+ *  the panel. Falls back to plain text if the API didn't hand back an id. */
+function showCreatedLink(taskId, title) {
+  statusEl.textContent = "";
+  statusEl.className = "ok";
+  if (!taskId) { statusEl.textContent = "Task created."; return; }
+  statusEl.append("Task created. ");
+  const a = document.createElement("a");
+  a.href = `${API_BASE}/?task=${encodeURIComponent(taskId)}`;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  a.textContent = title ? `Open “${title.length > 40 ? title.slice(0, 40).trimEnd() + "…" : title}”` : "Open it";
+  a.className = "created-link";
+  statusEl.append(a);
 }
 
 async function startCapture() {
