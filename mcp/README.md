@@ -17,7 +17,7 @@ same tool definitions (`core.mjs`):
 `list_my_tasks`, `list_client_tasks`, `get_task`, `create_task`, `update_task`,
 `delete_task`, `set_task_status`, `add_comment`, `draft_email`, `check_item`,
 `add_checklist_items`, `list_members`, `list_clients`, `list_projects`,
-`list_notes`, `add_note`, `list_links`, `get_client_overview` — see each
+`list_notes`, `add_note`, `list_links`, `get_client_link`, `get_client_overview` — see each
 tool's own description in `core.mjs` for its exact arguments.
 
 ## Install — Claude Code

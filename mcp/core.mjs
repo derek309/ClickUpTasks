@@ -22,6 +22,13 @@ const stripHtml = (html) => (html || "")
   .replace(/\n{3,}/g, "\n\n")
   .trim();
 const nowIso = () => new Date().toISOString();
+// Where the client-facing portal lives. Same shape the web app builds in
+// getClientShareUrl (src/components/Cockpit.tsx): /waiting/<token>.
+const APP_URL = process.env.APP_URL || "https://clickuptasks.vercel.app";
+const PERSONAL_CLIENT_ID = "personal";
+// 32 hex characters, no dashes — byte-for-byte the format the web app mints,
+// so a token created here is indistinguishable from one created there.
+const mintShareToken = () => globalThis.crypto.randomUUID().replace(/-/g, "");
 const rid = (p) => p + Math.random().toString(36).slice(2, 10);
 const todayIso = () => new Date().toISOString().slice(0, 10);
 function addDaysIso(iso, days) {
@@ -428,6 +435,37 @@ export function createServer(opts = {}) {
       const rows = await sb(`client_links?select=label,url,group_label&client_id=eq.${enc(client_id)}&order=position.asc`);
       if (!rows.length) return { content: [{ type: "text", text: "No links yet." }] };
       return { content: [{ type: "text", text: rows.map((l) => `${l.group_label ? `[${l.group_label}] ` : ""}${l.label}: ${l.url}`).join("\n") }] };
+    });
+
+  server.tool("get_client_link",
+    "The client's own portal link (/waiting/<token>) — the page where they see what we're waiting on them for, reply, upload files, and mark things done. Use this when you're drafting an email or SMS to a client and need to give them somewhere to respond. Pass project_id to link to just that one list instead of the whole account. Mints the link on first use if the client hasn't got one yet.\n\nTreat it as a secret: anyone holding the URL can see that client's tasks without signing in, so it goes to that client and nobody else. Never put one client's link in another client's message, and never post it anywhere public.",
+    { client_id: z.string(), project_id: z.string().optional().describe("link to a single list rather than the whole client") },
+    async ({ client_id, project_id }) => {
+      if (client_id === PERSONAL_CLIENT_ID) return { content: [{ type: "text", text: "Personal tasks are private — there is no client link for them." }] };
+      const [client] = await sb(`clients?select=name,share_token&id=eq.${enc(client_id)}`);
+      if (!client) return { content: [{ type: "text", text: `No client ${client_id}.` }] };
+
+      // A project link is its own token, not the client's with a query
+      // parameter — same split the web app makes, so revoking one doesn't
+      // touch the other.
+      if (project_id) {
+        const [project] = await sb(`projects?select=name,client_id,share_token&id=eq.${enc(project_id)}`);
+        if (!project) return { content: [{ type: "text", text: `No list ${project_id}.` }] };
+        if (project.client_id !== client_id) return { content: [{ type: "text", text: `List ${project_id} doesn't belong to ${client.name}.` }] };
+        let token = project.share_token;
+        if (!token) {
+          token = mintShareToken();
+          await sb(`projects?id=eq.${enc(project_id)}`, "PATCH", { share_token: token });
+        }
+        return { content: [{ type: "text", text: `${APP_URL}/waiting/${token}\n\nGoes straight to ${client.name}'s "${project.name}" list. Send only to that client.` }] };
+      }
+
+      let token = client.share_token;
+      if (!token) {
+        token = mintShareToken();
+        await sb(`clients?id=eq.${enc(client_id)}`, "PATCH", { share_token: token });
+      }
+      return { content: [{ type: "text", text: `${APP_URL}/waiting/${token}\n\n${client.name}'s portal. Send only to that client.` }] };
     });
 
   server.tool("get_client_overview",
