@@ -39,7 +39,7 @@ function whenOptions(due: string | null): { label: string; date: string }[] {
 }
 
 export function ActionDock({
-  task, client, contact, actions, me, users, onLog, onSetNextStepDone, onPatch, onAddComment, onOpenCompose, askNextStepFor, onAskNextStepHandled, pushToast,
+  task, client, contact, actions, me, users, onLog, onSetNextStepDone, onPatch, onAddComment, onOpenCompose, onSendDm, taskLink, askNextStepFor, onAskNextStepHandled, pushToast,
 }: {
   task: Task;
   client: { name: string } | null;
@@ -58,6 +58,11 @@ export function ActionDock({
   onOpenCompose?: (channel: "activity" | "chat" | "email" | "sms") => void;
   // Set once a message has actually gone out. The dock reopens on it to ask
   // what happens next, so sending stops being a dead end.
+  // A real DM, not an @mention comment on the task. The mention notified
+  // correctly but the message lived on the task, so it never showed up in the
+  // one place that teammate actually reads.
+  onSendDm?: (userId: string, body: string) => void;
+  taskLink?: () => string;
   askNextStepFor?: { kind: TaskActionKind; body: string } | null;
   onAskNextStepHandled?: () => void;
   pushToast: (msg: string) => void;
@@ -143,10 +148,17 @@ export function ActionDock({
 
     if (kind === "note") onAddComment(text);
     if (kind === "team" && teammate) {
-      // Reuses the comment path so the existing @mention notification fires,
-      // rather than inventing a second way to ping a teammate.
-      const name = users.find((u) => u.id === teammate)?.name;
-      onAddComment(name ? `@${name} ${text}` : text);
+      if (!text) { pushToast("Write the message first."); return; }
+      // Goes to their DM thread, with the task quoted and linked so the
+      // message stands on its own in a place that has no other context.
+      const link = taskLink?.();
+      // Built as two halves rather than one filtered list: filter(Boolean)
+      // ate the blank separator line, so the message ran straight into the
+      // "Re:" with no break.
+      const ref = [`Re: ${task.title}${client?.name ? ` · ${client.name}` : ""}`, link].filter(Boolean).join("\n");
+      const quoted = `${text}\n\n${ref}`;
+      if (onSendDm) onSendDm(teammate, quoted);
+      else onAddComment(`@${users.find((u) => u.id === teammate)?.name ?? ""} ${text}`.trim());
     }
 
     onLog({
@@ -308,7 +320,7 @@ export function ActionDock({
         {view === "team" && (
           <div>
             {header("team")}
-            <div className="mb-1.5 text-[13px] text-muted">Posts to the task and notifies them.</div>
+            <div className="mb-1.5 text-[13px] text-muted">Goes to their chat with a link back to this task.</div>
             <div className="mb-2 flex flex-wrap gap-1.5">
               {users.filter((u) => u.id !== me?.id).map((u) => (
                 <button key={u.id} onClick={() => setTeammate(u.id)}
