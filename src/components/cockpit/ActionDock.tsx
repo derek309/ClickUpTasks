@@ -76,6 +76,18 @@ export function ActionDock({
   // Explicit, rather than inferring "wanted" from the text being non-empty.
   // Setting nextStep to a space to force the panel open trimmed straight back
   // to empty, so the link did nothing.
+  const [quickNote, setQuickNote] = useState("");
+  const postQuickNote = () => {
+    const text = quickNote.trim();
+    if (!text) return;
+    // No companion comment. The action IS the note; writing both put the same
+    // sentence in the feed twice, once as "Left a note" and once as a bare
+    // comment underneath it.
+    onLog({ id: newId("ta_"), taskId: task.id, kind: "note", authorId: me?.id ?? null,
+      body: text, at: new Date().toISOString(), nextStep: null, nextStepDue: null, nextStepDoneAt: null });
+    setQuickNote("");
+    pushToast("Note added");
+  };
   const [wantNext, setWantNext] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiReason, setAiReason] = useState("");
@@ -146,7 +158,6 @@ export function ActionDock({
     const text = body.trim();
     if (kind === "note" && !text) { pushToast("Write the note first."); return; }
 
-    if (kind === "note") onAddComment(text);
     if (kind === "team" && teammate) {
       if (!text) { pushToast("Write the message first."); return; }
       // Goes to their DM thread, with the task quoted and linked so the
@@ -282,9 +293,24 @@ export function ActionDock({
                   className="rounded-md border px-3 py-1.5 text-[13px] font-medium hover:bg-background">Mark done</button>
               </>
             ) : (
-              <span className="text-[14px] text-muted">Nothing scheduled on this task.</span>
+              // Was dead text saying nothing was scheduled, which is a fact
+              // you can already see and can't act on. A note is the cheapest
+              // useful thing to do to a task, so the empty state offers it
+              // rather than reporting emptiness.
+              <input value={quickNote} onChange={(e) => setQuickNote(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); postQuickNote(); } }}
+                placeholder="Jot a quick note…"
+                className="min-w-0 flex-1 rounded-lg border border-transparent bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted hover:border-border focus:border-accent focus:bg-surface" />
             )}
-            <button onClick={() => openPanel("menu")} className="ml-auto rounded-lg bg-accent px-4 py-2 text-[15px] font-semibold text-white hover:opacity-90">＋ Log action</button>
+            {/* One button, two jobs. Start typing a note and it becomes the
+                way to post it, because a second button that only matters
+                while you are typing would sit dead the rest of the time
+                (Derek: "keep log action but if you type in then changes to
+                quick note"). */}
+            <button onClick={() => (quickNote.trim() ? postQuickNote() : openPanel("menu"))}
+              className="ml-auto shrink-0 rounded-lg bg-accent px-4 py-2 text-[15px] font-semibold text-white hover:opacity-90">
+              {quickNote.trim() ? "Add note" : "＋ Log action"}
+            </button>
           </div>
         )}
 
