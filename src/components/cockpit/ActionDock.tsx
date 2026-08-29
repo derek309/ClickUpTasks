@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  Attachment, Contact, MessageChannel, Task, TaskAction, TaskActionKind, TaskStatus,
+  Attachment, Contact, Task, TaskAction, TaskActionKind, TaskStatus,
   TASK_ACTION_META, TASK_ACTION_ORDER, STATUS_META, STATUS_ORDER,
   User, addDaysIso, TODAY, formatDue, daysUntilDue,
 } from "@/lib/data";
@@ -39,7 +39,7 @@ function whenOptions(due: string | null): { label: string; date: string }[] {
 }
 
 export function ActionDock({
-  task, client, contact, actions, me, users, onLog, onSetNextStepDone, onPatch, onAddComment, onSendMessage, pushToast,
+  task, client, contact, actions, me, users, onLog, onSetNextStepDone, onPatch, onAddComment, onOpenCompose, askNextStepFor, onAskNextStepHandled, pushToast,
 }: {
   task: Task;
   client: { name: string } | null;
@@ -51,12 +51,19 @@ export function ActionDock({
   onSetNextStepDone: (id: string, done: boolean) => void;
   onPatch: (patch: Partial<Task>) => void;
   onAddComment: (body: string, attachments?: Attachment[]) => void;
-  onSendMessage?: (channel: MessageChannel, subject: string, body: string) => void;
+  // Opens the drawer's real composer, the one with attachments, cc/bcc,
+  // scheduling and AI drafting. The dock used to render its own plain
+  // textarea, which meant two ways to send the same message with the poorer
+  // one in front.
+  onOpenCompose?: (channel: "activity" | "chat" | "email" | "sms") => void;
+  // Set once a message has actually gone out. The dock reopens on it to ask
+  // what happens next, so sending stops being a dead end.
+  askNextStepFor?: { kind: TaskActionKind; body: string } | null;
+  onAskNextStepHandled?: () => void;
   pushToast: (msg: string) => void;
 }) {
   const [view, setView] = useState<"closed" | "menu" | TaskActionKind>("closed");
   const [body, setBody] = useState("");
-  const [subject, setSubject] = useState("");
   const [teammate, setTeammate] = useState<string | null>(null);
   const [nextStep, setNextStep] = useState("");
   const [nextDue, setNextDue] = useState<string | null>(null);
@@ -75,11 +82,27 @@ export function ActionDock({
   // watching `view`. A half-typed email must not leak into the next action
   // you take, and doing it on the event avoids a cascading render.
   const openPanel = (v: "closed" | "menu" | TaskActionKind) => {
+    // These three have a real composer already. The dock hands off and gets
+    // out of the way; onMessageSent brings it back to ask what's next.
+    if ((v === "chat" || v === "email" || v === "sms") && onOpenCompose) { onOpenCompose(v); setView("closed"); return; }
     setView(v);
-    setBody(""); setSubject(""); setNextStep(""); setNextDue(null); setStage(null); setAiReason("");
+    setBody(""); setNextStep(""); setNextDue(null); setStage(null); setAiReason("");
     setWantNext(v !== "closed" && v !== "menu" ? TASK_ACTION_META[v as TaskActionKind].needsNextStep : false);
     setTeammate(users.find((u) => u.id !== me?.id)?.id ?? null);
   };
+  // Reopens the dock straight into "what's next?" for a message that just
+  // sent. Deferred a frame because it lands during the composer's own render.
+  useEffect(() => {
+    if (!askNextStepFor) return;
+    const r = requestAnimationFrame(() => {
+      setView(askNextStepFor.kind);
+      setBody(askNextStepFor.body); setNextStep(""); setNextDue(null); setStage(null); setAiReason("");
+      setWantNext(true);
+      onAskNextStepHandled?.();
+    });
+    return () => cancelAnimationFrame(r);
+  }, [askNextStepFor, onAskNextStepHandled]);
+
   useEffect(() => {
     if (!open) return;
     const t = setTimeout(() => bodyRef.current?.focus(), 40);
@@ -118,11 +141,6 @@ export function ActionDock({
     const text = body.trim();
     if (kind === "note" && !text) { pushToast("Write the note first."); return; }
 
-    if (kind === "email" || kind === "sms" || kind === "chat") {
-      if (!text) { pushToast("Write the message first."); return; }
-      if (!onSendMessage) { pushToast("This client has no linked contact to message."); return; }
-      onSendMessage(kind as MessageChannel, subject, text);
-    }
     if (kind === "note") onAddComment(text);
     if (kind === "team" && teammate) {
       // Reuses the comment path so the existing @mention notification fires,
@@ -187,7 +205,7 @@ export function ActionDock({
     <div className="mb-2.5 flex items-center justify-between">
       <span className="flex items-center gap-1.5 text-[15px] font-semibold">
         <button onClick={() => openPanel("menu")} title="Back" className="rounded px-1 text-[19px] leading-none text-muted hover:text-foreground">‹</button>
-        <span aria-hidden>{ICON[kind]}</span> {TASK_ACTION_META[kind].label}
+        <span aria-hidden>{ICON[kind]}</span> {actionLabel(kind)}
       </span>
       <button onClick={() => openPanel("closed")} className="rounded px-1 text-muted hover:text-foreground">✕</button>
     </div>
@@ -206,6 +224,21 @@ export function ActionDock({
       )}
     </div>
   );
+
+  // Naming the person turns a generic verb into the actual thing you are
+  // about to do (Derek: "make this email client name sms client name call
+  // client name"). Falls back to the client, then to a bare verb, so a task
+  // with no contact still reads as an instruction rather than a blank.
+  const who = contact?.name ?? client?.name ?? "";
+  const actionLabel = (k: TaskActionKind) => {
+    if (!who) return TASK_ACTION_META[k].label;
+    if (k === "chat") return `Chat ${who}`;
+    if (k === "email") return `Email ${who}`;
+    if (k === "sms") return `Text ${who}`;
+    if (k === "call") return `Call ${who}`;
+    if (k === "meeting") return `Book ${who}`;
+    return TASK_ACTION_META[k].label;
+  };
 
   const openStep = actions.find((a) => a.nextStep && !a.nextStepDoneAt) ?? null;
   const stepLate = openStep?.nextStepDue ? (daysUntilDue(openStep.nextStepDue) ?? 0) < 0 : false;
@@ -245,7 +278,7 @@ export function ActionDock({
               {TASK_ACTION_ORDER.map((k) => (
                 <button key={k} onClick={() => openPanel(k)}
                   className="inline-flex items-center gap-1.5 rounded-[5px] border border-[#b9cde3] bg-accent-soft px-3 py-1.5 text-[14px] font-semibold text-accent hover:bg-accent hover:text-white">
-                  <span aria-hidden>{ICON[k]}</span> {TASK_ACTION_META[k].label}
+                  <span aria-hidden>{ICON[k]}</span> {actionLabel(k)}
                 </button>
               ))}
             </div>
@@ -282,19 +315,13 @@ export function ActionDock({
           </div>
         )}
 
-        {(view === "email" || view === "sms" || view === "chat") && (
+        {(view === "chat" || view === "email" || view === "sms") && (
           <div>
             {header(view)}
-            <div className="mb-1.5 text-[13px] text-muted">
-              {contact ? <>To <b className="text-foreground">{contact.name}</b>{view === "email" && contact.email ? ` <${contact.email}>` : view === "sms" && contact.phone ? ` ${contact.phone}` : ""}</> : "No linked contact for this client."}
-            </div>
-            {view === "email" && (
-              <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject"
-                className="mb-1.5 w-full rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
-            )}
-            {bodyBox(view === "email" ? "Write the email…" : view === "sms" ? "Write the text…" : "Message the client…")}
+            <div className="mb-1.5 text-[13px] text-muted">Sent{contact ? ` to ${contact.name}` : ""}. It is in the feed above.</div>
+            {body && <div className="mb-2 line-clamp-2 rounded-[9px] border bg-background px-3 py-2 text-[14px] text-muted">{body}</div>}
             {nextStepPanel(view)}
-            {commitRow(view, `Send & log`)}
+            {commitRow(view, "Save next step")}
           </div>
         )}
 

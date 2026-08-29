@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, clientStatusMeta,
-  TaskAction,
+  TaskAction, TaskActionKind,
   STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY, WEEKDAY_LABEL, startSignal, isSnoozed, daysUntilDue, formatDue, dueCountdown,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
@@ -768,8 +768,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // TaskMessaging.tsx — see its own comment for why it's a hook rather than
   // a component (the three drawer layouts nest feedArea/composerFooter
   // differently, so this file controls placement, not TaskMessaging).
-  const { feedArea, composerFooter } = useTaskMessaging({
+  // A sent message parks here until the dock picks it up and asks what
+  // happens next. Sending used to end the interaction; the follow-up date
+  // never got set, which is how a task goes quiet after real work on it.
+  const [pendingNextStep, setPendingNextStep] = useState<{ kind: TaskActionKind; body: string } | null>(null);
+  const { feedArea, composerFooter, openCompose } = useTaskMessaging({
     actions, onSetNextStepDone: setNextStepDone,
+    onMessageSent: (channel, body) => setPendingNextStep({ kind: channel, body }),
     task, client, comment, setComment, onPatch, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, ccContacts, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin,
@@ -1043,8 +1048,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 {chipRow}
                 {playbookGuideBlock}
                 {clientResponseBlock}
-                <div className="mt-5 border-t pt-4">{feedArea}</div>
-                <div className="mt-3">{composerFooter}</div>
+                {/* Composer above the feed, because the feed is newest-first:
+                    what you write next belongs at the end you are reading
+                    from. Below it, opening a composer from the dock scrolled
+                    nothing into view and read as a click that did nothing. */}
+                <div className="mt-5 border-t pt-4">{composerFooter}</div>
+                <div className="mt-3">{feedArea}</div>
               </div>
             </div>
             {/* Stacks below the document on mobile (each pane its own scroll);
@@ -1100,7 +1109,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           task={task} client={client} contact={linkedContactInfo ?? null} actions={actions}
           me={userById(meId) ?? null} users={users}
           onLog={logAction} onSetNextStepDone={setNextStepDone} onPatch={onPatch} onAddComment={onAddComment}
-          onSendMessage={onSendTaskMessage ? (channel, subject, body) => onSendTaskMessage(channel, subject, plainTextToHtml(body)) : undefined}
+          onOpenCompose={openCompose}
+          askNextStepFor={pendingNextStep}
+          onAskNextStepHandled={() => setPendingNextStep(null)}
           pushToast={pushToast}
         />
       </aside>

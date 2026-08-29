@@ -206,11 +206,11 @@ const ACTION_ICON: Record<TaskActionKind, string> = {
   note: "📝", team: "👥", chat: "🗨", email: "✉", sms: "💬", call: "☎", meeting: "📅",
 };
 
-export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onSetNextStepDone?: (id: string, done: boolean) => void }): { feedArea: React.ReactNode; composerFooter: React.ReactNode } {
+export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onSetNextStepDone?: (id: string, done: boolean) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel) => void } {
   const { task, client, comment, setComment, onPatch, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, ccContacts, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin,
-    onDeleteMessage, onEditMessage, hasMessaging, actions, onSetNextStepDone } = p;
+    onDeleteMessage, onEditMessage, hasMessaging, actions, onSetNextStepDone, onMessageSent } = p;
 
   // C3: was a Set of independently-toggled channels (all four on by default),
   // which is how "the active tab reads Chat while the pane shows an email
@@ -310,6 +310,10 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     const bcc = channel === "email" ? msgBcc : undefined;
     const subject = channel === "email" ? (msgSubject.trim() || task.title) : msgSubject;
     onSendTaskMessage(channel, subject, channel === "email" ? msgBody : msgBody.trim(), pendingMsgAtts.length ? pendingMsgAtts : undefined, cc, bcc);
+    // Hands off to the dock, which logs the action and asks what happens
+    // next. Sending used to be a dead end: the message went out and nothing
+    // scheduled the follow-up, which is exactly how work went quiet.
+    onMessageSent?.(channel, htmlToText(msgBody).trim());
     if (replyingTo || isDraftReviewCompose) closeComposers(); else resetComposer();
   };
   const submitScheduledTaskMessage = (whenIso: string) => {
@@ -1037,17 +1041,12 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     </div>
   );
 
-  // Lives in the pinned footer slot, not in the scrolling feed, so the way to
-  // start a message is always on screen instead of only after scrolling to
-  // the bottom of a long thread (Derek, 2026-08-11).
-  const ctaRow = !replyingTo && !composingChannel ? (
-    <div className="flex shrink-0 flex-wrap items-center gap-2 border-t bg-surface px-3 py-2.5">
-      <button onClick={() => openCompose("activity")} className="rounded-md border px-2.5 py-1.5 text-[14px] font-medium text-muted hover:bg-background hover:text-foreground"><I.comment className="inline -mt-0.5 mr-1" />Note</button>
-      {hasMessaging && <button onClick={() => openCompose("chat")} className="rounded-md border px-2.5 py-1.5 text-[14px] font-medium hover:bg-background" style={{ color: channelColor.chat, borderColor: channelColor.chat + "55" }}><I.chatBubbles className="inline -mt-0.5 mr-1" />Chat</button>}
-      {hasMessaging && <button onClick={() => openCompose("email")} className="rounded-md border px-2.5 py-1.5 text-[14px] font-medium hover:bg-background" style={{ color: channelColor.email, borderColor: channelColor.email + "55" }}><I.mail className="inline -mt-0.5 mr-1" />Email</button>}
-      {hasMessaging && <button onClick={() => openCompose("sms")} className="rounded-md border px-2.5 py-1.5 text-[14px] font-medium hover:bg-background" style={{ color: channelColor.sms, borderColor: channelColor.sms + "55" }}><I.phone className="inline -mt-0.5 mr-1" />SMS</button>}
-    </div>
-  ) : null;
+  // The Note/Chat/Email/SMS buttons that used to live here are gone: the
+  // floating dock offers the same four actions and six more, so the drawer
+  // was showing two ways to start the same message a few inches apart
+  // (Derek: "there the Note Chat Email SMS buttons and also the floating
+  // bar"). The dock opens THIS composer, so nothing was lost with them.
+  const ctaRow = null;
 
   const feedArea = (
     <>
@@ -1074,5 +1073,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   );
 
 
-  return { feedArea, composerFooter };
+  // openCompose goes out so the dock can drive this composer rather than
+  // shipping a second, poorer one of its own.
+  return { feedArea, composerFooter, openCompose };
 }
