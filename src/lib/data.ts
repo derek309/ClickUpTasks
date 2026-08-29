@@ -2096,6 +2096,25 @@ export function openNextStep(actions: TaskAction[]): TaskAction | null {
   return best;
 }
 
+// The fields a new occurrence of a recurring task must NOT inherit.
+//
+// A recurrence clone used to copy createdAt and followUpAt straight off the
+// finished occurrence. Both are wrong for a task that starts life today:
+//
+//   createdAt  drove the runway bar, so a monthly task first created in
+//              January read "233 of 237 days used · Start now" forever. The
+//              window has to be this cycle, not every cycle ever.
+//   followUpAt was last cycle's "check back on the 12th". Carried over it
+//              either parks the new occurrence before anyone has touched it,
+//              or lands in the past and makes it look overdue on day one.
+//
+// The window starts at the previous due date, which is exactly when this
+// occurrence became the live one. Falling back to now covers a recurring task
+// that somehow had no due date to advance from.
+export function recurrenceResetFields(previousDue: string | null, now: string = new Date().toISOString()): { createdAt: string; followUpAt: null } {
+  return { createdAt: previousDue ? `${previousDue}T00:00:00.000Z` : now, followUpAt: null };
+}
+
 export function isSnoozed(task: { followUpAt?: string | null }, today: string = TODAY): boolean {
   return !!task.followUpAt && task.followUpAt > today;
 }

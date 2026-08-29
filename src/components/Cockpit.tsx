@@ -9,6 +9,7 @@ import {
   userById,
   formatDue,
   advanceDue,
+  recurrenceResetFields,
   isOverdue,
   timeAgo,
   plainTextToHtml,
@@ -2678,7 +2679,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     let clone: Task | null = null;
     if (cur && synced.status === "done" && cur.status !== "done" && cur.recurrence !== "none") {
       const nextDue = advanceDue(cur.due, cur.recurrence, cur.recurrenceInterval, cur.recurrenceUnit, cur.recurrenceDaysOfMonth, cur.recurrenceNth, cur.recurrenceWeekday);
-      clone = { ...cur, id: newId("t_"), status: "todo", due: nextDue, subtasks: cur.subtasks.map((s) => ({ ...s, id: newId("s_"), done: false })), comments: [], attachments: [...cur.attachments], ghlTaskId: null };
+      clone = { ...cur, id: newId("t_"), status: "todo", due: nextDue, ...recurrenceResetFields(cur.due), subtasks: cur.subtasks.map((s) => ({ ...s, id: newId("s_"), done: false })), comments: [], attachments: [...cur.attachments], ghlTaskId: null };
       pushToast(`🔁 Recurring — next occurrence created for ${formatDue(nextDue)}`);
     }
     if (cur && synced.status === "done" && cur.status !== "done") keepDoneVisible(id);
@@ -2717,7 +2718,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     let clone: Task | null = null;
     if (synced.status === "done" && before.status !== "done" && before.recurrence !== "none") {
       const nextDue = advanceDue(before.due, before.recurrence, before.recurrenceInterval, before.recurrenceUnit, before.recurrenceDaysOfMonth, before.recurrenceNth, before.recurrenceWeekday);
-      clone = { ...before, id: newId("t_"), status: "todo", due: nextDue, subtasks: before.subtasks.map((s) => ({ ...s, id: newId("s_"), done: false })), comments: [], attachments: [...before.attachments], ghlTaskId: null };
+      clone = { ...before, id: newId("t_"), status: "todo", due: nextDue, ...recurrenceResetFields(before.due), subtasks: before.subtasks.map((s) => ({ ...s, id: newId("s_"), done: false })), comments: [], attachments: [...before.attachments], ghlTaskId: null };
       pushToast(`🔁 Recurring — next occurrence created for ${formatDue(nextDue)}`);
     }
     if (synced.status === "done" && before.status !== "done") keepDoneVisible(id);

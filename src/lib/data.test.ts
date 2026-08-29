@@ -26,6 +26,7 @@ import {
   windowBurn,
   isSnoozed,
   effectiveDueDate,
+  recurrenceResetFields,
   startSignal,
   dueCountdown,
   describeRecurrence,
@@ -633,5 +634,26 @@ describe("startSignal across stages", () => {
   });
   it("stays quiet with no due date", () => {
     expect(startSignal({ createdAt: "2026-08-19T09:00:00Z", due: null, status: "in_progress" }, today).level).toBe("none");
+  });
+});
+
+describe("a new occurrence of a recurring task", () => {
+  it("starts its window at the previous due date, not the original creation", () => {
+    // A monthly task first created in January, now rolling from Sep 1 to
+    // Oct 1. Inheriting January made the bar read "233 of 237 days used" and
+    // pin "Start now" on every recurring task, forever.
+    const reset = recurrenceResetFields("2026-09-01");
+    expect(reset.createdAt.slice(0, 10)).toBe("2026-09-01");
+    expect(startSignal({ createdAt: reset.createdAt, due: "2026-10-01", status: "todo" }, "2026-09-03").level).toBe("none");
+  });
+  it("still warns near the end of its own cycle", () => {
+    const reset = recurrenceResetFields("2026-09-01");
+    expect(startSignal({ createdAt: reset.createdAt, due: "2026-10-01", status: "todo" }, "2026-09-25").label).toBe("Start now");
+  });
+  it("drops last cycle's follow-up date", () => {
+    expect(recurrenceResetFields("2026-09-01").followUpAt).toBeNull();
+  });
+  it("falls back to now when there was no due date to advance from", () => {
+    expect(recurrenceResetFields(null, "2026-09-01T12:00:00.000Z").createdAt).toBe("2026-09-01T12:00:00.000Z");
   });
 });
