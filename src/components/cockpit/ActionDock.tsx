@@ -243,10 +243,18 @@ export function ActionDock({
   const openStep = actions.find((a) => a.nextStep && !a.nextStepDoneAt) ?? null;
   const stepLate = openStep?.nextStepDue ? (daysUntilDue(openStep.nextStepDue) ?? 0) < 0 : false;
 
+  // Absolute, not fixed: fixed positions against the viewport, so left-0 put
+  // the dock's left edge under the app's own sidebar and clipped it. The
+  // drawer is itself position:fixed, which makes it the containing block, so
+  // absolute here means "the drawer's bottom-left".
+  //
+  // The right inset lives on this container rather than as a margin on the
+  // inner box. As a margin it fought mx-auto and shoved the dock left instead
+  // of centring it in the narrower space.
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-4 pb-4 sm:px-8 lg:px-12">
-      <div className="pointer-events-auto mx-auto w-full max-w-4xl rounded-[14px] border bg-surface/95 p-3 shadow-[0_12px_32px_rgba(20,24,40,.14),0_2px_6px_rgba(20,24,40,.08)] backdrop-blur-md"
-        style={{ marginRight: "var(--dock-right, 0px)" }}>
+    <div className="pointer-events-none absolute bottom-0 left-0 z-30 px-4 pb-4 sm:px-8 lg:px-12"
+      style={{ right: "var(--dock-right, 0px)" }}>
+      <div className="pointer-events-auto mx-auto w-full max-w-4xl rounded-[14px] border bg-surface/95 p-3 shadow-[0_12px_32px_rgba(20,24,40,.14),0_2px_6px_rgba(20,24,40,.08)] backdrop-blur-md">
 
         {view === "closed" && (
           <div className="flex flex-wrap items-center gap-3">

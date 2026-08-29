@@ -232,6 +232,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onPatch({ attachments: [...task.attachments, { id: newId("at_"), name: linkLabel.trim() || href.replace(/^https?:\/\//, ""), kind: "link", size: "", url: href }] });
     setLinkUrl(""); setLinkLabel(""); setLinkOpen(false);
   };
+  // Both default closed. The rail is reference you glance at; a live editor
+  // and a client/project form are things you touch rarely and they were
+  // costing the column its whole reason to exist.
+  const [descEditing, setDescEditing] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [labelOpen, setLabelOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -603,7 +608,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       </div>
     </div>
   );
-  const detailsBlock = (
+  const detailsBlock = !detailsOpen ? (
+    <button onClick={() => setDetailsOpen(true)} className="mt-3 w-full rounded-xl border border-dashed bg-surface/50 px-3.5 py-2 text-left text-[13px] text-muted hover:bg-surface">
+      Client, project and contact
+    </button>
+  ) : (
     <div className="mt-3 rounded-xl border bg-surface p-4">
     <div className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-muted">Details</div>
     <dl className={full ? "grid grid-cols-1 gap-x-12 gap-y-1.5 lg:grid-cols-2" : "space-y-2"}>
@@ -734,10 +743,25 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   );
 
   const descriptionBlock = !showDescription ? null : (
-    <div className="mt-4 rounded-xl border bg-surface p-4">
-      <div className="mb-2 text-[15px] font-semibold">Description</div>
-      <RichTextEditor key={`task-desc-${task.id}-${descFocusNonce}`} value={task.description} onChange={(html) => descriptionCommit.schedule(() => onPatch({ description: html }))} placeholder="Add a description…" />
-      {onDraftDescription && (
+    <div className="mt-3 rounded-xl border bg-surface p-3.5">
+      <div className="mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-muted">Description</div>
+      {/* Reads as text until you click it. A permanently-live editor put a
+          formatting toolbar and an AI prompt box in the rail on every task,
+          which is most of why this column looked twice the weight of the
+          mockup it came from. */}
+      {descEditing || !htmlToText(task.description).trim() ? (
+        <RichTextEditor key={`task-desc-${task.id}-${descFocusNonce}`} value={task.description} onChange={(html) => descriptionCommit.schedule(() => onPatch({ description: html }))} placeholder="Add a description…" />
+      ) : (
+        <button onClick={() => setDescEditing(true)} title="Click to edit"
+          className="-mx-1 block w-full rounded px-1 text-left text-[14px] leading-relaxed hover:bg-background">
+          <CollapsibleText text={htmlToText(task.description)} maxLines={8} />
+        </button>
+      )}
+      {descEditing && (
+        <button onClick={() => { descriptionCommit.flush(); setDescEditing(false); }}
+          className="mt-1.5 text-[13px] text-accent underline underline-offset-[3px]">Done editing</button>
+      )}
+      {descEditing && onDraftDescription && (
         <div className="mt-2 flex shrink-0 items-start gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
           <span aria-hidden className="pt-1 pl-1 text-[13px]">✨</span>
           {/* A textarea that grows with the text rather than an input that
@@ -781,9 +805,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onDeleteMessage, onEditMessage, hasMessaging,
   });
   const subtasksBlock = !showChecklist ? null : (
-    <div className="mt-4 rounded-xl border bg-surface p-4">
+    <div className="mt-3 rounded-xl border bg-surface p-3.5">
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-[15px] font-semibold">Checklist {task.subtasks.length > 0 && <span className="text-muted">· {doneSubs}/{task.subtasks.length} · {Math.round((doneSubs / task.subtasks.length) * 100)}%</span>}</span>
+        <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Checklist {task.subtasks.length > 0 && <span className="text-muted">· {doneSubs}/{task.subtasks.length} · {Math.round((doneSubs / task.subtasks.length) * 100)}%</span>}</span>
         {templates.length > 0 && (
           <div className="relative">
             <button onClick={() => setTemplateOpen((o) => !o)} className="inline-flex items-center gap-1 text-[13px] font-medium text-accent"><I.clipboard /> From template</button>
@@ -822,9 +846,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     return 0; // "added" — keep stored order (oldest first, matches how they were attached)
   }), [task.attachments, attSort]);
   const attachmentsBlock = !showAttachments ? null : (
-    <div className="mt-4 rounded-xl border bg-surface p-4">
+    <div className="mt-3 rounded-xl border bg-surface p-3.5">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <span className="text-[15px] font-semibold">Attachments {task.attachments.length > 0 && <span className="text-muted">· {task.attachments.length}</span>}</span>
+        <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Attachments {task.attachments.length > 0 && <span className="text-muted">· {task.attachments.length}</span>}</span>
         <span className="flex items-center gap-3">
           {task.attachments.length > 1 && (
             <select value={attSort} onChange={(e) => setAttSort(e.target.value as typeof attSort)} className="rounded-md border bg-background px-1.5 py-1 text-[13px] outline-none" title="Sort attachments">
@@ -965,7 +989,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           set by Cockpit and follows the sidebar (16rem, or 0 when hidden);
           below md the sidebar is an overlay, so the drawer is full width.
           left + right define the box there, hence md:w-auto over w-full. */}
-      <aside onPaste={handlePaste} className={full ? "fixed inset-0 z-50 flex flex-col bg-surface" : "fixed inset-y-0 right-0 z-20 flex w-full flex-col border-l bg-surface shadow-xl md:left-[var(--drawer-left,16rem)] md:w-auto"}>
+      {/* --dock-right keeps the floating dock inside the document column
+          instead of running under the reference rail, so it centres on the
+          column it belongs to. Zero below 1100px, where the rail stacks
+          underneath and there is no column to stay clear of. */}
+      <aside onPaste={handlePaste}
+        style={{ "--rail-w": `${activityW}px` } as React.CSSProperties}
+        className={`[--dock-right:0px] ${isLightTask ? "" : "min-[1100px]:[--dock-right:var(--rail-w)]"} ${full ? "fixed inset-0 z-50 flex flex-col bg-surface" : "fixed inset-y-0 right-0 z-20 flex w-full flex-col border-l bg-surface shadow-xl md:left-[var(--drawer-left,16rem)] md:w-auto"}`}>
         <div className="flex flex-wrap items-center gap-2 border-b px-5 py-3 text-[13px] text-muted">
           <span className="flex min-w-0 items-center gap-2">
             <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: client.color }} />
@@ -1092,12 +1122,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               {/* Sticky reference: description, checklist and attachments
                   stay on screen while the feed scrolls beside them, which is
                   the one thing a single column genuinely loses. */}
-              <div className="flex flex-1 flex-col overflow-y-auto px-5 py-4">
-                {detailsBlock}
+              <div className="flex flex-1 flex-col overflow-y-auto px-4 py-4">
                 {descriptionBlock}
                 {subtasksBlock}
                 {attachmentsBlock}
                 {emptySectionsRow}
+                {detailsBlock}
               </div>
             </div>
           </div>
