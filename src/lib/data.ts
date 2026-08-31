@@ -414,6 +414,10 @@ export interface Contact {
   company?: string; // GHL companyName — shown alongside the name in search
   city?: string; // GHL address fields — power the territory dashboard's city/state match
   state?: string;
+  /** Mirrored from the GoHighLevel contact custom field "SaaS"
+   *  (fieldKey contact.saas). Cached so a list can show it without a GHL
+   *  round trip per row; GoHighLevel stays the source of truth. */
+  saasUrl?: string;
 }
 
 // A reusable checklist, applied either to quick-populate a new task (title

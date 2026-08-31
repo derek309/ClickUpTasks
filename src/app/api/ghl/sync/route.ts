@@ -31,6 +31,19 @@ async function fetchGhlPage(url: string, headers: Record<string, string>, retrie
 // into our contacts table, linked to the given client. The GHL token stays
 // server-side (env). NOTE: this route is currently gated only by the admin-only
 // Settings UI; server-side role enforcement lands with RLS hardening.
+// The SaaS URL out of a GHL contact's custom fields. Matched on fieldKey
+// rather than a hardcoded id: the field's id differs per sub-account, and one
+// of them does not define the field at all.
+function saasFromContact(c: any): string | null {
+  for (const f of (c?.customFields ?? []) as any[]) {
+    if (f?.fieldKey === "contact.saas" || f?.key === "contact.saas") {
+      const v = typeof f.value === "string" ? f.value : (f.fieldValue ?? "");
+      return v || null;
+    }
+  }
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   if (!(await requireAdmin(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { clientId, locationId } = await req.json().catch(() => ({}));
@@ -70,6 +83,11 @@ export async function POST(req: NextRequest) {
     company_name: c.companyName ?? null,
     city: c.city ?? null,
     state: c.state ?? null,
+    // The SaaS URL rides along with the bulk sync rather than needing its own
+    // pass. GHL returns customFields on the list endpoint, so this costs
+    // nothing extra, and every already-synced client gets the value the next
+    // time their sub-account syncs.
+    saas_url: saasFromContact(c),
   }));
 
   if (rows.length) {

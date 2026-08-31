@@ -320,6 +320,57 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Counted rather than a boolean: dragleave fires every time the pointer
   // crosses into a child element, so a plain flag flickers off the moment you
   // move over anything inside the drawer.
+  // The client's SaaS URL, mirrored from GoHighLevel. Seeded from the synced
+  // contact so it shows instantly, then confirmed against GHL on open because
+  // the mirror can be a sync behind and this is the kind of link people paste
+  // into GHL directly.
+  const [saasFor, setSaasFor] = useState<{ id: string; url: string }>({ id: linkedContactInfo?.id ?? "", url: linkedContactInfo?.saasUrl ?? "" });
+  // Read through the contact it belongs to, so opening a different task never
+  // shows the previous client's link for a frame.
+  const saasUrl = saasFor.id === (linkedContactInfo?.id ?? "") ? saasFor.url : (linkedContactInfo?.saasUrl ?? "");
+  const setSaasUrl = (url: string) => setSaasFor({ id: linkedContactInfo?.id ?? "", url });
+  const [saasEditing, setSaasEditing] = useState(false);
+  const [saasSaving, setSaasSaving] = useState(false);
+  const [saasEditable, setSaasEditable] = useState(true);
+  useEffect(() => {
+    const ghlId = linkedContactInfo?.ghlContactId;
+    const contactRowId = linkedContactInfo?.id ?? "";
+    if (!ghlId) return;
+    let live = true;
+    // Seeding happens in the same async path as the confirm, so nothing sets
+    // state synchronously in the effect body. The mirrored value renders
+    // immediately anyway, as the initial state.
+    authedFetch("/api/ghl/saas", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ghlContactId: ghlId, contactId: contactRowId }),
+    })
+      .then((r) => r.json())
+      // setSaasFor directly rather than the setSaasUrl wrapper: the wrapper is
+      // rebuilt every render, so depending on it would re-run this effect
+      // forever.
+      .then((j) => { if (live && typeof j?.url === "string") { setSaasFor({ id: contactRowId, url: j.url }); setSaasEditable(j.editable !== false); } })
+      .catch(() => { /* keep the mirrored value */ });
+    return () => { live = false; };
+  }, [linkedContactInfo?.ghlContactId, linkedContactInfo?.id, linkedContactInfo?.saasUrl]);
+
+  const saveSaas = async (value: string) => {
+    const ghlId = linkedContactInfo?.ghlContactId;
+    if (!ghlId) return;
+    setSaasSaving(true);
+    try {
+      const res = await authedFetch("/api/ghl/saas", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ghlContactId: ghlId, contactId: linkedContactInfo?.id, url: value }),
+      });
+      const j = await res.json();
+      if (!res.ok) { pushToast(j?.error ?? "Couldn't save to GoHighLevel."); return; }
+      setSaasUrl(j.url ?? "");
+      setSaasEditing(false);
+      pushToast(j.url ? "SaaS link saved to GoHighLevel" : "SaaS link cleared");
+    } catch { pushToast("Couldn't reach GoHighLevel."); }
+    finally { setSaasSaving(false); }
+  };
+
   const [fileOverDrawer, setFileOverDrawer] = useState(false);
   const dragDepth = useRef(0);
   const carriesFiles = (e: React.DragEvent) => e.dataTransfer.types.includes("Files");
@@ -1273,6 +1324,39 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                       {onCopyClientLink && <button onClick={onCopyClientLink} className="font-medium text-accent hover:underline">Copy client link</button>}
                     </span>
                   </div>
+                  {/* The client's SaaS URL, living in GoHighLevel as the
+                      contact's "SaaS" custom field. Shown here because it is
+                      a per-client fact you want while working a task, and
+                      editable here because otherwise adding one means leaving
+                      for GHL and coming back. */}
+                  {linkedContactInfo?.ghlContactId && (
+                    <div className="mt-1.5 flex items-center gap-2 text-[12px]">
+                      <span className="shrink-0 font-semibold uppercase tracking-wide text-muted">SaaS</span>
+                      {saasEditing ? (
+                        <input autoFocus defaultValue={saasUrl} disabled={saasSaving}
+                          onBlur={(e) => saveSaas(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") { e.preventDefault(); saveSaas(e.currentTarget.value); }
+                            if (e.key === "Escape") setSaasEditing(false);
+                          }}
+                          placeholder="app.example.com"
+                          className="min-w-0 flex-1 rounded border bg-surface px-1.5 py-0.5 text-[12px] outline-none focus:border-accent disabled:opacity-60" />
+                      ) : saasUrl ? (
+                        <>
+                          <a href={saasUrl} target="_blank" rel="noopener noreferrer" title={saasUrl}
+                            className="min-w-0 flex-1 truncate font-medium text-accent hover:underline">{prettyLinkName(saasUrl)}</a>
+                          <button onClick={() => { navigator.clipboard?.writeText(saasUrl).then(() => pushToast("🔗 SaaS link copied"), () => {}); }}
+                            title="Copy the SaaS link" className="shrink-0 rounded p-0.5 text-muted hover:text-foreground"><I.copy className="h-3 w-3" /></button>
+                          {saasEditable && <button onClick={() => setSaasEditing(true)} title="Edit" className="shrink-0 rounded p-0.5 text-muted hover:text-foreground"><I.pencil className="h-3 w-3" /></button>}
+                        </>
+                      ) : saasEditable ? (
+                        <button onClick={() => setSaasEditing(true)} className="text-[12px] text-accent underline underline-offset-[3px]">Add a SaaS link</button>
+                      ) : (
+                        <span className="text-muted" title="This sub-account has no SaaS field in GoHighLevel yet.">not available here</span>
+                      )}
+                      {saasSaving && <span className="shrink-0 text-muted">saving…</span>}
+                    </div>
+                  )}
                 </div>
               )}
               {/* Top-anchored (Derek, 2026-08-19: the bottom-anchored
