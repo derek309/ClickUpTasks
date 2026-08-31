@@ -2460,7 +2460,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Shared with Follow Up's sales board (dueBucketOf/DUE_BUCKETS in data.ts)
   // so both read identically — My Work for active clients, Follow Up for
   // sales (Derek, 2026-08-11).
-  const dueBucket = (t: Task) => dueBucketOf(t.due, t.status === "done");
+  // Buckets on the effective date, so a task you asked to see today shows up
+  // in Today even when it isn't owed for a week.
+  const dueBucket = (t: Task) => dueBucketOf(effectiveDueDate(t), t.status === "done");
 
   type Grp = { key: string; label: string; color: string; tasks: Task[] };
   const buildGroups = (list: Task[], dim: typeof groupBy = groupBy): Grp[] => {
@@ -4648,7 +4650,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             canAdmin={canAdmin} onAddProject={() => addProject(WORKSPACE_CLIENT_ID)} onRename={renameProject} onDelete={deleteProject}
             starredLists={starredLists} onToggleStarList={toggleStarList} />
         ) : personalView ? (
-          <GroupedList meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} colOrder={colOrder} onReorderCols={reorderCols} />
+          <GroupedList key={groupBy} groupKind={groupBy} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} colOrder={colOrder} onReorderCols={reorderCols} />
         ) : myWork && dashboardView === "completed" ? (
           // Relocated from the Clients directory (Derek: "makes more sense
           // there") — same completionLog data, day-grouped feed of who
@@ -4759,7 +4761,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   </div>
                 )}
                 {activeFilterBar}
-                <GroupedList meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildPlaybookGroups(baseTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="" onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={false} colOrder={colOrder} onReorderCols={reorderCols} />
+                <GroupedList key={groupBy} groupKind={groupBy} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildPlaybookGroups(baseTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="" onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={false} colOrder={colOrder} onReorderCols={reorderCols} />
                 <div className="mt-3 rounded-xl border bg-surface p-4">
                   <div className="text-[13px] font-semibold uppercase tracking-wide text-muted">Always running for you</div>
                   <ul className="mt-2 list-disc space-y-1 pl-5 text-[14px] text-muted">
@@ -4782,7 +4784,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           ) : (
             <>
             {activeFilterBar}
-            <GroupedList meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
+            <GroupedList key={groupBy} groupKind={groupBy} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
             </>
           )}
           </>

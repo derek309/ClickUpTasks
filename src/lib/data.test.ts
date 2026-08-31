@@ -565,12 +565,15 @@ describe("follow-up date", () => {
   });
   it("orders by the follow-up while snoozed, and never overwrites the due date", () => {
     const t = { due: "2026-08-26", followUpAt: "2026-09-02" };
-    expect(effectiveDueDate(t, today)).toBe("2026-09-02");
+    expect(effectiveDueDate(t)).toBe("2026-09-02");
     expect(t.due).toBe("2026-08-26"); // the promise is still on record
   });
-  it("goes back to the due date once the follow-up has arrived", () => {
-    expect(effectiveDueDate({ due: "2026-08-26", followUpAt: "2026-08-28" }, today)).toBe("2026-08-26");
-    expect(effectiveDueDate({ due: "2026-08-26", followUpAt: null }, today)).toBe("2026-08-26");
+  // Superseded: an arrived follow-up used to hand the task back to its due
+  // date. It now stays the date the task is judged on, which is what makes a
+  // follow-up worth setting at all.
+  it("keeps using the follow-up once it has arrived, and the due date without one", () => {
+    expect(effectiveDueDate({ due: "2026-08-26", followUpAt: "2026-08-28" })).toBe("2026-08-28");
+    expect(effectiveDueDate({ due: "2026-08-26", followUpAt: null })).toBe("2026-08-26");
   });
   it("does not tell you to start something you're waiting on", () => {
     // Overdue and untouched, but snoozed until next week — silent.
@@ -583,19 +586,26 @@ describe("follow-up date", () => {
 
 describe("effectiveDueDate with a follow-up but no due date", () => {
   it("uses the follow-up date while it is still in the future", () => {
-    expect(effectiveDueDate({ due: null, followUpAt: "2026-09-05" }, "2026-08-28")).toBe("2026-09-05");
+    expect(effectiveDueDate({ due: null, followUpAt: "2026-09-05" })).toBe("2026-09-05");
   });
   it("still uses it on the day it arrives, instead of going undated", () => {
-    expect(effectiveDueDate({ due: null, followUpAt: "2026-09-05" }, "2026-09-05")).toBe("2026-09-05");
+    expect(effectiveDueDate({ due: null, followUpAt: "2026-09-05" })).toBe("2026-09-05");
   });
   it("keeps surfacing a follow-up that has passed", () => {
-    expect(effectiveDueDate({ due: null, followUpAt: "2026-08-20" }, "2026-08-28")).toBe("2026-08-20");
+    expect(effectiveDueDate({ due: null, followUpAt: "2026-08-20" })).toBe("2026-08-20");
   });
-  it("prefers a real due date once the snooze is over", () => {
-    expect(effectiveDueDate({ due: "2026-09-30", followUpAt: "2026-08-20" }, "2026-08-28")).toBe("2026-09-30");
+  // Superseded: the due date used to win back once a follow-up had passed.
+  // A follow-up now trumps the due date whenever one is set, in both
+  // directions, so an expired follow-up keeps surfacing rather than handing
+  // the task back to a due date a month out.
+  it("keeps using an expired follow-up over a far-off due date", () => {
+    expect(effectiveDueDate({ due: "2026-09-30", followUpAt: "2026-08-20" })).toBe("2026-08-20");
+  });
+  it("surfaces a task whose follow-up is today but is not due for a week", () => {
+    expect(effectiveDueDate({ due: "2026-09-04", followUpAt: "2026-08-28" })).toBe("2026-08-28");
   });
   it("is genuinely undated with neither", () => {
-    expect(effectiveDueDate({ due: null, followUpAt: null }, "2026-08-28")).toBeNull();
+    expect(effectiveDueDate({ due: null, followUpAt: null })).toBeNull();
   });
 });
 

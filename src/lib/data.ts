@@ -67,6 +67,13 @@ export const DUE_BUCKETS: { key: DueBucket; label: string; color: string }[] = [
   { key: "later", label: "Later", color: "#94a3b8" },
   { key: "none", label: "No date", color: "#cbd5e1" },
 ];
+// Buckets that start collapsed when a list is grouped by due date. Overdue,
+// Today, Tomorrow and This week are the horizon you act on; everything past
+// that is reference you open when you want it, and left expanded it buried
+// the near stuff under a hundred rows of "No date" (Derek: "close by default
+// next week, later and no date, leave today, tomorrow, this week open").
+export const COLLAPSED_DUE_BUCKETS: ReadonlySet<string> = new Set(["nextWeek", "month", "later", "none"]);
+
 /** Which bucket a yyyy-mm-dd date falls into, relative to TODAY. `isDone`
  * suppresses the overdue bucket — a finished task that happened to be late
  * isn't something that still needs doing. */
@@ -2151,13 +2158,20 @@ export function isSnoozed(task: { followUpAt?: string | null }, today: string = 
  *  to the top by a due date you can't yet act on is just noise. The due date
  *  itself is never overwritten — that was the whole problem with using one
  *  field for both. */
-export function effectiveDueDate(task: { due: string | null; followUpAt?: string | null }, today: string = TODAY): string | null {
-  if (isSnoozed(task, today)) return task.followUpAt!;
-  // Falling back to followUpAt matters for a task with a follow-up and no due
-  // date. Returning task.due alone would make it sort as undated on the very
-  // day it was supposed to come back, so the act of arriving would make it
-  // disappear. A past follow-up keeps surfacing until it is dealt with.
-  return task.due ?? task.followUpAt ?? null;
+export function effectiveDueDate(task: { due: string | null; followUpAt?: string | null }): string | null {
+  // A follow-up date beats the due date whenever one is set (Derek: "follow
+  // up date trumps due date ... pulling the task to the top due today even if
+  // it's not due for a week"). Both directions matter:
+  //
+  //   follow up today, due next week  → it surfaces today, which is the point
+  //                                     of having said "come back to me then"
+  //   follow up next week, due today  → it stays parked, which is the point
+  //                                     of having parked it
+  //
+  // The due date is still the promise, and the runway bar and the overdue
+  // colouring both keep measuring against it. This is only about when the
+  // task asks for your attention.
+  return task.followUpAt ?? task.due;
 }
 
 export function isOverdue(iso: string | null): boolean {
