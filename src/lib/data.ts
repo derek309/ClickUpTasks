@@ -2081,6 +2081,15 @@ export const TASK_ACTION_META: Record<TaskActionKind, { label: string; verb: str
 
 export const TASK_ACTION_ORDER: TaskActionKind[] = ["note", "team", "chat", "email", "sms", "call", "met", "meeting"];
 
+// Actions that reach the client. Hidden from anyone without permission to
+// contact that client, so a VA sees the internal half of the dock (note,
+// teammate, log a meeting, ask) and none of the ways to talk to them.
+//
+// "met" is not on this list: logging a meeting that already happened is a
+// record, not an outbound message, and a VA who sat in on a call still has to
+// be able to write down what was decided.
+export const CLIENT_FACING_ACTIONS: ReadonlySet<TaskActionKind> = new Set(["chat", "email", "sms", "call", "meeting"]);
+
 export type TaskAction = {
   id: string;
   taskId: string;

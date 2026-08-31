@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Attachment, Contact, Message, Task, TaskAction, TaskActionKind, TaskStatus, htmlToText,
-  TASK_ACTION_META, TASK_ACTION_ORDER, STATUS_META, STATUS_ORDER,
+  TASK_ACTION_META, TASK_ACTION_ORDER, CLIENT_FACING_ACTIONS, STATUS_META, STATUS_ORDER,
   User, addDaysIso, TODAY, formatDue, daysUntilDue,
 } from "@/lib/data";
 import { I, newId } from "./ui";
@@ -39,7 +39,7 @@ function whenOptions(due: string | null): { label: string; date: string }[] {
 }
 
 export function ActionDock({
-  task, client, contact, actions, messages, me, users, onLog, onSetNextStepDone, onPatch, onAddComment, onOpenCompose, onSendDm, taskLink, askNextStepFor, onAskNextStepHandled, pushToast,
+  task, client, contact, actions, messages, me, users, onLog, onSetNextStepDone, onPatch, onAddComment, onOpenCompose, canMessageClient = true, onSendDm, taskLink, askNextStepFor, onAskNextStepHandled, pushToast,
 }: {
   task: Task;
   client: { name: string } | null;
@@ -58,6 +58,8 @@ export function ActionDock({
   // textarea, which meant two ways to send the same message with the poorer
   // one in front.
   onOpenCompose?: (channel: "activity" | "chat" | "email" | "sms") => void;
+  /** May this person contact this client at all. False hides every outbound action. */
+  canMessageClient?: boolean;
   // Set once a message has actually gone out. The dock reopens on it to ask
   // what happens next, so sending stops being a dead end.
   // A real DM, not an @mention comment on the task. The mention notified
@@ -390,7 +392,7 @@ export function ActionDock({
                 className="inline-flex items-center gap-1.5 rounded-[5px] border border-dashed px-3 py-1.5 text-[14px] font-semibold text-muted hover:bg-background hover:text-foreground">
                 <span aria-hidden>💡</span> Ask about this task
               </button>
-              {TASK_ACTION_ORDER.map((k) => (
+              {TASK_ACTION_ORDER.filter((k) => canMessageClient || !CLIENT_FACING_ACTIONS.has(k)).map((k) => (
                 <button key={k} onClick={() => openPanel(k)}
                   className="inline-flex items-center gap-1.5 rounded-[5px] border border-[#b9cde3] bg-accent-soft px-3 py-1.5 text-[14px] font-semibold text-accent hover:bg-accent hover:text-white">
                   <span aria-hidden>{ICON[k]}</span> {actionLabel(k)}

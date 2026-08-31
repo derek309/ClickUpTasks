@@ -1208,6 +1208,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           me={userById(meId) ?? null} users={users}
           onLog={logAction} onSetNextStepDone={setNextStepDone} onPatch={onPatch} onAddComment={onAddComment}
           onOpenCompose={openCompose}
+          // Same gate the composer already uses: onSendTaskMessage is only
+          // passed when this person may message this client.
+          canMessageClient={!!onSendTaskMessage}
           onSendDm={onSendDm} taskLink={taskLink}
           askNextStepFor={pendingNextStep}
           onAskNextStepHandled={() => setPendingNextStep(null)}

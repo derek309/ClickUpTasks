@@ -27,6 +27,8 @@ import {
   isSnoozed,
   effectiveDueDate,
   prettyLinkName,
+  TASK_ACTION_ORDER,
+  CLIENT_FACING_ACTIONS,
   recurrenceResetFields,
   startSignal,
   dueCountdown,
@@ -682,5 +684,25 @@ describe("prettyLinkName", () => {
   });
   it("does not throw on junk", () => {
     expect(prettyLinkName("not a url at all")).toBeTruthy();
+  });
+});
+
+describe("what someone without client-messaging permission can do", () => {
+  const visible = TASK_ACTION_ORDER.filter((k) => !CLIENT_FACING_ACTIONS.has(k));
+
+  it("hides every way of reaching the client", () => {
+    expect(visible).not.toContain("email");
+    expect(visible).not.toContain("sms");
+    expect(visible).not.toContain("chat");
+    expect(visible).not.toContain("call");
+    expect(visible).not.toContain("meeting"); // booking one is an invitation
+  });
+  it("keeps the internal half", () => {
+    expect(visible).toEqual(["note", "team", "met"]);
+  });
+  // A VA who sat in on a call still has to be able to write down what was
+  // decided, so logging a meeting that happened is not an outbound action.
+  it("still lets them log a meeting that already happened", () => {
+    expect(CLIENT_FACING_ACTIONS.has("met")).toBe(false);
   });
 });
