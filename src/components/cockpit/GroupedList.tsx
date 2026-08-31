@@ -112,7 +112,7 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   const projectIds = new Set(groups.flatMap((g) => g.tasks.map((t) => t.projectId)));
   const showCrumb = projectIds.size > 1;
   const template = ["minmax(240px,1.4fr)", ...(showClient ? ["180px"] : []), ...cols.map((c) => COL_WIDTHS[c.key])].join(" ");
-  const sortColKey: Record<string, string> = { title: "task", priority: "priority", due: "due", assignee: "assignee", status: "status", comments: "comments" };
+  const sortColKey: Record<string, string> = { title: "task", priority: "priority", due: "due", followUp: "followUp", assignee: "assignee", status: "status", comments: "comments" };
   const activeCol = sortColKey[sortKey];
   const Arrow = ({ col }: { col: string }) => (activeCol === col ? <span className="text-accent">{sortDir === "asc" ? "↑" : "↓"}</span> : null);
 
@@ -234,6 +234,11 @@ function TaskRow({ task, template, cols, showClient, showCrumb, clientById, proj
     );
     if (key === "assignee") return <InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a, waitingOnClient: false })} onSetWaiting={() => onPatch(task.id, { waitingOnClient: true, assigneeId: null })} />;
     if (key === "priority") return <InlinePriority value={task.priority} onChange={(p) => onPatch(task.id, { priority: p })} />;
+    if (key === "followUp") return (
+      <InlineDate value={task.followUpAt ?? null} onChange={(d) => onPatch(task.id, { followUpAt: d })}
+        onClear={() => onPatch(task.id, { followUpAt: null })}
+        className={`text-[11px] ${isSnoozed(task) ? "font-medium text-amber-700" : "text-muted"}`} emptyLabel="—" />
+    );
     if (key === "due") return <InlineDue value={task.due} overdue={overdue && !isSnoozed(task)} followUpAt={task.followUpAt ?? null} recurrence={task.recurrence} onChange={(d) => onPatch(task.id, { due: d })} onRecurrenceChange={(r) => onPatch(task.id, { recurrence: r })} />;
     if (key === "created") return (
       <span className="truncate text-[11px] text-muted" title={`Created ${task.createdAt.slice(0, 10)}`}>{formatDue(task.createdAt.slice(0, 10))}</span>

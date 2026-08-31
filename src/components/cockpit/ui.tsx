@@ -372,7 +372,7 @@ export function CollapsibleText({ text, className, maxChars = LONG_TEXT_CHAR_THR
 }
 
 export type FilterState = { status: TaskStatus | "all"; assignee: string; priority: Priority | "all" };
-export type SortBy = "manual" | "due" | "priority" | "title" | "status" | "assignee" | "comments" | "created";
+export type SortBy = "manual" | "due" | "followUp" | "priority" | "title" | "status" | "assignee" | "comments" | "created";
 // Comments moved inline next to the task title, shown only when non-zero —
 // stays sortable via onSort even without a column header (Cockpit's sort
 // menu still offers it). Priority came back as a real column (Derek,
@@ -381,6 +381,10 @@ export type SortBy = "manual" | "due" | "priority" | "title" | "status" | "assig
 export const LIST_COLUMNS: { key: string; label: string; sortable: boolean }[] = [
   { key: "status", label: "Stage", sortable: true },
   { key: "priority", label: "Priority", sortable: true },
+  // Before Due, not after: a follow-up is the date you act on, and the due
+  // date is the promise it is working toward. Reading left to right that is
+  // "when do I pick this up" then "when is it owed".
+  { key: "followUp", label: "Follow up", sortable: true },
   { key: "due", label: "Due date", sortable: true },
   // Created is the start date: Derek wants to see how long something has been
   // sitting, not just when it's owed ("the creation date is the start date, I
@@ -400,7 +404,7 @@ export const DIR_ROW = "group flex min-h-[38px] cursor-pointer items-center gap-
 // status is wider than the label needs: the one-click done toggle sits beside
 // it (see GroupedList's doneToggle), and at 128px "Changes" plus the circle
 // clipped.
-export const COL_WIDTHS: Record<string, string> = { status: "152px", due: "132px", created: "88px", priority: "132px", comments: "84px", assignee: "72px", contact: "160px", labels: "150px" };
+export const COL_WIDTHS: Record<string, string> = { status: "152px", due: "132px", followUp: "120px", created: "88px", priority: "132px", comments: "84px", assignee: "72px", contact: "160px", labels: "150px" };
 // `action` powers undo: a bulk edit hands back a one-click revert instead of
 // leaving someone to re-set every task by hand. Toasts carrying an action
 // stay on screen longer (see pushToast) so there's time to actually hit it.

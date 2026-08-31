@@ -246,7 +246,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [filters, setFilters] = useState<FilterState>({ status: "all", assignee: "all", priority: "all" });
   const [sortBy, setSortBy] = useState<SortBy>("due");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
-  const [visibleCols, setVisibleCols] = useState<string[]>(["status", "priority", "due", "created"]);
+  const [visibleCols, setVisibleCols] = useState<string[]>(["status", "priority", "followUp", "due", "created"]);
   // Manual drag order for list columns — persisted like the other view
   // toggles below. Any key not yet in a saved order (e.g. after adding a new
   // column) falls back to LIST_COLUMNS' own order in reorderCols/colOrder use.
@@ -1660,6 +1660,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (sortBy === "manual") return hoistPinned(arr);
     const dir = sortDir === "desc" ? -1 : 1;
     if (sortBy === "due") arr.sort((a, b) => ((effectiveDueDate(a) ?? "9999").localeCompare(effectiveDueDate(b) ?? "9999")) * dir);
+    // Sorts on the follow-up date alone, not effectiveDueDate: the point of
+    // this column is "what comes back to me and when", so a task with no
+    // follow-up sorts to the end rather than borrowing its due date.
+    if (sortBy === "followUp") arr.sort((a, b) => ((a.followUpAt ?? "9999").localeCompare(b.followUpAt ?? "9999")) * dir);
     else if (sortBy === "priority") arr.sort((a, b) => {
       // A live reply thread outranks every priority tier. Derived from the
       // table rather than hardcoded — it used to be a literal 4, which
