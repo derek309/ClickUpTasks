@@ -111,7 +111,7 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   // only earns its line when the list actually spans more than one.
   const projectIds = new Set(groups.flatMap((g) => g.tasks.map((t) => t.projectId)));
   const showCrumb = projectIds.size > 1;
-  const template = ["minmax(200px,1fr)", ...(showClient ? ["180px"] : []), ...cols.map((c) => COL_WIDTHS[c.key])].join(" ");
+  const template = ["minmax(240px,1.4fr)", ...(showClient ? ["180px"] : []), ...cols.map((c) => COL_WIDTHS[c.key])].join(" ");
   const sortColKey: Record<string, string> = { title: "task", priority: "priority", due: "due", assignee: "assignee", status: "status", comments: "comments" };
   const activeCol = sortColKey[sortKey];
   const Arrow = ({ col }: { col: string }) => (activeCol === col ? <span className="text-accent">{sortDir === "asc" ? "↑" : "↓"}</span> : null);
@@ -301,7 +301,12 @@ function TaskRow({ task, template, cols, showClient, showCrumb, clientById, proj
                 below the thing they describe, not in front of it. */}
             <span className="flex min-w-0 items-center gap-1.5">
               {delegated && <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">Delegated</span>}
-              <span className={`line-clamp-none min-w-0 flex-1 break-words text-[15px] font-medium leading-snug sm:line-clamp-2 ${isDone ? "text-muted line-through" : ""}`} title={task.title}>{task.title}</span>
+              {/* One line, ellipsed. It used to wrap to two (break-words plus
+                  line-clamp-2), so on a narrow Name column every long title
+                  cost a second row of height and the list stopped scanning as
+                  a list. The full text is in the title attribute and the task
+                  is one click away. */}
+              <span className={`min-w-0 flex-1 truncate text-[15px] font-medium leading-snug ${isDone ? "text-muted line-through" : ""}`} title={task.title}>{task.title}</span>
             </span>
             <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5">
               {showCrumb && !showClient && crumb && <span className="min-w-0 truncate text-[11px] leading-tight text-muted">{crumb}</span>}
