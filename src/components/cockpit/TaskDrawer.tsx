@@ -229,6 +229,21 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
   const [linkLabel, setLinkLabel] = useState("");
+  // The task as it is NOW, not as it was when a callback was created.
+  //
+  // Every attachment edit rebuilds the whole array, so one built from a stale
+  // copy silently deletes anything added since. That is what made a new link
+  // appear and then vanish: addLink patched in the link, the title fetch came
+  // back a moment later and called renameAttachment, and renameAttachment
+  // mapped over the attachments from the render that had ALREADY happened —
+  // an array without the new link — writing it straight back out. The feed
+  // recorded it honestly as "added a link" then "removed the link".
+  const taskRef = useRef(task);
+  // Updated on commit, not during render: writing a ref while rendering is a
+  // side effect in the render path. The reads that matter happen well after
+  // commit anyway (a title fetch resolving hundreds of ms later).
+  useEffect(() => { taskRef.current = task; }, [task]);
+
   const addLink = () => {
     const url = linkUrl.trim();
     if (!url) return;
@@ -238,7 +253,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // Named immediately from the URL so the row never shows a raw link, then
     // upgraded in place if the page has a real title. Doing it the other way
     // round would leave a blank row while a slow site thinks about it.
-    onPatch({ attachments: [...task.attachments, { id, name: typed || prettyLinkName(href), kind: "link", size: "", url: href }] });
+    onPatch({ attachments: [...taskRef.current.attachments, { id, name: typed || prettyLinkName(href), kind: "link", size: "", url: href }] });
     setLinkUrl(""); setLinkLabel(""); setLinkOpen(false);
     if (!typed) void fetchLinkTitle(id, href);
   };
@@ -259,7 +274,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const renameAttachment = (id: string, name: string) => {
     const clean = name.trim().slice(0, 200);
     if (!clean) return;
-    onPatch({ attachments: task.attachments.map((a) => (a.id === id ? { ...a, name: clean } : a)) });
+    const current = taskRef.current.attachments;
+    // Nothing to rename means the row is gone (deleted while the title was in
+    // flight). Patching anyway would resurrect a stale array.
+    if (!current.some((a) => a.id === id)) return;
+    onPatch({ attachments: current.map((a) => (a.id === id ? { ...a, name: clean } : a)) });
   };
   // Both default closed. The rail is reference you glance at; a live editor
   // and a client/project form are things you touch rarely and they were
@@ -430,7 +449,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // the page title if we can read one. Pasting used to keep the raw URL, so
     // the two ways of adding a link produced different-looking rows.
     const pastedId = newId("at_");
-    onPatch({ attachments: [...task.attachments, { id: pastedId, name: prettyLinkName(text), kind: "link", size: "", url: text }] });
+    onPatch({ attachments: [...taskRef.current.attachments, { id: pastedId, name: prettyLinkName(text), kind: "link", size: "", url: text }] });
     void fetchLinkTitle(pastedId, text);
     pushToast?.("Link attached");
   };

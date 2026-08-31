@@ -80,6 +80,11 @@ export function ActionDock({
   // Explicit, rather than inferring "wanted" from the text being non-empty.
   // Setting nextStep to a space to force the panel open trimmed straight back
   // to empty, so the link did nothing.
+  const taskRef = useRef(task);
+  // Updated on commit, not during render: writing a ref while rendering is a
+  // side effect in the render path. The reads that matter happen well after
+  // commit anyway (a title fetch resolving hundreds of ms later).
+  useEffect(() => { taskRef.current = task; }, [task]);
   const [quickNote, setQuickNote] = useState("");
   // A link written into a note is a link on the task, so it joins the
   // Attachments panel as well as staying in the note (Derek: a link added in
@@ -89,14 +94,17 @@ export function ActionDock({
   // Returns the patch rather than applying it, so a caller that is already
   // patching the task can fold it into one write instead of two.
   const attachmentsFrom = (text: string): Partial<Task> | null => {
-    const have = new Set(task.attachments.map((a) => a.url).filter(Boolean));
+    // Read through the ref: an attachment array built from a stale copy of
+    // the task deletes anything added since it was captured.
+    const current = taskRef.current.attachments;
+    const have = new Set(current.map((a) => a.url).filter(Boolean));
     const found: Attachment[] = [];
     for (const { href } of linkSpans(text)) {
       if (have.has(href)) continue;
       have.add(href);
       found.push({ id: newId("at_"), name: prettyLinkName(href), kind: "link", size: "", url: href });
     }
-    return found.length ? { attachments: [...task.attachments, ...found] } : null;
+    return found.length ? { attachments: [...current, ...found] } : null;
   };
 
   const postQuickNote = () => {
