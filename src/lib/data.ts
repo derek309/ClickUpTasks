@@ -2061,7 +2061,7 @@ export function startSignal(
 // different question: not "what was said" but "what was done, and what
 // happens next". A single action can have all three faces — sending an email
 // writes a Message for the content and a TaskAction for the decision.
-export type TaskActionKind = "note" | "team" | "chat" | "email" | "sms" | "call" | "meeting";
+export type TaskActionKind = "note" | "team" | "chat" | "email" | "sms" | "call" | "meeting" | "met";
 
 export const TASK_ACTION_META: Record<TaskActionKind, { label: string; verb: string; icon: string; needsNextStep: boolean }> = {
   // needsNextStep drives whether the "what's next?" panel opens pre-expanded.
@@ -2074,9 +2074,12 @@ export const TASK_ACTION_META: Record<TaskActionKind, { label: string; verb: str
   sms:     { label: "Text them",          verb: "Texted client",     icon: "sms",     needsNextStep: true },
   call:    { label: "Call them",          verb: "Called",            icon: "call",    needsNextStep: true },
   meeting: { label: "Book a meeting",     verb: "Booked a meeting",  icon: "meeting", needsNextStep: true },
+  // Distinct from "meeting", which is one being booked. Same word, opposite
+  // ends of time, and only one of them needs a slot picked.
+  met:     { label: "Meeting",            verb: "Met",               icon: "met",     needsNextStep: true },
 };
 
-export const TASK_ACTION_ORDER: TaskActionKind[] = ["note", "team", "chat", "email", "sms", "call", "meeting"];
+export const TASK_ACTION_ORDER: TaskActionKind[] = ["note", "team", "chat", "email", "sms", "call", "met", "meeting"];
 
 export type TaskAction = {
   id: string;

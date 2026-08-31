@@ -57,3 +57,10 @@ create policy task_actions_update on task_actions for update to authenticated
 drop policy if exists task_actions_delete on task_actions;
 create policy task_actions_delete on task_actions for delete to authenticated
   using (is_admin() or author_id = my_member_id());
+
+-- Added later: 'met' is a meeting that already happened, distinct from
+-- 'meeting', which is one being booked. Same word, opposite ends of time,
+-- and only one of them needs a slot picked.
+alter table task_actions drop constraint if exists task_actions_kind_check;
+alter table task_actions add constraint task_actions_kind_check
+  check (kind in ('note','team','chat','email','sms','call','meeting','met'));

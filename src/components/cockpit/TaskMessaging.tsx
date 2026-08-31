@@ -203,8 +203,26 @@ export interface TaskMessagingProps {
 // Presentation only, so data.ts stays free of anything that only makes sense
 // on screen. Mirrors the dock's own set.
 const ACTION_ICON: Record<TaskActionKind, string> = {
-  note: "📝", team: "👥", chat: "🗨", email: "✉", sms: "💬", call: "☎", meeting: "📅",
+  note: "📝", team: "👥", chat: "🗨", email: "✉", sms: "💬", call: "☎", met: "👥", meeting: "📅",
 };
+
+// Long action bodies (a summarised meeting, a note someone wrote properly)
+// collapse to six lines with a toggle. Short ones render with no affordance
+// at all, so the common case stays plain text.
+function ActionBody({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const long = text.length > 320 || text.split("\n").length > 6;
+  return (
+    <div className="mt-0.5">
+      <div className={`whitespace-pre-wrap text-[15px] ${!open && long ? "line-clamp-6" : ""}`}>{text}</div>
+      {long && (
+        <button onClick={() => setOpen((o) => !o)} className="mt-0.5 text-[13px] font-medium text-accent hover:underline">
+          {open ? "Show less" : "Show more"}
+        </button>
+      )}
+    </div>
+  );
+}
 
 export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onSetNextStepDone?: (id: string, done: boolean) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel) => void } {
   const { task, client, comment, setComment, onPatch, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
@@ -789,7 +807,10 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
         <div className="min-w-0 flex-1 pt-0.5">
           <span className="text-[15px] font-semibold">{meta.verb}</span>
           <span className="text-[13px] text-muted"> · {who} · {timeAgo(a.at)}</span>
-          {a.body && <div className="mt-0.5 whitespace-pre-wrap text-[15px]">{a.body}</div>}
+          {/* Clamped with a Show more, because a logged meeting can be five
+              lines of decisions and there is no reason for it to push every
+              other entry off the screen. */}
+          {a.body && <ActionBody text={a.body} />}
           {a.nextStep && (
             <div className="mt-2 flex flex-wrap items-center gap-2 rounded-r-lg border-l-[3px] bg-background px-2.5 py-1.5 text-[14px]">
               <span>↳ <b className="font-semibold">{a.nextStep}</b></span>

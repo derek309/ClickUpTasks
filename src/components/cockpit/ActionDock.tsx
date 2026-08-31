@@ -22,7 +22,7 @@ import { authedFetch } from "@/lib/supabase";
 // drawer for something you do a few times a day.
 
 const ICON: Record<TaskActionKind, string> = {
-  note: "📝", team: "👥", chat: "🗨", email: "✉", sms: "💬", call: "☎", meeting: "📅",
+  note: "📝", team: "👥", chat: "🗨", email: "✉", sms: "💬", call: "☎", met: "👥", meeting: "📅",
 };
 
 // Named offsets rather than a date picker for the common cases. Picking
@@ -90,6 +90,7 @@ export function ActionDock({
   };
   const [wantNext, setWantNext] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
+  const [summarising, setSummarising] = useState(false);
   const [aiReason, setAiReason] = useState("");
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
@@ -152,6 +153,27 @@ export function ActionDock({
       setAiReason(j.reason ?? "");
     } catch { pushToast("Couldn't reach the AI."); }
     finally { setAiBusy(false); }
+  };
+
+  // Reads the transcript, keeps the record, throws the transcript away. Four
+  // thousand words of "yeah, right, mm-hm" in the activity feed buries every
+  // other entry around it; what the meeting decided does not.
+  const summariseMeeting = async () => {
+    const text = body.trim();
+    if (!text) { pushToast("Paste the transcript first."); return; }
+    setSummarising(true);
+    try {
+      const res = await authedFetch("/api/ai/meeting", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transcript: text, title: task.title, clientName: client?.name ?? "", due: task.due, today: TODAY }),
+      });
+      const j = await res.json();
+      if (!res.ok) { pushToast(j?.error ?? "Couldn't read that transcript."); return; }
+      setBody(j.summary);
+      if (j.nextStep) { setNextStep(j.nextStep); setNextDue(j.nextStepDue ?? null); setWantNext(true); }
+      pushToast("Summarised — edit anything before you log it");
+    } catch { pushToast("Couldn't reach the AI."); }
+    finally { setSummarising(false); }
   };
 
   const commit = (kind: TaskActionKind) => {
@@ -384,6 +406,24 @@ export function ActionDock({
             <div className="mt-2.5">{bodyBox("How did it go?")}</div>
             {nextStepPanel("call")}
             {commitRow("call", "Log the call")}
+          </div>
+        )}
+
+        {view === "met" && (
+          <div>
+            {header("met")}
+            <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[13px] text-muted">
+              <span>Paste the transcript or your notes. Only the record is kept.</span>
+              <button onClick={summariseMeeting} disabled={summarising}
+                className="ml-auto inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[13px] hover:bg-background hover:text-foreground disabled:opacity-50">
+                <I.bolt /> {summarising ? "Reading…" : "Summarise"}
+              </button>
+            </div>
+            <textarea ref={bodyRef} rows={6} value={body} onChange={(e) => setBody(e.target.value)}
+              placeholder={"Paste a meeting transcript, or write what was decided…"}
+              className="w-full resize-y rounded-[9px] border bg-surface px-3 py-2 text-[15px] outline-none focus:border-accent" />
+            {nextStepPanel("met")}
+            {commitRow("met", "Log the meeting")}
           </div>
         )}
 
