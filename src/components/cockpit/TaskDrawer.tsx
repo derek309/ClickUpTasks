@@ -312,6 +312,38 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     setDragAttId(null);
   };
   const [attFileDragOver, setAttFileDragOver] = useState(false);
+  // Drop a file anywhere on the drawer, not just on the Attachments block
+  // (Derek: "I want to be able to drag any place to attach an image"). Aiming
+  // at one small target to attach something is a rule the drawer had no
+  // reason to impose.
+  //
+  // Counted rather than a boolean: dragleave fires every time the pointer
+  // crosses into a child element, so a plain flag flickers off the moment you
+  // move over anything inside the drawer.
+  const [fileOverDrawer, setFileOverDrawer] = useState(false);
+  const dragDepth = useRef(0);
+  const carriesFiles = (e: React.DragEvent) => e.dataTransfer.types.includes("Files");
+  const drawerDropProps = {
+    onDragEnter: (e: React.DragEvent) => {
+      if (!carriesFiles(e)) return;
+      dragDepth.current += 1;
+      setFileOverDrawer(true);
+    },
+    onDragOver: (e: React.DragEvent) => { if (carriesFiles(e)) e.preventDefault(); },
+    onDragLeave: (e: React.DragEvent) => {
+      if (!carriesFiles(e)) return;
+      dragDepth.current = Math.max(0, dragDepth.current - 1);
+      if (dragDepth.current === 0) setFileOverDrawer(false);
+    },
+    onDrop: (e: React.DragEvent) => {
+      dragDepth.current = 0;
+      setFileOverDrawer(false);
+      if (!e.dataTransfer.files.length) return;
+      e.preventDefault();
+      openSection("attachments");
+      onAddFiles(e.dataTransfer.files);
+    },
+  };
   const [previewAtt, setPreviewAtt] = useState<Attachment | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const openPreview = async (att: Attachment) => {
@@ -1087,7 +1119,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           instead of running under the reference rail, so it centres on the
           column it belongs to. Zero below 1100px, where the rail stacks
           underneath and there is no column to stay clear of. */}
-      <aside onPaste={handlePaste}
+      <aside onPaste={handlePaste} {...drawerDropProps}
         style={{ "--rail-w": `${activityW}px` } as React.CSSProperties}
         className={`[--dock-right:0px] ${isLightTask ? "" : "min-[1100px]:[--dock-right:var(--rail-w)]"} ${full ? "fixed inset-0 z-50 flex flex-col bg-surface" : "fixed inset-y-0 right-0 z-20 flex w-full flex-col border-l bg-surface shadow-xl md:left-[var(--drawer-left,16rem)] md:w-auto"}`}>
         <div className="flex flex-wrap items-center gap-2 border-b px-5 py-3 text-[13px] text-muted">
@@ -1261,6 +1293,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 {detailsBlock}
               </div>
             </div>
+          </div>
+        )}
+        {/* Shown over the whole drawer while a file is being dragged in, so
+            the target is obvious and it is clear the drop will land here
+            rather than navigating the browser away to the file. */}
+        {fileOverDrawer && (
+          <div className="pointer-events-none absolute inset-3 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-accent bg-accent-soft/70 backdrop-blur-[1px]">
+            <span className="rounded-lg bg-surface px-4 py-2 text-[16px] font-semibold shadow-lg">Drop to attach</span>
           </div>
         )}
         {/* Fixed to the bottom of the drawer, so you can log from anywhere in
