@@ -2901,6 +2901,40 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       },
     });
   };
+  // A copy of a task, ready to be worked rather than a snapshot of one that
+  // already was. So the shape and the instructions come across (title,
+  // description, checklist, links, client, list, priority, labels, dates) and
+  // the history does not: no comments, no logged actions (they are keyed by
+  // task id and stay with the original), no GHL link, and every checklist
+  // item unticked. Status resets to To do, because "duplicate this" almost
+  // always means "do it again", not "record that it is already done".
+  //
+  // Uploaded files are dropped and links are kept. A link is a pointer that
+  // costs nothing to copy; a file lives in storage under the original task's
+  // path, so a second row pointing at it would break the moment the first
+  // task was deleted.
+  const duplicateTask = (id: string) => {
+    const src = tasksRef.current.find((x) => x.id === id);
+    if (!src) return;
+    const copy: Task = {
+      ...src,
+      id: newId("t_"),
+      title: `${src.title} (copy)`,
+      status: "todo",
+      subtasks: src.subtasks.map((sub) => ({ ...sub, id: newId("s_"), done: false })),
+      attachments: src.attachments.filter((a) => !!a.url).map((a) => ({ ...a, id: newId("at_") })),
+      comments: [],
+      ghlTaskId: null,
+      followUpAt: null,
+      createdAt: new Date().toISOString(),
+      createdBy: me.id,
+    };
+    setTasks((ts) => [...ts, copy]);
+    upsertTask(copy, me.id);
+    setOpenTaskId(copy.id);
+    pushToast("Task duplicated", { label: "Undo", run: () => { setTasks((ts) => ts.filter((t) => t.id !== copy.id)); deleteTaskDb(copy.id); setOpenTaskId(id); } });
+  };
+
   const deleteTask = (id: string) => {
     // Owner Growth Plan/Sales checklist steps are a fixed template every
     // business gets — defense in depth alongside the hidden delete button in
@@ -4892,7 +4926,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={navTaskIds.length} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(body, attachments) => addComment(openTask.id, body, attachments)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onDownloadAll={downloadAllAsZip} zippingIds={zippingIds} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { if (openTask.playbookStepKey) { pushToast("Playbook steps can't be moved to a different list."); return; } patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null })} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => openClientList(openTask.clientId, openTask.projectId)} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} onMarkChannelRead={(channel) => markTaskChannelRead(openTask.id, channel)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} onScheduleTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, scheduledAt, attachments, cc, bcc) => scheduleMessage(openTask.clientId, channel, subject, body, scheduledAt, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId)} draftingMessage={draftingMessage} onGetTaskLink={() => getClientShareUrl(openTask.clientId, { projectId: openTask.projectId, taskId: openTask.id })} canAdmin={canAdmin} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onCopyClientLink={() => copyClientShareLink(openTask.clientId, openTask.projectId)} onDeleteComment={(cid) => deleteComment(openTask.id, cid)} onDraftDescription={draftDescription} draftingDescription={draftingDescription} pushToast={pushToast} meId={me.id}
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onDownloadAll={downloadAllAsZip} zippingIds={zippingIds} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { if (openTask.playbookStepKey) { pushToast("Playbook steps can't be moved to a different list."); return; } patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null })} onDuplicate={() => duplicateTask(openTask.id)} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => openClientList(openTask.clientId, openTask.projectId)} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} onMarkChannelRead={(channel) => markTaskChannelRead(openTask.id, channel)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} onScheduleTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, scheduledAt, attachments, cc, bcc) => scheduleMessage(openTask.clientId, channel, subject, body, scheduledAt, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId)} draftingMessage={draftingMessage} onGetTaskLink={() => getClientShareUrl(openTask.clientId, { projectId: openTask.projectId, taskId: openTask.id })} canAdmin={canAdmin} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onCopyClientLink={() => copyClientShareLink(openTask.clientId, openTask.projectId)} onDeleteComment={(cid) => deleteComment(openTask.id, cid)} onDraftDescription={draftDescription} draftingDescription={draftingDescription} pushToast={pushToast} meId={me.id}
           onSendDm={(userId, body) => sendDmMessage(userId, body)}
           taskLink={() => linkTo({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null })} />
       )}
