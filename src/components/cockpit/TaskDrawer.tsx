@@ -157,11 +157,11 @@ function DateCol({ tone, label, children }: { tone: typeof DATE_TONES[keyof type
   );
 }
 
-export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onDuplicate, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast, meId, onSendDm, taskLink, onDeleteComment }: {
+export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onDuplicate, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast, meId, onSendDm, taskLink, onDeleteComment }: {
   task: Task;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; onPrev: () => void; onNext: () => void;
-  onClose: () => void; onPatch: (patch: Partial<Task>) => void; onDelete: () => void; onAddComment: (body: string, attachments?: Attachment[]) => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onDownloadFileAs: (path: string, filename: string) => void; onDownloadAll: (items: Attachment[], zipName: string, batchId: string) => void; zippingIds: Set<string>; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; allClients: Client[]; onMoveClient: (clientId: string) => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onRenameProject: () => void; onToggleSub: (sid: string) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onDeleteSub: (sid: string) => void; onPatchSub: (sid: string, patch: Partial<Subtask>) => void; onToggleLabel: (lid: string) => void; onCopyLink: () => void; onDuplicate: () => void; onOpenMerge: () => void; onOpenClientList: () => void;
+  onClose: () => void; onPatch: (patch: Partial<Task>) => void; onDelete: () => void; onAddComment: (body: string, attachments?: Attachment[]) => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onDownloadFileAs: (path: string, filename: string) => void; onDownloadAll: (items: Attachment[], zipName: string, batchId: string) => void; zippingIds: Set<string>; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; allClients: Client[]; onMoveClient: (clientId: string) => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onRenameProject: () => void; onToggleSub: (sid: string) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onDeleteSub: (sid: string) => void; onPatchSub: (sid: string, patch: Partial<Subtask>) => void; onToggleLabel: (lid: string) => void; onCopyLink: () => void; onDuplicate: (target?: { clientId: string; projectId: string }) => void; projectsFor: (clientId: string) => Project[]; onOpenMerge: () => void; onOpenClientList: () => void;
   templates: TaskTemplate[]; onApplyTemplate: (templateId: string) => void;
   onUploadCommentImage: (file: File) => Promise<Attachment | null>;
   onCopyAttachmentLink: (path: string) => void;
@@ -266,6 +266,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // costing the column its whole reason to exist.
   const [descEditing, setDescEditing] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [dupOpen, setDupOpen] = useState(false);
+  const [dupClient, setDupClient] = useState(task.clientId);
   const [renamingAttId, setRenamingAttId] = useState<string | null>(null);
   const [labelOpen, setLabelOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
@@ -459,6 +461,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     setNextStepDoneDb(id, at);
   };
 
+  // One name for "may this person contact this client", used by the dock, the
+  // Open in GHL link and the Call link. Cockpit only passes onSendTaskMessage
+  // when canMessageClient says yes, so this is that permission arriving by
+  // the back door; naming it keeps the three places from drifting.
+  const mayContactClient = !!onSendTaskMessage;
   const doneSubs = task.subtasks.filter((s) => s.done).length;
 
   useEffect(() => {
@@ -1076,13 +1083,44 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             <button onClick={copyForClaude} title="Copy this task as a brief to paste into Claude Code" className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
               <span aria-hidden>{copied ? "✓" : "✳"}</span><span className="hidden sm:inline">{copied ? "Copied" : "Copy for Claude"}</span>
             </button>
-            {ghlContactUrl && (
+            {ghlContactUrl && mayContactClient && (
               <a href={ghlContactUrl} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="inline-flex items-center gap-1 rounded-md border border-accent px-2 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft">
                 <I.bolt /> <span className="hidden sm:inline">Open in GHL</span>
               </a>
             )}
             <button onClick={onCopyLink} title="Copy a shareable link to this task" className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground"><I.link /></button>
-            <button onClick={onDuplicate} title="Duplicate this task" className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground"><I.copy /></button>
+            {/* Duplicating in place is the common case, so it is one click.
+                Duplicating INTO another list is the same button held open:
+                a second control for it would sit unused most of the time. */}
+            <div className="relative">
+              <button onClick={() => { setDupClient(task.clientId); setDupOpen((o) => !o); }} title="Duplicate this task" className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground"><I.copy /></button>
+              {dupOpen && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setDupOpen(false)} />
+                  <div className="absolute right-0 z-40 mt-1 w-72 rounded-lg border bg-surface p-2 text-left shadow-lg">
+                    <button onClick={() => { setDupOpen(false); onDuplicate(); }}
+                      className="w-full rounded-md px-2 py-1.5 text-left text-[14px] font-medium hover:bg-background">Duplicate here</button>
+                    <div className="mt-1.5 border-t pt-1.5">
+                      <div className="px-2 pb-1 text-[12px] font-semibold uppercase tracking-wide text-muted">Duplicate into</div>
+                      <select value={dupClient} onChange={(e) => setDupClient(e.target.value)}
+                        className="mb-1 w-full rounded-md border bg-background px-2 py-1.5 text-[14px] outline-none focus:border-accent">
+                        {allClients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      </select>
+                      <div className="max-h-52 overflow-y-auto">
+                        {projectsFor(dupClient).length === 0 && <div className="px-2 py-2 text-[13px] text-muted">No lists in this client yet.</div>}
+                        {projectsFor(dupClient).map((p) => (
+                          <button key={p.id} onClick={() => { setDupOpen(false); onDuplicate({ clientId: dupClient, projectId: p.id }); }}
+                            disabled={p.id === task.projectId && dupClient === task.clientId}
+                            className="block w-full truncate rounded-md px-2 py-1.5 text-left text-[14px] hover:bg-background disabled:opacity-40">
+                            {p.name}{p.id === task.projectId && dupClient === task.clientId ? " · current" : ""}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
             {task.priority === "conversation" && (
               <button onClick={onOpenMerge} title="Merge this conversation into an existing task" className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
                 <I.repeat /> <span className="hidden sm:inline">Merge</span>
@@ -1170,7 +1208,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   <div className="mt-0.5 flex items-center justify-between gap-2 text-[12px] text-muted">
                     <span>{clientStatusMeta(client.status).label}</span>
                     <span className="flex shrink-0 items-center gap-2">
-                      {messageDest?.phone ? (
+                      {messageDest?.phone && mayContactClient ? (
                         <a href={`tel:${messageDest.phone}`} className="font-medium text-accent hover:underline">Call</a>
                       ) : (
                         <span title="No phone on file" className="cursor-not-allowed opacity-40">Call</span>
@@ -1210,7 +1248,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           onOpenCompose={openCompose}
           // Same gate the composer already uses: onSendTaskMessage is only
           // passed when this person may message this client.
-          canMessageClient={!!onSendTaskMessage}
+          canMessageClient={mayContactClient}
           onSendDm={onSendDm} taskLink={taskLink}
           askNextStepFor={pendingNextStep}
           onAskNextStepHandled={() => setPendingNextStep(null)}
