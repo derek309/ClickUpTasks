@@ -106,6 +106,11 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   // the viewport. The subtask-expand chevron and assignee avatar live inside
   // this same column (not a separate unlabeled one to its left) so the row
   // reads as a single Name column under the header.
+  // A project crumb under every row is noise when the whole list is one
+  // project: inside the CUL Website tab, every task said "CUL Website". It
+  // only earns its line when the list actually spans more than one.
+  const projectIds = new Set(groups.flatMap((g) => g.tasks.map((t) => t.projectId)));
+  const showCrumb = projectIds.size > 1;
   const template = ["minmax(200px,1fr)", ...(showClient ? ["180px"] : []), ...cols.map((c) => COL_WIDTHS[c.key])].join(" ");
   const sortColKey: Record<string, string> = { title: "task", priority: "priority", due: "due", assignee: "assignee", status: "status", comments: "comments" };
   const activeCol = sortColKey[sortKey];
@@ -161,7 +166,7 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
                     </div>
                   )}
                   {g.tasks.map((t) => (
-                    <TaskRow key={t.id} task={t} template={template} cols={cols} showClient={showClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} onAddComment={onAddComment} meId={meId} delegated={!!highlightDelegateFor && t.assigneeId !== highlightDelegateFor && t.subtasks.some((s) => s.assigneeId === highlightDelegateFor)}
+                    <TaskRow key={t.id} task={t} template={template} cols={cols} showClient={showClient} showCrumb={showCrumb} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} onAddComment={onAddComment} meId={meId} delegated={!!highlightDelegateFor && t.assigneeId !== highlightDelegateFor && t.subtasks.some((s) => s.assigneeId === highlightDelegateFor)}
                       selected={!!selectedIds?.has(t.id)} onToggleSelect={onToggleSelect ? (e) => handleSelectClick(t.id, e) : undefined}
                       draggable={!!onDropInGroup || !!onMergeTasks} onDragStart={() => setDragTaskId(t.id)} onDragEnd={() => { setDragTaskId(null); setDragOverKey(null); setDragOverTaskId(null); }}
                       isMergeDropTarget={dragOverTaskId === t.id}
@@ -183,8 +188,8 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   );
 }
 
-function TaskRow({ task, template, cols, showClient, clientById, projectById, contactById, onOpen, onPatch, onAddComment, meId, delegated, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
-  task: Task; template: string; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean;
+function TaskRow({ task, template, cols, showClient, showCrumb, clientById, projectById, contactById, onOpen, onPatch, onAddComment, meId, delegated, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
+  task: Task; template: string; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean; showCrumb: boolean;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void; onAddComment: (taskId: string, body: string) => void; meId?: string; delegated?: boolean;
   selected?: boolean; onToggleSelect?: (e: React.MouseEvent) => void;
   draggable?: boolean; onDragStart?: () => void; onDragEnd?: () => void;
@@ -299,7 +304,7 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
               <span className={`line-clamp-none min-w-0 flex-1 break-words text-[15px] font-medium leading-snug sm:line-clamp-2 ${isDone ? "text-muted line-through" : ""}`} title={task.title}>{task.title}</span>
             </span>
             <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5">
-              {!showClient && crumb && <span className="min-w-0 truncate text-[11px] leading-tight text-muted">{crumb}</span>}
+              {showCrumb && !showClient && crumb && <span className="min-w-0 truncate text-[11px] leading-tight text-muted">{crumb}</span>}
               {/* The one thing the created and due dates together can tell you
                   that neither says alone: most of the runway is gone. Reads
                   "Start now" on To do and "Wrap up" once work is underway,
