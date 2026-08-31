@@ -289,13 +289,17 @@ function TaskRow({ task, template, cols, showClient, clientById, projectById, co
             }}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
             className="flex min-w-0 flex-1 cursor-pointer flex-col justify-center py-0.5 pl-1 text-left">
-            {/* Project crumb is redundant once the Client column is already
-                shown (My Work, All tasks) — keep it only in single-client
-                views where there's no other column carrying that context. */}
-            {!showClient && crumb && <span className="truncate text-[11px] leading-tight text-muted">{crumb}</span>}
+            {/* Two lines, and the title owns the first one outright. Every
+                badge used to sit inline with it, so a narrow Name column (an
+                iPad) squeezed the title to "Crea te..." while a "Start now"
+                chip beside it kept its full width. Context and badges belong
+                below the thing they describe, not in front of it. */}
             <span className="flex min-w-0 items-center gap-1.5">
               {delegated && <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">Delegated</span>}
               <span className={`line-clamp-none min-w-0 flex-1 break-words text-[15px] font-medium leading-snug sm:line-clamp-2 ${isDone ? "text-muted line-through" : ""}`} title={task.title}>{task.title}</span>
+            </span>
+            <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5">
+              {!showClient && crumb && <span className="min-w-0 truncate text-[11px] leading-tight text-muted">{crumb}</span>}
               {/* The one thing the created and due dates together can tell you
                   that neither says alone: most of the runway is gone. Reads
                   "Start now" on To do and "Wrap up" once work is underway,
