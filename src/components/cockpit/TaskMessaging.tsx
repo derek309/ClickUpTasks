@@ -224,11 +224,11 @@ function ActionBody({ text }: { text: string }) {
   );
 }
 
-export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onSetNextStepDone?: (id: string, done: boolean) => void; onDeleteAction?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel) => void } {
+export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onSetNextStepDone?: (id: string, done: boolean) => void; onDeleteAction?: (id: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel) => void } {
   const { task, client, comment, setComment, onPatch, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, ccContacts, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin,
-    onDeleteMessage, onEditMessage, hasMessaging, actions, onSetNextStepDone, onDeleteAction, onMessageSent } = p;
+    onDeleteMessage, onEditMessage, hasMessaging, actions, onSetNextStepDone, onDeleteAction, onDeleteComment, onMessageSent } = p;
 
   // C3: was a Set of independently-toggled channels (all four on by default),
   // which is how "the active tab reads Chat while the pane shows an email
@@ -976,12 +976,18 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   const renderEventRow = (c: Comment, gap: string) => {
     const u = userById(c.authorId); const diff = parseEventDiff(c.body);
     return (
-      <div key={c.id} className={`relative flex gap-3 ${gap}`}>
+      <div key={c.id} className={`group relative flex gap-3 ${gap}`}>
         <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface" style={{ background: diff ? eventAccentColor(diff) : "var(--muted)" }} /></div>
         <div className="min-w-0 flex-1 pt-1.5 text-[16px] text-muted">
           <span className="font-medium text-foreground">{u?.name}</span>{" "}
           {diff ? <>updated {diff.field} to <EventValuePill diff={diff} /></> : c.body}
           {" · "}<span className="text-[15px]">{timeAgo(c.at)}</span>
+          {onDeleteComment && (
+            <button onClick={() => onDeleteComment(c.id)} title="Delete this entry"
+              className="ml-1.5 rounded p-0.5 align-middle opacity-0 transition hover:text-danger group-hover:opacity-100">
+              <I.trash className="h-3 w-3" />
+            </button>
+          )}
         </div>
       </div>
     );
@@ -1018,10 +1024,18 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
         const c = item.comment;
         const u = userById(c.authorId);
         return (
-          <div key={c.id} className={`relative flex gap-3 ${gap}`}>
+          <div key={c.id} className={`group relative flex gap-3 ${gap}`}>
             <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><Avatar id={c.authorId} size={28} /></div>
             <div className="min-w-0 flex-1 pt-0.5">
-              <div className="text-[15px]"><span className="font-medium">{u?.name}</span> <span className="text-[13px] text-muted">· {timeAgo(c.at)}</span></div>
+              <div className="text-[15px]">
+                <span className="font-medium">{u?.name}</span> <span className="text-[13px] text-muted">· {timeAgo(c.at)}</span>
+                {onDeleteComment && (
+                  <button onClick={() => onDeleteComment(c.id)} title="Delete this entry"
+                    className="ml-1.5 rounded p-0.5 align-middle text-muted opacity-0 transition hover:text-danger group-hover:opacity-100">
+                    <I.trash className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
               {c.body && <CollapsibleText text={c.body} className="text-[16px]" />}
               {c.attachments && c.attachments.length > 0 && (
                 <div className="mt-1 flex flex-wrap gap-1.5">

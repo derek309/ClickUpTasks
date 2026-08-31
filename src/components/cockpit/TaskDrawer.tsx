@@ -157,7 +157,7 @@ function DateCol({ tone, label, children }: { tone: typeof DATE_TONES[keyof type
   );
 }
 
-export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast, meId, onSendDm, taskLink }: {
+export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast, meId, onSendDm, taskLink, onDeleteComment }: {
   task: Task;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; onPrev: () => void; onNext: () => void;
@@ -192,6 +192,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   draftingDescription?: boolean;
   pushToast: (text: string, action?: { label: string; run: () => void }, secondaryAction?: { label: string; run: () => void }) => void;
   meId: string;
+  onDeleteComment?: (commentId: string) => void;
   onSendDm?: (userId: string, body: string) => void;
   taskLink?: () => string;
 }) {
@@ -840,7 +841,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // never got set, which is how a task goes quiet after real work on it.
   const [pendingNextStep, setPendingNextStep] = useState<{ kind: TaskActionKind; body: string } | null>(null);
   const { feedArea, composerFooter, openCompose } = useTaskMessaging({
-    actions, onSetNextStepDone: setNextStepDone, onDeleteAction: deleteAction,
+    actions, onSetNextStepDone: setNextStepDone, onDeleteAction: deleteAction, onDeleteComment,
     onMessageSent: (channel, body) => setPendingNextStep({ kind: channel, body }),
     task, client, comment, setComment, onPatch, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, ccContacts, onUploadMessageImage,
