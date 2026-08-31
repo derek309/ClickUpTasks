@@ -239,7 +239,6 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   // of a back-and-forth — sending it should close the composer like a reply
   // does, instead of leaving an empty box open that needed a manual Cancel
   // (Derek, 2026-08-24: "it sent but didn't close").
-  const [isDraftReviewCompose, setIsDraftReviewCompose] = useState(false);
 
   // The nonce bump is what actually clears the EMAIL body on screen:
   // RichTextEditor takes `value` as boot-time content only and never
@@ -251,11 +250,10 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     setMsgSubject(""); setMsgBody(""); setPendingMsgAtts([]); setMsgCc([]); setMsgBcc([]); setShowCcBcc(false); setDraftPrompt("");
     setEmailFocusNonce((n) => n + 1);
   };
-  const closeComposers = () => { setReplyingTo(null); setComposingChannel(null); setIsDraftReviewCompose(false); resetComposer(); };
+  const closeComposers = () => { setReplyingTo(null); setComposingChannel(null); resetComposer(); };
 
   const openReply = (id: string, channel: Channel, subject?: string | null) => {
     setComposingChannel(null);
-    setIsDraftReviewCompose(false);
     resetComposer();
     if (channel === "email") {
       setMsgSubject((subject ?? "").trim() ? (/^re:/i.test((subject ?? "").trim()) ? (subject ?? "").trim() : `Re: ${(subject ?? "").trim()}`) : "");
@@ -266,7 +264,6 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   };
   const openCompose = (channel: Channel) => {
     setReplyingTo(null);
-    setIsDraftReviewCompose(false);
     resetComposer();
     if (channel === "email") setEmailFocusNonce((n) => n + 1);
     if (channel !== "activity") onMarkChannelRead?.(channel);
@@ -299,10 +296,12 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   const activeComposeChannel = replyingTo?.channel ?? composingChannel;
   const hasComposedMessage = activeComposeChannel === "email" ? !!htmlToText(msgBody).trim() : !!msgBody.trim();
 
-  // A reply closes back to the feed after sending (it was answering one
-  // specific message). A fresh CTA-triggered compose instead just clears
-  // itself and stays open, same as the old pinned composer did — so a quick
-  // back-and-forth doesn't mean re-clicking the CTA button every message.
+  // Sending always closes the composer now (Derek: "after the email is sent,
+  // close the box for email"). It used to stay open after a fresh compose so
+  // a quick back-and-forth didn't mean re-clicking the CTA button each time,
+  // but that CTA row is gone: the dock reopens on "what's next?" the moment a
+  // message goes out, so an empty composer left behind it is just a large
+  // blank box sitting between you and the feed.
   const submitTaskMessage = () => {
     const channel = activeComposeChannel;
     if (!channel || channel === "activity" || (!hasComposedMessage && pendingMsgAtts.length === 0) || !onSendTaskMessage) return;
@@ -314,7 +313,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     // next. Sending used to be a dead end: the message went out and nothing
     // scheduled the follow-up, which is exactly how work went quiet.
     onMessageSent?.(channel, htmlToText(msgBody).trim());
-    if (replyingTo || isDraftReviewCompose) closeComposers(); else resetComposer();
+    closeComposers();
   };
   const submitScheduledTaskMessage = (whenIso: string) => {
     const channel = activeComposeChannel;
@@ -323,7 +322,9 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     const bcc = channel === "email" ? msgBcc : undefined;
     const subject = channel === "email" ? (msgSubject.trim() || task.title) : msgSubject;
     onScheduleTaskMessage(channel, subject, channel === "email" ? msgBody : msgBody.trim(), whenIso, pendingMsgAtts.length ? pendingMsgAtts : undefined, cc, bcc);
-    if (replyingTo || isDraftReviewCompose) closeComposers(); else resetComposer();
+    // Scheduling closes too: the message is committed, there is nothing left
+    // in the box worth keeping on screen.
+    closeComposers();
   };
 
   // Admin-only correction for a message that already sent wrong.
@@ -349,7 +350,6 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   const openDraftEmail = () => {
     if (!task.draftEmail) return;
     openCompose("email");
-    setIsDraftReviewCompose(true);
     setMsgSubject(task.draftEmail.subject);
     setMsgBody(task.draftEmail.body);
     setEmailFocusNonce((n) => n + 1);

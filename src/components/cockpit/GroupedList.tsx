@@ -14,7 +14,7 @@ import { I, Avatar, LabelChips, CollapsibleText, COL_WIDTHS, LIST_COLUMNS } from
 
 // --- grouped list view (ClickUp-style: group, quick-add, expandable subtasks) --
 
-export function GroupedList({ groups, showClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onDeleteSub, onAddComment, hideEmpty, highlightDelegateFor, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId }: {
+export function GroupedList({ groups, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onDeleteSub, onAddComment, hideEmpty, highlightDelegateFor, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId }: {
   groups: { key: string; label: string; color: string; tasks: Task[] }[];
   // The signed-in user — the row's assignee avatar only renders when the
   // task is assigned to someone else; seeing your own face on every one of
@@ -22,7 +22,7 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   meId?: string;
   showClient: boolean; clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null;
   visibleCols: string[]; sortKey: string; sortDir: "asc" | "desc"; onSort: (key: string) => void;
-  onOpen: (id: string) => void; onPatch: (taskId: string, patch: Partial<Task>) => void; canQuickAdd: boolean; quickAddHint: string; onQuickAdd: (groupKey: string, title: string) => void;
+  onOpen: (id: string) => void; onOpenClient?: (clientId: string) => void; onPatch: (taskId: string, patch: Partial<Task>) => void; canQuickAdd: boolean; quickAddHint: string; onQuickAdd: (groupKey: string, title: string) => void;
   onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void; onDeleteSub: (taskId: string, subId: string) => void; onAddComment: (taskId: string, body: string) => void; hideEmpty?: boolean; highlightDelegateFor?: string;
   // When set, task rows can be dragged onto a group header to move them into
   // that group (e.g. drag a row onto "Urgent" to reprioritize it) — only
@@ -166,7 +166,7 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
                     </div>
                   )}
                   {g.tasks.map((t) => (
-                    <TaskRow key={t.id} task={t} template={template} cols={cols} showClient={showClient} showCrumb={showCrumb} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} onAddComment={onAddComment} meId={meId} delegated={!!highlightDelegateFor && t.assigneeId !== highlightDelegateFor && t.subtasks.some((s) => s.assigneeId === highlightDelegateFor)}
+                    <TaskRow key={t.id} task={t} template={template} cols={cols} showClient={showClient} showCrumb={showCrumb} onOpenClient={onOpenClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} onAddComment={onAddComment} meId={meId} delegated={!!highlightDelegateFor && t.assigneeId !== highlightDelegateFor && t.subtasks.some((s) => s.assigneeId === highlightDelegateFor)}
                       selected={!!selectedIds?.has(t.id)} onToggleSelect={onToggleSelect ? (e) => handleSelectClick(t.id, e) : undefined}
                       draggable={!!onDropInGroup || !!onMergeTasks} onDragStart={() => setDragTaskId(t.id)} onDragEnd={() => { setDragTaskId(null); setDragOverKey(null); setDragOverTaskId(null); }}
                       isMergeDropTarget={dragOverTaskId === t.id}
@@ -188,8 +188,8 @@ export function GroupedList({ groups, showClient, clientById, projectById, conta
   );
 }
 
-function TaskRow({ task, template, cols, showClient, showCrumb, clientById, projectById, contactById, onOpen, onPatch, onAddComment, meId, delegated, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
-  task: Task; template: string; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean; showCrumb: boolean;
+function TaskRow({ task, template, cols, showClient, showCrumb, onOpenClient, clientById, projectById, contactById, onOpen, onPatch, onAddComment, meId, delegated, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
+  task: Task; template: string; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean; showCrumb: boolean; onOpenClient?: (clientId: string) => void;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void; onAddComment: (taskId: string, body: string) => void; meId?: string; delegated?: boolean;
   selected?: boolean; onToggleSelect?: (e: React.MouseEvent) => void;
   draggable?: boolean; onDragStart?: () => void; onDragEnd?: () => void;
@@ -346,7 +346,21 @@ function TaskRow({ task, template, cols, showClient, showCrumb, clientById, proj
             the avatar); on sm+ `contents` dissolves the wrapper so each cell
             drops back into its own grid column. */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pl-11 sm:contents sm:pl-0">
-          {showClient && <span className="flex min-w-0 items-center gap-1.5 text-[13px]"><span className="h-2 w-2 shrink-0 rounded-full" style={{ background: client?.color }} /><span className="truncate">{client?.name}</span></span>}
+          {/* The client name is the obvious way to say "show me everything
+              for these people", so it acts like one. stopPropagation keeps it
+              from also opening the task behind it. */}
+          {showClient && (
+            <span className="flex min-w-0 items-center gap-1.5 text-[13px]">
+              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: client?.color }} />
+              {onOpenClient && client ? (
+                <button onClick={(e) => { e.stopPropagation(); onOpenClient(client.id); }}
+                  title={`Open ${client.name}`}
+                  className="min-w-0 truncate rounded px-1 -mx-1 text-left hover:bg-background hover:text-accent hover:underline">{client.name}</button>
+              ) : (
+                <span className="truncate">{client?.name}</span>
+              )}
+            </span>
+          )}
           {cols.map((c) => <div key={c.key} className="min-w-0">{cell(c.key)}</div>)}
         </div>
       </div>
