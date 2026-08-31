@@ -14,7 +14,7 @@ import { I, Avatar, LabelChips, CollapsibleText, COL_WIDTHS, LIST_COLUMNS } from
 
 // --- grouped list view (ClickUp-style: group, quick-add, expandable subtasks) --
 
-export function GroupedList({ groups, groupKind, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onDeleteSub, onAddComment, hideEmpty, highlightDelegateFor, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId }: {
+export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onDeleteSub, onAddComment, hideEmpty, highlightDelegateFor, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId }: {
   groups: { key: string; label: string; color: string; tasks: Task[] }[];
   // The signed-in user — the row's assignee avatar only renders when the
   // task is assigned to someone else; seeing your own face on every one of
@@ -23,6 +23,8 @@ export function GroupedList({ groups, groupKind, showClient, onOpenClient, clien
   showClient: boolean; clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null;
   visibleCols: string[]; sortKey: string; sortDir: "asc" | "desc"; onSort: (key: string) => void;
   groupKind?: string;
+  /** Start Next week / This month / Later / No date closed. All Tasks only. */
+  collapseFarBuckets?: boolean;
   onOpen: (id: string) => void; onOpenClient?: (clientId: string) => void; onPatch: (taskId: string, patch: Partial<Task>) => void; canQuickAdd: boolean; quickAddHint: string; onQuickAdd: (groupKey: string, title: string) => void;
   onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void; onDeleteSub: (taskId: string, subId: string) => void; onAddComment: (taskId: string, body: string) => void; hideEmpty?: boolean; highlightDelegateFor?: string;
   // When set, task rows can be dragged onto a group header to move them into
@@ -46,15 +48,21 @@ export function GroupedList({ groups, groupKind, showClient, onOpenClient, clien
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [subDraft, setSubDraft] = useState<Record<string, string>>({});
   const toggle = (id: string) => setExpanded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  // Only when the list is actually grouped by due date. Matching on the key
-  // alone collapsed "No priority" too, because the priority grouping has a
-  // "none" bucket of its own and the two sets of keys share that word.
+  // Two conditions, both needed. The list has to be grouped by due date, and
+  // the caller has to ask for it — All Tasks does, a single client's list does
+  // not (Derek: "only on the All Tasks tab"). Inside one client you are
+  // looking at a short list you want to see all of; All Tasks is where a
+  // hundred undated rows bury the horizon.
   //
-  // Lazy init, so opening a group keeps it open. The parent remounts this on
-  // a grouping change (key={groupBy}) rather than re-seeding in an effect,
-  // which would fight whatever you had just opened.
+  // The due-date check is not redundant: matching on the key alone collapsed
+  // "No priority" too, because the priority grouping has a "none" bucket of
+  // its own and the two sets of keys share that word.
+  //
+  // Lazy init, so opening a group keeps it open. The parent remounts this
+  // when either input changes rather than re-seeding in an effect, which
+  // would fight whatever you had just opened.
   const [collapsedG, setCollapsedG] = useState<Set<string>>(
-    () => new Set(groupKind === "due" ? groups.filter((g) => COLLAPSED_DUE_BUCKETS.has(g.key)).map((g) => g.key) : []),
+    () => new Set(collapseFarBuckets && groupKind === "due" ? groups.filter((g) => COLLAPSED_DUE_BUCKETS.has(g.key)).map((g) => g.key) : []),
   );
   const toggleG = (k: string) => setCollapsedG((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const [dragTaskId, setDragTaskId] = useState<string | null>(null);
