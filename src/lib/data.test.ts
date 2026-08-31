@@ -27,6 +27,7 @@ import {
   isSnoozed,
   effectiveDueDate,
   prettyLinkName,
+  linkSpans,
   TASK_ACTION_ORDER,
   CLIENT_FACING_ACTIONS,
   recurrenceResetFields,
@@ -704,5 +705,31 @@ describe("what someone without client-messaging permission can do", () => {
   // decided, so logging a meeting that happened is not an outbound action.
   it("still lets them log a meeting that already happened", () => {
     expect(CLIENT_FACING_ACTIONS.has("met")).toBe(false);
+  });
+});
+
+describe("linkSpans", () => {
+  const hrefs = (t: string) => linkSpans(t).map((l) => l.href);
+
+  it("finds a full URL", () => {
+    expect(hrefs("see https://pro.fiverr.com/mk/do-designs now")).toEqual(["https://pro.fiverr.com/mk/do-designs"]);
+  });
+  it("finds a scheme-less link, which older entries stored", () => {
+    expect(hrefs('renamed from "app.clickuplocal.com/v2/location/7B0Y/payments" to "Invoice"'))
+      .toEqual(["https://app.clickuplocal.com/v2/location/7B0Y/payments"]);
+  });
+  it("leaves ordinary prose alone", () => {
+    expect(hrefs("Call Brian, e.g. tomorrow, re: BibBoards Inc. and the 3.5 inch card")).toEqual([]);
+  });
+  it("does not swallow the sentence's full stop", () => {
+    expect(hrefs("see foo.com/a.")).toEqual(["https://foo.com/a"]);
+  });
+  it("finds several in one line", () => {
+    expect(hrefs("https://a.com/x and b.com/y")).toEqual(["https://a.com/x", "https://b.com/y"]);
+  });
+  it("reports spans that line up with the text", () => {
+    const t = "go to https://x.com/a ok";
+    const [span] = linkSpans(t);
+    expect(t.slice(span.start, span.end)).toBe("https://x.com/a");
   });
 });

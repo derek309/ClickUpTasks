@@ -3,7 +3,7 @@
 // Shared UI primitives for the Cockpit: the icon set, Avatar, misc formatting
 // helpers, and the list-view column definitions. Split out of Cockpit.tsx.
 import { useEffect, useRef, useState } from "react";
-import { users, userById, labelById, prettyLinkName, type Attachment, type TaskStatus, type Priority } from "@/lib/data";
+import { users, userById, labelById, prettyLinkName, linkSpans, type Attachment, type TaskStatus, type Priority } from "@/lib/data";
 
 // --- tiny inline icons ------------------------------------------------------
 
@@ -396,32 +396,31 @@ export type SortBy = "manual" | "due" | "followUp" | "priority" | "title" | "sta
 // touches the URLs, which is why it belongs here rather than in whatever
 // produced the string.
 export function LinkedText({ text, className = "" }: { text: string; className?: string }) {
-  // Trailing punctuation is excluded from the match: "see https://x.com/a."
-  // should link the URL, not the full stop after it.
-  const parts = text.split(/(https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)\]])/g);
-  return (
-    <span className={className}>
-      {parts.map((part, i) =>
-        /^https?:\/\//i.test(part) ? (
-          <span key={i} className="group/link inline-flex max-w-full items-baseline gap-1 align-baseline">
-            <a href={part} target="_blank" rel="noopener noreferrer" title={part}
-              className="inline-flex max-w-full items-baseline gap-1 align-baseline font-medium text-accent hover:underline">
-              <LinkFavicon url={part} className="translate-y-[2px]" />
-              <span className="truncate">{prettyLinkName(part)}</span>
-            </a>
-            {/* The pretty name hides the URL, so there has to be a way to get
-                the real thing back out without opening the page first. */}
-            <button onClick={() => { navigator.clipboard?.writeText(part); }} title="Copy this link"
-              className="translate-y-[2px] rounded p-0.5 text-muted opacity-0 transition hover:text-foreground group-hover/link:opacity-100">
-              <I.copy className="h-3 w-3" />
-            </button>
-          </span>
-        ) : (
-          <span key={i}>{part}</span>
-        ),
-      )}
-    </span>
-  );
+  // The matching lives in data.ts (linkSpans) so it can be unit tested;
+  // getting it wrong mangles every note anyone has written.
+  const out: React.ReactNode[] = [];
+  let last = 0;
+  for (const { start, end, href } of linkSpans(text)) {
+    if (start > last) out.push(<span key={`t${last}`}>{text.slice(last, start)}</span>);
+    out.push(
+      <span key={`l${start}`} className="group/link inline-flex max-w-full items-baseline gap-1 align-baseline">
+        <a href={href} target="_blank" rel="noopener noreferrer" title={href}
+          className="inline-flex max-w-full items-baseline gap-1 align-baseline font-medium text-accent hover:underline">
+          <LinkFavicon url={href} className="translate-y-[2px]" />
+          <span className="truncate">{prettyLinkName(href)}</span>
+        </a>
+        {/* The pretty name hides the URL, so there has to be a way to get the
+            real thing back out without opening the page first. */}
+        <button onClick={() => { navigator.clipboard?.writeText(href); }} title="Copy this link"
+          className="translate-y-[2px] rounded p-0.5 text-muted opacity-0 transition hover:text-foreground group-hover/link:opacity-100">
+          <I.copy className="h-3 w-3" />
+        </button>
+      </span>,
+    );
+    last = end;
+  }
+  if (last < text.length) out.push(<span key={`t${last}`}>{text.slice(last)}</span>);
+  return <span className={className}>{out}</span>;
 }
 
 export function LinkFavicon({ url, className = "" }: { url: string; className?: string }) {

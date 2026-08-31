@@ -2143,6 +2143,32 @@ export function recurrenceResetFields(previousDue: string | null, now: string = 
 // "Publishing_Local_Events_via_ClickUpLocal_Ambassador_Portal", which is a
 // real title once the separators are turned back into spaces. Falls back to
 // the host when a path is all ids and slashes.
+// Finds the links inside a plain string, as [start, end, href] spans.
+//
+// Two shapes, because older activity entries stored links with the scheme
+// stripped ("app.clickuplocal.com/v2/location/...") rather than the full URL.
+// Matching only https?:// left those as unclickable text, which is most of
+// what is in an existing feed.
+//
+// The bare form insists on a dotted host AND a slash path, so ordinary prose
+// survives: "e.g." and "Inc." have no path, so they are left alone. Trailing
+// punctuation is trimmed after the match rather than excluded from it, so
+// "see foo.com/a." links the URL and not the full stop.
+//
+// Pulled out of the component so the matching can actually be tested; getting
+// this wrong mangles every note anyone has written.
+export function linkSpans(text: string): { start: number; end: number; href: string }[] {
+  const re = /(https?:\/\/[^\s<>"']+|[a-z0-9-]+(?:\.[a-z0-9-]+)+\/[^\s<>"']*)/gi;
+  const out: { start: number; end: number; href: string }[] = [];
+  for (const m of text.matchAll(re)) {
+    const start = m.index ?? 0;
+    const raw = m[0];
+    const trimmed = raw.replace(/[.,;:!?)\]"']+$/, "") || raw;
+    out.push({ start, end: start + trimmed.length, href: /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}` });
+  }
+  return out;
+}
+
 export function prettyLinkName(url: string): string {
   let u: URL;
   try { u = new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`); } catch { return url.slice(0, 120); }
