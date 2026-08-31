@@ -378,6 +378,27 @@ export type SortBy = "manual" | "due" | "followUp" | "priority" | "title" | "sta
 // menu still offers it). Priority came back as a real column (Derek,
 // 2026-08-24): the leading-edge color bar alone left no way to change a
 // task's priority from the row.
+// The site's own favicon in place of a generic link glyph, so a row of links
+// is scannable at a glance rather than five identical chain icons.
+//
+// Derived from the URL's origin rather than stored on the attachment: it
+// needs no schema change, no second server round trip, and it self-heals when
+// a site changes its icon. Sites that don't serve /favicon.ico fall back to
+// the chain icon on the image's error event, which is the honest failure —
+// a broken-image box would be worse than the glyph it replaced.
+export function LinkFavicon({ url, className = "" }: { url: string; className?: string }) {
+  const [failed, setFailed] = useState(false);
+  let origin = "";
+  try { origin = new URL(url).origin; } catch { /* not a URL we can read */ }
+  if (!origin || failed) return <I.link className={`h-3.5 w-3.5 ${className}`} />;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- a third-party favicon, not a static asset next/image can optimize.
+    <img src={`${origin}/favicon.ico`} alt="" aria-hidden width={14} height={14}
+      onError={() => setFailed(true)}
+      className={`h-3.5 w-3.5 shrink-0 rounded-[2px] object-contain ${className}`} />
+  );
+}
+
 export const LIST_COLUMNS: { key: string; label: string; sortable: boolean }[] = [
   { key: "status", label: "Stage", sortable: true },
   { key: "priority", label: "Priority", sortable: true },

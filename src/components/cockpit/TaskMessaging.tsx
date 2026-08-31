@@ -224,11 +224,11 @@ function ActionBody({ text }: { text: string }) {
   );
 }
 
-export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onSetNextStepDone?: (id: string, done: boolean) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel) => void } {
+export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onSetNextStepDone?: (id: string, done: boolean) => void; onDeleteAction?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel) => void } {
   const { task, client, comment, setComment, onPatch, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, ccContacts, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin,
-    onDeleteMessage, onEditMessage, hasMessaging, actions, onSetNextStepDone, onMessageSent } = p;
+    onDeleteMessage, onEditMessage, hasMessaging, actions, onSetNextStepDone, onDeleteAction, onMessageSent } = p;
 
   // C3: was a Set of independently-toggled channels (all four on by default),
   // which is how "the active tab reads Chat while the pane shows an email
@@ -802,11 +802,17 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     const who = a.authorId ? (userById(a.authorId)?.name ?? "Someone") : "Someone";
     const late = a.nextStepDue && !a.nextStepDoneAt && (daysUntilDue(a.nextStepDue) ?? 0) < 0;
     return (
-      <div key={a.id} className={`flex gap-3 ${gap}`}>
+      <div key={a.id} className={`group flex gap-3 ${gap}`}>
         <span className="z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-[14px]" aria-hidden>{ACTION_ICON[a.kind]}</span>
         <div className="min-w-0 flex-1 pt-0.5">
           <span className="text-[15px] font-semibold">{meta.verb}</span>
           <span className="text-[13px] text-muted"> · {who} · {timeAgo(a.at)}</span>
+          {onDeleteAction && (
+            <button onClick={() => onDeleteAction(a.id)} title="Delete this entry"
+              className="ml-1.5 rounded p-0.5 align-middle text-muted opacity-0 transition hover:text-danger group-hover:opacity-100">
+              <I.trash className="h-3 w-3" />
+            </button>
+          )}
           {/* Clamped with a Show more, because a logged meeting can be five
               lines of decisions and there is no reason for it to push every
               other entry off the screen. */}

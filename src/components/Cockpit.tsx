@@ -2741,17 +2741,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       const has = new Set(patch.attachments.map((a) => a.id));
       for (const a of patch.attachments) {
         if (had.has(a.id)) continue;
-        lines.push(a.url ? `added a link — ${a.name} · ${a.url}` : `attached ${a.name}`);
+        // Name only. Printing the URL beside it repeated a 90 character
+        // string twice in one line, and the attachment list right there
+        // already carries the link itself.
+        lines.push(a.url ? `added a link — ${a.name}` : `attached ${a.name}`);
       }
       for (const a of before.attachments) {
         if (!has.has(a.id)) lines.push(`removed ${a.url ? "the link" : "the file"} ${a.name}`);
       }
-      // A rename is neither an add nor a remove, and silently rewriting a
-      // link's label is exactly the kind of edit someone else needs to see.
-      for (const a of patch.attachments) {
-        const prev = before.attachments.find((x) => x.id === a.id);
-        if (prev && prev.name !== a.name) lines.push(`renamed an attachment from "${prev.name}" to "${a.name}"`);
-      }
+      // Renames are deliberately NOT recorded. Most of them are the app's own
+      // doing — a link is added under a URL-derived name and renamed a second
+      // later when its page title arrives — so every link produced two
+      // entries, one of them quoting the full URL twice. The attachment list
+      // already shows the current name.
     }
     return lines;
   };

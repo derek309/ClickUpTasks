@@ -8,10 +8,10 @@ import {
   STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY, WEEKDAY_LABEL, startSignal, isSnoozed, daysUntilDue, formatDue, dueCountdown,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
-import { I, Row, CollapsibleText, SearchableSelect, newId } from "./ui";
+import { I, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
 import { authedFetch } from "@/lib/supabase";
 import { ActionDock } from "./ActionDock";
-import { fetchTaskActions, insertTaskAction, setNextStepDoneDb } from "@/lib/db";
+import { fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskActionDb } from "@/lib/db";
 import { AttachmentTile } from "./AttachmentTile";
 import { InlineAssignee, InlineDate, InlineDue } from "./GroupedList";
 import { RichTextEditor } from "./RichTextEditor";
@@ -421,7 +421,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       return;
     }
     e.preventDefault();
-    onPatch({ attachments: [...task.attachments, { id: newId("at_"), name: text.replace(/^https?:\/\//, ""), kind: "link", size: "", url: text }] });
+    // Same naming as the Link form: a readable name immediately, upgraded to
+    // the page title if we can read one. Pasting used to keep the raw URL, so
+    // the two ways of adding a link produced different-looking rows.
+    const pastedId = newId("at_");
+    onPatch({ attachments: [...task.attachments, { id: pastedId, name: prettyLinkName(text), kind: "link", size: "", url: text }] });
+    void fetchLinkTitle(pastedId, text);
     pushToast?.("Link attached");
   };
   // Loaded here rather than with the initial payload: unlike tasks or clients
@@ -438,6 +443,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     return () => { live = false; };
   }, [task.id]);
   const logAction = (a: TaskAction) => { setLoaded((p) => ({ id: task.id, rows: [a, ...(p.id === task.id ? p.rows : [])] })); insertTaskAction(a); };
+  // Removes a logged action outright. Needed because the commonest mistake
+  // with a paste-heavy log is pasting into the wrong task, and until now the
+  // only fix was living with it (Derek: "I added this all to the wrong task").
+  // RLS lets an admin or the author delete; anyone else gets a no-op and the
+  // row reappears on the next load, which is the honest outcome.
+  const deleteAction = (id: string) => {
+    setLoaded((p2) => ({ ...p2, rows: p2.rows.filter((a) => a.id !== id) }));
+    deleteTaskActionDb(id);
+  };
   const setNextStepDone = (id: string, done: boolean) => {
     const at = done ? new Date().toISOString() : null;
     setLoaded((p) => ({ ...p, rows: p.rows.map((a) => (a.id === id ? { ...a, nextStepDoneAt: at } : a)) }));
@@ -826,7 +840,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // never got set, which is how a task goes quiet after real work on it.
   const [pendingNextStep, setPendingNextStep] = useState<{ kind: TaskActionKind; body: string } | null>(null);
   const { feedArea, composerFooter, openCompose } = useTaskMessaging({
-    actions, onSetNextStepDone: setNextStepDone,
+    actions, onSetNextStepDone: setNextStepDone, onDeleteAction: deleteAction,
     onMessageSent: (channel, body) => setPendingNextStep({ kind: channel, body }),
     task, client, comment, setComment, onPatch, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, ccContacts, onUploadMessageImage,
@@ -961,7 +975,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 <a href={isLink ? a.url! : undefined} onClick={!isLink && a.path ? () => onDownloadFile(a.path!) : undefined} target={isLink ? "_blank" : undefined} rel={isLink ? "noreferrer" : undefined}
                   title={isLink ? a.url! : a.name}
                   className="flex min-w-0 flex-1 items-center gap-1.5 font-medium text-accent hover:underline">
-                  <I.link className="h-3.5 w-3.5 shrink-0" /> <span className="min-w-0 truncate">{a.name}</span>{a.size && <span className="shrink-0 font-normal text-muted"> · {a.size}</span>}
+                  {isLink ? <LinkFavicon url={a.url!} /> : <I.link className="h-3.5 w-3.5 shrink-0" />} <span className="min-w-0 truncate">{a.name}</span>{a.size && <span className="shrink-0 font-normal text-muted"> · {a.size}</span>}
                 </a>
                 )}
                 {!editing && (
@@ -1188,7 +1202,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             the scroll. Sitting after the feed, the action you take most often
             was the furthest thing from you on a task with real history. */}
         <ActionDock
-          task={task} client={client} contact={linkedContactInfo ?? null} actions={actions}
+          task={task} client={client} contact={linkedContactInfo ?? null} actions={actions} messages={messages ?? undefined}
           me={userById(meId) ?? null} users={users}
           onLog={logAction} onSetNextStepDone={setNextStepDone} onPatch={onPatch} onAddComment={onAddComment}
           onOpenCompose={openCompose}

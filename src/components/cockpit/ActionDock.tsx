@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  Attachment, Contact, Task, TaskAction, TaskActionKind, TaskStatus,
+  Attachment, Contact, Message, Task, TaskAction, TaskActionKind, TaskStatus, htmlToText,
   TASK_ACTION_META, TASK_ACTION_ORDER, STATUS_META, STATUS_ORDER,
   User, addDaysIso, TODAY, formatDue, daysUntilDue,
 } from "@/lib/data";
@@ -39,12 +39,14 @@ function whenOptions(due: string | null): { label: string; date: string }[] {
 }
 
 export function ActionDock({
-  task, client, contact, actions, me, users, onLog, onSetNextStepDone, onPatch, onAddComment, onOpenCompose, onSendDm, taskLink, askNextStepFor, onAskNextStepHandled, pushToast,
+  task, client, contact, actions, messages, me, users, onLog, onSetNextStepDone, onPatch, onAddComment, onOpenCompose, onSendDm, taskLink, askNextStepFor, onAskNextStepHandled, pushToast,
 }: {
   task: Task;
   client: { name: string } | null;
   contact: Contact | null;
   actions: TaskAction[];
+  // Read only, for answering questions from the task's own record.
+  messages?: Message[];
   me: User | null;
   users: User[];
   onLog: (a: TaskAction) => void;
@@ -67,7 +69,7 @@ export function ActionDock({
   onAskNextStepHandled?: () => void;
   pushToast: (msg: string) => void;
 }) {
-  const [view, setView] = useState<"closed" | "menu" | TaskActionKind>("closed");
+  const [view, setView] = useState<"closed" | "menu" | "askTask" | TaskActionKind>("closed");
   const [body, setBody] = useState("");
   const [teammate, setTeammate] = useState<string | null>(null);
   const [nextStep, setNextStep] = useState("");
@@ -91,21 +93,24 @@ export function ActionDock({
   const [wantNext, setWantNext] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
   const [summarising, setSummarising] = useState(false);
+  const [ask, setAsk] = useState("");
+  const [asking, setAsking] = useState(false);
+  const [thread, setThread] = useState<{ q: string; a: string }[]>([]);
   const [aiReason, setAiReason] = useState("");
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
-  const open = view !== "closed" && view !== "menu";
+  const open = view !== "closed" && view !== "menu" && view !== "askTask";
 
   // Opening a panel clears it here, in the handler, rather than in an effect
   // watching `view`. A half-typed email must not leak into the next action
   // you take, and doing it on the event avoids a cascading render.
-  const openPanel = (v: "closed" | "menu" | TaskActionKind) => {
+  const openPanel = (v: "closed" | "menu" | "askTask" | TaskActionKind) => {
     // These three have a real composer already. The dock hands off and gets
     // out of the way; onMessageSent brings it back to ask what's next.
     if ((v === "chat" || v === "email" || v === "sms") && onOpenCompose) { onOpenCompose(v); setView("closed"); return; }
     setView(v);
     setBody(""); setNextStep(""); setNextDue(null); setStage(null); setAiReason("");
-    setWantNext(v !== "closed" && v !== "menu" ? TASK_ACTION_META[v as TaskActionKind].needsNextStep : false);
+    setWantNext(v !== "closed" && v !== "menu" && v !== "askTask" ? TASK_ACTION_META[v as TaskActionKind].needsNextStep : false);
     setTeammate(users.find((u) => u.id !== me?.id)?.id ?? null);
   };
   // Reopens the dock straight into "what's next?" for a message that just
@@ -174,6 +179,44 @@ export function ActionDock({
       pushToast("Summarised — edit anything before you log it");
     } catch { pushToast("Couldn't reach the AI."); }
     finally { setSummarising(false); }
+  };
+
+  // Everything written on this task, oldest first, as plain text. Built here
+  // rather than server-side because the client already holds all of it and
+  // re-fetching it would be a second source of truth for what "this task
+  // says", which is the one thing the answer has to be grounded in.
+  const taskRecord = (): string => {
+    const parts: string[] = [
+      `Title: ${task.title}`,
+      client?.name ? `Client: ${client.name}` : "",
+      task.due ? `Due: ${task.due}` : "",
+      htmlToText(task.description).trim() ? `Description:\n${htmlToText(task.description).trim()}` : "",
+      task.subtasks.length ? `Checklist:\n${task.subtasks.map((x) => `${x.done ? "[x]" : "[ ]"} ${x.title}`).join("\n")}` : "",
+      task.attachments.length ? `Attachments:\n${task.attachments.map((a) => `${a.name}${a.url ? ` (${a.url})` : ""}`).join("\n")}` : "",
+    ];
+    const entries = [
+      ...actions.map((a) => ({ at: a.at, text: `[${a.at.slice(0, 10)}] ${TASK_ACTION_META[a.kind].verb}: ${a.body}${a.nextStep ? `\nNext step: ${a.nextStep}` : ""}` })),
+      ...(messages ?? []).map((m) => ({ at: m.at, text: `[${m.at.slice(0, 10)}] ${m.direction === "inbound" ? "Received" : "Sent"} ${m.channel}${m.subject ? ` — ${m.subject}` : ""}:\n${htmlToText(m.body).trim()}` })),
+      ...task.comments.filter((c) => c.kind !== "event").map((c) => ({ at: c.at, text: `[${c.at.slice(0, 10)}] Note: ${c.body}` })),
+    ].sort((x, y) => x.at.localeCompare(y.at));
+    return [...parts.filter(Boolean), entries.length ? `History:\n${entries.map((e) => e.text).join("\n\n")}` : ""].filter(Boolean).join("\n\n");
+  };
+
+  const askTask = async (q: string) => {
+    const question = q.trim();
+    if (!question) return;
+    setAsking(true);
+    setAsk("");
+    try {
+      const res = await authedFetch("/api/ai/ask-task", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question, context: taskRecord(), history: thread.slice(-4) }),
+      });
+      const j = await res.json();
+      if (!res.ok) { pushToast(j?.error ?? "Couldn't answer that."); setAsk(question); return; }
+      setThread((t) => [...t, { q: question, a: j.answer }]);
+    } catch { pushToast("Couldn't reach the AI."); setAsk(question); }
+    finally { setAsking(false); }
   };
 
   const commit = (kind: TaskActionKind) => {
@@ -343,6 +386,10 @@ export function ActionDock({
               <button onClick={() => openPanel("closed")} className="rounded px-1 text-muted hover:text-foreground">✕</button>
             </div>
             <div className="flex flex-wrap gap-1.5">
+              <button onClick={() => openPanel("askTask")}
+                className="inline-flex items-center gap-1.5 rounded-[5px] border border-dashed px-3 py-1.5 text-[14px] font-semibold text-muted hover:bg-background hover:text-foreground">
+                <span aria-hidden>💡</span> Ask about this task
+              </button>
               {TASK_ACTION_ORDER.map((k) => (
                 <button key={k} onClick={() => openPanel(k)}
                   className="inline-flex items-center gap-1.5 rounded-[5px] border border-[#b9cde3] bg-accent-soft px-3 py-1.5 text-[14px] font-semibold text-accent hover:bg-accent hover:text-white">
@@ -406,6 +453,47 @@ export function ActionDock({
             <div className="mt-2.5">{bodyBox("How did it go?")}</div>
             {nextStepPanel("call")}
             {commitRow("call", "Log the call")}
+          </div>
+        )}
+
+        {view === "askTask" && (
+          <div>
+            <div className="mb-2.5 flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-[15px] font-semibold">
+                <button onClick={() => openPanel("menu")} title="Back" className="rounded px-1 text-[19px] leading-none text-muted hover:text-foreground">‹</button>
+                <span aria-hidden>💡</span> Ask about this task
+              </span>
+              <button onClick={() => { setThread([]); setView("closed"); }} className="rounded px-1 text-muted hover:text-foreground">✕</button>
+            </div>
+            {thread.length === 0 ? (
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {["What is this for?", "What are the specs?", "What did we agree?", "What is outstanding?"].map((q) => (
+                  <button key={q} onClick={() => askTask(q)} disabled={asking}
+                    className="rounded-[5px] border border-dashed px-2.5 py-1 text-[13px] text-muted hover:bg-background hover:text-foreground disabled:opacity-50">{q}</button>
+                ))}
+              </div>
+            ) : (
+              <div className="mb-2 max-h-64 space-y-2.5 overflow-y-auto pr-1">
+                {thread.map((t, i) => (
+                  <div key={i}>
+                    <div className="text-[14px] font-semibold">{t.q}</div>
+                    <div className="mt-0.5 whitespace-pre-wrap text-[15px]">{t.a}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <input value={ask} onChange={(e) => setAsk(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); askTask(ask); } }}
+                placeholder={asking ? "Reading the task…" : "Ask anything about this task…"} disabled={asking}
+                className="min-w-0 flex-1 rounded-[9px] border bg-surface px-3 py-2 text-[15px] outline-none focus:border-accent disabled:opacity-60" />
+              <button onClick={() => askTask(ask)} disabled={asking || !ask.trim()}
+                className="shrink-0 rounded-lg bg-accent px-4 py-2 text-[15px] font-semibold text-white hover:opacity-90 disabled:opacity-40">{asking ? "…" : "Ask"}</button>
+            </div>
+            {/* Nothing here is logged. A question you asked yourself is not a
+                thing that happened to the task, and putting it in the feed
+                would bury the things that did. */}
+            <div className="mt-1.5 text-[13px] text-muted">Answers come from this task only, and aren&apos;t saved to it.</div>
           </div>
         )}
 
