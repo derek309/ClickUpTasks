@@ -4,11 +4,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, clientStatusMeta,
-  TaskAction, TaskActionKind,
+  TaskAction, TaskActionKind, prettyLinkName,
   STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY, WEEKDAY_LABEL, startSignal, isSnoozed, daysUntilDue, formatDue, dueCountdown,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Row, CollapsibleText, SearchableSelect, newId } from "./ui";
+import { authedFetch } from "@/lib/supabase";
 import { ActionDock } from "./ActionDock";
 import { fetchTaskActions, insertTaskAction, setNextStepDoneDb } from "@/lib/db";
 import { AttachmentTile } from "./AttachmentTile";
@@ -231,14 +232,40 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const url = linkUrl.trim();
     if (!url) return;
     const href = /^https?:\/\//i.test(url) ? url : `https://${url}`;
-    onPatch({ attachments: [...task.attachments, { id: newId("at_"), name: linkLabel.trim() || href.replace(/^https?:\/\//, ""), kind: "link", size: "", url: href }] });
+    const id = newId("at_");
+    const typed = linkLabel.trim();
+    // Named immediately from the URL so the row never shows a raw link, then
+    // upgraded in place if the page has a real title. Doing it the other way
+    // round would leave a blank row while a slow site thinks about it.
+    onPatch({ attachments: [...task.attachments, { id, name: typed || prettyLinkName(href), kind: "link", size: "", url: href }] });
     setLinkUrl(""); setLinkLabel(""); setLinkOpen(false);
+    if (!typed) void fetchLinkTitle(id, href);
+  };
+  // Reads the <title> server-side (CORS puts it out of reach here) and renames
+  // the attachment if it finds one. Silent on failure: the URL-derived name is
+  // already a reasonable answer, so a dead link or a slow host costs nothing.
+  const fetchLinkTitle = async (id: string, href: string) => {
+    try {
+      const res = await authedFetch("/api/link-title", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: href }),
+      });
+      const j = await res.json().catch(() => ({}));
+      const title = typeof j?.title === "string" ? j.title.trim() : "";
+      if (!title) return;
+      renameAttachment(id, title);
+    } catch { /* keep the URL-derived name */ }
+  };
+  const renameAttachment = (id: string, name: string) => {
+    const clean = name.trim().slice(0, 200);
+    if (!clean) return;
+    onPatch({ attachments: task.attachments.map((a) => (a.id === id ? { ...a, name: clean } : a)) });
   };
   // Both default closed. The rail is reference you glance at; a live editor
   // and a client/project form are things you touch rarely and they were
   // costing the column its whole reason to exist.
   const [descEditing, setDescEditing] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [renamingAttId, setRenamingAttId] = useState<string | null>(null);
   const [labelOpen, setLabelOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -912,18 +939,36 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           empty-looking AttachmentTile boxes with no real thumbnail to show
           — a compact link chip carries the same info (name, type, size)
           without pretending there's a preview. */}
+      {/* One per row, not wrapped chips: a 90 character URL in an inline-flex
+          chip either burst the card or wrapped into an unreadable block, and
+          a full-width row can truncate cleanly with room for the buttons. */}
       {sortedAttachments.some((a) => a.kind !== "image") && (
-        <div className="mt-2 flex flex-wrap gap-1.5">
+        <div className="mt-2 flex flex-col gap-1.5">
           {sortedAttachments.filter((a) => a.kind !== "image").map((a) => {
             const isLink = !!a.url;
+            const editing = renamingAttId === a.id;
             return (
-              <span key={a.id} className="group inline-flex items-center gap-1.5 rounded-[5px] border bg-background py-1 pl-2.5 pr-1 text-[13px]">
+              <span key={a.id} className="group flex min-w-0 items-center gap-1.5 rounded-[5px] border bg-background py-1 pl-2.5 pr-1 text-[13px]">
+                {editing ? (
+                  <input autoFocus defaultValue={a.name}
+                    onBlur={(e) => { renameAttachment(a.id, e.target.value); setRenamingAttId(null); }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") { renameAttachment(a.id, e.currentTarget.value); setRenamingAttId(null); }
+                      if (e.key === "Escape") setRenamingAttId(null);
+                    }}
+                    className="min-w-0 flex-1 rounded border bg-surface px-1.5 py-0.5 text-[13px] outline-none focus:border-accent" />
+                ) : (
                 <a href={isLink ? a.url! : undefined} onClick={!isLink && a.path ? () => onDownloadFile(a.path!) : undefined} target={isLink ? "_blank" : undefined} rel={isLink ? "noreferrer" : undefined}
-                  className="flex items-center gap-1.5 font-medium text-accent hover:underline">
-                  <I.link className="h-3.5 w-3.5" /> {a.name}{a.size && <span className="font-normal text-muted"> · {a.size}</span>}
+                  title={isLink ? a.url! : a.name}
+                  className="flex min-w-0 flex-1 items-center gap-1.5 font-medium text-accent hover:underline">
+                  <I.link className="h-3.5 w-3.5 shrink-0" /> <span className="min-w-0 truncate">{a.name}</span>{a.size && <span className="shrink-0 font-normal text-muted"> · {a.size}</span>}
                 </a>
-                {a.path && <button onClick={() => onDownloadFileAs(a.path!, a.name)} title="Download" className="rounded-full p-1 text-muted opacity-0 hover:bg-surface hover:text-foreground group-hover:opacity-100"><I.download className="h-3 w-3" /></button>}
-                <button onClick={() => onRemoveFile(a)} title="Remove" className="rounded-full p-1 text-muted opacity-0 hover:bg-surface hover:text-danger group-hover:opacity-100"><I.trash className="h-3 w-3" /></button>
+                )}
+                {!editing && (
+                  <button onClick={() => setRenamingAttId(a.id)} title="Rename" className="shrink-0 rounded-full p-1 text-muted opacity-0 hover:bg-surface hover:text-foreground group-hover:opacity-100"><I.pencil className="h-3 w-3" /></button>
+                )}
+                {a.path && <button onClick={() => onDownloadFileAs(a.path!, a.name)} title="Download" className="shrink-0 rounded-full p-1 text-muted opacity-0 hover:bg-surface hover:text-foreground group-hover:opacity-100"><I.download className="h-3 w-3" /></button>}
+                <button onClick={() => onRemoveFile(a)} title="Remove" className="shrink-0 rounded-full p-1 text-muted opacity-0 hover:bg-surface hover:text-danger group-hover:opacity-100"><I.trash className="h-3 w-3" /></button>
               </span>
             );
           })}

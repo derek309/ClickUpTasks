@@ -2115,6 +2115,33 @@ export function recurrenceResetFields(previousDue: string | null, now: string = 
   return { createdAt: previousDue ? `${previousDue}T00:00:00.000Z` : now, followUpAt: null };
 }
 
+// A readable name for a link when we have nothing better. Used as the
+// immediate label while the title fetch is in flight, and as the permanent
+// one when that fetch finds nothing.
+//
+// The last meaningful path segment beats the host, because that is where the
+// human-written part of a URL usually lives: a scribehow share ends in
+// "Publishing_Local_Events_via_ClickUpLocal_Ambassador_Portal", which is a
+// real title once the separators are turned back into spaces. Falls back to
+// the host when a path is all ids and slashes.
+export function prettyLinkName(url: string): string {
+  let u: URL;
+  try { u = new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`); } catch { return url.slice(0, 120); }
+  const host = u.hostname.replace(/^www\./, "");
+  const segments = u.pathname.split("/").filter(Boolean);
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const raw = decodeURIComponent(segments[i]).replace(/\.(html?|php|aspx)$/i, "");
+    const words = raw.replace(/[_+-]+/g, " ").replace(/\s+/g, " ").trim();
+    // Skip pure ids and hashes: they are not names, however long they are.
+    if (words.length < 3) continue;
+    if (!/[a-z]/i.test(words)) continue;
+    if (!words.includes(" ") && /^[0-9a-f]{8,}$/i.test(words)) continue;
+    if (!words.includes(" ") && words.length > 24) continue;
+    return `${words.charAt(0).toUpperCase()}${words.slice(1)}`.slice(0, 120);
+  }
+  return host;
+}
+
 export function isSnoozed(task: { followUpAt?: string | null }, today: string = TODAY): boolean {
   return !!task.followUpAt && task.followUpAt > today;
 }

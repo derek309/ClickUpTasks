@@ -9,6 +9,7 @@ import {
   userById,
   formatDue,
   advanceDue,
+  htmlToText,
   recurrenceResetFields,
   isOverdue,
   timeAgo,
@@ -2708,6 +2709,36 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       else lines.push(`changed due date from ${formatDue(before.due)} to ${formatDue(patch.due!)}`);
     }
     if (patch.priority && patch.priority !== before.priority) lines.push(`changed priority from ${PRIORITY_META[before.priority].label} to ${PRIORITY_META[patch.priority].label}`);
+    if (patch.followUpAt !== undefined && patch.followUpAt !== before.followUpAt) {
+      if (!before.followUpAt && patch.followUpAt) lines.push(`set follow up to ${formatDue(patch.followUpAt)}`);
+      else if (before.followUpAt && !patch.followUpAt) lines.push(`cleared the follow up (was ${formatDue(before.followUpAt)})`);
+      else lines.push(`moved follow up from ${formatDue(before.followUpAt!)} to ${formatDue(patch.followUpAt!)}`);
+    }
+    // The two changes that carry content worth reading. "Description updated"
+    // on its own tells you something happened and then makes you go find it;
+    // the point of a feed is that the thing is there (Derek: "just add the
+    // description there ... and then put the link there").
+    if (patch.description !== undefined && patch.description !== before.description) {
+      const text = htmlToText(patch.description).trim();
+      lines.push(text ? `updated the description — ${text.slice(0, 400)}` : "cleared the description");
+    }
+    if (patch.attachments !== undefined) {
+      const had = new Set(before.attachments.map((a) => a.id));
+      const has = new Set(patch.attachments.map((a) => a.id));
+      for (const a of patch.attachments) {
+        if (had.has(a.id)) continue;
+        lines.push(a.url ? `added a link — ${a.name} · ${a.url}` : `attached ${a.name}`);
+      }
+      for (const a of before.attachments) {
+        if (!has.has(a.id)) lines.push(`removed ${a.url ? "the link" : "the file"} ${a.name}`);
+      }
+      // A rename is neither an add nor a remove, and silently rewriting a
+      // link's label is exactly the kind of edit someone else needs to see.
+      for (const a of patch.attachments) {
+        const prev = before.attachments.find((x) => x.id === a.id);
+        if (prev && prev.name !== a.name) lines.push(`renamed an attachment from "${prev.name}" to "${a.name}"`);
+      }
+    }
     return lines;
   };
 

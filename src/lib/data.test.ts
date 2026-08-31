@@ -26,6 +26,7 @@ import {
   windowBurn,
   isSnoozed,
   effectiveDueDate,
+  prettyLinkName,
   recurrenceResetFields,
   startSignal,
   dueCountdown,
@@ -655,5 +656,21 @@ describe("a new occurrence of a recurring task", () => {
   });
   it("falls back to now when there was no due date to advance from", () => {
     expect(recurrenceResetFields(null, "2026-09-01T12:00:00.000Z").createdAt).toBe("2026-09-01T12:00:00.000Z");
+  });
+});
+
+describe("prettyLinkName", () => {
+  it("turns a slug into a title", () => {
+    expect(prettyLinkName("https://scribehow.com/o/dVGrWG/viewer/Publishing_Local_Events_via_ClickUpLocal_Ambassador_Portal"))
+      .toBe("Publishing Local Events via ClickUpLocal Ambassador Portal");
+  });
+  it("skips an id segment and keeps looking", () => {
+    expect(prettyLinkName("https://example.com/how-to-fix-the-thing/a1b2c3d4e5f6a7b8")).toBe("How to fix the thing");
+  });
+  it("falls back to the host when the path is all ids", () => {
+    expect(prettyLinkName("https://www.clickuplocal.com/?tab=events&city=lincoln")).toBe("clickuplocal.com");
+  });
+  it("does not throw on junk", () => {
+    expect(prettyLinkName("not a url at all")).toBeTruthy();
   });
 });
