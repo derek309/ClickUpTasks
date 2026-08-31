@@ -28,6 +28,8 @@ import {
   effectiveDueDate,
   prettyLinkName,
   linkSpans,
+  googleLinkName,
+  isUselessTitle,
   TASK_ACTION_ORDER,
   CLIENT_FACING_ACTIONS,
   recurrenceResetFields,
@@ -731,5 +733,33 @@ describe("linkSpans", () => {
     const t = "go to https://x.com/a ok";
     const [span] = linkSpans(t);
     expect(t.slice(span.start, span.end)).toBe("https://x.com/a");
+  });
+});
+
+describe("naming a Google link", () => {
+  it("says what a Drive folder is, since its real name needs Drive auth", () => {
+    expect(prettyLinkName("https://drive.google.com/drive/folders/1AbC_dEfG")).toBe("Google Drive folder");
+  });
+  it("distinguishes the document types", () => {
+    expect(googleLinkName("https://docs.google.com/document/d/1x/edit")).toBe("Google Doc");
+    expect(googleLinkName("https://docs.google.com/spreadsheets/d/1x/edit")).toBe("Google Sheet");
+    expect(googleLinkName("https://docs.google.com/presentation/d/1x/edit")).toBe("Google Slides");
+  });
+  it("leaves everything else to the normal naming", () => {
+    expect(googleLinkName("https://pro.fiverr.com/mk/do-designs")).toBeNull();
+    expect(prettyLinkName("https://pro.fiverr.com/mk/do-designs")).toBe("Do designs");
+  });
+});
+
+describe("titles that tell you nothing", () => {
+  it("rejects a login interstitial", () => {
+    // The exact title Drive hands back for a folder we cannot read.
+    expect(isUselessTitle("Open")).toBe(true);
+    expect(isUselessTitle("Sign in - Google Accounts")).toBe(true);
+    expect(isUselessTitle("  redirecting  ")).toBe(true);
+    expect(isUselessTitle("")).toBe(true);
+  });
+  it("keeps a real one", () => {
+    expect(isUselessTitle("Publishing Local Events via the Ambassador Portal")).toBe(false);
   });
 });

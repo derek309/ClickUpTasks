@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { lookup } from "node:dns/promises";
 import { requireUser } from "@/lib/serverAuth";
+import { isUselessTitle } from "@/lib/data";
 
 // Reads the <title> off a pasted link so an attachment reads
 // "Publishing Local Events via the Ambassador Portal" instead of a 90
@@ -113,7 +114,12 @@ export async function POST(req: NextRequest) {
       }
       reader.cancel().catch(() => {});
       const html = Buffer.concat(chunks.map((c) => Buffer.from(c))).toString("utf8");
-      return NextResponse.json({ title: extractTitle(html) });
+      // A page behind a login returns its interstitial, not its content, so
+      // a Drive folder titles itself "Open". Returning that renames the
+      // attachment to something worse than the URL, and worse still it looks
+      // deliberate. Empty means "keep the name you derived from the URL".
+      const title = extractTitle(html);
+      return NextResponse.json({ title: isUselessTitle(title) ? "" : title });
     }
     return NextResponse.json({ title: "" });
   } catch (e) {

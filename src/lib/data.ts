@@ -2169,7 +2169,51 @@ export function linkSpans(text: string): { start: number; end: number; href: str
   return out;
 }
 
+// Titles that tell you nothing. A page behind a login hands back its
+// interstitial rather than its content: a Drive folder titles itself "Open",
+// a gated doc says "Sign in". Letting those win produced attachments called
+// "Open" (Derek), which is worse than the URL they replaced because it also
+// looks deliberate.
+const USELESS_TITLES = new Set([
+  "open", "sign in", "sign in - google accounts", "google drive", "google docs",
+  "redirecting", "redirecting…", "loading", "loading…", "untitled", "untitled document",
+  "error", "not found", "access denied", "just a moment...", "attention required!",
+]);
+export function isUselessTitle(title: string): boolean {
+  const t = title.trim().toLowerCase();
+  return t.length === 0 || USELESS_TITLES.has(t);
+}
+
+// What a Google link is, when we cannot know what it is called.
+//
+// The real name of a Drive folder needs an authenticated Drive API call; the
+// public page will never give it up. So rather than a folder id or the word
+// "Open", say what kind of thing it is and let it be renamed in place.
+export function googleLinkName(url: string): string | null {
+  let u: URL;
+  try { u = new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`); } catch { return null; }
+  const host = u.hostname.replace(/^www\./, "");
+  const path = u.pathname;
+  if (host === "docs.google.com") {
+    if (path.startsWith("/document")) return "Google Doc";
+    if (path.startsWith("/spreadsheets")) return "Google Sheet";
+    if (path.startsWith("/presentation")) return "Google Slides";
+    if (path.startsWith("/forms")) return "Google Form";
+    return "Google Docs link";
+  }
+  if (host === "drive.google.com") {
+    if (path.includes("/folders/")) return "Google Drive folder";
+    if (path.includes("/file/")) return "Google Drive file";
+    return "Google Drive link";
+  }
+  if (host === "calendar.google.com") return "Google Calendar event";
+  if (host === "meet.google.com") return "Google Meet";
+  return null;
+}
+
 export function prettyLinkName(url: string): string {
+  const google = googleLinkName(url);
+  if (google) return google;
   let u: URL;
   try { u = new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`); } catch { return url.slice(0, 120); }
   const host = u.hostname.replace(/^www\./, "");
