@@ -3299,6 +3299,26 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   // A client's ghlLocationId field is repurposed to store the contact's business/company name.
   const clientCompany = (c: Client | null) => (c && c.id.startsWith("cl_") ? c.ghlLocationId : "");
+  // Someone found live in GoHighLevel who has never been synced here. The
+  // local contact row has to exist first: a client's id is `cl_<contactId>`,
+  // so without it the client would point at a contact that isn't there.
+  //
+  // ct_ghl_<id> matches the id the bulk sync builds, so when that sub-account
+  // next syncs it updates this row rather than creating a second copy of the
+  // same person.
+  const addRemoteContact = async (hit: { ghlContactId: string; locationId: string; name: string; email: string; phone: string; company: string; city: string; state: string }) => {
+    const sub = subAccounts.find((sa) => sa.ghlLocationId === hit.locationId);
+    const contact: Contact = {
+      id: `ct_ghl_${hit.ghlContactId}`,
+      clientId: sub?.id ?? "",
+      name: hit.name, email: hit.email, phone: hit.phone,
+      ghlContactId: hit.ghlContactId, company: hit.company, city: hit.city, state: hit.state,
+    };
+    setContacts((cs) => (cs.some((c) => c.id === contact.id) ? cs.map((c) => (c.id === contact.id ? contact : c)) : [...cs, contact]));
+    await upsertContact(contact);
+    await addClientContact(contact);
+  };
+
   const addClientContact = async (contact: Contact, type: ClientType = "client") => {
     const id = "cl_" + contact.id;
     if (clients.some((c) => c.id === id)) { setActiveClient(id); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setAddClientOpen(false); return; }
@@ -4877,7 +4897,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           taskLink={() => linkTo({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null })} />
       )}
 
-      {addClientOpen && <AddClientModal subAccounts={subAccounts} contacts={contacts} existingIds={new Set(clients.map((c) => c.id))} onAdd={addClientContact} onClose={() => setAddClientOpen(false)} />}
+      {addClientOpen && <AddClientModal subAccounts={subAccounts} contacts={contacts} existingIds={new Set(clients.map((c) => c.id))} onAdd={addClientContact} onAddRemote={addRemoteContact} onClose={() => setAddClientOpen(false)} />}
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
       {promptDialog && <PromptModal {...promptDialog} onCancel={() => setPromptDialog(null)} />}
       {mergeSourceId && (() => {
