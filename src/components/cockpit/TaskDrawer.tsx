@@ -986,6 +986,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   {isLink ? <LinkFavicon url={a.url!} /> : <I.link className="h-3.5 w-3.5 shrink-0" />} <span className="min-w-0 truncate">{a.name}</span>{a.size && <span className="shrink-0 font-normal text-muted"> · {a.size}</span>}
                 </a>
                 )}
+                {!editing && isLink && (
+                  <button onClick={() => { navigator.clipboard?.writeText(a.url!).then(() => pushToast("🔗 Link copied"), () => pushToast("⚠️ Couldn't copy link")); }}
+                    title="Copy this link" className="shrink-0 rounded-full p-1 text-muted opacity-0 hover:bg-surface hover:text-foreground group-hover:opacity-100"><I.copy className="h-3 w-3" /></button>
+                )}
                 {!editing && (
                   <button onClick={() => setRenamingAttId(a.id)} title="Rename" className="shrink-0 rounded-full p-1 text-muted opacity-0 hover:bg-surface hover:text-foreground group-hover:opacity-100"><I.pencil className="h-3 w-3" /></button>
                 )}

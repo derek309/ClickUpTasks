@@ -15,7 +15,7 @@ import {
   type Task, type Client, type Contact, type Attachment, type MessageChannel, type Message, type Comment,
   TaskAction, TaskActionKind, TASK_ACTION_META, daysUntilDue, formatDue,
 } from "@/lib/data";
-import { I, Avatar, CollapsibleText } from "./ui";
+import { I, Avatar, CollapsibleText, LinkedText } from "./ui";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 import { AttachmentTile } from "./AttachmentTile";
 import { RichTextEditor } from "./RichTextEditor";
@@ -214,7 +214,7 @@ function ActionBody({ text }: { text: string }) {
   const long = text.length > 320 || text.split("\n").length > 6;
   return (
     <div className="mt-0.5">
-      <div className={`whitespace-pre-wrap text-[15px] ${!open && long ? "line-clamp-6" : ""}`}>{text}</div>
+      <div className={`whitespace-pre-wrap text-[15px] ${!open && long ? "line-clamp-6" : ""}`}><LinkedText text={text} /></div>
       {long && (
         <button onClick={() => setOpen((o) => !o)} className="mt-0.5 text-[13px] font-medium text-accent hover:underline">
           {open ? "Show less" : "Show more"}
@@ -980,7 +980,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
         <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface" style={{ background: diff ? eventAccentColor(diff) : "var(--muted)" }} /></div>
         <div className="min-w-0 flex-1 pt-1.5 text-[16px] text-muted">
           <span className="font-medium text-foreground">{u?.name}</span>{" "}
-          {diff ? <>updated {diff.field} to <EventValuePill diff={diff} /></> : c.body}
+          {diff ? <>updated {diff.field} to <EventValuePill diff={diff} /></> : <LinkedText text={c.body} />}
           {" · "}<span className="text-[15px]">{timeAgo(c.at)}</span>
           {onDeleteComment && (
             <button onClick={() => onDeleteComment(c.id)} title="Delete this entry"
