@@ -2225,6 +2225,9 @@ export function prettyLinkName(url: string): string {
     if (words.length < 3) continue;
     if (!/[a-z]/i.test(words)) continue;
     if (!words.includes(" ") && /^[0-9a-f]{8,}$/i.test(words)) continue;
+    // Order and reference ids that are not hex: "FO62A175F5FC6" off a Fiverr
+    // order. One token, shouty, and carrying digits is an id, not a name.
+    if (!words.includes(" ") && /\d/.test(words) && /^[A-Z0-9_-]{6,}$/.test(words)) continue;
     if (!words.includes(" ") && words.length > 24) continue;
     return `${words.charAt(0).toUpperCase()}${words.slice(1)}`.slice(0, 120);
   }

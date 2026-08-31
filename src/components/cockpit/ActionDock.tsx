@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Attachment, Contact, Message, Task, TaskAction, TaskActionKind, TaskStatus, htmlToText,
-  TASK_ACTION_META, TASK_ACTION_ORDER, CLIENT_FACING_ACTIONS, STATUS_META, STATUS_ORDER,
+  TASK_ACTION_META, TASK_ACTION_ORDER, CLIENT_FACING_ACTIONS, STATUS_META, STATUS_ORDER, linkSpans, prettyLinkName,
   User, addDaysIso, TODAY, formatDue, daysUntilDue,
 } from "@/lib/data";
 import { I, newId } from "./ui";
@@ -81,6 +81,24 @@ export function ActionDock({
   // Setting nextStep to a space to force the panel open trimmed straight back
   // to empty, so the link did nothing.
   const [quickNote, setQuickNote] = useState("");
+  // A link written into a note is a link on the task, so it joins the
+  // Attachments panel as well as staying in the note (Derek: a link added in
+  // a log wasn't attached). Deduped on URL, so writing the same link twice,
+  // or mentioning one that is already attached, adds nothing.
+  //
+  // Returns the patch rather than applying it, so a caller that is already
+  // patching the task can fold it into one write instead of two.
+  const attachmentsFrom = (text: string): Partial<Task> | null => {
+    const have = new Set(task.attachments.map((a) => a.url).filter(Boolean));
+    const found: Attachment[] = [];
+    for (const { href } of linkSpans(text)) {
+      if (have.has(href)) continue;
+      have.add(href);
+      found.push({ id: newId("at_"), name: prettyLinkName(href), kind: "link", size: "", url: href });
+    }
+    return found.length ? { attachments: [...task.attachments, ...found] } : null;
+  };
+
   const postQuickNote = () => {
     const text = quickNote.trim();
     if (!text) return;
@@ -89,8 +107,10 @@ export function ActionDock({
     // comment underneath it.
     onLog({ id: newId("ta_"), taskId: task.id, kind: "note", authorId: me?.id ?? null,
       body: text, at: new Date().toISOString(), nextStep: null, nextStepDue: null, nextStepDoneAt: null });
+    const links = attachmentsFrom(text);
+    if (links) onPatch(links);
     setQuickNote("");
-    pushToast("Note added");
+    pushToast(links ? "Note added · link attached" : "Note added");
   };
   const [wantNext, setWantNext] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
@@ -249,7 +269,7 @@ export function ActionDock({
 
     // The next step's date IS the follow-up date. Two separate "when does
     // this come back" fields would drift apart within a week.
-    const patch: Partial<Task> = {};
+    const patch: Partial<Task> = { ...(attachmentsFrom(text) ?? {}) };
     if (nextStep.trim() && nextDue) patch.followUpAt = nextDue;
     if (stage && stage !== task.status) patch.status = stage;
     if (Object.keys(patch).length) onPatch(patch);

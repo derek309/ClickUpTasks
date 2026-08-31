@@ -679,6 +679,9 @@ describe("prettyLinkName", () => {
     expect(prettyLinkName("https://scribehow.com/o/dVGrWG/viewer/Publishing_Local_Events_via_ClickUpLocal_Ambassador_Portal"))
       .toBe("Publishing Local Events via ClickUpLocal Ambassador Portal");
   });
+  it("skips a shouty order id and keeps looking", () => {
+    expect(prettyLinkName("https://www.fiverr.com/orders/FO62A175F5FC6")).toBe("Orders");
+  });
   it("skips an id segment and keeps looking", () => {
     expect(prettyLinkName("https://example.com/how-to-fix-the-thing/a1b2c3d4e5f6a7b8")).toBe("How to fix the thing");
   });

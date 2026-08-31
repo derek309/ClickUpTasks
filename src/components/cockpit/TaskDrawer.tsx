@@ -379,26 +379,28 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       setTimeout(() => setCopied(false), 2000);
     } catch { /* clipboard unavailable */ }
   };
-  // Pasting an image anywhere in the drawer (title, description, a comment
+  // Pasting a FILE anywhere in the drawer (title, description, a comment
   // draft — doesn't matter which field has focus) attaches it to the task,
   // same upload pipeline as drag-drop onto the Attachments block. Only
-  // intercepts when the clipboard actually carries image data, so a normal
-  // text paste into any field is left untouched.
+  // intercepts when the clipboard actually carries a file, so a normal text
+  // paste into any field is left untouched.
   const handlePaste = (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
     if (!items) return;
-    const images: File[] = [];
+    // Any file, not just images. A pasted PDF, video or doc is exactly as
+    // much an attachment as a screenshot, and it used to fall through to the
+    // URL branch and then to nothing at all.
+    const files: File[] = [];
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      if (item.kind === "file" && item.type.startsWith("image/")) {
-        const file = item.getAsFile();
-        if (file) images.push(file);
-      }
+      if (item.kind !== "file") continue;
+      const file = item.getAsFile();
+      if (file) files.push(file);
     }
-    if (images.length > 0) {
+    if (files.length > 0) {
       e.preventDefault();
       const dt = new DataTransfer();
-      images.forEach((f) => dt.items.add(f));
+      files.forEach((f) => dt.items.add(f));
       onAddFiles(dt.files);
       return;
     }
