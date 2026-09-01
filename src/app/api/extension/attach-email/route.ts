@@ -83,16 +83,32 @@ export async function POST(req: NextRequest) {
     attachments: [], cc: [], bcc: [], created_at: e.internalDate,
   }));
 
-  // Ignore duplicates rather than failing the whole import: attaching a thread
-  // twice, or attaching one the poller already ingested, should be a no-op on
-  // the rows that exist and still write the ones that do not.
-  const { error } = await supabaseAdmin
-    .from("messages").upsert(rows, { onConflict: "gmail_message_id", ignoreDuplicates: true });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // Skip what is already here rather than relying on a conflict clause.
+  // Attaching a thread twice, or one the reply poller already ingested, has to
+  // be a no-op on the rows that exist and still write the ones that do not.
+  //
+  // Done as a read-then-insert because an ON CONFLICT arbiter is a promise
+  // about an index, and this route already shipped once believing an index it
+  // could not actually use — reporting three messages imported while the
+  // insert failed with 42P10 every time. A select cannot fail that quietly.
+  const ids = rows.map((r) => r.gmail_message_id).filter(Boolean) as string[];
+  const { data: existing } = await supabaseAdmin
+    .from("messages").select("gmail_message_id").in("gmail_message_id", ids);
+  const have = new Set((existing ?? []).map((r) => r.gmail_message_id as string));
+  const fresh = rows.filter((r) => !have.has(r.gmail_message_id as string));
+
+  if (fresh.length) {
+    const { error } = await supabaseAdmin.from("messages").insert(fresh);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  }
 
   return NextResponse.json({
     ok: true, threadId: thread.threadId, via: thread.via,
-    imported: rows.length, subject: thread.subject,
+    // What actually landed, and what was already here. The first number said
+    // "3 imported" for an import that wrote nothing, which is the kind of
+    // reassurance that costs an afternoon.
+    imported: fresh.length, alreadyHad: rows.length - fresh.length,
+    subject: thread.subject,
     // "search" means we guessed from a subject line, so the caller can say so
     // rather than presenting a guess as a fact.
     confident: thread.via !== "search",

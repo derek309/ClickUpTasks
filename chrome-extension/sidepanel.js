@@ -98,9 +98,13 @@ async function attachEmailThread(token, taskId) {
     if (res?.ok) {
       // Says which, because matching on a subject line is a guess and should
       // not be reported in the same voice as reading the thread's own id.
+      // Says what landed and what was already here, separately: "3 imported"
+      // for an import that wrote nothing is how a broken index went unnoticed.
+      const had = res.alreadyHad ? `, ${res.alreadyHad} already here` : "";
+      const count = `${res.imported} message${res.imported === 1 ? "" : "s"} imported${had}`;
       statusEl.textContent = res.confident
-        ? `Watching this thread — ${res.imported} message${res.imported === 1 ? "" : "s"} imported.`
-        : `Matched by subject — ${res.imported} imported. Check it is the right thread.`;
+        ? `Watching this thread — ${count}.`
+        : `Matched by subject — ${count}. Check it is the right thread.`;
       statusEl.className = "ok";
     }
   } catch {

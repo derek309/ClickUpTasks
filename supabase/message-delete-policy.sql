@@ -17,8 +17,12 @@ create policy messages_delete on messages for delete to authenticated using (is_
 -- upsert the messages already in it without duplicating anything the reply
 -- poller has already ingested. Partial because almost every row has no Gmail
 -- id at all (chat, SMS, anything from GoHighLevel).
+-- Plain, not partial: a partial index cannot serve as an ON CONFLICT arbiter
+-- unless the statement repeats its predicate, and nulls are distinct in a
+-- unique index anyway, so the partial version bought nothing and broke the
+-- upsert it existed for.
 create unique index if not exists messages_gmail_message_id_key
-  on messages(gmail_message_id) where gmail_message_id is not null;
+  on messages(gmail_message_id);
 
 -- Added later: which GoHighLevel conversation a message belongs to. The GHL
 -- equivalent of gmail_thread_id — what lets an inbound reply find the task it
