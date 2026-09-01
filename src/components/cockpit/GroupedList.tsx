@@ -5,17 +5,18 @@
 import { useMemo, useRef, useState } from "react";
 import { usePersisted } from "@/lib/usePersisted";
 import {
-  users, formatDue, isOverdue, TODAY, COLLAPSED_DUE_BUCKETS, effectivePriority, effectiveStatus, timeAgo, userById, clientInitials, dueOneLine, isSnoozed,
+  users, formatDue, isOverdue, TODAY, COLLAPSED_DUE_BUCKETS, effectivePriority, effectiveStatus, clientInitials, dueOneLine, isSnoozed,
   PRIORITY_META, manualPriorityOptions,
   STATUS_META, STATUS_ORDER, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence,
   PLAYBOOK_STEP_BY_KEY,
-  type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus,
+  addDaysIso, addBusinessDaysIso, SIZE_META, SIZE_ORDER,
+  type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus, type TaskSize,
 } from "@/lib/data";
-import { I, Avatar, LabelChips, CollapsibleText, LIST_COLUMNS } from "./ui";
+import { I, Avatar, LabelChips, LIST_COLUMNS } from "./ui";
 
 // --- grouped list view (ClickUp-style: group, quick-add, expandable subtasks) --
 
-export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onDeleteSub, onAddComment, hideEmpty, highlightDelegateFor, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId }: {
+export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onDeleteSub, hideEmpty, highlightDelegateFor, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId }: {
   groups: { key: string; label: string; color: string; tasks: Task[] }[];
   // The signed-in user — the row's assignee avatar only renders when the
   // task is assigned to someone else; seeing your own face on every one of
@@ -26,8 +27,8 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
   groupKind?: string;
   /** Start Next week / This month / Later / No date closed. All Tasks only. */
   collapseFarBuckets?: boolean;
-  onOpen: (id: string) => void; onOpenClient?: (clientId: string) => void; onPatch: (taskId: string, patch: Partial<Task>) => void; canQuickAdd: boolean; quickAddHint: string; onQuickAdd: (groupKey: string, title: string) => void;
-  onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void; onDeleteSub: (taskId: string, subId: string) => void; onAddComment: (taskId: string, body: string) => void; hideEmpty?: boolean; highlightDelegateFor?: string;
+  onOpen: (id: string) => void; onOpenClient?: (clientId: string) => void; onPatch: (taskId: string, patch: Partial<Task>) => void; canQuickAdd: boolean; quickAddHint: string; onQuickAdd: (groupKey: string, title: string, extras: { due: string | null; followUpAt: string | null; size: TaskSize | null }) => void;
+  onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void; onDeleteSub: (taskId: string, subId: string) => void; hideEmpty?: boolean; highlightDelegateFor?: string;
   // When set, task rows can be dragged onto a group header to move them into
   // that group (e.g. drag a row onto "Urgent" to reprioritize it) — only
   // meaningful for groupBy dimensions the caller knows how to translate back
@@ -46,7 +47,6 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
   selectedIds?: Set<string>; onToggleSelect?: (taskId: string) => void;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [draft, setDraft] = useState<Record<string, string>>({});
   const [subDraft, setSubDraft] = useState<Record<string, string>>({});
   const toggle = (id: string) => setExpanded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   // Two conditions, both needed. The list has to be grouped by due date, and
@@ -208,16 +208,16 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
                       rather than border-t since it now divides downward. */}
                   {canQuickAdd && (
                     <tr className="block sm:table-row"><td colSpan={colCount} className="block border-b p-0 sm:table-cell">
-                      <div className="flex items-center gap-2 px-4 py-1.5">
-                        <I.plus className="text-muted" />
-                        <input value={draft[g.key] ?? ""} onChange={(e) => setDraft((d) => ({ ...d, [g.key]: e.target.value }))}
-                          onKeyDown={(e) => { if (e.key === "Enter") { onQuickAdd(g.key, draft[g.key] ?? ""); setDraft((d) => ({ ...d, [g.key]: "" })); } }}
-                          placeholder="Add task…" className="flex-1 bg-transparent py-1 text-[15px] outline-none placeholder:text-muted" />
-                      </div>
+                      <InlineTaskComposer
+                        // A due bucket already says when the task is due, so
+                        // adding into "Today" starts on today rather than
+                        // making you say it twice.
+                        suggestedDue={groupKind === "due" && (g.key === "today" || g.key === "tomorrow") ? (g.key === "today" ? TODAY : addDaysIso(TODAY, 1)) : null}
+                        onAdd={(title, extras) => onQuickAdd(g.key, title, extras)} />
                     </td></tr>
                   )}
                   {g.tasks.map((t) => (
-                    <TaskRow key={t.id} task={t} colCount={colCount} cols={cols} showClient={showClient} showCrumb={showCrumb} onOpenClient={onOpenClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} onAddComment={onAddComment} meId={meId} delegated={!!highlightDelegateFor && t.assigneeId !== highlightDelegateFor && t.subtasks.some((s) => s.assigneeId === highlightDelegateFor)}
+                    <TaskRow key={t.id} task={t} colCount={colCount} cols={cols} showClient={showClient} showCrumb={showCrumb} onOpenClient={onOpenClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} meId={meId} delegated={!!highlightDelegateFor && t.assigneeId !== highlightDelegateFor && t.subtasks.some((s) => s.assigneeId === highlightDelegateFor)}
                       selected={!!selectedIds?.has(t.id)} onToggleSelect={onToggleSelect ? (e) => handleSelectClick(t.id, e) : undefined}
                       draggable={!!onDropInGroup || !!onMergeTasks} onDragStart={() => setDragTaskId(t.id)} onDragEnd={() => { setDragTaskId(null); setDragOverKey(null); setDragOverTaskId(null); }}
                       isMergeDropTarget={dragOverTaskId === t.id}
@@ -239,9 +239,91 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
   );
 }
 
-function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, clientById, projectById, contactById, onOpen, onPatch, onAddComment, meId, delegated, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
+// Adding a task from the list asks the same questions the full form does.
+//
+// It used to take a title and create on Enter, which meant the one path
+// people actually use produced tasks with no due date, no follow-up and no
+// size — exactly what the create form was just made to refuse. Two answers to
+// "what does it take to make a task" is one too many.
+//
+// It still starts as one line. Typing opens the rest rather than creating
+// something half made, everything is chips so the whole thing is a few
+// clicks, and it never leaves the list.
+function InlineTaskComposer({ suggestedDue, onAdd }: {
+  suggestedDue: string | null;
+  onAdd: (title: string, extras: { due: string | null; followUpAt: string | null; size: TaskSize | null }) => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [due, setDue] = useState<string | null>(suggestedDue);
+  const [followUpAt, setFollowUpAt] = useState<string | null>(null);
+  const [size, setSize] = useState<TaskSize | null>(null);
+
+  const missing = [!due && "a due date", !followUpAt && "a follow-up date", !size && "how long it takes"].filter(Boolean) as string[];
+  const ready = !!title.trim() && missing.length === 0;
+  const reset = () => { setTitle(""); setDue(suggestedDue); setFollowUpAt(null); setSize(null); };
+  const submit = () => { if (!ready) return; onAdd(title.trim(), { due, followUpAt, size }); reset(); };
+
+  const dayChips = (value: string | null, set: (d: string | null) => void) => (
+    <>
+      {[["Today", TODAY], ["Tomorrow", addDaysIso(TODAY, 1)], ["In 3 days", addBusinessDaysIso(TODAY, 3)]].map(([label, date]) => (
+        <button key={label} onClick={() => set(value === date ? null : date)} title={formatDue(date)}
+          className={`rounded-md border px-2 py-0.5 text-[13px] ${value === date ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{label}</button>
+      ))}
+      <label className={`cursor-pointer rounded-md border px-2 py-0.5 text-[13px] ${value && ![TODAY, addDaysIso(TODAY, 1), addBusinessDaysIso(TODAY, 3)].includes(value) ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>
+        {value && ![TODAY, addDaysIso(TODAY, 1), addBusinessDaysIso(TODAY, 3)].includes(value) ? formatDue(value) : "Pick"}
+        <input type="date" value={value ?? ""} onChange={(e) => set(e.target.value || null)} className="sr-only" />
+      </label>
+    </>
+  );
+
+  const label = (t: string) => <span className="w-[62px] shrink-0 text-[11px] font-semibold uppercase tracking-wide text-muted">{t}</span>;
+
+  return (
+    <div className={title.trim() ? "border-b bg-background/40 px-4 py-2.5" : "px-4 py-1.5"}>
+      <div className="flex items-center gap-2">
+        <I.plus className="shrink-0 text-muted" />
+        <input value={title} onChange={(e) => setTitle(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") { reset(); return; }
+            // Enter adds once the answers are in, so the keyboard path stays
+            // as fast as it was. Before that it does nothing rather than
+            // creating something the list cannot plan.
+            if (e.key === "Enter") { e.preventDefault(); submit(); }
+          }}
+          placeholder="Add task…" className="flex-1 bg-transparent py-1 text-[15px] outline-none placeholder:text-muted" />
+      </div>
+      {!!title.trim() && (
+        <div className="mt-2 space-y-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">{label("Due")}{dayChips(due, setDue)}</div>
+          <div className="flex flex-wrap items-center gap-1.5">{label("Follow up")}{dayChips(followUpAt, setFollowUpAt)}</div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {label("Takes")}
+            {SIZE_ORDER.map((sz) => (
+              <button key={sz} onClick={() => setSize(size === sz ? null : sz)} title={`${SIZE_META[sz].label} · ${SIZE_META[sz].hint}`}
+                className={`rounded-md border px-2 py-0.5 text-[13px] ${size === sz ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{SIZE_META[sz].label}</button>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-3 pt-1">
+            <button onClick={submit} disabled={!ready}
+              className="rounded-md bg-accent px-3 py-1 text-[14px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">Add task</button>
+            <button onClick={reset} className="text-[13px] text-muted underline underline-offset-[3px] hover:text-foreground">Cancel</button>
+            {/* Named, not just greyed out. A disabled button with no reason is
+                a dead end you have to hunt for. */}
+            {missing.length > 0 && (
+              <span className="text-[13px] text-muted">
+                Still needs {missing.length > 1 ? `${missing.slice(0, -1).join(", ")} and ${missing[missing.length - 1]}` : missing[0]}.
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, clientById, projectById, contactById, onOpen, onPatch, meId, delegated, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
   task: Task; colCount: number; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean; showCrumb: boolean; onOpenClient?: (clientId: string) => void;
-  clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void; onAddComment: (taskId: string, body: string) => void; meId?: string; delegated?: boolean;
+  clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void; meId?: string; delegated?: boolean;
   selected?: boolean; onToggleSelect?: (e: React.MouseEvent) => void;
   draggable?: boolean; onDragStart?: () => void; onDragEnd?: () => void;
   // Drop-onto-this-row-to-merge — independent of the drag-to-reorder-groups
@@ -253,9 +335,7 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
   const client = clientById(task.clientId);
   const project = projectById(task.projectId);
   const overdue = isOverdue(task.due) && task.status !== "done";
-  const doneSubs = task.subtasks.filter((x) => x.done).length;
   const crumb = project && project.name !== "Tasks" ? project.name : "";
-  const commentCount = task.comments.filter((c) => c.kind !== "event").length;
   const isDone = task.status === "done";
   // Priority used to be its own column; it's now a 3px bar on the row's
   // leading edge so it reads at a glance without repeating the group
@@ -325,11 +405,6 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
               assignee shown at all, since most tasks are assigned to the
               admin viewing the list. */}
           <InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a, waitingOnClient: false })} onSetWaiting={() => onPatch(task.id, { waitingOnClient: true, assigneeId: null })} size={30} />
-          {/* A real <button> here used to wrap InlineComments, which renders
-              its own <button> trigger — invalid HTML (button-in-button),
-              flagged live as a hydration error. role="button" on a <div>
-              gets the same click/keyboard-activation semantics without
-              nesting an interactive element inside another one. */}
           {/* Multi-select lives on the row itself now (Derek, 2026-08-26:
               "remove the multiple checkboxes and just make it shift and
               select multi"). Shift-click extends a range from the last row
@@ -358,13 +433,16 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
                   in the title attribute and the task is one click away. */}
               <span className={`line-clamp-2 min-w-0 flex-1 break-words text-[15px] font-medium leading-snug ${isDone ? "text-muted line-through" : ""}`} title={task.title}>{task.title}</span>
             </span>
-            <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-              {showCrumb && !showClient && crumb && <span className="min-w-0 truncate text-[11px] leading-tight text-muted">{crumb}</span>}
-              {task.recurrence !== "none" && <span title={describeRecurrence(task.recurrence, task.recurrenceInterval, task.recurrenceUnit, task.recurrenceDaysOfMonth, task.recurrenceNth, task.recurrenceWeekday)}><I.repeat className="shrink-0 text-muted" /></span>}
-              {task.attachments.length > 0 && <I.clip className="shrink-0 text-muted" />}
-              {commentCount > 0 && <span onClick={(e) => e.stopPropagation()}><InlineComments task={task} onAddComment={onAddComment} /></span>}
-              {task.subtasks.length > 0 && <span className="inline-flex shrink-0 items-center gap-0.5 text-[11px] text-muted"><I.check />{doneSubs}/{task.subtasks.length}</span>}
-            </span>
+            {/* No icon row (Derek, 2026-09-01: "remove the icons not needed
+                on tasks list view"). A repeat arrow, a paperclip, a comment
+                bubble and a subtask count on every row is four pieces of
+                trivia competing with the title, and none of them changes what
+                you do next. All of it is in the task, one click away. The
+                project crumb stays: it says which list you are looking at,
+                which the row otherwise cannot tell you. */}
+            {showCrumb && !showClient && crumb && (
+              <span className="min-w-0 truncate text-[11px] leading-tight text-muted">{crumb}</span>
+            )}
             {playbookStep?.youGet && task.status !== "done" && (
               <span className="block truncate text-[12px] text-muted" title={playbookStep.youGet}>📈 {playbookStep.youGet}</span>
             )}
@@ -522,51 +600,9 @@ export function InlineAssignee({ value, onChange, waiting, onSetWaiting, client,
   );
 }
 
-function InlineComments({ task, onAddComment }: { task: Task; onAddComment: (taskId: string, body: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const [body, setBody] = useState("");
-  const ref = useRef<HTMLButtonElement>(null);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-  const visible = task.comments.filter((c) => c.kind !== "event");
-  const send = () => { if (!body.trim()) return; onAddComment(task.id, body); setBody(""); };
-  return (
-    <div className="relative flex justify-center">
-      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 320, 360)); setOpen((o) => !o); }} className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-muted hover:bg-background">
-        <I.comment className={`h-[18px] w-[18px] ${visible.length ? "" : "opacity-30"}`} /> {visible.length > 0 && visible.length}
-      </button>
-      {open && (<>
-        <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
-        <div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", top: pos.top, left: pos.left, width: 320 }} className="z-40 flex max-h-96 flex-col overflow-hidden rounded-xl border bg-surface shadow-xl">
-          <div className="border-b px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Comments · {visible.length}</div>
-          <div className="flex-1 space-y-2.5 overflow-y-auto p-3">
-            {visible.map((c) => {
-              const u = userById(c.authorId);
-              return (
-                <div key={c.id} className="flex gap-2">
-                  <Avatar id={c.authorId} size={22} />
-                  <div className="min-w-0">
-                    <div className="text-[13px]"><span className="font-medium">{u?.name}</span> <span className="text-muted">· {timeAgo(c.at)}</span></div>
-                    <CollapsibleText text={c.body} className="text-[14px]" />
-                  </div>
-                </div>
-              );
-            })}
-            {visible.length === 0 && <div className="py-4 text-center text-[13px] text-muted">No comments yet.</div>}
-          </div>
-          <div className="flex items-end gap-1.5 border-t p-2">
-            <textarea value={body} onChange={(e) => setBody(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder="Write a team chat… (internal only)" rows={1} className="max-h-32 min-h-[32px] flex-1 resize-y rounded-lg border bg-background px-2 py-1.5 text-[14px] outline-none placeholder:text-muted" />
-            <button onClick={send} disabled={!body.trim()} className="rounded-lg bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white disabled:opacity-40">Send</button>
-          </div>
-        </div>
-      </>)}
-    </div>
-  );
-}
-
 const WD = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 const MO = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const isoOf = (y: number, m: number, d: number) => `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-const addDaysIso = (iso: string, n: number) => { const [y, m, d] = iso.split("-").map(Number); const dt = new Date(Date.UTC(y, m - 1, d)); dt.setUTCDate(dt.getUTCDate() + n); return dt.toISOString().slice(0, 10); };
 const dowIso = (iso: string) => { const [y, m, d] = iso.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d)).getUTCDay(); };
 const WD_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 function friendlyDue(iso: string): string {

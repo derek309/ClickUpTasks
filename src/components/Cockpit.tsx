@@ -2589,7 +2589,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openTaskId, navTaskIds]);
 
-  const quickAdd = (groupKey: string, title: string) => {
+  const quickAdd = (groupKey: string, title: string, extras: { due: string | null; followUpAt: string | null; size: TaskSize | null }) => {
     if (!title.trim() || !activeClient.startsWith("cl_")) return;
     let projectId: string;
     // tasks.project_id is a foreign key, so a task inserted in the same tick as
@@ -2616,12 +2616,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       priority: groupBy === "priority" && isManuallyAssignable(groupKey as Priority) ? (groupKey as Priority) : "normal",
       assigneeId: me.id,
       contactId: activeClient.slice(3),
-      // Only set a due date when the group itself says so (adding straight
-      // into the "Today"/"Tomorrow" due-date bucket) — anywhere else, no
-      // due date is the correct default. A task with none is meant to
-      // surface in the assignee's own no-due-date review, not get silently
-      // pushed a day out and hidden from it.
-      due: groupBy === "due" && groupKey === "today" ? TODAY : groupBy === "due" && groupKey === "tomorrow" ? TOMORROW : null,
+      // Asked for in the composer now rather than inferred from the group,
+      // so a quick-added task arrives with the same three answers the full
+      // form insists on. The bucket still seeds the due date; it is just no
+      // longer the only thing that can set one.
+      due: extras.due, followUpAt: extras.followUpAt, size: extras.size,
       recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
       createdBy: me.id,
     };
@@ -2671,17 +2670,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     }
   };
 
-  const quickAddPersonal = (groupKey: string, title: string) => {
+  const quickAddPersonal = (groupKey: string, title: string, extras: { due: string | null; followUpAt: string | null; size: TaskSize | null }) => {
     if (!title.trim()) return;
     const t: Task = {
       id: newId("t_"), projectId: PERSONAL_PROJECT_ID, clientId: PERSONAL_CLIENT_ID, title: title.trim(), description: "",
       status: groupBy === "status" ? (groupKey as TaskStatus) : "todo",
       priority: "normal",
       assigneeId: me.id, contactId: null,
-      // See quickAdd's identical comment — no due date outside the
-      // Today/Tomorrow due-bucket context, so a plain new task can surface
-      // in the no-due-date review instead of defaulting a day out.
-      due: groupBy === "due" && groupKey === "today" ? TODAY : groupBy === "due" && groupKey === "tomorrow" ? TOMORROW : null,
+      // See quickAdd — the composer asks, so these arrive answered.
+      due: extras.due, followUpAt: extras.followUpAt, size: extras.size,
       recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: true, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
       createdBy: me.id,
     };
@@ -4748,7 +4745,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             canAdmin={canAdmin} onAddProject={() => addProject(WORKSPACE_CLIENT_ID)} onRename={renameProject} onDelete={deleteProject}
             starredLists={starredLists} onToggleStarList={toggleStarList} />
         ) : personalView ? (
-          <GroupedList key={`${groupBy}:${activeClient === "all"}`} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} colOrder={colOrder} onReorderCols={reorderCols} />
+          <GroupedList key={`${groupBy}:${activeClient === "all"}`} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={hideEmpty} colOrder={colOrder} onReorderCols={reorderCols} />
         ) : myWork && dashboardView === "plan" ? (
           <PlanView days={planDays.days} unplanned={planDays.unplanned} budgetHours={workdayHours} onBudget={setWorkdayHours}
             clientById={clientById} projectById={projectById} onOpen={setOpenTaskId}
@@ -4864,7 +4861,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   </div>
                 )}
                 {activeFilterBar}
-                <GroupedList key={`${groupBy}:${activeClient === "all"}`} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildPlaybookGroups(baseTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="" onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={false} colOrder={colOrder} onReorderCols={reorderCols} />
+                <GroupedList key={`${groupBy}:${activeClient === "all"}`} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildPlaybookGroups(baseTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="" onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={false} colOrder={colOrder} onReorderCols={reorderCols} />
                 <div className="mt-3 rounded-xl border bg-surface p-4">
                   <div className="text-[13px] font-semibold uppercase tracking-wide text-muted">Always running for you</div>
                   <ul className="mt-2 list-disc space-y-1 pl-5 text-[14px] text-muted">
@@ -4887,7 +4884,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           ) : (
             <>
             {activeFilterBar}
-            <GroupedList key={`${groupBy}:${activeClient === "all"}`} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
+            <GroupedList key={`${groupBy}:${activeClient === "all"}`} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={hideEmpty} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
             </>
           )}
           </>
