@@ -160,7 +160,7 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
             hit the labels that aren't sort buttons — Client and any
             non-sortable column — leaving one shouted header in a row of
             normal ones rather than styling the row as a whole. */}
-        <div className="hidden items-center gap-2 border-b bg-background/40 px-4 py-2 text-[12px] font-semibold tracking-wide text-muted sm:grid" style={{ gridTemplateColumns: template }}>
+        <div className="hidden items-center gap-2 border-b bg-background/40 px-4 py-1.5 text-[12px] font-semibold tracking-wide text-muted sm:grid" style={{ gridTemplateColumns: template }}>
           <button onClick={() => onSort("task")} className="flex items-center gap-1 text-left hover:text-foreground">Name <Arrow col="task" /></button>
           {showClient && <span>Client</span>}
           {cols.map((c) => (
@@ -293,7 +293,7 @@ function TaskRow({ task, template, cols, showClient, showCrumb, onOpenClient, cl
         onDragOver={(e) => { if (onRowDragOver) { e.preventDefault(); onRowDragOver(); } }}
         onDragLeave={onRowDragLeave}
         onDrop={(e) => { if (onRowDrop) { e.preventDefault(); onRowDrop(); } }}
-        className={`group/tr flex flex-col gap-1 border-b border-l-[3px] px-4 py-2 transition-colors last:border-0 hover:bg-accent-soft/50 sm:grid sm:min-h-[40px] sm:items-center sm:gap-2 sm:py-1.5 ${delegated ? "border-l-accent bg-accent-soft/30" : ""} ${selected ? "bg-accent-soft" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${isMergeDropTarget ? "ring-2 ring-inset ring-accent" : ""}`}
+        className={`group/tr flex flex-col gap-0.5 border-b border-l-[3px] px-4 py-1.5 transition-colors last:border-0 hover:bg-accent-soft/50 sm:grid sm:min-h-[34px] sm:items-center sm:gap-2 sm:py-1 ${delegated ? "border-l-accent bg-accent-soft/30" : ""} ${selected ? "bg-accent-soft" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${isMergeDropTarget ? "ring-2 ring-inset ring-accent" : ""}`}
         style={{ gridTemplateColumns: template, borderLeftColor: delegated ? undefined : priorityBarColor }}>
         <div className="flex min-w-0 items-center gap-0.5">
           {/* Bulk select, back as a permanent fixture at the leading edge
@@ -338,7 +338,7 @@ function TaskRow({ task, template, cols, showClient, showCrumb, onOpenClient, cl
               onOpen();
             }}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
-            className="flex min-w-0 flex-1 cursor-pointer flex-col justify-center py-0.5 pl-1 text-left">
+            className="flex min-w-0 flex-1 cursor-pointer flex-col justify-center pl-1 text-left">
             {/* Two lines, and the title owns the first one outright. Every
                 badge used to sit inline with it, so a narrow Name column (an
                 iPad) squeezed the title to "Crea te..." while a "Start now"
@@ -353,7 +353,7 @@ function TaskRow({ task, template, cols, showClient, showCrumb, onOpenClient, cl
                   is one click away. */}
               <span className={`min-w-0 flex-1 truncate text-[15px] font-medium leading-snug ${isDone ? "text-muted line-through" : ""}`} title={task.title}>{task.title}</span>
             </span>
-            <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5">
+            <span className="flex min-w-0 flex-wrap items-center gap-1.5">
               {showCrumb && !showClient && crumb && <span className="min-w-0 truncate text-[11px] leading-tight text-muted">{crumb}</span>}
               {task.recurrence !== "none" && <span title={describeRecurrence(task.recurrence, task.recurrenceInterval, task.recurrenceUnit, task.recurrenceDaysOfMonth, task.recurrenceNth, task.recurrenceWeekday)}><I.repeat className="shrink-0 text-muted" /></span>}
               {task.attachments.length > 0 && <I.clip className="shrink-0 text-muted" />}

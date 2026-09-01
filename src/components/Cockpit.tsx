@@ -486,38 +486,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   useEffect(() => { if (dmUserId && openDmThreadUnread) markDmRead(dmConversationId(me.id, dmUserId)); }, [dmUserId, openDmThreadUnread, me.id]);
   const [addClientOpen, setAddClientOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
-  // Draggable quick-add FAB position (viewport px of its top-left). null =
-  // default corner (bottom-left). Persisted per-user in localStorage so it
-  // stays wherever you park it out of the way of the composer/toasts.
-  const [fabPos, setFabPos] = useState<{ x: number; y: number } | null>(null);
-  const fabDragRef = useRef({ down: false, moved: false, offX: 0, offY: 0, startX: 0, startY: 0 });
-  const onFabPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
-    const r = e.currentTarget.getBoundingClientRect();
-    fabDragRef.current = { down: true, moved: false, offX: e.clientX - r.left, offY: e.clientY - r.top, startX: e.clientX, startY: e.clientY };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
-  const onFabPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
-    const d = fabDragRef.current;
-    if (!d.down) return;
-    if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) > 4) d.moved = true;
-    setFabPos({ x: Math.max(4, Math.min(window.innerWidth - 60, e.clientX - d.offX)), y: Math.max(4, Math.min(window.innerHeight - 60, e.clientY - d.offY)) });
-  };
-  const onFabPointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
-    const d = fabDragRef.current;
-    d.down = false;
-    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch {}
-    if (!d.moved) setQuickAddOpen(true); // a click (no real drag) opens the modal
-  };
-  useEffect(() => { if (fabPos) try { localStorage.setItem("cut_fabPos", JSON.stringify(fabPos)); } catch {} }, [fabPos]);
-  // Fade the FAB out of the way while you're actively scrolling a list, back
-  // in once you stop — so it never sits on top of the content you're reading.
-  const [fabScrolling, setFabScrolling] = useState(false);
-  useEffect(() => {
-    let t: ReturnType<typeof setTimeout>;
-    const onScroll = () => { setFabScrolling(true); clearTimeout(t); t = setTimeout(() => setFabScrolling(false), 600); };
-    window.addEventListener("scroll", onScroll, true); // capture phase catches nested scroll containers
-    return () => { window.removeEventListener("scroll", onScroll, true); clearTimeout(t); };
-  }, []);
   // Set by the header Email/SMS buttons — jumps the Journal composer into that
   // mode. nonce bumps each click so it re-fires even when already on the Journal.
   const [composeIntent, setComposeIntent] = useState<{ mode: "email" | "sms"; nonce: number } | null>(null);
@@ -1022,7 +990,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       const s = localStorage.getItem("cut_clientSort"); if (s) setClientSort(s as ClientSort);
       const st = localStorage.getItem("cut_starred"); if (st) { localStarred = JSON.parse(st); setStarred(new Set(localStarred)); }
       const stl = localStorage.getItem("cut_starredLists"); if (stl) { localStarredLists = JSON.parse(stl); setStarredLists(new Set(localStarredLists)); }
-      const fp = localStorage.getItem("cut_fabPos"); if (fp) setFabPos(JSON.parse(fp));
       const mo = localStorage.getItem("cut_clientOrder"); if (mo) setManualOrder(JSON.parse(mo));
       const cu = localStorage.getItem("cut_clientUsed"); if (cu) setClientUsed(JSON.parse(cu));
     } catch { /* fresh browser */ }
@@ -5151,18 +5118,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         onAddContact={(contact) => { addClientContact(contact); setCmdkOpen(false); }}
         onClose={() => setCmdkOpen(false)} />}
 
-      {/* Global quick-add-task FAB — defaults to bottom-LEFT (the composer's
-          Send button and toasts live bottom-right), draggable so it can be
-          parked anywhere, and hidden on the Journal tab so it never covers the
-          message composer while writing/sending. */}
-      {!(!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && clientTab === "chat") && (
-        <button onPointerDown={onFabPointerDown} onPointerMove={onFabPointerMove} onPointerUp={onFabPointerUp}
-          title="Add a task (drag to move)" aria-label="Add a task"
-          style={fabPos ? { left: fabPos.x, top: fabPos.y, right: "auto", bottom: "auto" } : undefined}
-          className={`fixed z-30 flex h-12 w-12 touch-none items-center justify-center rounded-full bg-accent text-white shadow-lg ring-2 ring-[color:var(--surface)] transition-all duration-200 hover:opacity-90 active:scale-95 ${fabScrolling ? "pointer-events-none scale-90 opacity-0" : ""} ${fabPos ? "" : "bottom-6 left-4 sm:left-6"}`}>
-          <I.plus className="h-6 w-6" />
-        </button>
-      )}
       {quickAddOpen && (
         <QuickAddTask
           clients={workableClients}
