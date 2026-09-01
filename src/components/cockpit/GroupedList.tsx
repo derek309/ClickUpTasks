@@ -399,6 +399,11 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
               {selected && <I.check />}
             </button>
           )}
+          {/* Only when the Stage column is off, so there is never two of
+              them on one row. */}
+          {!cols.some((c) => c.key === "status") && (
+            <span className="mr-1"><StatusDot value={effectiveStatus(task)} onChange={(st) => onPatch(task.id, { status: st })} /></span>
+          )}
           <button onClick={onToggleExpand} className={`shrink-0 rounded p-0.5 text-muted hover:text-foreground ${task.subtasks.length ? "" : "opacity-0 group-hover/tr:opacity-40"}`} title="Subtasks"><I.chevron className={`transition ${expanded ? "-rotate-90" : "rotate-180"}`} /></button>
           {/* Always visible (Derek, 2026-08-24): hiding it whenever the
               assignee was you left most rows on a client's own list with no
@@ -508,14 +513,40 @@ function menuPos(ref: React.RefObject<HTMLElement | null>, width: number, height
   return { top, left };
 }
 
+// The stage's own dot, doubling as complete. Lives on its own so the Name
+// cell can carry it when the Stage column is switched off — which the default
+// All Tasks view does, and losing one-click complete along with a column you
+// hid for width is not what anyone meant by hiding it.
+export function StatusDot({ value, onChange }: { value: TaskStatus; onChange: (s: TaskStatus) => void }) {
+  const isDone = value === "done";
+  return (
+    <button onClick={(e) => { e.stopPropagation(); onChange(isDone ? "todo" : "done"); }}
+      title={isDone ? "Mark as not done" : "Mark done"} aria-pressed={isDone}
+      className={`group/dot flex h-4 w-4 shrink-0 items-center justify-center rounded-full transition ${isDone ? "text-white" : "hover:ring-2 hover:ring-success/40"}`}
+      style={{ background: isDone ? "var(--success)" : STATUS_META[value].dot }}>
+      {/* The tick only shows once it is done, or while you are hovering the
+          dot — otherwise every row carries a checkmark it has not earned. */}
+      <I.check className={`h-2.5 w-2.5 ${isDone ? "" : "text-white opacity-0 group-hover/dot:opacity-100"}`} />
+    </button>
+  );
+}
+
+// The dot completes the task, the label opens the stage menu.
+//
+// One-click complete came back without a second control beside the stage
+// (Derek: "make the stage dot the toggle"). The circle that used to sit here
+// said the same thing the stage label already says, and an empty ring on
+// every row reads as an unticked box. The dot is already the stage's colour,
+// so turning it into the tick keeps one thing where there were two.
 function InlineStatus({ value, onChange }: { value: TaskStatus; onChange: (s: TaskStatus) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   return (
-    <div className="relative">
-      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 144, STATUS_ORDER.length * 32 + 8)); setOpen((o) => !o); }} className="inline-flex items-center gap-1.5 rounded px-1 py-0.5 text-[13px] font-medium hover:bg-background">
-        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[value].dot }} /> {STATUS_META[value].label}
+    <div className="relative inline-flex items-center gap-1.5">
+      <StatusDot value={value} onChange={onChange} />
+      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 144, STATUS_ORDER.length * 32 + 8)); setOpen((o) => !o); }} className="inline-flex items-center rounded px-1 py-0.5 text-[13px] font-medium hover:bg-background">
+        {STATUS_META[value].label}
       </button>
       {open && (<>
         <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
