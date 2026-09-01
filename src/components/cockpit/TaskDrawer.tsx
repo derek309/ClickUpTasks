@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, clientStatusMeta,
-  TaskAction, TaskActionKind, prettyLinkName,
+  TaskAction, TaskActionKind, prettyLinkName, effectiveStatus,
   STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY, WEEKDAY_LABEL, startSignal, isSnoozed, daysUntilDue, formatDue, dueCountdown,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
@@ -691,9 +691,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const chip = "inline-flex items-center rounded-[5px] border bg-surface shadow-sm px-1 py-0.5";
   const chipRow = (
     <div className="mt-4 flex flex-wrap items-center gap-1.5">
-      <span className={chip} style={{ borderColor: STATUS_META[task.status].dot + "55" }}>
-        <span className="ml-2 h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: STATUS_META[task.status].dot }} />
-        <select value={task.status} onChange={(e) => onPatch({ status: e.target.value as TaskStatus })} className="rounded-[5px] bg-transparent py-0.5 pl-1.5 pr-1 text-[13px] font-medium outline-none" style={{ color: STATUS_META[task.status].dot }}>
+      <span className={chip} style={{ borderColor: STATUS_META[effectiveStatus(task)].dot + "55" }}>
+        <span className="ml-2 h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: STATUS_META[effectiveStatus(task)].dot }} />
+        <select value={effectiveStatus(task)} onChange={(e) => onPatch({ status: e.target.value as TaskStatus })} className="rounded-[5px] bg-transparent py-0.5 pl-1.5 pr-1 text-[13px] font-medium outline-none" style={{ color: STATUS_META[effectiveStatus(task)].dot }}>
           {STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
         </select>
       </span>

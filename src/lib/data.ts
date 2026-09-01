@@ -1682,6 +1682,32 @@ export function effectivePriority(task: { priority: Priority; due: string | null
   return derivedPriority(task.due, today);
 }
 
+// How close counts as "get started". The same three days that turn a task
+// urgent, so the stage and the priority never disagree about the same date.
+export const GET_STARTED_DAYS = 3;
+
+// A task's stage as it should read right now.
+//
+// An untouched task whose date is closing in shows as Get started rather than
+// To do. Derived rather than written, for the same reason the priority is:
+// nothing has to sweep the table, it is right the moment a date moves, and it
+// cannot race between two people with the app open.
+//
+// Only ever promotes To do. Every later stage means someone has picked the
+// work up, and telling them to get started would be wrong. Moving a task back
+// to To do while its date is still close shows Get started again, which is
+// correct: To do and Get started are both "not started", and the only thing
+// separating them is how near the date is.
+export function effectiveStatus(task: { status: TaskStatus; due: string | null; followUpAt?: string | null }, today: string = TODAY): TaskStatus {
+  if (task.status !== "todo") return task.status;
+  // Parked work is not late to start; it is waiting on purpose.
+  if (isSnoozed(task, today)) return "todo";
+  const date = effectiveDueDate(task);
+  if (!date) return "todo";
+  const left = daysUntilDue(date, today);
+  return left !== null && left <= GET_STARTED_DAYS ? "get_started" : "todo";
+}
+
 export const manualPriorityOptions = (current: Priority): Priority[] =>
   PRIORITY_ORDER.filter((p) => isManuallyAssignable(p) || p === current);
 

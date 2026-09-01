@@ -4,7 +4,7 @@
 // expandable subtasks, and the inline cell editors (priority/assignee/due).
 import { useRef, useState } from "react";
 import {
-  users, formatDue, isOverdue, TODAY, COLLAPSED_DUE_BUCKETS, effectivePriority, timeAgo, userById, clientInitials, dueCountdown, isSnoozed,
+  users, formatDue, isOverdue, TODAY, COLLAPSED_DUE_BUCKETS, effectivePriority, effectiveStatus, timeAgo, userById, clientInitials, dueCountdown, isSnoozed,
   PRIORITY_META, manualPriorityOptions,
   STATUS_META, STATUS_ORDER, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence,
   PLAYBOOK_STEP_BY_KEY,
@@ -250,7 +250,7 @@ function TaskRow({ task, template, cols, showClient, showCrumb, onOpenClient, cl
   const cell = (key: string) => {
     if (key === "status") return (
       <span className="flex min-w-0 items-center gap-1.5">
-        <InlineStatus value={task.status} onChange={(s) => onPatch(task.id, { status: s })} />
+        <InlineStatus value={effectiveStatus(task)} onChange={(s) => onPatch(task.id, { status: s })} />
         {doneToggle}
       </span>
     );

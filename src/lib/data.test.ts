@@ -32,6 +32,7 @@ import {
   addBusinessDaysIso,
   derivedPriority,
   effectivePriority,
+  effectiveStatus,
   googleLinkName,
   isUselessTitle,
   TASK_ACTION_ORDER,
@@ -840,5 +841,32 @@ describe("priority from the due date", () => {
   });
   it("treats a task with no flag as hand-set, which is what every existing row is", () => {
     expect(effectivePriority({ priority: "none", due: "2026-09-02" }, today)).toBe("none");
+  });
+});
+
+describe("moving into Get started as the date closes in", () => {
+  const today = "2026-09-01";
+
+  it("promotes a To do task inside three days", () => {
+    expect(effectiveStatus({ status: "todo", due: "2026-09-03" }, today)).toBe("get_started");
+    expect(effectiveStatus({ status: "todo", due: "2026-08-20" }, today)).toBe("get_started"); // overdue
+  });
+  it("leaves a To do task that is still far out", () => {
+    expect(effectiveStatus({ status: "todo", due: "2026-09-30" }, today)).toBe("todo");
+    expect(effectiveStatus({ status: "todo", due: null }, today)).toBe("todo");
+  });
+  it("never touches a stage someone has already moved past To do", () => {
+    for (const status of ["in_progress", "review", "changes_requested", "waiting", "approved", "done"] as const) {
+      expect(effectiveStatus({ status, due: "2026-09-01" }, today)).toBe(status);
+    }
+  });
+  it("leaves parked work alone: it is waiting on purpose, not late to start", () => {
+    expect(effectiveStatus({ status: "todo", due: "2026-09-02", followUpAt: "2026-09-20" }, today)).toBe("todo");
+  });
+  it("uses the follow-up date when that is what the task is judged on", () => {
+    // A follow-up still in the future is a snooze, handled above. Once it
+    // arrives, it is the date the task is judged on and it counts.
+    expect(effectiveStatus({ status: "todo", due: null, followUpAt: "2026-09-01" }, today)).toBe("get_started");
+    expect(effectiveStatus({ status: "todo", due: null, followUpAt: "2026-08-25" }, today)).toBe("get_started");
   });
 });

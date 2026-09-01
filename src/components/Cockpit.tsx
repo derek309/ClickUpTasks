@@ -10,6 +10,7 @@ import {
   formatDue,
   advanceDue,
   effectivePriority,
+  effectiveStatus,
   htmlToText,
   recurrenceResetFields,
   isOverdue,
@@ -1630,7 +1631,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   };
 
   const passesFilters = (t: Task) =>
-    (filters.status === "all" || t.status === filters.status) &&
+    (filters.status === "all" || effectiveStatus(t) === filters.status) &&
     (filters.assignee === "all" || (filters.assignee === "waiting" ? !!t.waitingOnClient : filters.assignee === "unassigned" ? (t.assigneeId === null && !t.waitingOnClient) : t.assigneeId === filters.assignee)) &&
     (filters.priority === "all" || effectivePriority(t) === filters.priority) &&
     // Explicitly filtering to Done overrides the hide-done toggle — asking
@@ -2467,7 +2468,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   type Grp = { key: string; label: string; color: string; tasks: Task[] };
   const buildGroups = (list: Task[], dim: typeof groupBy = groupBy): Grp[] => {
-    if (dim === "status") return STATUS_ORDER.map((s) => ({ key: s, label: STATUS_META[s].label, color: STATUS_META[s].dot, tasks: list.filter((t) => t.status === s) }));
+    if (dim === "status") return STATUS_ORDER.map((s) => ({ key: s, label: STATUS_META[s].label, color: STATUS_META[s].dot, tasks: list.filter((t) => effectiveStatus(t) === s) }));
     if (dim === "priority") {
       const needsReply = list.filter(hasUnreadReply);
       const needsReplyIds = new Set(needsReply.map((t) => t.id));
