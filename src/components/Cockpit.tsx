@@ -16,7 +16,6 @@ import {
   htmlToText,
   recurrenceResetFields,
   isOverdue,
-  timeAgo,
   plainTextToHtml,
   TODAY,
   TOMORROW,
@@ -94,7 +93,7 @@ import {
   normalizeState,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifsReadDb, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, touchPlaybookProgress, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, touchPlaybookProgress, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import TeamChat from "./TeamChat";
@@ -318,7 +317,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
 
-  const [bellOpen, setBellOpen] = useState(false);
   // A real page, like My Work/Personal/Team Chat — not a popup or slide-out
   // (it used to be a fixed-position overlay; Derek asked more than once for
   // it to render in the normal content area instead).
@@ -1637,8 +1635,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     }).catch(() => {});
   };
 
-  const myNotifs = notifications.filter((n) => n.recipientId === me.id);
-  const unread = myNotifs.filter((n) => !n.read).length;
+
   // A live comment/mention thread is easy to miss since notifications aren't
   // reliably checked — surfaced separately from the bell, as its own
   // top-of-list group/sort-boost (see buildGroups/sortTasks below), above
@@ -4169,24 +4166,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const headerTitleText = settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Team Chat") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "My Work" : activeClient === "all" ? "All Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? ""));
   const isClientDetail = !myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && !!clientById(activeClient);
   const showFilterControl = !inboxView && !dirView && !myWork && !settingsView && !(activeClient !== "all" && clientTab === "chat");
-  const bellControl = (
-    <div className="relative">
-      <button onClick={() => { const opening = !bellOpen; setBellOpen(opening); if (opening) { setNotifications((ns) => ns.map((n) => (n.recipientId === me.id ? { ...n, read: true } : n))); markNotifsReadDb(me.id); } }} aria-label="Notifications" className="relative rounded-lg border bg-background p-2 text-muted hover:text-foreground">
-        <I.bell />
-        {unread > 0 && <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[15px] font-semibold text-white">{unread}</span>}
-      </button>
-      {bellOpen && (<>
-        <div className="fixed inset-0 z-30" onClick={() => setBellOpen(false)} />
-        <div className="absolute right-0 z-40 mt-1 w-80 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-xl border bg-surface shadow-xl">
-          <div className="border-b px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Notifications</div>
-          <div className="max-h-96 overflow-y-auto">
-            {myNotifs.length === 0 && <div className="px-4 py-6 text-center text-[13px] text-muted">You&apos;re all caught up.</div>}
-            {myNotifs.map((n) => (<button key={n.id} onClick={() => { if (n.taskId) setOpenTaskId(n.taskId); setBellOpen(false); }} className="flex w-full gap-2.5 border-b px-4 py-2.5 text-left last:border-0 hover:bg-background"><I.comment className="mt-0.5 shrink-0 text-accent" /><div><div className="text-[15px] leading-snug">{n.text}</div><div className="text-[13px] text-muted">{timeAgo(n.at)}</div></div></button>))}
-          </div>
-        </div>
-      </>)}
-    </div>
-  );
   // Following moved out of the filter popover into its own header avatar
   // stack — "Following" isn't a filter, it's who's watching this client.
   const followingControl = !personalView && activeClient !== "all" && clientById(activeClient) ? (
@@ -4579,7 +4558,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <button onClick={() => setQuickAddOpen(true)} aria-label="New task" title="New task"
                 className="shrink-0 rounded-lg bg-accent p-2 text-white"><I.plus /></button>
             )}
-            {!(inboxView && !dmUserId) && bellControl}
             {isClientDetail && overflowControl}
           </div>
           {isClientDetail ? (
@@ -4773,26 +4751,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               and it was redundant/unwanted floating over a page that's
               already a live feed (Derek, Aug 4). Still shown on DMs,
               Dashboard, client pages, etc. */}
-          {!(inboxView && !dmUserId) && (
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <button onClick={() => { const opening = !bellOpen; setBellOpen(opening); if (opening) { setNotifications((ns) => ns.map((n) => (n.recipientId === me.id ? { ...n, read: true } : n))); markNotifsReadDb(me.id); } }} className="relative rounded-lg border bg-background p-2 text-muted hover:text-foreground">
-                <I.bell />
-                {unread > 0 && <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[15px] font-semibold text-white">{unread}</span>}
-              </button>
-              {bellOpen && (<>
-                <div className="fixed inset-0 z-30" onClick={() => setBellOpen(false)} />
-                <div className="absolute right-0 z-40 mt-1 w-80 overflow-hidden rounded-xl border bg-surface shadow-xl">
-                  <div className="border-b px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Notifications</div>
-                  <div className="max-h-96 overflow-y-auto">
-                    {myNotifs.length === 0 && <div className="px-4 py-6 text-center text-[13px] text-muted">You&apos;re all caught up.</div>}
-                    {myNotifs.map((n) => (<button key={n.id} onClick={() => { if (n.taskId) setOpenTaskId(n.taskId); setBellOpen(false); }} className="flex w-full gap-2.5 border-b px-4 py-2.5 text-left last:border-0 hover:bg-background"><I.comment className="mt-0.5 shrink-0 text-accent" /><div><div className="text-[15px] leading-snug">{n.text}</div><div className="text-[13px] text-muted">{timeAgo(n.at)}</div></div></button>))}
-                  </div>
-                </div>
-              </>)}
-            </div>
-          </div>
-          )}
+          {/* No notification bell (Derek, 2026-09-01: "not useful"). It
+              restated things the app already surfaces where you act on them:
+              assignments show up in your task list, client replies raise a
+              Conversation task, and unread chat is counted on the Team Chat
+              row. A second inbox for the same signals is one more thing to
+              clear rather than one more thing you learn from. */}
+
           </div>
         </header>
 
