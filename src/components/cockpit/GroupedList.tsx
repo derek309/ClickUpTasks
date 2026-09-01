@@ -257,7 +257,6 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
   const crumb = project && project.name !== "Tasks" ? project.name : "";
   const commentCount = task.comments.filter((c) => c.kind !== "event").length;
   const isDone = task.status === "done";
-  const statusColShown = cols.some((c) => c.key === "status");
   // Priority used to be its own column; it's now a 3px bar on the row's
   // leading edge so it reads at a glance without repeating the group
   // heading when a view is already grouped by priority.
@@ -270,22 +269,14 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
   // ambassador scanning the list before walking into a business sees "if
   // they do this, they get that" without opening every task individually.
   const playbookStep = task.playbookStepKey ? PLAYBOOK_STEP_BY_KEY.get(task.playbookStepKey) : undefined;
-  // Sits to the right of the Stage label (Derek's pick) — the two say the
-  // same thing, so they belong together, and unlike the row's far edge this
-  // never scrolls out of view when the columns overflow.
-  const doneToggle = (
-    <button onClick={(e) => { e.stopPropagation(); onPatch(task.id, { status: isDone ? "todo" : "done" }); }}
-      title={isDone ? "Mark as not done" : "Mark done"} aria-pressed={isDone}
-      className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border transition ${isDone ? "border-success bg-success text-white" : "border-border text-transparent hover:border-success hover:text-success"}`}>
-      <I.check />
-    </button>
-  );
+  // No done circle beside the Stage label any more (Derek, 2026-09-01:
+  // "remove the done check mark circle"). It said the same thing the Stage
+  // column already says, and an empty ring on every row read as an unticked
+  // box waiting to be dealt with. Done is a stage: pick it from Stage, or
+  // from the drawer.
   const cell = (key: string) => {
     if (key === "status") return (
-      <span className="flex min-w-0 items-center gap-1.5">
-        <InlineStatus value={effectiveStatus(task)} onChange={(s) => onPatch(task.id, { status: s })} />
-        {doneToggle}
-      </span>
+      <InlineStatus value={effectiveStatus(task)} onChange={(s) => onPatch(task.id, { status: s })} />
     );
     if (key === "assignee") return <InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a, waitingOnClient: false })} onSetWaiting={() => onPatch(task.id, { waitingOnClient: true, assigneeId: null })} />;
     if (key === "priority") return <InlinePriority value={shownPriority} auto={task.priorityAuto !== false} onChange={(p) => onPatch(task.id, { priority: p })} />;
@@ -328,11 +319,6 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
               {selected && <I.check />}
             </button>
           )}
-          {/* Fallback home for the done toggle: it normally rides in the Stage
-              cell (see doneToggle below), but that column can be switched off
-              in Columns & density, and losing one-click complete along with it
-              would be a surprise. */}
-          {!statusColShown && doneToggle}
           <button onClick={onToggleExpand} className={`shrink-0 rounded p-0.5 text-muted hover:text-foreground ${task.subtasks.length ? "" : "opacity-0 group-hover/tr:opacity-40"}`} title="Subtasks"><I.chevron className={`transition ${expanded ? "-rotate-90" : "rotate-180"}`} /></button>
           {/* Always visible (Derek, 2026-08-24): hiding it whenever the
               assignee was you left most rows on a client's own list with no
