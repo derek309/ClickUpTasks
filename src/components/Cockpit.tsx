@@ -465,6 +465,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       return Number.isFinite(at) && at > readAt;
     }).length;
   }, [teamMessages, me.id, teamChatLastRead]);
+  // Team channel plus direct messages: one number for how much chat you have
+  // missed, since the sidebar row is the only place either is visible when
+  // the DM list is collapsed.
   // Chat is always on screen now (the whole Conversations page is Chat, full
   // width), so this fires any time you're on that page at all. Messages
   // arriving while you're already there are already read — without this the
@@ -503,6 +506,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const cid = dmConversationId(me.id, otherUserId);
     return dmMessages.some((m) => m.conversationId === cid && m.authorId !== me.id && m.at > (dmLastRead[cid] ?? ""));
   };
+  // Every unread direct message, across every thread. The per-person rows
+  // below Team Chat each carry their own dot, but the dots are only visible
+  // when DMs are switched on and the list is expanded, so the parent row has
+  // to be able to say how many you have missed on its own.
+  const dmUnreadTotal = useMemo(() => dmMessages.filter((m) => {
+    if (m.authorId === me.id) return false;
+    return m.at > (dmLastRead[m.conversationId] ?? "");
+  }).length, [dmMessages, dmLastRead, me.id]);
+  // One number for how much chat you have missed. The sidebar row is the only
+  // place either kind is visible when the DM list is collapsed, so splitting
+  // them across two badges would mean the row could read zero while three
+  // people were waiting on you.
+  const chatsMissed = teamChatUnread + dmUnreadTotal;
   // Mirrors openTeamChat exactly, for a specific teammate's thread instead
   // of the shared feed.
   const openDm = (userId: string) => {
@@ -1744,6 +1760,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     () => (canAdmin ? tasks : tasks.filter((t) => t.assigneeId === me.id)),
     [tasks, canAdmin, me.id]
   );
+  // What the All Tasks row in the sidebar counts. Scoped the same way the
+  // list is, so a VA's number is their own work rather than a total they
+  // cannot see.
+  const openTaskCount = useMemo(() => scopedTasks.filter((t) => t.status !== "done").length, [scopedTasks]);
   // Map indices for scopedTasks/clients/projects — every lookup helper below
   // (clientById, clientTaskCount, clientNeedsReview, hasOpenConversationTask,
   // clientUrgencyKey, assignedClientsFor, ...) used to do its own linear
@@ -4404,19 +4424,27 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               slotting All Tasks in at 2 would have shifted Team Chat through
               Personal down one and broken existing muscle memory for a key
               nobody asked for. */}
-          {navVisible.work && <SideItem active={allTasksView} title="Every task across all clients, by due date" onClick={() => goToView("alltasks")}><I.list className="text-muted" /> <span>All Tasks</span></SideItem>}
+          {/* Open only, so the number is work outstanding rather than
+              everything ever written down — the same thing the list itself
+              shows when you click through. Every other row in this nav
+              carries its count; this one was the exception. */}
+          {navVisible.work && <SideItem active={allTasksView} title={`${openTaskCount} open task${openTaskCount === 1 ? "" : "s"} across every client`} onClick={() => goToView("alltasks")}><I.list className="text-muted" /> <span>All Tasks</span><span className="ml-auto text-[13px] text-muted">{openTaskCount}</span></SideItem>}
           {/* "Client replies" nav item removed (Derek, 2026-08-09) — My Work
               and Follow Up already surface an open conversation-priority
               task each their own way (hasOpenConversationTask / Follow Up's
               own task-driven tiers); a third place to check the same signal
               was redundant, not additional coverage. */}
           {navVisible.inbox && (<>
-            <SideItem active={inboxView && dmUserId === null} title="Team Chat (press 2)" onClick={openTeamChat}><I.comment className="text-muted" /> <span>Team Chat</span>{teamChatUnread > 0 && (
-              // Literal unread team-chat messages only — general notifications
-              // (task assignments, client replies, etc.) have their own home
-              // on the bell, not this nav item (Derek, Aug 4). Capped display
-              // so a long weekend doesn't stretch the sidebar row.
-              <span title={`${teamChatUnread} unread message${teamChatUnread === 1 ? "" : "s"}`} className="ml-auto rounded-full bg-accent px-1.5 text-[12px] font-semibold leading-[18px] text-white">{teamChatUnread > 99 ? "99+" : teamChatUnread}</span>
+            <SideItem active={inboxView && dmUserId === null} title="Team Chat (press 2)" onClick={openTeamChat}><I.comment className="text-muted" /> <span>Team Chat</span>{chatsMissed > 0 && (
+              // Unread chat only — team channel plus every direct message
+              // (Derek: "team chat show the number of chats missed"). General
+              // notifications, task assignments and client replies have their
+              // own home on the bell, not this nav item (Derek, Aug 4).
+              // Capped display so a long weekend doesn't stretch the row.
+              <span title={[
+                teamChatUnread ? `${teamChatUnread} in Team Chat` : "",
+                dmUnreadTotal ? `${dmUnreadTotal} direct` : "",
+              ].filter(Boolean).join(" · ")} className="ml-auto rounded-full bg-accent px-1.5 text-[12px] font-semibold leading-[18px] text-white">{chatsMissed > 99 ? "99+" : chatsMissed}</span>
             )}</SideItem>
             {dmEnabled && users.filter((u) => u.id !== me.id).map((u) => (
               <SideItem key={u.id} active={inboxView && dmUserId === u.id} onClick={() => openDm(u.id)}>
