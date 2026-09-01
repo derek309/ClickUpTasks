@@ -25,7 +25,7 @@ function dayLabel(iso: string): string {
   return new Date(`${iso}T12:00:00Z`).toLocaleDateString(undefined, { weekday: "long" });
 }
 
-export function PlanView({ days, budgetHours, onBudget, clientById, projectById, onOpen, onSize, unsizedCount }: {
+export function PlanView({ days, budgetHours, onBudget, clientById, projectById, onOpen, onSize, unsizedCount, includePersonal, onIncludePersonal }: {
   days: PlanDay<Task>[];
   budgetHours: number;
   onBudget: (h: number) => void;
@@ -34,6 +34,8 @@ export function PlanView({ days, budgetHours, onBudget, clientById, projectById,
   onOpen: (taskId: string) => void;
   onSize: (taskId: string, size: TaskSize | null) => void;
   unsizedCount: number;
+  includePersonal: boolean;
+  onIncludePersonal: (v: boolean) => void;
 }) {
   const row = (p: PlannedTask<Task>, dimmed: boolean) => {
     const t = p.task;
@@ -73,7 +75,11 @@ export function PlanView({ days, budgetHours, onBudget, clientById, projectById,
           <h1 className="text-[22px] font-bold">Plan</h1>
           <p className="text-[13px] text-muted">Your open work, laid across the days it has to happen in.</p>
         </div>
-        <label className="ml-auto flex items-center gap-2 text-[13px] text-muted">
+        <label className="ml-auto flex items-center gap-1.5 text-[13px] text-muted" title="Personal tasks have their own view. Fold them in when you want the plan to reflect your whole day.">
+          <input type="checkbox" checked={includePersonal} onChange={(e) => onIncludePersonal(e.target.checked)} className="accent-[var(--accent)]" />
+          Include personal
+        </label>
+        <label className="flex items-center gap-2 text-[13px] text-muted">
           Working day
           <input type="number" min={1} max={16} step={0.5} value={budgetHours}
             onChange={(e) => onBudget(Math.min(16, Math.max(1, Number(e.target.value) || 1)))}

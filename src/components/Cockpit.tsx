@@ -12,6 +12,7 @@ import {
   effectivePriority,
   effectiveStatus,
   buildPlan,
+  isPersonalTask,
   htmlToText,
   recurrenceResetFields,
   isOverdue,
@@ -248,6 +249,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // setting: how long your day is is a personal fact, and app_settings only
   // stores booleans anyway. Read after mount so the server and the first
   // client render agree.
+  const [planPersonal, setPlanPersonal] = useState(false);
   const [workdayHours, setWorkdayHoursState] = useState(6);
   useEffect(() => {
     // Deferred a frame rather than set in the effect body: a setState there
@@ -2479,7 +2481,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // about what is next.
   const planDays = useMemo(() => {
     const mine = tasks
-      .filter((t) => t.status !== "done" && t.assigneeId === me.id)
+      // Personal tasks are excluded by default. They have their own view, and
+      // a long overdue admin backlog (pay rent, YNAB) sorts to the front and
+      // fills every day, leaving no room for a single client task — which is
+      // exactly what the plan is for. They still take real time, so they can
+      // be folded back in.
+      .filter((t) => t.status !== "done" && t.assigneeId === me.id && (planPersonal || !isPersonalTask(t)))
       .sort((a, b) => {
         const da = effectiveDueDate(a) ?? "9999";
         const db = effectiveDueDate(b) ?? "9999";
@@ -2487,7 +2494,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         return PRIORITY_META[effectivePriority(a)].rank - PRIORITY_META[effectivePriority(b)].rank;
       });
     return buildPlan(mine, workdayHours, 5);
-  }, [tasks, workdayHours, me.id]);
+  }, [tasks, workdayHours, me.id, planPersonal]);
   const planUnsized = useMemo(() => planDays.flatMap((d) => d.planned).filter((p) => !p.task.size).length, [planDays]);
 
   // due-date buckets relative to the fixed "today" — "This week"/"Next week"
@@ -4776,7 +4783,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         ) : myWork && dashboardView === "plan" ? (
           <PlanView days={planDays} budgetHours={workdayHours} onBudget={setWorkdayHours}
             clientById={clientById} projectById={projectById} onOpen={setOpenTaskId}
-            onSize={(taskId, size) => patchTask(taskId, { size })} unsizedCount={planUnsized} />
+            onSize={(taskId, size) => patchTask(taskId, { size })} unsizedCount={planUnsized}
+            includePersonal={planPersonal} onIncludePersonal={setPlanPersonal} />
         ) : myWork && dashboardView === "completed" ? (
           // Relocated from the Clients directory (Derek: "makes more sense
           // there") — same completionLog data, day-grouped feed of who

@@ -1816,6 +1816,16 @@ export function isWeekend(iso: string): boolean {
   return dow === 0 || dow === 6;
 }
 
+// Personal work, by either of the two ways it is marked.
+//
+// The private flag is the one the Personal view uses, but not everything in
+// the Personal client carries it: "Open a high yield savings account" sits in
+// client "personal" with private false. Checking one and not the other let
+// half the admin backlog through into the work plan.
+export function isPersonalTask(task: { private?: boolean; clientId: string }): boolean {
+  return !!task.private || task.clientId === "personal";
+}
+
 export const manualPriorityOptions = (current: Priority): Priority[] =>
   PRIORITY_ORDER.filter((p) => isManuallyAssignable(p) || p === current);
 

@@ -35,6 +35,7 @@ import {
   effectiveStatus,
   fillDay,
   buildPlan,
+  isPersonalTask,
   isWeekend,
   taskHours,
   SIZE_META,
@@ -938,5 +939,20 @@ describe("laying work across the week", () => {
     const ids = ["a", "b", "c", "d", "e"];
     const plan = buildPlan(ids.map((i) => t(i, "half")), 6, 5, tue);
     expect(plan.flatMap((d) => d.planned.map((p) => p.task.id)).sort()).toEqual(ids);
+  });
+});
+
+describe("what counts as personal", () => {
+  it("catches the private flag", () => {
+    expect(isPersonalTask({ private: true, clientId: "cl_brian" })).toBe(true);
+  });
+  // Not everything in the Personal client carries the flag: "Open a high
+  // yield savings account" sits there with private false, and checking one
+  // and not the other let half the admin backlog into the work plan.
+  it("also catches the Personal client, flag or not", () => {
+    expect(isPersonalTask({ private: false, clientId: "personal" })).toBe(true);
+  });
+  it("leaves client work alone", () => {
+    expect(isPersonalTask({ private: false, clientId: "cl_brian" })).toBe(false);
   });
 });
