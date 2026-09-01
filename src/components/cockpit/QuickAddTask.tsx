@@ -1,10 +1,10 @@
 "use client";
 
-// The global quick-add-task modal, opened by the floating "+" button. Pre-fills
+// The global quick-add-task modal. Pre-fills
 // the client/list from wherever you are (still changeable), and creates a task
 // via the same path as the inline grouped-list quick-add (assignee = you).
 import { useEffect, useRef, useState } from "react";
-import { type Client, type Project, type Priority, PRIORITY_ORDER, PRIORITY_META, isManuallyAssignable } from "@/lib/data";
+import { type Client, type Project, type Priority, type TaskSize, PRIORITY_ORDER, PRIORITY_META, SIZE_META, SIZE_ORDER, isManuallyAssignable } from "@/lib/data";
 import { SearchableSelect } from "./ui";
 
 export function QuickAddTask({
@@ -15,13 +15,20 @@ export function QuickAddTask({
   companyFor: (clientId: string) => string | undefined;
   defaultClientId: string;         // "" when there's no client context
   defaultProjectId: string | null;
-  onCreate: (clientId: string, projectId: string | null, title: string, due: string | null, priority: Priority) => void;
+  onCreate: (clientId: string, projectId: string | null, title: string, due: string | null, priority: Priority, followUpAt: string | null, size: TaskSize | null) => void;
   onClose: () => void;
 }) {
   const [title, setTitle] = useState("");
   const [clientId, setClientId] = useState(defaultClientId);
   const [projectId, setProjectId] = useState<string>(defaultProjectId ?? "");
   const [due, setDue] = useState("");
+  // Asked for at creation, not left for someone to fill in later (Derek: "when
+  // we create a task we have to make sure that we ask for the due date, the
+  // follow-up date, and how long it's gonna take"). Ninety-odd open tasks with
+  // no date on them is what happens when these are optional afterthoughts, and
+  // the plan cannot place a task nobody has sized.
+  const [followUp, setFollowUp] = useState("");
+  const [size, setSize] = useState<TaskSize | null>(null);
   const [priority, setPriority] = useState<Priority>("normal");
   const titleRef = useRef<HTMLInputElement>(null);
   useEffect(() => { titleRef.current?.focus(); }, []);
@@ -34,10 +41,12 @@ export function QuickAddTask({
     .map((c) => ({ value: c.id, label: c.name, sub: companyFor(c.id) }));
   const priorities = PRIORITY_ORDER.filter(isManuallyAssignable);
   const canCreate = !!title.trim() && !!clientId;
+  // Named so the button can say which answer is still missing.
+  const missing = [!due && "a due date", !size && "how long it takes"].filter(Boolean) as string[];
 
   const submit = () => {
     if (!title.trim() || !clientId) return;
-    onCreate(clientId, projectId || null, title.trim(), due || null, priority);
+    onCreate(clientId, projectId || null, title.trim(), due || null, priority, followUp || null, size);
     onClose();
   };
 
@@ -79,6 +88,12 @@ export function QuickAddTask({
           </label>
 
           <label className="block">
+            <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted">Follow up</span>
+            <input type="date" value={followUp} onChange={(e) => setFollowUp(e.target.value)}
+              className="w-full rounded-md border bg-background px-2 py-2 text-[15px] outline-none focus:border-accent" />
+          </label>
+
+          <label className="block">
             <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted">Priority</span>
             <select value={priority} onChange={(e) => setPriority(e.target.value as Priority)}
               className="w-full rounded-md border bg-background px-2 py-2 text-[15px] outline-none focus:border-accent">
@@ -86,6 +101,30 @@ export function QuickAddTask({
             </select>
           </label>
         </div>
+
+        {/* How long it takes, asked here because the plan has to place this
+            task tomorrow and an unsized one is counted at a number the plan
+            invents rather than one anyone stands behind. */}
+        <div className="mt-3">
+          <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted">How long will it take</span>
+          <div className="flex flex-wrap gap-1.5">
+            {SIZE_ORDER.map((sz) => (
+              <button key={sz} onClick={() => setSize(size === sz ? null : sz)} title={`${SIZE_META[sz].label} · ${SIZE_META[sz].hint}`}
+                className={`rounded-md border px-2.5 py-1 text-[14px] ${size === sz ? "border-accent bg-accent text-white" : "bg-background hover:bg-surface"}`}>
+                {SIZE_META[sz].label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Said out loud rather than enforced. A task you cannot file yet is
+            still worth writing down, and a required field is how people learn
+            to type anything to get past it. */}
+        {canCreate && missing.length > 0 && (
+          <div className="mt-3 rounded-md border border-dashed px-2.5 py-1.5 text-[13px] text-muted">
+            No {missing.join(" and no ")} yet. It will still be created, but it cannot be planned until you say.
+          </div>
+        )}
 
         <div className="mt-5 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-md border px-3 py-1.5 text-[15px] font-medium hover:bg-background">Cancel</button>

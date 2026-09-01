@@ -395,7 +395,11 @@ export type SortBy = "manual" | "due" | "followUp" | "priority" | "title" | "sta
 // them open in tab links"). This keeps the surrounding words intact and only
 // touches the URLs, which is why it belongs here rather than in whatever
 // produced the string.
-export function LinkedText({ text, className = "" }: { text: string; className?: string }) {
+// `chip` draws each link as a button rather than as coloured words in a
+// sentence (Derek: "make the links buttons so we can see them better"). A
+// link inside a note is a place to go, and underlined blue text in the middle
+// of a paragraph reads as emphasis until you hover it.
+export function LinkedText({ text, className = "", chip = false }: { text: string; className?: string; chip?: boolean }) {
   // The matching lives in data.ts (linkSpans) so it can be unit tested;
   // getting it wrong mangles every note anyone has written.
   const out: React.ReactNode[] = [];
@@ -403,16 +407,20 @@ export function LinkedText({ text, className = "" }: { text: string; className?:
   for (const { start, end, href } of linkSpans(text)) {
     if (start > last) out.push(<span key={`t${last}`}>{text.slice(last, start)}</span>);
     out.push(
-      <span key={`l${start}`} className="group/link inline-flex max-w-full items-baseline gap-1 align-baseline">
+      <span key={`l${start}`} className={`group/link max-w-full gap-1 ${chip
+        ? "mx-0.5 inline-flex items-center rounded-md border bg-surface py-0.5 pl-1.5 pr-1 align-middle shadow-[0_1px_1px_rgba(20,24,40,.05)] hover:border-accent"
+        : "inline-flex items-baseline align-baseline"}`}>
         <a href={href} target="_blank" rel="noopener noreferrer" title={href}
-          className="inline-flex max-w-full items-baseline gap-1 align-baseline font-medium text-accent hover:underline">
-          <LinkFavicon url={href} className="translate-y-[2px]" />
+          className={`inline-flex max-w-full gap-1 font-medium text-accent ${chip ? "items-center text-[14px]" : "items-baseline align-baseline hover:underline"}`}>
+          <LinkFavicon url={href} className={chip ? "" : "translate-y-[2px]"} />
           <span className="truncate">{prettyLinkName(href)}</span>
         </a>
         {/* The pretty name hides the URL, so there has to be a way to get the
-            real thing back out without opening the page first. */}
+            real thing back out without opening the page first. Always visible
+            on a chip: it is a button, and a button whose second action only
+            appears on hover is one nobody finds on a touch screen. */}
         <button onClick={() => { navigator.clipboard?.writeText(href); }} title="Copy this link"
-          className="translate-y-[2px] rounded p-0.5 text-muted opacity-0 transition hover:text-foreground group-hover/link:opacity-100">
+          className={`rounded p-0.5 text-muted transition hover:text-foreground ${chip ? "" : "translate-y-[2px] opacity-0 group-hover/link:opacity-100"}`}>
           <I.copy className="h-3 w-3" />
         </button>
       </span>,

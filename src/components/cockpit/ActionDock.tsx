@@ -151,7 +151,9 @@ export function ActionDock({
     setView(v);
     setBody(""); setNextStep(""); setNextDue(null); setStage(null); setAiReason("");
     setWantNext(v !== "closed" && v !== "menu" && v !== "askTask" ? TASK_ACTION_META[v as TaskActionKind].needsNextStep : false);
-    setTeammate(users.find((u) => u.id !== me?.id)?.id ?? null);
+    // Whoever owns the task is who a question about it usually goes to, so
+    // they start selected rather than whoever happens to sort first.
+    setTeammate(task.assigneeId && task.assigneeId !== me?.id ? task.assigneeId : users.find((u) => u.id !== me?.id)?.id ?? null);
   };
   const suggest = (kind: TaskActionKind) => suggestFor(kind, body);
   const suggestFor = async (kind: TaskActionKind, note: string) => {
@@ -292,6 +294,11 @@ export function ActionDock({
     // saving without one is refused rather than quietly allowed.
     if (wantNext && !done && !nextStep.trim()) { pushToast("Say what happens next, or mark it done."); setEditingNext(true); return; }
 
+    // Refused rather than logged. With nobody picked the branch below never
+    // ran, so the message reached no one while the feed still said
+    // "Messaged" — five of them are sitting in the log having gone nowhere.
+    // A send with no addressee is not a send.
+    if (kind === "team" && !teammate) { pushToast("Pick who this goes to."); return; }
     if (kind === "team" && teammate) {
       if (!text) { pushToast("Write the message first."); return; }
       // Goes to their DM thread, with the task quoted and linked so the
@@ -577,6 +584,9 @@ export function ActionDock({
           <div>
             {header("team")}
             <div className="mb-1.5 text-[13px] text-muted">Goes to their chat with a link back to this task.</div>
+            <div className="mb-1 text-[12px] font-semibold uppercase tracking-wide text-muted">
+              To{!teammate && <span className="ml-1 font-medium normal-case tracking-normal text-danger">pick someone</span>}
+            </div>
             <div className="mb-2 flex flex-wrap gap-1.5">
               {users.filter((u) => u.id !== me?.id).map((u) => (
                 <button key={u.id} onClick={() => setTeammate(u.id)}

@@ -170,7 +170,7 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
         <table className="block w-full border-collapse text-left sm:table sm:table-auto">
         <thead className="hidden sm:table-header-group">
           <tr className="border-b bg-background/40 text-[12px] font-semibold tracking-wide text-muted">
-            <th className="w-full px-4 py-1.5 font-semibold">
+            <th className="w-full max-w-0 px-4 py-1.5 font-semibold">
               <button onClick={() => onSort("task")} className="flex items-center gap-1 text-left hover:text-foreground">Name <Arrow col="task" /></button>
             </th>
             {showClient && <th className="whitespace-nowrap py-1.5 pr-4 font-semibold">Client</th>}
@@ -304,7 +304,7 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
         onDrop={(e) => { if (onRowDrop) { e.preventDefault(); onRowDrop(); } }}
         className={`group/tr block border-b border-l-[3px] px-4 pb-1.5 transition-colors hover:bg-accent-soft/50 sm:table-row sm:px-0 sm:pb-0 ${delegated ? "border-l-accent bg-accent-soft/30" : ""} ${selected ? "bg-accent-soft" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${isMergeDropTarget ? "bg-accent-soft" : ""}`}
         style={{ borderLeftColor: delegated ? undefined : priorityBarColor }}>
-        <td className="block w-full py-1 pr-3 align-middle sm:table-cell sm:pl-4">
+        <td className="block w-full py-1 pr-3 align-middle sm:table-cell sm:max-w-0 sm:pl-4">
         <div className="flex min-w-0 items-center gap-0.5">
           {/* Bulk select, back as a permanent fixture at the leading edge
               (Derek, 2026-08-26: "we have to bring back the check box because
@@ -344,19 +344,19 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
             }}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
             className="flex min-w-0 flex-1 cursor-pointer flex-col justify-center pl-1 text-left">
-            {/* Two lines, and the title owns the first one outright. Every
-                badge used to sit inline with it, so a narrow Name column (an
-                iPad) squeezed the title to "Crea te..." while a "Start now"
-                chip beside it kept its full width. Context and badges belong
-                below the thing they describe, not in front of it. */}
+            {/* Badges live below the title, never inline with it: a narrow
+                Name column used to squeeze the title to "Crea te..." while a
+                chip beside it kept its full width. Context belongs below the
+                thing it describes, not in front of it. */}
             <span className="flex min-w-0 items-center gap-1.5">
               {delegated && <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">Delegated</span>}
-              {/* One line, ellipsed. It used to wrap to two (break-words plus
-                  line-clamp-2), so on a narrow Name column every long title
-                  cost a second row of height and the list stopped scanning as
-                  a list. The full text is in the title attribute and the task
-                  is one click away. */}
-              <span className={`min-w-0 flex-1 truncate text-[15px] font-medium leading-snug ${isDone ? "text-muted line-through" : ""}`} title={task.title}>{task.title}</span>
+              {/* Wraps to a second line rather than pushing the table wider
+                  than the window (Derek: "go ahead and wordwrap the titles if
+                  you have to" — a sideways scrollbar that hides the Name
+                  column is worse than a taller row). Clamped at two lines so
+                  one essay of a title cannot own the screen; the full text is
+                  in the title attribute and the task is one click away. */}
+              <span className={`line-clamp-2 min-w-0 flex-1 break-words text-[15px] font-medium leading-snug ${isDone ? "text-muted line-through" : ""}`} title={task.title}>{task.title}</span>
             </span>
             <span className="flex min-w-0 flex-wrap items-center gap-1.5">
               {showCrumb && !showClient && crumb && <span className="min-w-0 truncate text-[11px] leading-tight text-muted">{crumb}</span>}

@@ -50,6 +50,7 @@ import {
   type Task,
   type TaskStatus,
   type Priority,
+  type TaskSize,
   type Subtask,
   type Client,
   type Project,
@@ -2627,7 +2628,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Quick-add-task FAB: create a task for an explicitly-chosen client/list
   // (from the floating "+" modal). Mirrors quickAdd's Task shape and the
   // find-or-create-"Tasks"-list idiom; assignee = the creator.
-  const createQuickTask = (clientId: string, projectId: string | null, title: string, due: string | null, priority: Priority) => {
+  const createQuickTask = (clientId: string, projectId: string | null, title: string, due: string | null, priority: Priority, followUpAt: string | null = null, size: TaskSize | null = null) => {
     if (!title.trim() || !clientId.startsWith("cl_")) return;
     let pid = projectId ?? "";
     // Same foreign-key ordering as quickAdd above — see the comment there.
@@ -2640,7 +2641,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const t: Task = {
       id: newId("t_"), projectId: pid, clientId, title: title.trim(), description: "",
       status: "todo", priority: isManuallyAssignable(priority) ? priority : "none",
-      assigneeId: me.id, contactId: clientId.slice(3), due,
+      assigneeId: me.id, contactId: clientId.slice(3), due, followUpAt, size,
       recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
       createdBy: me.id,
     };

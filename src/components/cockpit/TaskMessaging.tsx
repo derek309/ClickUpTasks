@@ -214,7 +214,7 @@ function ActionBody({ text }: { text: string }) {
   const long = text.length > 320 || text.split("\n").length > 6;
   return (
     <div className="mt-0.5">
-      <div className={`whitespace-pre-wrap text-[15px] ${!open && long ? "line-clamp-6" : ""}`}><LinkedText text={text} /></div>
+      <div className={`whitespace-pre-wrap text-[15px] ${!open && long ? "line-clamp-6" : ""}`}><LinkedText text={text} chip /></div>
       {long && (
         <button onClick={() => setOpen((o) => !o)} className="mt-0.5 text-[13px] font-medium text-accent hover:underline">
           {open ? "Show less" : "Show more"}
@@ -883,7 +883,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
                       <I.trash className="h-3 w-3" />
                     </button>
                   )}
-                  <div className="whitespace-pre-wrap text-[14px] leading-relaxed"><LinkedText text={r.body} /></div>
+                  <div className="whitespace-pre-wrap text-[14px] leading-relaxed"><LinkedText text={r.body} chip /></div>
                 </div>
               ))}
             </div>
