@@ -15,7 +15,7 @@ import {
   type Task, type Client, type Contact, type Attachment, type MessageChannel, type Message, type Comment,
   TaskAction, TaskActionKind, TASK_ACTION_META, daysUntilDue, formatDue, splitQuotedEmail,
 } from "@/lib/data";
-import { I, Avatar, CollapsibleText, LinkedText } from "./ui";
+import { I, Avatar, CollapsibleText, LinkedText, newId } from "./ui";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 import { AttachmentTile } from "./AttachmentTile";
 import { RichTextEditor } from "./RichTextEditor";
@@ -224,11 +224,11 @@ function ActionBody({ text }: { text: string }) {
   );
 }
 
-export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onSetNextStepDone?: (id: string, done: boolean) => void; onDeleteAction?: (id: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel) => void } {
+export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onSetNextStepDone?: (id: string, done: boolean) => void; onDeleteAction?: (id: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel) => void } {
   const { task, client, comment, setComment, onPatch, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, ccContacts, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin,
-    onDeleteMessage, onEditMessage, hasMessaging, actions, onSetNextStepDone, onDeleteAction, onDeleteComment, onMessageSent } = p;
+    onDeleteMessage, onEditMessage, hasMessaging, actions, onSetNextStepDone, onDeleteAction, onLogAction, meId, onSendDm, onDeleteComment, onMessageSent } = p;
 
   // C3: was a Set of independently-toggled channels (all four on by default),
   // which is how "the active tab reads Chat while the pane shows an email
@@ -238,6 +238,11 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   const [activeFilter, setActiveFilter] = useState<Channel | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [replyingTo, setReplyingTo] = useState<{ id: string; channel: Channel } | null>(null);
+  // Which action entry has its reply box open, and what is typed in it. A
+  // reply is a team action of its own, so the whole thread lives in the same
+  // log rather than in a parallel comment stream.
+  const [replyingAction, setReplyingAction] = useState<string | null>(null);
+  const [actionReply, setActionReply] = useState("");
   const [composingChannel, setComposingChannel] = useState<Channel | null>(null);
 
   // One shared composer-state bundle — reply and fresh-compose are kept
@@ -723,7 +728,9 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
       .filter((m): m is Message & { channel: "chat" | "email" | "sms" } => m.channel !== "call" && (activeFilter === "all" || activeFilter === m.channel))
       .map((m) => ({ at: m.at, kind: "message" as const, channel: m.channel, message: m })),
     ...(activeFilter === "all" || activeFilter === "activity"
-      ? (actions ?? []).map((a) => ({ at: a.at, kind: "action" as const, channel: "activity" as const, action: a }))
+      // Replies are actions too, but they belong under the entry they answer,
+      // not loose in the feed at their own timestamp.
+      ? (actions ?? []).filter((a) => !a.parentId).map((a) => ({ at: a.at, kind: "action" as const, channel: "activity" as const, action: a }))
       : []),
   ]
     .filter((item) => {
@@ -801,16 +808,40 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   // An action reads as a decision, not a note: what you did, and the
   // commitment it left behind with whether that commitment was kept. The
   // next-step strip is the part that makes the history worth scrolling.
+  // A reply lands back in the log as a team action pointing at its parent,
+  // and goes out as a DM to whoever is on the other end of the thread — the
+  // parent's addressee if you wrote it, otherwise its author. Answering in
+  // the drawer should reach the person, not just the record.
+  const sendActionReply = (parent: TaskAction) => {
+    const text = actionReply.trim();
+    if (!text || !onLogAction) return;
+    const other = parent.authorId === meId ? (parent.toId ?? null) : (parent.authorId ?? null);
+    onLogAction({
+      id: newId("ta_"), taskId: task.id, kind: "team", authorId: meId ?? null,
+      toId: other, parentId: parent.id, body: text, at: new Date().toISOString(),
+      nextStep: null, nextStepDue: null, nextStepDoneAt: null,
+    });
+    if (other && other !== meId && onSendDm) onSendDm(other, `${text}\n\nRe: ${task.title}`);
+    setActionReply("");
+    setReplyingAction(null);
+  };
+
   const renderActionItem = (a: TaskAction, gap: string) => {
     const meta = TASK_ACTION_META[a.kind];
     const who = a.authorId ? (userById(a.authorId)?.name ?? "Someone") : "Someone";
+    const toName = a.toId ? (userById(a.toId)?.name ?? null) : null;
     const late = a.nextStepDue && !a.nextStepDoneAt && (daysUntilDue(a.nextStepDue) ?? 0) < 0;
+    const replies = (actions ?? []).filter((r) => r.parentId === a.id).sort((x, y) => x.at.localeCompare(y.at));
+    const replyOpen = replyingAction === a.id;
     return (
       <div key={a.id} className={`group flex gap-3 ${gap}`}>
         <span className="z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-[14px]" aria-hidden>{ACTION_ICON[a.kind]}</span>
         <div className="min-w-0 flex-1 pt-0.5">
           <span className="text-[15px] font-semibold">{meta.verb}</span>
-          <span className="text-[13px] text-muted"> · {who} · {timeAgo(a.at)}</span>
+          {/* Who wrote it and who it was addressed to. "Messaged · Derek Fox"
+              recorded that a teammate was messaged and lost which one, which
+              is the only part of the entry anyone needs to act on. */}
+          <span className="text-[13px] text-muted"> · {who}{toName ? ` → ${toName}` : ""} · {timeAgo(a.at)}</span>
           {onDeleteAction && (
             <button onClick={() => onDeleteAction(a.id)} title="Delete this entry"
               className="ml-1.5 rounded p-0.5 align-middle text-muted opacity-0 transition hover:text-danger group-hover:opacity-100">
@@ -836,6 +867,45 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
               )}
             </div>
           )}
+          {/* The thread. Every entry can be replied to, not just team
+              messages: a note or a logged call is just as likely to be the
+              thing someone wants to ask about, and the answer belongs on the
+              entry rather than as a loose comment further down the feed. */}
+          {replies.length > 0 && (
+            <div className="mt-2 space-y-2 border-l-2 pl-2.5">
+              {replies.map((r) => (
+                <div key={r.id} className="group/reply">
+                  <span className="text-[13px] font-semibold">{r.authorId ? (userById(r.authorId)?.name ?? "Someone") : "Someone"}</span>
+                  <span className="text-[13px] text-muted"> · {timeAgo(r.at)}</span>
+                  {onDeleteAction && (
+                    <button onClick={() => onDeleteAction(r.id)} title="Delete this reply"
+                      className="ml-1.5 rounded p-0.5 align-middle text-muted opacity-0 transition hover:text-danger group-hover/reply:opacity-100">
+                      <I.trash className="h-3 w-3" />
+                    </button>
+                  )}
+                  <div className="whitespace-pre-wrap text-[14px] leading-relaxed"><LinkedText text={r.body} /></div>
+                </div>
+              ))}
+            </div>
+          )}
+          {onLogAction && (replyOpen ? (
+            <div className="mt-2 flex items-end gap-2">
+              <textarea autoFocus value={actionReply} rows={1}
+                onChange={(e) => { setActionReply(e.target.value); e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`; }}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") { setReplyingAction(null); setActionReply(""); return; }
+                  if (e.key !== "Enter" || e.shiftKey) return;
+                  e.preventDefault(); sendActionReply(a);
+                }}
+                placeholder="Reply… (Enter to send, Shift+Enter for a new line)"
+                className="max-h-[160px] min-w-0 flex-1 resize-none overflow-y-auto rounded-lg border bg-surface px-2 py-1.5 text-[14px] leading-snug outline-none focus:border-accent" />
+              <button onClick={() => sendActionReply(a)} disabled={!actionReply.trim()}
+                className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[14px] font-medium text-white disabled:opacity-40">Reply</button>
+            </div>
+          ) : (
+            <button onClick={() => { setReplyingAction(a.id); setActionReply(""); }}
+              className="mt-1 text-[13px] font-medium text-accent hover:underline">Reply</button>
+          ))}
         </div>
       </div>
     );

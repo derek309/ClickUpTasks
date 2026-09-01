@@ -878,22 +878,28 @@ describe("moving into Get started as the date closes in", () => {
 });
 
 describe("filling a day", () => {
-  const t = (size: "quick" | "hour" | "half" | "full" | "multi" | null) => ({ size });
+  const t = (size: "quick" | "hour" | "h2" | "h3" | "half" | "full" | "multi" | null) => ({ size });
 
   it("sizes an unsized task rather than treating it as free", () => {
-    expect(taskHours({ size: null })).toBe(3);
-    expect(taskHours({ size: "quick" })).toBe(0.25);
+    expect(taskHours({ size: null })).toBe(4);
+    expect(taskHours({ size: "quick" })).toBe(0.5);
+  });
+  // A number someone typed beats the bucket it happens to land in.
+  it("prefers a typed estimate over its bucket", () => {
+    expect(taskHours({ size: "hour", sizeHours: 1.5 })).toBe(1.5);
+    expect(taskHours({ size: "hour", sizeHours: 0 })).toBe(1);
+    expect(taskHours({ size: null, sizeHours: 20 })).toBe(20);
   });
   it("stops where the day runs out and marks the rest", () => {
-    const { planned, usedHours, overflowAt } = fillDay([t("full"), t("half"), t("quick")], 6);
+    const { planned, usedHours, overflowAt } = fillDay([t("full"), t("half"), t("quick")], 8);
     expect(planned.map((p) => p.fits)).toEqual([true, false, false]);
-    expect(usedHours).toBe(6);
+    expect(usedHours).toBe(8);
     expect(overflowAt).toBe(1);
   });
   it("packs what does fit", () => {
-    const { planned, usedHours, overflowAt } = fillDay([t("hour"), t("half"), t("quick")], 6);
+    const { planned, usedHours, overflowAt } = fillDay([t("hour"), t("half"), t("quick")], 8);
     expect(planned.every((p) => p.fits)).toBe(true);
-    expect(usedHours).toBe(4.25);
+    expect(usedHours).toBe(5.5);
     expect(overflowAt).toBeNull();
   });
   // Otherwise the biggest, most urgent thing on the list is the one thing the
@@ -961,12 +967,12 @@ describe("work the horizon cannot reach", () => {
   const t = (id: string, size: "half" | null) => ({ id, size });
   const tue = "2026-09-01";
 
-  // With everything unsized at three hours and a six hour day, two tasks fit
-  // per day. Ten across a week, out of ninety-two open. Dropping the rest is
-  // what made a working plan look like it was pulling nothing in.
+  // With half-days at four hours and an eight hour day, two tasks fit per day.
+  // Dropping the rest is what made a working plan look like it was pulling
+  // nothing in, out of ninety-two open tasks.
   it("hands back everything that did not fit", () => {
     const ids = Array.from({ length: 12 }, (_, i) => `t${i}`);
-    const { days, unplanned } = buildPlan(ids.map((i) => t(i, "half")), 6, 3, tue);
+    const { days, unplanned } = buildPlan(ids.map((i) => t(i, "half")), 8, 3, tue);
     expect(days.flatMap((d) => d.planned)).toHaveLength(6);
     expect(unplanned).toHaveLength(6);
   });

@@ -1,8 +1,9 @@
 "use client";
 
-import { Task, Client, Project, PlanDay, PlannedTask, SIZE_META, SIZE_ORDER, TaskSize,
+import { Task, Client, Project, PlanDay, PlannedTask, sizeLabel, taskHours, UNSIZED_HOURS, TaskSize,
   formatDue, effectivePriority, PRIORITY_META, effectiveDueDate, TODAY, daysUntilDue } from "@/lib/data";
 import { I } from "./ui";
+import { SizePicker } from "./SizePicker";
 
 // What you are doing today, and where the day runs out.
 //
@@ -37,7 +38,7 @@ export function PlanView({ days, unplanned, budgetHours, onBudget, clientById, p
   clientById: (id: string) => Client | null;
   projectById: (id: string) => Project | null;
   onOpen: (taskId: string) => void;
-  onSize: (taskId: string, size: TaskSize | null) => void;
+  onSize: (taskId: string, patch: { size: TaskSize | null; sizeHours: number | null }) => void;
   unsizedCount: number;
   includePersonal: boolean;
   onIncludePersonal: (v: boolean) => void;
@@ -55,16 +56,12 @@ export function PlanView({ days, unplanned, budgetHours, onBudget, clientById, p
         {/* Sizing lives here as well as in the drawer: the plan is where you
             notice a task has no size, and making you open it to fix that is
             how a plan stops being maintained. */}
-        <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover:opacity-100">
-          {SIZE_ORDER.map((sz) => (
-            <button key={sz} onClick={() => onSize(t.id, t.size === sz ? null : sz)} title={`${SIZE_META[sz].label} · ${SIZE_META[sz].hint}`}
-              className={`rounded px-1 py-0.5 text-[11px] ${t.size === sz ? "bg-accent text-white" : "text-muted hover:bg-background hover:text-foreground"}`}>
-              {SIZE_META[sz].label}
-            </button>
-          ))}
+        <span className={`shrink-0 transition ${t.size || t.sizeHours ? "opacity-0 group-hover:opacity-100" : ""}`}>
+          <SizePicker size={t.size} sizeHours={t.sizeHours} onChange={(patch) => onSize(t.id, patch)}
+            chipClass="inline-flex items-center rounded-[5px] border bg-surface" />
         </span>
         <span className={`shrink-0 rounded px-1.5 py-0.5 text-[12px] font-medium ${t.size ? "bg-background text-muted" : "border border-dashed text-muted"}`}
-          title={t.size ? SIZE_META[t.size].label : "No size set — counted as half a day so the plan isn't quietly wrong"}>
+          title={t.size ? (sizeLabel(t) ?? "") : `No size set — counted as ${UNSIZED_HOURS} hours so the plan isn't quietly wrong`}>
           {hoursLabel(p.hours)}{t.size ? "" : "?"}
         </span>
         <span className="w-24 shrink-0 truncate text-right text-[13px] text-muted">{client?.name ?? projectById(t.projectId)?.name ?? ""}</span>
@@ -139,10 +136,10 @@ export function PlanView({ days, unplanned, budgetHours, onBudget, clientById, p
             <b className="text-[15px]">Not this week</b>
             <span className="text-[13px] text-muted">
               {unplanned.length} more task{unplanned.length === 1 ? "" : "s"} · roughly{" "}
-              {hoursLabel(unplanned.reduce((sum, t) => sum + (t.size ? SIZE_META[t.size].hours : 3), 0))} of work
+              {hoursLabel(unplanned.reduce((sum, t) => sum + taskHours(t), 0))} of work
             </span>
           </div>
-          {unplanned.slice(0, 12).map((t) => row({ task: t, hours: t.size ? SIZE_META[t.size].hours : 3, fits: false }, true))}
+          {unplanned.slice(0, 12).map((t) => row({ task: t, hours: taskHours(t), fits: false }, true))}
           {unplanned.length > 12 && (
             <div className="border-t px-3.5 py-2 text-[13px] text-muted">and {unplanned.length - 12} more.</div>
           )}

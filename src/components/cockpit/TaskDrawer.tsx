@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, clientStatusMeta,
-  TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, SIZE_META, SIZE_ORDER,
+  TaskAction, TaskActionKind, prettyLinkName, effectiveStatus,
   STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY, WEEKDAY_LABEL, startSignal, isSnoozed, daysUntilDue, formatDue, dueCountdown,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
@@ -13,6 +13,7 @@ import { authedFetch } from "@/lib/supabase";
 import { ActionDock } from "./ActionDock";
 import { fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskActionDb } from "@/lib/db";
 import { AttachmentTile } from "./AttachmentTile";
+import { SizePicker } from "./SizePicker";
 import { InlineAssignee, InlineDate, InlineDue } from "./GroupedList";
 import { RichTextEditor } from "./RichTextEditor";
 import { useTaskMessaging } from "./TaskMessaging";
@@ -760,15 +761,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {/* Sizing sits with the other chips, not in a panel of its own: it is
           one decision, made once, and it belongs beside the stage and the
           assignee rather than somewhere you have to go looking for. */}
-      <span className={`${chip} gap-0.5 px-1 py-0.5`} title="Rough size, used to fill a day. Not time tracking.">
-        {SIZE_ORDER.map((sz) => (
-          <button key={sz} onClick={() => onPatch({ size: task.size === sz ? null : sz })}
-            title={`${SIZE_META[sz].label} · ${SIZE_META[sz].hint}`}
-            className={`rounded-[4px] px-1.5 py-0.5 text-[13px] ${task.size === sz ? "bg-accent font-semibold text-white" : "text-muted hover:bg-background hover:text-foreground"}`}>
-            {SIZE_META[sz].label}
-          </button>
-        ))}
-      </span>
+      <SizePicker size={task.size} sizeHours={task.sizeHours} onChange={onPatch} chipClass={chip} />
       <div className="relative">
         <button onClick={() => setLabelOpen((o) => !o)} className="inline-flex items-center gap-0.5 rounded-[5px] border border-dashed px-2 py-1 text-[13px] text-muted hover:bg-surface"><I.plus /> Label</button>
         {labelOpen && (<div className="absolute z-30 mt-1 w-40 rounded-lg border bg-surface p-1 shadow-lg">{labels.map((l) => { const on = task.labelIds.includes(l.id); return (<button key={l.id} onClick={() => onToggleLabel(l.id)} className="flex w-full items-center gap-2 rounded px-2 py-1 text-[13px] hover:bg-background"><span className="h-2.5 w-2.5 rounded-full" style={{ background: l.color }} /> {l.name}{on && <I.check className="ml-auto text-accent" />}</button>); })}</div>)}
@@ -964,7 +957,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // never got set, which is how a task goes quiet after real work on it.
   const [pendingNextStep, setPendingNextStep] = useState<{ kind: TaskActionKind; body: string } | null>(null);
   const { feedArea, composerFooter, openCompose } = useTaskMessaging({
-    actions, onSetNextStepDone: setNextStepDone, onDeleteAction: deleteAction, onDeleteComment,
+    actions, onSetNextStepDone: setNextStepDone, onDeleteAction: deleteAction, onLogAction: logAction, meId, onSendDm, onDeleteComment,
     onMessageSent: (channel, body) => setPendingNextStep({ kind: channel, body }),
     task, client, comment, setComment, onPatch, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, ccContacts, onUploadMessageImage,
@@ -1381,7 +1374,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               {/* Sticky reference: description, checklist and attachments
                   stay on screen while the feed scrolls beside them, which is
                   the one thing a single column genuinely loses. */}
-              <div className="flex min-h-0 flex-1 flex-col px-4 py-4">
+              {/* The rail is max-h-screen and sticky at 1100px+, so anything
+                  taller than the viewport was simply unreachable — a long
+                  description ran off the bottom with no way to scroll to it.
+                  Only scrolls at that breakpoint; below it the rail stacks
+                  under the document and the page scroll is the right one. */}
+              <div className="flex min-h-0 flex-1 flex-col px-4 py-4 min-[1100px]:overflow-y-auto">
                 {descriptionBlock}
                 {subtasksBlock}
                 {attachmentsBlock}

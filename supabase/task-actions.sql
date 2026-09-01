@@ -64,3 +64,13 @@ create policy task_actions_delete on task_actions for delete to authenticated
 alter table task_actions drop constraint if exists task_actions_kind_check;
 alter table task_actions add constraint task_actions_kind_check
   check (kind in ('note','team','chat','email','sms','call','meeting','met'));
+
+-- Added later: who a team message went to, and threading so any entry can be
+-- replied to. "Messaged · Derek Fox" recorded that a teammate was messaged
+-- and lost which teammate, and the person addressed had nowhere to answer in
+-- the place the question was asked. A reply is itself an action row (author,
+-- time and body for free); parent_id is what turns a flat log into a thread.
+alter table task_actions add column if not exists to_id text;
+alter table task_actions add column if not exists parent_id text
+  references task_actions(id) on delete cascade;
+create index if not exists task_actions_parent_idx on task_actions(parent_id);

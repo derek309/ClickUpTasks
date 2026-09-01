@@ -1499,6 +1499,10 @@ export interface Task {
   priorityAuto?: boolean;
   /** Rough size, for filling a day. Null means nobody has said. */
   size?: TaskSize | null;
+  /** A typed estimate in hours, which overrides the bucket's own number.
+   *  How a Multi-day says how many days, and how anything else says an hour
+   *  and a half without rounding to something untrue. */
+  sizeHours?: number | null;
   recurrenceNth?: number;
   /** 0 = Sunday .. 6 = Saturday, matching Date#getUTCDay. */
   recurrenceWeekday?: number;
@@ -1716,26 +1720,51 @@ export function effectiveStatus(task: { status: TaskStatus; due: string | null; 
 // afternoon, and the only decision being made is whether three of these fit
 // today. "hour" exists because the gap from 15 minutes to half a day was a
 // cliff, and most real work lands in it.
-export type TaskSize = "quick" | "hour" | "half" | "full" | "multi";
+export type TaskSize = "quick" | "hour" | "h2" | "h3" | "half" | "full" | "multi";
 
+// Every bucket names its hours, because "half day" is a word two people read
+// as four hours and twelve. The named ones stay named — a full day is a
+// recognisable unit of work in a way that "8 h" is not — but the number rides
+// along with it so there is nothing to guess at.
 export const SIZE_META: Record<TaskSize, { label: string; hint: string; hours: number }> = {
-  quick: { label: "Quick", hint: "15 min", hours: 0.25 },
-  hour: { label: "An hour", hint: "1 h", hours: 1 },
-  half: { label: "Half day", hint: "3 h", hours: 3 },
-  full: { label: "Full day", hint: "6 h", hours: 6 },
+  quick: { label: "30 min", hint: "0.5 h", hours: 0.5 },
+  hour: { label: "1 hour", hint: "1 h", hours: 1 },
+  // The gap these two close: an hour to three hours used to be one step, and
+  // most of what actually gets estimated lands inside it.
+  h2: { label: "2 hours", hint: "2 h", hours: 2 },
+  h3: { label: "3 hours", hint: "3 h", hours: 3 },
+  half: { label: "Half day", hint: "4 h", hours: 4 },
+  full: { label: "Full day", hint: "8 h", hours: 8 },
   // Counted as a full day per day it appears in: a multi-day task fills every
-  // day it touches, so treating it as one 6 hour block would let the rest of
+  // day it touches, so treating it as one 8 hour block would let the rest of
   // the week look free when it is not.
-  multi: { label: "Multi-day", hint: "2 d+", hours: 6 },
+  multi: { label: "Multi-day", hint: "8 h+, set your own", hours: 8 },
 };
-export const SIZE_ORDER: TaskSize[] = ["quick", "hour", "half", "full", "multi"];
+export const SIZE_ORDER: TaskSize[] = ["quick", "hour", "h2", "h3", "half", "full", "multi"];
 
 // A task nobody has sized still has to occupy the day, or the plan quietly
 // promises time that does not exist. Half a day is the honest middle: it is
 // wrong in both directions rather than optimistic in one.
-export const UNSIZED_HOURS = 3;
+export const UNSIZED_HOURS = 4;
 
-export function taskHours(task: { size?: TaskSize | null }): number {
+// A typed estimate beats the bucket it sits in. The buckets exist so sizing
+// is one click on the common cases, not so an hour and a half has to be
+// rounded to something that is not true.
+// Reads back what was set: the bucket's own name, or the typed estimate when
+// there is one, since a number someone chose deserves to be shown as that
+// number rather than as the bucket it happens to land in.
+export function sizeLabel(task: { size?: TaskSize | null; sizeHours?: number | null }): string | null {
+  const h = task.sizeHours;
+  if (typeof h === "number" && h > 0) {
+    if (h >= 8 && h % 8 === 0) return `${h / 8} day${h === 8 ? "" : "s"}`;
+    if (h < 1) return `${Math.round(h * 60)} min`;
+    return `${Number(h.toFixed(2))} h`;
+  }
+  return task.size ? SIZE_META[task.size].label : null;
+}
+
+export function taskHours(task: { size?: TaskSize | null; sizeHours?: number | null }): number {
+  if (typeof task.sizeHours === "number" && task.sizeHours > 0) return task.sizeHours;
   return task.size ? SIZE_META[task.size].hours : UNSIZED_HOURS;
 }
 
@@ -1750,7 +1779,7 @@ export function taskHours(task: { size?: TaskSize | null }): number {
 // for not fitting. Otherwise the biggest, most urgent thing on the list is
 // the one thing the plan never shows you.
 export type PlannedTask<T> = { task: T; hours: number; fits: boolean };
-export function fillDay<T extends { size?: TaskSize | null }>(
+export function fillDay<T extends { size?: TaskSize | null; sizeHours?: number | null }>(
   ordered: T[],
   budgetHours: number,
 ): { planned: PlannedTask<T>[]; usedHours: number; overflowAt: number | null } {
@@ -1782,7 +1811,7 @@ export type PlanDay<T> = { date: string; planned: PlannedTask<T>[]; usedHours: n
 // dropped: with 92 open tasks, a five day plan holds about ten of them, and
 // silently losing the other eighty makes a working plan look broken.
 export type Plan<T> = { days: PlanDay<T>[]; unplanned: T[] };
-export function buildPlan<T extends { size?: TaskSize | null }>(
+export function buildPlan<T extends { size?: TaskSize | null; sizeHours?: number | null }>(
   ordered: T[],
   budgetHours: number,
   days: number,
@@ -2299,6 +2328,12 @@ export type TaskAction = {
   taskId: string;
   kind: TaskActionKind;
   authorId: string | null;
+  // Who it was addressed to, for the kinds that have an addressee (today
+  // just "team"). Null everywhere else.
+  toId?: string | null;
+  // Set on a reply, pointing at the entry being replied to. Replies are
+  // actions like any other, so they thread without a second table.
+  parentId?: string | null;
   body: string;
   at: string;
   nextStep: string | null;

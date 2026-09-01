@@ -298,6 +298,9 @@ export function ActionDock({
     if (!sent || scheduled) {
       onLog({
         id: newId("ta_"), taskId: task.id, kind, authorId: me?.id ?? null,
+        // The addressee, so the feed can say who it went to rather than
+        // just that a message happened.
+        toId: kind === "team" ? teammate : null, parentId: null,
         body: sent ? "" : text, at: new Date().toISOString(),
         nextStep: nextStep.trim() || null,
         nextStepDue: nextDue,

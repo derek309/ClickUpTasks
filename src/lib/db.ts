@@ -75,7 +75,7 @@ const taskToRow = (t: Task, updatedBy?: string | null) => ({
   id: t.id, project_id: t.projectId, client_id: t.clientId, title: t.title, description: t.description,
   status: t.status, priority: t.priority, assignee_id: t.assigneeId, waiting_on_client: t.waitingOnClient ?? false, contact_id: t.contactId, due: t.due,
   recurrence: t.recurrence, recurrence_interval: t.recurrenceInterval ?? null, recurrence_unit: t.recurrenceUnit ?? null,
-  recurrence_days_of_month: t.recurrenceDaysOfMonth ?? null, follow_up_at: t.followUpAt ?? null, priority_auto: t.priorityAuto ?? false, size: t.size ?? null, recurrence_nth: t.recurrenceNth ?? null, recurrence_weekday: t.recurrenceWeekday ?? null,
+  recurrence_days_of_month: t.recurrenceDaysOfMonth ?? null, follow_up_at: t.followUpAt ?? null, priority_auto: t.priorityAuto ?? false, size: t.size ?? null, size_hours: t.sizeHours ?? null, recurrence_nth: t.recurrenceNth ?? null, recurrence_weekday: t.recurrenceWeekday ?? null,
   ghl_task_id: t.ghlTaskId, label_ids: t.labelIds, subtasks: t.subtasks,
   attachments: t.attachments, comments: t.comments, updated_by: updatedBy ?? null, is_private: t.private,
   stage_id: t.stageId ?? null, client_response: t.clientResponse ?? null, draft_email: t.draftEmail ?? null,
@@ -95,7 +95,7 @@ export const rowToTask = (r: any): Task => ({
   status: r.status, priority: asPriority(r.priority), assigneeId: r.assignee_id, waitingOnClient: r.waiting_on_client ?? false, contactId: r.contact_id, due: r.due,
   lastActivityAt: r.last_activity_at ?? null,
   recurrence: r.recurrence, recurrenceInterval: r.recurrence_interval ?? undefined, recurrenceUnit: r.recurrence_unit ?? undefined,
-  recurrenceDaysOfMonth: r.recurrence_days_of_month ?? undefined, followUpAt: r.follow_up_at ?? null, priorityAuto: r.priority_auto ?? false, size: r.size ?? null, recurrenceNth: r.recurrence_nth ?? undefined, recurrenceWeekday: r.recurrence_weekday ?? undefined,
+  recurrenceDaysOfMonth: r.recurrence_days_of_month ?? undefined, followUpAt: r.follow_up_at ?? null, priorityAuto: r.priority_auto ?? false, size: r.size ?? null, sizeHours: r.size_hours ?? null, recurrenceNth: r.recurrence_nth ?? undefined, recurrenceWeekday: r.recurrence_weekday ?? undefined,
   ghlTaskId: r.ghl_task_id, labelIds: r.label_ids ?? [], subtasks: r.subtasks ?? [],
   attachments: r.attachments ?? [], comments: r.comments ?? [], createdAt: r.created_at ?? new Date().toISOString(),
   private: r.is_private ?? false,
@@ -138,10 +138,12 @@ const messageToRow = (m: Message) => ({
 });
 const taskActionToRow = (a: TaskAction) => ({
   id: a.id, task_id: a.taskId, kind: a.kind, author_id: a.authorId, body: a.body, at: a.at,
+  to_id: a.toId ?? null, parent_id: a.parentId ?? null,
   next_step: a.nextStep, next_step_due: a.nextStepDue, next_step_done_at: a.nextStepDoneAt,
 });
 export const rowToTaskAction = (r: any): TaskAction => ({
   id: r.id, taskId: r.task_id, kind: r.kind as TaskActionKind, authorId: r.author_id ?? null,
+  toId: r.to_id ?? null, parentId: r.parent_id ?? null,
   body: r.body ?? "", at: r.at, nextStep: r.next_step ?? null, nextStepDue: r.next_step_due ?? null,
   nextStepDoneAt: r.next_step_done_at ?? null,
 });
