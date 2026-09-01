@@ -145,7 +145,9 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
   // only earns its line when the list actually spans more than one.
   const projectIds = new Set(groups.flatMap((g) => g.tasks.map((t) => t.projectId)));
   const showCrumb = projectIds.size > 1;
-  const template = ["minmax(240px,1.4fr)", ...(showClient ? ["180px"] : []), ...cols.map((c) => COL_WIDTHS[c.key])].join(" ");
+  // The title takes everything the other columns give back: 2fr against their
+  // fixed widths, so it grows with the window instead of the gaps doing it.
+  const template = ["minmax(240px,2fr)", ...(showClient ? ["150px"] : []), ...cols.map((c) => COL_WIDTHS[c.key])].join(" ");
   const sortColKey: Record<string, string> = { title: "task", priority: "priority", due: "due", followUp: "followUp", assignee: "assignee", status: "status", comments: "comments" };
   const activeCol = sortColKey[sortKey];
   const Arrow = ({ col }: { col: string }) => (activeCol === col ? <span className="text-accent">{sortDir === "asc" ? "↑" : "↓"}</span> : null);

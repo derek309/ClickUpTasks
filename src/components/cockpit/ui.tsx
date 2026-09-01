@@ -462,7 +462,11 @@ export const DIR_ROW = "group flex min-h-[38px] cursor-pointer items-center gap-
 // status is wider than the label needs: the one-click done toggle sits beside
 // it (see GroupedList's doneToggle), and at 128px "Changes" plus the circle
 // clipped.
-export const COL_WIDTHS: Record<string, string> = { status: "152px", due: "132px", followUp: "120px", created: "88px", priority: "132px", comments: "84px", assignee: "72px", contact: "160px", labels: "150px" };
+// Sized to their content, not to their headings. Every one of these was wide
+// enough for a label twice as long as anything it ever holds ("Normal" in a
+// 132px Priority column), and all that slack came out of the task title,
+// which is the one column whose content actually varies.
+export const COL_WIDTHS: Record<string, string> = { status: "112px", due: "112px", followUp: "96px", created: "78px", priority: "96px", comments: "68px", assignee: "60px", contact: "130px", labels: "120px" };
 // `action` powers undo: a bulk edit hands back a one-click revert instead of
 // leaving someone to re-set every task by hand. Toasts carrying an action
 // stay on screen longer (see pushToast) so there's time to actually hit it.
