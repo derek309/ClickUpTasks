@@ -22,7 +22,7 @@ import { authedFetch } from "@/lib/supabase";
 // drawer for something you do a few times a day.
 
 const ICON: Record<TaskActionKind, string> = {
-  note: "📝", team: "👥", chat: "🗨", email: "✉", sms: "💬", call: "☎", met: "👥", meeting: "📅",
+  note: "📝", team: "👥", chat: "🗨", email: "✉", sms: "💬", call: "☎", met: "🗓", meeting: "📅",
 };
 
 // Named offsets rather than a date picker for the common cases. Picking
@@ -155,6 +155,9 @@ export function ActionDock({
     // they start selected rather than whoever happens to sort first.
     setTeammate(task.assigneeId && task.assigneeId !== me?.id ? task.assigneeId : users.find((u) => u.id !== me?.id)?.id ?? null);
   };
+  const openPanelRef = useRef(openPanel);
+  useEffect(() => { openPanelRef.current = openPanel; });
+
   const suggest = (kind: TaskActionKind) => suggestFor(kind, body);
   const suggestFor = async (kind: TaskActionKind, note: string) => {
     setAiBusy(true);
@@ -219,8 +222,24 @@ export function ActionDock({
     return () => clearTimeout(t);
   }, [view, open]);
 
+  // Read through a ref so the shortcut effect does not re-bind on every
+  // render just because the group arrays are rebuilt each time.
+  const menuOrderRef = useRef<TaskActionKind[]>([]);
+
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && view !== "closed") { e.stopPropagation(); setView("closed"); } };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && view !== "closed") { e.stopPropagation(); setView("closed"); return; }
+      // Only on the menu itself, and never while something is being typed
+      // into — a "3" in a note is a 3, not a shortcut.
+      if (view !== "menu" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      const list = menuOrderRef.current;
+      if (e.key >= "1" && e.key <= String(Math.min(9, list.length))) {
+        e.preventDefault();
+        openPanelRef.current(list[Number(e.key) - 1]);
+      }
+    };
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
   }, [view]);
@@ -486,6 +505,8 @@ export function ActionDock({
   // client name"). Falls back to the client, then to a bare verb, so a task
   // with no contact still reads as an instruction rather than a blank.
   const who = contact?.name ?? client?.name ?? "";
+  // Full label, for the panel header once you are inside an action: there the
+  // name is the whole point, because it says who you are about to write to.
   const actionLabel = (k: TaskActionKind) => {
     if (!who) return TASK_ACTION_META[k].label;
     if (k === "chat") return `Chat ${who}`;
@@ -495,6 +516,38 @@ export function ActionDock({
     if (k === "meeting") return `Book ${who}`;
     return TASK_ACTION_META[k].label;
   };
+  // Bare verb, for the menu: the name is said once in the group heading above
+  // these, so printing it on five buttons only made them wider.
+  const MENU_LABEL: Partial<Record<TaskActionKind, string>> = {
+    chat: "Chat", email: "Email", sms: "Text", call: "Call",
+    // Same word, opposite ends of time. One already happened and one has not,
+    // and only one of them needs a slot picked.
+    met: "Log a meeting", meeting: "Book a meeting",
+  };
+  const menuLabel = (k: TaskActionKind) => MENU_LABEL[k] ?? TASK_ACTION_META[k].label;
+
+  // Grouped by who it reaches, because that is the question you answer before
+  // picking anything: does this stay inside the team, or does it go to the
+  // client. Nine buttons in one undifferentiated wrap made a note to yourself
+  // and a text to a client read as the same kind of thing.
+  // Split off CLIENT_FACING_ACTIONS rather than written out again, so the
+  // permission rule that hides client contact from a VA lives in exactly one
+  // place. A second hardcoded list is a rule that drifts.
+  const INTERNAL_ACTIONS = TASK_ACTION_ORDER.filter((k) => !CLIENT_FACING_ACTIONS.has(k));
+  const CLIENT_ACTIONS = TASK_ACTION_ORDER.filter((k) => CLIENT_FACING_ACTIONS.has(k));
+  const menuGroups: { label: string; kinds: TaskActionKind[] }[] = [
+    { label: "Just record it", kinds: INTERNAL_ACTIONS },
+    { label: who ? `Reach ${who}` : "Reach the client", kinds: canMessageClient ? CLIENT_ACTIONS : [] },
+  ];
+  // Numbered in the order they are drawn, so the digit on screen is the digit
+  // you press. Nine choices is a lot to hunt through when you use the same
+  // three every day.
+  const menuOrder: TaskActionKind[] = menuGroups.flatMap((g) => g.kinds);
+
+  // Kept current in an effect rather than during render, so the shortcut
+  // handler always sees what is actually drawn without the effect re-binding
+  // on every render.
+  useEffect(() => { menuOrderRef.current = menuOrder; });
 
   const openStep = actions.find((a) => a.nextStep && !a.nextStepDoneAt) ?? null;
   const stepLate = openStep?.nextStepDue ? (daysUntilDue(openStep.nextStepDue) ?? 0) < 0 : false;
@@ -553,18 +606,27 @@ export function ActionDock({
               <span className="text-[15px] font-semibold">What are you doing?</span>
               <button onClick={() => openPanel("closed")} className="rounded px-1 text-muted hover:text-foreground">✕</button>
             </div>
-            <div className="flex flex-wrap gap-1.5">
-              <button onClick={() => openPanel("askTask")}
-                className="inline-flex items-center gap-1.5 rounded-[5px] border border-dashed px-3 py-1.5 text-[14px] font-semibold text-muted hover:bg-background hover:text-foreground">
-                <span aria-hidden>💡</span> Ask about this task
-              </button>
-              {TASK_ACTION_ORDER.filter((k) => canMessageClient || !CLIENT_FACING_ACTIONS.has(k)).map((k) => (
-                <button key={k} onClick={() => openPanel(k)}
-                  className="inline-flex items-center gap-1.5 rounded-[5px] border border-[#b9cde3] bg-accent-soft px-3 py-1.5 text-[14px] font-semibold text-accent hover:bg-accent hover:text-white">
-                  <span aria-hidden>{ICON[k]}</span> {actionLabel(k)}
-                </button>
-              ))}
-            </div>
+            {menuGroups.filter((g) => g.kinds.length > 0).map((g) => (
+              <div key={g.label} className="mb-2.5">
+                <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-muted">{g.label}</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {g.kinds.map((k) => (
+                    <button key={k} onClick={() => openPanel(k)}
+                      className="inline-flex items-center gap-1.5 rounded-[7px] border bg-surface px-3 py-1.5 text-[15px] hover:border-accent hover:bg-accent-soft">
+                      <span aria-hidden className="w-[17px] text-center opacity-80">{ICON[k]}</span> {menuLabel(k)}
+                      <span aria-hidden className="rounded border px-1 text-[11px] leading-4 text-muted">{menuOrder.indexOf(k) + 1}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-muted">Ask</div>
+            {/* No longer the one pale item in the row. Dashed grey read as
+                unavailable rather than as the AI one. */}
+            <button onClick={() => openPanel("askTask")}
+              className="inline-flex items-center gap-1.5 rounded-[7px] border border-accent bg-accent-soft px-3 py-1.5 text-[15px] font-semibold text-accent hover:bg-accent hover:text-white">
+              <span aria-hidden className="w-[17px] text-center">✦</span> Ask Claude about this task
+            </button>
           </div>
         )}
 
