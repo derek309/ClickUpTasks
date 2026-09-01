@@ -1760,17 +1760,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     () => (canAdmin ? tasks : tasks.filter((t) => t.assigneeId === me.id)),
     [tasks, canAdmin, me.id]
   );
-  // What the All Tasks row in the sidebar counts. Scoped the same way the
-  // list is, so a VA's number is their own work rather than a total they
-  // cannot see.
+  // What the All Tasks row in the sidebar counts: your own open work.
+  //
+  // It counted every task an admin could see, which is every task across
+  // thirty-five clients — 23,494 of them, a number that says nothing and
+  // reads as an error. A nav badge answers "how much is on me", so it is
+  // scoped to you regardless of the Mine/All toggle, which also keeps the
+  // number from lurching when you flip it.
   //
   // Approved is excluded alongside Done (Derek, 2026-09-01). The two are
   // deliberately separate stages — the client's yes and your delivery are
-  // different events — but neither is work waiting on you, and a nav count is
-  // there to say how much is.
+  // different events — but neither is work waiting on you.
   const openTaskCount = useMemo(
-    () => scopedTasks.filter((t) => t.status !== "done" && t.status !== "approved").length,
-    [scopedTasks],
+    () => tasks.filter((t) => t.assigneeId === me.id && t.status !== "done" && t.status !== "approved").length,
+    [tasks, me.id],
   );
   // Map indices for scopedTasks/clients/projects — every lookup helper below
   // (clientById, clientTaskCount, clientNeedsReview, hasOpenConversationTask,
@@ -4477,11 +4480,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               slotting All Tasks in at 2 would have shifted Team Chat through
               Personal down one and broken existing muscle memory for a key
               nobody asked for. */}
-          {/* Open only, so the number is work outstanding rather than
-              everything ever written down — the same thing the list itself
-              shows when you click through. Every other row in this nav
-              carries its count; this one was the exception. */}
-          {navVisible.work && <SideItem active={allTasksView} title={`${openTaskCount} open task${openTaskCount === 1 ? "" : "s"} across every client`} onClick={() => goToView("alltasks")}><I.list className="text-muted" /> <span>All Tasks</span><span className="ml-auto text-[13px] text-muted">{openTaskCount}</span></SideItem>}
+          {/* Your open tasks, not every task in the database. Every other row
+              in this nav carries its count; this one was the exception. */}
+          {navVisible.work && <SideItem active={allTasksView} title={`${openTaskCount} open task${openTaskCount === 1 ? "" : "s"} assigned to you`} onClick={() => goToView("alltasks")}><I.list className="text-muted" /> <span>All Tasks</span><span className="ml-auto text-[13px] text-muted">{openTaskCount}</span></SideItem>}
           {/* "Client replies" nav item removed (Derek, 2026-08-09) — My Work
               and Follow Up already surface an open conversation-priority
               task each their own way (hasOpenConversationTask / Follow Up's
