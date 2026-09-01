@@ -46,6 +46,9 @@ const refreshBtn = document.getElementById("refresh");
 let permalink = null;
 let senderName = null;
 let senderEmail = null;
+// The Gmail API ids scraped alongside the rest of the email, held so the task
+// can be bound to its thread once it exists.
+let mailIds = { gmailMessageId: null, rfc822MessageId: null };
 let allClients = []; // [{id, name, company, contactName}]
 let selectedClientId = "";
 let capturedScreenshots = []; // data URLs, in the order added
@@ -73,6 +76,38 @@ async function apiFetch(path, token, init) {
 // Screenshots are captured as data URLs (chrome.tabs.captureVisibleTab) but
 // the upload route wants multipart/form-data, so this converts + posts
 // separately from apiFetch, which always sends JSON.
+// Bind the clipped email's thread to the task, so every future reply lands
+// there rather than on a generic "Reply to <client>" task. Best effort on
+// purpose: the task and its notes are already saved by the time this runs,
+// and failing to resolve a thread is not a reason to say the clip failed.
+async function attachEmailThread(token, taskId) {
+  if (!taskId) return;
+  if (!mailIds.gmailMessageId && !mailIds.rfc822MessageId && !titleInput.value.trim()) return;
+  try {
+    const res = await apiFetch("/api/extension/attach-email", token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task_id: taskId,
+        gmail_message_id: mailIds.gmailMessageId,
+        rfc822_message_id: mailIds.rfc822MessageId,
+        from_email: senderEmail,
+        subject: titleInput.value.trim(),
+      }),
+    });
+    if (res?.ok) {
+      // Says which, because matching on a subject line is a guess and should
+      // not be reported in the same voice as reading the thread's own id.
+      statusEl.textContent = res.confident
+        ? `Watching this thread — ${res.imported} message${res.imported === 1 ? "" : "s"} imported.`
+        : `Matched by subject — ${res.imported} imported. Check it is the right thread.`;
+      statusEl.className = "ok";
+    }
+  } catch {
+    // Silent: the clip itself worked.
+  }
+}
+
 async function uploadScreenshot(token, dataUrl, clientId) {
   const blob = await (await fetch(dataUrl)).blob();
   const form = new FormData();
@@ -527,6 +562,7 @@ async function init(forceClientRefresh = false) {
     const fromLine = senderName || senderEmail ? `From: ${senderName || ""}${senderEmail ? ` <${senderEmail}>` : ""}` : "";
     notesInput.value = [fromLine, email.snippet || ""].filter(Boolean).join("\n\n");
     permalink = email.permalink || null;
+    mailIds = { gmailMessageId: email.gmailMessageId || null, rfc822MessageId: email.rfc822MessageId || null };
     // Ticked by default: if you're clipping an email that has attachments,
     // wanting them on the task is the common case (Derek: "add all the
     // attachments so we can see them"). Untick to leave one behind.
@@ -703,12 +739,14 @@ createBtn.addEventListener("click", async () => {
       // with nothing to click. Opens in a new tab: this is a side panel, and
       // navigating it away would close the form you're still working in.
       showCreatedLink(created?.id, created?.title || titleInput.value.trim(), skipped);
+      await attachEmailThread(token, created?.id);
     } else {
       await apiFetch(`/api/extension/tasks/${encodeURIComponent(selectedTaskId)}/comment`, token, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ body: notesInput.value.trim(), screenshot_paths: screenshotPaths }),
       });
+      await attachEmailThread(token, selectedTaskId);
       statusEl.textContent = "Added to task.";
       statusEl.className = "ok";
     }

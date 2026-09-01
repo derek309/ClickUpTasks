@@ -54,6 +54,35 @@ function scrapeSubject() {
   return title && title !== document.title ? title.trim() : null;
 }
 
+// The ids that let the server find this thread through the Gmail API.
+//
+// The permalink in the address bar is NOT one of them: Gmail's URL hash is a
+// UI permalink id (FMfcgz…), while the API — and therefore every gmail_thread_id
+// already in the database — uses a 16 hex character id. Attaching a thread by
+// the URL would produce an id that can never match a polled reply.
+//
+// data-legacy-message-id is that hex id, set by Gmail on each message in the
+// thread. Taking the LAST one means the newest message, which is the one most
+// likely to still be in a mailbox the server can read. It is only a claim
+// either way: the server confirms it against Gmail before storing anything.
+//
+// rfc822 is the belt to that braces — the Message-ID header, which Gmail
+// indexes as rfc822msgid and which survives even a forward. Neither being
+// present is fine: the server can still fall back to a subject search.
+function scrapeMailIds() {
+  const legacy = [...document.querySelectorAll("[data-legacy-message-id]")]
+    .map((el) => el.getAttribute("data-legacy-message-id"))
+    .filter((id) => /^[0-9a-f]{8,20}$/i.test(id ?? ""));
+  const rfc = [...document.querySelectorAll("[data-message-id]")]
+    .map((el) => el.getAttribute("data-message-id"))
+    .filter(Boolean);
+  return {
+    gmailMessageId: legacy.length ? legacy[legacy.length - 1] : null,
+    // Gmail writes these as "#msg-f:1795…"; strip the marker it adds.
+    rfc822MessageId: rfc.length ? String(rfc[rfc.length - 1]).replace(/^#msg-[af]:/, "") : null,
+  };
+}
+
 function scrapeSender() {
   // `.gD`'s `name`/`email` attributes are set directly by Gmail (not
   // derived from the volatile class name itself), so this stays reasonably
@@ -146,5 +175,11 @@ function scrapeOpenEmail() {
   const permalink = location.hash ? `https://mail.google.com/mail/u/${acct}/${location.hash}` : null;
 
   if (!subject && !senderEmail) return null;
-  return { subject, senderName, senderEmail, snippet, permalink, attachments: scrapeAttachments() };
+  const ids = scrapeMailIds();
+  return {
+    subject, senderName, senderEmail, snippet, permalink,
+    attachments: scrapeAttachments(),
+    gmailMessageId: ids.gmailMessageId,
+    rfc822MessageId: ids.rfc822MessageId,
+  };
 }

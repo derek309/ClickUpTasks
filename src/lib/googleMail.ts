@@ -133,6 +133,108 @@ function extractBody(payload: any, snippet: string): string {
   return snippet;
 }
 
+// Resolve one Gmail thread from whatever the browser could tell us about it.
+//
+// The Clipper scrapes a rendered Gmail page, so what it can offer varies. In
+// order of how much we trust it:
+//
+//   messageId  Gmail's own DOM carries data-legacy-message-id, which IS the
+//              API message id. One call turns it into a thread id.
+//   rfc822     The Message-ID header, which Gmail indexes as rfc822msgid.
+//              Exact, and works even from a forwarded copy.
+//   search     from/subject, newest first. A guess, and the only one that can
+//              pick the wrong thread when a subject repeats — so it is last
+//              and it says so in the result.
+//
+// Returns the thread id plus how it was found, because "we searched for it"
+// and "we read its id" deserve different confidence at the call site.
+export type ThreadLookup = { threadId: string; messageId: string; subject: string; via: "messageId" | "rfc822" | "search" };
+
+export async function resolveGmailThread(userEmail: string, hint: {
+  messageId?: string | null; rfc822?: string | null; fromEmail?: string | null; subject?: string | null;
+}): Promise<ThreadLookup | null> {
+  if (!googleConfigured) throw new Error("Google Workspace is not configured.");
+  const jwt = new JWT({ email: SA_EMAIL, key: SA_KEY, scopes: [GMAIL_READ_SCOPE], subject: userEmail });
+  const { token } = await jwt.getAccessToken();
+  if (!token) throw new Error("Could not obtain a Google access token.");
+  const auth = { Authorization: `Bearer ${token}` };
+
+  const readMessage = async (id: string, via: ThreadLookup["via"]): Promise<ThreadLookup | null> => {
+    const res = await fetch(`${GMAIL_LIST}/${encodeURIComponent(id)}?format=metadata&metadataHeaders=Subject`, { headers: auth });
+    if (!res.ok) return null;
+    const m = await res.json().catch(() => null);
+    if (!m?.threadId) return null;
+    const headers: any[] = m.payload?.headers ?? [];
+    const subject = headers.find((x) => x.name?.toLowerCase() === "subject")?.value ?? "";
+    return { threadId: m.threadId, messageId: m.id ?? id, subject, via };
+  };
+  const searchOne = async (q: string, via: ThreadLookup["via"]): Promise<ThreadLookup | null> => {
+    const res = await fetch(`${GMAIL_LIST}?q=${encodeURIComponent(q)}&maxResults=1`, { headers: auth });
+    if (!res.ok) return null;
+    const j = await res.json().catch(() => ({}));
+    const id: string | undefined = j.messages?.[0]?.id;
+    return id ? readMessage(id, via) : null;
+  };
+
+  // A DOM id is only a claim until Gmail confirms it, so this is still a
+  // fetch rather than something we write straight to the database.
+  if (hint.messageId) {
+    const hit = await readMessage(hint.messageId, "messageId");
+    if (hit) return hit;
+  }
+  if (hint.rfc822) {
+    const bare = hint.rfc822.replace(/^<|>$/g, "");
+    const hit = await searchOne(`rfc822msgid:${bare}`, "rfc822");
+    if (hit) return hit;
+  }
+  if (hint.subject) {
+    // Quoted so a subject with its own colons or operators is matched as
+    // text rather than parsed as more search syntax.
+    const parts = [`subject:"${hint.subject.replace(/"/g, "")}"`];
+    if (hint.fromEmail) parts.push(`from:${hint.fromEmail}`);
+    return searchOne(parts.join(" "), "search");
+  }
+  return null;
+}
+
+// Every message in one thread, oldest first, with enough to render it in the
+// task feed. Used when a thread is first attached to a task, so the task
+// shows the conversation so far rather than only whatever arrives next.
+export type ThreadEmail = InboundEmail & { toEmails: string[]; outbound: boolean };
+
+export async function readGmailThread(userEmail: string, threadId: string, max = 40): Promise<ThreadEmail[]> {
+  if (!googleConfigured) throw new Error("Google Workspace is not configured.");
+  const jwt = new JWT({ email: SA_EMAIL, key: SA_KEY, scopes: [GMAIL_READ_SCOPE], subject: userEmail });
+  const { token } = await jwt.getAccessToken();
+  if (!token) throw new Error("Could not obtain a Google access token.");
+  const auth = { Authorization: `Bearer ${token}` };
+
+  const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(threadId)}?format=full`, { headers: auth });
+  if (!res.ok) throw new Error(`Gmail thread read failed (${res.status})`);
+  const json = await res.json().catch(() => null);
+  const msgs: any[] = (json?.messages ?? []).slice(0, max);
+
+  const me = userEmail.toLowerCase();
+  return msgs.map((m) => {
+    const headers: any[] = m.payload?.headers ?? [];
+    const h = (name: string) => headers.find((x) => x.name?.toLowerCase() === name)?.value ?? "";
+    const fromRaw = h("from");
+    const fromEmail = (fromRaw.match(/<([^>]+)>/)?.[1] ?? fromRaw).trim().toLowerCase();
+    const fromName = fromRaw.replace(/<[^>]+>/, "").replace(/"/g, "").trim();
+    const toEmails = [...h("to").matchAll(/[\w.+-]+@[\w.-]+\.\w+/g)].map((x) => x[0].toLowerCase());
+    return {
+      gmailId: m.id, threadId: m.threadId ?? threadId, fromEmail, fromName,
+      subject: h("subject"), body: extractBody(m.payload, m.snippet ?? ""),
+      internalDate: new Date(Number(m.internalDate ?? Date.now())).toISOString(),
+      auto: false,
+      toEmails,
+      // Sent by the teammate whose mailbox we are reading, so it renders as
+      // outbound rather than as the client writing to themselves.
+      outbound: fromEmail === me,
+    };
+  });
+}
+
 // Read recent inbound email for a teammate (impersonated via DWD, gmail.readonly
 // scope). Used to pull client replies that came back through Gmail directly
 // (bypassing GHL) so they still land in the app. `query` is a Gmail search

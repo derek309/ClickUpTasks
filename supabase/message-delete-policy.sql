@@ -12,3 +12,10 @@
 -- since column grants and row policies don't compose that way.
 drop policy if exists messages_delete on messages;
 create policy messages_delete on messages for delete to authenticated using (is_admin());
+
+-- Added later: one row per Gmail message, so attaching a thread to a task can
+-- upsert the messages already in it without duplicating anything the reply
+-- poller has already ingested. Partial because almost every row has no Gmail
+-- id at all (chat, SMS, anything from GoHighLevel).
+create unique index if not exists messages_gmail_message_id_key
+  on messages(gmail_message_id) where gmail_message_id is not null;
