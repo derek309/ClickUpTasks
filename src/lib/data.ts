@@ -1778,12 +1778,16 @@ export function fillDay<T extends { size?: TaskSize | null }>(
 // The order is the order the dates demand, decided by the caller. This only
 // answers "given that order, what actually fits".
 export type PlanDay<T> = { date: string; planned: PlannedTask<T>[]; usedHours: number; budgetHours: number };
+// `unplanned` is everything the horizon could not reach. Returned, not
+// dropped: with 92 open tasks, a five day plan holds about ten of them, and
+// silently losing the other eighty makes a working plan look broken.
+export type Plan<T> = { days: PlanDay<T>[]; unplanned: T[] };
 export function buildPlan<T extends { size?: TaskSize | null }>(
   ordered: T[],
   budgetHours: number,
   days: number,
   today: string = TODAY,
-): PlanDay<T>[] {
+): Plan<T> {
   const out: PlanDay<T>[] = [];
   const queue = [...ordered];
   let date = today;
@@ -1808,7 +1812,7 @@ export function buildPlan<T extends { size?: TaskSize | null }>(
     date = addDaysIso(date, 1);
     while (isWeekend(date)) date = addDaysIso(date, 1);
   }
-  return out;
+  return { days: out, unplanned: queue };
 }
 
 export function isWeekend(iso: string): boolean {

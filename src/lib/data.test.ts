@@ -917,27 +917,27 @@ describe("laying work across the week", () => {
   const tue = "2026-09-01"; // a Tuesday
 
   it("rolls what does not fit into the next day", () => {
-    const plan = buildPlan([t("a", "full"), t("b", "full"), t("c", "quick")], 6, 3, tue);
+    const plan = buildPlan([t("a", "full"), t("b", "full"), t("c", "quick")], 6, 3, tue).days;
     expect(plan[0].planned.map((p) => p.task.id)).toEqual(["a"]);
     expect(plan[1].planned.map((p) => p.task.id)).toEqual(["b"]);
     expect(plan[2].planned.map((p) => p.task.id)).toEqual(["c"]);
   });
   it("skips the weekend", () => {
-    const plan = buildPlan([t("a", "full"), t("b", "full"), t("c", "full")], 6, 3, "2026-09-04"); // Friday
+    const plan = buildPlan([t("a", "full"), t("b", "full"), t("c", "full")], 6, 3, "2026-09-04").days; // Friday
     expect(plan.map((d) => d.date)).toEqual(["2026-09-04", "2026-09-07", "2026-09-08"]);
     expect(plan.every((d) => !isWeekend(d.date))).toBe(true);
   });
   it("starts on Monday when asked on a Saturday", () => {
-    expect(buildPlan([t("a", "quick")], 6, 1, "2026-09-05")[0].date).toBe("2026-09-07");
+    expect(buildPlan([t("a", "quick")], 6, 1, "2026-09-05").days[0].date).toBe("2026-09-07");
   });
   it("pads the remaining days as free rather than omitting them", () => {
-    const plan = buildPlan([t("a", "quick")], 6, 4, tue);
+    const plan = buildPlan([t("a", "quick")], 6, 4, tue).days;
     expect(plan).toHaveLength(4);
     expect(plan.slice(1).every((d) => d.planned.length === 0 && d.usedHours === 0)).toBe(true);
   });
   it("never loses a task", () => {
     const ids = ["a", "b", "c", "d", "e"];
-    const plan = buildPlan(ids.map((i) => t(i, "half")), 6, 5, tue);
+    const plan = buildPlan(ids.map((i) => t(i, "half")), 6, 5, tue).days;
     expect(plan.flatMap((d) => d.planned.map((p) => p.task.id)).sort()).toEqual(ids);
   });
 });
@@ -954,5 +954,29 @@ describe("what counts as personal", () => {
   });
   it("leaves client work alone", () => {
     expect(isPersonalTask({ private: false, clientId: "cl_brian" })).toBe(false);
+  });
+});
+
+describe("work the horizon cannot reach", () => {
+  const t = (id: string, size: "half" | null) => ({ id, size });
+  const tue = "2026-09-01";
+
+  // With everything unsized at three hours and a six hour day, two tasks fit
+  // per day. Ten across a week, out of ninety-two open. Dropping the rest is
+  // what made a working plan look like it was pulling nothing in.
+  it("hands back everything that did not fit", () => {
+    const ids = Array.from({ length: 12 }, (_, i) => `t${i}`);
+    const { days, unplanned } = buildPlan(ids.map((i) => t(i, "half")), 6, 3, tue);
+    expect(days.flatMap((d) => d.planned)).toHaveLength(6);
+    expect(unplanned).toHaveLength(6);
+  });
+  it("loses nothing between the two halves", () => {
+    const ids = Array.from({ length: 9 }, (_, i) => `t${i}`);
+    const { days, unplanned } = buildPlan(ids.map((i) => t(i, null)), 6, 2, tue);
+    const seen = [...days.flatMap((d) => d.planned.map((p) => p.task.id)), ...unplanned.map((x) => x.id)];
+    expect(seen.sort()).toEqual(ids.sort());
+  });
+  it("is empty when everything fits", () => {
+    expect(buildPlan([t("a", "half")], 6, 5, tue).unplanned).toEqual([]);
   });
 });

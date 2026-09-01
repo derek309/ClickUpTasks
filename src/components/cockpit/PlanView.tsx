@@ -25,8 +25,10 @@ function dayLabel(iso: string): string {
   return new Date(`${iso}T12:00:00Z`).toLocaleDateString(undefined, { weekday: "long" });
 }
 
-export function PlanView({ days, budgetHours, onBudget, clientById, projectById, onOpen, onSize, unsizedCount, includePersonal, onIncludePersonal }: {
+export function PlanView({ days, unplanned, budgetHours, onBudget, clientById, projectById, onOpen, onSize, unsizedCount, includePersonal, onIncludePersonal }: {
   days: PlanDay<Task>[];
+  /** Open work the horizon could not reach. Shown, not dropped. */
+  unplanned: Task[];
   budgetHours: number;
   onBudget: (h: number) => void;
   clientById: (id: string) => Client | null;
@@ -121,6 +123,25 @@ export function PlanView({ days, budgetHours, onBudget, clientById, projectById,
           </div>
         );
       })}
+
+      {/* Everything past the horizon. With ninety-odd open tasks a five day
+          plan holds about ten, and leaving the rest off the page entirely is
+          what made a working plan look like it was pulling nothing in. */}
+      {unplanned.length > 0 && (
+        <div className="overflow-hidden rounded-xl border bg-surface">
+          <div className="flex flex-wrap items-baseline gap-2 border-b bg-background/60 px-3.5 py-2">
+            <b className="text-[15px]">Not this week</b>
+            <span className="text-[13px] text-muted">
+              {unplanned.length} more task{unplanned.length === 1 ? "" : "s"} · roughly{" "}
+              {hoursLabel(unplanned.reduce((sum, t) => sum + (t.size ? SIZE_META[t.size].hours : 3), 0))} of work
+            </span>
+          </div>
+          {unplanned.slice(0, 12).map((t) => row({ task: t, hours: t.size ? SIZE_META[t.size].hours : 3, fits: false }, true))}
+          {unplanned.length > 12 && (
+            <div className="border-t px-3.5 py-2 text-[13px] text-muted">and {unplanned.length - 12} more.</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -2495,7 +2495,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       });
     return buildPlan(mine, workdayHours, 5);
   }, [tasks, workdayHours, me.id, planPersonal]);
-  const planUnsized = useMemo(() => planDays.flatMap((d) => d.planned).filter((p) => !p.task.size).length, [planDays]);
+  const planUnsized = useMemo(() => planDays.days.flatMap((d) => d.planned).filter((p) => !p.task.size).length, [planDays]);
 
   // due-date buckets relative to the fixed "today" — "This week"/"Next week"
   // are calendar weeks starting Sunday, not rolling 7-day windows, so the
@@ -4781,7 +4781,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         ) : personalView ? (
           <GroupedList key={`${groupBy}:${activeClient === "all"}`} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} colOrder={colOrder} onReorderCols={reorderCols} />
         ) : myWork && dashboardView === "plan" ? (
-          <PlanView days={planDays} budgetHours={workdayHours} onBudget={setWorkdayHours}
+          <PlanView days={planDays.days} unplanned={planDays.unplanned} budgetHours={workdayHours} onBudget={setWorkdayHours}
             clientById={clientById} projectById={projectById} onOpen={setOpenTaskId}
             onSize={(taskId, size) => patchTask(taskId, { size })} unsizedCount={planUnsized}
             includePersonal={planPersonal} onIncludePersonal={setPlanPersonal} />
