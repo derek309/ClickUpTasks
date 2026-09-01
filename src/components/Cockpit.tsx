@@ -4469,6 +4469,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <div className="flex items-center gap-2">
             <button onClick={toggleSidebar} aria-label="Menu" className="shrink-0 rounded-lg border p-2 text-muted"><I.menu /></button>
             <h1 className="min-w-0 flex-1 truncate text-[17px] font-semibold">{headerTitleText}</h1>
+            {/* Icon only here — the phone header has a title and two controls
+                already, and a labelled button would push one of them off. */}
+            {!inboxView && !settingsView && !dirView && (
+              <button onClick={() => setQuickAddOpen(true)} aria-label="New task" title="New task"
+                className="shrink-0 rounded-lg bg-accent p-2 text-white"><I.plus /></button>
+            )}
             {!(inboxView && !dmUserId) && bellControl}
             {isClientDetail && overflowControl}
           </div>
@@ -4553,6 +4559,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </div>
 
           <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
+          {/* The only way into the create form since the floating "+" was
+              removed, and the only way to make a task at all from All Tasks,
+              where the inline row is off because no client is selected.
+              Hidden on the views that are not lists of tasks. */}
+          {!inboxView && !settingsView && !dirView && (
+            <button onClick={() => setQuickAddOpen(true)} title="New task"
+              className="inline-flex items-center gap-1 rounded-md bg-accent px-2.5 py-1.5 text-[13px] font-semibold text-white hover:opacity-90">
+              <I.plus /> New task
+            </button>
+          )}
           {/* This is the "All Tasks" scope toggle — it belongs there only. */}
           {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient === "all" && canAdmin && (
             <div className="inline-flex overflow-hidden rounded-md border" title="VAs only ever see their own tasks here regardless of this toggle">
