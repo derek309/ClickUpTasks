@@ -40,9 +40,18 @@ export function QuickAddTask({
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((c) => ({ value: c.id, label: c.name, sub: companyFor(c.id) }));
   const priorities = PRIORITY_ORDER.filter(isManuallyAssignable);
-  const canCreate = !!title.trim() && !!clientId;
-  // Named so the button can say which answer is still missing.
-  const missing = [!due && "a due date", !size && "how long it takes"].filter(Boolean) as string[];
+  // Required, not encouraged (Derek: "make it required"). A task with no date
+  // and no size cannot be planned, cannot surface on My Work, and is how
+  // ninety odd open tasks ended up with nothing on them. The form is the last
+  // place anyone has the answers in their head.
+  const missing = [
+    !title.trim() && "a title",
+    !clientId && "a client",
+    !due && "a due date",
+    !followUp && "a follow-up date",
+    !size && "how long it takes",
+  ].filter(Boolean) as string[];
+  const canCreate = missing.length === 0;
 
   const submit = () => {
     if (!title.trim() || !clientId) return;
@@ -82,13 +91,13 @@ export function QuickAddTask({
           </label>
 
           <label className="block">
-            <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted">Due date</span>
+            <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted">Due date <b className="text-danger">*</b></span>
             <input type="date" value={due} onChange={(e) => setDue(e.target.value)}
               className="w-full rounded-md border bg-background px-2 py-2 text-[15px] outline-none focus:border-accent" />
           </label>
 
           <label className="block">
-            <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted">Follow up</span>
+            <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted">Follow up <b className="text-danger">*</b></span>
             <input type="date" value={followUp} onChange={(e) => setFollowUp(e.target.value)}
               className="w-full rounded-md border bg-background px-2 py-2 text-[15px] outline-none focus:border-accent" />
           </label>
@@ -106,7 +115,7 @@ export function QuickAddTask({
             task tomorrow and an unsized one is counted at a number the plan
             invents rather than one anyone stands behind. */}
         <div className="mt-3">
-          <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted">How long will it take</span>
+          <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted">How long will it take <b className="text-danger">*</b></span>
           <div className="flex flex-wrap gap-1.5">
             {SIZE_ORDER.map((sz) => (
               <button key={sz} onClick={() => setSize(size === sz ? null : sz)} title={`${SIZE_META[sz].label} · ${SIZE_META[sz].hint}`}
@@ -117,19 +126,20 @@ export function QuickAddTask({
           </div>
         </div>
 
-        {/* Said out loud rather than enforced. A task you cannot file yet is
-            still worth writing down, and a required field is how people learn
-            to type anything to get past it. */}
-        {canCreate && missing.length > 0 && (
+        {/* Says which answer is missing rather than just greying the button
+            out. A disabled button with no reason is a dead end you have to
+            hunt for. */}
+        {missing.length > 0 && (
           <div className="mt-3 rounded-md border border-dashed px-2.5 py-1.5 text-[13px] text-muted">
-            No {missing.join(" and no ")} yet. It will still be created, but it cannot be planned until you say.
+            Still needs {missing.length > 1 ? `${missing.slice(0, -1).join(", ")} and ${missing[missing.length - 1]}` : missing[0]}.
           </div>
         )}
 
         <div className="mt-5 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-md border px-3 py-1.5 text-[15px] font-medium hover:bg-background">Cancel</button>
           <button onClick={submit} disabled={!canCreate}
-            className="rounded-md bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">Create task</button>
+            title={canCreate ? "" : `Still needs ${missing.join(", ")}`}
+            className="rounded-md bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-40">Create task</button>
         </div>
       </div>
     </>

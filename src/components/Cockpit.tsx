@@ -265,7 +265,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [filters, setFilters] = useState<FilterState>({ status: "all", assignee: "all", priority: "all" });
   const [sortBy, setSortBy] = usePersisted<SortBy>("sortBy", "due", (v) => typeof v === "string");
   const [sortDir, setSortDir] = usePersisted<"asc" | "desc">("sortDir", "asc", (v) => v === "asc" || v === "desc");
-  const [visibleCols, setVisibleCols] = usePersisted<string[]>("visibleCols", ["status", "priority", "followUp", "due", "created"], (v) => Array.isArray(v) && v.every((x) => typeof x === "string"));
+  // Title, client, follow up, due (Derek: "on all tasks only show title,
+  // client, follow and due date by default"). Stage, priority and created
+  // were on by default and are all derivable from what is left: the priority
+  // follows the due date, the stage follows how close it is, and nobody scans
+  // a list by when a task was made. They are still one click away in Columns.
+  // A new storage key, because the old default is already saved in the
+  // browser of anyone who has opened the list once.
+  const [visibleCols, setVisibleCols] = usePersisted<string[]>("visibleCols2", ["followUp", "due"], (v) => Array.isArray(v) && v.every((x) => typeof x === "string"));
   // Manual drag order for list columns — persisted like the other view
   // toggles below. Any key not yet in a saved order (e.g. after adding a new
   // column) falls back to LIST_COLUMNS' own order in reorderCols/colOrder use.

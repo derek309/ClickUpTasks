@@ -283,13 +283,13 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
     if (key === "followUp") return (
       <InlineDate value={task.followUpAt ?? null} onChange={(d) => onPatch(task.id, { followUpAt: d })}
         onClear={() => onPatch(task.id, { followUpAt: null })}
-        className={`text-[11px] ${isSnoozed(task) ? "font-medium text-amber-700" : "text-muted"}`} emptyLabel="—" />
+        className={`text-[13px] ${isSnoozed(task) ? "font-medium text-amber-700" : "text-muted"}`} emptyLabel="—" />
     );
     if (key === "due") return <InlineDue value={task.due} overdue={overdue && !isSnoozed(task)} followUpAt={task.followUpAt ?? null} recurrence={task.recurrence} onChange={(d) => onPatch(task.id, { due: d })} onRecurrenceChange={(r) => onPatch(task.id, { recurrence: r })} />;
     if (key === "created") return (
-      <span className="truncate text-[11px] text-muted" title={`Created ${task.createdAt.slice(0, 10)}`}>{formatDue(task.createdAt.slice(0, 10))}</span>
+      <span className="truncate text-[13px] text-muted" title={`Created ${task.createdAt.slice(0, 10)}`}>{formatDue(task.createdAt.slice(0, 10))}</span>
     );
-    if (key === "contact") { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return <span className="truncate text-[11px] text-muted">{ct?.name ?? "—"}</span>; }
+    if (key === "contact") { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return <span className="truncate text-[13px] text-muted">{ct?.name ?? "—"}</span>; }
     if (key === "labels") return <LabelChips ids={task.labelIds} />;
     return null;
   };
@@ -636,7 +636,7 @@ export function InlineDate({ value, onChange, onClear, className = "", emptyLabe
   );
 }
 
-export function InlineDue({ value, overdue, followUpAt = null, recurrence = "none", recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth, recurrenceNth, recurrenceWeekday, onChange, onRecurrenceChange, emptyLabel = "—", strong = false, showRecurrenceLabel = false, showCountdown = true, formatValue = friendlyDue, textClass = "text-[11px]", toneClass }: { value: string | null; overdue: boolean; followUpAt?: string | null; recurrence?: Recurrence; recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[]; recurrenceNth?: number; recurrenceWeekday?: number; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; emptyLabel?: React.ReactNode; strong?: boolean; showRecurrenceLabel?: boolean; showCountdown?: boolean; formatValue?: (iso: string) => string; textClass?: string; toneClass?: string }) {
+export function InlineDue({ value, overdue, followUpAt = null, recurrence = "none", recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth, recurrenceNth, recurrenceWeekday, onChange, onRecurrenceChange, emptyLabel = "—", strong = false, showRecurrenceLabel = false, showCountdown = true, formatValue = friendlyDue, textClass = "text-[13px]", toneClass }: { value: string | null; overdue: boolean; followUpAt?: string | null; recurrence?: Recurrence; recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[]; recurrenceNth?: number; recurrenceWeekday?: number; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; emptyLabel?: React.ReactNode; strong?: boolean; showRecurrenceLabel?: boolean; showCountdown?: boolean; formatValue?: (iso: string) => string; textClass?: string; toneClass?: string }) {
   const { open, setOpen, ref, pos, openIt } = useDatePopover();
   // Amber only for a genuinely near date — not "any date that isn't
   // overdue," which would paint every far-future due date the same urgent
