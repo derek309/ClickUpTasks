@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Attachment, Contact, Message, Task, TaskAction, TaskActionKind, TaskStatus, htmlToText,
   TASK_ACTION_META, TASK_ACTION_ORDER, CLIENT_FACING_ACTIONS, STATUS_META, STATUS_ORDER, linkSpans, prettyLinkName,
-  User, addBusinessDaysIso, TODAY, formatDue, daysUntilDue,
+  User, addBusinessDaysIso, TODAY, formatDue, daysUntilDue, TaskSize, SIZE_META, SIZE_ORDER, sizeLabel, userById,
 } from "@/lib/data";
 import { I, newId } from "./ui";
 // Plain fetch reaches this route without a session and gets a 401 back.
@@ -78,6 +78,12 @@ export function ActionDock({
   const [view, setView] = useState<"closed" | "menu" | "askTask" | TaskActionKind>("closed");
   const [body, setBody] = useState("");
   const [teammate, setTeammate] = useState<string | null>(null);
+  // The suggestion card is the default; "Change it" opens the fields. Editing
+  // one field should not throw away the other three, so this is one flag over
+  // the whole card rather than a mode per row.
+  const [editingNext, setEditingNext] = useState(false);
+  const [size, setSize] = useState<TaskSize | null>(null);
+  const [assignee, setAssignee] = useState<string | null>(null);
   const [nextStep, setNextStep] = useState("");
   const [nextDue, setNextDue] = useState<string | null>(null);
   const [stage, setStage] = useState<TaskStatus | null>(null);
@@ -157,6 +163,11 @@ export function ActionDock({
         body: JSON.stringify({
           title: task.title, description: task.description, clientName: client?.name ?? "",
           kind: TASK_ACTION_META[kind].verb, note, due: task.due, today: TODAY,
+          status: task.status,
+          // Only asked for when nobody has estimated it. An estimate someone
+          // already made is theirs; overwriting it with a guess is worse than
+          // having no guess at all.
+          needsSize: !task.size && !task.sizeHours,
           history: actions.slice(0, 8).map((a) => `${a.at.slice(0, 10)} ${TASK_ACTION_META[a.kind].verb}: ${a.body.slice(0, 160)}`),
         }),
       });
@@ -164,7 +175,9 @@ export function ActionDock({
       if (!res.ok) { pushToast(j?.error ?? "Couldn't get a suggestion."); return; }
       if (!j.nextStep) { pushToast("Nothing left to schedule, by the look of it."); return; }
       setNextStep(j.nextStep);
-      setNextDue(j.nextStepDue ?? null);
+      setNextDue(j.followUpAt ?? null);
+      if (j.status) setStage(j.status as TaskStatus);
+      if (j.size) setSize(j.size as TaskSize);
       setAiReason(j.reason ?? "");
     } catch { pushToast("Couldn't reach the AI."); }
     finally { setAiBusy(false); }
@@ -182,6 +195,7 @@ export function ActionDock({
     const r = requestAnimationFrame(() => {
       setView(askNextStepFor.kind);
       setBody(askNextStepFor.body); setNextStep(""); setNextDue(null); setStage(null); setAiReason("");
+      setSize(null); setAssignee(task.assigneeId ?? null); setEditingNext(false);
       setWantNext(true);
       onAskNextStepHandled?.();
       // Asked automatically rather than waiting for a Suggest click. The
@@ -191,6 +205,10 @@ export function ActionDock({
       void suggestRef.current(askNextStepFor.kind, askNextStepFor.body);
     });
     return () => cancelAnimationFrame(r);
+    // task.assigneeId is deliberately out of the list: this effect seeds the
+    // panel when it opens, and re-running it because someone reassigned the
+    // task underneath would throw away what is typed in it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [askNextStepFor, onAskNextStepHandled]);
 
   useEffect(() => {
@@ -265,9 +283,14 @@ export function ActionDock({
     finally { setAsking(false); }
   };
 
-  const commit = (kind: TaskActionKind) => {
+  const commit = (kind: TaskActionKind, done = false) => {
     const text = body.trim();
     if (kind === "note" && !text) { pushToast("Write the note first."); return; }
+    // There is always a next step until the work is marked done (Derek:
+    // "there should always be a next until it's marked done"). A task with
+    // nothing scheduled is how ninety-odd of them ended up with no date, so
+    // saving without one is refused rather than quietly allowed.
+    if (wantNext && !done && !nextStep.trim()) { pushToast("Say what happens next, or mark it done."); setEditingNext(true); return; }
 
     if (kind === "team" && teammate) {
       if (!text) { pushToast("Write the message first."); return; }
@@ -289,7 +312,7 @@ export function ActionDock({
     // still gets logged, because the next step has to hang on something, but
     // it carries no body of its own.
     const sent = kind === "email" || kind === "sms" || kind === "chat";
-    // A date on its own is a real commitment: "check back in 3 days" says
+    // A date on its own is a real commitment: "follow up in 3 days" says
     // everything even with the sentence left blank. Gating the date on the
     // text meant picking "In 3 days" and saving did nothing at all.
     const scheduled = !!nextStep.trim() || !!nextDue;
@@ -312,45 +335,114 @@ export function ActionDock({
     // this come back" fields would drift apart within a week.
     const patch: Partial<Task> = { ...(attachmentsFrom(text) ?? {}) };
     if (nextDue) patch.followUpAt = nextDue;
-    if (stage && stage !== task.status) patch.status = stage;
+    if (done) patch.status = "done";
+    else if (stage && stage !== task.status) patch.status = stage;
+    // Only ever written when nobody had estimated it. A size someone set by
+    // hand stays theirs.
+    if (size && !task.size && !task.sizeHours) patch.size = size;
+    if (assignee !== null && assignee !== task.assigneeId) patch.assigneeId = assignee;
     if (Object.keys(patch).length) onPatch(patch);
 
-    pushToast(`${TASK_ACTION_META[kind].verb}${nextDue ? ` · check back ${formatDue(nextDue)}` : nextStep.trim() ? " · next step set" : ""}`);
+    pushToast(done
+      ? `${TASK_ACTION_META[kind].verb} · marked done`
+      : `${TASK_ACTION_META[kind].verb}${nextDue ? ` · follow up ${formatDue(nextDue)}` : nextStep.trim() ? " · next step set" : ""}`);
     setView("closed");
   };
+
+  // What's next, as one thing to agree with rather than four fields to fill.
+  //
+  // Claude reads the task and proposes the whole move: the step, the day you
+  // pick it back up, the stage it now sits in, who owns it, and how long it
+  // will take when nobody has said yet. The fast path is agreeing. "Change
+  // it" opens every field at once, because editing one of them should not
+  // throw away the other four.
+  //
+  // There is no "no next step needed" here on purpose (Derek: "there should
+  // always be a next until it's marked done"). A task with nothing scheduled
+  // is how ninety-odd tasks ended up with no date on them. The only way out
+  // is saying the work is finished, which is a different claim and gets its
+  // own button.
+  const sizeIsSet = !!task.size || !!task.sizeHours || !!size;
+  const shownSize = size ?? task.size ?? null;
+  const assigneeName = assignee ? (userById(assignee)?.name ?? "Unassigned") : "Unassigned";
+
+  const fieldRow = (label: string, children: React.ReactNode) => (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+      <span className="w-[76px] shrink-0 text-[12px] font-semibold uppercase tracking-wide text-muted">{label}</span>
+      {children}
+    </div>
+  );
 
   const nextStepPanel = (kind: TaskActionKind) => (
     <div className="mt-2.5 rounded-[10px] border bg-background p-3 shadow-[inset_0_2px_5px_rgba(20,24,40,.06)]">
       <div className="mb-2 flex items-center gap-2">
-        <span className="flex h-[19px] w-[19px] items-center justify-center rounded-full bg-accent text-[12px] font-bold text-white">2</span>
         <span className="text-[14px] font-bold">What&apos;s next?</span>
-        <button onClick={() => suggest(kind)} disabled={aiBusy}
-          className="ml-auto inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[13px] text-muted hover:bg-surface hover:text-foreground disabled:opacity-50">
-          <I.bolt /> {aiBusy ? "Thinking…" : "Suggest"}
-        </button>
+        {aiBusy && <span className="inline-flex items-center gap-1 text-[13px] text-accent"><I.bolt /> Claude is reading the task…</span>}
+        {!aiBusy && !editingNext && (
+          <button onClick={() => suggest(kind)} className="ml-auto inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[13px] text-muted hover:bg-surface hover:text-foreground">
+            <I.bolt /> Suggest again
+          </button>
+        )}
       </div>
-      <input value={nextStep} onChange={(e) => setNextStep(e.target.value)} placeholder="What do you do next?"
-        className="w-full rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
-      {aiReason && <div className="mt-1.5 text-[13px] text-muted">{aiReason}</div>}
-      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-        <span className="w-[72px] shrink-0 text-[12px] font-semibold uppercase tracking-wide text-muted">Check back</span>
-        {whenOptions(task.due).map((o) => (
-          <button key={o.label} onClick={() => setNextDue(o.date)}
-            className={`rounded-md border px-2 py-1 text-[13px] ${nextDue === o.date ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}
-            title={formatDue(o.date)}>{o.label}</button>
-        ))}
-        <label className={`cursor-pointer rounded-md border px-2 py-1 text-[13px] ${nextDue && !whenOptions(task.due).some((o) => o.date === nextDue) ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>
-          {nextDue && !whenOptions(task.due).some((o) => o.date === nextDue) ? formatDue(nextDue) : "Pick a date"}
-          <input type="date" value={nextDue ?? ""} onChange={(e) => setNextDue(e.target.value || null)} className="sr-only" />
-        </label>
-      </div>
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-        <span className="w-[72px] shrink-0 text-[12px] font-semibold uppercase tracking-wide text-muted">Stage</span>
-        {STATUS_ORDER.filter((s) => s !== "done").map((s) => (
-          <button key={s} onClick={() => setStage(s)}
-            className={`rounded-md border px-2 py-1 text-[13px] ${(stage ?? task.status) === s ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{STATUS_META[s].label}</button>
-        ))}
-      </div>
+
+      {/* The suggestion, whole. One thing to agree with. */}
+      {!editingNext ? (
+        <div className="rounded-[9px] border border-accent bg-surface p-3">
+          <div className="text-[15px] font-medium leading-snug">{nextStep || (aiBusy ? "…" : "Say what you do next")}</div>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[13px] text-muted">
+            <span>Follow up <b className="font-semibold text-foreground">{nextDue ? formatDue(nextDue) : "not set"}</b></span>
+            <span aria-hidden>·</span>
+            <span>Stage <b className="font-semibold text-foreground">{STATUS_META[stage ?? task.status].label}</b></span>
+            <span aria-hidden>·</span>
+            <span>Assigned to <b className="font-semibold text-foreground">{assigneeName}</b></span>
+            {shownSize && (<><span aria-hidden>·</span><span>Takes <b className="font-semibold text-foreground">{sizeLabel({ size: shownSize })}</b></span></>)}
+          </div>
+          {aiReason && <div className="mt-1.5 text-[13px] text-muted">{aiReason}</div>}
+          {/* Asked, not assumed. A task nobody has sized is counted at four
+              hours in the plan, which is a number the plan invents rather
+              than one anyone stands behind. */}
+          {!sizeIsSet && !aiBusy && (
+            <div className="mt-2 rounded-md border border-dashed px-2 py-1.5 text-[13px] text-muted">
+              Nobody has said how long this takes. Pick one and the plan can place it.
+            </div>
+          )}
+          <button onClick={() => setEditingNext(true)} className="mt-2 text-[13px] font-medium text-accent underline underline-offset-[3px]">Change it</button>
+        </div>
+      ) : (
+        <>
+          <input value={nextStep} onChange={(e) => setNextStep(e.target.value)} placeholder="What do you do next?"
+            className="w-full rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
+          {aiReason && <div className="mt-1.5 text-[13px] text-muted">{aiReason}</div>}
+          {fieldRow("Follow up", (
+            <>
+              {whenOptions(task.due).map((o) => (
+                <button key={o.label} onClick={() => setNextDue(o.date)}
+                  className={`rounded-md border px-2 py-1 text-[13px] ${nextDue === o.date ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}
+                  title={formatDue(o.date)}>{o.label}</button>
+              ))}
+              <label className={`cursor-pointer rounded-md border px-2 py-1 text-[13px] ${nextDue && !whenOptions(task.due).some((o) => o.date === nextDue) ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>
+                {nextDue && !whenOptions(task.due).some((o) => o.date === nextDue) ? formatDue(nextDue) : "Pick a date"}
+                <input type="date" value={nextDue ?? ""} onChange={(e) => setNextDue(e.target.value || null)} className="sr-only" />
+              </label>
+            </>
+          ))}
+          {fieldRow("Stage", STATUS_ORDER.filter((st) => st !== "done").map((st) => (
+            <button key={st} onClick={() => setStage(st)}
+              className={`rounded-md border px-2 py-1 text-[13px] ${(stage ?? task.status) === st ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{STATUS_META[st].label}</button>
+          )))}
+          {fieldRow("Owner", (
+            <select value={assignee ?? ""} onChange={(e) => setAssignee(e.target.value || null)}
+              className="rounded-md border bg-surface px-2 py-1 text-[13px] outline-none focus:border-accent">
+              <option value="">Unassigned</option>
+              {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
+          ))}
+          {fieldRow("Takes", SIZE_ORDER.map((sz) => (
+            <button key={sz} onClick={() => setSize(sz)} title={`${SIZE_META[sz].label} · ${SIZE_META[sz].hint}`}
+              className={`rounded-md border px-2 py-1 text-[13px] ${shownSize === sz ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{SIZE_META[sz].label}</button>
+          )))}
+        </>
+      )}
     </div>
   );
 
@@ -369,11 +461,15 @@ export function ActionDock({
       className="w-full resize-none rounded-[9px] border bg-surface px-3 py-2 text-[15px] outline-none focus:border-accent" />
   );
 
+  // "Nothing to do next" is gone. The only way to leave a task with nothing
+  // scheduled is to say the work is finished, which is a different claim and
+  // gets its own button rather than hiding behind a dismissive link.
   const commitRow = (kind: TaskActionKind, label: string) => (
     <div className="mt-2.5 flex flex-wrap items-center gap-3">
       <button onClick={() => commit(kind)} className="rounded-lg bg-accent px-4 py-2 text-[15px] font-semibold text-white hover:opacity-90">{label}</button>
       {(wantNext || nextDue) && (
-        <button onClick={() => { setWantNext(false); setNextStep(""); setNextDue(null); setAiReason(""); }} className="text-[13px] text-muted underline underline-offset-[3px] hover:text-foreground">No next step needed</button>
+        <button onClick={() => commit(kind, true)} title="Nothing follows this, the task is finished"
+          className="rounded-lg border px-3 py-2 text-[14px] font-medium text-muted hover:bg-background hover:text-foreground">This finishes it</button>
       )}
     </div>
   );

@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
     "   Name who owns something when the transcript says so.",
     "2. nextStep — the single next move for the person whose task this is, as an instruction to themselves,",
     "   starting with a verb, under 60 characters. Empty string if the meeting settled everything.",
-    `3. nextStepDue — the day to check back, yyyy-mm-dd. Today is ${today}.`,
+    `3. nextStepDue — the day to follow up, yyyy-mm-dd. Today is ${today}.`,
     due ? `The task is due ${due}; never suggest a date after it.` : "The task has no due date.",
     "   Never a past date, never a Saturday or Sunday. Null when nextStep is empty.",
     "",
