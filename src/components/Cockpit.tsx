@@ -251,7 +251,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // stores booleans anyway. Read after mount so the server and the first
   // client render agree.
   const [planPersonal, setPlanPersonal] = usePersisted("planPersonal", false, (v) => typeof v === "boolean");
-  const [workdayHours, setWorkdayHours] = usePersisted("workdayHours", 8, (v) => typeof v === "number" && v >= 1 && v <= 16);
+  const [workdayHours, setWorkdayHours] = usePersisted("workdayHours8", 8, (v) => typeof v === "number" && v >= 1 && v <= 16);
   // All Tasks defaults to just your own — admins can flip to "all"; for VAs
   // this is inert either way since scopedTasks already fully restricts them.
   const [allTasksScope, setAllTasksScope] = useState<"mine" | "all">("mine");

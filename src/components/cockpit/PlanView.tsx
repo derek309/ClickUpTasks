@@ -93,7 +93,7 @@ export function PlanView({ days, unplanned, budgetHours, onBudget, clientById, p
       {unsizedCount > 0 && (
         <div className="mb-3 flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-[13px] text-muted">
           <I.bolt className="shrink-0" />
-          {unsizedCount} task{unsizedCount === 1 ? " has" : "s have"} no size, counted at half a day each. Hover a row to set one.
+          {unsizedCount} task{unsizedCount === 1 ? " has" : "s have"} no size, counted at {UNSIZED_HOURS} hours each. Hover a row to set one.
         </div>
       )}
 
