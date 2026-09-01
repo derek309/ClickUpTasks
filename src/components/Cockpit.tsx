@@ -4968,7 +4968,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         />
       )}
       {openTask && (
-        <TaskDrawer task={openTask} clientById={clientById} projectById={projectById} contactById={contactById}
+        // Keyed on the task, so switching tasks closes this drawer and opens
+        // a new one rather than swapping the record underneath a drawer that
+        // keeps its old state (Derek: "close the window and open the new one
+        // when I hit enter in the command K search"). Without it the drawer
+        // is one long-lived component: a composer left open, a description
+        // mid-edit, a scrolled feed and an expanded section all carried over
+        // onto whatever task you jumped to, which reads as the jump not
+        // having happened. Applies to j/k navigation too, and should: a draft
+        // typed against one task has no business following you to another.
+        <TaskDrawer key={openTask.id} task={openTask} clientById={clientById} projectById={projectById} contactById={contactById}
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={navTaskIds.length} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(body, attachments) => addComment(openTask.id, body, attachments)}
