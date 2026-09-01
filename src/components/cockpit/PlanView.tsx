@@ -1,6 +1,7 @@
 "use client";
 
 import { Task, Client, Project, PlanDay, PlannedTask, sizeLabel, taskHours, UNSIZED_HOURS, TaskSize,
+  parseClock, formatClock, clockSlots,
   formatDue, effectivePriority, PRIORITY_META, effectiveDueDate, TODAY, daysUntilDue } from "@/lib/data";
 import { I } from "./ui";
 import { SizePicker } from "./SizePicker";
@@ -29,11 +30,13 @@ function dayLabel(iso: string): string {
   return left > 6 ? `Next ${weekday}` : weekday;
 }
 
-export function PlanView({ days, unplanned, budgetHours, onBudget, clientById, projectById, onOpen, onSize, unsizedCount, includePersonal, onIncludePersonal }: {
+export function PlanView({ days, unplanned, budgetHours, onBudget, dayStart, onDayStart, clientById, projectById, onOpen, onSize, unsizedCount, includePersonal, onIncludePersonal }: {
   days: PlanDay<Task>[];
   /** Open work the horizon could not reach. Shown, not dropped. */
   unplanned: Task[];
   budgetHours: number;
+  dayStart: string;
+  onDayStart: (v: string) => void;
   onBudget: (h: number) => void;
   clientById: (id: string) => Client | null;
   projectById: (id: string) => Project | null;
@@ -43,7 +46,11 @@ export function PlanView({ days, unplanned, budgetHours, onBudget, clientById, p
   includePersonal: boolean;
   onIncludePersonal: (v: boolean) => void;
 }) {
-  const row = (p: PlannedTask<Task>, dimmed: boolean) => {
+  // Falls back to nine if the box is mid-edit and holding something that is
+  // not yet a time, so the plan never blanks out while you type.
+  const startMins = parseClock(dayStart) ?? 540;
+
+  const row = (p: PlannedTask<Task>, dimmed: boolean, slot?: { start: number; end: number }) => {
     const t = p.task;
     const client = clientById(t.clientId);
     const due = effectiveDueDate(t);
@@ -52,6 +59,13 @@ export function PlanView({ days, unplanned, budgetHours, onBudget, clientById, p
     return (
       <div key={t.id} className={`group flex items-center gap-2.5 border-t px-3.5 py-2 first:border-t-0 ${dimmed ? "opacity-55" : ""}`}>
         <span className="h-6 w-[3px] shrink-0 rounded-full" style={{ background: pri === "none" ? "transparent" : PRIORITY_META[pri].color }} />
+        {/* When you are doing it, not just that you are. Only the work that
+            fits the day gets a time: putting a clock time on the overflow
+            would be promising an hour the day does not have. */}
+        {slot ? (
+          <span className="w-14 shrink-0 text-[13px] font-medium tabular-nums text-muted"
+            title={`${formatClock(slot.start)} to ${formatClock(slot.end)}`}>{formatClock(slot.start)}</span>
+        ) : <span className="w-14 shrink-0" />}
         <button onClick={() => onOpen(t.id)} className="min-w-0 flex-1 truncate text-left text-[15px] hover:underline">{t.title}</button>
         {/* Sizing lives here as well as in the drawer: the plan is where you
             notice a task has no size, and making you open it to fix that is
@@ -82,11 +96,16 @@ export function PlanView({ days, unplanned, budgetHours, onBudget, clientById, p
           Include personal
         </label>
         <label className="flex items-center gap-2 text-[13px] text-muted">
-          Working day
+          Day starts
+          <input type="time" value={dayStart} onChange={(e) => onDayStart(e.target.value)}
+            className="rounded-md border bg-surface px-2 py-1 text-[14px] text-foreground outline-none focus:border-accent" />
+        </label>
+        <label className="flex items-center gap-2 text-[13px] text-muted">
+          for
           <input type="number" min={1} max={16} step={0.5} value={budgetHours}
             onChange={(e) => onBudget(Math.min(16, Math.max(1, Number(e.target.value) || 1)))}
             className="w-16 rounded-md border bg-surface px-2 py-1 text-[14px] text-foreground outline-none focus:border-accent" />
-          hours
+          hours, to {formatClock(startMins + Math.round(budgetHours * 60))}
         </label>
       </div>
 
@@ -112,12 +131,17 @@ export function PlanView({ days, unplanned, budgetHours, onBudget, clientById, p
                 <span className="h-2 w-32 overflow-hidden rounded-full bg-border">
                   <span className="block h-full rounded-full" style={{ width: `${Math.max(2, pct)}%`, background: over ? "var(--danger)" : pct > 80 ? "#f59e0b" : "var(--success)" }} />
                 </span>
+                {formatClock(startMins)} to {formatClock(startMins + Math.round(d.budgetHours * 60))}
+                <span className="opacity-60">·</span>
                 {hoursLabel(d.usedHours)} of {hoursLabel(d.budgetHours)}
               </span>
             </div>
             {d.planned.length === 0 ? (
               <div className="px-3.5 py-3 text-[14px] text-muted">Nothing scheduled. This day is free.</div>
-            ) : d.planned.map((p) => row(p, false))}
+            ) : (() => {
+              const slots = clockSlots(d.planned.map((p) => p.hours), startMins);
+              return d.planned.map((p, j) => row(p, false, p.fits ? slots[j] : undefined));
+            })()}
             {over && (
               <div className="border-t border-dashed border-danger bg-danger/5 px-3.5 py-2 text-[13px] font-medium text-danger">
                 This day is over by {hoursLabel(d.usedHours - d.budgetHours)}. Something moves, or a date does.

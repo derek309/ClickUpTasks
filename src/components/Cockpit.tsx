@@ -252,6 +252,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // client render agree.
   const [planPersonal, setPlanPersonal] = usePersisted("planPersonal", false, (v) => typeof v === "boolean");
   const [workdayHours, setWorkdayHours] = usePersisted("workdayHours8", 8, (v) => typeof v === "number" && v >= 1 && v <= 16);
+  // Nine to five by default. The plan needs one clock fact to turn "three
+  // hours" into "you are on this at half ten".
+  const [dayStart, setDayStart] = usePersisted("dayStart", "09:00", (v) => typeof v === "string" && /^\d{2}:\d{2}$/.test(v));
   // All Tasks defaults to just your own — admins can flip to "all"; for VAs
   // this is inert either way since scopedTasks already fully restricts them.
   const [allTasksScope, setAllTasksScope] = useState<"mine" | "all">("mine");
@@ -4741,7 +4744,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         ) : myWork && dashboardView === "plan" ? (
           <PlanView days={planDays.days} unplanned={planDays.unplanned} budgetHours={workdayHours} onBudget={setWorkdayHours}
             clientById={clientById} projectById={projectById} onOpen={setOpenTaskId}
-            onSize={(taskId, patch) => patchTask(taskId, patch)} unsizedCount={planUnsized}
+            onSize={(taskId, patch) => patchTask(taskId, patch)} dayStart={dayStart} onDayStart={setDayStart} unsizedCount={planUnsized}
             includePersonal={planPersonal} onIncludePersonal={setPlanPersonal} />
         ) : myWork && dashboardView === "completed" ? (
           // Relocated from the Clients directory (Derek: "makes more sense

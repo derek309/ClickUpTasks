@@ -39,6 +39,9 @@ import {
   isWeekend,
   taskHours,
   SIZE_META,
+  parseClock,
+  formatClock,
+  clockSlots,
   googleLinkName,
   isUselessTitle,
   TASK_ACTION_ORDER,
@@ -874,6 +877,35 @@ describe("moving into Get started as the date closes in", () => {
     // arrives, it is the date the task is judged on and it counts.
     expect(effectiveStatus({ status: "todo", due: null, followUpAt: "2026-09-01" }, today)).toBe("get_started");
     expect(effectiveStatus({ status: "todo", due: null, followUpAt: "2026-08-25" }, today)).toBe("get_started");
+  });
+});
+
+describe("clock times", () => {
+  it("reads a start time, and refuses one that is not a time", () => {
+    expect(parseClock("9:00")).toBe(540);
+    expect(parseClock("09:30")).toBe(570);
+    expect(parseClock("17:00")).toBe(1020);
+    expect(parseClock("9:70")).toBeNull();
+    expect(parseClock("25:00")).toBeNull();
+    expect(parseClock("noon")).toBeNull();
+  });
+  it("formats to a clock people read", () => {
+    expect(formatClock(540)).toBe("9:00am");
+    expect(formatClock(720)).toBe("12:00pm");
+    expect(formatClock(0)).toBe("12:00am");
+    expect(formatClock(1020)).toBe("5:00pm");
+    // A day that runs past midnight wraps rather than reading 25:00.
+    expect(formatClock(1500)).toBe("1:00am");
+  });
+  it("lays the day end to end from the start time", () => {
+    const slots = clockSlots([1, 0.5, 2], 540);
+    expect(slots.map((s) => formatClock(s.start))).toEqual(["9:00am", "10:00am", "10:30am"]);
+    expect(formatClock(slots[2].end)).toBe("12:30pm");
+  });
+  // Nine to five with an eight hour day should land exactly on five.
+  it("ends where the working day ends", () => {
+    const slots = clockSlots([4, 4], parseClock("9:00")!);
+    expect(formatClock(slots[1].end)).toBe("5:00pm");
   });
 });
 

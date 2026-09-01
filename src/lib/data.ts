@@ -1750,6 +1750,40 @@ export const UNSIZED_HOURS = 4;
 // A typed estimate beats the bucket it sits in. The buckets exist so sizing
 // is one click on the common cases, not so an hour and a half has to be
 // rounded to something that is not true.
+// Clock times for the plan. Sizing says how long each thing takes; a start
+// time is the one extra fact needed to turn that into "this is what you are
+// doing at half ten", which is the difference between a list and a day.
+//
+// Minutes since midnight throughout, because arithmetic on "9:30" is how you
+// end up with 9:70. Formatting back to a clock happens once, at the edge.
+export function parseClock(hhmm: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+  if (!m) return null;
+  const h = Number(m[1]), min = Number(m[2]);
+  if (h > 23 || min > 59) return null;
+  return h * 60 + min;
+}
+
+export function formatClock(mins: number): string {
+  // Wraps rather than reading 25:00, for a day that runs past midnight.
+  const m = ((mins % 1440) + 1440) % 1440;
+  const h24 = Math.floor(m / 60);
+  const h = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${h}:${String(m % 60).padStart(2, "0")}${h24 < 12 ? "am" : "pm"}`;
+}
+
+// Lays a day's work end to end from a start time. Back to back on purpose:
+// this is a plan, not a calendar, and inventing gaps would be inventing
+// facts about a day nobody described.
+export function clockSlots(hours: number[], startMins: number): { start: number; end: number }[] {
+  let at = startMins;
+  return hours.map((h) => {
+    const start = at;
+    at += Math.round(h * 60);
+    return { start, end: at };
+  });
+}
+
 // Reads back what was set: the bucket's own name, or the typed estimate when
 // there is one, since a number someone chose deserves to be shown as that
 // number rather than as the bucket it happens to land in.
