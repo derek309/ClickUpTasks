@@ -799,11 +799,14 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     </div>
   );
 
-  // Chat has no compose surface of its own on this side, so a reply to a
-  // chat message goes out over email instead — same reasoning the old
-  // replyToEmail carried. "call" has no compose surface at all.
+  // A reply goes out on the channel it came in on (Derek, 2026-09-01: "I
+  // click reply on a chat, it opened an email format"). Chat used to be
+  // redirected to email on the grounds that it had no compose surface of its
+  // own; it has had one for a while, and channelComposer takes "chat"
+  // directly. Answering a chat message with an email, subject line and all,
+  // is not a reply to it. "call" genuinely has no compose surface.
   const replyableChannel = (ch: MessageChannel): Channel | undefined =>
-    ch === "chat" ? "email" : ch === "email" || ch === "sms" ? ch : undefined;
+    ch === "chat" || ch === "email" || ch === "sms" ? ch : undefined;
 
   // An action reads as a decision, not a note: what you did, and the
   // commitment it left behind with whether that commitment was kept. The
