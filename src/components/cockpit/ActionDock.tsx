@@ -6,7 +6,7 @@ import {
   TASK_ACTION_META, TASK_ACTION_ORDER, CLIENT_FACING_ACTIONS, STATUS_META, STATUS_ORDER, linkSpans, prettyLinkName,
   User, addBusinessDaysIso, TODAY, formatDue, daysUntilDue, TaskSize, SIZE_META, SIZE_ORDER, sizeLabel, userById,
 } from "@/lib/data";
-import { I, newId } from "./ui";
+import { I, newId, DateChip } from "./ui";
 // Plain fetch reaches this route without a session and gets a 401 back.
 import { authedFetch } from "@/lib/supabase";
 
@@ -157,6 +157,10 @@ export function ActionDock({
     setView(v);
     setBody(""); setNextStep(""); setNextDue(null); setStage(null); setAiReason("");
     setMenuQ(""); setMenuIdx(0);
+    // Seeded here too, not only on the reopen-after-send path. Opening the
+    // dock from the menu left this null, so the card said "Unassigned" about
+    // a task that has an owner.
+    setSize(null); setAssignee(task.assigneeId ?? null); setEditingNext(false);
     setWantNext(v !== "closed" && v !== "menu" && v !== "askTask" ? TASK_ACTION_META[v as TaskActionKind].needsNextStep : false);
     // Whoever owns the task is who a question about it usually goes to, so
     // they start selected rather than whoever happens to sort first.
@@ -453,10 +457,9 @@ export function ActionDock({
                   className={`rounded-md border px-2 py-1 text-[13px] ${nextDue === o.date ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}
                   title={formatDue(o.date)}>{o.label}</button>
               ))}
-              <label className={`cursor-pointer rounded-md border px-2 py-1 text-[13px] ${nextDue && !whenOptions(task.due).some((o) => o.date === nextDue) ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>
-                {nextDue && !whenOptions(task.due).some((o) => o.date === nextDue) ? formatDue(nextDue) : "Pick a date"}
-                <input type="date" value={nextDue ?? ""} onChange={(e) => setNextDue(e.target.value || null)} className="sr-only" />
-              </label>
+              <DateChip value={nextDue} onChange={setNextDue}
+                label={nextDue && !whenOptions(task.due).some((o) => o.date === nextDue) ? formatDue(nextDue) : "Pick a date"}
+                className={`rounded-md border px-2 py-1 text-[13px] ${nextDue && !whenOptions(task.due).some((o) => o.date === nextDue) ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`} />
             </>
           ))}
           {fieldRow("Stage", STATUS_ORDER.filter((st) => st !== "done").map((st) => (

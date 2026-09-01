@@ -12,7 +12,7 @@ import {
   addDaysIso, addBusinessDaysIso, SIZE_META, SIZE_ORDER,
   type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus, type TaskSize,
 } from "@/lib/data";
-import { I, Avatar, LabelChips, LIST_COLUMNS } from "./ui";
+import { I, Avatar, LabelChips, LIST_COLUMNS, DateChip } from "./ui";
 
 // --- grouped list view (ClickUp-style: group, quick-add, expandable subtasks) --
 
@@ -269,10 +269,9 @@ function InlineTaskComposer({ suggestedDue, onAdd }: {
         <button key={label} onClick={() => set(value === date ? null : date)} title={formatDue(date)}
           className={`rounded-md border px-2 py-0.5 text-[13px] ${value === date ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{label}</button>
       ))}
-      <label className={`cursor-pointer rounded-md border px-2 py-0.5 text-[13px] ${value && ![TODAY, addDaysIso(TODAY, 1), addBusinessDaysIso(TODAY, 3)].includes(value) ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>
-        {value && ![TODAY, addDaysIso(TODAY, 1), addBusinessDaysIso(TODAY, 3)].includes(value) ? formatDue(value) : "Pick"}
-        <input type="date" value={value ?? ""} onChange={(e) => set(e.target.value || null)} className="sr-only" />
-      </label>
+      <DateChip value={value} onChange={set}
+        label={value && ![TODAY, addDaysIso(TODAY, 1), addBusinessDaysIso(TODAY, 3)].includes(value) ? formatDue(value) : "Pick"}
+        className={`rounded-md border px-2 py-0.5 text-[13px] ${value && ![TODAY, addDaysIso(TODAY, 1), addBusinessDaysIso(TODAY, 3)].includes(value) ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`} />
     </>
   );
 

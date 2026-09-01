@@ -111,6 +111,29 @@ export function SideItem({ active, onClick, children, title }: { active: boolean
 }
 // Small on/off switch, shared by NotificationPrefsPanel's per-user email
 // toggles and any admin-facing app-wide toggle (e.g. the sidebar's DMs switch).
+// A date chip whose whole surface is the date input.
+//
+// This was a <label> wrapping an input with sr-only, which reads correctly to
+// a screen reader but does nothing when clicked in Chrome: a visually clipped
+// date input takes focus without opening its picker, so "Pick a date" looked
+// dead. Laying a transparent input over the chip means the click lands on the
+// real control, which is the one thing guaranteed to open the native picker.
+export function DateChip({ value, onChange, label, className = "" }: {
+  value: string | null;
+  onChange: (d: string | null) => void;
+  label: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <span className={`relative inline-flex cursor-pointer items-center ${className}`}>
+      {label}
+      <input type="date" value={value ?? ""} onChange={(e) => onChange(e.target.value || null)}
+        aria-label="Pick a date"
+        className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+    </span>
+  );
+}
+
 export function Toggle({ on, onClick, disabled }: { on: boolean; onClick: () => void; disabled?: boolean }) {
   return (
     <button type="button" role="switch" aria-checked={on} disabled={disabled} onClick={onClick}
