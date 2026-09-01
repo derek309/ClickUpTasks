@@ -22,7 +22,10 @@ function dayLabel(iso: string): string {
   if (iso === TODAY) return "Today";
   const left = daysUntilDue(iso) ?? 0;
   if (left === 1) return "Tomorrow";
-  return new Date(`${iso}T12:00:00Z`).toLocaleDateString(undefined, { weekday: "long" });
+  const weekday = new Date(`${iso}T12:00:00Z`).toLocaleDateString(undefined, { weekday: "long" });
+  // Past this week a bare weekday is ambiguous: "Thursday" reads as the one
+  // coming up, not the one after it.
+  return left > 6 ? `Next ${weekday}` : weekday;
 }
 
 export function PlanView({ days, unplanned, budgetHours, onBudget, clientById, projectById, onOpen, onSize, unsizedCount, includePersonal, onIncludePersonal }: {
@@ -97,11 +100,14 @@ export function PlanView({ days, unplanned, budgetHours, onBudget, clientById, p
         </div>
       )}
 
-      {days.map((d) => {
+      {days.map((d, i) => {
         const over = d.usedHours > d.budgetHours;
+        // A quiet rule where the second week starts, so ten day cards read as
+        // two weeks rather than one long strip.
+        const weekBreak = i > 0 && (daysUntilDue(d.date) ?? 0) > 6 && (daysUntilDue(days[i - 1].date) ?? 0) <= 6;
         const pct = Math.min(100, Math.round((d.usedHours / d.budgetHours) * 100));
         return (
-          <div key={d.date} className="mb-3 overflow-hidden rounded-xl border bg-surface">
+          <div key={d.date} className={`mb-3 overflow-hidden rounded-xl border bg-surface ${weekBreak ? "mt-6 border-t-4" : ""}`}>
             <div className="flex flex-wrap items-center gap-3 border-b bg-background/60 px-3.5 py-2">
               <b className="text-[15px]">{dayLabel(d.date)}</b>
               <span className="text-[13px] text-muted">{formatDue(d.date)}</span>

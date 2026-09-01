@@ -2493,7 +2493,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         if (da !== db) return da.localeCompare(db);
         return PRIORITY_META[effectivePriority(a)].rank - PRIORITY_META[effectivePriority(b)].rank;
       });
-    return buildPlan(mine, workdayHours, 5);
+    // Two working weeks. Five days held about ten tasks out of ninety-odd,
+    // which is a day-by-day view rather than a plan you can promise from.
+    return buildPlan(mine, workdayHours, 10);
   }, [tasks, workdayHours, me.id, planPersonal]);
   const planUnsized = useMemo(() => planDays.days.flatMap((d) => d.planned).filter((p) => !p.task.size).length, [planDays]);
 
