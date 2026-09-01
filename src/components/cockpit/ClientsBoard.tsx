@@ -7,7 +7,7 @@
 // then due today, and so on. Clients and projects are interleaved together
 // within each tier, not split into separate sections — a project qualifies
 // (and sorts) exactly the same way a client does.
-import { formatDue, isOverdue, type Client, type Project, type Task } from "@/lib/data";
+import { dueOneLine, effectiveDueDate, isOverdue, isSnoozed, type Client, type Project, type Task } from "@/lib/data";
 import { I } from "./ui";
 
 // A personal to-do isn't a client or project — it's its own thing, so it
@@ -84,11 +84,20 @@ function ClientRow({ client, taskCount, unread, onOpen }: {
 }
 
 function TaskRow({ task, onOpen }: { task: Task; onOpen: () => void }) {
+  const dueDate = effectiveDueDate(task);
+  // A snoozed task is not late: the follow-up date is the promise now, and
+  // the original due date is one you have already renegotiated with yourself.
+  const late = isOverdue(dueDate) && !isSnoozed(task);
   return (
     <button onClick={onOpen} className="flex w-full items-center gap-3 border-b px-4 py-3 text-left transition-colors last:border-0 hover:bg-accent-soft/50">
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-background text-muted"><I.check /></span>
       <span className="min-w-0 flex-1 truncate text-[17px] font-medium leading-snug">{task.title}</span>
-      {task.due && <span className={`shrink-0 text-[13px] ${isOverdue(task.due) ? "font-medium text-danger" : "text-muted"}`}>{formatDue(task.due)}</span>}
+      {/* The same date the rest of the app shows: the follow-up date when
+          there is one, the due date otherwise, as one value rather than a
+          date and a countdown. My Work already ORDERS by that date — it was
+          only the label that still read the raw due date, so a task sorted
+          into Today could sit there displaying "Sep 18". */}
+      {dueDate && <span className={`shrink-0 text-[13px] ${late ? "font-medium text-danger" : "text-muted"}`}>{dueOneLine(dueDate)}</span>}
     </button>
   );
 }
