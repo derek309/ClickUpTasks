@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Attachment, Contact, Message, Task, TaskAction, TaskActionKind, TaskStatus, htmlToText,
   TASK_ACTION_META, TASK_ACTION_ORDER, CLIENT_FACING_ACTIONS, STATUS_META, STATUS_ORDER, linkSpans, prettyLinkName,
-  User, addDaysIso, TODAY, formatDue, daysUntilDue,
+  User, addBusinessDaysIso, TODAY, formatDue, daysUntilDue,
 } from "@/lib/data";
 import { I, newId } from "./ui";
 // Plain fetch reaches this route without a session and gets a 401 back.
@@ -29,9 +29,13 @@ const ICON: Record<TaskActionKind, string> = {
 // "in 3 days" off a calendar means counting squares; naming it does not.
 function whenOptions(due: string | null): { label: string; date: string }[] {
   const opts = [
-    { label: "Tomorrow", date: addDaysIso(TODAY, 1) },
-    { label: "In 3 days", date: addDaysIso(TODAY, 3) },
-    { label: "Next week", date: addDaysIso(TODAY, 7) },
+    { label: "Tomorrow", date: addBusinessDaysIso(TODAY, 1) },
+    // Business days throughout: "check back in 3 days" from a Thursday landing
+    // on a Sunday means two extra days of silence and a task that reads as
+    // overdue by Monday.
+    { label: "In 3 days", date: addBusinessDaysIso(TODAY, 3) },
+    { label: "Next week", date: addBusinessDaysIso(TODAY, 5) },
+    { label: "In 2 weeks", date: addBusinessDaysIso(TODAY, 10) },
   ];
   // Offering a check-back after the promised date is offering to be late on
   // purpose, so those options are dropped rather than shown and ignored.
@@ -143,6 +147,34 @@ export function ActionDock({
     setWantNext(v !== "closed" && v !== "menu" && v !== "askTask" ? TASK_ACTION_META[v as TaskActionKind].needsNextStep : false);
     setTeammate(users.find((u) => u.id !== me?.id)?.id ?? null);
   };
+  const suggest = (kind: TaskActionKind) => suggestFor(kind, body);
+  const suggestFor = async (kind: TaskActionKind, note: string) => {
+    setAiBusy(true);
+    try {
+      const res = await authedFetch("/api/ai/next-step", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: task.title, description: task.description, clientName: client?.name ?? "",
+          kind: TASK_ACTION_META[kind].verb, note, due: task.due, today: TODAY,
+          history: actions.slice(0, 8).map((a) => `${a.at.slice(0, 10)} ${TASK_ACTION_META[a.kind].verb}: ${a.body.slice(0, 160)}`),
+        }),
+      });
+      const j = await res.json();
+      if (!res.ok) { pushToast(j?.error ?? "Couldn't get a suggestion."); return; }
+      if (!j.nextStep) { pushToast("Nothing left to schedule, by the look of it."); return; }
+      setNextStep(j.nextStep);
+      setNextDue(j.nextStepDue ?? null);
+      setAiReason(j.reason ?? "");
+    } catch { pushToast("Couldn't reach the AI."); }
+    finally { setAiBusy(false); }
+  };
+  // Reached through a ref by the auto-suggest effect below. useCallback would
+  // have done the same job but the React compiler cannot preserve it here, and
+  // a plain function in the dependency list re-runs the effect every render.
+  const suggestRef = useRef(suggestFor);
+  useEffect(() => { suggestRef.current = suggestFor; });
+
   // Reopens the dock straight into "what's next?" for a message that just
   // sent. Deferred a frame because it lands during the composer's own render.
   useEffect(() => {
@@ -152,6 +184,11 @@ export function ActionDock({
       setBody(askNextStepFor.body); setNextStep(""); setNextDue(null); setStage(null); setAiReason("");
       setWantNext(true);
       onAskNextStepHandled?.();
+      // Asked automatically rather than waiting for a Suggest click. The
+      // moment a message goes out is exactly when the next step is knowable,
+      // and it is also the moment someone is most likely to close the panel
+      // and move on.
+      void suggestRef.current(askNextStepFor.kind, askNextStepFor.body);
     });
     return () => cancelAnimationFrame(r);
   }, [askNextStepFor, onAskNextStepHandled]);
@@ -168,27 +205,6 @@ export function ActionDock({
     return () => document.removeEventListener("keydown", onKey, true);
   }, [view]);
 
-  const suggest = async (kind: TaskActionKind) => {
-    setAiBusy(true);
-    try {
-      const res = await authedFetch("/api/ai/next-step", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: task.title, description: task.description, clientName: client?.name ?? "",
-          kind: TASK_ACTION_META[kind].verb, note: body, due: task.due, today: TODAY,
-          history: actions.slice(0, 8).map((a) => `${a.at.slice(0, 10)} ${TASK_ACTION_META[a.kind].verb}: ${a.body.slice(0, 160)}`),
-        }),
-      });
-      const j = await res.json();
-      if (!res.ok) { pushToast(j?.error ?? "Couldn't get a suggestion."); return; }
-      if (!j.nextStep) { pushToast("Nothing left to schedule, by the look of it."); return; }
-      setNextStep(j.nextStep);
-      setNextDue(j.nextStepDue ?? null);
-      setAiReason(j.reason ?? "");
-    } catch { pushToast("Couldn't reach the AI."); }
-    finally { setAiBusy(false); }
-  };
 
   // Reads the transcript, keeps the record, throws the transcript away. Four
   // thousand words of "yeah, right, mm-hm" in the activity feed buries every
@@ -267,22 +283,36 @@ export function ActionDock({
       else onAddComment(`@${users.find((u) => u.id === teammate)?.name ?? ""} ${text}`.trim());
     }
 
-    onLog({
-      id: newId("ta_"), taskId: task.id, kind, authorId: me?.id ?? null,
-      body: text, at: new Date().toISOString(),
-      nextStep: nextStep.trim() || null,
-      nextStepDue: nextStep.trim() ? nextDue : null,
-      nextStepDoneAt: null,
-    });
+    // A sent message is already in the feed as a Message row carrying its own
+    // body. Logging an action with that same body printed the whole email
+    // twice, once on send and again when the next step was saved. The action
+    // still gets logged, because the next step has to hang on something, but
+    // it carries no body of its own.
+    const sent = kind === "email" || kind === "sms" || kind === "chat";
+    // A date on its own is a real commitment: "check back in 3 days" says
+    // everything even with the sentence left blank. Gating the date on the
+    // text meant picking "In 3 days" and saving did nothing at all.
+    const scheduled = !!nextStep.trim() || !!nextDue;
+    // With nothing scheduled and nothing to say, a sent message needs no
+    // action row: the Message row is the whole record.
+    if (!sent || scheduled) {
+      onLog({
+        id: newId("ta_"), taskId: task.id, kind, authorId: me?.id ?? null,
+        body: sent ? "" : text, at: new Date().toISOString(),
+        nextStep: nextStep.trim() || null,
+        nextStepDue: nextDue,
+        nextStepDoneAt: null,
+      });
+    }
 
     // The next step's date IS the follow-up date. Two separate "when does
     // this come back" fields would drift apart within a week.
     const patch: Partial<Task> = { ...(attachmentsFrom(text) ?? {}) };
-    if (nextStep.trim() && nextDue) patch.followUpAt = nextDue;
+    if (nextDue) patch.followUpAt = nextDue;
     if (stage && stage !== task.status) patch.status = stage;
     if (Object.keys(patch).length) onPatch(patch);
 
-    pushToast(`${TASK_ACTION_META[kind].verb}${nextStep.trim() ? ` · next step ${nextDue ? formatDue(nextDue) : "set"}` : ""}`);
+    pushToast(`${TASK_ACTION_META[kind].verb}${nextDue ? ` · check back ${formatDue(nextDue)}` : nextStep.trim() ? " · next step set" : ""}`);
     setView("closed");
   };
 
@@ -300,7 +330,7 @@ export function ActionDock({
         className="w-full rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
       {aiReason && <div className="mt-1.5 text-[13px] text-muted">{aiReason}</div>}
       <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-        <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Check back</span>
+        <span className="w-[72px] shrink-0 text-[12px] font-semibold uppercase tracking-wide text-muted">Check back</span>
         {whenOptions(task.due).map((o) => (
           <button key={o.label} onClick={() => setNextDue(o.date)}
             className={`rounded-md border px-2 py-1 text-[13px] ${nextDue === o.date ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}
@@ -310,7 +340,9 @@ export function ActionDock({
           {nextDue && !whenOptions(task.due).some((o) => o.date === nextDue) ? formatDue(nextDue) : "Pick a date"}
           <input type="date" value={nextDue ?? ""} onChange={(e) => setNextDue(e.target.value || null)} className="sr-only" />
         </label>
-        <span className="ml-3 text-[12px] font-semibold uppercase tracking-wide text-muted">Stage</span>
+      </div>
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+        <span className="w-[72px] shrink-0 text-[12px] font-semibold uppercase tracking-wide text-muted">Stage</span>
         {STATUS_ORDER.filter((s) => s !== "done").map((s) => (
           <button key={s} onClick={() => setStage(s)}
             className={`rounded-md border px-2 py-1 text-[13px] ${(stage ?? task.status) === s ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{STATUS_META[s].label}</button>
@@ -337,7 +369,7 @@ export function ActionDock({
   const commitRow = (kind: TaskActionKind, label: string) => (
     <div className="mt-2.5 flex flex-wrap items-center gap-3">
       <button onClick={() => commit(kind)} className="rounded-lg bg-accent px-4 py-2 text-[15px] font-semibold text-white hover:opacity-90">{label}</button>
-      {wantNext && (
+      {(wantNext || nextDue) && (
         <button onClick={() => { setWantNext(false); setNextStep(""); setNextDue(null); setAiReason(""); }} className="text-[13px] text-muted underline underline-offset-[3px] hover:text-foreground">No next step needed</button>
       )}
     </div>
@@ -464,7 +496,7 @@ export function ActionDock({
           <div>
             {header(view)}
             <div className="mb-1.5 text-[13px] text-muted">Sent{contact ? ` to ${contact.name}` : ""}. It is in the feed above.</div>
-            {body && <div className="mb-2 line-clamp-2 rounded-[9px] border bg-background px-3 py-2 text-[14px] text-muted">{body}</div>}
+            {body && <div className="mb-2 max-h-16 overflow-hidden rounded-[9px] border bg-background px-3 py-2 text-[13px] leading-snug text-muted">{body.split("\n").slice(0, 2).join(" ").slice(0, 160)}…</div>}
             {nextStepPanel(view)}
             {commitRow(view, "Save next step")}
           </div>

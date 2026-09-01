@@ -21,6 +21,21 @@ export function addDaysIso(iso: string, days: number): string {
   return dt.toISOString().slice(0, 10);
 }
 export const TOMORROW = addDaysIso(TODAY, 1);
+// Skips weekends. "Check back in 3 days" from a Thursday lands on a Sunday,
+// which is not a day anyone checks anything, so the client gets an extra two
+// days of silence and the task sits in Sunday's bucket looking overdue by
+// Monday morning.
+export function addBusinessDaysIso(iso: string, days: number): string {
+  let out = iso;
+  let left = days;
+  while (left > 0) {
+    out = addDaysIso(out, 1);
+    const dow = new Date(`${out}T12:00:00Z`).getUTCDay();
+    if (dow !== 0 && dow !== 6) left--;
+  }
+  return out;
+}
+
 /** yyyy-mm-dd of the Monday on or before `iso` (weeks start Monday) — the
  * anchor for the weekly Review reset: a client reviewed on/after this Monday
  * counts as "reviewed this week" and drops out of the Review tier until next
@@ -2213,6 +2228,40 @@ export function googleLinkName(url: string): string | null {
   if (host === "calendar.google.com") return "Google Calendar event";
   if (host === "meet.google.com") return "Google Meet";
   return null;
+}
+
+// Splits an email body into the part worth reading and the reply chain under
+// it. A received email arrives carrying the whole thread plus signatures and
+// legal boilerplate, so one reply of "I edited it. Its ready." rendered as a
+// screen and a half of quoted history (Derek: "the emails are adding a ton of
+// space").
+//
+// Cutting at the quote marker rather than truncating blindly keeps whatever
+// the person actually wrote, however long it is, and hides only the part they
+// did not write. The quoted half is returned, not discarded, so it stays one
+// click away.
+const QUOTE_MARKERS: RegExp[] = [
+  // "On Mon, 1 Sep 2026 at 14:32, Derek Fox <derek@x.com> wrote:"
+  /^\s*On .{0,120}\bwrote:\s*$/im,
+  // Gmail's other shape: "August 31 at 2:32 PM, Derek Fox <derek@x.com> wrote:"
+  /^\s*\w+ \d{1,2}(,| at ).{0,120}\bwrote:\s*$/im,
+  /^\s*-{2,}\s*Original Message\s*-{2,}\s*$/im,
+  /^\s*_{5,}\s*$/m,
+  // Outlook's header block, which starts a quote without any "wrote:" line.
+  /^\s*From:.{0,200}\r?\n\s*Sent:/im,
+  /^\s*>{1,}\s?.+$/m,
+];
+export function splitQuotedEmail(body: string): { visible: string; quoted: string } {
+  // Runs of blank lines are most of the wasted height: HTML mail converts to
+  // text with a dozen of them between paragraphs.
+  const text = body.replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  let cut = -1;
+  for (const re of QUOTE_MARKERS) {
+    const m = re.exec(text);
+    if (m && m.index >= 0 && (cut === -1 || m.index < cut)) cut = m.index;
+  }
+  if (cut === -1) return { visible: text, quoted: "" };
+  return { visible: text.slice(0, cut).trim(), quoted: text.slice(cut).trim() };
 }
 
 export function prettyLinkName(url: string): string {

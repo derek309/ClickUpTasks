@@ -13,7 +13,7 @@ import {
   users, userById, timeAgo, htmlToText, looksLikeHtml, plainTextToHtml, parseEventDiff, STATUS_META, PRIORITY_META,
   mentionCandidates, applyMention,
   type Task, type Client, type Contact, type Attachment, type MessageChannel, type Message, type Comment,
-  TaskAction, TaskActionKind, TASK_ACTION_META, daysUntilDue, formatDue,
+  TaskAction, TaskActionKind, TASK_ACTION_META, daysUntilDue, formatDue, splitQuotedEmail,
 } from "@/lib/data";
 import { I, Avatar, CollapsibleText, LinkedText } from "./ui";
 import { AttachmentThumbs } from "./AttachmentThumbs";
@@ -353,6 +353,10 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   // message so only one card's menu is ever open at a time.
   const [openMsgMenuId, setOpenMsgMenuId] = useState<string | null>(null);
   const [openEventGroups, setOpenEventGroups] = useState<Set<string>>(new Set());
+  // Which messages have had their quoted thread expanded. Per message rather
+  // than one flag, so opening one does not unfold every email in the feed.
+  const [openQuotes, setOpenQuotes] = useState<Set<string>>(new Set());
+  const toggleQuote = (id: string) => setOpenQuotes((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const toggleEventGroup = (key: string) => setOpenEventGroups((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; });
   const [editDraft, setEditDraft] = useState("");
   const startEditMessage = (m: Message) => { setEditingMsgId(m.id); setEditDraft(looksLikeHtml(m.body) ? htmlToText(m.body) : m.body); };
@@ -842,7 +846,12 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     const channelLabel = m.channel === "email" ? "Email" : m.channel === "chat" ? "Chat" : "SMS";
     const isReplyingHere = replyingTo?.id === m.id;
     const rawBodyText = m.body?.trim() ? (looksLikeHtml(m.body) ? htmlToText(m.body) : m.body) : "";
-    const { cleanText, imageUrls, linkUrls } = splitMessageUrls(rawBodyText);
+    // The reply chain and the signature block under it are not what anyone
+    // opened the task to read: one line of "I edited it. Its ready." was
+    // rendering as a screen and a half of quoted history.
+    const { visible: ownText, quoted } = splitQuotedEmail(rawBodyText);
+    const { cleanText, imageUrls, linkUrls } = splitMessageUrls(ownText || rawBodyText);
+    const quotedOpen = openQuotes.has(m.id);
     return (
       <div key={m.id} className={`relative ${gap}`}>
         <div className="relative flex gap-3">
@@ -926,6 +935,14 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
                   <CollapsibleText text={cleanText} className="mt-1 text-[16px]"
                     maxLines={m.direction === "inbound" ? 6 : 2}
                     maxChars={m.direction === "inbound" ? 400 : 180} />
+                )}
+                {quoted && (
+                  <>
+                    <button onClick={() => toggleQuote(m.id)}
+                      className="mt-1 rounded border px-1.5 py-0 text-[13px] leading-5 text-muted hover:bg-background hover:text-foreground"
+                      title={quotedOpen ? "Hide the earlier thread" : "Show the earlier thread"}>···</button>
+                    {quotedOpen && <div className="mt-1 whitespace-pre-wrap border-l-2 pl-2 text-[14px] text-muted">{quoted}</div>}
+                  </>
                 )}
                 {imageUrls.length > 0 && (
                   <div className="mt-1.5 flex flex-wrap gap-1.5">

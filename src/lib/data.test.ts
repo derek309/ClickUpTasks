@@ -28,6 +28,8 @@ import {
   effectiveDueDate,
   prettyLinkName,
   linkSpans,
+  splitQuotedEmail,
+  addBusinessDaysIso,
   googleLinkName,
   isUselessTitle,
   TASK_ACTION_ORDER,
@@ -764,5 +766,51 @@ describe("titles that tell you nothing", () => {
   });
   it("keeps a real one", () => {
     expect(isUselessTitle("Publishing Local Events via the Ambassador Portal")).toBe(false);
+  });
+});
+
+describe("splitQuotedEmail", () => {
+  it("keeps the reply and hides the thread under it", () => {
+    const body = [
+      "I edited it . Its ready.", "", "Brian", "",
+      "August 31 at 2:32 PM, Derek Fox <derek@clickuplocal.com> wrote:",
+      "Hi Brian,", "September's Race Directors email is ready.",
+    ].join("\n");
+    const { visible, quoted } = splitQuotedEmail(body);
+    expect(visible).toBe("I edited it . Its ready.\n\nBrian");
+    expect(quoted).toContain("September's Race Directors email is ready.");
+  });
+  it("handles the On ... wrote: shape", () => {
+    const { visible } = splitQuotedEmail("Sounds good.\n\nOn Mon, 1 Sep 2026 at 14:32, Derek <d@x.com> wrote:\nthe original");
+    expect(visible).toBe("Sounds good.");
+  });
+  it("collapses the runs of blank lines that eat the height", () => {
+    expect(splitQuotedEmail("one\n\n\n\n\ntwo").visible).toBe("one\n\ntwo");
+  });
+  it("cuts at an Outlook header block with no wrote: line", () => {
+    expect(splitQuotedEmail("Thanks!\n\nFrom: Derek\nSent: Monday\nbody").visible).toBe("Thanks!");
+  });
+  it("leaves an email with no quoted chain alone", () => {
+    expect(splitQuotedEmail("Just a short note.").quoted).toBe("");
+  });
+});
+
+describe("addBusinessDaysIso", () => {
+  // 2026-09-01 is a Tuesday.
+  it("counts plain weekdays", () => {
+    expect(addBusinessDaysIso("2026-09-01", 3)).toBe("2026-09-04"); // Tue -> Fri
+  });
+  it("steps over the weekend", () => {
+    expect(addBusinessDaysIso("2026-09-03", 3)).toBe("2026-09-08"); // Thu -> Tue
+  });
+  it("never lands on a Saturday or Sunday", () => {
+    for (let start = 1; start <= 28; start++) {
+      const iso = `2026-09-${String(start).padStart(2, "0")}`;
+      for (const n of [1, 2, 3, 5, 10]) {
+        const dow = new Date(`${addBusinessDaysIso(iso, n)}T12:00:00Z`).getUTCDay();
+        expect(dow).not.toBe(0);
+        expect(dow).not.toBe(6);
+      }
+    }
   });
 });
