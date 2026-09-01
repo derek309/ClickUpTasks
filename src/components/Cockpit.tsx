@@ -98,6 +98,7 @@ import { subscribeRealtime } from "@/lib/realtime";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import TeamChat from "./TeamChat";
 import AddClientModal from "./AddClientModal";
+import { usePersisted } from "@/lib/usePersisted";
 import { PlanView } from "./cockpit/PlanView";
 
 
@@ -244,37 +245,28 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // bell dropdown already covers real mentions/assignments; Activity's own
   // "Unmatched email" section was mostly automated noise — WordPress,
   // Stripe, Amazon — not real leads).
-  const [dashboardView, setDashboardView] = useState<"work" | "plan" | "completed">("work");
+  const [dashboardView, setDashboardView] = usePersisted<"work" | "plan" | "completed">("dashboardView", "work", (v) => ["work", "plan", "completed"].includes(v as string));
   // Hours in YOUR working day. Deliberately local rather than a workspace
   // setting: how long your day is is a personal fact, and app_settings only
   // stores booleans anyway. Read after mount so the server and the first
   // client render agree.
-  const [planPersonal, setPlanPersonal] = useState(false);
-  const [workdayHours, setWorkdayHoursState] = useState(6);
-  useEffect(() => {
-    // Deferred a frame rather than set in the effect body: a setState there
-    // triggers a cascading render. It cannot be a lazy useState initializer
-    // either, because localStorage does not exist during the server render.
-    const r = requestAnimationFrame(() => {
-      const raw = Number(localStorage.getItem("workdayHours"));
-      if (raw >= 1 && raw <= 16) setWorkdayHoursState(raw);
-    });
-    return () => cancelAnimationFrame(r);
-  }, []);
-  const setWorkdayHours = (h: number) => { setWorkdayHoursState(h); localStorage.setItem("workdayHours", String(h)); };
+  const [planPersonal, setPlanPersonal] = usePersisted("planPersonal", false, (v) => typeof v === "boolean");
+  const [workdayHours, setWorkdayHours] = usePersisted("workdayHours", 6, (v) => typeof v === "number" && v >= 1 && v <= 16);
   // All Tasks defaults to just your own — admins can flip to "all"; for VAs
   // this is inert either way since scopedTasks already fully restricts them.
   const [allTasksScope, setAllTasksScope] = useState<"mine" | "all">("mine");
-  const [groupBy, setGroupBy] = useState<"project" | "status" | "priority" | "due">("priority");
+  // View preferences survive a refresh: they are decisions about how you
+  // want to work, and resetting them every reload quietly undoes that.
+  const [groupBy, setGroupBy] = usePersisted<"project" | "status" | "priority" | "due">("groupBy", "priority", (v) => ["project", "status", "priority", "due"].includes(v as string));
   const [filters, setFilters] = useState<FilterState>({ status: "all", assignee: "all", priority: "all" });
-  const [sortBy, setSortBy] = useState<SortBy>("due");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
-  const [visibleCols, setVisibleCols] = useState<string[]>(["status", "priority", "followUp", "due", "created"]);
+  const [sortBy, setSortBy] = usePersisted<SortBy>("sortBy", "due", (v) => typeof v === "string");
+  const [sortDir, setSortDir] = usePersisted<"asc" | "desc">("sortDir", "asc", (v) => v === "asc" || v === "desc");
+  const [visibleCols, setVisibleCols] = usePersisted<string[]>("visibleCols", ["status", "priority", "followUp", "due", "created"], (v) => Array.isArray(v) && v.every((x) => typeof x === "string"));
   // Manual drag order for list columns — persisted like the other view
   // toggles below. Any key not yet in a saved order (e.g. after adding a new
   // column) falls back to LIST_COLUMNS' own order in reorderCols/colOrder use.
-  const [colOrder, setColOrder] = useState<string[]>(LIST_COLUMNS.map((c) => c.key));
-  const reorderCols = (keys: string[]) => { setColOrder(keys); try { localStorage.setItem("cut_colOrder", JSON.stringify(keys)); } catch {} };
+  const [colOrder, setColOrder] = usePersisted<string[]>("colOrder", LIST_COLUMNS.map((c) => c.key), (v) => Array.isArray(v) && v.every((x) => typeof x === "string"));
+  const reorderCols = (keys: string[]) => setColOrder(keys);
   // The old "Filter & view" popover held Following, group/sort, filter, and
   // column config all in one 290px panel — split into three focused menus
   // (item 6) plus Following moving to its own header avatar stack below.
@@ -282,8 +274,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [followingOpen, setFollowingOpen] = useState(false);
-  const [hideEmpty, setHideEmpty] = useState(true);
-  const [hideDone, setHideDone] = useState(true);
+  const [hideEmpty, setHideEmpty] = usePersisted("hideEmpty", true, (v) => typeof v === "boolean");
+  const [hideDone, setHideDone] = usePersisted("hideDone", true, (v) => typeof v === "boolean");
 
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
 
@@ -1032,9 +1024,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       const stl = localStorage.getItem("cut_starredLists"); if (stl) { localStarredLists = JSON.parse(stl); setStarredLists(new Set(localStarredLists)); }
       const fp = localStorage.getItem("cut_fabPos"); if (fp) setFabPos(JSON.parse(fp));
       const mo = localStorage.getItem("cut_clientOrder"); if (mo) setManualOrder(JSON.parse(mo));
-      const he = localStorage.getItem("cut_hideEmpty"); if (he !== null) setHideEmpty(he === "1");
-      const hd = localStorage.getItem("cut_hideDone"); if (hd !== null) setHideDone(hd === "1");
-      const colo = localStorage.getItem("cut_colOrder"); if (colo) setColOrder(JSON.parse(colo));
       const cu = localStorage.getItem("cut_clientUsed"); if (cu) setClientUsed(JSON.parse(cu));
     } catch { /* fresh browser */ }
     // Pinned clients/lists used to live only in localStorage — invisible
@@ -1069,8 +1058,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!activeClient.startsWith("cl_")) return;
     setClientUsed((m) => { const n = { ...m, [activeClient]: Date.now() }; try { localStorage.setItem("cut_clientUsed", JSON.stringify(n)); } catch {} return n; });
   }, [activeClient]);
-  const toggleHideEmpty = () => setHideEmpty((v) => { const n = !v; try { localStorage.setItem("cut_hideEmpty", n ? "1" : "0"); } catch {} return n; });
-  const toggleHideDone = () => setHideDone((v) => { const n = !v; try { localStorage.setItem("cut_hideDone", n ? "1" : "0"); } catch {} return n; });
+  const toggleHideEmpty = () => setHideEmpty(!hideEmpty);
+  const toggleHideDone = () => setHideDone(!hideDone);
   const saveClientSort = (v: ClientSort) => { setClientSort(v); try { localStorage.setItem("cut_clientSort", v); } catch {} };
   // localStorage write kept alongside the DB one — harmless, and it's what
   // still seeds `starred` synchronously on the very next mount before the
@@ -1729,10 +1718,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const sortByCol = (key: string) => {
     const map: Record<string, SortBy> = { priority: "priority", assignee: "assignee", due: "due", task: "title", status: "status", comments: "comments", created: "created" };
     const sb = map[key] ?? "manual";
-    if (sortBy === sb) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    if (sortBy === sb) setSortDir(sortDir === "asc" ? "desc" : "asc");
     else { setSortBy(sb); setSortDir("asc"); }
   };
-  const toggleCol = (key: string) => setVisibleCols((c) => (c.includes(key) ? c.filter((x) => x !== key) : [...c, key]));
+  const toggleCol = (key: string) => setVisibleCols(visibleCols.includes(key) ? visibleCols.filter((x) => x !== key) : [...visibleCols, key]);
 
   const canAdmin = me.role === "admin";
   // Sending email/SMS is gated per-user (admins always, VAs when granted).

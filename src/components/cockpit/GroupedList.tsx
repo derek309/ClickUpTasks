@@ -2,7 +2,8 @@
 
 // The ClickUp-style grouped list view: group headers, task rows, quick-add,
 // expandable subtasks, and the inline cell editors (priority/assignee/due).
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { usePersisted } from "@/lib/usePersisted";
 import {
   users, formatDue, isOverdue, TODAY, COLLAPSED_DUE_BUCKETS, effectivePriority, effectiveStatus, timeAgo, userById, clientInitials, dueCountdown, isSnoozed,
   PRIORITY_META, manualPriorityOptions,
@@ -58,13 +59,28 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
   // "No priority" too, because the priority grouping has a "none" bucket of
   // its own and the two sets of keys share that word.
   //
-  // Lazy init, so opening a group keeps it open. The parent remounts this
-  // when either input changes rather than re-seeding in an effect, which
-  // would fight whatever you had just opened.
-  const [collapsedG, setCollapsedG] = useState<Set<string>>(
-    () => new Set(collapseFarBuckets && groupKind === "due" ? groups.filter((g) => COLLAPSED_DUE_BUCKETS.has(g.key)).map((g) => g.key) : []),
+  // Folded groups survive a refresh, keyed by grouping so folding a priority
+  // bucket does not also fold a due-date one.
+  //
+  // The far-bucket defaults apply only until someone folds or unfolds
+  // something themselves; from then on their choice is what is remembered,
+  // which is why null and "nothing collapsed" have to be different values.
+  const [savedCollapsed, setSavedCollapsed] = usePersisted<string[] | null>(
+    `collapsed.${groupKind ?? "none"}`, null,
+    (v) => v === null || (Array.isArray(v) && v.every((x) => typeof x === "string")),
   );
-  const toggleG = (k: string) => setCollapsedG((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const seeded = useMemo(
+    () => (collapseFarBuckets && groupKind === "due" ? groups.filter((g) => COLLAPSED_DUE_BUCKETS.has(g.key)).map((g) => g.key) : []),
+    // Only the group keys matter here, and they are stable for a grouping.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [collapseFarBuckets, groupKind, groups.length],
+  );
+  const collapsedG = useMemo(() => new Set(savedCollapsed ?? seeded), [savedCollapsed, seeded]);
+  const toggleG = (k: string) => {
+    const n = new Set(collapsedG);
+    if (n.has(k)) n.delete(k); else n.add(k);
+    setSavedCollapsed([...n]);
+  };
   const [dragTaskId, setDragTaskId] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [dragColKey, setDragColKey] = useState<string | null>(null);
