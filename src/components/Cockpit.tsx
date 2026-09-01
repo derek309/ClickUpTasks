@@ -4225,9 +4225,36 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // entries that do exactly the same thing, which is worse than one named
   // for what the column visibly shows. Created is listed here too: it was
   // sortable by clicking the column header but was missing from this menu.
+  // The bar says what the list is currently doing rather than hiding it
+  // behind an icon (Derek, 2026-09-01: "I like 3 because it's faster"). Every
+  // one of these still opens the same popover it always did; the difference
+  // is that you can read the answer without opening anything, and change one
+  // thing without a panel.
+  const GROUP_LABEL: Record<typeof groupBy, string> = {
+    status: "stage", priority: "priority", due: "follow up / due", project: "project",
+  };
+  const SORT_LABEL: Partial<Record<SortBy, string>> = {
+    manual: "manual", due: "days left", created: "oldest first", priority: "priority",
+    title: "name", status: "stage", assignee: "assignee",
+  };
+  const barButton = "inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border bg-background px-2.5 py-1.5 text-[13px] text-muted hover:border-accent hover:text-accent";
+
+  // The merged Journal feed's size — notes, messages, task comments and
+  // completions, which is what ClientJournal actually renders. Lifted out of
+  // the old Tasks/Journal toggle so the overflow item can carry it.
+  const journalCount = () => {
+    const noteCount = clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId)).length;
+    const messageCount = activeProject ? 0 : (() => { const ct = contactForClient(activeClient); return ct ? messages.filter((m) => m.contactId === ct.id).length : 0; })();
+    const activityCount = baseTasks.reduce((sum, t) => sum + t.comments.filter((c) => c.kind !== "event" || isCompletionEvent(c.body)).length, 0);
+    return noteCount + messageCount + activityCount;
+  };
+
   const groupSortControl = (
     <div className="relative">
-      <button onClick={() => setGroupSortOpen((o) => !o)} title="Group & sort" className="rounded-md border bg-background p-2 text-muted hover:text-foreground"><I.list /></button>
+      <button onClick={() => setGroupSortOpen((o) => !o)} title="Group & sort" className={barButton}>
+        <I.list className="h-3.5 w-3.5" />
+        <span className="hidden sm:inline">Grouped by <b className="font-semibold text-foreground">{GROUP_LABEL[groupBy]}</b> <span className="opacity-50">·</span> sorted by <b className="font-semibold text-foreground">{SORT_LABEL[sortBy] ?? sortBy}</b></span>
+      </button>
       {groupSortOpen && (<>
         <div className="fixed inset-0 z-30" onClick={() => setGroupSortOpen(false)} />
         <div className="absolute right-0 z-40 mt-1 w-64 max-w-[calc(100vw-1.5rem)] space-y-2.5 rounded-xl border bg-surface p-3 shadow-xl">
@@ -4256,9 +4283,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   );
   const filterMenuControl = (
     <div className="relative">
-      <button onClick={() => setFilterMenuOpen((o) => !o)} title="Filter" className="relative rounded-md border bg-background p-2 text-muted hover:text-foreground">
-        <I.filter />
-        {activeFilterCount > 0 && <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[13px] font-semibold text-white">{activeFilterCount}</span>}
+      {/* Says how many rather than carrying a dot, so an unexpectedly short
+          list explains itself instead of you hunting for why. */}
+      <button onClick={() => setFilterMenuOpen((o) => !o)} title="Filter"
+        className={`${barButton} ${activeFilterCount > 0 ? "border-accent text-accent" : ""}`}>
+        <I.filter className="h-3.5 w-3.5" />
+        {activeFilterCount > 0
+          ? <><b className="font-semibold">{activeFilterCount}</b><span className="hidden sm:inline"> filter{activeFilterCount === 1 ? "" : "s"}</span></>
+          : <span className="hidden sm:inline">No filters</span>}
       </button>
       {filterMenuOpen && (<>
         <div className="fixed inset-0 z-30" onClick={() => setFilterMenuOpen(false)} />
@@ -4276,7 +4308,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   );
   const columnsControl = (
     <div className="relative">
-      <button onClick={() => setColumnsOpen((o) => !o)} title="Columns & density" className="rounded-md border bg-background p-2 text-muted hover:text-foreground"><I.grid /></button>
+      <button onClick={() => setColumnsOpen((o) => !o)} title="Columns & density" className={barButton}>
+        <I.grid className="h-3.5 w-3.5" />
+        <span className="hidden sm:inline"><b className="font-semibold text-foreground">{visibleCols.length + 1 + (activeClient === "all" ? 1 : 0)}</b> columns</span>
+      </button>
       {columnsOpen && (<>
         <div className="fixed inset-0 z-30" onClick={() => setColumnsOpen(false)} />
         <div className="absolute right-0 z-40 mt-1 w-56 max-w-[calc(100vw-1.5rem)] rounded-xl border bg-surface p-3 shadow-xl">
@@ -4336,6 +4371,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       {headerMoreOpen && (<>
         <div className="fixed inset-0 z-40" onClick={() => setHeaderMoreOpen(false)} />
         <div className="absolute right-0 top-full z-50 mt-1 w-56 max-w-[calc(100vw-1.5rem)] rounded-lg border bg-surface p-1 shadow-soft-md">
+          {/* Journal lives here now (Derek, 2026-09-01: "we don't use journal
+              much so much that under 3 dots"). It was half of a permanent
+              segmented control at the top of every client, which is a lot of
+              bar for a view nobody opens most days. */}
+          {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && (
+            <button onClick={() => { setHeaderMoreOpen(false); setClientTab(clientTab === "chat" ? "tasks" : "chat"); }}
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background">
+              <I.comment /> {clientTab === "chat" ? "Back to tasks" : `Journal · ${journalCount()}`}
+            </button>
+          )}
           {activeClient !== "all" && !activeProject && canMessageClient(activeClient) && (
             <button onClick={() => { setHeaderMoreOpen(false); openCompose("email"); }}
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background sm:hidden"><I.comment /> Email</button>
@@ -4538,10 +4583,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </div>
           {isClientDetail ? (
             <div className="flex items-center gap-2">
-              <div className="flex flex-1 rounded-lg bg-background p-0.5">
-                <button onClick={() => setClientTab("tasks")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${clientTab === "tasks" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Tasks</button>
-                <button onClick={() => setClientTab("chat")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${clientTab === "chat" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Journal</button>
-              </div>
+              {/* No Tasks/Journal segmented control: Journal has one home now,
+                  the ⋮ menu, which this header already carries. */}
+              <div className="flex-1" />
               {clientTab === "tasks" && (
                 <div className="flex items-center gap-1.5">
                   {followingControl}
@@ -4634,21 +4678,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <button onClick={() => setAllTasksScope("all")} className={`px-2.5 py-1.5 text-[13px] font-medium ${allTasksScope === "all" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>All</button>
             </div>
           )}
-          {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && (
-            <div className="inline-flex overflow-hidden rounded-md border">
-              <button onClick={() => setClientTab("tasks")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "tasks" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Tasks</button>
-              <button onClick={() => setClientTab("chat")} className={`px-2.5 py-1.5 text-[13px] font-medium ${clientTab === "chat" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Journal · {(() => {
-                // Counts the whole merged feed (notes + messages + task
-                // comments + completions), not just typed notes — matches
-                // what ClientJournal.tsx actually renders, same scoping
-                // it uses for its own `messages`/`tasks` props.
-                const noteCount = clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId)).length;
-                const messageCount = activeProject ? 0 : (() => { const ct = contactForClient(activeClient); return ct ? messages.filter((m) => m.contactId === ct.id).length : 0; })();
-                const activityCount = baseTasks.reduce((sum, t) => sum + t.comments.filter((c) => c.kind !== "event" || isCompletionEvent(c.body)).length, 0);
-                return noteCount + messageCount + activityCount;
-              })()}</button>
-            </div>
-          )}
+          {/* The Tasks/Journal toggle is gone from the bar — Journal is in
+              the ⋮ menu now, and Tasks is simply where you already are. */}
           {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && clientById(activeClient) && (
             <div className="flex items-center gap-1.5">
               {/* Status dropdown hidden per Derek (Aug 23): the multi-stage
