@@ -97,17 +97,22 @@ export async function POST(req: NextRequest) {
   const have = new Set((existing ?? []).map((r) => r.gmail_message_id as string));
   const fresh = rows.filter((r) => !have.has(r.gmail_message_id as string));
 
+  // .select() so the count is the database's answer, not ours. Reporting
+  // fresh.length was still reporting an intention: it said "2 imported" for
+  // an insert that added nothing, twice, and each time the number was the
+  // only thing standing between a real bug and a working feature.
+  let wrote = 0;
   if (fresh.length) {
-    const { error } = await supabaseAdmin.from("messages").insert(fresh);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const { data: inserted, error } = await supabaseAdmin.from("messages").insert(fresh).select("id");
+    if (error) return NextResponse.json({ error: error.message, stage: "insert" }, { status: 500 });
+    wrote = inserted?.length ?? 0;
   }
 
   return NextResponse.json({
-    ok: true, threadId: thread.threadId, via: thread.via,
-    // What actually landed, and what was already here. The first number said
-    // "3 imported" for an import that wrote nothing, which is the kind of
-    // reassurance that costs an afternoon.
-    imported: fresh.length, alreadyHad: rows.length - fresh.length,
+    ok: true, threadId: thread.threadId, via: thread.via, taskId,
+    // Confirmed by the database. attempted is kept beside it so a silent
+    // no-op is visible as a disagreement rather than looking like success.
+    imported: wrote, attempted: fresh.length, alreadyHad: rows.length - fresh.length,
     subject: thread.subject,
     // "search" means we guessed from a subject line, so the caller can say so
     // rather than presenting a guess as a fact.

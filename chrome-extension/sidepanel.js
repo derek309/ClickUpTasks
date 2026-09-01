@@ -102,6 +102,14 @@ async function attachEmailThread(token, taskId) {
       // for an import that wrote nothing is how a broken index went unnoticed.
       const had = res.alreadyHad ? `, ${res.alreadyHad} already here` : "";
       const count = `${res.imported} message${res.imported === 1 ? "" : "s"} imported${had}`;
+      // A disagreement between what we tried to write and what the database
+      // confirmed is the whole bug we have been chasing, so say it out loud
+      // rather than rounding it up into a success.
+      if (typeof res.attempted === "number" && res.attempted !== res.imported) {
+        statusEl.textContent = `Thread bound, but ${res.attempted - res.imported} message(s) did not save. Thread ${res.threadId}.`;
+        statusEl.className = "err";
+        return;
+      }
       statusEl.textContent = res.confident
         ? `Watching this thread — ${count}.`
         : `Matched by subject — ${count}. Check it is the right thread.`;
