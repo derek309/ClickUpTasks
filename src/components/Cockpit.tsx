@@ -9,6 +9,7 @@ import {
   userById,
   formatDue,
   advanceDue,
+  effectivePriority,
   htmlToText,
   recurrenceResetFields,
   isOverdue,
@@ -844,7 +845,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         id: newId("t_"), projectId, clientId: activeClient, title: r.title.trim(), description: r.description.trim() ? plainTextToHtml(r.description.trim()) : "",
         status: waiting ? "todo" : "todo",
         priority: r.priority, assigneeId: waiting ? null : (member?.id ?? null), waitingOnClient: waiting,
-        contactId: activeClient.slice(3), due: r.due, recurrence: "none", labelIds: [], ghlTaskId: null,
+        contactId: activeClient.slice(3), due: r.due, recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true,
         private: false, subtasks: [], attachments: [], comments: [], createdAt: now, createdBy: me.id,
       } as Task;
     });
@@ -1631,7 +1632,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const passesFilters = (t: Task) =>
     (filters.status === "all" || t.status === filters.status) &&
     (filters.assignee === "all" || (filters.assignee === "waiting" ? !!t.waitingOnClient : filters.assignee === "unassigned" ? (t.assigneeId === null && !t.waitingOnClient) : t.assigneeId === filters.assignee)) &&
-    (filters.priority === "all" || t.priority === filters.priority) &&
+    (filters.priority === "all" || effectivePriority(t) === filters.priority) &&
     // Explicitly filtering to Done overrides the hide-done toggle — asking
     // to see done tasks and then hiding them would show nothing.
     (!hideDone || filters.status === "done" || t.status !== "done" || lingeringDone.has(t.id));
@@ -1682,7 +1683,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       // table rather than hardcoded — it used to be a literal 4, which
       // silently became a TIE when "client_request" was added at rank 4.
       const unreadRank = Math.max(...Object.values(PRIORITY_META).map((m) => m.rank)) + 1;
-      const rank = (t: Task) => (hasUnreadReply(t) ? unreadRank : PRIORITY_META[t.priority].rank);
+      const rank = (t: Task) => (hasUnreadReply(t) ? unreadRank : PRIORITY_META[effectivePriority(t)].rank);
       return (rank(b) - rank(a)) * dir;
     });
     else if (sortBy === "title") arr.sort((a, b) => a.title.localeCompare(b.title) * dir);
@@ -2045,11 +2046,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (hasOpenConversationTask(clientId)) return { tier: 1, due: "", priorityRank: 0 };
     const open = (scopedTasksByClientId.get(clientId) ?? []).filter((t) => t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
     const candidates: { date: string; priorityRank: number }[] = open
-      .map((t) => ({ date: urgencyDateOf(t), priorityRank: PRIORITY_META[t.priority].rank }))
+      .map((t) => ({ date: urgencyDateOf(t), priorityRank: PRIORITY_META[effectivePriority(t)].rank }))
       .filter((c): c is { date: string; priorityRank: number } => !!c.date);
     if (candidates.length === 0) {
       if (open.length === 0) return { tier: 10, due: "", priorityRank: 0 };
-      return { tier: 9, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
+      return { tier: 9, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[effectivePriority(t)].rank)) };
     }
     const soonest = candidates.reduce((a, b) => (b.date < a.date ? b : a)).date;
     const atSoonest = candidates.filter((c) => c.date === soonest);
@@ -2062,11 +2063,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (projectNeedsReview(projectId, forAssignee)) return { tier: 0, due: "", priorityRank: 0 };
     const open = (scopedTasksByProjectId.get(projectId) ?? []).filter((t) => t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
     const candidates: { date: string; priorityRank: number }[] = open
-      .map((t) => ({ date: urgencyDateOf(t), priorityRank: PRIORITY_META[t.priority].rank }))
+      .map((t) => ({ date: urgencyDateOf(t), priorityRank: PRIORITY_META[effectivePriority(t)].rank }))
       .filter((c): c is { date: string; priorityRank: number } => !!c.date);
     if (candidates.length === 0) {
       if (open.length === 0) return { tier: 10, due: "", priorityRank: 0 };
-      return { tier: 9, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[t.priority].rank)) };
+      return { tier: 9, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[effectivePriority(t)].rank)) };
     }
     const soonest = candidates.reduce((a, b) => (b.date < a.date ? b : a)).date;
     const atSoonest = candidates.filter((c) => c.date === soonest);
@@ -2471,7 +2472,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       const needsReply = list.filter(hasUnreadReply);
       const needsReplyIds = new Set(needsReply.map((t) => t.id));
       const rest = list.filter((t) => !needsReplyIds.has(t.id));
-      const buckets = PRIORITY_ORDER.map((p) => ({ key: p, label: PRIORITY_META[p].label, color: PRIORITY_META[p].color, tasks: rest.filter((t) => t.priority === p) }));
+      const buckets = PRIORITY_ORDER.map((p) => ({ key: p, label: PRIORITY_META[p].label, color: PRIORITY_META[p].color, tasks: rest.filter((t) => effectivePriority(t) === p) }));
       return needsReply.length ? [{ key: "needs_reply", label: "Needs your reply", color: "#0ea5e9", tasks: needsReply }, ...buckets] : buckets;
     }
     if (dim === "due") return DUE_BUCKETS.map((b) => ({ key: b.key, label: b.label, color: b.color, tasks: list.filter((t) => dueBucket(t) === b.key) }));
@@ -2610,7 +2611,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       // surface in the assignee's own no-due-date review, not get silently
       // pushed a day out and hidden from it.
       due: groupBy === "due" && groupKey === "today" ? TODAY : groupBy === "due" && groupKey === "tomorrow" ? TOMORROW : null,
-      recurrence: "none", labelIds: [], ghlTaskId: null, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
+      recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
       createdBy: me.id,
     };
     pinJustAdded(t.id);
@@ -2637,7 +2638,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       id: newId("t_"), projectId: pid, clientId, title: title.trim(), description: "",
       status: "todo", priority: isManuallyAssignable(priority) ? priority : "none",
       assigneeId: me.id, contactId: clientId.slice(3), due,
-      recurrence: "none", labelIds: [], ghlTaskId: null, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
+      recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
       createdBy: me.id,
     };
     setTasks((ts) => [...ts, t]);
@@ -2670,7 +2671,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       // Today/Tomorrow due-bucket context, so a plain new task can surface
       // in the no-due-date review instead of defaulting a day out.
       due: groupBy === "due" && groupKey === "today" ? TODAY : groupBy === "due" && groupKey === "tomorrow" ? TOMORROW : null,
-      recurrence: "none", labelIds: [], ghlTaskId: null, private: true, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
+      recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: true, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
       createdBy: me.id,
     };
     pinJustAdded(t.id);
@@ -2777,7 +2778,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!before) return;
     // Keeps status:"waiting" and waitingOnClient in lockstep — see update()'s
     // matching comment for why this can't just live in one place.
-    const synced: Partial<Task> = { ...patch, ...applyWaitingStatusSync(before, patch) };
+    // Choosing a priority by hand takes this task off automatic for good: the
+    // app must not argue with a deliberate decision the next time the due
+    // date moves.
+    const withAuto: Partial<Task> = patch.priority !== undefined && patch.priority !== before.priority ? { ...patch, priorityAuto: false } : patch;
+    const synced: Partial<Task> = { ...withAuto, ...applyWaitingStatusSync(before, withAuto) };
     const events = describeFieldChange(before, synced).map((body) => ({ id: newId("cm_"), authorId: me.id, body, at: new Date().toISOString(), kind: "event" as const }));
     const updated: Task = { ...before, ...synced, comments: events.length ? [...before.comments, ...events] : before.comments };
     let clone: Task | null = null;
@@ -3446,7 +3451,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       id: newId("t_"), projectId, clientId, title: tpl.name, description: "",
       status: "todo", priority: "normal", assigneeId: me.id,
       contactId: clientId.startsWith("cl_") ? clientId.slice(3) : null,
-      due: null, recurrence: "none", labelIds: [], ghlTaskId: null, private: false,
+      due: null, recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: false,
       subtasks: tpl.checklistItems.map((title) => ({ id: newId("s_"), title, done: false })),
       attachments: [], comments: [], createdAt: new Date().toISOString(), createdBy: me.id,
     };
@@ -3483,7 +3488,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       id: newId("t_"), projectId, clientId, title: pt.title, description: "",
       status: "todo", priority: pt.priority ?? "normal", assigneeId: me.id, contactId,
       due: typeof pt.dueOffsetDays === "number" ? addDaysIso(TODAY, pt.dueOffsetDays) : null,
-      recurrence: "none", labelIds: [], ghlTaskId: null, private: false,
+      recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: false,
       subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(), createdBy: me.id,
     }));
     setTasks((ts) => [...ts, ...created]);
@@ -3775,7 +3780,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const t: Task = {
       id: newId("t_"), projectId, clientId: p.clientId, title: title.trim(), description: "",
       status: stage?.isDone ? "done" : "todo", priority: "normal", assigneeId: me.id, contactId: p.clientId.slice(3), due: null,
-      recurrence: "none", labelIds: [], ghlTaskId: null, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
+      recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
       stageId, createdBy: me.id,
     };
     setTasks((ts) => [...ts, t]);

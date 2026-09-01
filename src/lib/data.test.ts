@@ -30,6 +30,8 @@ import {
   linkSpans,
   splitQuotedEmail,
   addBusinessDaysIso,
+  derivedPriority,
+  effectivePriority,
   googleLinkName,
   isUselessTitle,
   TASK_ACTION_ORDER,
@@ -812,5 +814,31 @@ describe("addBusinessDaysIso", () => {
         expect(dow).not.toBe(6);
       }
     }
+  });
+});
+
+describe("priority from the due date", () => {
+  const today = "2026-09-01";
+  it("is none with no date, urgent inside three days, normal beyond", () => {
+    expect(derivedPriority(null, today)).toBe("none");
+    expect(derivedPriority("2026-09-01", today)).toBe("urgent");   // today
+    expect(derivedPriority("2026-09-04", today)).toBe("urgent");   // 3 days
+    expect(derivedPriority("2026-09-05", today)).toBe("normal");   // 4 days
+    expect(derivedPriority("2026-08-28", today)).toBe("urgent");   // overdue
+  });
+  it("follows the date while the task is on automatic", () => {
+    expect(effectivePriority({ priority: "none", due: "2026-09-02", priorityAuto: true }, today)).toBe("urgent");
+  });
+  it("keeps a hand-set priority forever", () => {
+    // The whole point of the flag: an overdue task someone deliberately
+    // called Normal stays Normal.
+    expect(effectivePriority({ priority: "normal", due: "2026-08-20", priorityAuto: false }, today)).toBe("normal");
+  });
+  it("never overrides the system-assigned priorities", () => {
+    expect(effectivePriority({ priority: "client_request", due: "2026-08-20", priorityAuto: true }, today)).toBe("client_request");
+    expect(effectivePriority({ priority: "conversation", due: null, priorityAuto: true }, today)).toBe("conversation");
+  });
+  it("treats a task with no flag as hand-set, which is what every existing row is", () => {
+    expect(effectivePriority({ priority: "none", due: "2026-09-02" }, today)).toBe("none");
   });
 });

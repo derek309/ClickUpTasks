@@ -142,7 +142,7 @@ export interface Me {
   role: Role;
   canSendMessages: boolean; // admins always true; VAs only when an admin grants it
 }
-export type TaskStatus = "todo" | "in_progress" | "review" | "changes_requested" | "waiting" | "done";
+export type TaskStatus = "todo" | "get_started" | "in_progress" | "review" | "changes_requested" | "waiting" | "approved" | "done";
 export type Priority = "client_request" | "conversation" | "urgent" | "normal" | "none";
 export type Recurrence = "none" | "daily" | "weekday" | "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly" | "custom";
 export const RECURRENCE_ORDER: Recurrence[] = ["none", "daily", "weekday", "weekly", "biweekly", "monthly", "quarterly", "yearly", "custom"];
@@ -1495,6 +1495,8 @@ export interface Task {
    *  "snoozed": quiet in the list, out of the way on My Work, no late
    *  styling. See supabase/task-follow-up.sql. */
   followUpAt?: string | null;
+  /** Priority still follows the due date. Cleared the moment someone sets one by hand. */
+  priorityAuto?: boolean;
   recurrenceNth?: number;
   /** 0 = Sunday .. 6 = Saturday, matching Date#getUTCDay. */
   recurrenceWeekday?: number;
@@ -1563,13 +1565,19 @@ export const PERSONAL_PROJECT_ID = "personal_project";
 export const WORKSPACE_CLIENT_ID = "cl_workspace";
 export const STATUS_META: Record<TaskStatus, { label: string; dot: string; chip: string }> = {
   todo: { label: "To do", dot: "#94a3b8", chip: "#f1f5f9" },
+  // Not started, and the date is close enough that it needs to be. Amber
+  // rather than red: it is a nudge, not a failure.
+  get_started: { label: "Get started", dot: "#f97316", chip: "#fff7ed" },
   in_progress: { label: "Progress", dot: "#3b82f6", chip: "#eff6ff" },
   review: { label: "Review", dot: "#f59e0b", chip: "#fffbeb" },
   changes_requested: { label: "Changes", dot: "#ef4444", chip: "#fef2f2" },
   waiting: { label: "Waiting", dot: "#14b8a6", chip: "#f0fdfa" },
+  // The client said go. Deliberately not Done: their yes and your delivery
+  // are two different events, and collapsing them loses the gap between them.
+  approved: { label: "Approved", dot: "#8b5cf6", chip: "#f5f3ff" },
   done: { label: "Done", dot: "#22c55e", chip: "#f0fdf4" },
 };
-export const STATUS_ORDER: TaskStatus[] = ["todo", "in_progress", "review", "changes_requested", "waiting", "done"];
+export const STATUS_ORDER: TaskStatus[] = ["todo", "get_started", "in_progress", "review", "changes_requested", "waiting", "approved", "done"];
 
 // Status "waiting" and Task.waitingOnClient must always move together — this
 // is the one place that rule lives. Every mutation path (update/patchTask
@@ -1645,6 +1653,35 @@ export const isManuallyAssignable = (p: Priority): boolean => p !== "conversatio
 // A priority picker's option list: every manually-assignable tier, plus the
 // current value even if it's Conversation (so an existing auto-created task
 // can still show/reselect its own tier, just not switch *into* it).
+// Priority as the due date implies it (Derek: "move the priorities from none,
+// normal and urgent based on when they are due").
+//
+// Replaces the Start now / Wrap up chip, which ended up on nearly every open
+// row and so distinguished nothing. Priority is a field that already exists,
+// already sorts, already groups and already has a colour on the row, so
+// putting the answer there costs no new furniture.
+export function derivedPriority(due: string | null, today: string = TODAY): Priority {
+  if (!due) return "none";
+  const left = daysUntilDue(due, today);
+  if (left === null) return "none";
+  return left <= 3 ? "urgent" : "normal";
+}
+
+// What a task's priority actually is right now.
+//
+// Auto only while priorityAuto holds. Setting a priority by hand clears the
+// flag and the choice sticks, so the app never argues with a decision someone
+// made deliberately.
+//
+// client_request and conversation are never derived: they are assigned by the
+// system to mark where a task came from, and a due date says nothing about
+// that.
+export function effectivePriority(task: { priority: Priority; due: string | null; priorityAuto?: boolean }, today: string = TODAY): Priority {
+  if (!task.priorityAuto) return task.priority;
+  if (task.priority === "client_request" || task.priority === "conversation") return task.priority;
+  return derivedPriority(task.due, today);
+}
+
 export const manualPriorityOptions = (current: Priority): Priority[] =>
   PRIORITY_ORDER.filter((p) => isManuallyAssignable(p) || p === current);
 

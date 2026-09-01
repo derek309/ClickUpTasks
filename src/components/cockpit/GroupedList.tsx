@@ -4,7 +4,7 @@
 // expandable subtasks, and the inline cell editors (priority/assignee/due).
 import { useRef, useState } from "react";
 import {
-  users, formatDue, isOverdue, TODAY, COLLAPSED_DUE_BUCKETS, timeAgo, userById, clientInitials, dueCountdown, startSignal, windowBurn, isSnoozed,
+  users, formatDue, isOverdue, TODAY, COLLAPSED_DUE_BUCKETS, effectivePriority, timeAgo, userById, clientInitials, dueCountdown, isSnoozed,
   PRIORITY_META, manualPriorityOptions,
   STATUS_META, STATUS_ORDER, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence,
   PLAYBOOK_STEP_BY_KEY,
@@ -228,7 +228,11 @@ function TaskRow({ task, template, cols, showClient, showCrumb, onOpenClient, cl
   // Priority used to be its own column; it's now a 3px bar on the row's
   // leading edge so it reads at a glance without repeating the group
   // heading when a view is already grouped by priority.
-  const priorityBarColor = task.priority !== "none" ? PRIORITY_META[task.priority].color : "transparent";
+  // Read through effectivePriority everywhere it shows, so a task on
+  // automatic reads as its due date implies rather than as the value sitting
+  // in the column.
+  const shownPriority = effectivePriority(task);
+  const priorityBarColor = shownPriority !== "none" ? PRIORITY_META[shownPriority].color : "transparent";
   // The payoff for this Playbook step, surfaced right on the row — so an
   // ambassador scanning the list before walking into a business sees "if
   // they do this, they get that" without opening every task individually.
@@ -251,7 +255,7 @@ function TaskRow({ task, template, cols, showClient, showCrumb, onOpenClient, cl
       </span>
     );
     if (key === "assignee") return <InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a, waitingOnClient: false })} onSetWaiting={() => onPatch(task.id, { waitingOnClient: true, assigneeId: null })} />;
-    if (key === "priority") return <InlinePriority value={task.priority} onChange={(p) => onPatch(task.id, { priority: p })} />;
+    if (key === "priority") return <InlinePriority value={shownPriority} auto={task.priorityAuto !== false} onChange={(p) => onPatch(task.id, { priority: p })} />;
     if (key === "followUp") return (
       <InlineDate value={task.followUpAt ?? null} onChange={(d) => onPatch(task.id, { followUpAt: d })}
         onClear={() => onPatch(task.id, { followUpAt: null })}
@@ -333,23 +337,6 @@ function TaskRow({ task, template, cols, showClient, showCrumb, onOpenClient, cl
             </span>
             <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5">
               {showCrumb && !showClient && crumb && <span className="min-w-0 truncate text-[11px] leading-tight text-muted">{crumb}</span>}
-              {/* The one thing the created and due dates together can tell you
-                  that neither says alone: most of the runway is gone. Reads
-                  "Start now" on To do and "Wrap up" once work is underway,
-                  because the advice differs even though the maths doesn't.
-                  Waiting and Done never get a chip. */}
-              {(() => {
-                const sig = startSignal(task);
-                if (sig.level === "none") return null;
-                const burn = windowBurn(task.createdAt, task.due);
-                return (
-                  <span
-                    title={`${sig.label}: ${burn !== null ? `${Math.round(burn * 100)}% of the time from creation to due date has gone` : "past due"}, and this is still ${STATUS_META[task.status].label}`}
-                    className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold ${sig.level === "late" ? "bg-danger/10 text-danger" : "bg-amber-500/15 text-amber-700"}`}>
-                    {sig.label}
-                  </span>
-                );
-              })()}
               {task.recurrence !== "none" && <span title={describeRecurrence(task.recurrence, task.recurrenceInterval, task.recurrenceUnit, task.recurrenceDaysOfMonth, task.recurrenceNth, task.recurrenceWeekday)}><I.repeat className="shrink-0 text-muted" /></span>}
               {task.attachments.length > 0 && <I.clip className="shrink-0 text-muted" />}
               {commentCount > 0 && <span onClick={(e) => e.stopPropagation()}><InlineComments task={task} onAddComment={onAddComment} /></span>}
@@ -442,7 +429,7 @@ function InlineStatus({ value, onChange }: { value: TaskStatus; onChange: (s: Ta
 // Brought back as a real column (Derek, 2026-08-24): the leading-edge color
 // bar alone wasn't enough on a single-client list — no way to actually
 // change a task's priority from the row without opening it.
-function InlinePriority({ value, onChange }: { value: Priority; onChange: (p: Priority) => void }) {
+function InlinePriority({ value, auto = false, onChange }: { value: Priority; auto?: boolean; onChange: (p: Priority) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
@@ -453,8 +440,13 @@ function InlinePriority({ value, onChange }: { value: Priority; onChange: (p: Pr
           longest label and was wrapping onto two lines, which made its row
           taller than every other row in the list (Derek, 2026-08-27). The
           column is sized for it in COL_WIDTHS. */}
-      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 128, options.length * 32 + 8)); setOpen((o) => !o); }} className="inline-flex items-center gap-1 whitespace-nowrap rounded px-1 py-0.5 text-[13px] font-medium hover:bg-background" style={{ color: value === "none" ? "var(--muted)" : PRIORITY_META[value].color }}>
+      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 128, options.length * 32 + 8)); setOpen((o) => !o); }}
+        title={auto ? "Following the due date. Pick one to fix it." : "Set by hand"}
+        className="inline-flex items-center gap-1 whitespace-nowrap rounded px-1 py-0.5 text-[13px] font-medium hover:bg-background" style={{ color: value === "none" ? "var(--muted)" : PRIORITY_META[value].color }}>
         {value === "none" ? "—" : (<><I.flag className="shrink-0" />{PRIORITY_META[value].label}</>)}
+        {/* A dot, not a word: the row is already dense and this only answers
+            "why did that change on its own". */}
+        {auto && <span className="ml-0.5 h-1 w-1 shrink-0 rounded-full bg-current opacity-50" />}
       </button>
       {open && (<>
         <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
