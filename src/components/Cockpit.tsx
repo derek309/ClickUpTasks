@@ -508,10 +508,26 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // below Team Chat each carry their own dot, but the dots are only visible
   // when DMs are switched on and the list is expanded, so the parent row has
   // to be able to say how many you have missed on its own.
-  const dmUnreadTotal = useMemo(() => dmMessages.filter((m) => {
-    if (m.authorId === me.id) return false;
-    return m.at > (dmLastRead[m.conversationId] ?? "");
-  }).length, [dmMessages, dmLastRead, me.id]);
+  // Only what you can actually open and clear. Team Chat read 1 with every
+  // per-person dot below it dark, because the count included a DM thread that
+  // is not rendered at all when direct messages are switched off — an unread
+  // you cannot see, cannot open and therefore cannot clear.
+  //
+  // Read state for DMs lives in this browser's localStorage, not the
+  // database, so an old message read on another machine still looks unread
+  // here. Counting only reachable threads keeps that from surfacing as a
+  // number with nothing behind it.
+  const dmUnreadTotal = useMemo(() => {
+    if (!dmEnabled) return 0;
+    return dmMessages.filter((m) => {
+      // Addressed to me, not merely not-from-me: dm_messages is fetched
+      // whole, so this also keeps two other people's thread out of my count.
+      if (m.recipientId !== me.id) return false;
+      if (!users.some((u) => u.id === m.authorId && u.id !== me.id)) return false;
+      return m.at > (dmLastRead[m.conversationId] ?? "");
+    }).length;
+    // `users` is a module-level roster, not state, so it is not a dependency.
+  }, [dmEnabled, dmMessages, dmLastRead, me.id]);
   // One number for how much chat you have missed. The sidebar row is the only
   // place either kind is visible when the DM list is collapsed, so splitting
   // them across two badges would mean the row could read zero while three
@@ -1765,11 +1781,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // scoped to you regardless of the Mine/All toggle, which also keeps the
   // number from lurching when you flip it.
   //
-  // Approved is excluded alongside Done (Derek, 2026-09-01). The two are
-  // deliberately separate stages — the client's yes and your delivery are
-  // different events — but neither is work waiting on you.
+  // Approved counts (Derek, 2026-09-01: "approved is still work, count it
+  // everywhere"). The client saying yes is not the work being delivered —
+  // that is exactly why the two are separate stages — so an approved task is
+  // still something you owe. Done is the only stage that is not.
   const openTaskCount = useMemo(
-    () => tasks.filter((t) => t.assigneeId === me.id && t.status !== "done" && t.status !== "approved").length,
+    () => tasks.filter((t) => t.assigneeId === me.id && t.status !== "done").length,
     [tasks, me.id],
   );
   // Map indices for scopedTasks/clients/projects — every lookup helper below
