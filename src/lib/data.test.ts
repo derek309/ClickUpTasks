@@ -49,6 +49,8 @@ import {
   recurrenceResetFields,
   startSignal,
   dueCountdown,
+  dueOneLine,
+  addDaysIso,
   describeRecurrence,
   TODAY,
   type User,
@@ -877,6 +879,35 @@ describe("moving into Get started as the date closes in", () => {
     // arrives, it is the date the task is judged on and it counts.
     expect(effectiveStatus({ status: "todo", due: null, followUpAt: "2026-09-01" }, today)).toBe("get_started");
     expect(effectiveStatus({ status: "todo", due: null, followUpAt: "2026-08-25" }, today)).toBe("get_started");
+  });
+});
+
+describe("one value per date", () => {
+  const today = "2026-09-01";
+  it("counts down inside the week, because that is what you act on", () => {
+    expect(dueOneLine("2026-08-30", today)).toBe("2 days late");
+    expect(dueOneLine("2026-08-31", today)).toBe("1 day late");
+    expect(dueOneLine("2026-09-01", today)).toBe("Today");
+    expect(dueOneLine("2026-09-02", today)).toBe("Tomorrow");
+    expect(dueOneLine("2026-09-04", today)).toBe("3 days left");
+    expect(dueOneLine("2026-09-07", today)).toBe("6 days left");
+  });
+  // Past a week the countdown stops being a quantity anyone feels, so the
+  // date takes over rather than the two of them sharing the cell.
+  it("switches to the date once a countdown stops meaning anything", () => {
+    expect(dueOneLine("2026-09-08", today)).not.toMatch(/left/);
+    expect(dueOneLine("2026-09-18", today)).not.toMatch(/left/);
+  });
+  it("says nothing when there is no date", () => {
+    expect(dueOneLine(null, today)).toBe("");
+  });
+  // The whole point: one fact per cell, never a date and a countdown both.
+  it("never says the same thing twice", () => {
+    for (let d = -10; d <= 40; d++) {
+      const iso = addDaysIso(today, d);
+      const out = dueOneLine(iso, today);
+      expect(out.split(" ").length, `${iso} -> ${out}`).toBeLessThanOrEqual(3);
+    }
   });
 });
 

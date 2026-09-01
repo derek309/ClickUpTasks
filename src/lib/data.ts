@@ -1574,9 +1574,9 @@ export const STATUS_META: Record<TaskStatus, { label: string; dot: string; chip:
   // Not started, and the date is close enough that it needs to be. Amber
   // rather than red: it is a nudge, not a failure.
   get_started: { label: "Get started", dot: "#f97316", chip: "#fff7ed" },
-  in_progress: { label: "Progress", dot: "#3b82f6", chip: "#eff6ff" },
+  in_progress: { label: "In progress", dot: "#3b82f6", chip: "#eff6ff" },
   review: { label: "Review", dot: "#f59e0b", chip: "#fffbeb" },
-  changes_requested: { label: "Changes", dot: "#ef4444", chip: "#fef2f2" },
+  changes_requested: { label: "Changes requested", dot: "#ef4444", chip: "#fef2f2" },
   waiting: { label: "Waiting", dot: "#14b8a6", chip: "#f0fdfa" },
   // The client said go. Deliberately not Done: their yes and your delivery
   // are two different events, and collapsing them loses the gap between them.
@@ -2258,6 +2258,25 @@ export function dueCountdown(iso: string | null, today: string = TODAY): string 
   if (n <= 60) return `${n} days left`;
   const months = Math.round(n / 30);
   return `${months} months left`;
+}
+
+/** One value for a date, never two.
+ *
+ *  A date and a countdown beside it are the same fact said twice, which is
+ *  why "Tomorrow 1 day left" read as clutter. Inside a week the countdown is
+ *  the thing you act on, so that is all this says. Past a week a countdown
+ *  stops meaning anything you can hold ("17 days left" is not a quantity
+ *  anyone feels), so the date takes over. The real date is always in the
+ *  title attribute, so nothing is actually lost either way.
+ */
+export function dueOneLine(iso: string | null, today: string = TODAY): string {
+  const n = daysUntilDue(iso, today);
+  if (n === null) return "";
+  if (n < 0) return `${Math.abs(n)} day${n === -1 ? "" : "s"} late`;
+  if (n === 0) return "Today";
+  if (n === 1) return "Tomorrow";
+  if (n <= 6) return `${n} days left`;
+  return formatDue(iso!);
 }
 
 /** How much of the created-to-due window has been used up, 0 to 1, or null

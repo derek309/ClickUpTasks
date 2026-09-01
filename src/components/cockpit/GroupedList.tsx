@@ -5,13 +5,13 @@
 import { useMemo, useRef, useState } from "react";
 import { usePersisted } from "@/lib/usePersisted";
 import {
-  users, formatDue, isOverdue, TODAY, COLLAPSED_DUE_BUCKETS, effectivePriority, effectiveStatus, timeAgo, userById, clientInitials, dueCountdown, isSnoozed,
+  users, formatDue, isOverdue, TODAY, COLLAPSED_DUE_BUCKETS, effectivePriority, effectiveStatus, timeAgo, userById, clientInitials, dueOneLine, isSnoozed,
   PRIORITY_META, manualPriorityOptions,
   STATUS_META, STATUS_ORDER, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence,
   PLAYBOOK_STEP_BY_KEY,
   type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus,
 } from "@/lib/data";
-import { I, Avatar, LabelChips, CollapsibleText, COL_WIDTHS, LIST_COLUMNS } from "./ui";
+import { I, Avatar, LabelChips, CollapsibleText, LIST_COLUMNS } from "./ui";
 
 // --- grouped list view (ClickUp-style: group, quick-add, expandable subtasks) --
 
@@ -145,9 +145,16 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
   // only earns its line when the list actually spans more than one.
   const projectIds = new Set(groups.flatMap((g) => g.tasks.map((t) => t.projectId)));
   const showCrumb = projectIds.size > 1;
-  // The title takes everything the other columns give back: 2fr against their
-  // fixed widths, so it grows with the window instead of the gaps doing it.
-  const template = ["minmax(240px,2fr)", ...(showClient ? ["150px"] : []), ...cols.map((c) => COL_WIDTHS[c.key])].join(" ");
+  // A real table, so every column is exactly as wide as its own widest value
+  // and every row matches by construction. The old fixed pixel widths meant
+  // the widest value in the list had no say: tighten one number and "Get
+  // started" wrapped to two lines while "17 days left" clipped. `table-auto`
+  // is the browser doing that arithmetic across all the rows at once, which
+  // is not something a per-row grid can do however the numbers are chosen.
+  //
+  // Only the Name column is told anything: w-full, so it absorbs whatever the
+  // sized columns give back rather than the gaps swallowing it.
+  const colCount = 1 + (showClient ? 1 : 0) + cols.length;
   const sortColKey: Record<string, string> = { title: "task", priority: "priority", due: "due", followUp: "followUp", assignee: "assignee", status: "status", comments: "comments" };
   const activeCol = sortColKey[sortKey];
   const Arrow = ({ col }: { col: string }) => (activeCol === col ? <span className="text-accent">{sortDir === "asc" ? "↑" : "↓"}</span> : null);
@@ -160,22 +167,27 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
             hit the labels that aren't sort buttons — Client and any
             non-sortable column — leaving one shouted header in a row of
             normal ones rather than styling the row as a whole. */}
-        <div className="hidden items-center gap-2 border-b bg-background/40 px-4 py-1.5 text-[12px] font-semibold tracking-wide text-muted sm:grid" style={{ gridTemplateColumns: template }}>
-          <button onClick={() => onSort("task")} className="flex items-center gap-1 text-left hover:text-foreground">Name <Arrow col="task" /></button>
-          {showClient && <span>Client</span>}
-          {cols.map((c) => (
-            <div key={c.key} draggable={!!onReorderCols} onDragStart={() => setDragColKey(c.key)} onDragEnd={() => setDragColKey(null)}
-              onDragOver={(e) => onReorderCols && e.preventDefault()} onDrop={(e) => { if (onReorderCols) { e.preventDefault(); dropColHere(c.key); } }}
-              className={onReorderCols ? "cursor-grab active:cursor-grabbing" : undefined}>
-              {c.sortable
-                ? <button onClick={() => onSort(c.key)} className={`flex items-center gap-1 hover:text-foreground ${c.key === "comments" ? "justify-center" : "text-left"}`}>{c.label} <Arrow col={c.key} /></button>
-                : <span className={c.key === "comments" ? "block text-center" : ""}>{c.label}</span>}
-            </div>
-          ))}
-        </div>
-        <div className="divide-y-8 divide-background">
+        <table className="block w-full border-collapse text-left sm:table sm:table-auto">
+        <thead className="hidden sm:table-header-group">
+          <tr className="border-b bg-background/40 text-[12px] font-semibold tracking-wide text-muted">
+            <th className="w-full px-4 py-1.5 font-semibold">
+              <button onClick={() => onSort("task")} className="flex items-center gap-1 text-left hover:text-foreground">Name <Arrow col="task" /></button>
+            </th>
+            {showClient && <th className="whitespace-nowrap py-1.5 pr-4 font-semibold">Client</th>}
+            {cols.map((c) => (
+              <th key={c.key} draggable={!!onReorderCols} onDragStart={() => setDragColKey(c.key)} onDragEnd={() => setDragColKey(null)}
+                onDragOver={(e) => onReorderCols && e.preventDefault()} onDrop={(e) => { if (onReorderCols) { e.preventDefault(); dropColHere(c.key); } }}
+                className={`whitespace-nowrap py-1.5 pr-4 font-semibold ${onReorderCols ? "cursor-grab active:cursor-grabbing" : ""}`}>
+                {c.sortable
+                  ? <button onClick={() => onSort(c.key)} className={`flex items-center gap-1 hover:text-foreground ${c.key === "comments" ? "justify-center" : "text-left"}`}>{c.label} <Arrow col={c.key} /></button>
+                  : <span className={c.key === "comments" ? "block text-center" : ""}>{c.label}</span>}
+              </th>
+            ))}
+          </tr>
+        </thead>
           {visibleGroups.map((g) => (
-            <div key={g.key}>
+            <tbody key={g.key} className="block border-b-8 border-background sm:table-row-group">
+              <tr className="block sm:table-row"><td colSpan={colCount} className="block p-0 sm:table-cell">
               <button onClick={() => toggleG(g.key)}
                 onDragOver={(e) => { if (onDropInGroup) { e.preventDefault(); setDragOverKey(g.key); } }}
                 onDragLeave={() => setDragOverKey((k) => (k === g.key ? null : k))}
@@ -186,23 +198,26 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
                 <span className="text-[15px] font-bold">{g.label}</span>
                 <span className="rounded-[5px] px-1.5 text-[13px] font-semibold normal-case tracking-normal text-white" style={{ background: g.color }}>{g.tasks.length}</span>
               </button>
+              </td></tr>
               {!collapsedG.has(g.key) && (
-                <div>
+                <>
                   {/* Quick-add sits at the TOP of the group, not the bottom
                       (Derek: "move the add task to the top of the list") — on
                       a long group the bottom row was off screen, so adding a
                       task meant scrolling past everything first. border-b
                       rather than border-t since it now divides downward. */}
                   {canQuickAdd && (
-                    <div className="flex items-center gap-2 border-b px-4 py-1.5">
-                      <I.plus className="text-muted" />
-                      <input value={draft[g.key] ?? ""} onChange={(e) => setDraft((d) => ({ ...d, [g.key]: e.target.value }))}
-                        onKeyDown={(e) => { if (e.key === "Enter") { onQuickAdd(g.key, draft[g.key] ?? ""); setDraft((d) => ({ ...d, [g.key]: "" })); } }}
-                        placeholder="Add task…" className="flex-1 bg-transparent py-1 text-[15px] outline-none placeholder:text-muted" />
-                    </div>
+                    <tr className="block sm:table-row"><td colSpan={colCount} className="block border-b p-0 sm:table-cell">
+                      <div className="flex items-center gap-2 px-4 py-1.5">
+                        <I.plus className="text-muted" />
+                        <input value={draft[g.key] ?? ""} onChange={(e) => setDraft((d) => ({ ...d, [g.key]: e.target.value }))}
+                          onKeyDown={(e) => { if (e.key === "Enter") { onQuickAdd(g.key, draft[g.key] ?? ""); setDraft((d) => ({ ...d, [g.key]: "" })); } }}
+                          placeholder="Add task…" className="flex-1 bg-transparent py-1 text-[15px] outline-none placeholder:text-muted" />
+                      </div>
+                    </td></tr>
                   )}
                   {g.tasks.map((t) => (
-                    <TaskRow key={t.id} task={t} template={template} cols={cols} showClient={showClient} showCrumb={showCrumb} onOpenClient={onOpenClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} onAddComment={onAddComment} meId={meId} delegated={!!highlightDelegateFor && t.assigneeId !== highlightDelegateFor && t.subtasks.some((s) => s.assigneeId === highlightDelegateFor)}
+                    <TaskRow key={t.id} task={t} colCount={colCount} cols={cols} showClient={showClient} showCrumb={showCrumb} onOpenClient={onOpenClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} onAddComment={onAddComment} meId={meId} delegated={!!highlightDelegateFor && t.assigneeId !== highlightDelegateFor && t.subtasks.some((s) => s.assigneeId === highlightDelegateFor)}
                       selected={!!selectedIds?.has(t.id)} onToggleSelect={onToggleSelect ? (e) => handleSelectClick(t.id, e) : undefined}
                       draggable={!!onDropInGroup || !!onMergeTasks} onDragStart={() => setDragTaskId(t.id)} onDragEnd={() => { setDragTaskId(null); setDragOverKey(null); setDragOverTaskId(null); }}
                       isMergeDropTarget={dragOverTaskId === t.id}
@@ -212,11 +227,11 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
                       expanded={expanded.has(t.id)} onToggleExpand={() => toggle(t.id)} onToggleSub={onToggleSub} onAddSub={onAddSub} onDeleteSub={onDeleteSub}
                       subDraft={subDraft[t.id] ?? ""} setSubDraft={(v) => setSubDraft((s) => ({ ...s, [t.id]: v }))} />
                   ))}
-                </div>
+                </>
               )}
-            </div>
+            </tbody>
           ))}
-        </div>
+        </table>
         {visibleGroups.length === 0 && <div className="px-4 py-10 text-center text-[13px] text-muted">No tasks yet.</div>}
       </div>
       {!canQuickAdd && quickAddHint && <div className="mt-3 text-center text-[13px] text-muted">{quickAddHint}</div>}
@@ -224,8 +239,8 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
   );
 }
 
-function TaskRow({ task, template, cols, showClient, showCrumb, onOpenClient, clientById, projectById, contactById, onOpen, onPatch, onAddComment, meId, delegated, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
-  task: Task; template: string; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean; showCrumb: boolean; onOpenClient?: (clientId: string) => void;
+function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, clientById, projectById, contactById, onOpen, onPatch, onAddComment, meId, delegated, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
+  task: Task; colCount: number; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean; showCrumb: boolean; onOpenClient?: (clientId: string) => void;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void; onAddComment: (taskId: string, body: string) => void; meId?: string; delegated?: boolean;
   selected?: boolean; onToggleSelect?: (e: React.MouseEvent) => void;
   draggable?: boolean; onDragStart?: () => void; onDragEnd?: () => void;
@@ -289,12 +304,16 @@ function TaskRow({ task, template, cols, showClient, showCrumb, onOpenClient, cl
   };
   return (
     <>
-      <div draggable={draggable} onDragStart={onDragStart} onDragEnd={onDragEnd}
+      {/* A real row again, which is the whole reason the list is a table: the
+          hover, the selected background and the priority bar down the left
+          edge are one element's business, not something painted per cell. */}
+      <tr draggable={draggable} onDragStart={onDragStart} onDragEnd={onDragEnd}
         onDragOver={(e) => { if (onRowDragOver) { e.preventDefault(); onRowDragOver(); } }}
         onDragLeave={onRowDragLeave}
         onDrop={(e) => { if (onRowDrop) { e.preventDefault(); onRowDrop(); } }}
-        className={`group/tr flex flex-col gap-0.5 border-b border-l-[3px] px-4 py-1.5 transition-colors last:border-0 hover:bg-accent-soft/50 sm:grid sm:min-h-[34px] sm:items-center sm:gap-2 sm:py-1 ${delegated ? "border-l-accent bg-accent-soft/30" : ""} ${selected ? "bg-accent-soft" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${isMergeDropTarget ? "ring-2 ring-inset ring-accent" : ""}`}
-        style={{ gridTemplateColumns: template, borderLeftColor: delegated ? undefined : priorityBarColor }}>
+        className={`group/tr block border-b border-l-[3px] px-4 pb-1.5 transition-colors hover:bg-accent-soft/50 sm:table-row sm:px-0 sm:pb-0 ${delegated ? "border-l-accent bg-accent-soft/30" : ""} ${selected ? "bg-accent-soft" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${isMergeDropTarget ? "bg-accent-soft" : ""}`}
+        style={{ borderLeftColor: delegated ? undefined : priorityBarColor }}>
+        <td className="block w-full py-1 pr-3 align-middle sm:table-cell sm:pl-4">
         <div className="flex min-w-0 items-center gap-0.5">
           {/* Bulk select, back as a permanent fixture at the leading edge
               (Derek, 2026-08-26: "we have to bring back the check box because
@@ -365,14 +384,14 @@ function TaskRow({ task, template, cols, showClient, showCrumb, onOpenClient, cl
             )}
           </div>
         </div>
-        {/* On mobile these wrap into a chip row under the title (indented past
-            the avatar); on sm+ `contents` dissolves the wrapper so each cell
-            drops back into its own grid column. */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pl-11 sm:contents sm:pl-0">
+        </td>
           {/* The client name is the obvious way to say "show me everything
               for these people", so it acts like one. stopPropagation keeps it
-              from also opening the task behind it. */}
+              from also opening the task behind it. Capped rather than sized to
+              content: one long client name would otherwise widen the column
+              for every row and eat the title. */}
           {showClient && (
+            <td className="inline-flex items-center py-0.5 pr-3 align-middle sm:table-cell sm:max-w-[190px] sm:py-1 sm:pr-4">
             <span className="flex min-w-0 items-center gap-1.5 text-[13px]">
               <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: client?.color }} />
               {onOpenClient && client ? (
@@ -383,12 +402,16 @@ function TaskRow({ task, template, cols, showClient, showCrumb, onOpenClient, cl
                 <span className="truncate">{client?.name}</span>
               )}
             </span>
+            </td>
           )}
-          {cols.map((c) => <div key={c.key} className="min-w-0">{cell(c.key)}</div>)}
-        </div>
-      </div>
+          {/* whitespace-nowrap is what makes the column size to its widest
+              value instead of wrapping to fit a number somebody guessed. */}
+          {cols.map((c) => (
+            <td key={c.key} className={`inline-flex items-center whitespace-nowrap py-0.5 pr-3 align-middle sm:table-cell sm:py-1 sm:pr-4 `}>{cell(c.key)}</td>
+          ))}
+      </tr>
       {expanded && (
-        <div className="border-b bg-background/40 py-1.5 pl-10 pr-3">
+        <tr className="block sm:table-row"><td colSpan={colCount} className="block border-b bg-background/40 py-1.5 pl-10 pr-3 sm:table-cell">
           {task.subtasks.map((st) => (
             <div key={st.id} className="group/sub flex items-center gap-2 py-0.5">
               <button onClick={() => onToggleSub(task.id, st.id)} className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${st.done ? "border-accent bg-accent text-white" : "border-border"}`}>{st.done && <I.check />}</button>
@@ -400,7 +423,7 @@ function TaskRow({ task, template, cols, showClient, showCrumb, onOpenClient, cl
             <span className="h-4 w-4 shrink-0" />
             <input value={subDraft} onChange={(e) => setSubDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { onAddSub(task.id, subDraft); setSubDraft(""); } }} placeholder="Add checklist item…" className="flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted" />
           </div>
-        </div>
+        </td></tr>
       )}
     </>
   );
@@ -457,7 +480,7 @@ function InlinePriority({ value, auto = false, onChange }: { value: Priority; au
       {/* whitespace-nowrap + a shrink-proof flag: "Client request" is the
           longest label and was wrapping onto two lines, which made its row
           taller than every other row in the list (Derek, 2026-08-27). The
-          column is sized for it in COL_WIDTHS. */}
+          column now sizes itself to fit it. */}
       <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 128, options.length * 32 + 8)); setOpen((o) => !o); }}
         title={auto ? "Following the due date. Pick one to fix it." : "Set by hand"}
         className="inline-flex items-center gap-1 whitespace-nowrap rounded px-1 py-0.5 text-[13px] font-medium hover:bg-background" style={{ color: value === "none" ? "var(--muted)" : PRIORITY_META[value].color }}>
@@ -645,26 +668,18 @@ export function InlineDue({ value, overdue, followUpAt = null, recurrence = "non
           column over, because this class won on specificity over the band's
           own sizing (Derek: "make all the dates larger and the same size"). */}
       <button ref={ref} onClick={openIt} className={`inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-background ${textClass} ${tone}`}>
-        {/* friendlyDue by default, which says "Mon" for anything inside a
-            week — right for a list row. The drawer's dates band overrides it,
-            because "Mon" beside an "Aug 27" created date in the very next
-            column reads as two different kinds of thing. */}
-        {value ? formatValue(value) : emptyLabel}
-        {/* "how long have I got", beside the date rather than instead of it
-            (Derek: "say hey you have this many days to get this done", then
-            "make the countdown show further out than 14 days"). Always shown
-            now; dueCountdown switches to months past ~2 out so a distant date
-            stays short and doesn't compete with the genuinely urgent rows. */}
+        {/* One value, never two (Derek: "either whose dates, tomorrow or
+            days left, not not all, it's too much"). In a list row that is
+            dueOneLine: the countdown inside the week, the date past it. The
+            drawer's dates band turns the countdown off and formats the date
+            itself, because "Mon" beside an "Aug 27" created date in the very
+            next column reads as two different kinds of thing. */}
+        {isSnoozed({ followUpAt }) ? null : value ? (showCountdown ? dueOneLine(value) : formatValue(value)) : emptyLabel}
         {/* While it's snoozed the countdown answers the question you can
             actually act on — when it comes back — not how late the promise
             is, which you already know and can't do anything about today. */}
         {isSnoozed({ followUpAt }) ? (
           <span className="shrink-0 text-accent opacity-80">follow up {friendlyDue(followUpAt!)}</span>
-        ) : value && showCountdown ? (
-          // The drawer's dates band prints the countdown on its own sub-line,
-          // so it turns this one off. Left on, the Due column read "Mon
-          // 3 days left" with "3 days left" repeated directly underneath.
-          <span className="shrink-0 opacity-70">{dueCountdown(value)}</span>
         ) : null}
         {recurrence !== "none" && <I.repeat className="text-accent" />}
         {recurrence !== "none" && showRecurrenceLabel && (

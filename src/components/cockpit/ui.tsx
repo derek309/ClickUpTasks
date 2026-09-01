@@ -466,7 +466,6 @@ export const DIR_ROW = "group flex min-h-[38px] cursor-pointer items-center gap-
 // enough for a label twice as long as anything it ever holds ("Normal" in a
 // 132px Priority column), and all that slack came out of the task title,
 // which is the one column whose content actually varies.
-export const COL_WIDTHS: Record<string, string> = { status: "112px", due: "112px", followUp: "96px", created: "78px", priority: "96px", comments: "68px", assignee: "60px", contact: "130px", labels: "120px" };
 // `action` powers undo: a bulk edit hands back a one-click revert instead of
 // leaving someone to re-set every task by hand. Toasts carrying an action
 // stay on screen longer (see pushToast) so there's time to actually hit it.
