@@ -1,0 +1,125 @@
+<title>Sizing and Scheduling</title>
+<style>
+:root{--background:#eef4fb;--surface:#fff;--foreground:#1c2030;--muted:#6b7280;--border:#d0dce8;
+--accent:#1b3a5c;--accent-soft:#e1eaf4;--danger:#ef4444;--success:#16a34a;--amber:#b45309;
+--shadow-sm:0 1px 2px rgba(20,24,40,.04),0 1px 3px rgba(20,24,40,.05)}
+*{box-sizing:border-box}
+body{margin:0;padding:28px;background:var(--background);color:var(--foreground);
+font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif}
+.wrap{max-width:1180px;margin:0 auto}
+h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:30px 0 6px}
+h2:first-child{margin-top:0}
+.note{font-size:14px;color:var(--muted);margin:0 0 14px;max-width:84ch}
+.pane{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 20px;box-shadow:var(--shadow-sm)}
+.sz{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--border);background:var(--surface);
+border-radius:8px;padding:8px 13px;font-size:14px;cursor:pointer;box-shadow:var(--shadow-sm)}
+.sz.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.sz b{font-weight:600}
+.sz span{opacity:.7;font-size:13px}
+.sz.on span{opacity:.8}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.cap{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+
+.day{border:1px solid var(--border);border-radius:11px;background:var(--surface);margin-bottom:10px;overflow:hidden}
+.dayhd{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);background:#fbfcfe}
+.dayhd b{font-size:15px}
+.meter{margin-left:auto;display:flex;align-items:center;gap:9px;font-size:13px;color:var(--muted)}
+.bar{width:150px;height:8px;border-radius:99px;background:var(--border);overflow:hidden;display:flex}
+.seg{height:100%}
+.task{display:flex;align-items:center;gap:10px;padding:9px 14px;border-top:1px solid var(--border);font-size:15px}
+.task:first-of-type{border-top:0}
+.pri{width:3px;align-self:stretch;border-radius:2px;margin:-9px 0 -9px -14px;margin-right:8px}
+.chip{font-size:12px;border-radius:5px;padding:1px 7px;font-weight:600;white-space:nowrap}
+.c-q{background:#eef2ff;color:#4338ca}.c-h{background:#ecfdf5;color:#047857}
+.c-f{background:#fff7ed;color:var(--amber)}.c-m{background:#fef2f2;color:var(--danger)}
+.who{margin-left:auto;font-size:13px;color:var(--muted);white-space:nowrap}
+.over{padding:9px 14px;border-top:1px dashed var(--danger);background:#fef2f2;font-size:14px;color:var(--danger)}
+.spill{display:flex;align-items:center;gap:10px;padding:9px 14px;border-top:1px solid var(--border);font-size:15px;opacity:.55}
+.ask{margin-top:12px;border:1px solid var(--border);border-radius:10px;background:var(--background);padding:12px 14px;
+box-shadow:inset 0 2px 5px rgba(20,24,40,.06);font-size:15px}
+.ask b{font-weight:600}
+.verdict{display:inline-block;border-radius:6px;padding:2px 9px;font-weight:700;font-size:14px}
+.v-no{background:#fef2f2;color:var(--danger)}.v-yes{background:#ecfdf5;color:#047857}
+</style>
+<div class="wrap">
+
+<h2>1 · Sizing, on the task</h2>
+<p class="note">Four buttons, not an hours box. Nobody types "2.5" honestly on a Tuesday afternoon, and you do not
+need the precision: the decision you are making is whether three of these fit in a day, and a size answers that.
+The hours behind each size are a setting you can tune once, not something anyone enters per task.</p>
+<div class="pane">
+  <div style="font-size:19px;font-weight:700;margin-bottom:3px">Rebuild Pamela's website with AI features</div>
+  <div style="font-size:13px;color:var(--muted);margin-bottom:14px">Pamela Macias · due Fri · Progress</div>
+  <div class="cap" style="margin-bottom:7px">How big is this?</div>
+  <div class="row">
+    <span class="sz"><b>Quick</b><span>15 min</span></span>
+    <span class="sz"><b>Half day</b><span>3 h</span></span>
+    <span class="sz on"><b>Full day</b><span>6 h</span></span>
+    <span class="sz"><b>Multi-day</b><span>2 d+</span></span>
+  </div>
+</div>
+
+<h2>2 · Today, and whether it fits</h2>
+<p class="note">The plan is not a new list. It is the tasks you already have, in the order their dates demand, cut
+off at the point the day runs out. The line is the whole product: everything under it is what you are not doing
+today, said out loud instead of discovered at 6pm.</p>
+
+<div class="day">
+  <div class="dayhd">
+    <b>Today</b> <span style="color:var(--muted);font-size:13px">Tue 1 Sep</span>
+    <span class="meter">
+      <span class="bar">
+        <span class="seg" style="width:52%;background:var(--danger)"></span>
+        <span class="seg" style="width:26%;background:#f59e0b"></span>
+        <span class="seg" style="width:9%;background:var(--accent)"></span>
+      </span>
+      5 h 45 of 6 h
+    </span>
+  </div>
+  <div class="task"><span class="pri" style="background:var(--danger)"></span>Rebuild Pamela's website <span class="chip c-f">Full day</span><span class="who">Pamela Macias · due Fri</span></div>
+  <div class="over">Full day and a half day will not both fit. Everything below moves unless something moves out.</div>
+  <div class="task"><span class="pri" style="background:var(--danger)"></span>Redesign website <span class="chip c-h">Half day</span><span class="who">Nicole Scott · due Fri</span></div>
+  <div class="task"><span class="pri" style="background:#3b82f6"></span>Send Lincoln Newsletter <span class="chip c-q">Quick</span><span class="who">ClickUpLocal · due Wed</span></div>
+  <div class="spill">Process ClickUpLocal QuickBooks <span class="chip c-h">Half day</span><span class="who">moved to tomorrow</span></div>
+  <div class="spill">Create Weekly Blog Posts <span class="chip c-q">Quick</span><span class="who">moved to tomorrow</span></div>
+</div>
+
+<div class="day">
+  <div class="dayhd">
+    <b>Tomorrow</b> <span style="color:var(--muted);font-size:13px">Wed 2 Sep</span>
+    <span class="meter">
+      <span class="bar"><span class="seg" style="width:58%;background:#f59e0b"></span></span>
+      3 h 30 of 6 h
+    </span>
+  </div>
+  <div class="task"><span class="pri" style="background:#3b82f6"></span>Process ClickUpLocal QuickBooks <span class="chip c-h">Half day</span><span class="who">pushed from today</span></div>
+  <div class="task"><span class="pri" style="background:#3b82f6"></span>Create Weekly Blog Posts <span class="chip c-q">Quick</span><span class="who">pushed from today</span></div>
+  <div class="task"><span class="pri" style="background:#3b82f6"></span>Tyvke Press Release <span class="chip c-q">Quick</span><span class="who">Brian Goodell · due Wed</span></div>
+</div>
+
+<h2>3 · Can I promise Thursday?</h2>
+<p class="note">The same numbers answering the question you actually get asked on a call. It does not need a new
+screen: type a date, and it tells you what is already committed before it and whether the new work fits in what is
+left.</p>
+<div class="pane">
+  <div class="ask">
+    <b>Rebuild the offers page</b> · Full day · promised for <b>Thu 3 Sep</b><br>
+    <span style="color:var(--muted)">Between now and Thursday you have 18 h of working time and 16 h 15 already committed.</span><br>
+    <span class="verdict v-no" style="margin-top:7px">Tight, and only if nothing slips</span>
+  </div>
+  <div class="ask" style="margin-top:8px">
+    <b>Rebuild the offers page</b> · Full day · promised for <b>Mon 7 Sep</b><br>
+    <span style="color:var(--muted)">30 h of working time, 19 h 45 committed.</span><br>
+    <span class="verdict v-yes" style="margin-top:7px">Fits, with 10 h spare</span>
+  </div>
+</div>
+
+<h2>What this needs from you</h2>
+<p class="note" style="max-width:none">One field on a task (the size) and one setting (hours in your working day, and which days you work).
+Nothing else. Tasks with no size are counted at half a day so the plan is never silently wrong, and shown with a
+faint marker so it is obvious which numbers are guesses.
+<br><br>
+The thing I would not build first: per-person capacity across the team. It doubles the model and you are the
+constraint right now, not Michaella.</p>
+
+</div>

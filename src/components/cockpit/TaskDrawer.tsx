@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, clientStatusMeta,
-  TaskAction, TaskActionKind, prettyLinkName, effectiveStatus,
+  TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, SIZE_META, SIZE_ORDER,
   STATUS_META, STATUS_ORDER, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY, WEEKDAY_LABEL, startSignal, isSnoozed, daysUntilDue, formatDue, dueCountdown,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
@@ -757,6 +757,18 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         <select value={task.priority} onChange={(e) => onPatch({ priority: e.target.value as Priority })} className="rounded-[5px] bg-transparent py-0.5 pl-1 pr-1 text-[13px] outline-none" style={{ color: PRIORITY_META[task.priority].color }}>{manualPriorityOptions(task.priority).map((p) => (<option key={p} value={p}>{PRIORITY_META[p].label}</option>))}</select>
       </span>
       {task.labelIds.map((id) => { const l = labelById(id); return l ? (<button key={id} onClick={() => onToggleLabel(id)} className="group inline-flex items-center gap-1 rounded-[5px] border px-2 py-1 text-[13px] font-medium" style={{ background: l.color + "1a", color: l.color, borderColor: l.color + "40" }}>{l.name} <span className="opacity-50 group-hover:opacity-100">×</span></button>) : null; })}
+      {/* Sizing sits with the other chips, not in a panel of its own: it is
+          one decision, made once, and it belongs beside the stage and the
+          assignee rather than somewhere you have to go looking for. */}
+      <span className={`${chip} gap-0.5 px-1 py-0.5`} title="Rough size, used to fill a day. Not time tracking.">
+        {SIZE_ORDER.map((sz) => (
+          <button key={sz} onClick={() => onPatch({ size: task.size === sz ? null : sz })}
+            title={`${SIZE_META[sz].label} · ${SIZE_META[sz].hint}`}
+            className={`rounded-[4px] px-1.5 py-0.5 text-[13px] ${task.size === sz ? "bg-accent font-semibold text-white" : "text-muted hover:bg-background hover:text-foreground"}`}>
+            {SIZE_META[sz].label}
+          </button>
+        ))}
+      </span>
       <div className="relative">
         <button onClick={() => setLabelOpen((o) => !o)} className="inline-flex items-center gap-0.5 rounded-[5px] border border-dashed px-2 py-1 text-[13px] text-muted hover:bg-surface"><I.plus /> Label</button>
         {labelOpen && (<div className="absolute z-30 mt-1 w-40 rounded-lg border bg-surface p-1 shadow-lg">{labels.map((l) => { const on = task.labelIds.includes(l.id); return (<button key={l.id} onClick={() => onToggleLabel(l.id)} className="flex w-full items-center gap-2 rounded px-2 py-1 text-[13px] hover:bg-background"><span className="h-2.5 w-2.5 rounded-full" style={{ background: l.color }} /> {l.name}{on && <I.check className="ml-auto text-accent" />}</button>); })}</div>)}

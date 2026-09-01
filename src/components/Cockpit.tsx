@@ -11,6 +11,7 @@ import {
   advanceDue,
   effectivePriority,
   effectiveStatus,
+  buildPlan,
   htmlToText,
   recurrenceResetFields,
   isOverdue,
@@ -96,6 +97,7 @@ import { subscribeRealtime } from "@/lib/realtime";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import TeamChat from "./TeamChat";
 import AddClientModal from "./AddClientModal";
+import { PlanView } from "./cockpit/PlanView";
 
 
 import { I, Avatar, SideItem, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFromName, LIST_COLUMNS, SearchableSelect, type FilterState, type SortBy, type Toast } from "./cockpit/ui";
@@ -241,7 +243,23 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // bell dropdown already covers real mentions/assignments; Activity's own
   // "Unmatched email" section was mostly automated noise — WordPress,
   // Stripe, Amazon — not real leads).
-  const [dashboardView, setDashboardView] = useState<"work" | "completed">("work");
+  const [dashboardView, setDashboardView] = useState<"work" | "plan" | "completed">("work");
+  // Hours in YOUR working day. Deliberately local rather than a workspace
+  // setting: how long your day is is a personal fact, and app_settings only
+  // stores booleans anyway. Read after mount so the server and the first
+  // client render agree.
+  const [workdayHours, setWorkdayHoursState] = useState(6);
+  useEffect(() => {
+    // Deferred a frame rather than set in the effect body: a setState there
+    // triggers a cascading render. It cannot be a lazy useState initializer
+    // either, because localStorage does not exist during the server render.
+    const r = requestAnimationFrame(() => {
+      const raw = Number(localStorage.getItem("workdayHours"));
+      if (raw >= 1 && raw <= 16) setWorkdayHoursState(raw);
+    });
+    return () => cancelAnimationFrame(r);
+  }, []);
+  const setWorkdayHours = (h: number) => { setWorkdayHoursState(h); localStorage.setItem("workdayHours", String(h)); };
   // All Tasks defaults to just your own — admins can flip to "all"; for VAs
   // this is inert either way since scopedTasks already fully restricts them.
   const [allTasksScope, setAllTasksScope] = useState<"mine" | "all">("mine");
@@ -2456,6 +2474,22 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const filtersActive = filters.status !== "all" || filters.assignee !== "all" || filters.priority !== "all";
   const activeFilterCount = [filters.status !== "all", filters.assignee !== "all", filters.priority !== "all", sortBy !== "due"].filter(Boolean).length;
 
+  // My open work in the order its dates demand, then laid across the days.
+  // Same ordering the list uses, so the plan never disagrees with the board
+  // about what is next.
+  const planDays = useMemo(() => {
+    const mine = tasks
+      .filter((t) => t.status !== "done" && t.assigneeId === me.id)
+      .sort((a, b) => {
+        const da = effectiveDueDate(a) ?? "9999";
+        const db = effectiveDueDate(b) ?? "9999";
+        if (da !== db) return da.localeCompare(db);
+        return PRIORITY_META[effectivePriority(a)].rank - PRIORITY_META[effectivePriority(b)].rank;
+      });
+    return buildPlan(mine, workdayHours, 5);
+  }, [tasks, workdayHours, me.id]);
+  const planUnsized = useMemo(() => planDays.flatMap((d) => d.planned).filter((p) => !p.task.size).length, [planDays]);
+
   // due-date buckets relative to the fixed "today" — "This week"/"Next week"
   // are calendar weeks starting Sunday, not rolling 7-day windows, so the
   // boundary always falls on a Saturday regardless of what day "today" is.
@@ -4484,6 +4518,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <div className="flex flex-col gap-2">
               <div className="flex rounded-lg bg-background p-0.5">
                 <button onClick={() => setDashboardView("work")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "work" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Work</button>
+                <button onClick={() => setDashboardView("plan")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "plan" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Plan</button>
                 <button onClick={() => setDashboardView("completed")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "completed" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Completed</button>
               </div>
             </div>
@@ -4625,6 +4660,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <div className="flex flex-wrap items-center gap-2">
               <div className="inline-flex overflow-hidden rounded-md border">
                 <button onClick={() => setDashboardView("work")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "work" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Work</button>
+                <button onClick={() => setDashboardView("plan")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "plan" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Plan</button>
                 <button onClick={() => setDashboardView("completed")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "completed" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Completed</button>
               </div>
               {/* De-emphasized on purpose — the Dashboard is meant to be the
@@ -4737,6 +4773,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             starredLists={starredLists} onToggleStarList={toggleStarList} />
         ) : personalView ? (
           <GroupedList key={`${groupBy}:${activeClient === "all"}`} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["status", "due"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} onAddComment={addComment} hideEmpty={hideEmpty} colOrder={colOrder} onReorderCols={reorderCols} />
+        ) : myWork && dashboardView === "plan" ? (
+          <PlanView days={planDays} budgetHours={workdayHours} onBudget={setWorkdayHours}
+            clientById={clientById} projectById={projectById} onOpen={setOpenTaskId}
+            onSize={(taskId, size) => patchTask(taskId, { size })} unsizedCount={planUnsized} />
         ) : myWork && dashboardView === "completed" ? (
           // Relocated from the Clients directory (Derek: "makes more sense
           // there") — same completionLog data, day-grouped feed of who

@@ -1497,6 +1497,8 @@ export interface Task {
   followUpAt?: string | null;
   /** Priority still follows the due date. Cleared the moment someone sets one by hand. */
   priorityAuto?: boolean;
+  /** Rough size, for filling a day. Null means nobody has said. */
+  size?: TaskSize | null;
   recurrenceNth?: number;
   /** 0 = Sunday .. 6 = Saturday, matching Date#getUTCDay. */
   recurrenceWeekday?: number;
@@ -1706,6 +1708,112 @@ export function effectiveStatus(task: { status: TaskStatus; due: string | null; 
   if (!date) return "todo";
   const left = daysUntilDue(date, today);
   return left !== null && left <= GET_STARTED_DAYS ? "get_started" : "todo";
+}
+
+// How big a task is, for filling a day. Not time tracking.
+//
+// Five buckets, not a number: nobody types "2.5" honestly on a Tuesday
+// afternoon, and the only decision being made is whether three of these fit
+// today. "hour" exists because the gap from 15 minutes to half a day was a
+// cliff, and most real work lands in it.
+export type TaskSize = "quick" | "hour" | "half" | "full" | "multi";
+
+export const SIZE_META: Record<TaskSize, { label: string; hint: string; hours: number }> = {
+  quick: { label: "Quick", hint: "15 min", hours: 0.25 },
+  hour: { label: "An hour", hint: "1 h", hours: 1 },
+  half: { label: "Half day", hint: "3 h", hours: 3 },
+  full: { label: "Full day", hint: "6 h", hours: 6 },
+  // Counted as a full day per day it appears in: a multi-day task fills every
+  // day it touches, so treating it as one 6 hour block would let the rest of
+  // the week look free when it is not.
+  multi: { label: "Multi-day", hint: "2 d+", hours: 6 },
+};
+export const SIZE_ORDER: TaskSize[] = ["quick", "hour", "half", "full", "multi"];
+
+// A task nobody has sized still has to occupy the day, or the plan quietly
+// promises time that does not exist. Half a day is the honest middle: it is
+// wrong in both directions rather than optimistic in one.
+export const UNSIZED_HOURS = 3;
+
+export function taskHours(task: { size?: TaskSize | null }): number {
+  return task.size ? SIZE_META[task.size].hours : UNSIZED_HOURS;
+}
+
+// Fills a day with the work its dates demand, and says where it runs out.
+//
+// The cut-off is the whole point. Everything past it is what you are not
+// doing today, said now rather than discovered at six o'clock. So a task that
+// does not fit is still returned, marked, rather than hidden.
+//
+// One task larger than the whole day (a Multi-day, or a Full day against a
+// short working day) always takes the first slot rather than being ruled out
+// for not fitting. Otherwise the biggest, most urgent thing on the list is
+// the one thing the plan never shows you.
+export type PlannedTask<T> = { task: T; hours: number; fits: boolean };
+export function fillDay<T extends { size?: TaskSize | null }>(
+  ordered: T[],
+  budgetHours: number,
+): { planned: PlannedTask<T>[]; usedHours: number; overflowAt: number | null } {
+  const planned: PlannedTask<T>[] = [];
+  let used = 0;
+  let overflowAt: number | null = null;
+  for (const task of ordered) {
+    const hours = taskHours(task);
+    const first = planned.length === 0;
+    const fits = first || used + hours <= budgetHours;
+    if (fits) used += hours;
+    else if (overflowAt === null) overflowAt = planned.length;
+    planned.push({ task, hours, fits });
+  }
+  return { planned, usedHours: used, overflowAt };
+}
+
+// Lays open work across the next few working days.
+//
+// Nothing is stored: the plan is a reading of the tasks and their dates, so
+// it is right the moment anything moves and there is no second copy to fall
+// out of step. Weekends are skipped rather than filled, and whatever does not
+// fit in a day rolls to the next.
+//
+// The order is the order the dates demand, decided by the caller. This only
+// answers "given that order, what actually fits".
+export type PlanDay<T> = { date: string; planned: PlannedTask<T>[]; usedHours: number; budgetHours: number };
+export function buildPlan<T extends { size?: TaskSize | null }>(
+  ordered: T[],
+  budgetHours: number,
+  days: number,
+  today: string = TODAY,
+): PlanDay<T>[] {
+  const out: PlanDay<T>[] = [];
+  const queue = [...ordered];
+  let date = today;
+  // If today is a weekend, start on Monday rather than planning a day nobody
+  // is working.
+  while (isWeekend(date)) date = addDaysIso(date, 1);
+  while (out.length < days) {
+    const { planned, usedHours } = fillDay(queue, budgetHours);
+    const taken = planned.filter((p) => p.fits);
+    out.push({ date, planned: taken, usedHours, budgetHours });
+    queue.splice(0, taken.length);
+    if (queue.length === 0 && out.length >= 1) {
+      // Still pad out the requested days, so an empty Thursday reads as free
+      // rather than simply missing.
+      while (out.length < days) {
+        date = addDaysIso(date, 1);
+        while (isWeekend(date)) date = addDaysIso(date, 1);
+        out.push({ date, planned: [], usedHours: 0, budgetHours });
+      }
+      break;
+    }
+    date = addDaysIso(date, 1);
+    while (isWeekend(date)) date = addDaysIso(date, 1);
+  }
+  return out;
+}
+
+export function isWeekend(iso: string): boolean {
+  const dow = new Date(`${iso}T12:00:00Z`).getUTCDay();
+  return dow === 0 || dow === 6;
 }
 
 export const manualPriorityOptions = (current: Priority): Priority[] =>

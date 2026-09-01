@@ -33,6 +33,11 @@ import {
   derivedPriority,
   effectivePriority,
   effectiveStatus,
+  fillDay,
+  buildPlan,
+  isWeekend,
+  taskHours,
+  SIZE_META,
   googleLinkName,
   isUselessTitle,
   TASK_ACTION_ORDER,
@@ -868,5 +873,70 @@ describe("moving into Get started as the date closes in", () => {
     // arrives, it is the date the task is judged on and it counts.
     expect(effectiveStatus({ status: "todo", due: null, followUpAt: "2026-09-01" }, today)).toBe("get_started");
     expect(effectiveStatus({ status: "todo", due: null, followUpAt: "2026-08-25" }, today)).toBe("get_started");
+  });
+});
+
+describe("filling a day", () => {
+  const t = (size: "quick" | "hour" | "half" | "full" | "multi" | null) => ({ size });
+
+  it("sizes an unsized task rather than treating it as free", () => {
+    expect(taskHours({ size: null })).toBe(3);
+    expect(taskHours({ size: "quick" })).toBe(0.25);
+  });
+  it("stops where the day runs out and marks the rest", () => {
+    const { planned, usedHours, overflowAt } = fillDay([t("full"), t("half"), t("quick")], 6);
+    expect(planned.map((p) => p.fits)).toEqual([true, false, false]);
+    expect(usedHours).toBe(6);
+    expect(overflowAt).toBe(1);
+  });
+  it("packs what does fit", () => {
+    const { planned, usedHours, overflowAt } = fillDay([t("hour"), t("half"), t("quick")], 6);
+    expect(planned.every((p) => p.fits)).toBe(true);
+    expect(usedHours).toBe(4.25);
+    expect(overflowAt).toBeNull();
+  });
+  // Otherwise the biggest, most urgent thing on the list is the one thing the
+  // plan never shows you.
+  it("always shows a task bigger than the whole day", () => {
+    const { planned, overflowAt } = fillDay([t("multi"), t("quick")], 3);
+    expect(planned[0].fits).toBe(true);
+    expect(overflowAt).toBe(1);
+  });
+  it("returns the overflow rather than dropping it", () => {
+    const { planned } = fillDay([t("full"), t("full"), t("full")], 6);
+    expect(planned).toHaveLength(3);
+  });
+  it("counts a multi-day as a full day, so the rest of the week is not free", () => {
+    expect(SIZE_META.multi.hours).toBe(SIZE_META.full.hours);
+  });
+});
+
+describe("laying work across the week", () => {
+  const t = (id: string, size: "quick" | "hour" | "half" | "full" | null) => ({ id, size });
+  const tue = "2026-09-01"; // a Tuesday
+
+  it("rolls what does not fit into the next day", () => {
+    const plan = buildPlan([t("a", "full"), t("b", "full"), t("c", "quick")], 6, 3, tue);
+    expect(plan[0].planned.map((p) => p.task.id)).toEqual(["a"]);
+    expect(plan[1].planned.map((p) => p.task.id)).toEqual(["b"]);
+    expect(plan[2].planned.map((p) => p.task.id)).toEqual(["c"]);
+  });
+  it("skips the weekend", () => {
+    const plan = buildPlan([t("a", "full"), t("b", "full"), t("c", "full")], 6, 3, "2026-09-04"); // Friday
+    expect(plan.map((d) => d.date)).toEqual(["2026-09-04", "2026-09-07", "2026-09-08"]);
+    expect(plan.every((d) => !isWeekend(d.date))).toBe(true);
+  });
+  it("starts on Monday when asked on a Saturday", () => {
+    expect(buildPlan([t("a", "quick")], 6, 1, "2026-09-05")[0].date).toBe("2026-09-07");
+  });
+  it("pads the remaining days as free rather than omitting them", () => {
+    const plan = buildPlan([t("a", "quick")], 6, 4, tue);
+    expect(plan).toHaveLength(4);
+    expect(plan.slice(1).every((d) => d.planned.length === 0 && d.usedHours === 0)).toBe(true);
+  });
+  it("never loses a task", () => {
+    const ids = ["a", "b", "c", "d", "e"];
+    const plan = buildPlan(ids.map((i) => t(i, "half")), 6, 5, tue);
+    expect(plan.flatMap((d) => d.planned.map((p) => p.task.id)).sort()).toEqual(ids);
   });
 });
