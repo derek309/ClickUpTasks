@@ -374,6 +374,15 @@ export function CollapsibleText({ text, className, maxChars = LONG_TEXT_CHAR_THR
 
 export type FilterState = { status: TaskStatus | "all"; assignee: string; priority: Priority | "all" };
 export type SortBy = "manual" | "due" | "followUp" | "priority" | "title" | "status" | "assignee" | "comments" | "created";
+
+// How one section of the app is being read: what the list is grouped by, what
+// it is sorted by, and which way. Kept per section rather than globally, so
+// All Tasks by due date and a client list by priority can both be true.
+export type ViewPrefs = {
+  groupBy: "project" | "status" | "priority" | "due";
+  sortBy: SortBy;
+  sortDir: "asc" | "desc";
+};
 // Comments moved inline next to the task title, shown only when non-zero —
 // stays sortable via onSort even without a column header (Cockpit's sort
 // menu still offers it). Priority came back as a real column (Derek,

@@ -103,7 +103,7 @@ import { usePersisted } from "@/lib/usePersisted";
 import { PlanView } from "./cockpit/PlanView";
 
 
-import { I, Avatar, SideItem, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFromName, LIST_COLUMNS, SearchableSelect, type FilterState, type SortBy, type Toast } from "./cockpit/ui";
+import { I, Avatar, SideItem, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFromName, LIST_COLUMNS, SearchableSelect, type FilterState, type SortBy, type ViewPrefs, type Toast } from "./cockpit/ui";
 import { BulkAddModal, type ParsedRow } from "./cockpit/BulkAddModal";
 import { RemindClientModal } from "./cockpit/RemindClientModal";
 import { ConfirmModal, PromptModal, LinkFormModal, MergeTaskModal, MergeClientModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
@@ -259,12 +259,40 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // All Tasks defaults to just your own — admins can flip to "all"; for VAs
   // this is inert either way since scopedTasks already fully restricts them.
   const [allTasksScope, setAllTasksScope] = useState<"mine" | "all">("mine");
-  // View preferences survive a refresh: they are decisions about how you
-  // want to work, and resetting them every reload quietly undoes that.
-  const [groupBy, setGroupBy] = usePersisted<"project" | "status" | "priority" | "due">("groupBy", "priority", (v) => ["project", "status", "priority", "due"].includes(v as string));
+  // View preferences survive a refresh AND are kept per section (Derek: "if
+  // I change a setting stop resetting it, keep it for that section"). They
+  // were one global set of three values, and All Tasks additionally forced
+  // its own grouping and sort every time you opened it — so grouping the
+  // list by priority held until you clicked away and back, then silently
+  // went to due date again.
+  //
+  // Sections, not individual clients: how you like to read a client's task
+  // list is the same thought whichever client it is, and a preference stored
+  // once per client would be a preference you have to set thirty-five times.
+  const sectionKey = myWork ? "mywork" : personalView ? "personal" : activeProject ? "project" : activeClient === "all" ? "alltasks" : "client";
+  // All Tasks opens grouped by when it comes back and sorted by priority
+  // (Derek, 2026-09-01). The "due" grouping reads the follow-up date first
+  // and falls back to the due date, so a task you said you would look at
+  // today sits in Today even when it is not due for a week — which is the
+  // whole reason the follow-up date exists. Within a day, priority decides
+  // the order: the day says when, the priority says what first.
+  //
+  // A starting point, used only until you choose otherwise, rather than
+  // something reapplied on every visit.
+  const SECTION_DEFAULTS: Record<string, ViewPrefs> = {
+    alltasks: { groupBy: "due", sortBy: "priority", sortDir: "asc" },
+  };
+  const FALLBACK_PREFS: ViewPrefs = { groupBy: "priority", sortBy: "due", sortDir: "asc" };
+  const [viewPrefs, setViewPrefs] = usePersisted<Record<string, ViewPrefs>>("viewPrefs", {}, (v) => !!v && typeof v === "object" && !Array.isArray(v));
+  const prefs = viewPrefs[sectionKey] ?? SECTION_DEFAULTS[sectionKey] ?? FALLBACK_PREFS;
+  const setPrefs = (patch: Partial<ViewPrefs>) => setViewPrefs({ ...viewPrefs, [sectionKey]: { ...prefs, ...patch } });
+  const groupBy = prefs.groupBy;
+  const sortBy = prefs.sortBy;
+  const sortDir = prefs.sortDir;
+  const setGroupBy = (g: ViewPrefs["groupBy"]) => setPrefs({ groupBy: g });
+  const setSortBy = (sb: SortBy) => setPrefs({ sortBy: sb });
+  const setSortDir = (d: "asc" | "desc") => setPrefs({ sortDir: d });
   const [filters, setFilters] = useState<FilterState>({ status: "all", assignee: "all", priority: "all" });
-  const [sortBy, setSortBy] = usePersisted<SortBy>("sortBy", "due", (v) => typeof v === "string");
-  const [sortDir, setSortDir] = usePersisted<"asc" | "desc">("sortDir", "asc", (v) => v === "asc" || v === "desc");
   // Title, client, follow up, due (Derek: "on all tasks only show title,
   // client, follow and due date by default"). Stage, priority and created
   // were on by default and are all derivable from what is left: the priority
@@ -396,18 +424,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (view === "clients" || view === "projects") setActiveProject(null);
     if (view === "teamchat") markTeamChatRead();
     // All Tasks is the flat everything-list, so it can't stay scoped to one
-    // client or project. It opens grouped and sorted by due date (Derek,
-    // 2026-08-26: "just want to see all tasks as well by due date") — the
-    // point of the view is what's coming up, not which client it belongs to.
-    // groupBy isn't persisted, and the vault folder picker already sets it on
-    // navigation the same way, so this is a starting point you can change
-    // from the Group by control, not a preference being overwritten.
+    // client or project. Its due-date grouping is now a default for that
+    // section rather than something reapplied here on every visit, which was
+    // overwriting the grouping you had just chosen.
     if (view === "alltasks") {
       setActiveClient("all");
       setActiveProject(null);
-      setGroupBy("due");
-      setSortBy("due");
-      setSortDir("asc");
     }
   };
   // Team Chat is a real view now, not an overlay — open the page on its Chat
