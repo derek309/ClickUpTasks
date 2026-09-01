@@ -139,7 +139,12 @@ export async function POST(req: NextRequest) {
     const ghlMessageId: string | null =
       json?.messageId ?? json?.message?.id ?? json?.conversationId ?? json?.id ?? null;
     if (!ghlMessageId) console.warn("[ghl/message] send succeeded but no id found in response:", JSON.stringify(json).slice(0, 500));
-    return NextResponse.json({ ok: true, ghlMessageId });
+    // Returned separately from the message id, which has historically fallen
+    // back to it. Stored on the sent row, it becomes the thread key: the
+    // client's reply on this conversation then finds the task you sent from
+    // rather than a generic Conversation task.
+    const ghlConversationId: string | null = json?.conversationId ?? json?.conversation?.id ?? null;
+    return NextResponse.json({ ok: true, ghlMessageId, ghlConversationId });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "GoHighLevel request failed." }, { status: 502 });
   }

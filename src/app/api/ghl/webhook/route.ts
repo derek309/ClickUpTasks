@@ -149,6 +149,11 @@ async function handleMessageReply(body: any, custom: any) {
   const ghlMessageId: string = typeof custom?.messageId === "string" && custom.messageId
     ? custom.messageId
     : `synthetic:${ghlContactId}:${channel}:${hourBucket}:${createHash("sha256").update(text).digest("hex").slice(0, 16)}`;
+  // GHL names this differently depending on which workflow action fired.
+  const ghlConversationId: string | null =
+    (typeof custom?.conversationId === "string" && custom.conversationId)
+    || (typeof custom?.conversation_id === "string" && custom.conversation_id)
+    || null;
   const messageId = "msg_" + crypto.randomUUID();
   const { error } = await supabaseAdmin.from("messages").insert({
     id: messageId,
@@ -159,6 +164,9 @@ async function handleMessageReply(body: any, custom: any) {
     subject: typeof custom?.subject === "string" && custom.subject.trim() ? custom.subject : null,
     body: text,
     ghl_message_id: ghlMessageId,
+    // The thread key, when the webhook sends one. Lets the next reply on this
+    // conversation find whatever task this one landed on.
+    ghl_conversation_id: ghlConversationId,
     created_by: null,
   });
   // A duplicate delivery of the same reply (GHL retries on a non-2xx, or the
@@ -170,12 +178,15 @@ async function handleMessageReply(body: any, custom: any) {
     if (!error.message.includes("duplicate key")) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ ok: true });
   }
-  // Scope this message to its Conversation task (see the task drawer's
-  // Activity feed filter, which reads messages.task_id) — resolved/created
-  // after the insert above, not before, so a retried delivery still can't
-  // double-bump the task's due date; this is a best-effort backfill, not
-  // part of the duplicate-delivery guard.
-  const taskId = await upsertConversationTask(contact, ghlContactId);
+  // Scope this message to a task (see the task drawer's Activity feed filter,
+  // which reads messages.task_id) — resolved after the insert above, not
+  // before, so a retried delivery still can't double-bump the task's due
+  // date; this is a best-effort backfill, not part of the duplicate guard.
+  //
+  // A task already working this conversation wins over the generic
+  // Conversation task: if you sent from a task, the reply belongs there.
+  const taskId = (await taskForConversation(contact.id, ghlConversationId))
+    ?? await upsertConversationTask(contact, ghlContactId);
   if (taskId) await supabaseAdmin.from("messages").update({ task_id: taskId }).eq("id", messageId);
   const snippet = text.replace(/\s+/g, " ").trim().slice(0, 80);
   const notifText = channel === "sms"
@@ -271,3 +282,16 @@ async function handleCall(body: any, custom: any) {
 
 // resolveTrackedClientId / upsertConversationTask now live in
 // @/lib/ghlConversationTask (shared with the appointment sync poll).
+
+// The task this conversation was last seen on, if any. Mirrors the Gmail
+// side's resolveTaskForThread: the binding lives on the messages themselves,
+// so sending from a task is all it takes to claim the thread.
+async function taskForConversation(contactId: string, conversationId: string | null): Promise<string | null> {
+  if (!conversationId) return null;
+  const { data } = await supabaseAdmin
+    .from("messages").select("task_id")
+    .eq("contact_id", contactId).eq("ghl_conversation_id", conversationId)
+    .not("task_id", "is", null)
+    .order("created_at", { ascending: false }).limit(1);
+  return (data?.[0]?.task_id as string | undefined) ?? null;
+}

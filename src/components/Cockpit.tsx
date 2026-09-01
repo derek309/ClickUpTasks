@@ -3301,7 +3301,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       const m: Message = {
         id: newId("msg_"), contactId: contact.id, clientId, taskId, channel, direction: "outbound",
         subject: channel === "email" && subject.trim() ? subject.trim() : null, body,
-        ghlMessageId: j.ghlMessageId ?? null, createdBy: me.id, at: new Date().toISOString(), read: true,
+        ghlMessageId: j.ghlMessageId ?? null, ghlConversationId: j.ghlConversationId ?? null, createdBy: me.id, at: new Date().toISOString(), read: true,
         attachments, cc: emailCc, bcc: emailBcc,
       };
       setMessages((ms) => [...ms, m]);

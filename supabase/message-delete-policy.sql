@@ -19,3 +19,13 @@ create policy messages_delete on messages for delete to authenticated using (is_
 -- id at all (chat, SMS, anything from GoHighLevel).
 create unique index if not exists messages_gmail_message_id_key
   on messages(gmail_message_id) where gmail_message_id is not null;
+
+-- Added later: which GoHighLevel conversation a message belongs to. The GHL
+-- equivalent of gmail_thread_id — what lets an inbound reply find the task it
+-- belongs to instead of falling to a generic "Reply to <client>" task. The
+-- lookup is always "newest message on this conversation that knows its task",
+-- so conversation plus recency is exactly the index for it.
+alter table messages add column if not exists ghl_conversation_id text;
+create index if not exists messages_ghl_conversation_idx
+  on messages(ghl_conversation_id, created_at desc)
+  where ghl_conversation_id is not null;

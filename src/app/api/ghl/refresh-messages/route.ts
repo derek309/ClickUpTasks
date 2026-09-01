@@ -87,6 +87,19 @@ export async function POST(req: NextRequest) {
   // TaskDrawer's Activity feed filters messages by task_id, so a reply sent
   // directly in GHL — the whole point of this route — would otherwise never
   // show up there even after a successful backfill).
+  // Conversations already being worked on a real task. Read up front, one
+  // query for the contact, rather than per message.
+  const convTaskIds = new Map<string, string>();
+  {
+    const { data: bound } = await supabaseAdmin
+      .from("messages").select("ghl_conversation_id, task_id, created_at")
+      .eq("contact_id", contactId).not("ghl_conversation_id", "is", null).not("task_id", "is", null)
+      .order("created_at", { ascending: false }).limit(200);
+    for (const r of bound ?? []) {
+      const cid = r.ghl_conversation_id as string;
+      if (!convTaskIds.has(cid)) convTaskIds.set(cid, r.task_id as string);
+    }
+  }
   const { data: openTask } = await supabaseAdmin.from("tasks").select("id").eq("contact_id", contactId).eq("priority", "conversation").neq("status", "done").limit(1).maybeSingle();
   const taskId: string | null = openTask?.id ?? null;
 
@@ -144,9 +157,16 @@ export async function POST(req: NextRequest) {
             // summary instead of a real message body.
             body: channel === "call" ? formatCallBody(m) : (m.body ?? ""),
             ghl_message_id: m.id,
+            // The thread key. Stored so the next message on this conversation
+            // can find whatever task it landed on last time, instead of every
+            // reply falling to a generic Conversation task.
+            ghl_conversation_id: conv.id ?? null,
             created_by: null,
             created_at: m.dateAdded,
-            task_id: taskId,
+            // A task already bound to this conversation wins over the open
+            // Conversation task: if this exchange is being worked somewhere,
+            // that is where the rest of it belongs.
+            task_id: convTaskIds.get(conv.id) ?? taskId,
           };
         })
         .filter((r): r is NonNullable<typeof r> => r !== null);

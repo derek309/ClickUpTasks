@@ -1283,6 +1283,9 @@ export interface Message {
    * supabase/message-gmail-thread-id.sql and resolveTaskForThread in
    * src/lib/inboundIngest.ts. */
   gmailThreadId?: string | null;
+  /** The GoHighLevel conversation this message belongs to. The GHL equivalent
+   *  of gmailThreadId: what lets a reply find the task it belongs to. */
+  ghlConversationId?: string | null;
   createdBy: string | null; // roster id for outbound; null for inbound
   at: string; // ISO
   /** Shared team-wide, not per-user (one flag per message). Outbound rows are
