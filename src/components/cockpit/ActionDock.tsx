@@ -82,6 +82,12 @@ export function ActionDock({
   // one field should not throw away the other three, so this is one flag over
   // the whole card rather than a mode per row.
   const [editingNext, setEditingNext] = useState(false);
+  // Type to filter the menu. Nine choices is past the point where scanning
+  // beats typing two letters, and the filter costs nothing when you would
+  // rather click: an empty box is the full menu.
+  const [menuQ, setMenuQ] = useState("");
+  const [menuIdx, setMenuIdx] = useState(0);
+  const menuInputRef = useRef<HTMLInputElement>(null);
   const [size, setSize] = useState<TaskSize | null>(null);
   const [assignee, setAssignee] = useState<string | null>(null);
   const [nextStep, setNextStep] = useState("");
@@ -150,6 +156,7 @@ export function ActionDock({
     if ((v === "chat" || v === "email" || v === "sms") && onOpenCompose) { onOpenCompose(v); setView("closed"); return; }
     setView(v);
     setBody(""); setNextStep(""); setNextDue(null); setStage(null); setAiReason("");
+    setMenuQ(""); setMenuIdx(0);
     setWantNext(v !== "closed" && v !== "menu" && v !== "askTask" ? TASK_ACTION_META[v as TaskActionKind].needsNextStep : false);
     // Whoever owns the task is who a question about it usually goes to, so
     // they start selected rather than whoever happens to sort first.
@@ -543,6 +550,18 @@ export function ActionDock({
   // you press. Nine choices is a lot to hunt through when you use the same
   // three every day.
   const menuOrder: TaskActionKind[] = menuGroups.flatMap((g) => g.kinds);
+  // "ask" rides in the same match list as the actions, so typing "as" and
+  // pressing Enter reaches it like everything else rather than it being the
+  // one item the keyboard cannot get to.
+  const menuQl = menuQ.trim().toLowerCase();
+  const matches = (label: string) => label.toLowerCase().includes(menuQl);
+  const shownGroups = menuGroups
+    .map((g) => ({ ...g, kinds: g.kinds.filter((k) => !menuQl || matches(menuLabel(k)) || matches(TASK_ACTION_META[k].label)) }))
+    .filter((g) => g.kinds.length > 0);
+  const askShown = !menuQl || matches("ask claude about this task");
+  // Flat, in draw order: what ↑/↓ walks and what Enter opens.
+  const menuHits: (TaskActionKind | "ask")[] = [...shownGroups.flatMap((g) => g.kinds), ...(askShown ? ["ask" as const] : [])];
+  const openHit = (h: TaskActionKind | "ask") => openPanel(h === "ask" ? "askTask" : h);
 
   // Kept current in an effect rather than during render, so the shortcut
   // handler always sees what is actually drawn without the effect re-binding
@@ -602,31 +621,55 @@ export function ActionDock({
 
         {view === "menu" && (
           <div>
-            <div className="mb-2.5 flex items-center justify-between">
-              <span className="text-[15px] font-semibold">What are you doing?</span>
-              <button onClick={() => openPanel("closed")} className="rounded px-1 text-muted hover:text-foreground">✕</button>
+            <div className="mb-2 flex items-center gap-2">
+              <span className="shrink-0 text-[15px] font-semibold">What are you doing?</span>
+              {/* Filter, not search: it narrows the same menu in place rather
+                  than replacing it with a list of results, so the grouping
+                  and the number keys survive typing. */}
+              <input ref={menuInputRef} autoFocus value={menuQ}
+                onChange={(e) => { setMenuQ(e.target.value); setMenuIdx(0); }}
+                onKeyDown={(e) => {
+                  if (e.key === "ArrowDown") { e.preventDefault(); setMenuIdx((i) => Math.min(i + 1, menuHits.length - 1)); return; }
+                  if (e.key === "ArrowUp") { e.preventDefault(); setMenuIdx((i) => Math.max(i - 1, 0)); return; }
+                  if (e.key === "Enter") { e.preventDefault(); if (menuHits[menuIdx]) openHit(menuHits[menuIdx]); return; }
+                  // Digits are shortcuts only while the box is empty. Once you
+                  // are typing, a number is a number — and nothing in this
+                  // menu starts with one, so nothing is lost.
+                  if (!menuQ && e.key >= "1" && e.key <= "9") {
+                    const k = menuOrder[Number(e.key) - 1];
+                    if (k) { e.preventDefault(); openPanel(k); }
+                  }
+                }}
+                placeholder="or type to filter…"
+                className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-[14px] outline-none focus:border-accent" />
+              <button onClick={() => openPanel("closed")} className="shrink-0 rounded px-1 text-muted hover:text-foreground">✕</button>
             </div>
-            {menuGroups.filter((g) => g.kinds.length > 0).map((g) => (
+            {shownGroups.map((g) => (
               <div key={g.label} className="mb-2.5">
                 <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-muted">{g.label}</div>
                 <div className="flex flex-wrap gap-1.5">
                   {g.kinds.map((k) => (
-                    <button key={k} onClick={() => openPanel(k)}
-                      className="inline-flex items-center gap-1.5 rounded-[7px] border bg-surface px-3 py-1.5 text-[15px] hover:border-accent hover:bg-accent-soft">
+                    <button key={k} onClick={() => openPanel(k)} onMouseEnter={() => setMenuIdx(menuHits.indexOf(k))}
+                      className={`inline-flex items-center gap-1.5 rounded-[7px] border px-3 py-1.5 text-[15px] hover:border-accent hover:bg-accent-soft ${menuHits[menuIdx] === k ? "border-accent bg-accent-soft" : "bg-surface"}`}>
                       <span aria-hidden className="w-[17px] text-center opacity-80">{ICON[k]}</span> {menuLabel(k)}
-                      <span aria-hidden className="rounded border px-1 text-[11px] leading-4 text-muted">{menuOrder.indexOf(k) + 1}</span>
+                      {/* The digit is only true while the box is empty, so it
+                          stops claiming to be a shortcut once it is not. */}
+                      {!menuQ && <span aria-hidden className="rounded border px-1 text-[11px] leading-4 text-muted">{menuOrder.indexOf(k) + 1}</span>}
                     </button>
                   ))}
                 </div>
               </div>
             ))}
-            <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-muted">Ask</div>
+            {askShown && <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-muted">Ask</div>}
             {/* No longer the one pale item in the row. Dashed grey read as
                 unavailable rather than as the AI one. */}
-            <button onClick={() => openPanel("askTask")}
-              className="inline-flex items-center gap-1.5 rounded-[7px] border border-accent bg-accent-soft px-3 py-1.5 text-[15px] font-semibold text-accent hover:bg-accent hover:text-white">
+            {askShown && <button onClick={() => openPanel("askTask")} onMouseEnter={() => setMenuIdx(menuHits.indexOf("ask"))}
+              className={`inline-flex items-center gap-1.5 rounded-[7px] border border-accent px-3 py-1.5 text-[15px] font-semibold hover:bg-accent hover:text-white ${menuHits[menuIdx] === "ask" ? "bg-accent text-white" : "bg-accent-soft text-accent"}`}>
               <span aria-hidden className="w-[17px] text-center">✦</span> Ask Claude about this task
-            </button>
+            </button>}
+            {menuHits.length === 0 && (
+              <div className="text-[14px] text-muted">Nothing matches “{menuQ.trim()}”.</div>
+            )}
           </div>
         )}
 
