@@ -1763,7 +1763,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // What the All Tasks row in the sidebar counts. Scoped the same way the
   // list is, so a VA's number is their own work rather than a total they
   // cannot see.
-  const openTaskCount = useMemo(() => scopedTasks.filter((t) => t.status !== "done").length, [scopedTasks]);
+  //
+  // Approved is excluded alongside Done (Derek, 2026-09-01). The two are
+  // deliberately separate stages — the client's yes and your delivery are
+  // different events — but neither is work waiting on you, and a nav count is
+  // there to say how much is.
+  const openTaskCount = useMemo(
+    () => scopedTasks.filter((t) => t.status !== "done" && t.status !== "approved").length,
+    [scopedTasks],
+  );
   // Map indices for scopedTasks/clients/projects — every lookup helper below
   // (clientById, clientTaskCount, clientNeedsReview, hasOpenConversationTask,
   // clientUrgencyKey, assignedClientsFor, ...) used to do its own linear
