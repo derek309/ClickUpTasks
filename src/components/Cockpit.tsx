@@ -28,7 +28,7 @@ import {
   STATUS_ORDER, HIDDEN_STATUSES, pickableStatuses,
   applyWaitingStatusSync,
   mentionsUser,
-  viewerDueDate, isOnPlateOf,
+  viewerDueDate, isOnPlateOf, delegationTitle,
   isSnoozed,
   isCompletionEvent,
   CLIENT_STATUS_META,
@@ -3354,11 +3354,28 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const t = tasks.find((x) => x.id === taskId);
     const s = t?.subtasks.find((x) => x.id === subId);
     if (!t || !s) return;
+    // Taking a handoff back is a bigger deal than deleting a checklist line:
+    // it removes the only thing giving that person access to the task, so it
+    // says whose it was and what happens to the stage.
+    const isDelegation = !!s.assigneeId && s.assigneeId !== t.assigneeId;
+    const who = isDelegation ? (userById(s.assigneeId!)?.name ?? "them") : "";
+    const rest = t.subtasks.filter((x) => x.id !== subId);
+    const lastOne = isDelegation && !rest.some((x) => x.assigneeId && x.assigneeId !== t.assigneeId);
     setConfirmDialog({
-      title: `Delete “${s.title || "this checklist item"}”?`,
-      message: "This can't be undone.",
-      confirmLabel: "Delete",
-      onConfirm: () => { setConfirmDialog(null); update(taskId, { subtasks: t.subtasks.filter((x) => x.id !== subId) }); },
+      title: isDelegation ? `Take this back from ${who}?` : `Delete “${s.title || "this checklist item"}”?`,
+      message: isDelegation
+        ? `${who} loses access to this task${lastOne ? ", and it leaves the Delegated stage" : ""}. What they were asked to do is deleted with it, and this can't be undone.`
+        : "This can't be undone.",
+      confirmLabel: isDelegation ? "Take it back" : "Delete",
+      onConfirm: () => {
+        setConfirmDialog(null);
+        const patch: Partial<Task> = { subtasks: rest };
+        // Nothing is delegated any more, so the task cannot stay in a stage
+        // that means it is with someone else.
+        if (lastOne && t.status === "delegated") patch.status = "in_progress";
+        update(taskId, patch);
+        if (isDelegation) pushToast(`Taken back from ${who}`);
+      },
     });
   };
   const patchSub = (taskId: string, subId: string, patch: Partial<Subtask>) => {
@@ -3376,15 +3393,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // hidden Delegated stage, and the ping. It lives here rather than in the
   // dock because the notify and the task write belong to the same owner.
   const delegateTask = (taskId: string, spec: {
-    toId: string; instructions: string; theirDue: string; followUpAt: string | null;
+    toId: string; title: string; instructions: string; theirDue: string; followUpAt: string | null;
     size: TaskSize | null; priority: Priority; links: string[];
   }) => {
     const t = tasksRef.current.find((x) => x.id === taskId);
     if (!t) return;
-    // The item's title is the first line of the instructions, so their
-    // checklist reads as the ask rather than as the task's own name repeated.
-    const firstLine = spec.instructions.split("\n")[0].trim();
-    const title = firstLine.length > 90 ? `${firstLine.slice(0, 87)}…` : firstLine;
+    // Whatever they called it, or a name derived from the brief when they
+    // left it blank: see delegationTitle.
+    const title = spec.title.trim() || delegationTitle(spec.instructions);
     const sub: Subtask = {
       id: newId("s_"), title: title || t.title, done: false,
       assigneeId: spec.toId, due: spec.theirDue,

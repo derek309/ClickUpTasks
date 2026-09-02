@@ -53,6 +53,7 @@ import {
   pickableStatuses,
   isOnPlateOf,
   delegateeOf,
+  delegationTitle,
   viewerDueDate,
   type Subtask,
   addDaysIso,
@@ -1126,5 +1127,28 @@ describe("delegateeOf", () => {
   });
   it("is null for a task nobody has been handed", () => {
     expect(delegateeOf({ assigneeId: "u_derek", subtasks: [item({})] })).toBe(null);
+  });
+});
+
+describe("delegationTitle", () => {
+  it("keeps a short ask whole", () => {
+    expect(delegationTitle("Rebuild the Lincoln events page")).toBe("Rebuild the Lincoln events page");
+  });
+  it("cuts a long opener at its first clause", () => {
+    expect(delegationTitle("FULL PAGE PRINT AD for a run specialty trade magazine, The Running Event 2026 Planner (Running Insight). Publisher deadline Sept 18."))
+      .toBe("FULL PAGE PRINT AD for a run specialty trade magazine");
+  });
+  it("takes the first sentence when it is short enough", () => {
+    expect(delegationTitle("Send the deck to Brian. Then chase him on Friday about the sponsor slot."))
+      .toBe("Send the deck to Brian.");
+  });
+  it("cuts on a word boundary and says so when nothing else fits", () => {
+    const out = delegationTitle("aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk llll mmmm nnnn");
+    expect(out.endsWith("…")).toBe(true);
+    expect(out.length).toBeLessThanOrEqual(61);
+    expect(out).not.toMatch(/\s…$/);
+  });
+  it("ignores leading blank lines", () => {
+    expect(delegationTitle("\n\n  Fix the footer email  ")).toBe("Fix the footer email");
   });
 });

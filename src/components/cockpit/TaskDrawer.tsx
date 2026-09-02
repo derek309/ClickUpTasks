@@ -993,7 +993,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const delegationRow = delegations.length === 0 ? null : (
     <div className="mt-2 space-y-1.5">
       {delegations.map((s) => (
-        <div key={s.id} className="rounded-xl border border-accent/40 bg-accent-soft/40 px-3 py-2">
+        <div key={s.id} className="group/deleg rounded-xl border border-accent/40 bg-accent-soft/40 px-3 py-2">
           <div className="flex items-start gap-2.5">
             <button onClick={() => onToggleSub(s.id)} title={s.done ? "Reopen" : "Mark done"}
               className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${s.done ? "border-accent bg-accent text-white" : "bg-surface hover:border-accent"}`}>
@@ -1001,7 +1001,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             </button>
             <Avatar id={s.assigneeId!} size={22} />
             <div className="min-w-0 flex-1">
-              <div className={`text-[15px] font-medium leading-snug ${s.done ? "text-muted line-through" : ""}`}>{s.title}</div>
+              {/* Editable in place: a handoff gets renamed as often as a
+                  task does, and the derived title is a first guess at what
+                  to call it (Derek: "I also want to be able to edit the task
+                  title"). */}
+              <textarea value={s.title} onChange={(e) => onPatchSub(s.id, { title: e.target.value })} rows={1}
+                onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
+                className={`-mx-1 w-full resize-none rounded bg-transparent px-1 text-[15px] font-medium leading-snug outline-none [field-sizing:content] focus:bg-surface ${s.done ? "text-muted line-through" : ""}`} />
               <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] text-muted">
                 <span className="font-semibold uppercase tracking-wide text-accent">Delegated</span>
                 <span aria-hidden>·</span>
@@ -1012,11 +1018,18 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             </div>
             <InlineDate value={s.due ?? null} onChange={(d) => onPatchSub(s.id, { due: d })} onClear={() => onPatchSub(s.id, { due: null })}
               className="shrink-0 text-[13px] text-muted" formatValue={formatDue} emptyLabel={<span className="text-[13px] text-muted">Set a date</span>} />
+            {/* Taking it back. Confirmed in Cockpit's deleteSub, which names
+                the person and says they lose access, because this is the one
+                thing giving them the task at all. */}
+            <button onClick={() => onDeleteSub(s.id)} title="Take this back"
+              className="mt-0.5 shrink-0 rounded p-1 text-muted opacity-0 transition hover:bg-danger/10 hover:text-danger group-hover/deleg:opacity-100">
+              <I.trash className="h-3.5 w-3.5" />
+            </button>
           </div>
           {/* The brief, editable in place. It is what they actually read. */}
           <textarea value={s.note ?? ""} onChange={(e) => onPatchSub(s.id, { note: e.target.value })} rows={2}
             placeholder="What do you need done? (instructions)"
-            className="mt-1.5 w-full resize-none rounded-lg border bg-surface px-2.5 py-1.5 text-[14px] leading-snug outline-none [field-sizing:content] focus:border-accent" />
+            className="mt-1.5 max-h-[11rem] w-full resize-none overflow-y-auto rounded-lg border bg-surface px-2.5 py-1.5 text-[14px] leading-snug outline-none [field-sizing:content] focus:border-accent" />
         </div>
       ))}
     </div>

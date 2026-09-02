@@ -5,7 +5,7 @@ import {
   Attachment, Contact, Message, Task, TaskAction, TaskActionKind, TaskStatus, htmlToText,
   TASK_ACTION_META, TASK_ACTION_ORDER, CLIENT_FACING_ACTIONS, STATUS_META, pickableStatuses, linkSpans, prettyLinkName,
   User, addBusinessDaysIso, TODAY, formatDue, daysUntilDue, TaskSize, SIZE_META, SIZE_ORDER, sizeLabel, userById,
-  Priority, PRIORITY_META, manualPriorityOptions, type DelegateSpec, type ClientLink,
+  Priority, PRIORITY_META, manualPriorityOptions, delegationTitle, type DelegateSpec, type ClientLink,
 } from "@/lib/data";
 import { I, newId, DateChip } from "./ui";
 // Plain fetch reaches this route without a session and gets a 401 back.
@@ -90,6 +90,7 @@ export function ActionDock({
   // follow-up date every other action sets: one is when they owe it, the
   // other is when it lands back on you, and collapsing them into one date
   // means one of the two people is planning off the wrong day.
+  const [delegateTitle, setDelegateTitle] = useState("");
   const [theirDue, setTheirDue] = useState<string | null>(null);
   const [delegatePriority, setDelegatePriority] = useState<Priority | null>(null);
   const [links, setLinks] = useState<string[]>([]);
@@ -183,6 +184,7 @@ export function ActionDock({
     setTeammate(task.assigneeId && task.assigneeId !== me?.id ? task.assigneeId : users.find((u) => u.id !== me?.id)?.id ?? null);
     // Delegating starts blank rather than inheriting the task's own dates:
     // the whole point is deciding when THEY owe it.
+    setDelegateTitle("");
     setTheirDue(null); setDelegatePriority(task.priority === "none" ? "normal" : task.priority);
     setLinks([]); setLinkDraft("");
   };
@@ -358,7 +360,7 @@ export function ActionDock({
       if (!theirDue) { pushToast("Give them a date to have it by."); return; }
       if (!onDelegate) { pushToast("Delegating is not available here."); return; }
       onDelegate({
-        toId: teammate, instructions: text, theirDue, followUpAt: nextDue,
+        toId: teammate, title: delegateTitle, instructions: text, theirDue, followUpAt: nextDue,
         size: size ?? task.size ?? null, priority: delegatePriority ?? task.priority, links,
       });
       onLog({
@@ -844,7 +846,17 @@ export function ActionDock({
               </div>
             ))}
 
-            {block("What they need to do", bodyBox("The first line becomes their checklist item."))}
+            {/* Named, not derived. The generated name is a decent guess at
+                what to call a brief, and a guess is a poor thing to read on
+                a row every day (Derek: "add delegation title"). Left blank it
+                still falls back to the guess. */}
+            {block("Call it", (
+              <input value={delegateTitle} onChange={(e) => setDelegateTitle(e.target.value)}
+                placeholder={body.trim() ? delegationTitle(body) : "Name this handoff"}
+                className="w-full rounded-[9px] border bg-surface px-3 py-2 text-[15px] outline-none focus:border-accent" />
+            ))}
+
+            {block("What they need to do", bodyBox("Everything they need to know to do it."))}
 
             {block("Links they will need", (
               <>

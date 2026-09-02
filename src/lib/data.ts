@@ -2400,6 +2400,9 @@ export const CLIENT_FACING_ACTIONS: ReadonlySet<TaskActionKind> = new Set(["chat
 /** Everything one handoff decides. The dock collects it, Cockpit writes it. */
 export type DelegateSpec = {
   toId: string;
+  /** What to call the handoff. Blank means "name it from the brief" — see
+   *  delegationTitle. */
+  title: string;
   instructions: string;
   /** When THEY owe it. Drives their list, not yours. */
   theirDue: string;
@@ -2617,6 +2620,26 @@ export function effectiveDueDate(task: { due: string | null; followUpAt?: string
   // colouring both keep measuring against it. This is only about when the
   // task asks for your attention.
   return task.followUpAt ?? task.due;
+}
+
+/** A short name for a handoff, from the brief someone typed. A brief opens
+ *  with the whole ask on one line ("FULL PAGE PRINT AD for a run specialty
+ *  trade magazine, The Running Event 2026 Planner (Running Insight).
+ *  Publisher deadline Sept 18, so I need..."), and using that line whole
+ *  gave a row title that wrapped, truncated, and then repeated verbatim in
+ *  the brief underneath it. Cut at the first sentence, then at the first
+ *  clause, then hard, so the title is a name and the brief is the detail. */
+export function delegationTitle(instructions: string): string {
+  const first = instructions.split("\n").map((l) => l.trim()).find(Boolean) ?? "";
+  if (first.length <= 60) return first;
+  const sentence = first.split(/(?<=[.!?])\s/)[0].trim();
+  if (sentence.length <= 60) return sentence;
+  const clause = sentence.split(/[,;:(]/)[0].trim();
+  if (clause.length >= 20 && clause.length <= 60) return clause;
+  // Cut on a word boundary rather than mid-word, then say it was cut.
+  const cut = sentence.slice(0, 60);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > 20 ? cut.slice(0, space) : cut).trim()}…`;
 }
 
 /** The date this person was given on their own open delegated item, if any.
