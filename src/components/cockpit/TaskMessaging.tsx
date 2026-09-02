@@ -209,20 +209,47 @@ const ACTION_ICON: Record<TaskActionKind, string> = {
 // Long action bodies (a summarised meeting, a note someone wrote properly)
 // collapse to six lines with a toggle. Short ones render with no affordance
 // at all, so the common case stays plain text.
+/** A pasted message, made readable without rewriting it.
+ *
+ *  Runs of blank lines collapse: three newlines is still just a paragraph
+ *  break, and stacked ones turned five sentences into a screenful of gaps.
+ *
+ *  A line holding nothing but a link joins the line above it. People write
+ *  "And the automations" then paste the URL on the next line, and the link
+ *  chip then sat alone on a line of its own with the rest of the row empty
+ *  (Derek: "why are the links wrapping when there is plenty of space"). The
+ *  URL is the object of that sentence, so it belongs on the end of it. A
+ *  link after a blank line is left where it is: that one is deliberate.
+ */
+const URL_ONLY = /^\s*(https?:\/\/\S+)\s*$/i;
+export function tidyBody(text: string): string {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const out: string[] = [];
+  for (const line of lines) {
+    const url = line.match(URL_ONLY);
+    const prev = out.length ? out[out.length - 1] : "";
+    if (url && prev.trim() !== "" && !URL_ONLY.test(prev)) out[out.length - 1] = `${prev.trimEnd()} ${url[1]}`;
+    else out.push(line);
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 function ActionBody({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   // Runs of blank lines are how a pasted message arrives, and they turned a
   // five sentence reply into a screenful of gaps. Two newlines is a
   // paragraph; three or more is still just a paragraph.
-  const tidy = text.replace(/\n{3,}/g, "\n\n").trim();
+  const tidy = tidyBody(text);
   const long = tidy.length > 320 || tidy.split("\n").length > 6;
   return (
     <div className="mt-0.5">
-      {/* A line length, not the width of the drawer. Reading a paragraph that
-          runs 140 characters wide is the thing that made this hard to read
-          (Derek: "this is hard to read, any way we can make it visually
-          easier to read and clean it up"). */}
-      <div className={`max-w-[68ch] whitespace-pre-wrap text-[15px] leading-relaxed ${!open && long ? "line-clamp-6" : ""}`}><LinkedText text={tidy} chip /></div>
+      {/* Capped, but only just under the card: 68 characters read beautifully
+          and left a visible strip of empty card beside every message, which
+          reads as a bug rather than as typography (Derek: "why is Justin's
+          message not taking the full width of box space"). 88 fills the card
+          at any normal width and still stops a paragraph running the length
+          of an ultrawide monitor. */}
+      <div className={`max-w-[88ch] whitespace-pre-wrap text-[15px] leading-relaxed ${!open && long ? "line-clamp-6" : ""}`}><LinkedText text={tidy} chip /></div>
       {long && (
         <button onClick={() => setOpen((o) => !o)} className="mt-0.5 text-[13px] font-medium text-accent hover:underline">
           {open ? "Show less" : "Show more"}
@@ -925,13 +952,35 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
                 <div key={r.id} className="group/reply rounded-lg bg-background px-2.5 py-2">
                   <span className="text-[13px] font-semibold">{r.authorId ? (userById(r.authorId)?.name ?? "Someone") : "Someone"}</span>
                   <span className="text-[13px] text-muted"> · {timeAgo(r.at)}</span>
+                  {/* Editable, like the entry above it. A reply is typed in a
+                      hurry into a small box and read for months (Derek: "make
+                      it so we can edit our messages"). */}
+                  {onEditAction && (
+                    <button onClick={() => { setEditingAction(r.id); setActionEdit(r.body); }} title="Edit this reply"
+                      className="ml-1.5 rounded p-0.5 align-middle text-muted opacity-0 transition hover:text-foreground group-hover/reply:opacity-100">
+                      <I.pencil className="h-3 w-3" />
+                    </button>
+                  )}
                   {onDeleteAction && (
                     <button onClick={() => onDeleteAction(r.id)} title="Delete this reply"
                       className="ml-1.5 rounded p-0.5 align-middle text-muted opacity-0 transition hover:text-danger group-hover/reply:opacity-100">
                       <I.trash className="h-3 w-3" />
                     </button>
                   )}
-                  <ActionBody text={r.body} />
+                  {editingAction === r.id ? (
+                    <div className="mt-1.5 flex items-end gap-2">
+                      <textarea autoFocus value={actionEdit} rows={2}
+                        onChange={(e) => setActionEdit(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") { setEditingAction(null); setActionEdit(""); return; }
+                          if (e.key !== "Enter" || e.shiftKey) return;
+                          e.preventDefault(); saveActionEdit(r.id);
+                        }}
+                        className="max-h-[200px] min-w-0 flex-1 resize-none overflow-y-auto rounded-lg border bg-surface px-2 py-1.5 text-[14px] leading-snug outline-none focus:border-accent" />
+                      <button onClick={() => saveActionEdit(r.id)} disabled={!actionEdit.trim()}
+                        className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[14px] font-medium text-white disabled:opacity-40">Save</button>
+                    </div>
+                  ) : <ActionBody text={r.body} />}
                 </div>
               ))}
             </div>
