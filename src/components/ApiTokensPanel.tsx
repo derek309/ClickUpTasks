@@ -10,6 +10,14 @@ import { I } from "./cockpit/ui";
 
 type TokenRow = { id: string; name: string; created_at: string; last_used_at: string | null };
 
+// Shown on the download link so a stale copy is visible rather than silent.
+// The zip served here sat at 1.4.0 for six weeks while the source reached
+// 1.9.2, and nothing on screen said so — people were told to reload an
+// extension to get a fix that had never been in their build. Bump this with
+// chrome-extension/manifest.json; `npm run build` repackages the zip from
+// source, so the two cannot drift apart again.
+const EXTENSION_VERSION = "1.9.2";
+
 export default function ApiTokensPanel() {
   const [tokens, setTokens] = useState<TokenRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -117,7 +125,7 @@ export default function ApiTokensPanel() {
           <div className="mb-2 text-[15px] font-semibold">Gmail extension</div>
           <p className="mb-2 text-[13px] text-muted">Create a ClickUpTasks task straight from an email you&apos;re viewing in Gmail.</p>
           <ol className="mb-3 list-decimal space-y-1 pl-4 text-[13px] text-muted">
-            <li><a href="/clickuptasks-gmail-extension.zip" download className="font-medium text-accent hover:underline">Download the extension</a> and unzip it.</li>
+            <li><a href="/clickuptasks-gmail-extension.zip" download className="font-medium text-accent hover:underline">Download the extension (v{EXTENSION_VERSION})</a> and unzip it.</li>
             <li>In Chrome, go to <code className="rounded bg-surface px-1 py-0.5">chrome://extensions</code> and turn on <b>Developer mode</b> (top right).</li>
             <li>Click <b>Load unpacked</b> and select the unzipped <code className="rounded bg-surface px-1 py-0.5">chrome-extension</code> folder.</li>
             <li>It&apos;ll open a settings page &mdash; create a token above and paste it there.</li>
