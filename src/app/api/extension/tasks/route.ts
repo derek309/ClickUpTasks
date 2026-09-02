@@ -105,10 +105,21 @@ export async function GET(req: NextRequest) {
   if (!clientId) return NextResponse.json({ error: "Missing client_id." }, { status: 400 });
   if (!(await isClientVisible(caller, clientId))) return NextResponse.json({ error: "Unknown or inaccessible client." }, { status: 403 });
 
-  const { data, error } = await supabaseAdmin.from("tasks").select("id, title, status, created_at").eq("client_id", clientId).neq("status", "done").order("created_at", { ascending: false });
+  const { data, error } = await supabaseAdmin.from("tasks").select("id, title, status, created_at, project_id").eq("client_id", clientId).neq("status", "done").order("created_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
   const query = (req.nextUrl.searchParams.get("query") || "").trim().toLowerCase();
-  const filtered = query ? (data ?? []).filter((t) => t.title.toLowerCase().includes(query)) : (data ?? []);
-  return NextResponse.json({ tasks: filtered.slice(0, 30).map((t) => ({ id: t.id, title: t.title, status: t.status })) });
+  // Optional list filter: attaching an email to an existing task means one
+  // task out of a client's whole open set, which for a busy client is dozens.
+  // Narrowing by the list you already picked is the difference between
+  // choosing and hunting.
+  const projectId = req.nextUrl.searchParams.get("project_id");
+  const inList = projectId ? (data ?? []).filter((t) => t.project_id === projectId) : (data ?? []);
+  const filtered = query ? inList.filter((t) => t.title.toLowerCase().includes(query)) : inList;
+  // project_id rides along so the picker can label each row with its list —
+  // two tasks called "Website" under different lists are otherwise the same
+  // row twice.
+  return NextResponse.json({
+    tasks: filtered.slice(0, 30).map((t) => ({ id: t.id, title: t.title, status: t.status, projectId: t.project_id })),
+  });
 }

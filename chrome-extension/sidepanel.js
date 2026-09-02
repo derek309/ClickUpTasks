@@ -20,6 +20,7 @@ const existingTaskFieldsEl = document.getElementById("existingTaskFields");
 const taskSearchInput = document.getElementById("taskSearch");
 const taskResultsEl = document.getElementById("taskResults");
 const projectSel = document.getElementById("project");
+const existingProjectSel = document.getElementById("existingProject");
 const dueInput = document.getElementById("due");
 const prioritySel = document.getElementById("priority");
 const assigneeSel = document.getElementById("assignee");
@@ -251,6 +252,7 @@ async function loadMembers(token) {
 
 async function loadProjectsFor(clientId) {
   projectSel.innerHTML = "";
+  existingProjectSel.innerHTML = '<option value="">All lists</option>';
   const blankOpt = document.createElement("option");
   blankOpt.value = "";
   blankOpt.textContent = "Default";
@@ -265,6 +267,9 @@ async function loadProjectsFor(clientId) {
       opt.value = p.id;
       opt.textContent = p.name;
       projectSel.appendChild(opt);
+      // The same lists, for narrowing the task search. A client with a dozen
+      // lists has far too many open tasks to scan as one flat list.
+      existingProjectSel.appendChild(opt.cloneNode(true));
     }
   } catch { /* leave just "Default" — task creation still works via the fallback */ }
 }
@@ -461,21 +466,40 @@ clientSearchInput.addEventListener("input", () => {
 clientSearchInput.addEventListener("focus", () => renderClientResults(clientSearchInput.value));
 clientSearchInput.addEventListener("blur", () => clientResultsEl.classList.remove("open"));
 
+function listNameFor(projectId) {
+  if (!projectId) return "";
+  const opt = [...existingProjectSel.options].find((o) => o.value === projectId);
+  return opt ? opt.textContent : "";
+}
+
 function renderTaskResults(query) {
   const q = query.trim().toLowerCase();
-  const matches = !q ? allTasks : allTasks.filter((t) => t.title.toLowerCase().includes(q));
+  const list = existingProjectSel.value;
+  const inList = list ? allTasks.filter((t) => t.projectId === list) : allTasks;
+  const matches = !q ? inList : inList.filter((t) => t.title.toLowerCase().includes(q));
   taskResultsEl.innerHTML = "";
   if (!matches.length) {
     const empty = document.createElement("div");
     empty.className = "result-row";
     empty.style.cssText = "color:#94a3b8;cursor:default;";
-    empty.textContent = selectedClientId ? "No matching open tasks" : "Pick a client first";
+    empty.textContent = !selectedClientId
+      ? "Pick a client first"
+      : (existingProjectSel.value ? "No matching open tasks in this list" : "No matching open tasks");
     taskResultsEl.appendChild(empty);
   } else {
     for (const t of matches.slice(0, 50)) {
       const row = document.createElement("div");
       row.className = "result-row";
       row.textContent = t.title;
+      // Which list it is in, when the search spans all of them: two tasks
+      // called "Website" under different lists are otherwise one row twice.
+      const listName = !list && listNameFor(t.projectId);
+      if (listName) {
+        const tag = document.createElement("span");
+        tag.textContent = listName;
+        tag.style.cssText = "color:#64748b;font-size:11px;margin-left:6px;";
+        row.appendChild(tag);
+      }
       row.addEventListener("mousedown", (e) => { e.preventDefault(); selectTask(t.id); });
       taskResultsEl.appendChild(row);
     }
@@ -493,6 +517,12 @@ function selectTask(id) {
 taskSearchInput.addEventListener("input", () => {
   selectedTaskId = "";
   renderTaskResults(taskSearchInput.value);
+});
+existingProjectSel.addEventListener("change", () => {
+  // Changing the list invalidates a task chosen from a different one.
+  selectedTaskId = "";
+  taskSearchInput.value = "";
+  renderTaskResults("");
 });
 taskSearchInput.addEventListener("focus", () => renderTaskResults(taskSearchInput.value));
 taskSearchInput.addEventListener("blur", () => taskResultsEl.classList.remove("open"));
