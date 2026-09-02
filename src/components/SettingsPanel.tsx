@@ -17,6 +17,10 @@ export default function SettingsPanel({
   const [tokenLocations, setTokenLocations] = useState<string[]>([]);
   const [granolaApiKeyConfigured, setGranolaApiKeyConfigured] = useState<boolean | null>(null);
   const [granolaWebhookConfigured, setGranolaWebhookConfigured] = useState<boolean | null>(null);
+  // Backfilling walks contacts through GoHighLevel's API one at a time, so it
+  // reports progress rather than spinning: remaining is what tells you whether
+  // to press it again.
+  const [backfill, setBackfill] = useState<{ kind: "idle" | "busy" | "ok" | "err"; msg?: string; remaining?: number }>({ kind: "idle" });
   const [granolaStatus, setGranolaStatus] = useState<{ kind: "idle" | "busy" | "ok" | "err"; msg?: string }>({ kind: "idle" });
   const [locs, setLocs] = useState<Record<string, string>>(() => Object.fromEntries(clients.map((c) => [c.id, c.ghlLocationId || ""])));
   const [status, setStatus] = useState<Record<string, { kind: "idle" | "busy" | "ok" | "err"; msg?: string }>>({});
@@ -73,6 +77,31 @@ export default function SettingsPanel({
       setGranolaStatus({ kind: "ok", msg: `Registered. Signing secret (copy now, shown once): ${j.signingSecret}` });
     } catch (e) {
       setGranolaStatus({ kind: "err", msg: e instanceof Error ? e.message : "Webhook setup failed" });
+    }
+  }
+
+  // One pass, capped server-side. Deliberately not a loop that runs to
+  // completion: this is dozens of calls to someone else's API, and a button
+  // you press again is easier to stop than a run that has decided to keep
+  // going.
+  async function backfillConversations() {
+    setBackfill({ kind: "busy" });
+    try {
+      const res = await authedFetch("/api/ghl/backfill-conversations", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ limit: 10 }),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error ?? "Backfill failed");
+      const failed = (j.results ?? []).filter((r: { error?: string }) => r.error).length;
+      setBackfill({
+        kind: "ok",
+        remaining: j.remaining ?? 0,
+        msg: `${j.contactsProcessed} client${j.contactsProcessed === 1 ? "" : "s"} checked, ${j.bound} message${j.bound === 1 ? "" : "s"} linked`
+          + (failed ? `, ${failed} could not be reached` : "")
+          + (j.remaining ? ` — ${j.remaining} client${j.remaining === 1 ? "" : "s"} still to go.` : ". All done."),
+      });
+    } catch (e) {
+      setBackfill({ kind: "err", msg: e instanceof Error ? e.message : "Backfill failed" });
     }
   }
 
@@ -235,6 +264,22 @@ export default function SettingsPanel({
 
           <div className="mb-3 mt-6 flex items-center gap-2">
             <span className="text-[15px] font-semibold">Data cleanup</span>
+          </div>
+          <div className="mb-2 rounded-lg border bg-background px-3 py-2.5">
+            <p className="text-[13px] text-muted">
+              Messages that arrived before conversations were linked to tasks have no thread to follow, so a reply to one
+              lands on a general &quot;Reply to&quot; task instead of the task it belongs to. This asks GoHighLevel which
+              conversation each old message came from. Safe to run more than once — anything already linked is skipped.
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button onClick={backfillConversations} disabled={backfill.kind === "busy"}
+                className="shrink-0 rounded-md border px-2.5 py-1 text-[15px] font-medium hover:bg-surface disabled:opacity-50">
+                {backfill.kind === "busy" ? "Linking…" : backfill.remaining ? "Link the next 10 clients" : "Link old conversations"}
+              </button>
+            </div>
+            {backfill.kind !== "busy" && backfill.msg && (
+              <div className={`mt-1.5 text-[15px] ${backfill.kind === "ok" ? "text-green-600" : "text-red-500"}`}>{backfill.msg}</div>
+            )}
           </div>
           <div className="rounded-lg border bg-background px-3 py-2.5">
             <p className="text-[13px] text-muted">
