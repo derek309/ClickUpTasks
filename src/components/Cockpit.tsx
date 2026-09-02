@@ -1796,15 +1796,25 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       const list = byClient.get(p.clientId);
       if (list) list.push(p); else byClient.set(p.clientId, [p]);
     }
-    return [...workableClients].sort((x, y) => x.name.localeCompare(y.name)).flatMap((c) => [
+    // The workspace's own projects belong here too — Tracy CA and Lincoln CA
+    // are ClickUpLocal's internal lists, and workableClients deliberately
+    // excludes the workspace client, so listing clients and their projects
+    // alone still left them unreachable (Derek: "still not showing the
+    // project in search").
+    const workspace = clients.find((c) => c.id === WORKSPACE_CLIENT_ID);
+    return [
+      ...(workspace ? [...byClient.get(WORKSPACE_CLIENT_ID) ?? []].sort((x, y) => x.name.localeCompare(y.name))
+        .map((p) => ({ value: `p:${p.id}`, label: p.name, sub: workspace.name })) : []),
+      ...[...workableClients].sort((x, y) => x.name.localeCompare(y.name)).flatMap((c) => [
       { value: `c:${c.id}`, label: c.name },
       ...(byClient.get(c.id) ?? []).sort((x, y) => x.name.localeCompare(y.name))
         // A lone project named for the client adds a second row that means
         // the same thing as the client row above it.
         .filter((p, _i, all) => all.length > 1 || p.name !== "Tasks")
         .map((p) => ({ value: `p:${p.id}`, label: p.name, sub: c.name })),
-    ]);
-  }, [workableClients, projects]);
+      ]),
+    ];
+  }, [workableClients, clients, projects]);
   const workspaceProjects = useMemo(
     () => (clients.some((c) => c.id === WORKSPACE_CLIENT_ID) ? projects.filter((p) => p.clientId === WORKSPACE_CLIENT_ID) : []),
     [clients, projects]
@@ -3808,7 +3818,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     patchTask(taskId, {
       clientId: newClientId,
       projectId,
-      contactId: newClientId.startsWith("cl_") ? newClientId.slice(3) : null,
+      contactId: newClientId.startsWith("cl_") && newClientId !== WORKSPACE_CLIENT_ID ? newClientId.slice(3) : null,
       ghlTaskId: null,
     });
     if (!silent) pushToast(`Moved to ${projectById(projectId)?.name ?? clientById(newClientId)?.name ?? "client"}${wasLinked ? " — unlinked from GoHighLevel" : ""}`);
