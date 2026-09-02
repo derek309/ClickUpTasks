@@ -27,7 +27,9 @@ export default function TrashPanel({ onRestoreClient, onRestoreProject, onRestor
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const load = async () => { setLoading(true); try { setTrash(await fetchTrash()); } finally { setLoading(false); } };
-  useEffect(() => { load(); }, []);
+  // Deferred a frame: load() sets state, and writing state synchronously from
+  // an effect body is what makes the compiler stop optimising a component.
+  useEffect(() => { const r = requestAnimationFrame(() => { void load(); }); return () => cancelAnimationFrame(r); }, []);
 
   const remove = (kind: "clients" | "projects" | "tasks", id: string) =>
     setTrash((t) => ({ ...t, [kind]: t[kind].filter((e) => e.id !== id) }));
@@ -48,7 +50,7 @@ export default function TrashPanel({ onRestoreClient, onRestoreProject, onRestor
     <div className="p-5">
       <div className="mb-4">
         <h2 className="text-[17px] font-semibold">Trash</h2>
-        <p className="text-[13px] text-muted">Deleted clients, projects, and tasks stay here for {RETENTION_DAYS} days before they're gone for good.</p>
+        <p className="text-[13px] text-muted">Deleted clients, projects, and tasks stay here for {RETENTION_DAYS} days before they&apos;re gone for good.</p>
       </div>
       {loading ? (
         <div className="text-[13px] text-muted">Loading…</div>

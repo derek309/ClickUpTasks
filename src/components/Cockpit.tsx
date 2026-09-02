@@ -1110,7 +1110,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // reflects real use without threading a call through every open site.
   useEffect(() => {
     if (!activeClient.startsWith("cl_")) return;
-    setClientUsed((m) => { const n = { ...m, [activeClient]: Date.now() }; try { localStorage.setItem("cut_clientUsed", JSON.stringify(n)); } catch {} return n; });
+    // Deferred a frame: stamping the time is bookkeeping, not something the
+    // render that triggered it needs to see, and writing state straight out of
+    // an effect body is what makes the compiler give up on this component.
+    const r = requestAnimationFrame(() => {
+      setClientUsed((m) => { const n = { ...m, [activeClient]: Date.now() }; try { localStorage.setItem("cut_clientUsed", JSON.stringify(n)); } catch {} return n; });
+    });
+    return () => cancelAnimationFrame(r);
   }, [activeClient]);
   const toggleHideEmpty = () => setHideEmpty(!hideEmpty);
   const toggleHideDone = () => setHideDone(!hideDone);

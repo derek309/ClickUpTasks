@@ -37,7 +37,9 @@ export default function NotificationPrefsPanel() {
     }
   }
 
-  useEffect(() => { load(); }, []);
+  // Deferred a frame: load() sets state, and writing state synchronously from
+  // an effect body is what makes the compiler stop optimising a component.
+  useEffect(() => { const r = requestAnimationFrame(() => { void load(); }); return () => cancelAnimationFrame(r); }, []);
 
   async function toggle(key: keyof Prefs) {
     if (!prefs) return;

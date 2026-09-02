@@ -35,7 +35,9 @@ export default function ApiTokensPanel() {
     }
   }
 
-  useEffect(() => { load(); }, []);
+  // void, and deferred a frame: load() sets state and the compiler will not
+  // optimise a component that writes state synchronously from an effect body.
+  useEffect(() => { const r = requestAnimationFrame(() => { void load(); }); return () => cancelAnimationFrame(r); }, []);
 
   async function createToken(e: React.FormEvent) {
     e.preventDefault();
