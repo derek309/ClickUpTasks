@@ -1463,12 +1463,22 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       () => pushToast("⚠️ Couldn't copy link"),
     );
   };
-  // Surfaces every failed background save (see db.ts logErr) so a dropped
-  // connection is never silent — was previously console.error-only.
+  // A failed save is not a passing event, it is a state: the screen is showing
+  // something the database refused, and it will keep showing it until the page
+  // is reloaded. A toast said so once and then took the evidence away with it.
+  //
+  // db.ts's save() retries a few times first, so anything that reaches here has
+  // already failed a dropped connection's worth of attempts.
+  const [unsaved, setUnsaved] = useState(0);
   useEffect(() => {
-    const onSaveError = () => pushToast("⚠️ Couldn't save — check your connection and reload.");
-    window.addEventListener("cut:save-error", onSaveError);
-    return () => window.removeEventListener("cut:save-error", onSaveError);
+    const onUnsaved = (e: Event) => {
+      const n = (e as CustomEvent<number>).detail ?? 0;
+      // Deferred out of the event handler: this fires from inside a write that
+      // may itself be mid-render elsewhere.
+      requestAnimationFrame(() => setUnsaved(n));
+    };
+    window.addEventListener("cut:unsaved", onUnsaved);
+    return () => window.removeEventListener("cut:unsaved", onUnsaved);
   }, []);
 
   // Live sync — tasks/clients/notifications only (see supabase/realtime.sql
@@ -2463,7 +2473,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!toWrite.length) return;
     const writeIds = new Set(toWrite.map((t) => t.id));
     setTasks((ts) => [...ts.filter((t) => !writeIds.has(t.id)), ...toWrite]);
-    if (projectWrite) projectWrite.then(() => bulkUpsertTasks(toWrite));
+    // void: the chained write is awaited for ordering (the project row has to
+    // exist before its tasks reference it), not for a value.
+    if (projectWrite) void projectWrite.then(() => { void bulkUpsertTasks(toWrite); });
     else bulkUpsertTasks(toWrite);
   };
   // The Playbook is standard on every contact, not just ones that came
@@ -5259,6 +5271,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         />
       )}
 
+      {/* Persistent on purpose. Reloading is the only thing that reconciles the
+          screen with the database, so this stays until someone does. */}
+      {unsaved > 0 && (
+        <div className="fixed inset-x-0 top-0 z-[60] flex items-center justify-center gap-3 bg-danger px-4 py-2 text-[14px] font-medium text-white shadow-lg">
+          <span>
+            {unsaved} change{unsaved === 1 ? "" : "s"} did not save. What you are looking at is not what is stored.
+          </span>
+          <button onClick={() => window.location.reload()}
+            className="rounded-md bg-white/20 px-2.5 py-1 text-[13px] font-semibold hover:bg-white/30">Reload</button>
+        </div>
+      )}
       <div className="pointer-events-none fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 flex-col items-center gap-2">
         {toasts.map((t) => (<div key={t.id} className="flex items-center gap-3 rounded-lg bg-foreground px-3.5 py-2 text-[15px] font-medium text-[color:var(--surface)] shadow-lg"><span>{t.text}</span>{t.action && (<button onClick={() => { t.action!.run(); dismissToast(t.id); }} className="shrink-0 rounded-md border border-[color:var(--surface)]/35 px-2 py-0.5 text-[14px] font-semibold hover:bg-[color:var(--surface)]/15">{t.action.label}</button>)}{t.secondaryAction && (<button onClick={() => { t.secondaryAction!.run(); dismissToast(t.id); }} className="shrink-0 rounded-md bg-[color:var(--surface)] px-2 py-0.5 text-[14px] font-semibold text-foreground hover:opacity-90">{t.secondaryAction.label}</button>)}</div>))}
       </div>

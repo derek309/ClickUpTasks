@@ -347,7 +347,7 @@ export async function fetchAll() {
 export const rowToUnmatched = (r: any): UnmatchedEmail => ({ id: r.id, fromEmail: r.from_email ?? "", fromName: r.from_name ?? "", subject: r.subject ?? "", body: r.body ?? "", at: r.at ?? r.created_at ?? "" });
 // Acted-on rows are marked handled, not deleted, so a re-poll within the
 // 2-day Gmail window can't re-surface them.
-export const markUnmatchedHandledDb = (id: string) => supabase.from("inbound_unmatched").update({ handled: true }).eq("id", id).then(logErr);
+export const markUnmatchedHandledDb = (id: string) => save(() => supabase.from("inbound_unmatched").update({ handled: true }).eq("id", id));
 export async function fetchUnmatchedDb(): Promise<UnmatchedEmail[]> {
   const { data, error } = await supabase.from("inbound_unmatched").select("*").eq("handled", false).order("created_at", { ascending: false });
   return error ? [] : (data ?? []).map(rowToUnmatched);
@@ -359,7 +359,7 @@ export const rowToGranolaUnmatched = (r: any): GranolaUnmatchedMeeting => ({
   id: r.id, granolaNoteId: r.granola_note_id, title: r.title ?? null, attendees: r.attendees ?? [],
   summary: r.summary ?? null, webUrl: r.web_url ?? null, occurredAt: r.occurred_at ?? null, handled: r.handled ?? false,
 });
-export const markGranolaUnmatchedHandledDb = (id: string) => supabase.from("granola_unmatched").update({ handled: true }).eq("id", id).then(logErr);
+export const markGranolaUnmatchedHandledDb = (id: string) => save(() => supabase.from("granola_unmatched").update({ handled: true }).eq("id", id));
 export async function fetchGranolaUnmatchedDb(): Promise<GranolaUnmatchedMeeting[]> {
   const { data, error } = await supabase.from("granola_unmatched").select("*").eq("handled", false).order("created_at", { ascending: false });
   return error ? [] : (data ?? []).map(rowToGranolaUnmatched);
@@ -367,9 +367,9 @@ export async function fetchGranolaUnmatchedDb(): Promise<GranolaUnmatchedMeeting
 // Backfills the ledger once an unmatched meeting is manually assigned to a
 // client, so it reads the same as one the automatic matcher found.
 export const linkGranolaSyncedNoteDb = (granolaNoteId: string, clientId: string, clientNoteId: string) =>
-  supabase.from("granola_synced_notes").update({ client_id: clientId, client_note_id: clientNoteId }).eq("granola_note_id", granolaNoteId).then(logErr);
+  save(() => supabase.from("granola_synced_notes").update({ client_id: clientId, client_note_id: clientNoteId }).eq("granola_note_id", granolaNoteId));
 
-export const upsertContact = (c: Contact) => supabase.from("contacts").upsert(contactToRow(c)).then(logErr);
+export const upsertContact = (c: Contact) => save(() => supabase.from("contacts").upsert(contactToRow(c)));
 
 export async function fetchContacts(): Promise<Contact[]> {
   const { data, error } = await fetchAllRows("contacts");
@@ -379,58 +379,58 @@ export async function fetchContacts(): Promise<Contact[]> {
 
 // --- mutations (fire-and-forget from the UI; errors surface via console) -----
 
-export const upsertTask = (t: Task, updatedBy?: string | null) => supabase.from("tasks").upsert(taskToRow(t, updatedBy)).then(logErr);
+export const upsertTask = (t: Task, updatedBy?: string | null) => save(() => supabase.from("tasks").upsert(taskToRow(t, updatedBy)));
 // One request for many new/updated tasks at once — used by reconcilePlaybookTasks
 // (up to 18 rows per client) instead of N separate round trips.
-export const bulkUpsertTasks = (ts: Task[]) => (ts.length ? supabase.from("tasks").upsert(ts.map((t) => taskToRow(t))).then(logErr) : Promise.resolve());
+export const bulkUpsertTasks = (ts: Task[]) => (ts.length ? save(() => supabase.from("tasks").upsert(ts.map((t) => taskToRow(t)))) : Promise.resolve());
 
 // Atomic JSONB array-append (see supabase/realtime.sql append_comment) —
 // avoids the read-then-full-row-replace race that a plain upsertTask() would
 // have if two teammates comment on the same task within the same window.
-export const appendCommentDb = (taskId: string, comment: Comment) => supabase.rpc("append_comment", { task_id: taskId, comment }).then(logErr);
+export const appendCommentDb = (taskId: string, comment: Comment) => save(() => supabase.rpc("append_comment", { task_id: taskId, comment }));
 // Soft delete — see soft-delete.sql. Sets deleted_at instead of removing the
 // row; fetchAll's excludeDeleted filter is what actually hides it from the
 // live app. Restored via restoreTaskDb, purged for good after 30 days by
 // the /api/cron/purge-trash sweep (trashCleanupServer.ts), or immediately
 // via hardDeleteTaskDb from the Trash panel's "Delete forever".
-export const deleteTaskDb = (id: string) => supabase.from("tasks").update({ deleted_at: new Date().toISOString() }).eq("id", id).then(logErr);
-export const restoreTaskDb = (id: string) => supabase.from("tasks").update({ deleted_at: null }).eq("id", id).then(logErr);
-export const hardDeleteTaskDb = (id: string) => supabase.from("tasks").delete().eq("id", id).then(logErr);
-export const upsertClient = (c: Client) => supabase.from("clients").upsert(clientToRow(c)).then(logErr);
+export const deleteTaskDb = (id: string) => save(() => supabase.from("tasks").update({ deleted_at: new Date().toISOString() }).eq("id", id));
+export const restoreTaskDb = (id: string) => save(() => supabase.from("tasks").update({ deleted_at: null }).eq("id", id));
+export const hardDeleteTaskDb = (id: string) => save(() => supabase.from("tasks").delete().eq("id", id));
+export const upsertClient = (c: Client) => save(() => supabase.from("clients").upsert(clientToRow(c)));
 // Bumped whenever a Playbook step completes (patchTask here; the owner
 // toggle route has its own server-side twin) — see playbookLastProgressAt's
 // doc comment on Client and playbookCheckinsServer.ts's stall check.
-export const touchPlaybookProgress = (clientId: string) => supabase.from("clients").update({ playbook_last_progress_at: new Date().toISOString() }).eq("id", clientId).then(logErr);
+export const touchPlaybookProgress = (clientId: string) => save(() => supabase.from("clients").update({ playbook_last_progress_at: new Date().toISOString() }).eq("id", clientId));
 // One request for many new clients at once instead of N separate round trips.
-export const bulkUpsertClients = (cs: Client[]) => (cs.length ? supabase.from("clients").upsert(cs.map(clientToRow)).then(logErr) : Promise.resolve());
-export const upsertProject = (p: Project) => supabase.from("projects").upsert(projectToRow(p)).then(logErr);
+export const bulkUpsertClients = (cs: Client[]) => (cs.length ? save(() => supabase.from("clients").upsert(cs.map(clientToRow))) : Promise.resolve());
+export const upsertProject = (p: Project) => save(() => supabase.from("projects").upsert(projectToRow(p)));
 // Soft delete, cascading to this project's own not-yet-deleted tasks (parity
 // with the old ON DELETE CASCADE — a project's tasks disappear with it, and
 // come back with it via restoreProjectDb). See deleteTaskDb's comment.
 export const deleteProjectDb = async (id: string) => {
   const deletedAt = new Date().toISOString();
-  await supabase.from("tasks").update({ deleted_at: deletedAt }).eq("project_id", id).is("deleted_at", null).then(logErr);
-  return supabase.from("projects").update({ deleted_at: deletedAt }).eq("id", id).then(logErr);
+  await save(() => supabase.from("tasks").update({ deleted_at: deletedAt }).eq("project_id", id).is("deleted_at", null));
+  return save(() => supabase.from("projects").update({ deleted_at: deletedAt }).eq("id", id));
 };
 export const restoreProjectDb = async (id: string) => {
-  await supabase.from("tasks").update({ deleted_at: null }).eq("project_id", id).then(logErr);
-  return supabase.from("projects").update({ deleted_at: null }).eq("id", id).then(logErr);
+  await save(() => supabase.from("tasks").update({ deleted_at: null }).eq("project_id", id));
+  return save(() => supabase.from("projects").update({ deleted_at: null }).eq("id", id));
 };
-export const hardDeleteProjectDb = (id: string) => supabase.from("projects").delete().eq("id", id).then(logErr);
+export const hardDeleteProjectDb = (id: string) => save(() => supabase.from("projects").delete().eq("id", id));
 // Cascades to this client's own not-yet-deleted projects AND tasks — a
 // client's whole tree goes to Trash together and comes back together.
 export const deleteClientDb = async (id: string) => {
   const deletedAt = new Date().toISOString();
-  await supabase.from("tasks").update({ deleted_at: deletedAt }).eq("client_id", id).is("deleted_at", null).then(logErr);
-  await supabase.from("projects").update({ deleted_at: deletedAt }).eq("client_id", id).is("deleted_at", null).then(logErr);
-  return supabase.from("clients").update({ deleted_at: deletedAt }).eq("id", id).then(logErr);
+  await save(() => supabase.from("tasks").update({ deleted_at: deletedAt }).eq("client_id", id).is("deleted_at", null));
+  await save(() => supabase.from("projects").update({ deleted_at: deletedAt }).eq("client_id", id).is("deleted_at", null));
+  return save(() => supabase.from("clients").update({ deleted_at: deletedAt }).eq("id", id));
 };
 export const restoreClientDb = async (id: string) => {
-  await supabase.from("tasks").update({ deleted_at: null }).eq("client_id", id).then(logErr);
-  await supabase.from("projects").update({ deleted_at: null }).eq("client_id", id).then(logErr);
-  return supabase.from("clients").update({ deleted_at: null }).eq("id", id).then(logErr);
+  await save(() => supabase.from("tasks").update({ deleted_at: null }).eq("client_id", id));
+  await save(() => supabase.from("projects").update({ deleted_at: null }).eq("client_id", id));
+  return save(() => supabase.from("clients").update({ deleted_at: null }).eq("id", id));
 };
-export const hardDeleteClientDb = (id: string) => supabase.from("clients").delete().eq("id", id).then(logErr);
+export const hardDeleteClientDb = (id: string) => save(() => supabase.from("clients").delete().eq("id", id));
 
 export interface TrashEntry { id: string; name: string; deletedAt: string }
 // Trash panel's data source — deliberately not routed through
@@ -460,24 +460,24 @@ export async function fetchTrash(): Promise<{ clients: TrashEntry[]; projects: T
 // source. Awaited (not fire-and-forget) so the caller can refetch on success.
 export const mergeClientsDb = (sourceId: string, targetId: string) =>
   supabase.rpc("merge_clients", { source_id: sourceId, target_id: targetId });
-export const insertNotif = (n: Notification) => supabase.from("notifications").insert(notifToRow(n)).then(logErr);
-export const markNotifsReadDb = (recipientId: string) => supabase.from("notifications").update({ read: true }).eq("recipient_id", recipientId).then(logErr);
-export const markNotifReadDb = (id: string) => supabase.from("notifications").update({ read: true }).eq("id", id).then(logErr);
-export const upsertClientLink = (l: ClientLink) => supabase.from("client_links").upsert(clientLinkToRow(l)).then(logErr);
-export const deleteClientLinkDb = (id: string) => supabase.from("client_links").delete().eq("id", id).then(logErr);
-export const upsertClientNote = (n: ClientNote) => supabase.from("client_notes").upsert(clientNoteToRow(n)).then(logErr);
+export const insertNotif = (n: Notification) => save(() => supabase.from("notifications").insert(notifToRow(n)));
+export const markNotifsReadDb = (recipientId: string) => save(() => supabase.from("notifications").update({ read: true }).eq("recipient_id", recipientId));
+export const markNotifReadDb = (id: string) => save(() => supabase.from("notifications").update({ read: true }).eq("id", id));
+export const upsertClientLink = (l: ClientLink) => save(() => supabase.from("client_links").upsert(clientLinkToRow(l)));
+export const deleteClientLinkDb = (id: string) => save(() => supabase.from("client_links").delete().eq("id", id));
+export const upsertClientNote = (n: ClientNote) => save(() => supabase.from("client_notes").upsert(clientNoteToRow(n)));
 
-export const upsertTaskTemplate = (t: TaskTemplate) => supabase.from("task_templates").upsert(taskTemplateToRow(t)).then(logErr);
-export const deleteTaskTemplateDb = (id: string) => supabase.from("task_templates").delete().eq("id", id).then(logErr);
-export const upsertPlaybook = (p: Playbook) => supabase.from("playbooks").upsert(playbookToRow(p)).then(logErr);
-export const deletePlaybookDb = (id: string) => supabase.from("playbooks").delete().eq("id", id).then(logErr);
-export const deleteClientNoteDb = (id: string) => supabase.from("client_notes").delete().eq("id", id).then(logErr);
-export const insertTeamMessage = (m: TeamMessage) => supabase.from("team_messages").insert(teamMessageToRow(m)).then(logErr);
-export const deleteTeamMessageDb = (id: string) => supabase.from("team_messages").delete().eq("id", id).then(logErr);
+export const upsertTaskTemplate = (t: TaskTemplate) => save(() => supabase.from("task_templates").upsert(taskTemplateToRow(t)));
+export const deleteTaskTemplateDb = (id: string) => save(() => supabase.from("task_templates").delete().eq("id", id));
+export const upsertPlaybook = (p: Playbook) => save(() => supabase.from("playbooks").upsert(playbookToRow(p)));
+export const deletePlaybookDb = (id: string) => save(() => supabase.from("playbooks").delete().eq("id", id));
+export const deleteClientNoteDb = (id: string) => save(() => supabase.from("client_notes").delete().eq("id", id));
+export const insertTeamMessage = (m: TeamMessage) => save(() => supabase.from("team_messages").insert(teamMessageToRow(m)));
+export const deleteTeamMessageDb = (id: string) => save(() => supabase.from("team_messages").delete().eq("id", id));
 // Narrow patch, not a full-row upsert — pin toggle is the only in-place edit
 // a chat message supports (see chat-reply-attachments-pins.sql's update policy).
 export const updateTeamMessageDb = (id: string, patch: { pinned: boolean; pinnedBy: string | null; pinnedAt: string | null }) =>
-  supabase.from("team_messages").update({ pinned: patch.pinned, pinned_by: patch.pinnedBy, pinned_at: patch.pinnedAt }).eq("id", id).then(logErr);
+  save(() => supabase.from("team_messages").update({ pinned: patch.pinned, pinned_by: patch.pinnedBy, pinned_at: patch.pinnedAt }).eq("id", id));
 // How far this member has read each DM thread. Server-side because read state
 // is a property of a person, not of a browser: it used to live in localStorage,
 // so a message read on one machine stayed unread on every other one.
@@ -489,19 +489,18 @@ export const fetchDmReads = async (memberId: string): Promise<Record<string, str
   return out;
 };
 export const markDmReadDb = (memberId: string, conversationId: string, at: string) =>
-  supabase.from("dm_reads").upsert({ member_id: memberId, conversation_id: conversationId, last_read_at: at },
-    { onConflict: "member_id,conversation_id" }).then(logErr);
+  save(() => supabase.from("dm_reads").upsert({ member_id: memberId, conversation_id: conversationId, last_read_at: at }, { onConflict: "member_id,conversation_id" }));
 
-export const insertDmMessage = (m: DmMessage) => supabase.from("dm_messages").insert(dmMessageToRow(m)).then(logErr);
-export const deleteDmMessageDb = (id: string) => supabase.from("dm_messages").delete().eq("id", id).then(logErr);
+export const insertDmMessage = (m: DmMessage) => save(() => supabase.from("dm_messages").insert(dmMessageToRow(m)));
+export const deleteDmMessageDb = (id: string) => save(() => supabase.from("dm_messages").delete().eq("id", id));
 export const updateDmMessageDb = (id: string, patch: { pinned: boolean; pinnedBy: string | null; pinnedAt: string | null }) =>
-  supabase.from("dm_messages").update({ pinned: patch.pinned, pinned_by: patch.pinnedBy, pinned_at: patch.pinnedAt }).eq("id", id).then(logErr);
-export const upsertVaultFolder = (f: VaultFolder) => supabase.from("vault_folders").upsert(vaultFolderToRow(f)).then(logErr);
-export const deleteVaultFolderDb = (id: string) => supabase.from("vault_folders").delete().eq("id", id).then(logErr);
-export const upsertFolder = (f: Folder) => supabase.from("folders").upsert(folderToRow(f)).then(logErr);
-export const deleteFolderDb = (id: string) => supabase.from("folders").delete().eq("id", id).then(logErr);
-export const upsertStage = (s: Stage) => supabase.from("stages").upsert(stageToRow(s)).then(logErr);
-export const deleteStageDb = (id: string) => supabase.from("stages").delete().eq("id", id).then(logErr);
+  save(() => supabase.from("dm_messages").update({ pinned: patch.pinned, pinned_by: patch.pinnedBy, pinned_at: patch.pinnedAt }).eq("id", id));
+export const upsertVaultFolder = (f: VaultFolder) => save(() => supabase.from("vault_folders").upsert(vaultFolderToRow(f)));
+export const deleteVaultFolderDb = (id: string) => save(() => supabase.from("vault_folders").delete().eq("id", id));
+export const upsertFolder = (f: Folder) => save(() => supabase.from("folders").upsert(folderToRow(f)));
+export const deleteFolderDb = (id: string) => save(() => supabase.from("folders").delete().eq("id", id));
+export const upsertStage = (s: Stage) => save(() => supabase.from("stages").upsert(stageToRow(s)));
+export const deleteStageDb = (id: string) => save(() => supabase.from("stages").delete().eq("id", id));
 // Messages are insert-once from this call's perspective (never upserted) —
 // editing an existing row is a separate, admin-only path (see
 // src/app/api/messages/edit/route.ts), not this function. The caller awaits
@@ -511,10 +510,10 @@ export const deleteStageDb = (id: string) => supabase.from("stages").delete().eq
 // Insert-once, like messages: an action records something that already
 // happened, so there is nothing to re-save. The single exception is ticking
 // its next step done, which is the narrow update below.
-export const insertTaskAction = (a: TaskAction) => supabase.from("task_actions").insert(taskActionToRow(a)).then(logErr);
+export const insertTaskAction = (a: TaskAction) => save(() => supabase.from("task_actions").insert(taskActionToRow(a)));
 export const setNextStepDoneDb = (id: string, doneAt: string | null) =>
-  supabase.from("task_actions").update({ next_step_done_at: doneAt }).eq("id", id).then(logErr);
-export const deleteTaskActionDb = (id: string) => supabase.from("task_actions").delete().eq("id", id).then(logErr);
+  save(() => supabase.from("task_actions").update({ next_step_done_at: doneAt }).eq("id", id));
+export const deleteTaskActionDb = (id: string) => save(() => supabase.from("task_actions").delete().eq("id", id));
 // Loaded per task rather than all at once. Unlike tasks or clients this grows
 // without bound and only one task's worth is ever on screen, so pulling the
 // whole table into the client at boot would cost more every week.
@@ -524,26 +523,26 @@ export const fetchTaskActions = async (taskId: string): Promise<TaskAction[]> =>
   return (data ?? []).map(rowToTaskAction);
 };
 
-export const insertMessage = (m: Message) => supabase.from("messages").insert(messageToRow(m)).then(logErr);
+export const insertMessage = (m: Message) => save(() => supabase.from("messages").insert(messageToRow(m)));
 // One write per opened conversation, not per message — flips every unread
 // inbound row for that contact in a single UPDATE.
 export const markMessagesReadDb = (contactId: string) =>
-  supabase.from("messages").update({ read: true }).eq("contact_id", contactId).eq("read", false).then(logErr);
+  save(() => supabase.from("messages").update({ read: true }).eq("contact_id", contactId).eq("read", false));
 // Narrower than markMessagesReadDb above — one task's messages on one
 // channel, for the TaskDrawer's per-tab unread dot (Chat/Email/SMS), which
 // needs to clear just the tab you opened, not every message for the contact.
 export const markTaskChannelReadDb = (taskId: string, channel: MessageChannel) =>
-  supabase.from("messages").update({ read: true }).eq("task_id", taskId).eq("channel", channel).eq("read", false).then(logErr);
+  save(() => supabase.from("messages").update({ read: true }).eq("task_id", taskId).eq("channel", channel).eq("read", false));
 // Admin-only per messages_delete RLS (see supabase/message-delete-policy.sql)
 // — a wrongly sent client-facing email/sms/chat message, not something any
 // assignee should be able to erase on their own.
-export const deleteMessageDb = (id: string) => supabase.from("messages").delete().eq("id", id).then(logErr);
+export const deleteMessageDb = (id: string) => save(() => supabase.from("messages").delete().eq("id", id));
 
 // Re-scopes every message on a Conversation task to a different task —
 // the write side of "merge this conversation into an existing task" (see
 // Cockpit.tsx's mergeConversationIntoTask).
 export const reassignMessagesTaskDb = (fromTaskId: string, toTaskId: string) =>
-  supabase.from("messages").update({ task_id: toTaskId }).eq("task_id", fromTaskId).then(logErr);
+  save(() => supabase.from("messages").update({ task_id: toTaskId }).eq("task_id", fromTaskId));
 
 // Every upsert/delete above is fire-and-forget from the UI's perspective — this
 // is the single choke point where a failed save gets surfaced. Dispatches a
@@ -555,6 +554,53 @@ function logErr({ error }: { error: any }) {
     if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("cut:save-error", { detail: error.message }));
   }
 }
+
+// Every write in this file is optimistic: the UI applies the change and moves
+// on. That is the right feel, and it was the wrong guarantee — a failed write
+// left the screen showing something the database never accepted, with only a
+// toast to say so. A toast you can miss, and it does not come back.
+//
+// save() is the single seam all sixty writes go through. It retries, because
+// most failures here are a dropped connection rather than a rejected write,
+// and it counts what never landed so the app can say so persistently.
+const SAVE_RETRIES = 3;
+let pendingFailures = 0;
+
+/** How many writes have failed every retry this session. Above zero means the
+ *  screen and the database disagree about something. */
+export function unsavedCount(): number { return pendingFailures; }
+
+export async function save<T extends { error: unknown }>(run: () => PromiseLike<T>): Promise<T | null> {
+  let last: T | null = null;
+  for (let attempt = 0; attempt <= SAVE_RETRIES; attempt++) {
+    let res: T;
+    try {
+      // A thunk rather than a promise, so every attempt issues a fresh request
+      // instead of re-awaiting the same settled one.
+      res = await run();
+    } catch (e) {
+      // A throw here is a transport failure, which is the kind most worth
+      // retrying.
+      res = { error: e } as T;
+    }
+    last = res;
+    if (!res?.error) return res;
+    // A rejected write will be rejected again. A constraint violation or an
+    // RLS denial will not change in four hundred milliseconds, and retrying
+    // only delays telling someone.
+    const msg = String((res.error as { message?: string })?.message ?? res.error ?? "");
+    if (/duplicate key|violates|constraint|row-level security|permission denied|invalid input|JWT/i.test(msg)) break;
+    if (attempt === SAVE_RETRIES) break;
+    await new Promise((r) => setTimeout(r, 400 * 2 ** attempt));
+  }
+  logErr({ error: last?.error });
+  pendingFailures++;
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("cut:unsaved", { detail: pendingFailures }));
+  }
+  return last;
+}
+
 
 // --- file storage (Supabase Storage) ----------------------------------------
 // Task attachments live in a private `task-files` bucket, keyed by task id.
@@ -584,7 +630,7 @@ export async function downloadUrlForFile(path: string, filename: string, expiryS
 }
 
 export async function deleteTaskFile(path: string): Promise<void> {
-  await supabase.storage.from(TASK_FILES_BUCKET).remove([path]).then(logErr);
+  await save(() => supabase.storage.from(TASK_FILES_BUCKET).remove([path]));
 }
 
 // Shared, admin-controlled app settings (see supabase/app-settings.sql) — a
@@ -599,4 +645,4 @@ export async function fetchAppSetting(key: string, fallback: boolean): Promise<b
   return !!data.value;
 }
 export const upsertAppSetting = (key: string, value: boolean) =>
-  supabase.from("app_settings").upsert({ key, value, updated_at: new Date().toISOString() }).then(logErr);
+  save(() => supabase.from("app_settings").upsert({ key, value, updated_at: new Date().toISOString() }));
