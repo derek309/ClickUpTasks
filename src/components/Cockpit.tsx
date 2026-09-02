@@ -2297,7 +2297,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const foldersForClient = (clientId: string) => folders.filter((f) => f.clientId === clientId).sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt));
   const stagesForProject = (projectId: string) => stages.filter((s) => s.projectId === projectId).sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt));
   const folderById = (id: string | null | undefined) => (id ? folders.find((f) => f.id === id) ?? null : null);
-  const projectProgress = (projectId: string) => { const ts = scopedTasks.filter((t) => t.projectId === projectId); const done = ts.filter((t) => t.status === "done").length; return { done, total: ts.length, pct: ts.length ? Math.round((done / ts.length) * 100) : 0 }; };
   // Open (non-done) count — matches what the client's task list actually shows
   // with "Hide done" on by default, so the sidebar/board badge and the list
   // never disagree about how many tasks "need attention".
@@ -4576,8 +4575,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 <button onClick={() => { setDirView("clients"); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
                 <span>›</span>
                 <button onClick={() => setActiveProject(null)} className="hover:text-foreground hover:underline">{clientById(activeClient)?.name}</button>
-                <span>·</span>
-                {(() => { const pg = projectProgress(activeProject); return (<span className="inline-flex items-center gap-1.5">{pg.done}/{pg.total} done<span className="inline-block h-1.5 w-24 overflow-hidden rounded-full bg-border align-middle"><span className="block h-full rounded-full bg-green-500 transition-all" style={{ width: `${pg.pct}%` }} /></span>{pg.pct}%</span>); })()}
+                {/* No done count or progress bar here — it said the same
+                    thing three ways in a breadcrumb (Derek: "remove tasks
+                    done, it's just clutter"). */}
               </p>
             </>) : (<>
               <h1 className="flex items-center gap-2 truncate text-[20px] font-semibold">
