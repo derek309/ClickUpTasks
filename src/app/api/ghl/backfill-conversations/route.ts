@@ -51,20 +51,24 @@ export async function POST(req: NextRequest) {
     .limit(5000);
   const alreadyLinked = new Set((linkedRows ?? []).map((r) => r.contact_id as string));
 
-  const { data: pending, error } = await supabaseAdmin
+  // Excluded in the query, not after it. Filtering afterwards meant the
+  // thousand-row window filled up with the one contact that has nine hundred
+  // unlinked messages — all of them already-linked contacts — and the pass
+  // came back with nothing to do while forty seven contacts waited.
+  let q = supabaseAdmin
     .from("messages")
     .select("contact_id, client_id")
     .not("ghl_message_id", "is", null)
     .is("ghl_conversation_id", null)
-    .not("contact_id", "is", null)
-    .order("contact_id", { ascending: true })
-    .limit(1000);
+    .not("contact_id", "is", null);
+  if (alreadyLinked.size) q = q.not("contact_id", "in", `(${[...alreadyLinked].join(",")})`);
+  const { data: pending, error } = await q.order("contact_id", { ascending: true }).limit(1000);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   const byContact = new Map<string, string>();
   for (const r of pending ?? []) {
     const cid = r.contact_id as string;
-    if (!alreadyLinked.has(cid) && !byContact.has(cid)) byContact.set(cid, r.client_id as string);
+    if (!byContact.has(cid)) byContact.set(cid, r.client_id as string);
   }
 
   // Which sub-account each contact actually lives in.
