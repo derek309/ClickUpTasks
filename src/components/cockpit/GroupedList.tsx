@@ -364,7 +364,11 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
         onClear={() => onPatch(task.id, { followUpAt: null })}
         className={`text-[13px] ${isSnoozed(task) ? "font-medium text-amber-700" : "text-muted"}`} emptyLabel="—" />
     );
-    if (key === "due") return <InlineDue value={task.due} overdue={overdue && !isSnoozed(task)} followUpAt={task.followUpAt ?? null} recurrence={task.recurrence} onChange={(d) => onPatch(task.id, { due: d })} onRecurrenceChange={(r) => onPatch(task.id, { recurrence: r })} />;
+    // The Due date column shows the date itself, month and day (Derek:
+    // "just make due date the month and day it's due"). The countdown reads
+    // as a second copy of the Follow up column beside it, and the snooze
+    // suffix put "follow up Tomorrow" in both columns at once.
+    if (key === "due") return <InlineDue value={task.due} overdue={overdue && !isSnoozed(task)} showCountdown={false} formatValue={formatDue} showSnooze={false} followUpAt={task.followUpAt ?? null} recurrence={task.recurrence} onChange={(d) => onPatch(task.id, { due: d })} onRecurrenceChange={(r) => onPatch(task.id, { recurrence: r })} />;
     if (key === "created") return (
       <span className="truncate text-[13px] text-muted" title={`Created ${task.createdAt.slice(0, 10)}`}>{formatDue(task.createdAt.slice(0, 10))}</span>
     );
@@ -702,7 +706,7 @@ export function InlineDate({ value, onChange, onClear, className = "", emptyLabe
   );
 }
 
-export function InlineDue({ value, overdue, followUpAt = null, recurrence = "none", recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth, recurrenceNth, recurrenceWeekday, onChange, onRecurrenceChange, emptyLabel = "—", strong = false, showRecurrenceLabel = false, showCountdown = true, formatValue = friendlyDue, textClass = "text-[13px]", toneClass }: { value: string | null; overdue: boolean; followUpAt?: string | null; recurrence?: Recurrence; recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[]; recurrenceNth?: number; recurrenceWeekday?: number; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; emptyLabel?: React.ReactNode; strong?: boolean; showRecurrenceLabel?: boolean; showCountdown?: boolean; formatValue?: (iso: string) => string; textClass?: string; toneClass?: string }) {
+export function InlineDue({ value, overdue, followUpAt = null, recurrence = "none", recurrenceInterval, recurrenceUnit, recurrenceDaysOfMonth, recurrenceNth, recurrenceWeekday, onChange, onRecurrenceChange, emptyLabel = "—", strong = false, showRecurrenceLabel = false, showCountdown = true, showSnooze = true, formatValue = friendlyDue, textClass = "text-[13px]", toneClass }: { value: string | null; overdue: boolean; followUpAt?: string | null; recurrence?: Recurrence; recurrenceInterval?: number; recurrenceUnit?: import("@/lib/data").RecurrenceUnit; recurrenceDaysOfMonth?: number[]; recurrenceNth?: number; recurrenceWeekday?: number; onChange: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; emptyLabel?: React.ReactNode; strong?: boolean; showRecurrenceLabel?: boolean; showCountdown?: boolean; showSnooze?: boolean; formatValue?: (iso: string) => string; textClass?: string; toneClass?: string }) {
   const { open, setOpen, ref, pos, openIt } = useDatePopover();
   // Amber only for a genuinely near date — not "any date that isn't
   // overdue," which would paint every far-future due date the same urgent
@@ -726,11 +730,11 @@ export function InlineDue({ value, overdue, followUpAt = null, recurrence = "non
             drawer's dates band turns the countdown off and formats the date
             itself, because "Mon" beside an "Aug 27" created date in the very
             next column reads as two different kinds of thing. */}
-        {isSnoozed({ followUpAt }) ? null : value ? (showCountdown ? dueOneLine(value) : formatValue(value)) : emptyLabel}
+        {showSnooze && isSnoozed({ followUpAt }) ? null : value ? (showCountdown ? dueOneLine(value) : formatValue(value)) : emptyLabel}
         {/* While it's snoozed the countdown answers the question you can
             actually act on — when it comes back — not how late the promise
             is, which you already know and can't do anything about today. */}
-        {isSnoozed({ followUpAt }) ? (
+        {showSnooze && isSnoozed({ followUpAt }) ? (
           <span className="shrink-0 text-accent opacity-80">follow up {friendlyDue(followUpAt!)}</span>
         ) : null}
         {recurrence !== "none" && <I.repeat className="text-accent" />}
