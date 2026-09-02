@@ -836,10 +836,15 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     const late = a.nextStepDue && !a.nextStepDoneAt && (daysUntilDue(a.nextStepDue) ?? 0) < 0;
     const replies = (actions ?? []).filter((r) => r.parentId === a.id).sort((x, y) => x.at.localeCompare(y.at));
     const replyOpen = replyingAction === a.id;
+    // A message to a teammate gets a white card; everything else stays flat
+    // on the feed's tinted ground. That contrast is the point — a message is
+    // the one entry here that is addressed to a person and waiting on them
+    // (Derek: "add a white box around messages so it stands out").
+    const carded = a.kind === "team";
     return (
       <div key={a.id} className={`group flex gap-3 ${gap}`}>
         <span className="z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-[14px]" aria-hidden>{ACTION_ICON[a.kind]}</span>
-        <div className="min-w-0 flex-1 pt-0.5">
+        <div className={`min-w-0 flex-1 ${carded ? "rounded-xl border bg-surface px-3 py-2 shadow-soft" : "pt-0.5"}`}>
           <span className="text-[15px] font-semibold">{meta.verb}</span>
           {/* Who wrote it and who it was addressed to. "Messaged · Derek Fox"
               recorded that a teammate was messaged and lost which one, which
