@@ -10,15 +10,19 @@ import { I } from "./ui";
 
 export type CompletionRow = { id: string; taskId: string; taskTitle: string; clientId: string; clientName: string; authorId: string; authorName: string; authorColor: string; authorInitials: string; at: string };
 
-export function CompletedLog({ rows, onOpenTask }: { rows: CompletionRow[]; onOpenTask?: (clientId: string, taskId: string) => void }) {
+// authorId, when given, is the caller answering "whose" for us — All Tasks
+// asks it in its own header dropdown, and the log's picker beneath would be
+// the same question a second time.
+export function CompletedLog({ rows, authorId = null, onOpenTask }: { rows: CompletionRow[]; authorId?: string | null; onOpenTask?: (clientId: string, taskId: string) => void }) {
   const [q, setQ] = useState("");
   const [completedBy, setCompletedBy] = useState<string>("all");
+  const who = authorId ?? completedBy;
 
   const query = q.trim().toLowerCase();
   const matches = (r: CompletionRow) => !query || r.taskTitle.toLowerCase().includes(query) || r.clientName.toLowerCase().includes(query);
-  const shown = useMemo(() => rows.filter((r) => (completedBy === "all" || r.authorId === completedBy) && matches(r)),
+  const shown = useMemo(() => rows.filter((r) => (who === "all" || r.authorId === who) && matches(r)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rows, completedBy, query]);
+    [rows, who, query]);
 
   // Doesn't depend on the search query at all — rebuilding it on every
   // keystroke was wasted work.
@@ -50,7 +54,7 @@ export function CompletedLog({ rows, onOpenTask }: { rows: CompletionRow[]; onOp
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search completed tasks…"
             className="w-full rounded-lg border bg-surface py-2 pl-8 pr-3 text-[15px] outline-none focus:border-accent" />
         </div>
-        {completedByOptions.length > 0 && (
+        {!authorId && completedByOptions.length > 0 && (
           <select value={completedBy} onChange={(e) => setCompletedBy(e.target.value)} title="Filter by who completed it"
             className="rounded-lg border bg-surface px-2.5 py-2 text-[13px] font-medium outline-none focus:border-accent">
             <option value="all">Everyone</option>

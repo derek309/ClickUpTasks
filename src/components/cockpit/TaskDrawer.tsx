@@ -603,11 +603,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {/* No done circle here. It never worked reliably from the drawer, and
           the Stage control in the chip row below already sets Done — two
           controls for one field, one of them broken. */}
+      {/* The title gets the whole line. Riding the byline alongside it cost
+          a long title a second row of wrapping to make room for text nobody
+          acts on (Derek: "the city ir line wrapping"). Who added it now sits
+          under the Created date in the band below, which is the fact it
+          actually describes. */}
       <div className="min-w-0 flex-1">{titleBlock}</div>
-      {/* Rides the title line rather than sitting under it (Derek: "combine
-          into one line"). It's provenance, not something you act on, so it
-          shouldn't cost a row of its own above the dates band. */}
-      <span className="mt-1.5 hidden shrink-0 text-[13px] text-muted sm:block">{creatorName ? `Added by ${creatorName} · ` : ""}Updated {timeAgo(lastActivityAt)}</span>
     </div>
   );
   // The three dates used to live in three unrelated places: created as grey
@@ -643,7 +644,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       <div className="flex items-stretch gap-1.5">
         <DateCol tone={DATE_TONES.created} label="Created">
           <span className={dateVal}>{formatDue(createdDay)}</span>
-          <span className={dateSub}>{ageDays <= 0 ? "today" : `${ageDays} day${ageDays === 1 ? "" : "s"} ago`}</span>
+          {/* Who and when, in the column already labelled Created. The
+              full byline, including the last-activity time, is the hover
+              title so the one line stays short enough not to truncate. */}
+          <span className={dateSub} title={`${creatorName ? `Added by ${creatorName} · ` : ""}Updated ${timeAgo(lastActivityAt)}`}>
+            {creatorName ? `${creatorName} · ` : ""}{ageDays <= 0 ? "today" : `${ageDays}d ago`}
+          </span>
         </DateCol>
         <DateCol tone={DATE_TONES.followUp} label="Follow up">
           <InlineDate value={task.followUpAt ?? null} onChange={(d) => onPatch({ followUpAt: d })} onClear={() => onPatch({ followUpAt: null })}

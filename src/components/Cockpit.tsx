@@ -180,7 +180,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // bell dropdown already covers real mentions/assignments; Activity's own
   // "Unmatched email" section was mostly automated noise — WordPress,
   // Stripe, Amazon — not real leads).
-  const [dashboardView, setDashboardView] = usePersisted<"work" | "plan" | "completed">("dashboardView", "work", (v) => ["work", "plan", "completed"].includes(v as string));
+  // No "completed" any more — it moved to All Tasks. Anyone whose stored
+  // value still says completed fails this guard and lands back on Work,
+  // rather than on a tab that no longer has a button or a view.
+  const [dashboardView, setDashboardView] = usePersisted<"work" | "plan">("dashboardView", "work", (v) => ["work", "plan"].includes(v as string));
   // Hours in YOUR working day. Deliberately local rather than a workspace
   // setting: how long your day is is a personal fact, and app_settings only
   // stores booleans anyway. Read after mount so the server and the first
@@ -192,7 +195,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [dayStart, setDayStart] = usePersisted("dayStart", "09:00", (v) => typeof v === "string" && /^\d{2}:\d{2}$/.test(v));
   // All Tasks defaults to just your own — admins can flip to "all"; for VAs
   // this is inert either way since scopedTasks already fully restricts them.
-  const [allTasksScope, setAllTasksScope] = useState<"mine" | "all">("mine");
+  // All Tasks can show the completed log instead of the open list. It moved
+  // off My Work (Derek: "on my work move completed tasks to All Tasks"),
+  // where it sat behind a third tab on a page that is about what is still
+  // open; All Tasks is already the everything view, and the scope dropdown
+  // beside this answers "whose".
+  const [allTasksCompleted, setAllTasksCompleted] = useState(false);
+  // "mine", "all", or one member's id — a two-way toggle could only ever ask
+  // "me or everyone", and the question Derek actually has on All Tasks is
+  // "what is Michaella carrying" (Derek: "make this a drop down to select all
+  // or a user").
+  const [allTasksScope, setAllTasksScope] = useState<string>("mine");
   // View preferences survive a refresh AND are kept per section (Derek: "if
   // I change a setting stop resetting it, keep it for that section"). They
   // were one global set of three values, and All Tasks additionally forced
@@ -1764,6 +1777,25 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     () => clients.filter((c) => c.id.startsWith("cl_") && c.id !== WORKSPACE_CLIENT_ID && (c.type === "client" || c.type === "prospect")),
     [clients]
   );
+  // Everywhere a task can be moved to: each client, then each of its
+  // projects underneath. Clients alone left the ClickUpLocal projects Derek
+  // actually files work into (Tracy CA, Lincoln CA, CUL Website) unreachable
+  // from the move picker.
+  const moveTargets = useMemo(() => {
+    const byClient = new Map<string, Project[]>();
+    for (const p of projects) {
+      const list = byClient.get(p.clientId);
+      if (list) list.push(p); else byClient.set(p.clientId, [p]);
+    }
+    return [...workableClients].sort((x, y) => x.name.localeCompare(y.name)).flatMap((c) => [
+      { value: `c:${c.id}`, label: c.name },
+      ...(byClient.get(c.id) ?? []).sort((x, y) => x.name.localeCompare(y.name))
+        // A lone project named for the client adds a second row that means
+        // the same thing as the client row above it.
+        .filter((p, _i, all) => all.length > 1 || p.name !== "Tasks")
+        .map((p) => ({ value: `p:${p.id}`, label: p.name, sub: c.name })),
+    ]);
+  }, [workableClients, projects]);
   const workspaceProjects = useMemo(
     () => (clients.some((c) => c.id === WORKSPACE_CLIENT_ID) ? projects.filter((p) => p.clientId === WORKSPACE_CLIENT_ID) : []),
     [clients, projects]
@@ -1839,8 +1871,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // count. Gated on the tab actually being open — a full scan of every
   // task's comments is real work at this app's task volume, no reason to
   // pay for it on every render of every other view.
+  const showCompletedLog = !myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient === "all" && allTasksCompleted;
   const completionLog = useMemo(() => {
-    if (!(myWork && dashboardView === "completed")) return [];
+    if (!showCompletedLog) return [];
     const rows: { id: string; taskId: string; taskTitle: string; clientId: string; clientName: string; authorId: string; authorName: string; authorColor: string; authorInitials: string; at: string }[] = [];
     for (const t of tasks) {
       if (t.clientId === PERSONAL_CLIENT_ID) continue; // personal to-dos aren't client work to review
@@ -1856,7 +1889,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     }
     rows.sort((a, b) => b.at.localeCompare(a.at));
     return rows.slice(0, 300); // a running log, not a full export
-  }, [myWork, dashboardView, tasks]);
+  }, [showCompletedLog, tasks]);
   // Memoized for the same reason — the sidebar's "My Work" nav badge
   // (below) calls this inline on every render of every view, including
   // Team Chat, which is what made typing/sending there feel laggy even
@@ -2158,7 +2191,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // was O(scopedTasks × projects) every render (projectById is a linear
   // scan), and it feeds displayedGroups/vaultItems/Journal counts below.
   const baseTasks = useMemo(
-    () => scopedTasks.filter((t) => t.clientId.startsWith("cl_") && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject) && (!activeFolder || projectById(t.projectId)?.folderId === activeFolder) && (activeClient !== "all" || allTasksScope === "all" || t.assigneeId === me.id) && (!t.playbookStepKey || !!activeProject || !!t.assigneeId || !!t.due)),
+    () => scopedTasks.filter((t) => t.clientId.startsWith("cl_") && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject) && (!activeFolder || projectById(t.projectId)?.folderId === activeFolder) && (activeClient !== "all" || allTasksScope === "all" || t.assigneeId === (allTasksScope === "mine" ? me.id : allTasksScope)) && (!t.playbookStepKey || !!activeProject || !!t.assigneeId || !!t.due)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [scopedTasks, activeClient, activeProject, activeFolder, projects, allTasksScope, me.id]
   );
@@ -3740,14 +3773,22 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // task is quietly unlinked rather than deleted remotely: the old link
   // points at the wrong contact once moved, but the task on GHL's side is
   // still real work someone may be tracking there — not ours to delete.
-  const moveTaskToClient = (taskId: string, newClientId: string, silent?: boolean) => {
+  const moveTaskToClient = (taskId: string, newClientId: string, silent?: boolean, targetProjectId?: string) => {
     const t = tasksRef.current.find((x) => x.id === taskId);
-    if (!t || t.clientId === newClientId) return;
+    // A move to a named project inside the client the task is already in is a
+    // real move — only a move to the same client with no project named is the
+    // no-op this guard is for.
+    if (!t || (t.clientId === newClientId && (!targetProjectId || t.projectId === targetProjectId))) return;
     // Owner Growth Plan steps stay on their business — defense in depth
     // alongside the hidden Client/Project selects in TaskDrawer, in case
     // some other path (bulk move, a future feature) ever calls this directly.
     if (t.playbookStepKey) { pushToast("Playbook steps can't be moved to a different client."); return; }
-    let projectId = projects.find((p) => p.clientId === newClientId)?.id;
+    // A named target wins; otherwise land in the client's first project, and
+    // failing that make one. Without the named target, "move to Tracy, CA"
+    // could only ever mean "move to ClickUpLocal", dumping the task into
+    // whichever of its projects happened to sort first.
+    let projectId = (targetProjectId && projects.find((p) => p.id === targetProjectId && p.clientId === newClientId)?.id)
+      ?? projects.find((p) => p.clientId === newClientId)?.id;
     if (!projectId) {
       const p: Project = { id: newId("p_"), clientId: newClientId, name: "Tasks", description: "" };
       setProjects((ps) => [...ps, p]);
@@ -3761,17 +3802,26 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       contactId: newClientId.startsWith("cl_") ? newClientId.slice(3) : null,
       ghlTaskId: null,
     });
-    if (!silent) pushToast(`Moved to ${clientById(newClientId)?.name ?? "client"}${wasLinked ? " — unlinked from GoHighLevel" : ""}`);
+    if (!silent) pushToast(`Moved to ${projectById(projectId)?.name ?? clientById(newClientId)?.name ?? "client"}${wasLinked ? " — unlinked from GoHighLevel" : ""}`);
   };
   // Bulk version of the above — moves every selected task in one pass with a
   // single summary toast instead of one per task. Confirmed and undoable for
   // the same reason as bulkPatch, and more so: a move rewrites client,
   // project, and contact together, so putting it back by hand is real work.
-  const bulkMoveToClient = (clientId: string) => {
+  // Destination is either a client ("c:<id>", land in its first project) or
+  // one specific project ("p:<id>") — Derek: "when moving a task I can only
+  // move to clients not projects", after searching the picker for "Tracy, CA"
+  // and getting No matches, because Tracy is a ClickUpLocal project.
+  const bulkMoveTo = (dest: string) => {
+    const projectDest = dest.startsWith("p:") ? projectById(dest.slice(2)) : null;
+    const clientId = projectDest ? projectDest.clientId : dest.slice(2);
+    bulkMoveToClient(clientId, projectDest?.id);
+  };
+  const bulkMoveToClient = (clientId: string, targetProjectId?: string) => {
     const ids = [...selectedTaskIds];
     if (!ids.length) return;
-    const name = clientById(clientId)?.name ?? "client";
-    const movable = ids.filter((id) => { const t = tasks.find((x) => x.id === id); return t && t.clientId !== clientId && !t.playbookStepKey; });
+    const name = (targetProjectId && projectById(targetProjectId)?.name) || clientById(clientId)?.name || "client";
+    const movable = ids.filter((id) => { const t = tasks.find((x) => x.id === id); return t && !t.playbookStepKey && (targetProjectId ? t.projectId !== targetProjectId : t.clientId !== clientId); });
     if (!movable.length) { pushToast(`Already in ${name}`); return; }
     const n = movable.length;
     const plural = n === 1 ? "" : "s";
@@ -3787,7 +3837,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             return t ? { id, prev: { clientId: t.clientId, projectId: t.projectId, contactId: t.contactId, ghlTaskId: t.ghlTaskId } as Partial<Task> } : null;
           })
           .filter((x): x is { id: string; prev: Partial<Task> } => !!x);
-        movable.forEach((id) => moveTaskToClient(id, clientId, true));
+        movable.forEach((id) => moveTaskToClient(id, clientId, true, targetProjectId));
         setConfirmDialog(null);
         clearSelection();
         pushToast(`Moved ${n} task${plural} to ${name}`, {
@@ -4045,6 +4095,28 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const headerTitleText = settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Team Chat") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "My Work" : activeClient === "all" ? "All Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? ""));
   const isClientDetail = !myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && !!clientById(activeClient);
   const showFilterControl = !inboxView && !dirView && !myWork && !settingsView && !(activeClient !== "all" && clientTab === "chat");
+  // Whose tasks All Tasks is showing: me, everyone, or one named member.
+  // The old Mine/All pair could only ask "me or everyone" (Derek: "make this
+  // a drop down to select all or a user").
+  const scopeControl = (
+    <select value={allTasksScope} onChange={(e) => setAllTasksScope(e.target.value)}
+      title="VAs only ever see their own tasks here regardless of this setting"
+      className="rounded-md border bg-background px-2 py-1.5 text-[13px] font-medium outline-none">
+      <option value="mine">Mine</option>
+      <option value="all">Everyone</option>
+      {users.filter((u) => u.id !== me.id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+    </select>
+  );
+  // One switch, not a third tab: All Tasks is either what is still open or
+  // what got finished, for whoever the dropdown beside it names.
+  const scopeControls = (
+    <div className="flex items-center gap-2">
+      {scopeControl}
+      <button onClick={() => setAllTasksCompleted((v) => !v)}
+        title={allTasksCompleted ? "Back to open tasks" : "Show what has been completed"}
+        className={`rounded-md border px-2.5 py-1.5 text-[13px] font-medium ${allTasksCompleted ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Completed</button>
+    </div>
+  );
   // Following moved out of the filter popover into its own header avatar
   // stack — "Following" isn't a filter, it's who's watching this client.
   const followingControl = !personalView && activeClient !== "all" && clientById(activeClient) ? (
@@ -4458,16 +4530,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <div className="flex rounded-lg bg-background p-0.5">
                 <button onClick={() => setDashboardView("work")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "work" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Work</button>
                 <button onClick={() => setDashboardView("plan")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "plan" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Plan</button>
-                <button onClick={() => setDashboardView("completed")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "completed" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Completed</button>
               </div>
             </div>
           ) : showFilterControl ? (
             <div className="flex items-center gap-2">
               {activeClient === "all" && !myWork && canAdmin && (
-                <div className="inline-flex overflow-hidden rounded-md border text-[13px]">
-                  <button onClick={() => setAllTasksScope("mine")} className={`px-3 py-1.5 font-medium ${allTasksScope === "mine" ? "bg-accent-soft text-accent" : "bg-background text-muted"}`}>Mine</button>
-                  <button onClick={() => setAllTasksScope("all")} className={`px-3 py-1.5 font-medium ${allTasksScope === "all" ? "bg-accent-soft text-accent" : "bg-background text-muted"}`}>All</button>
-                </div>
+                scopeControls
               )}
               <div className="flex-1" />
               {followingControl}
@@ -4531,10 +4599,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           )}
           {/* This is the "All Tasks" scope toggle — it belongs there only. */}
           {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient === "all" && canAdmin && (
-            <div className="inline-flex overflow-hidden rounded-md border" title="VAs only ever see their own tasks here regardless of this toggle">
-              <button onClick={() => setAllTasksScope("mine")} className={`px-2.5 py-1.5 text-[13px] font-medium ${allTasksScope === "mine" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Mine</button>
-              <button onClick={() => setAllTasksScope("all")} className={`px-2.5 py-1.5 text-[13px] font-medium ${allTasksScope === "all" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>All</button>
-            </div>
+            scopeControls
           )}
           {/* The Tasks/Journal toggle is gone from the bar — Journal is in
               the ⋮ menu now, and Tasks is simply where you already are. */}
@@ -4597,7 +4662,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <div className="inline-flex overflow-hidden rounded-md border">
                 <button onClick={() => setDashboardView("work")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "work" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Work</button>
                 <button onClick={() => setDashboardView("plan")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "plan" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Plan</button>
-                <button onClick={() => setDashboardView("completed")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "completed" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Completed</button>
               </div>
               {/* De-emphasized on purpose — the Dashboard is meant to be the
                   one place everyone works from; this is just an escape
@@ -4701,11 +4765,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             clientById={clientById} projectById={projectById} onOpen={setOpenTaskId}
             onSize={(taskId, patch) => patchTask(taskId, patch)} dayStart={dayStart} onDayStart={setDayStart} unsizedCount={planUnsized}
             includePersonal={planPersonal} onIncludePersonal={setPlanPersonal} />
-        ) : myWork && dashboardView === "completed" ? (
-          // Relocated from the Clients directory (Derek: "makes more sense
-          // there") — same completionLog data, day-grouped feed of who
-          // finished what and when.
-          <CompletedLog rows={completionLog} onOpenTask={(_clientId, taskId) => setOpenTaskId(taskId)} />
+        ) : showCompletedLog ? (
+          // Now an All Tasks mode rather than a My Work tab — same
+          // completionLog data, day-grouped feed of who finished what and
+          // when. Whose is the header dropdown's answer, so the log's own
+          // author picker would be the same question asked twice.
+          <CompletedLog rows={completionLog} authorId={allTasksScope === "all" ? null : allTasksScope === "mine" ? me.id : allTasksScope}
+            onOpenTask={(_clientId, taskId) => setOpenTaskId(taskId)} />
         ) : myWork ? (
           <ClientsBoard groups={myWorkGroups} clientTaskCount={clientTaskCount} projectTaskCount={projectTaskCount} hasUnreadMessage={hasUnreadMessage} onOpenTask={setOpenTaskId}
             onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }}
@@ -4860,9 +4926,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <input type="date" onChange={(e) => { if (e.target.value) { bulkPatch({ due: e.target.value }, `Set due date to ${e.target.value}`); e.target.value = ""; } }} title="Due date" className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none" />
           <button onClick={() => bulkPatch({ due: null }, "Removed due date")} title="Clear the due date on every selected task" className="rounded-md border bg-background px-2 py-1 text-[15px] text-muted hover:bg-danger-soft hover:text-danger">Remove dates</button>
           <div className="w-40">
-            <SearchableSelect value="" onChange={(v) => v && bulkMoveToClient(v)}
-              options={[...workableClients].sort((a, b) => a.name.localeCompare(b.name)).map((c) => ({ value: c.id, label: c.name }))}
-              placeholder="Move to…" searchPlaceholder="Search clients…"
+            <SearchableSelect value="" onChange={(v) => v && bulkMoveTo(v)}
+              options={moveTargets}
+              placeholder="Move to…" searchPlaceholder="Search clients and projects…"
               className="rounded-md border bg-background px-2 py-1 text-[15px]" />
           </div>
           {selectedTaskIds.size === 2 && (() => {
