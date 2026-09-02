@@ -93,12 +93,20 @@ export default function SettingsPanel({
       const j = await res.json();
       if (!res.ok) throw new Error(j.error ?? "Backfill failed");
       const failed = (j.results ?? []).filter((r: { error?: string }) => r.error).length;
+      // Blocked is not the same as failed. A sub-account with no token is not
+      // something pressing the button again will fix, and saying "could not be
+      // reached" about it made a finished run look broken.
+      const blocked = (j.blockedNoToken ?? 0) + (j.blockedNoIds ?? 0);
+      const blockedNote = blocked
+        ? ` ${blocked} client${blocked === 1 ? "" : "s"} can't be linked: ${j.blockedNoToken ?? 0} in sub-accounts with no GoHighLevel token${j.blockedNoIds ? `, ${j.blockedNoIds} missing GoHighLevel ids` : ""}.`
+        : "";
       setBackfill({
         kind: "ok",
         remaining: j.remaining ?? 0,
         msg: `${j.contactsProcessed} client${j.contactsProcessed === 1 ? "" : "s"} checked, ${j.bound} message${j.bound === 1 ? "" : "s"} linked`
-          + (failed ? `, ${failed} could not be reached` : "")
-          + (j.remaining ? ` — ${j.remaining} client${j.remaining === 1 ? "" : "s"} still to go.` : ". All done."),
+          + (failed ? `, ${failed} errored` : "")
+          + (j.remaining ? ` — ${j.remaining} still to go.` : ". Nothing left to link.")
+          + blockedNote,
       });
     } catch (e) {
       setBackfill({ kind: "err", msg: e instanceof Error ? e.message : "Backfill failed" });

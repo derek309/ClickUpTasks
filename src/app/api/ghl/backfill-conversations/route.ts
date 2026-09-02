@@ -31,21 +31,55 @@ export async function POST(req: NextRequest) {
   // is cheap and safe.
   const limit = typeof body.limit === "number" && body.limit > 0 ? Math.min(body.limit, 50) : 25;
 
-  // Only contacts that still have unbound GoHighLevel messages. Once a
-  // contact is done it drops out of this list, which is what makes repeated
-  // calls converge instead of redoing the same work.
+  // Only contacts this can actually do something about.
+  //
+  // The first run taught this the hard way: nine of ten contacts failed with
+  // "no token for this sub-account", and because a failure changes nothing in
+  // the database, the next run picked the same nine again. A queue that keeps
+  // reserving work it cannot do never drains.
+  //
+  // Most of these conversations live in sub-accounts nobody holds a token for.
+  // That is not an error to retry, it is a fact to report.
   const { data: pending, error } = await supabaseAdmin
     .from("messages")
     .select("contact_id, client_id")
     .not("ghl_message_id", "is", null)
     .is("ghl_conversation_id", null)
-    .limit(5000);
+    .not("contact_id", "is", null)
+    // Ordered so the window is stable rather than whatever the planner felt
+    // like returning — without it the same rows come back every time and the
+    // run cannot move past them.
+    .order("contact_id", { ascending: true })
+    .limit(1000);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   const byContact = new Map<string, string>();
   for (const r of pending ?? []) {
-    const cid = r.contact_id as string | null;
-    if (cid && !byContact.has(cid)) byContact.set(cid, r.client_id as string);
+    const cid = r.contact_id as string;
+    if (!byContact.has(cid)) byContact.set(cid, r.client_id as string);
+  }
+
+  // Resolve reachability in three bulk reads rather than per contact.
+  const contactIds = [...byContact.keys()];
+  const clientIds = [...new Set(byContact.values())];
+  const [{ data: contactRows }, { data: clientRows }, { data: tokenRows }] = await Promise.all([
+    supabaseAdmin.from("contacts").select("id, ghl_contact_id").in("id", contactIds),
+    supabaseAdmin.from("clients").select("id, ghl_location_id").in("id", clientIds),
+    supabaseAdmin.from("ghl_tokens").select("location_id"),
+  ]);
+  const ghlContactOf = new Map((contactRows ?? []).map((r) => [r.id as string, r.ghl_contact_id as string | null]));
+  const locationOf = new Map((clientRows ?? []).map((r) => [r.id as string, r.ghl_location_id as string | null]));
+  const tokened = new Set((tokenRows ?? []).map((r) => r.location_id as string));
+
+  const reachable: { contactId: string; clientId: string; ghlContactId: string; locationId: string }[] = [];
+  let noIds = 0;
+  let noToken = 0;
+  for (const [contactId, clientId] of byContact) {
+    const ghlContactId = ghlContactOf.get(contactId);
+    const locationId = locationOf.get(clientId);
+    if (!ghlContactId || !locationId) { noIds++; continue; }
+    if (!tokened.has(locationId)) { noToken++; continue; }
+    reachable.push({ contactId, clientId, ghlContactId, locationId });
   }
 
   const origin = req.nextUrl.origin;
@@ -53,19 +87,7 @@ export async function POST(req: NextRequest) {
   const results: { contactId: string; bound?: number; error?: string }[] = [];
   let bound = 0;
 
-  for (const [contactId, clientId] of [...byContact].slice(0, limit)) {
-    // The contact id is on the contact; the sub-account it belongs to is on
-    // the client, which is where GoHighLevel's location id lives.
-    const { data: contact } = await supabaseAdmin
-      .from("contacts").select("ghl_contact_id").eq("id", contactId).maybeSingle();
-    const { data: client } = await supabaseAdmin
-      .from("clients").select("ghl_location_id").eq("id", clientId).maybeSingle();
-    const ghlContactId = contact?.ghl_contact_id as string | undefined;
-    const locationId = client?.ghl_location_id as string | undefined;
-    if (!ghlContactId || !locationId) {
-      results.push({ contactId, error: "no GoHighLevel ids on this contact" });
-      continue;
-    }
+  for (const { contactId, clientId, ghlContactId, locationId } of reachable.slice(0, limit)) {
     try {
       const res = await fetch(`${origin}/api/ghl/refresh-messages`, {
         method: "POST",
@@ -81,12 +103,15 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // remaining is the honest number: how many contacts still have unbound
-  // messages after this pass, so it is obvious whether to call again.
+  // Reported separately because they are different problems. remaining is work
+  // left to do; blocked is work nobody can do until a token is added, and
+  // rolling the two together is how the first version looked stuck.
   return NextResponse.json({
     contactsProcessed: results.length,
-    remaining: Math.max(0, byContact.size - results.length),
+    remaining: Math.max(0, reachable.length - results.length),
     bound,
+    blockedNoToken: noToken,
+    blockedNoIds: noIds,
     results,
   });
 }
