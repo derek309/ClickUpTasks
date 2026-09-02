@@ -43,6 +43,11 @@ export async function POST(req: NextRequest) {
 
   const description = typeof body.description === "string" ? body.description : "";
   const due = typeof body.due === "string" && body.due ? body.due : null;
+  // A caller that knows when it wants to see this again can say so. The
+  // website feedback plugin does: its reports are due in three working days
+  // and want looking at today, and without this they arrived with no dates at
+  // all and sank in the list.
+  const followUpAt = typeof body.follow_up_at === "string" && body.follow_up_at ? body.follow_up_at : null;
   const link = typeof body.link === "string" && body.link.trim() ? body.link.trim() : null;
   // The extension can attach more than one screenshot per task (e.g. several
   // areas of a page under review) — each becomes its own image attachment.
@@ -86,7 +91,7 @@ export async function POST(req: NextRequest) {
     // own token) — but let them explicitly hand it to a teammate instead.
     assignee_id: typeof body.assignee_id === "string" && body.assignee_id ? body.assignee_id : caller.memberId,
     contact_id: clientId.startsWith("cl_") ? clientId.slice(3) : null,
-    due, attachments, created_by: caller.memberId,
+    due, follow_up_at: followUpAt, attachments, created_by: caller.memberId,
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ id, title, clientId, projectId });
