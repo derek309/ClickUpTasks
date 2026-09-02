@@ -279,17 +279,24 @@ function InlineTaskComposer({ suggestedDue, onAdd }: {
 
   return (
     <div className={title.trim() ? "border-b bg-background/40 px-4 py-2.5" : "px-4 py-1.5"}>
-      <div className="flex items-center gap-2">
-        <I.plus className="shrink-0 text-muted" />
-        <input value={title} onChange={(e) => setTitle(e.target.value)}
+      <div className="flex items-start gap-2">
+        <I.plus className="mt-1 shrink-0 text-muted" />
+        {/* A textarea, not an input: pasting a whole paragraph into a
+            single-line field scrolled the start of it off to the left, so you
+            could not see what you were writing (Derek). It grows with the
+            text via field-sizing and stops at about five lines, after which
+            it scrolls. Enter still submits — newlines are not the point of
+            wrapping here — and shift+Enter is left alone for the day someone
+            wants one. */}
+        <textarea value={title} onChange={(e) => setTitle(e.target.value)} rows={1}
           onKeyDown={(e) => {
             if (e.key === "Escape") { reset(); return; }
             // Enter adds once the answers are in, so the keyboard path stays
             // as fast as it was. Before that it does nothing rather than
             // creating something the list cannot plan.
-            if (e.key === "Enter") { e.preventDefault(); submit(); }
+            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
           }}
-          placeholder="Add task…" className="flex-1 bg-transparent py-1 text-[15px] outline-none placeholder:text-muted" />
+          placeholder="Add task…" className="max-h-[7.5rem] flex-1 resize-none overflow-y-auto bg-transparent py-1 text-[15px] leading-snug outline-none [field-sizing:content] placeholder:text-muted" />
       </div>
       {!!title.trim() && (
         <div className="mt-2 space-y-1.5">

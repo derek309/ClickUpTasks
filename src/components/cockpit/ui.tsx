@@ -148,7 +148,11 @@ export function Toggle({ on, onClick, disabled }: { on: boolean; onClick: () => 
 // select it replaces. Open, it puts a filter box above the options: typing
 // narrows the list, Up/Down move the highlight, Enter picks, Escape closes
 // (and stops there, so it never also closes the modal the picker lives in).
-export type SearchOption = { value: string; label: string; sub?: string };
+// dot paints a small marker before the label — the client's own colour, so a
+// mixed list of clients and their projects reads as groups rather than one
+// long alphabet. hollow draws it as a ring instead of a disc, which is how a
+// project says "inside that client" without a second colour to learn.
+export type SearchOption = { value: string; label: string; sub?: string; dot?: string; hollow?: boolean };
 
 export function SearchableSelect({
   value, options, onChange, placeholder = "Select…", searchPlaceholder = "Type to filter…",
@@ -239,8 +243,14 @@ export function SearchableSelect({
             {shown.map((o, i) => (
               <button key={o.value} type="button" data-i={i} onMouseEnter={() => setIdx(i)} onClick={() => pick(o.value)}
                 className={`flex w-full flex-col items-start rounded-md px-2.5 py-1.5 text-left ${i === idx ? "bg-background" : ""} ${o.value === value ? "text-accent" : ""}`}>
-                <span className="w-full truncate text-[13px]">{o.label}</span>
-                {o.sub && <span className="w-full truncate text-[12px] text-muted">{o.sub}</span>}
+                <span className="flex w-full items-center gap-1.5">
+                  {o.dot && (
+                    <span className="size-2 shrink-0 rounded-full"
+                      style={o.hollow ? { boxShadow: `inset 0 0 0 2px ${o.dot}` } : { background: o.dot }} />
+                  )}
+                  <span className="min-w-0 flex-1 truncate text-[13px]">{o.label}</span>
+                </span>
+                {o.sub && <span className={`w-full truncate text-[12px] text-muted ${o.dot ? "pl-3.5" : ""}`}>{o.sub}</span>}
               </button>
             ))}
           </div>

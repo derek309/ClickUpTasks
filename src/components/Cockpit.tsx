@@ -1804,14 +1804,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const workspace = clients.find((c) => c.id === WORKSPACE_CLIENT_ID);
     return [
       ...(workspace ? [...byClient.get(WORKSPACE_CLIENT_ID) ?? []].sort((x, y) => x.name.localeCompare(y.name))
-        .map((p) => ({ value: `p:${p.id}`, label: p.name, sub: workspace.name })) : []),
+        .map((p) => ({ value: `p:${p.id}`, label: p.name, sub: workspace.name, dot: workspace.color, hollow: true })) : []),
       ...[...workableClients].sort((x, y) => x.name.localeCompare(y.name)).flatMap((c) => [
-      { value: `c:${c.id}`, label: c.name },
+      { value: `c:${c.id}`, label: c.name, dot: c.color },
       ...(byClient.get(c.id) ?? []).sort((x, y) => x.name.localeCompare(y.name))
         // A lone project named for the client adds a second row that means
         // the same thing as the client row above it.
         .filter((p, _i, all) => all.length > 1 || p.name !== "Tasks")
-        .map((p) => ({ value: `p:${p.id}`, label: p.name, sub: c.name })),
+        .map((p) => ({ value: `p:${p.id}`, label: p.name, sub: c.name, dot: c.color, hollow: true })),
       ]),
     ];
   }, [workableClients, clients, projects]);

@@ -30,7 +30,7 @@ export function QuickAddTask({
   const [followUp, setFollowUp] = useState("");
   const [size, setSize] = useState<TaskSize | null>(null);
   const [priority, setPriority] = useState<Priority>("normal");
-  const titleRef = useRef<HTMLInputElement>(null);
+  const titleRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { titleRef.current?.focus(); }, []);
 
   const lists = clientId ? projectsFor(clientId) : [];
@@ -66,10 +66,14 @@ export function QuickAddTask({
         onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}>
         <h2 className="text-[16px] font-semibold">New task</h2>
 
-        <input ref={titleRef} value={title} onChange={(e) => setTitle(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && canCreate) { e.preventDefault(); submit(); } }}
+        {/* Wraps rather than scrolling sideways, same as the inline row: a
+            pasted paragraph is a normal way to start a task, and you should
+            be able to read it while you type. Grows to about five lines,
+            then scrolls. */}
+        <textarea ref={titleRef} value={title} onChange={(e) => setTitle(e.target.value)} rows={1}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && canCreate) { e.preventDefault(); submit(); } }}
           placeholder="What needs doing?"
-          className="mt-3 w-full rounded-md border bg-background px-3 py-2 text-[15px] outline-none focus:border-accent" />
+          className="mt-3 max-h-[7.5rem] w-full resize-none overflow-y-auto rounded-md border bg-background px-3 py-2 text-[15px] leading-snug outline-none [field-sizing:content] focus:border-accent" />
 
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
           {/* A plain div, not a <label>: a <button> is labelable, so wrapping
