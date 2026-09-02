@@ -116,6 +116,8 @@ export async function POST(req: NextRequest) {
   };
 
   let inserted = 0;
+  // Pre-existing rows given their conversation id for the first time.
+  let bound = 0;
   for (const conv of conversations) {
     let lastMessageId: string | undefined;
     for (let page = 0; page < 5; page++) { // ~100 messages per conversation, plenty for a manual refresh
@@ -200,11 +202,25 @@ export async function POST(req: NextRequest) {
         const { error } = await supabaseAdmin.from("messages").insert(rows);
         if (!error) inserted += rows.length;
       }
+      // Heal the rows that were already here. Every message stored before
+      // ghl_conversation_id existed has no thread key, so a reply to it still
+      // falls through to a generic Conversation task. We are holding the
+      // conversation this page came from, which is the only place that id can
+      // come from — the API never sent it to us again for a message we
+      // already had. Refreshing a client now backfills it.
+      const seenIds = messages.map((m: any) => m.id).filter(Boolean);
+      if (seenIds.length && conv.id) {
+        const { data: healed } = await supabaseAdmin
+          .from("messages").update({ ghl_conversation_id: conv.id })
+          .in("ghl_message_id", seenIds).is("ghl_conversation_id", null)
+          .select("id");
+        bound += healed?.length ?? 0;
+      }
       if (!nextPage || !pageLastId) break;
       lastMessageId = pageLastId;
     }
   }
-  return NextResponse.json({ inserted });
+  return NextResponse.json({ inserted, bound });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed to refresh messages." }, { status: 502 });
   }

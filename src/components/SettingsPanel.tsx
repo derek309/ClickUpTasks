@@ -55,8 +55,8 @@ export default function SettingsPanel({
   }
 
   useEffect(() => {
-    fetch("/api/ghl/status").then((r) => r.json()).then((j) => { setConfigured(!!j.configured); setTokenLocations(j.locations ?? []); }).catch(() => setConfigured(false));
-    fetch("/api/granola/status").then((r) => r.json()).then((j) => { setGranolaApiKeyConfigured(!!j.apiKeyConfigured); setGranolaWebhookConfigured(!!j.webhookConfigured); }).catch(() => { setGranolaApiKeyConfigured(false); setGranolaWebhookConfigured(false); });
+    authedFetch("/api/ghl/status").then((r) => r.json()).then((j) => { setConfigured(!!j.configured); setTokenLocations(j.locations ?? []); }).catch(() => setConfigured(false));
+    authedFetch("/api/granola/status").then((r) => r.json()).then((j) => { setGranolaApiKeyConfigured(!!j.apiKeyConfigured); setGranolaWebhookConfigured(!!j.webhookConfigured); }).catch(() => { setGranolaApiKeyConfigured(false); setGranolaWebhookConfigured(false); });
   }, []);
 
   // Registers this deployment's /api/granola/webhook URL with Granola —
