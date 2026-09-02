@@ -32,24 +32,31 @@ export async function POST(req: NextRequest) {
   // is cheap and safe.
   const limit = typeof body.limit === "number" && body.limit > 0 ? Math.min(body.limit, 50) : 25;
 
-  // Only contacts this can actually do something about.
+  // Contacts with no linked message at all — not every contact with an
+  // unlinked one.
   //
-  // The first run taught this the hard way: nine of ten contacts failed with
-  // "no token for this sub-account", and because a failure changes nothing in
-  // the database, the next run picked the same nine again. A queue that keeps
-  // reserving work it cannot do never drains.
+  // The point of this is that a reply arriving on a conversation can find the
+  // task it belongs to, and that needs one linked message per conversation,
+  // not all of them. Refreshing a contact walks every conversation it has and
+  // links the recent window of each, which makes all of them discoverable.
   //
-  // Most of these conversations live in sub-accounts nobody holds a token for.
-  // That is not an error to retry, it is a fact to report.
+  // Queueing on "has an unlinked message" instead does not converge: one
+  // contact here has nine hundred old messages and a hundred recent ones, so
+  // it would be picked, link the same recent window, and be picked again
+  // forever. Stamping every historical row would mean paging back through
+  // years of a conversation for no gain anyone can see.
+  const { data: linkedRows } = await supabaseAdmin
+    .from("messages").select("contact_id")
+    .not("ghl_conversation_id", "is", null).not("contact_id", "is", null)
+    .limit(5000);
+  const alreadyLinked = new Set((linkedRows ?? []).map((r) => r.contact_id as string));
+
   const { data: pending, error } = await supabaseAdmin
     .from("messages")
     .select("contact_id, client_id")
     .not("ghl_message_id", "is", null)
     .is("ghl_conversation_id", null)
     .not("contact_id", "is", null)
-    // Ordered so the window is stable rather than whatever the planner felt
-    // like returning — without it the same rows come back every time and the
-    // run cannot move past them.
     .order("contact_id", { ascending: true })
     .limit(1000);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -57,7 +64,7 @@ export async function POST(req: NextRequest) {
   const byContact = new Map<string, string>();
   for (const r of pending ?? []) {
     const cid = r.contact_id as string;
-    if (!byContact.has(cid)) byContact.set(cid, r.client_id as string);
+    if (!alreadyLinked.has(cid) && !byContact.has(cid)) byContact.set(cid, r.client_id as string);
   }
 
   // Which sub-account each contact actually lives in.
