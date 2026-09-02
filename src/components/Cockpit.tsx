@@ -2668,7 +2668,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Quick-add-task FAB: create a task for an explicitly-chosen client/list
   // (from the floating "+" modal). Mirrors quickAdd's Task shape and the
   // find-or-create-"Tasks"-list idiom; assignee = the creator.
-  const createQuickTask = (clientId: string, projectId: string | null, title: string, due: string | null, priority: Priority, followUpAt: string | null = null, size: TaskSize | null = null) => {
+  const createQuickTask = (clientId: string, projectId: string | null, title: string, due: string | null, priority: Priority, followUpAt: string | null = null, size: TaskSize | null = null, files: File[] = []) => {
     if (!title.trim() || !clientId.startsWith("cl_")) return;
     let pid = projectId ?? "";
     // Same foreign-key ordering as quickAdd above — see the comment there.
@@ -2689,6 +2689,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (projectWrite) projectWrite.then(() => upsertTask(t, me.id));
     else upsertTask(t, me.id);
     maybeCleanupTaskTitle(t.id, t.title, t.description);
+    // Anything pasted into the modal rides along. Uploaded after the row
+    // exists, because an attachment needs a task to hang on.
+    if (files.length) void addFiles(t.id, files);
     pushToast(`Task added to ${clientById(clientId)?.name ?? "client"}.`);
   };
 
@@ -3035,7 +3038,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       notify(t.assigneeId, `${me.name} commented on “${t.title}”`, id, { kind: "message" });
     }
   };
-  const addFiles = async (id: string, fileList: FileList) => {
+  const addFiles = async (id: string, fileList: FileList | File[]) => {
     const t = tasks.find((x) => x.id === id);
     if (!t || fileList.length === 0) return;
     const all = Array.from(fileList);

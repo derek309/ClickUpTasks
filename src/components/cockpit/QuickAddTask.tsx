@@ -15,7 +15,7 @@ export function QuickAddTask({
   companyFor: (clientId: string) => string | undefined;
   defaultClientId: string;         // "" when there's no client context
   defaultProjectId: string | null;
-  onCreate: (clientId: string, projectId: string | null, title: string, due: string | null, priority: Priority, followUpAt: string | null, size: TaskSize | null) => void;
+  onCreate: (clientId: string, projectId: string | null, title: string, due: string | null, priority: Priority, followUpAt: string | null, size: TaskSize | null, files: File[]) => void;
   onClose: () => void;
 }) {
   const [title, setTitle] = useState("");
@@ -30,6 +30,40 @@ export function QuickAddTask({
   const [followUp, setFollowUp] = useState("");
   const [size, setSize] = useState<TaskSize | null>(null);
   const [priority, setPriority] = useState<Priority>("normal");
+  // Screenshots pasted before the task exists. Held here as Files and
+  // uploaded once it does, because an attachment needs a task to hang on
+  // (Derek: "sometimes I have a saved screenshot, let me paste it in before
+  // creating").
+  const [shots, setShots] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<Record<string, string>>({});
+  const keyOf = (f: File) => `${f.name}:${f.size}:${f.lastModified}`;
+
+  // Object URLs are revoked when the file goes, and on unmount, so closing
+  // the modal after pasting five screenshots does not leak five bitmaps.
+  useEffect(() => () => { Object.values(previews).forEach((u) => URL.revokeObjectURL(u)); }, [previews]);
+
+  const takeFiles = (files: File[]) => {
+    const images = files.filter((f) => f.type.startsWith("image/"));
+    if (!images.length) return;
+    setShots((prev) => {
+      const seen = new Set(prev.map(keyOf));
+      return [...prev, ...images.filter((f) => !seen.has(keyOf(f)))];
+    });
+    setPreviews((prev) => {
+      const next = { ...prev };
+      images.forEach((f) => { if (!next[keyOf(f)]) next[keyOf(f)] = URL.createObjectURL(f); });
+      return next;
+    });
+  };
+
+  const dropShot = (f: File) => {
+    setShots((prev) => prev.filter((x) => keyOf(x) !== keyOf(f)));
+    setPreviews((prev) => {
+      const next = { ...prev };
+      if (next[keyOf(f)]) { URL.revokeObjectURL(next[keyOf(f)]); delete next[keyOf(f)]; }
+      return next;
+    });
+  };
   const titleRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { titleRef.current?.focus(); }, []);
 
@@ -55,7 +89,7 @@ export function QuickAddTask({
 
   const submit = () => {
     if (!title.trim() || !clientId) return;
-    onCreate(clientId, projectId || null, title.trim(), due || null, priority, followUp || null, size);
+    onCreate(clientId, projectId || null, title.trim(), due || null, priority, followUp || null, size, shots);
     onClose();
   };
 
@@ -63,7 +97,16 @@ export function QuickAddTask({
     <>
       <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
       <div className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border bg-surface p-5 shadow-xl"
-        onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}>
+        onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
+        onPaste={(e) => {
+          const files = Array.from(e.clipboardData?.files ?? []);
+          if (files.some((f) => f.type.startsWith("image/"))) { e.preventDefault(); takeFiles(files); }
+        }}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          const files = Array.from(e.dataTransfer?.files ?? []);
+          if (files.some((f) => f.type.startsWith("image/"))) { e.preventDefault(); takeFiles(files); }
+        }}>
         <h2 className="text-[16px] font-semibold">New task</h2>
 
         {/* Wraps rather than scrolling sideways, same as the inline row: a
@@ -138,6 +181,27 @@ export function QuickAddTask({
             Still needs {missing.length > 1 ? `${missing.slice(0, -1).join(", ")} and ${missing[missing.length - 1]}` : missing[0]}.
           </div>
         )}
+
+        {/* Thumbnails, so you can see you actually pasted the right shot
+            before the task exists. The line stays visible when empty because
+            "you can paste a screenshot here" is not discoverable otherwise. */}
+        <div className="mt-3">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Screenshots</div>
+          {shots.length === 0 ? (
+            <div className="rounded-md border border-dashed px-2.5 py-2 text-[13px] text-muted">Paste or drop an image anywhere in this box.</div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {shots.map((f) => (
+                <button key={keyOf(f)} type="button" onClick={() => dropShot(f)} title={`${f.name} — click to remove`}
+                  className="group relative h-16 w-24 overflow-hidden rounded-md border bg-background">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={previews[keyOf(f)]} alt={f.name} className="h-full w-full object-cover" />
+                  <span className="absolute inset-0 hidden items-center justify-center bg-black/50 text-[12px] font-semibold text-white group-hover:flex">Remove</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         <div className="mt-5 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-md border px-3 py-1.5 text-[15px] font-medium hover:bg-background">Cancel</button>
