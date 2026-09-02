@@ -16,7 +16,7 @@ type TokenRow = { id: string; name: string; created_at: string; last_used_at: st
 // extension to get a fix that had never been in their build. Bump this with
 // chrome-extension/manifest.json; `npm run build` repackages the zip from
 // source, so the two cannot drift apart again.
-const EXTENSION_VERSION = "1.9.3";
+const EXTENSION_VERSION = "1.10.0";
 
 export default function ApiTokensPanel() {
   const [tokens, setTokens] = useState<TokenRow[]>([]);

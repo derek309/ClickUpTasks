@@ -16,8 +16,7 @@
   #enrich { margin-top: 8px; background: #fff; color: #E87722; border: 1px solid #E87722; }
   #matchHint { font-size: 11px; margin-top: 3px; color: #64748b; }
   #status { font-size: 12px; margin-top: 8px; }
-  /* Attachments found on the open Gmail message. Same row shape as the
-     workspace tab list, so the two read as one idiom. */
+  /* Attachments found on the open Gmail message. */
   /* Existing task(s) already made from this page. Amber rather than the
      neutral grey of the other blocks: this is the one thing on the panel
      that should stop you before you press Create. */
@@ -63,28 +62,15 @@
   /* Work contexts — the saved tab set for this client (and optionally this
      task). Sits directly under the client picker because it's scoped by the
      same selection. */
-  #workspace { margin-top: 14px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; background: #f8fafc; }
-  #workspace h2 { margin: 0 0 6px; font-size: 12px; font-weight: 700; color: #1B3A5C; text-transform: none; }
-  #workspace button { margin-top: 0; padding: 6px 10px; font-size: 12px; width: auto; }
-  #workspace .ghost { background: #fff; color: #1B3A5C; border: 1px solid #d0dce8; }
   #wsActions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
   /* The panel's global rules are written for full-width form fields:
      `select, input, textarea { width: 100% }` blows a checkbox up to the full
      row and squeezes the title out of existence, and `label` carries
      display:block plus a top margin and bold weight. Both need undoing here,
      since a row is a label wrapping a checkbox and a line of text. */
-  .ws-tab { display: flex; align-items: center; gap: 6px; margin: 0; padding: 3px 0; font-size: 12px; font-weight: 400; color: #334155; }
-  .ws-tab input[type="checkbox"] { width: auto; flex: none; margin: 0; padding: 0; border: none; }
-  .ws-tab .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ws-tab .from { flex: none; font-size: 10px; color: #94a3b8; }
   /* Overrides the panel's global full-width button rule, same reason the
      checkbox above needs one. Only shows on row hover so a list of saved
      tabs reads as a list, not a row of delete buttons. */
-  .ws-x { width: auto; margin: 0; padding: 0 4px; background: none; border: none; color: #94a3b8; font-size: 15px; line-height: 1; cursor: pointer; opacity: 0; }
-  .ws-tab:hover .ws-x, .ws-x:focus-visible { opacity: 1; }
-  .ws-x:hover { color: #c5221f; }
-  .ws-warn { margin-top: 6px; font-size: 11px; color: #b45309; }
-  #wsList { max-height: 220px; overflow-y: auto; }
 </style>
 </head>
 <body>
@@ -109,20 +95,6 @@
     <div id="emailAtts" style="display:none;">
       <h2>Attachments on this email</h2>
       <div id="emailAttsList"></div>
-    </div>
-
-    <div id="workspace" style="display:none;">
-      <h2>Workspace tabs</h2>
-      <div class="mode-toggle">
-        <button id="wsScopeClient" type="button" class="mode-btn active">This client</button>
-        <button id="wsScopeTask" type="button" class="mode-btn">This task</button>
-      </div>
-      <div id="wsList"></div>
-      <div id="wsWarn" class="ws-warn" style="display:none;"></div>
-      <div id="wsActions">
-        <button id="wsOpen" type="button">Open tabs</button>
-        <button id="wsCapture" type="button" class="ghost">Save open tabs…</button>
-      </div>
     </div>
 
     <div class="mode-toggle">

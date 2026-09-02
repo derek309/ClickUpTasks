@@ -1,4 +1,3 @@
-import { layerContexts, prepareCapture, contextKey, isCapturable, normalizeUrl, SOFT_MAX_TABS, HARD_MAX_TABS } from "./lib/context.js";
 
 const API_BASE = "https://clickuptasks.vercel.app";
 // Matches the /api/extension/upload route's own limit.
@@ -34,13 +33,6 @@ const clippedEl = document.getElementById("alreadyClipped");
 const clippedListEl = document.getElementById("alreadyClippedList");
 const emailAttsEl = document.getElementById("emailAtts");
 const emailAttsListEl = document.getElementById("emailAttsList");
-const wsEl = document.getElementById("workspace");
-const wsListEl = document.getElementById("wsList");
-const wsWarnEl = document.getElementById("wsWarn");
-const wsOpenBtn = document.getElementById("wsOpen");
-const wsCaptureBtn = document.getElementById("wsCapture");
-const wsScopeClientBtn = document.getElementById("wsScopeClient");
-const wsScopeTaskBtn = document.getElementById("wsScopeTask");
 const refreshBtn = document.getElementById("refresh");
 
 let permalink = null;
@@ -459,7 +451,6 @@ function selectClient(id) {
     loadProjectsFor(selectedClientId);
   }
   loadTasksFor(selectedClientId);
-  loadWorkspace();
 }
 
 clientSearchInput.addEventListener("input", () => {
@@ -496,7 +487,6 @@ function selectTask(id) {
   const t = allTasks.find((x) => x.id === id);
   selectedTaskId = id;
   taskSearchInput.value = t ? t.title : "";
-  loadWorkspace();
   taskResultsEl.classList.remove("open");
 }
 
@@ -542,7 +532,6 @@ async function init(forceClientRefresh = false) {
   addContactEl.style.display = "none";
   selectedClientId = "";
   clientSearchInput.value = "";
-  if (wsEl) { wsEl.style.display = "none"; wsCapture = null; }
   emailAttachments = [];
   renderEmailAttachments();
   clippedListEl.innerHTML = "";
@@ -686,10 +675,6 @@ function resetFormAfterSubmit() {
   notesInput.value = "";
   selectedClientId = "";
   clientSearchInput.value = "";
-  // The client is cleared, so the workspace block must go with it — otherwise
-  // it sits there showing the previous client's saved tabs with no client
-  // selected, and "Open tabs" would act on a client you can no longer see.
-  if (wsEl) { wsEl.style.display = "none"; wsCapture = null; }
   emailAttachments = [];
   renderEmailAttachments();
   clippedListEl.innerHTML = "";
@@ -729,6 +714,16 @@ createBtn.addEventListener("click", async () => {
   createBtn.disabled = true;
   statusEl.textContent = mode === "new" ? "Creating…" : "Adding…";
   statusEl.className = "";
+  // Learn the client from what you actually filed against, not only from
+  // adding a brand new contact (Derek: "when I pick a client and create a
+  // task have it remember that client and preselect when I open another email
+  // from them"). Picking a client and pressing Create is the strongest signal
+  // there is about who a sender belongs to — stronger than the server's
+  // contact or domain guess, which is why the recall above beats it.
+  //
+  // Before the request rather than after: the point is the association, and
+  // it should survive a task that fails to save for some unrelated reason.
+  void rememberClientForSender(senderEmail, clientId);
   try {
     const screenshotPaths = [];
     for (const dataUrl of capturedScreenshots) screenshotPaths.push(await uploadScreenshot(token, dataUrl, clientId));
@@ -789,172 +784,18 @@ init();
 
 
 // ---------------------------------------------------------------------------
-// Work contexts: the tabs you keep open for a client, and optionally for one
-// task under it. Opening one puts them in a named Chrome tab group; switching
-// to another COLLAPSES the previous group rather than closing it, because
-// chrome.tabs.remove() skips beforeunload and would silently bin an unsaved
-// draft. See supabase/work-contexts.sql and lib/context.js.
-// ---------------------------------------------------------------------------
 
 // Attachments found on the open Gmail message: [{ name, mime, url, keep }].
 // Downloaded only on submit, and only the ticked ones.
 let emailAttachments = [];
 
-let wsScope = "client";        // "client" | "task"
-let wsClientTabs = [];         // the client's baseline
-let wsTaskTabs = [];           // this task's own additions
-let wsCapture = null;          // rows awaiting review, or null when not capturing
 
-const WS_GROUPS_KEY = "wsGroups"; // { [contextKey]: groupId } — a cache, never a key
 
-function wsScopeTaskId() {
-  return wsScope === "task" ? selectedTaskId : "";
-}
 
-async function loadWorkspace(force = false) {
-  if (!selectedClientId) { wsEl.style.display = "none"; return; }
-  wsEl.style.display = "";
-  // Deliberately NOT disabled when there's no task yet: a greyed button gave
-  // no clue that the way to enable it is to switch to "Add to existing task"
-  // and pick one. Clicking it now takes you there.
-  wsScopeTaskBtn.classList.toggle("needs-task", !selectedTaskId);
-  if (!selectedTaskId && wsScope === "task") setWsScope("client");
-  const token = await getToken();
-  if (!token) return;
-  const key = contextKey(selectedClientId, selectedTaskId);
-  if (!force) {
-    const cached = await chrome.storage.local.get(["workTabsCache", "workTabsCacheAt"]);
-    const fresh = cached.workTabsCacheAt && Date.now() - cached.workTabsCacheAt < 5 * 60 * 1000;
-    if (fresh && cached.workTabsCache && cached.workTabsCache.key === key) {
-      wsClientTabs = cached.workTabsCache.clientTabs || [];
-      wsTaskTabs = cached.workTabsCache.taskTabs || [];
-      renderWorkspace();
-      return;
-    }
-  }
-  try {
-    const qs = new URLSearchParams({ client_id: selectedClientId });
-    if (selectedTaskId) qs.set("task_id", selectedTaskId);
-    const j = await apiFetch(`/api/extension/tabs?${qs}`, token);
-    wsClientTabs = j.clientTabs || [];
-    wsTaskTabs = j.taskTabs || [];
-    await chrome.storage.local.set({ workTabsCache: { key, clientTabs: wsClientTabs, taskTabs: wsTaskTabs }, workTabsCacheAt: Date.now() });
-  } catch {
-    // Offline or a 403 — show nothing rather than a broken block; the rest of
-    // the panel still creates tasks fine.
-    wsClientTabs = []; wsTaskTabs = [];
-  }
-  renderWorkspace();
-}
 
-function setWsScope(next) {
-  wsScope = next;
-  wsScopeClientBtn.classList.toggle("active", next === "client");
-  wsScopeTaskBtn.classList.toggle("active", next === "task");
-  wsCapture = null;
-  renderWorkspace();
-}
 
-function renderWorkspace() {
-  wsListEl.innerHTML = "";
-  wsWarnEl.style.display = "none";
 
-  if (wsCapture) {
-    wsCapture.forEach((row, i) => {
-      const el = document.createElement("label");
-      el.className = "ws-tab";
-      const cb = document.createElement("input");
-      cb.type = "checkbox"; cb.checked = row.keep;
-      cb.addEventListener("change", () => { wsCapture[i].keep = cb.checked; renderCaptureCount(); });
-      const t = document.createElement("span");
-      t.className = "t"; t.textContent = row.title || row.url; t.title = row.url;
-      el.append(cb, t);
-      if (row.signIn) { const f = document.createElement("span"); f.className = "from"; f.textContent = "sign in"; el.append(f); }
-      wsListEl.append(el);
-    });
-    renderCaptureCount();
-    wsOpenBtn.textContent = "Save these";
-    wsCaptureBtn.textContent = "Cancel";
-    return;
-  }
 
-  const shown = wsScope === "task" ? layerContexts(wsClientTabs, wsTaskTabs) : layerContexts(wsClientTabs);
-  if (shown.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "ws-tab";
-    empty.textContent = wsScope === "task" ? "No tabs saved for this task yet." : "No tabs saved for this client yet.";
-    wsListEl.append(empty);
-  } else {
-    const inherited = new Set(wsClientTabs.map((t) => t.url));
-    shown.forEach((tab) => {
-      const el = document.createElement("div");
-      el.className = "ws-tab";
-      const t = document.createElement("span");
-      t.className = "t"; t.textContent = tab.title || tab.url; t.title = tab.url;
-      el.append(t);
-      // A task row that came from the client's baseline can't be removed from
-      // here: it isn't in this task's set, and deleting it would have to mean
-      // editing the client's set out from under every other task. Labelled
-      // instead, with the × withheld so the button never lies about what it
-      // will do.
-      const isInherited = wsScope === "task" && inherited.has(tab.url);
-      if (isInherited) {
-        const f = document.createElement("span");
-        f.className = "from"; f.textContent = "from client";
-        el.append(f);
-      } else {
-        const x = document.createElement("button");
-        x.className = "ws-x";
-        x.type = "button";
-        x.textContent = "×";
-        x.title = "Remove this tab from the saved set";
-        x.addEventListener("click", () => removeSavedTab(tab.url));
-        el.append(x);
-      }
-      wsListEl.append(el);
-    });
-  }
-  wsOpenBtn.textContent = shown.length ? `Open ${shown.length} tab${shown.length === 1 ? "" : "s"}` : "Open tabs";
-  wsOpenBtn.disabled = shown.length === 0;
-  wsCaptureBtn.textContent = "Save open tabs…";
-}
-
-function renderCaptureCount() {
-  const n = wsCapture.filter((r) => r.keep).length;
-  wsOpenBtn.textContent = `Save ${n} tab${n === 1 ? "" : "s"}`;
-  wsOpenBtn.disabled = n === 0;
-  const skipped = wsCapture.filter((r) => r.signIn).length;
-  const msgs = [];
-  if (skipped) msgs.push(`${skipped} looked like sign-in pages and were unticked.`);
-  if (n > SOFT_MAX_TABS) msgs.push(`${n} tabs is a lot to reopen at once — consider a task-level set.`);
-  wsWarnEl.textContent = msgs.join(" ");
-  wsWarnEl.style.display = msgs.length ? "" : "none";
-}
-
-/** Drop one tab from whichever scope is showing, then write the set back.
- *  Removes by normalized URL so a trailing slash or a stray query can't leave
- *  the row on screen after a "successful" delete. */
-async function removeSavedTab(url) {
-  const token = await getToken();
-  if (!token) return;
-  const target = normalizeUrl(url);
-  const current = wsScope === "task" ? wsTaskTabs : wsClientTabs;
-  const next = current.filter((t) => normalizeUrl(t.url) !== target);
-  if (next.length === current.length) return;
-  try {
-    await apiFetch("/api/extension/tabs", token, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: selectedClientId, task_id: wsScopeTaskId() || undefined, tabs: next }),
-    });
-    if (wsScope === "task") wsTaskTabs = next; else wsClientTabs = next;
-    await chrome.storage.local.remove(["workTabsCache", "workTabsCacheAt"]);
-    renderWorkspace();
-  } catch (e) {
-    statusEl.textContent = e instanceof Error ? e.message : "Couldn't remove that tab.";
-    statusEl.className = "err";
-  }
-}
 
 /** "Task created" plus a link to the thing itself. Built as real DOM rather
  *  than innerHTML so a task title containing < or & can't inject markup into
@@ -1094,112 +935,7 @@ async function showAlreadyClipped(link) {
   }
 }
 
-async function startCapture() {
-  const tabs = await chrome.tabs.query({ currentWindow: true });
-  wsCapture = prepareCapture(tabs);
-  if (wsCapture.length === 0) {
-    wsCapture = null;
-    statusEl.textContent = "Nothing in this window can be saved (Chrome pages and local files can't be reopened).";
-    statusEl.className = "err";
-    return;
-  }
-  renderWorkspace();
-}
 
-async function saveCapture() {
-  const token = await getToken();
-  if (!token) return;
-  const tabs = wsCapture.filter((r) => r.keep).map((r) => ({ url: r.url, title: r.title, pinned: r.pinned }));
-  if (tabs.length > HARD_MAX_TABS) {
-    statusEl.textContent = `That's ${tabs.length} tabs. The limit is ${HARD_MAX_TABS}.`;
-    statusEl.className = "err";
-    return;
-  }
-  wsOpenBtn.disabled = true;
-  try {
-    await apiFetch("/api/extension/tabs", token, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: selectedClientId, task_id: wsScopeTaskId() || undefined, tabs }),
-    });
-    wsCapture = null;
-    await chrome.storage.local.remove(["workTabsCache", "workTabsCacheAt"]);
-    await loadWorkspace(true);
-    statusEl.textContent = `Saved ${tabs.length} tab${tabs.length === 1 ? "" : "s"}.`;
-    statusEl.className = "ok";
-  } catch (e) {
-    statusEl.textContent = e instanceof Error ? e.message : "Couldn't save those tabs.";
-    statusEl.className = "err";
-  } finally {
-    wsOpenBtn.disabled = false;
-  }
-}
 
-/** Put the previously-opened context away. Collapse, never close: this is the
- *  whole safety story (see the header comment). A group that no longer exists
- *  is simply forgotten. */
-async function collapseOtherGroups(keepKey) {
-  const store = await chrome.storage.local.get(WS_GROUPS_KEY);
-  const map = store[WS_GROUPS_KEY] || {};
-  let changed = false;
-  for (const [key, groupId] of Object.entries(map)) {
-    if (key === keepKey) continue;
-    try {
-      await chrome.tabGroups.update(groupId, { collapsed: true });
-    } catch {
-      delete map[key]; changed = true; // group is gone; stop tracking it
-    }
-  }
-  if (changed) await chrome.storage.local.set({ [WS_GROUPS_KEY]: map });
-}
 
-async function openWorkspace() {
-  const tabs = wsScope === "task" ? layerContexts(wsClientTabs, wsTaskTabs) : layerContexts(wsClientTabs);
-  if (!tabs.length) return;
-  const key = contextKey(selectedClientId, wsScopeTaskId());
-  const label = (allClients.find((c) => c.id === selectedClientId)?.name) || "Workspace";
-  const title = wsScope === "task" && selectedTaskId
-    ? ((allTasks.find((t) => t.id === selectedTaskId)?.title) || label).slice(0, 40)
-    : label;
 
-  wsOpenBtn.disabled = true;
-  try {
-    const win = await chrome.windows.getCurrent();
-    const created = [];
-    for (const tab of tabs) {
-      if (!isCapturable(tab.url)) continue;
-      // Inactive + discarded: 40 tabs then cost about what 2 cost, and each
-      // loads for real the first time it's clicked.
-      const t = await chrome.tabs.create({ url: tab.url, active: false, windowId: win.id });
-      created.push(t.id);
-      try { await chrome.tabs.discard(t.id); } catch { /* already discarded, or too new to discard */ }
-    }
-    if (!created.length) return;
-    const groupId = await chrome.tabs.group({ tabIds: created, createProperties: { windowId: win.id } });
-    await chrome.tabGroups.update(groupId, { title, collapsed: false });
-    const store = await chrome.storage.local.get(WS_GROUPS_KEY);
-    await chrome.storage.local.set({ [WS_GROUPS_KEY]: { ...(store[WS_GROUPS_KEY] || {}), [key]: groupId } });
-    await collapseOtherGroups(key);
-    statusEl.textContent = `Opened ${created.length} tab${created.length === 1 ? "" : "s"} in “${title}”.`;
-    statusEl.className = "ok";
-  } catch (e) {
-    statusEl.textContent = e instanceof Error ? e.message : "Couldn't open those tabs.";
-    statusEl.className = "err";
-  } finally {
-    wsOpenBtn.disabled = false;
-    renderWorkspace();
-  }
-}
-
-wsScopeClientBtn.addEventListener("click", () => setWsScope("client"));
-wsScopeTaskBtn.addEventListener("click", () => {
-  if (selectedTaskId) { setWsScope("task"); return; }
-  // No task chosen yet — send them to the picker rather than doing nothing.
-  setMode("existing");
-  taskSearchInput.focus();
-  taskSearchInput.scrollIntoView({ block: "center" });
-  statusEl.textContent = "Pick a task below, then choose “This task” again.";
-  statusEl.className = "";
-});
-wsCaptureBtn.addEventListener("click", () => { if (wsCapture) { wsCapture = null; renderWorkspace(); } else startCapture(); });
-wsOpenBtn.addEventListener("click", () => { if (wsCapture) saveCapture(); else openWorkspace(); });
