@@ -993,8 +993,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const delegationRow = delegations.length === 0 ? null : (
     <div className="mt-2 space-y-1.5">
       {delegations.map((s) => (
-        {/* Orange, so a handoff is the one block in the drawer you cannot
-            mistake for the task's own furniture (Derek). */}
+        // Orange, so a handoff is the one block in the drawer you cannot
+        // mistake for the task's own furniture (Derek).
         <div key={s.id} className="group/deleg rounded-xl border border-orange-500 bg-orange-50/60 px-3 py-2">
           <div className="flex items-start gap-2.5">
             <button onClick={() => onToggleSub(s.id)} title={s.done ? "Reopen" : "Mark done"}
