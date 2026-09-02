@@ -113,6 +113,7 @@ import { ProjectsDirectory } from "./cockpit/ProjectsDirectory";
 import { FolderRail } from "./cockpit/FolderRail";
 
 
+import { sortTasks as sortTasksBy } from "@/lib/taskSort";
 import { URGENCY_TIER, tierForDate, urgencyDateOf, urgencyKeyFrom } from "@/lib/urgency";
 import { clientContactIds, findDuplicateTrackedClient as findDuplicateClient } from "@/lib/clientDedup";
 import { type NavState, buildSearch, parseSearch, NAV_KEY_VIEWS, LONG_TITLE_THRESHOLD, TEAM_CHAT_LINK } from "@/lib/navState";
@@ -1667,42 +1668,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const pinJustAdded = (taskId: string) =>
     setJustAdded((prev) => ({ key: listKey, ids: [taskId, ...(prev.key === listKey ? prev.ids : [])] }));
 
-  const sortTasks = (list: Task[]) => {
-    const arr = [...list];
-    if (sortBy === "manual") return hoistPinned(arr);
-    const dir = sortDir === "desc" ? -1 : 1;
-    if (sortBy === "due") arr.sort((a, b) => ((effectiveDueDate(a) ?? "9999").localeCompare(effectiveDueDate(b) ?? "9999")) * dir);
-    // Sorts on the follow-up date alone, not effectiveDueDate: the point of
-    // this column is "what comes back to me and when", so a task with no
-    // follow-up sorts to the end rather than borrowing its due date.
-    if (sortBy === "followUp") arr.sort((a, b) => ((a.followUpAt ?? "9999").localeCompare(b.followUpAt ?? "9999")) * dir);
-    else if (sortBy === "priority") arr.sort((a, b) => {
-      // A live reply thread outranks every priority tier. Derived from the
-      // table rather than hardcoded — it used to be a literal 4, which
-      // silently became a TIE when "client_request" was added at rank 4.
-      const unreadRank = Math.max(...Object.values(PRIORITY_META).map((m) => m.rank)) + 1;
-      const rank = (t: Task) => (hasUnreadReply(t) ? unreadRank : PRIORITY_META[effectivePriority(t)].rank);
-      return (rank(b) - rank(a)) * dir;
-    });
-    else if (sortBy === "title") arr.sort((a, b) => a.title.localeCompare(b.title) * dir);
-    else if (sortBy === "status") arr.sort((a, b) => (STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status)) * dir);
-    else if (sortBy === "assignee") arr.sort((a, b) => ((userById(a.assigneeId)?.name ?? "~").localeCompare(userById(b.assigneeId)?.name ?? "~")) * dir);
-    else if (sortBy === "comments") arr.sort((a, b) => (b.comments.length - a.comments.length) * dir);
-    // Oldest first when ascending — "what has been sitting longest" is the
-    // question a Created sort is asked to answer.
-    else if (sortBy === "created") arr.sort((a, b) => a.createdAt.localeCompare(b.createdAt) * dir);
-    return hoistPinned(arr);
-  };
-  // Pull the just-added tasks to the front, in the order they were pinned
-  // (newest first, so each new one lands directly under the Add task row).
-  // Order-preserving for everything else, and a no-op once nothing is pinned.
-  function hoistPinned(arr: Task[]): Task[] {
-    if (pinnedIds.length === 0) return arr;
-    const pinned = pinnedIds.map((id) => arr.find((t) => t.id === id)).filter((t): t is Task => !!t);
-    if (pinned.length === 0) return arr;
-    const pinnedSet = new Set(pinned.map((t) => t.id));
-    return [...pinned, ...arr.filter((t) => !pinnedSet.has(t.id))];
-  }
+  // The rule lives in lib/taskSort.ts so it can be tested: ordering is what
+  // the list view mostly is, and it has been quietly wrong before.
+  const sortTasks = (list: Task[]) => sortTasksBy(list, { sortBy, sortDir, hasUnreadReply, pinnedIds });
   const sortByCol = (key: string) => {
     const map: Record<string, SortBy> = { priority: "priority", assignee: "assignee", due: "due", task: "title", status: "status", comments: "comments", created: "created" };
     const sb = map[key] ?? "manual";
