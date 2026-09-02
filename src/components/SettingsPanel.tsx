@@ -98,7 +98,7 @@ export default function SettingsPanel({
       // reached" about it made a finished run look broken.
       const blocked = (j.blockedNoToken ?? 0) + (j.blockedNoIds ?? 0);
       const blockedNote = blocked
-        ? ` ${blocked} client${blocked === 1 ? "" : "s"} can't be linked: ${j.blockedNoToken ?? 0} in sub-accounts with no GoHighLevel token${j.blockedNoIds ? `, ${j.blockedNoIds} missing GoHighLevel ids` : ""}.`
+        ? ` ${blocked} client${blocked === 1 ? "" : "s"} skipped: ${j.blockedNoToken ?? 0} not found in any connected sub-account${j.blockedNoIds ? `, ${j.blockedNoIds} with no GoHighLevel contact id` : ""}.`
         : "";
       setBackfill({
         kind: "ok",
