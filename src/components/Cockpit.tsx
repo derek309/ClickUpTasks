@@ -117,6 +117,7 @@ import { ProjectsDirectory } from "./cockpit/ProjectsDirectory";
 import { FolderRail } from "./cockpit/FolderRail";
 
 
+import { clientContactIds, findDuplicateTrackedClient as findDuplicateClient } from "@/lib/clientDedup";
 import { type NavState, buildSearch, parseSearch, NAV_KEY_VIEWS, LONG_TITLE_THRESHOLD, TEAM_CHAT_LINK } from "@/lib/navState";
 
 export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
@@ -3571,35 +3572,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // (agency + directory); if each got promoted, you'd get two client records
   // for one entity. These find likely duplicates (by email / phone / name)
   // and fold one into the other.
-  const dedupName = (s: string | undefined) => (s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
-  const dedupPhone = (s: string | undefined) => { const d = (s ?? "").replace(/\D/g, ""); return d.length >= 10 ? d.slice(-10) : d; };
-  // Every contact id a tracked client "is" — its own (from the cl_ id) plus
-  // anything it absorbed via a prior merge / manual GHL link.
-  const clientContactIds = (cl: Client): string[] => [
-    ...(cl.id.startsWith("cl_") ? [cl.id.slice(3)] : []),
-    ...(cl.linkedContactId ? [cl.linkedContactId] : []),
-    ...(cl.linkedContactIds ?? []),
-  ];
-  // Returns an existing tracked client that already represents this contact
-  // (same email / phone / name), or null. Used to stop promotion from making
-  // a second record for someone already tracked.
-  const findDuplicateTrackedClient = (contact: Contact): string | null => {
-    const email = (contact.email ?? "").trim().toLowerCase();
-    const phone = dedupPhone(contact.phone);
-    const name = dedupName(contact.name);
-    for (const cl of clients) {
-      if (!cl.id.startsWith("cl_")) continue;
-      if (cl.id === "cl_" + contact.id) continue; // itself
-      for (const cid of clientContactIds(cl)) {
-        const other = contactById(cid);
-        if (!other) continue;
-        if (email && (other.email ?? "").trim().toLowerCase() === email) return cl.id;
-        if (phone && dedupPhone(other.phone) === phone) return cl.id;
-        if (name.length > 3 && dedupName(other.name) === name) return cl.id;
-      }
-    }
-    return null;
-  };
+  // The rule itself lives in lib/clientDedup.ts, where it can be tested: it
+  // decides whether importing a contact folds into an existing client or
+  // creates a second record for the same business, and a wrong merge costs far
+  // more to undo than a duplicate costs to spot.
+  const findDuplicateTrackedClient = (contact: Contact): string | null =>
+    findDuplicateClient(contact, clients, (id) => contactById(id));
   // Associate an extra contact's future inbound with an existing client
   // (append to linked_contact_ids) without creating a new client record.
   const linkContactToClient = (clientId: string, contactId: string) => {
