@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { dedupName, dedupPhone, sameContact, clientContactIds, findDuplicateTrackedClient } from "./clientDedup";
 import type { Client, Contact } from "./data";
 
-const ct = (o: Partial<Contact>): Contact => ({ id: "c", name: "", email: null, phone: null } as unknown as Contact & typeof o) && ({ id: "c", name: "", email: null, phone: null, ...o } as unknown as Contact);
+const ct = (o: Partial<Contact>): Contact => ({ id: "c", name: "", ...o } as Contact);
 const cl = (o: Partial<Client>): Client => ({ id: "cl_x", name: "X", ...o } as unknown as Client);
 
 // A wrong merge folds two businesses into one record and splits neither back
@@ -37,7 +37,7 @@ describe("deciding whether two contacts are the same business", () => {
   });
   it("treats missing fields as no evidence, not as a match", () => {
     expect(sameContact(ct({}), ct({}))).toBe(false);
-    expect(sameContact(ct({ email: null, phone: null, name: "" }), ct({ email: null, phone: null, name: "" }))).toBe(false);
+    expect(sameContact(ct({ name: "" }), ct({ name: "" }))).toBe(false);
   });
 });
 

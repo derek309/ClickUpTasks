@@ -17,13 +17,9 @@ import {
   recurrenceResetFields,
   plainTextToHtml,
   TODAY,
-  TOMORROW,
   addDaysIso,
   daysBetween,
   THIS_MONDAY,
-  THIS_WEEK_END,
-  NEXT_WEEK_END,
-  THIS_MONTH_END,
   DUE_BUCKETS,
   dueBucketOf,
   NURTURE_CHECK_IN_DAYS,
@@ -117,6 +113,7 @@ import { ProjectsDirectory } from "./cockpit/ProjectsDirectory";
 import { FolderRail } from "./cockpit/FolderRail";
 
 
+import { URGENCY_TIER, tierForDate, urgencyDateOf, urgencyKeyFrom } from "@/lib/urgency";
 import { clientContactIds, findDuplicateTrackedClient as findDuplicateClient } from "@/lib/clientDedup";
 import { type NavState, buildSearch, parseSearch, NAV_KEY_VIEWS, LONG_TITLE_THRESHOLD, TEAM_CHAT_LINK } from "@/lib/navState";
 
@@ -2044,51 +2041,21 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // waiting. Counting it at the date it comes back keeps the client on the
   // board, at the moment it's actually actionable, and it reappears in the
   // right tier on its own with nothing to remember.
-  const urgencyDateOf = (t: Task): string | null => effectiveDueDate(t);
-  function tierForDate(soonest: string): number {
-    if (soonest < TODAY) return 2;
-    if (soonest === TODAY) return 3;
-    if (soonest === TOMORROW) return 4;
-    if (soonest <= THIS_WEEK_END) return 5;
-    if (soonest <= NEXT_WEEK_END) return 6;
-    if (soonest <= THIS_MONTH_END) return 7;
-    return 8;
-  }
   // forAssignee narrows "open tasks" to just that person's — used by the
   // personal My Work board, where a client's tier should reflect *my* tasks
   // there, not a teammate's. Omitted for the sidebar's "Overdue first" sort,
   // which is intentionally client-wide across every assignee.
   function clientUrgencyKey(clientId: string, forAssignee?: string): { tier: number; due: string; priorityRank: number } {
-    if (clientNeedsReview(clientId, forAssignee)) return { tier: 0, due: "", priorityRank: 0 };
-    if (hasOpenConversationTask(clientId)) return { tier: 1, due: "", priorityRank: 0 };
-    const open = (scopedTasksByClientId.get(clientId) ?? []).filter((t) => t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
-    const candidates: { date: string; priorityRank: number }[] = open
-      .map((t) => ({ date: urgencyDateOf(t), priorityRank: PRIORITY_META[effectivePriority(t)].rank }))
-      .filter((c): c is { date: string; priorityRank: number } => !!c.date);
-    if (candidates.length === 0) {
-      if (open.length === 0) return { tier: 10, due: "", priorityRank: 0 };
-      return { tier: 9, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[effectivePriority(t)].rank)) };
-    }
-    const soonest = candidates.reduce((a, b) => (b.date < a.date ? b : a)).date;
-    const atSoonest = candidates.filter((c) => c.date === soonest);
-    return { tier: tierForDate(soonest), due: soonest, priorityRank: Math.max(...atSoonest.map((c) => c.priorityRank)) };
+    if (clientNeedsReview(clientId, forAssignee)) return { tier: URGENCY_TIER.needsReview, due: "", priorityRank: 0 };
+    if (hasOpenConversationTask(clientId)) return { tier: URGENCY_TIER.newMessage, due: "", priorityRank: 0 };
+    return urgencyKeyFrom((scopedTasksByClientId.get(clientId) ?? []).filter((t) => t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee)));
   }
   // Same tiering as clientUrgencyKey, scoped to one project's tasks. No "New
   // message" tier — that's a client-level Conversation concept, not a
   // project one.
   function projectUrgencyKey(projectId: string, forAssignee?: string): { tier: number; due: string; priorityRank: number } {
-    if (projectNeedsReview(projectId, forAssignee)) return { tier: 0, due: "", priorityRank: 0 };
-    const open = (scopedTasksByProjectId.get(projectId) ?? []).filter((t) => t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
-    const candidates: { date: string; priorityRank: number }[] = open
-      .map((t) => ({ date: urgencyDateOf(t), priorityRank: PRIORITY_META[effectivePriority(t)].rank }))
-      .filter((c): c is { date: string; priorityRank: number } => !!c.date);
-    if (candidates.length === 0) {
-      if (open.length === 0) return { tier: 10, due: "", priorityRank: 0 };
-      return { tier: 9, due: "", priorityRank: Math.max(...open.map((t) => PRIORITY_META[effectivePriority(t)].rank)) };
-    }
-    const soonest = candidates.reduce((a, b) => (b.date < a.date ? b : a)).date;
-    const atSoonest = candidates.filter((c) => c.date === soonest);
-    return { tier: tierForDate(soonest), due: soonest, priorityRank: Math.max(...atSoonest.map((c) => c.priorityRank)) };
+    if (projectNeedsReview(projectId, forAssignee)) return { tier: URGENCY_TIER.needsReview, due: "", priorityRank: 0 };
+    return urgencyKeyFrom((scopedTasksByProjectId.get(projectId) ?? []).filter((t) => t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee)));
   }
   // A personal to-do's own tier — no Review/New-message concept (those are
   // client/project-level), and it's always "open" if it's being shown at
@@ -2096,7 +2063,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // tier 9 (no due date) same as clientUrgencyKey/projectUrgencyKey do.
   function taskUrgencyKey(task: Task): { tier: number; due: string; priorityRank: number } {
     const d = urgencyDateOf(task);
-    if (!d) return { tier: 9, due: "", priorityRank: PRIORITY_META[task.priority].rank };
+    if (!d) return { tier: URGENCY_TIER.noDate, due: "", priorityRank: PRIORITY_META[task.priority].rank };
     return { tier: tierForDate(d), due: d, priorityRank: PRIORITY_META[task.priority].rank };
   }
   const projectTaskCount = (projectId: string) => (scopedTasksByProjectId.get(projectId) ?? []).filter((t) => t.status !== "done").length;
