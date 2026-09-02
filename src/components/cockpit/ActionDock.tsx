@@ -95,6 +95,9 @@ export function ActionDock({
   const [delegatePriority, setDelegatePriority] = useState<Priority | null>(null);
   const [links, setLinks] = useState<string[]>([]);
   const [linkDraft, setLinkDraft] = useState("");
+  // The paste box is a chip until you want it. A permanently open input sat
+  // in the row looking like a field you had to fill in.
+  const [addingLink, setAddingLink] = useState(false);
   // The suggestion card is the default; "Change it" opens the fields. Editing
   // one field should not throw away the other three, so this is one flag over
   // the whole card rather than a mode per row.
@@ -186,7 +189,7 @@ export function ActionDock({
     // the whole point is deciding when THEY owe it.
     setDelegateTitle("");
     setTheirDue(null); setDelegatePriority(task.priority === "none" ? "normal" : task.priority);
-    setLinks([]); setLinkDraft("");
+    setLinks([]); setLinkDraft(""); setAddingLink(false);
   };
   const openPanelRef = useRef(openPanel);
   useEffect(() => { openPanelRef.current = openPanel; });
@@ -863,30 +866,39 @@ export function ActionDock({
                 <div className="flex flex-wrap items-center gap-1.5">
                   {links.map((l) => (
                     <button key={l} onClick={() => setLinks((ls) => ls.filter((x) => x !== l))} title={l}
-                      className="inline-flex max-w-[220px] items-center gap-1 rounded-md border border-accent bg-accent-soft px-2 py-1 text-[13px] text-accent">
+                      className="inline-flex max-w-[220px] items-center gap-1.5 rounded-md border bg-surface px-2 py-1 text-[13px] font-medium text-accent">
                       <span className="truncate">🔗 {prettyLinkName(l)}</span> <span aria-hidden className="text-muted">×</span>
                     </button>
                   ))}
-                  <input value={linkDraft} onChange={(e) => setLinkDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key !== "Enter") return;
-                      e.preventDefault();
-                      const v = linkDraft.trim();
-                      if (v && !links.includes(v)) setLinks((ls) => [...ls, v]);
-                      setLinkDraft("");
-                    }}
-                    placeholder="Paste a link, then Enter"
-                    className="min-w-[200px] flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[13px] outline-none focus:border-accent" />
+                  {addingLink ? (
+                    <input autoFocus value={linkDraft} onChange={(e) => setLinkDraft(e.target.value)}
+                      onBlur={() => { if (!linkDraft.trim()) setAddingLink(false); }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") { setLinkDraft(""); setAddingLink(false); return; }
+                        if (e.key !== "Enter") return;
+                        e.preventDefault();
+                        const v = linkDraft.trim();
+                        if (v && !links.includes(v)) setLinks((ls) => [...ls, v]);
+                        setLinkDraft(""); setAddingLink(false);
+                      }}
+                      placeholder="Paste a link, then Enter"
+                      className="min-w-[200px] flex-1 rounded-md border bg-surface px-2.5 py-1 text-[13px] outline-none focus:border-accent" />
+                  ) : (
+                    <button onClick={() => setAddingLink(true)}
+                      className="rounded-md border border-dashed px-2 py-1 text-[13px] font-medium text-muted hover:border-accent hover:text-accent">＋ Paste a link</button>
+                  )}
                 </div>
                 {/* One tap beats retyping a URL that is already saved, which
                     is the reason nobody attaches them. */}
                 {clientLinks.some((l) => !links.includes(l.url)) && (
-                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                    <span className="text-[12px] text-muted">From this client</span>
-                    {clientLinks.filter((l) => !links.includes(l.url)).map((l) => (
-                      <button key={l.url} onClick={() => setLinks((ls) => [...ls, l.url])} title={l.url}
-                        className="max-w-[200px] truncate rounded-md border border-dashed px-2 py-1 text-[13px] text-muted hover:border-accent hover:bg-accent-soft hover:text-accent">＋ {l.label}</button>
-                    ))}
+                  <div className="mt-2 rounded-[10px] border bg-background px-2.5 py-2">
+                    <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-muted">From this client, one tap to add</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {clientLinks.filter((l) => !links.includes(l.url)).map((l) => (
+                        <button key={l.url} onClick={() => setLinks((ls) => [...ls, l.url])} title={l.url}
+                          className="max-w-[220px] truncate rounded-md border bg-surface px-2 py-1 text-[13px] font-medium text-accent hover:border-accent hover:bg-accent-soft">🔗 {l.label}</button>
+                      ))}
+                    </div>
                   </div>
                 )}
               </>
