@@ -15,7 +15,6 @@ import {
   isPersonalTask,
   htmlToText,
   recurrenceResetFields,
-  isOverdue,
   plainTextToHtml,
   TODAY,
   TOMORROW,
@@ -37,7 +36,6 @@ import {
   isSnoozed,
   isCompletionEvent,
   CLIENT_STATUS_META,
-  CLIENT_STATUS_ORDER,
   clientStatusMeta,
   type ClientStatus,
   type ClientType,
@@ -90,10 +88,9 @@ import {
   PERSONAL_CLIENT_ID,
   WORKSPACE_CLIENT_ID,
   PERSONAL_PROJECT_ID,
-  normalizeState,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, touchPlaybookProgress, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, touchPlaybookProgress, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import TeamChat from "./TeamChat";
@@ -107,7 +104,7 @@ import { BulkAddModal, type ParsedRow } from "./cockpit/BulkAddModal";
 import { RemindClientModal } from "./cockpit/RemindClientModal";
 import { ConfirmModal, PromptModal, LinkFormModal, MergeTaskModal, MergeClientModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
 import { CommandK } from "./cockpit/CommandK";
-import { GroupedList, InlineDue } from "./cockpit/GroupedList";
+import { GroupedList } from "./cockpit/GroupedList";
 import StageBoard from "./cockpit/StageBoard";
 import { TaskDrawer } from "./cockpit/TaskDrawer";
 import { QuickLinksBar } from "./cockpit/ClientLinks";
@@ -325,12 +322,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Settings straight to a specific tab instead of always landing on
   // Integrations — SettingsHub only reads this once per mount, via its own
   // initialTab prop.
-  const [settingsInitialTab, setSettingsInitialTab] = useState<TabKey>("integrations");
-  const openSettingsTab = (tab: TabKey) => {
-    setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setDirView(null);
-    setSettingsInitialTab(tab);
-    setSettingsView(true);
-  };
+  // A constant since openSettingsTab went: nothing sets it any more, and a
+  // useState nobody writes to is a variable pretending to be state.
+  const settingsInitialTab: TabKey = "integrations";
   const [teamMessages, setTeamMessages] = useState<TeamMessage[]>([]);
   const [dmMessages, setDmMessages] = useState<DmMessage[]>([]);
   // Which half of the Team Chat page is showing. Chat leads — per Derek, the
@@ -795,17 +789,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     markOwnClientWrite(nc.id);
     upsertClient(nc);
     pushToast(on ? `${c.name}'s client link now shows their growth plan.` : `${c.name}'s client link no longer shows their growth plan.`);
-  };
-  // "Follow" a project directly — same idea as toggleClientAssignment, just
-  // scoped to one project instead of the whole client. App-level only (no
-  // RLS change, no realtime subscription on `projects` to echo-suppress).
-  const toggleProjectAssignment = (projectId: string, memberId: string) => {
-    const p = projectById(projectId);
-    if (!p) return;
-    const current = p.assignedTo ?? [];
-    const np = { ...p, assignedTo: current.includes(memberId) ? current.filter((id) => id !== memberId) : [...current, memberId] };
-    setProjects((ps) => ps.map((x) => (x.id === projectId ? np : x)));
-    upsertProject(np);
   };
   // Stamp reviewedAt = today, clearing this client/project from the Review
   // tier until next Monday (weekly) or its next nurture cycle. See
@@ -1335,7 +1318,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // several times per client/task). O(1) lookups instead.
   const clientsById = useMemo(() => new Map(clients.map((c) => [c.id, c])), [clients]);
   const projectsById = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
-  const tasksById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
   const clientById = (id: string) => clientsById.get(id) ?? null;
   const projectById = (id: string) => projectsById.get(id) ?? null;
   const contactById = (id: string | null) => contacts.find((c) => c.id === id) ?? null;
@@ -2411,11 +2393,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     }
     return m;
   }, [scopedTasks]);
-  // Same idea as openClientPlaybook/openClientSales, for a business's other
-  // (non-checklist) lists — no reconciliation needed, it's already a real list.
-  const onOpenProject = (clientId: string, projectId: string) => {
- setActiveClient(clientId); setActiveProject(projectId); setClientTab("tasks");
-  };
   // Owner Growth Plan tasks, bucketed by client — same one-pass-not-memoized
   // shape as openTasksByClient above, but WITHOUT the status==="done"
   // exclusion (playbookCompletion needs to see done steps too, to count them).
@@ -2513,13 +2490,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // switch, which is the only time re-reconciling is meaningful.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeClient]);
-  // Opens a business's Playbook the same way onOpenClient opens its Tasks —
-  // reconciling first so a business that's never been looked at yet lands on
-  // a fully caught-up list, not a stale/empty one.
-  const openClientPlaybook = (clientId: string) => {
-    reconcilePlaybookTasks(clientId);
- setActiveClient(clientId); setActiveProject(playbookProjectId(clientId)); setClientTab("tasks");
-  };
   // Not gated by myWorkUser (the admin-only "viewing work for" selector) —
   // RLS never even returns another person's private tasks in `tasks`, so
   // filtering by `me.id` here is correct regardless of who's being viewed.
@@ -3256,8 +3226,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!sub?.ghlLocationId) return null;
     return { locationId: sub.ghlLocationId, ghlContactId: contact.ghlContactId };
   };
-  const activeContact = (): Contact | null =>
-    activeClient !== "all" ? contactForClient(activeClient) : null;
   const [sendingMessage, setSendingMessage] = useState(false);
   // Sends via GHL's Conversations API (so it goes out from the sub-account's
   // own connected email/number) and only writes the local `messages` row
