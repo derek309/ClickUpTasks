@@ -4129,7 +4129,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const m: DmMessage = { id: newId("dm_"), conversationId: cid, authorId: me.id, recipientId: otherUserId, body: body.trim(), at: new Date().toISOString(), replyToId: replyToId ?? null, attachments: attachments ?? [] };
     setDmMessages((ms) => [...ms, m]);
     insertDmMessage(m);
-    notify(otherUserId, `${me.name} sent you a message`, null, { kind: "dm", skipEmail: !firstOfBurst });
+    // Straight to the thread. Without a link the email fell back to the app
+    // root, so "Justin sent you a message" landed you on your own dashboard
+    // with no way to find the message it was about (Derek: "it doesn't link
+    // to where the message is"). The recipient is the one reading the mail,
+    // so the thread they need is the one with ME in it.
+    notify(otherUserId, `${me.name} sent you a message`, null, {
+      kind: "dm", skipEmail: !firstOfBurst, link: `${TEAM_CHAT_LINK}&dm=${encodeURIComponent(me.id)}`,
+    });
   };
   const deleteDmMessage = (id: string) => {
     setConfirmDialog({
