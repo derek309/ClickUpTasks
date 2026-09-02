@@ -7,7 +7,7 @@ import { usePersisted } from "@/lib/usePersisted";
 import {
   users, formatDue, isOverdue, TODAY, COLLAPSED_DUE_BUCKETS, effectivePriority, effectiveStatus, clientInitials, dueOneLine, isSnoozed,
   PRIORITY_META, manualPriorityOptions,
-  STATUS_META, STATUS_ORDER, pickableStatuses, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence,
+  STATUS_META, pickableStatuses, delegateeOf, delegatedDueFor, userById, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence,
   PLAYBOOK_STEP_BY_KEY,
   addDaysIso, addBusinessDaysIso, SIZE_META, SIZE_ORDER,
   type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus, type TaskSize,
@@ -16,19 +16,22 @@ import { I, Avatar, LabelChips, LIST_COLUMNS, DateChip } from "./ui";
 
 // --- grouped list view (ClickUp-style: group, quick-add, expandable subtasks) --
 
-export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onDeleteSub, hideEmpty, highlightDelegateFor, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId }: {
+export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onDeleteSub, hideEmpty, lensId, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId }: {
   groups: { key: string; label: string; color: string; tasks: Task[] }[];
   // The signed-in user — the row's assignee avatar only renders when the
   // task is assigned to someone else; seeing your own face on every one of
   // your own rows added nothing.
   meId?: string;
+  /** Whose list this is. A task delegated to that person wears their face and
+   *  the date they were given, rather than the owner's. */
+  lensId?: string;
   showClient: boolean; clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null;
   visibleCols: string[]; sortKey: string; sortDir: "asc" | "desc"; onSort: (key: string) => void;
   groupKind?: string;
   /** Start Next week / This month / Later / No date closed. All Tasks only. */
   collapseFarBuckets?: boolean;
   onOpen: (id: string) => void; onOpenClient?: (clientId: string) => void; onPatch: (taskId: string, patch: Partial<Task>) => void; canQuickAdd: boolean; quickAddHint: string; onQuickAdd: (groupKey: string, title: string, extras: { due: string | null; followUpAt: string | null; size: TaskSize | null }) => void;
-  onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void; onDeleteSub: (taskId: string, subId: string) => void; hideEmpty?: boolean; highlightDelegateFor?: string;
+  onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void; onDeleteSub: (taskId: string, subId: string) => void; hideEmpty?: boolean; 
   // When set, task rows can be dragged onto a group header to move them into
   // that group (e.g. drag a row onto "Urgent" to reprioritize it) — only
   // meaningful for groupBy dimensions the caller knows how to translate back
@@ -217,7 +220,7 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
                     </td></tr>
                   )}
                   {g.tasks.map((t) => (
-                    <TaskRow key={t.id} task={t} colCount={colCount} cols={cols} showClient={showClient} showCrumb={showCrumb} onOpenClient={onOpenClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} meId={meId} delegated={!!highlightDelegateFor && t.assigneeId !== highlightDelegateFor && t.subtasks.some((s) => s.assigneeId === highlightDelegateFor)}
+                    <TaskRow key={t.id} task={t} colCount={colCount} cols={cols} showClient={showClient} showCrumb={showCrumb} onOpenClient={onOpenClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} lensId={lensId} delegatedTo={delegateeOf(t)}
                       selected={!!selectedIds?.has(t.id)} onToggleSelect={onToggleSelect ? (e) => handleSelectClick(t.id, e) : undefined}
                       draggable={!!onDropInGroup || !!onMergeTasks} onDragStart={() => setDragTaskId(t.id)} onDragEnd={() => { setDragTaskId(null); setDragOverKey(null); setDragOverTaskId(null); }}
                       isMergeDropTarget={dragOverTaskId === t.id}
@@ -327,9 +330,9 @@ function InlineTaskComposer({ suggestedDue, onAdd }: {
   );
 }
 
-function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, clientById, projectById, contactById, onOpen, onPatch, meId, delegated, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
+function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, clientById, projectById, contactById, onOpen, onPatch, delegatedTo, lensId, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
   task: Task; colCount: number; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean; showCrumb: boolean; onOpenClient?: (clientId: string) => void;
-  clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void; meId?: string; delegated?: boolean;
+  clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void;  delegatedTo?: string | null; lensId?: string;
   selected?: boolean; onToggleSelect?: (e: React.MouseEvent) => void;
   draggable?: boolean; onDragStart?: () => void; onDragEnd?: () => void;
   // Drop-onto-this-row-to-merge — independent of the drag-to-reorder-groups
@@ -338,6 +341,11 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
   expanded: boolean; onToggleExpand: () => void; onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void; onDeleteSub: (taskId: string, subId: string) => void;
   subDraft: string; setSubDraft: (v: string) => void;
 }) {
+  // The same task on two lists. On the owner's it is theirs, dated theirs; on
+  // the delegatee's it wears their face and the date they were given. Same
+  // row, same task, two honest readings of it.
+  const mineByDelegation = !!lensId && delegatedTo === lensId;
+  const lensDue = lensId ? delegatedDueFor(task, lensId) : null;
   const client = clientById(task.clientId);
   const project = projectById(task.projectId);
   const overdue = isOverdue(task.due) && task.status !== "done";
@@ -375,7 +383,11 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
     // "just make due date the month and day it's due"). The countdown reads
     // as a second copy of the Follow up column beside it, and the snooze
     // suffix put "follow up Tomorrow" in both columns at once.
-    if (key === "due") return <InlineDue value={task.due} overdue={overdue && !isSnoozed(task)} showCountdown={false} formatValue={formatDue} showSnooze={false} followUpAt={task.followUpAt ?? null} recurrence={task.recurrence} onChange={(d) => onPatch(task.id, { due: d })} onRecurrenceChange={(r) => onPatch(task.id, { recurrence: r })} />;
+    // The delegatee's own date when this is their list: grouping them under a
+    // date the row then contradicts is worse than no date at all.
+    if (key === "due") return lensDue
+      ? <span className="text-[13px] font-medium text-accent" title="The date you were given">{formatDue(lensDue)}</span>
+      : <InlineDue value={task.due} overdue={overdue && !isSnoozed(task)} showCountdown={false} formatValue={formatDue} showSnooze={false} followUpAt={task.followUpAt ?? null} recurrence={task.recurrence} onChange={(d) => onPatch(task.id, { due: d })} onRecurrenceChange={(r) => onPatch(task.id, { recurrence: r })} />;
     if (key === "created") return (
       <span className="truncate text-[13px] text-muted" title={`Created ${task.createdAt.slice(0, 10)}`}>{formatDue(task.createdAt.slice(0, 10))}</span>
     );
@@ -392,8 +404,8 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
         onDragOver={(e) => { if (onRowDragOver) { e.preventDefault(); onRowDragOver(); } }}
         onDragLeave={onRowDragLeave}
         onDrop={(e) => { if (onRowDrop) { e.preventDefault(); onRowDrop(); } }}
-        className={`group/tr block border-b border-l-[3px] px-4 pb-1.5 transition-colors hover:bg-accent-soft/50 sm:table-row sm:px-0 sm:pb-0 ${delegated ? "border-l-accent bg-accent-soft/30" : ""} ${selected ? "bg-accent-soft" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${isMergeDropTarget ? "bg-accent-soft" : ""}`}
-        style={{ borderLeftColor: delegated ? undefined : priorityBarColor }}>
+        className={`group/tr block border-b border-l-[3px] px-4 pb-1.5 transition-colors hover:bg-accent-soft/50 sm:table-row sm:px-0 sm:pb-0 ${mineByDelegation ? "border-l-accent bg-accent-soft/30" : ""} ${selected ? "bg-accent-soft" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${isMergeDropTarget ? "bg-accent-soft" : ""}`}
+        style={{ borderLeftColor: mineByDelegation ? undefined : priorityBarColor }}>
         <td className="block w-full py-1 pr-3 align-middle sm:table-cell sm:max-w-0 sm:pl-4">
         <div className="flex min-w-0 items-center gap-0.5">
           {/* Bulk select, back as a permanent fixture at the leading edge
@@ -419,7 +431,18 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
               assignee was you left most rows on a client's own list with no
               assignee shown at all, since most tasks are assigned to the
               admin viewing the list. */}
+          {mineByDelegation && <Avatar id={delegatedTo!} size={20} />}
           <InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a, waitingOnClient: false })} onSetWaiting={() => onPatch(task.id, { waitingOnClient: true, assigneeId: null })} size={30} />
+          {/* Owner first, then who it is with. One avatar said "Derek" on a
+              task sitting on Michaella's list, which reads as hers being his
+              (Derek: "it's assigning to me... make it clear it's
+              delegated"). The arrow is the whole sentence. */}
+          {delegatedTo && !mineByDelegation && (
+            <span className="mr-1 flex shrink-0 items-center gap-0.5" title={`Delegated to ${userById(delegatedTo)?.name ?? "a teammate"}`}>
+              <span aria-hidden className="text-[13px] text-muted">→</span>
+              <Avatar id={delegatedTo} size={20} />
+            </span>
+          )}
           {/* Multi-select lives on the row itself now (Derek, 2026-08-26:
               "remove the multiple checkboxes and just make it shift and
               select multi"). Shift-click extends a range from the last row
@@ -439,7 +462,8 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
                 chip beside it kept its full width. Context belongs below the
                 thing it describes, not in front of it. */}
             <span className="flex min-w-0 items-center gap-1.5">
-              {delegated && <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">Delegated</span>}
+              {mineByDelegation && <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">From {userById(task.assigneeId)?.name?.split(" ")[0] ?? "the owner"}</span>}
+              {!mineByDelegation && delegatedTo && <span className="shrink-0 rounded bg-accent-soft px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-accent">With {userById(delegatedTo)?.name?.split(" ")[0] ?? "them"}</span>}
               {/* Wraps to a second line rather than pushing the table wider
                   than the window (Derek: "go ahead and wordwrap the titles if
                   you have to" — a sideways scrollbar that hides the Name

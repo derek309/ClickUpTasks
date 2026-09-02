@@ -2619,6 +2619,30 @@ export function effectiveDueDate(task: { due: string | null; followUpAt?: string
   return task.followUpAt ?? task.due;
 }
 
+/** The date this person was given on their own open delegated item, if any.
+ *  The same task can therefore be due one day for its owner and another for
+ *  the person holding a piece of it, which is the point: they were given
+ *  different dates. */
+export function delegatedDueFor(
+  task: { assigneeId?: string | null; subtasks?: Subtask[] },
+  userId: string,
+): string | null {
+  if (task.assigneeId === userId) return null;
+  const dates = (task.subtasks ?? [])
+    .filter((s) => !s.done && s.assigneeId === userId && s.due)
+    .map((s) => s.due!)
+    .sort();
+  return dates[0] ?? null;
+}
+
+/** Who a task is currently with, if it has been handed off: the assignee of
+ *  the first open delegated checklist item that is not the owner's own. Null
+ *  for a task nobody is waiting on. */
+export function delegateeOf(task: { assigneeId?: string | null; subtasks?: Subtask[] }): string | null {
+  const item = (task.subtasks ?? []).find((s) => !s.done && s.assigneeId && s.assigneeId !== task.assigneeId);
+  return item?.assigneeId ?? null;
+}
+
 /** Is this task on that person's plate? True for its assignee, and for
  *  anyone holding an open delegated checklist item on it. Delegation puts a
  *  task on someone's list without changing who owns it, so every "whose work
@@ -2641,14 +2665,8 @@ export function viewerDueDate(
   task: { due: string | null; followUpAt?: string | null; assigneeId?: string | null; subtasks?: Subtask[] },
   viewerId?: string | null,
 ): string | null {
-  if (viewerId && task.assigneeId !== viewerId) {
-    const mine = (task.subtasks ?? [])
-      .filter((s) => !s.done && s.assigneeId === viewerId && s.due)
-      .map((s) => s.due!)
-      .sort();
-    if (mine.length) return mine[0];
-  }
-  return effectiveDueDate(task);
+  const mine = viewerId ? delegatedDueFor(task, viewerId) : null;
+  return mine ?? effectiveDueDate(task);
 }
 
 export function isOverdue(iso: string | null): boolean {

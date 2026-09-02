@@ -8,7 +8,7 @@ import {
   STATUS_META, pickableStatuses, type DelegateSpec, type ClientLink, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY, WEEKDAY_LABEL, startSignal, isSnoozed, daysUntilDue, formatDue, dueCountdown,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
-import { I, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
+import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
 import { authedFetch } from "@/lib/supabase";
 import { ActionDock } from "./ActionDock";
 import { fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskActionDb, editTaskActionDb } from "@/lib/db";
@@ -579,7 +579,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // when canMessageClient says yes, so this is that permission arriving by
   // the back door; naming it keeps the three places from drifting.
   const mayContactClient = !!onSendTaskMessage;
-  const doneSubs = task.subtasks.filter((s) => s.done).length;
+  // A delegation is stored as an assigned checklist item, but reading it as
+  // one buried it: a truncated row inside Checklist, under a "0/1 · 0%"
+  // counter, saying nothing about who has it (Derek: "move the delegate out
+  // of checklist and over under the stage selection ... with Michaella's
+  // icon, who it's assigned to"). Split here, shown as its own row below the
+  // stage chips, and left out of the checklist and its progress entirely.
+  const delegations = task.subtasks.filter((s) => !!s.assigneeId && s.assigneeId !== task.assigneeId);
+  const plainSubs = task.subtasks.filter((s) => !delegations.includes(s));
+  const doneSubs = plainSubs.filter((s) => s.done).length;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -978,10 +986,45 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin,
     onDeleteMessage, onEditMessage, hasMessaging,
   });
+  // Reads like the task row it effectively is: a tick box, their face, what
+  // they were asked for, and when they owe it. Sits directly under the stage
+  // chips, because "Delegated" in that row and the person holding it are one
+  // fact and were two screens apart.
+  const delegationRow = delegations.length === 0 ? null : (
+    <div className="mt-2 space-y-1.5">
+      {delegations.map((s) => (
+        <div key={s.id} className="rounded-xl border border-accent/40 bg-accent-soft/40 px-3 py-2">
+          <div className="flex items-start gap-2.5">
+            <button onClick={() => onToggleSub(s.id)} title={s.done ? "Reopen" : "Mark done"}
+              className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${s.done ? "border-accent bg-accent text-white" : "bg-surface hover:border-accent"}`}>
+              {s.done && <I.check className="h-3 w-3" />}
+            </button>
+            <Avatar id={s.assigneeId!} size={22} />
+            <div className="min-w-0 flex-1">
+              <div className={`text-[15px] font-medium leading-snug ${s.done ? "text-muted line-through" : ""}`}>{s.title}</div>
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] text-muted">
+                <span className="font-semibold uppercase tracking-wide text-accent">Delegated</span>
+                <span aria-hidden>·</span>
+                <span>{userById(s.assigneeId!)?.name ?? "a teammate"}</span>
+                {s.due && (<><span aria-hidden>·</span>
+                  <span className={isOverdue(s.due) && !s.done ? "font-semibold text-danger" : ""}>due {formatDue(s.due)}</span></>)}
+              </div>
+            </div>
+            <InlineDate value={s.due ?? null} onChange={(d) => onPatchSub(s.id, { due: d })} onClear={() => onPatchSub(s.id, { due: null })}
+              className="shrink-0 text-[13px] text-muted" formatValue={formatDue} emptyLabel={<span className="text-[13px] text-muted">Set a date</span>} />
+          </div>
+          {/* The brief, editable in place. It is what they actually read. */}
+          <textarea value={s.note ?? ""} onChange={(e) => onPatchSub(s.id, { note: e.target.value })} rows={2}
+            placeholder="What do you need done? (instructions)"
+            className="mt-1.5 w-full resize-none rounded-lg border bg-surface px-2.5 py-1.5 text-[14px] leading-snug outline-none [field-sizing:content] focus:border-accent" />
+        </div>
+      ))}
+    </div>
+  );
   const subtasksBlock = !showChecklist ? null : (
     <div className="mt-3 rounded-xl border bg-surface p-3.5">
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Checklist {task.subtasks.length > 0 && <span className="text-muted">· {doneSubs}/{task.subtasks.length} · {Math.round((doneSubs / task.subtasks.length) * 100)}%</span>}</span>
+        <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Checklist {plainSubs.length > 0 && <span className="text-muted">· {doneSubs}/{plainSubs.length} · {Math.round((doneSubs / task.subtasks.length) * 100)}%</span>}</span>
         {templates.length > 0 && (
           <div className="relative">
             <button onClick={() => setTemplateOpen((o) => !o)} className="inline-flex items-center gap-1 text-[13px] font-medium text-accent"><I.clipboard /> From template</button>
@@ -999,8 +1042,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           </div>
         )}
       </div>
-      {task.subtasks.length > 0 && (<div className="mb-2 h-2 overflow-hidden rounded-full bg-background"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${(doneSubs / task.subtasks.length) * 100}%` }} /></div>)}
-      <div className="space-y-1">{task.subtasks.map((s) => (
+      {plainSubs.length > 0 && (<div className="mb-2 h-2 overflow-hidden rounded-full bg-background"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${(doneSubs / task.subtasks.length) * 100}%` }} /></div>)}
+      <div className="space-y-1">{plainSubs.map((s) => (
         <div key={s.id}>
           <div className="group/sub flex items-start gap-2 rounded-md px-1 py-1 hover:bg-background"><button onClick={() => onToggleSub(s.id)} className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${s.done ? "border-accent bg-accent text-white" : "border-border"}`}>{s.done && <I.check />}</button><textarea value={s.title} onChange={(e) => onRenameSub(s.id, e.target.value)} rows={1} className={`-mx-1 mt-0.5 flex-1 resize-none rounded bg-transparent px-1 text-[15px] leading-snug outline-none [field-sizing:content] transition focus:bg-background ${s.done ? "text-muted line-through" : ""}`} /><InlineDue value={s.due ?? null} overdue={isOverdue(s.due ?? null) && !s.done} onChange={(d) => onPatchSub(s.id, { due: d })} /><InlineAssignee value={s.assigneeId ?? null} onChange={(a) => onPatchSub(s.id, { assigneeId: a })} size={20} /><button onClick={() => onDeleteSub(s.id)} title="Delete checklist item" className="mt-0.5 shrink-0 text-muted opacity-0 hover:text-red-500 group-hover/sub:opacity-100"><I.trash /></button></div>
           {s.assigneeId && (
@@ -1270,6 +1313,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 {titleRow}
                 {metaLine}
                 {chipRow}
+                {delegationRow}
                 {detailsBlock}
                 <div className="my-4 border-t" />
                 {playbookGuideBlock}
@@ -1309,6 +1353,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 {titleRow}
                 {metaLine}
                 {chipRow}
+                {delegationRow}
                 {playbookGuideBlock}
                 {clientResponseBlock}
                 {/* Composer above the feed, because the feed is newest-first:

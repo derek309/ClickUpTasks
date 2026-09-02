@@ -52,6 +52,7 @@ import {
   dueOneLine,
   pickableStatuses,
   isOnPlateOf,
+  delegateeOf,
   viewerDueDate,
   type Subtask,
   addDaysIso,
@@ -1109,5 +1110,21 @@ describe("isOnPlateOf", () => {
   });
   it("says no to someone with nothing on it", () => {
     expect(isOnPlateOf({ assigneeId: "u_derek", subtasks: [item({ assigneeId: "u_mp" })] }, "u_justin")).toBe(false);
+  });
+});
+
+describe("delegateeOf", () => {
+  const item = (over: Partial<Subtask>): Subtask => ({ id: "s1", title: "x", done: false, ...over });
+  it("names who it is with", () => {
+    expect(delegateeOf({ assigneeId: "u_derek", subtasks: [item({ assigneeId: "u_mp" })] })).toBe("u_mp");
+  });
+  it("ignores the owner's own checklist items", () => {
+    expect(delegateeOf({ assigneeId: "u_derek", subtasks: [item({ assigneeId: "u_derek" })] })).toBe(null);
+  });
+  it("ignores one they have finished", () => {
+    expect(delegateeOf({ assigneeId: "u_derek", subtasks: [item({ assigneeId: "u_mp", done: true })] })).toBe(null);
+  });
+  it("is null for a task nobody has been handed", () => {
+    expect(delegateeOf({ assigneeId: "u_derek", subtasks: [item({})] })).toBe(null);
   });
 });
