@@ -929,15 +929,24 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       try {
         const res = await authedFetch("/api/ai/cleanup-task-title", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, description }) });
         const j = await res.json().catch(() => ({}));
-        if (!res.ok || j.error) return;
+        // Every path out of here used to be silent, which is why "the AI
+        // grammar and spelling fix was removed" (Derek) is indistinguishable
+        // from it running and deciding to change nothing. A failed call now
+        // says so once; the console line names which branch we took, so the
+        // next long title tells us what actually happened.
+        if (!res.ok || j.error) {
+          console.warn("[title cleanup] failed", res.status, j.error ?? "");
+          pushToast("Couldn't tidy up that long title.");
+          return;
+        }
         const cleaned = typeof j.title === "string" ? j.title.trim() : "";
-        if (!cleaned || cleaned === title.trim()) return;
+        if (!cleaned || cleaned === title.trim()) { console.warn("[title cleanup] no change returned"); return; }
         // Re-read the task rather than trusting the values we sent: the user
         // has had a few seconds with it and may have renamed it, written a
         // description, or deleted it outright. Any of those means our answer
         // is stale, so leave their version alone.
         const current = tasksRef.current.find((t) => t.id === taskId);
-        if (!current || current.title !== title) return;
+        if (!current || current.title !== title) { console.warn("[title cleanup] task changed under us, leaving it alone"); return; }
         const extracted = typeof j.description === "string" ? j.description.trim() : "";
         const patch: Partial<Task> = { title: cleaned };
         // Append, never overwrite — the extracted detail is an addition to
@@ -945,9 +954,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         if (extracted) patch.description = current.description + plainTextToHtml(extracted);
         patchTask(taskId, patch);
         pushToast(extracted ? "Shortened the title, full text moved to the description" : "Cleaned up a long title");
-      } catch {
-        // Network dropped mid-request. Same as every other failure here: the
-        // task keeps the title as typed and the user hears nothing about it.
+      } catch (e) {
+        // Network dropped mid-request. The task keeps the title as typed.
+        console.warn("[title cleanup] request failed", e);
       }
     })();
   };
