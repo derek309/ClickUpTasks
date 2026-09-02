@@ -93,7 +93,7 @@ import {
   normalizeState,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, touchPlaybookProgress, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, bulkUpsertClients, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, touchPlaybookProgress, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import TeamChat from "./TeamChat";
@@ -480,16 +480,33 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // already accepts a single shared Message.read boolean for client SMS/
   // email, so an occasionally-stale-across-devices unread dot is a
   // proportionate cost for how much simpler this is to ship and maintain.
+  // Read state follows the person, not the browser. It lived in localStorage,
+  // which made a message read on a laptop still unread on a desktop and turned
+  // a cleared cache into months of resurrected unreads.
   const [dmLastRead, setDmLastRead] = useState<Record<string, string>>({});
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { try { setDmLastRead(JSON.parse(localStorage.getItem("cut_dmLastRead") ?? "{}")); } catch {} }, []);
+  useEffect(() => {
+    let live = true;
+    // One read of the old localStorage value, kept as a seed so nobody's
+    // existing read state is thrown away by the move, merged under whatever
+    // the server says. Both land in a single setState after the fetch rather
+    // than one synchronously in the effect and another later, which is two
+    // renders and a warning for no gain — nothing can be read in the
+    // milliseconds between them anyway.
+    let seed: Record<string, string> = {};
+    try {
+      const local = JSON.parse(localStorage.getItem("cut_dmLastRead") ?? "{}");
+      if (local && typeof local === "object") seed = local;
+    } catch {}
+    void fetchDmReads(me.id).then((rows) => {
+      if (!live) return;
+      setDmLastRead({ ...seed, ...rows });
+    });
+    return () => { live = false; };
+  }, [me.id]);
   const markDmRead = (conversationId: string) => {
     const now = new Date().toISOString();
-    setDmLastRead((m) => {
-      const next = { ...m, [conversationId]: now };
-      try { localStorage.setItem("cut_dmLastRead", JSON.stringify(next)); } catch {}
-      return next;
-    });
+    setDmLastRead((m) => ({ ...m, [conversationId]: now }));
+    markDmReadDb(me.id, conversationId, now);
   };
   // Opening a teammate's thread clears the bell notifications they generated —
   // otherwise each "X sent you a message" lingers unread until you open the
@@ -545,7 +562,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Same reasoning as the Team Chat effect above: a DM message arriving
   // while its thread is already open is already read.
   const openDmThreadUnread = dmUserId !== null && dmUnread(dmUserId);
-  // eslint-disable-next-line react-hooks/set-state-in-effect
+  // Two suppressions, both load-bearing. markDmRead still sets the optimistic
+  // read marker, so this is a setState in an effect by design: the alternative
+  // is the thread you are looking at staying bold until a round trip finishes.
+  // And markDmRead is redefined every render, so listing it as a dependency
+  // would re-run this on every render and mark the thread read in a loop —
+  // what should re-trigger it is the thread changing or becoming unread, which
+  // is exactly what is listed.
+  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
   useEffect(() => { if (dmUserId && openDmThreadUnread) markDmRead(dmConversationId(me.id, dmUserId)); }, [dmUserId, openDmThreadUnread, me.id]);
   const [addClientOpen, setAddClientOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);

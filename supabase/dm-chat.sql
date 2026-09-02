@@ -47,3 +47,29 @@ begin
     alter publication supabase_realtime add table public.dm_messages;
   end if;
 end $$;
+
+-- Added later: how far each member has read each thread.
+--
+-- This lived in localStorage under cut_dmLastRead, which made read state a
+-- property of a browser rather than of a person: a message read on a laptop
+-- was still unread on a desktop, and clearing site data resurrected months of
+-- read threads. It surfaced as a Team Chat badge counting a July message that
+-- had been read long ago somewhere else.
+create table if not exists dm_reads (
+  member_id text not null,
+  conversation_id text not null,
+  -- A timestamp, not a boolean: a thread is read up to a point, and the next
+  -- message after it is unread without any old row having to change.
+  last_read_at timestamptz not null default now(),
+  primary key (member_id, conversation_id)
+);
+alter table dm_reads enable row level security;
+drop policy if exists dm_reads_select on dm_reads;
+create policy dm_reads_select on dm_reads for select to authenticated
+  using (member_id = my_member_id());
+drop policy if exists dm_reads_upsert on dm_reads;
+create policy dm_reads_upsert on dm_reads for insert to authenticated
+  with check (member_id = my_member_id());
+drop policy if exists dm_reads_update on dm_reads;
+create policy dm_reads_update on dm_reads for update to authenticated
+  using (member_id = my_member_id()) with check (member_id = my_member_id());

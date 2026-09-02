@@ -478,6 +478,20 @@ export const deleteTeamMessageDb = (id: string) => supabase.from("team_messages"
 // a chat message supports (see chat-reply-attachments-pins.sql's update policy).
 export const updateTeamMessageDb = (id: string, patch: { pinned: boolean; pinnedBy: string | null; pinnedAt: string | null }) =>
   supabase.from("team_messages").update({ pinned: patch.pinned, pinned_by: patch.pinnedBy, pinned_at: patch.pinnedAt }).eq("id", id).then(logErr);
+// How far this member has read each DM thread. Server-side because read state
+// is a property of a person, not of a browser: it used to live in localStorage,
+// so a message read on one machine stayed unread on every other one.
+export const fetchDmReads = async (memberId: string): Promise<Record<string, string>> => {
+  const { data, error } = await supabase.from("dm_reads").select("conversation_id, last_read_at").eq("member_id", memberId);
+  if (error) { logErr({ error }); return {}; }
+  const out: Record<string, string> = {};
+  for (const r of data ?? []) out[r.conversation_id as string] = r.last_read_at as string;
+  return out;
+};
+export const markDmReadDb = (memberId: string, conversationId: string, at: string) =>
+  supabase.from("dm_reads").upsert({ member_id: memberId, conversation_id: conversationId, last_read_at: at },
+    { onConflict: "member_id,conversation_id" }).then(logErr);
+
 export const insertDmMessage = (m: DmMessage) => supabase.from("dm_messages").insert(dmMessageToRow(m)).then(logErr);
 export const deleteDmMessageDb = (id: string) => supabase.from("dm_messages").delete().eq("id", id).then(logErr);
 export const updateDmMessageDb = (id: string, patch: { pinned: boolean; pinnedBy: string | null; pinnedAt: string | null }) =>
