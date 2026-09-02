@@ -20,6 +20,7 @@ import {
   type ClientNote, type NoteType, type Task, type Comment, type Message, type MessageChannel, type MessageDirection, type Me, type Attachment, type Contact, type ScheduledMessage, type VaultFolder,
   mentionCandidates, applyMention,
 } from "@/lib/data";
+import { safeMessageHtml } from "@/lib/safeHtml";
 import { I, Avatar, CollapsibleText, newId, useStickyBottom, JumpToLatestButton } from "./ui";
 import { ConfirmModal, type ConfirmSpec } from "./modals";
 import { AttachmentThumbs } from "./AttachmentThumbs";
@@ -731,7 +732,9 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                                 else (SMS, and any email predating that composer) is plain
                                 text through the usual collapsible/autolink treatment. */}
                             {looksLikeHtml(m.body)
-                              ? <div className="rte-content mt-0.5 text-[15px]" dangerouslySetInnerHTML={{ __html: m.body }} />
+                              // Sanitised: an email body is whatever a stranger
+                              // decided to send, and this renders it as HTML.
+                              ? <div className="rte-content mt-0.5 text-[15px]" dangerouslySetInnerHTML={{ __html: safeMessageHtml(m.body) }} />
                               : <CollapsibleText text={m.body} className="mt-0.5 whitespace-pre-wrap text-[15px]" />}
                             {m.attachments && m.attachments.length > 0 && (
                               <div className="mt-1.5"><AttachmentThumbs items={m.attachments} onOpen={onOpenFile} /></div>
