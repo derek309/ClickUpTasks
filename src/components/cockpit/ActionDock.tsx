@@ -663,12 +663,15 @@ export function ActionDock({
                 </div>
               </div>
             ))}
-            {askShown && <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-muted">Ask</div>}
+            {/* "Get help" rather than "Ask": this is where handing the work
+                to someone else will live too, and delegating is not asking
+                (Derek). */}
+            {askShown && <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-muted">Get help</div>}
             {/* No longer the one pale item in the row. Dashed grey read as
                 unavailable rather than as the AI one. */}
             {askShown && <button onClick={() => openPanel("askTask")} onMouseEnter={() => setMenuIdx(menuHits.indexOf("ask"))}
               className={`inline-flex items-center gap-1.5 rounded-[7px] border border-accent px-3 py-1.5 text-[15px] font-semibold hover:bg-accent hover:text-white ${menuHits[menuIdx] === "ask" ? "bg-accent text-white" : "bg-accent-soft text-accent"}`}>
-              <span aria-hidden className="w-[17px] text-center">✦</span> Ask Claude about this task
+              <span aria-hidden className="w-[17px] text-center">✦</span> Ask AI
             </button>}
             {menuHits.length === 0 && (
               <div className="text-[14px] text-muted">Nothing matches “{menuQ.trim()}”.</div>
