@@ -7,7 +7,7 @@ import { usePersisted } from "@/lib/usePersisted";
 import {
   users, formatDue, isOverdue, TODAY, COLLAPSED_DUE_BUCKETS, effectivePriority, effectiveStatus, clientInitials, dueOneLine, isSnoozed,
   PRIORITY_META, manualPriorityOptions,
-  STATUS_META, STATUS_ORDER, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence,
+  STATUS_META, STATUS_ORDER, pickableStatuses, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence,
   PLAYBOOK_STEP_BY_KEY,
   addDaysIso, addBusinessDaysIso, SIZE_META, SIZE_ORDER,
   type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus, type TaskSize,
@@ -555,13 +555,13 @@ function InlineStatus({ value, onChange }: { value: TaskStatus; onChange: (s: Ta
   return (
     <div className="relative inline-flex items-center gap-1.5">
       <StatusDot value={value} onChange={onChange} />
-      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 144, STATUS_ORDER.length * 32 + 8)); setOpen((o) => !o); }} className="inline-flex items-center rounded px-1 py-0.5 text-[13px] font-medium hover:bg-background">
+      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 144, pickableStatuses(value).length * 32 + 8)); setOpen((o) => !o); }} className="inline-flex items-center rounded px-1 py-0.5 text-[13px] font-medium hover:bg-background">
         {STATUS_META[value].label}
       </button>
       {open && (<>
         <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
         <div style={{ position: "fixed", top: pos.top, left: pos.left, width: 144 }} className="z-40 rounded-lg border bg-surface p-1 shadow-lg">
-          {STATUS_ORDER.map((s) => (
+          {pickableStatuses(value).map((s) => (
             <button key={s} onClick={(e) => { e.stopPropagation(); onChange(s); setOpen(false); }} className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[15px] hover:bg-background">
               <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[s].dot }} /> {STATUS_META[s].label}
             </button>

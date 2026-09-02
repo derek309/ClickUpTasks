@@ -1,5 +1,5 @@
 import {
-  effectiveDueDate, effectivePriority, PRIORITY_META, STATUS_ORDER, userById,
+  viewerDueDate, effectivePriority, PRIORITY_META, STATUS_ORDER, userById,
   type Task,
 } from "./data";
 import type { SortBy } from "@/components/cockpit/ui";
@@ -21,6 +21,9 @@ export type SortOptions = {
   /** Just-added tasks, newest first, held at the top so each one lands under
    *  the Add task row rather than jumping to wherever it sorts. */
   pinnedIds?: string[];
+  /** Who is looking. A delegated task sorts by the date its delegatee was
+   *  given, not by the owner's. */
+  viewerId?: string | null;
 };
 
 /** Order-preserving for everything unpinned, and a no-op once nothing is
@@ -34,7 +37,7 @@ export function hoistPinned(arr: Task[], pinnedIds: string[] = []): Task[] {
 }
 
 export function sortTasks(list: Task[], opts: SortOptions): Task[] {
-  const { sortBy, sortDir, hasUnreadReply, pinnedIds } = opts;
+  const { sortBy, sortDir, hasUnreadReply, pinnedIds, viewerId } = opts;
   const arr = [...list];
   if (sortBy === "manual") return hoistPinned(arr, pinnedIds);
   const dir = sortDir === "desc" ? -1 : 1;
@@ -43,7 +46,7 @@ export function sortTasks(list: Task[], opts: SortOptions): Task[] {
   // rather than being special-cased in every comparator.
   const NEVER = "9999";
   if (sortBy === "due") {
-    arr.sort((a, b) => ((effectiveDueDate(a) ?? NEVER).localeCompare(effectiveDueDate(b) ?? NEVER)) * dir);
+    arr.sort((a, b) => ((viewerDueDate(a, viewerId) ?? NEVER).localeCompare(viewerDueDate(b, viewerId) ?? NEVER)) * dir);
   } else if (sortBy === "followUp") {
     // The follow-up date alone, not the effective one: this column answers
     // "what comes back to me and when", so a task with no follow-up sorts to

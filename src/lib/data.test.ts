@@ -50,6 +50,9 @@ import {
   startSignal,
   dueCountdown,
   dueOneLine,
+  pickableStatuses,
+  viewerDueDate,
+  type Subtask,
   addDaysIso,
   describeRecurrence,
   TODAY,
@@ -720,7 +723,9 @@ describe("what someone without client-messaging permission can do", () => {
     expect(visible).not.toContain("meeting"); // booking one is an invitation
   });
   it("keeps the internal half", () => {
-    expect(visible).toEqual(["note", "team", "met"]);
+    // Delegating is internal: handing work to a teammate is not contacting
+    // the client, and a VA who cannot email a client can still pass a job on.
+    expect(visible).toEqual(["note", "team", "met", "delegate"]);
   });
   // A VA who sat in on a call still has to be able to write down what was
   // decided, so logging a meeting that happened is not an outbound action.
@@ -1047,5 +1052,45 @@ describe("work the horizon cannot reach", () => {
   });
   it("is empty when everything fits", () => {
     expect(buildPlan([t("a", "half")], 6, 5, tue).unplanned).toEqual([]);
+  });
+});
+
+describe("pickableStatuses", () => {
+  it("hides Delegated from a task that is not delegated", () => {
+    expect(pickableStatuses("todo")).not.toContain("delegated");
+  });
+  it("offers it once the task is in it, so there is a way back out", () => {
+    expect(pickableStatuses("delegated")).toContain("delegated");
+  });
+  it("hides it when nothing is passed at all", () => {
+    expect(pickableStatuses()).not.toContain("delegated");
+  });
+});
+
+describe("viewerDueDate", () => {
+  const base = { due: "2026-09-30", followUpAt: null as string | null, assigneeId: "u_derek" };
+  const item = (over: Partial<Subtask>): Subtask => ({ id: "s1", title: "x", done: false, ...over });
+
+  it("gives the owner the effective due date", () => {
+    const t = { ...base, subtasks: [item({ assigneeId: "u_mp", due: "2026-09-08" })] };
+    expect(viewerDueDate(t, "u_derek")).toBe("2026-09-30");
+  });
+  it("gives a delegatee the date on their own item", () => {
+    const t = { ...base, subtasks: [item({ assigneeId: "u_mp", due: "2026-09-08" })] };
+    expect(viewerDueDate(t, "u_mp")).toBe("2026-09-08");
+  });
+  it("ignores an item they have already finished", () => {
+    const t = { ...base, subtasks: [item({ assigneeId: "u_mp", due: "2026-09-08", done: true })] };
+    expect(viewerDueDate(t, "u_mp")).toBe("2026-09-30");
+  });
+  it("takes the earliest when they hold two", () => {
+    const t = { ...base, subtasks: [
+      item({ id: "s1", assigneeId: "u_mp", due: "2026-09-20" }),
+      item({ id: "s2", assigneeId: "u_mp", due: "2026-09-08" }),
+    ] };
+    expect(viewerDueDate(t, "u_mp")).toBe("2026-09-08");
+  });
+  it("falls back to the follow-up date, same as before, with no viewer", () => {
+    expect(viewerDueDate({ ...base, followUpAt: "2026-09-05", subtasks: [] })).toBe("2026-09-05");
   });
 });

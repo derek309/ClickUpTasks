@@ -25,10 +25,10 @@ import {
   NURTURE_CHECK_IN_DAYS,
   TRIAL_DAYS,
   STATUS_META,
-  STATUS_ORDER,
+  STATUS_ORDER, HIDDEN_STATUSES, pickableStatuses,
   applyWaitingStatusSync,
   mentionsUser,
-  effectiveDueDate,
+  effectiveDueDate, viewerDueDate,
   isSnoozed,
   isCompletionEvent,
   CLIENT_STATUS_META,
@@ -1692,7 +1692,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   // The rule lives in lib/taskSort.ts so it can be tested: ordering is what
   // the list view mostly is, and it has been quietly wrong before.
-  const sortTasks = (list: Task[]) => sortTasksBy(list, { sortBy, sortDir, hasUnreadReply, pinnedIds });
+  const sortTasks = (list: Task[]) => sortTasksBy(list, { sortBy, sortDir, hasUnreadReply, pinnedIds, viewerId: me.id });
   const sortByCol = (key: string) => {
     const map: Record<string, SortBy> = { priority: "priority", assignee: "assignee", due: "due", task: "title", status: "status", comments: "comments", created: "created" };
     const sb = map[key] ?? "manual";
@@ -1938,7 +1938,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // would look like a change every time.
   const clientListBase = useMemo(
     () => rosterOnly(clientListScope === "mine" ? myAssignedClients : visibleClients),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [clientListScope, myAssignedClients, visibleClients]
   );
   // Memoized — the "urgent"/"mine" branches call clientUrgencyKey per client,
@@ -2460,8 +2459,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       // be folded back in.
       .filter((t) => t.status !== "done" && t.assigneeId === me.id && (planPersonal || !isPersonalTask(t)))
       .sort((a, b) => {
-        const da = effectiveDueDate(a) ?? "9999";
-        const db = effectiveDueDate(b) ?? "9999";
+        const da = viewerDueDate(a, me.id) ?? "9999";
+        const db = viewerDueDate(b, me.id) ?? "9999";
         if (da !== db) return da.localeCompare(db);
         return PRIORITY_META[effectivePriority(a)].rank - PRIORITY_META[effectivePriority(b)].rank;
       });
@@ -2479,11 +2478,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // sales (Derek, 2026-08-11).
   // Buckets on the effective date, so a task you asked to see today shows up
   // in Today even when it isn't owed for a week.
-  const dueBucket = (t: Task) => dueBucketOf(effectiveDueDate(t), t.status === "done");
+  // Bucketed by the date the person looking was actually given: a task
+  // delegated to you groups on your item's date, not on the owner's.
+  const dueBucket = (t: Task) => dueBucketOf(viewerDueDate(t, me.id), t.status === "done");
 
   type Grp = { key: string; label: string; color: string; tasks: Task[] };
   const buildGroups = (list: Task[], dim: typeof groupBy = groupBy): Grp[] => {
-    if (dim === "status") return STATUS_ORDER.map((s) => ({ key: s, label: STATUS_META[s].label, color: STATUS_META[s].dot, tasks: list.filter((t) => effectiveStatus(t) === s) }));
+    // A hidden stage gets a column only when something is actually in it, so
+    // nobody is looking at an empty Delegated column on the thirty three
+    // clients where nothing has been handed off.
+    if (dim === "status") return STATUS_ORDER
+      .map((s) => ({ key: s, label: STATUS_META[s].label, color: STATUS_META[s].dot, tasks: list.filter((t) => effectiveStatus(t) === s) }))
+      .filter((g) => !HIDDEN_STATUSES.has(g.key as TaskStatus) || g.tasks.length > 0);
     if (dim === "priority") {
       const needsReply = list.filter(hasUnreadReply);
       const needsReplyIds = new Set(needsReply.map((t) => t.id));
@@ -3354,6 +3360,40 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     update(taskId, { subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, ...patch } : s)) });
     // Assigning a checklist item to someone else = delegating that step; ping them.
     if (patch.assigneeId && patch.assigneeId !== before?.assigneeId && patch.assigneeId !== me.id) notify(patch.assigneeId, `${me.name} delegated "${before?.title || "a checklist item"}" on ${t.title} to you`, taskId);
+  };
+  // Handing a task to a teammate without creating a second task. One write
+  // does all of it: a checklist item assigned to them (which is what puts the
+  // task on their list at all, via tasks.delegated_to and the RLS in
+  // supabase/task-delegation.sql), the task's own dates and sizing, the
+  // hidden Delegated stage, and the ping. It lives here rather than in the
+  // dock because the notify and the task write belong to the same owner.
+  const delegateTask = (taskId: string, spec: {
+    toId: string; instructions: string; theirDue: string; followUpAt: string | null;
+    size: TaskSize | null; priority: Priority; links: string[];
+  }) => {
+    const t = tasksRef.current.find((x) => x.id === taskId);
+    if (!t) return;
+    // The item's title is the first line of the instructions, so their
+    // checklist reads as the ask rather than as the task's own name repeated.
+    const firstLine = spec.instructions.split("\n")[0].trim();
+    const title = firstLine.length > 90 ? `${firstLine.slice(0, 87)}…` : firstLine;
+    const sub: Subtask = {
+      id: newId("s_"), title: title || t.title, done: false,
+      assigneeId: spec.toId, due: spec.theirDue,
+      // Links ride in the instructions: LinkedText already renders a URL as a
+      // chip wherever the note is shown, so a separate links column would be
+      // a second way to say the same thing.
+      note: [spec.instructions, ...spec.links].filter(Boolean).join("\n"),
+    };
+    const patch: Partial<Task> = {
+      subtasks: [...t.subtasks, sub],
+      status: "delegated",
+      priority: spec.priority, priorityAuto: false,
+    };
+    if (spec.followUpAt) patch.followUpAt = spec.followUpAt;
+    if (spec.size) patch.size = spec.size;
+    update(taskId, patch);
+    if (spec.toId !== me.id) notify(spec.toId, `${me.name} delegated "${title}" to you on ${t.title}`, taskId);
   };
   const toggleLabel = (taskId: string, labelId: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { labelIds: t.labelIds.includes(labelId) ? t.labelIds.filter((l) => l !== labelId) : [...t.labelIds, labelId] }); };
 
@@ -4940,7 +4980,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             else if (v) bulkPatch({ assigneeId: v, waitingOnClient: false }, `Assign to ${users.find((u) => u.id === v)?.name ?? "user"}`);
             e.target.value = "";
           }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Assignee…</option><option value="unassigned">Unassigned</option><option value="waiting">⏳ Waiting on client</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
-          <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ status: e.target.value as TaskStatus }, `Set status to ${STATUS_META[e.target.value as TaskStatus]?.label ?? e.target.value}`); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Status…</option>{STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}</select>
+          <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ status: e.target.value as TaskStatus }, `Set status to ${STATUS_META[e.target.value as TaskStatus]?.label ?? e.target.value}`); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Status…</option>{pickableStatuses().map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}</select>
           <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ priority: e.target.value as Priority }, `Set priority to ${PRIORITY_META[e.target.value as Priority]?.label ?? e.target.value}`); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Priority…</option>{PRIORITY_ORDER.filter(isManuallyAssignable).map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}</select>
           <input type="date" onChange={(e) => { if (e.target.value) { bulkPatch({ due: e.target.value }, `Set due date to ${e.target.value}`); e.target.value = ""; } }} title="Due date" className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none" />
           <button onClick={() => bulkPatch({ due: null }, "Removed due date")} title="Clear the due date on every selected task" className="rounded-md border bg-background px-2 py-1 text-[15px] text-muted hover:bg-danger-soft hover:text-danger">Remove dates</button>
@@ -5002,6 +5042,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(body, attachments) => addComment(openTask.id, body, attachments)}
           onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onDownloadAll={downloadAllAsZip} zippingIds={zippingIds} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { if (openTask.playbookStepKey) { pushToast("Playbook steps can't be moved to a different list."); return; } patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null })} onDuplicate={(target) => duplicateTask(openTask.id, target)} projectsFor={projectsForClient} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => openClientList(openTask.clientId, openTask.projectId)} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} onMarkChannelRead={(channel) => markTaskChannelRead(openTask.id, channel)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage("messages", file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} onScheduleTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, scheduledAt, attachments, cc, bcc) => scheduleMessage(openTask.clientId, channel, subject, body, scheduledAt, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId)} draftingMessage={draftingMessage} onGetTaskLink={() => getClientShareUrl(openTask.clientId, { projectId: openTask.projectId, taskId: openTask.id })} canAdmin={canAdmin} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onCopyClientLink={() => copyClientShareLink(openTask.clientId, openTask.projectId)} onDeleteComment={(cid) => deleteComment(openTask.id, cid)} onDraftDescription={draftDescription} draftingDescription={draftingDescription} pushToast={pushToast} meId={me.id}
           onSendDm={(userId, body) => sendDmMessage(userId, body)}
+          onDelegate={(spec) => delegateTask(openTask.id, spec)}
+          clientLinks={clientLinks.filter((l) => l.clientId === openTask.clientId)}
           taskLink={() => linkTo({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null })} />
       )}
 

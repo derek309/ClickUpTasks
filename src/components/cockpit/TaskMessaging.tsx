@@ -203,7 +203,7 @@ export interface TaskMessagingProps {
 // Presentation only, so data.ts stays free of anything that only makes sense
 // on screen. Mirrors the dock's own set.
 const ACTION_ICON: Record<TaskActionKind, string> = {
-  note: "📝", team: "👥", chat: "🗨", email: "✉", sms: "💬", call: "☎", met: "👥", meeting: "📅",
+  note: "📝", team: "👥", chat: "🗨", email: "✉", sms: "💬", call: "☎", met: "👥", meeting: "📅", delegate: "🤝",
 };
 
 // Long action bodies (a summarised meeting, a note someone wrote properly)

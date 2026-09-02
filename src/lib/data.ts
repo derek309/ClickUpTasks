@@ -142,7 +142,7 @@ export interface Me {
   role: Role;
   canSendMessages: boolean; // admins always true; VAs only when an admin grants it
 }
-export type TaskStatus = "todo" | "get_started" | "in_progress" | "review" | "changes_requested" | "waiting" | "approved" | "done";
+export type TaskStatus = "todo" | "get_started" | "in_progress" | "review" | "changes_requested" | "waiting" | "approved" | "delegated" | "done";
 export type Priority = "client_request" | "conversation" | "urgent" | "normal" | "none";
 export type Recurrence = "none" | "daily" | "weekday" | "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly" | "custom";
 export const RECURRENCE_ORDER: Recurrence[] = ["none", "daily", "weekday", "weekly", "biweekly", "monthly", "quarterly", "yearly", "custom"];
@@ -1584,9 +1584,23 @@ export const STATUS_META: Record<TaskStatus, { label: string; dot: string; chip:
   // The client said go. Deliberately not Done: their yes and your delivery
   // are two different events, and collapsing them loses the gap between them.
   approved: { label: "Approved", dot: "#8b5cf6", chip: "#f5f3ff" },
+  // Handed to a teammate. Set by delegating, never picked by hand — see
+  // HIDDEN_STATUSES.
+  delegated: { label: "Delegated", dot: "#7c3aed", chip: "#f5f3ff" },
   done: { label: "Done", dot: "#22c55e", chip: "#f0fdf4" },
 };
-export const STATUS_ORDER: TaskStatus[] = ["todo", "get_started", "in_progress", "review", "changes_requested", "waiting", "approved", "done"];
+export const STATUS_ORDER: TaskStatus[] = ["todo", "get_started", "in_progress", "review", "changes_requested", "waiting", "delegated", "approved", "done"];
+
+// Stages nobody picks by hand. They arrive by doing the thing that sets them
+// (delegating), so offering them in a stage menu just adds a way to lie about
+// where the work is. Hidden from every picker unless the task is already in
+// one, which is how you get back out of it (Derek: "it will move into a
+// delegated stage that's hidden and only shows when it's created").
+export const HIDDEN_STATUSES: ReadonlySet<TaskStatus> = new Set(["delegated"]);
+/** The stages a picker should offer, given where this task is now. */
+export function pickableStatuses(current?: TaskStatus | null): TaskStatus[] {
+  return STATUS_ORDER.filter((s) => !HIDDEN_STATUSES.has(s) || s === current);
+}
 
 // Status "waiting" and Task.waitingOnClient must always move together — this
 // is the one place that rule lives. Every mutation path (update/patchTask
@@ -2350,7 +2364,7 @@ export function startSignal(
 // different question: not "what was said" but "what was done, and what
 // happens next". A single action can have all three faces — sending an email
 // writes a Message for the content and a TaskAction for the decision.
-export type TaskActionKind = "note" | "team" | "chat" | "email" | "sms" | "call" | "meeting" | "met";
+export type TaskActionKind = "note" | "team" | "delegate" | "chat" | "email" | "sms" | "call" | "meeting" | "met";
 
 export const TASK_ACTION_META: Record<TaskActionKind, { label: string; verb: string; icon: string; needsNextStep: boolean }> = {
   // needsNextStep drives whether the "what's next?" panel opens pre-expanded.
@@ -2358,6 +2372,10 @@ export const TASK_ACTION_META: Record<TaskActionKind, { label: string; verb: str
   // follow-up date on "FYI for Michaella" would train people to type junk.
   note:    { label: "Leave a note",       verb: "Left a note",       icon: "note",    needsNextStep: false },
   team:    { label: "Message a teammate", verb: "Messaged",          icon: "team",    needsNextStep: false },
+  // Handing the work over, not asking about it. Its own panel asks for the
+  // instructions, both dates, the hours and the priority, then writes a
+  // delegated checklist item so the delegatee can actually see the task.
+  delegate:{ label: "Delegate",           verb: "Delegated",         icon: "team",    needsNextStep: false },
   chat:    { label: "Chat the client",    verb: "Chatted client",    icon: "chat",    needsNextStep: true },
   email:   { label: "Email them",         verb: "Emailed client",    icon: "email",   needsNextStep: true },
   sms:     { label: "Text them",          verb: "Texted client",     icon: "sms",     needsNextStep: true },
@@ -2368,7 +2386,7 @@ export const TASK_ACTION_META: Record<TaskActionKind, { label: string; verb: str
   met:     { label: "Meeting",            verb: "Met",               icon: "met",     needsNextStep: true },
 };
 
-export const TASK_ACTION_ORDER: TaskActionKind[] = ["note", "team", "chat", "email", "sms", "call", "met", "meeting"];
+export const TASK_ACTION_ORDER: TaskActionKind[] = ["note", "team", "chat", "email", "sms", "call", "met", "meeting", "delegate"];
 
 // Actions that reach the client. Hidden from anyone without permission to
 // contact that client, so a VA sees the internal half of the dock (note,
@@ -2378,6 +2396,19 @@ export const TASK_ACTION_ORDER: TaskActionKind[] = ["note", "team", "chat", "ema
 // record, not an outbound message, and a VA who sat in on a call still has to
 // be able to write down what was decided.
 export const CLIENT_FACING_ACTIONS: ReadonlySet<TaskActionKind> = new Set(["chat", "email", "sms", "call", "meeting"]);
+
+/** Everything one handoff decides. The dock collects it, Cockpit writes it. */
+export type DelegateSpec = {
+  toId: string;
+  instructions: string;
+  /** When THEY owe it. Drives their list, not yours. */
+  theirDue: string;
+  /** When it comes back to you if you have heard nothing. */
+  followUpAt: string | null;
+  size: TaskSize | null;
+  priority: Priority;
+  links: string[];
+};
 
 export type TaskAction = {
   id: string;
@@ -2586,6 +2617,25 @@ export function effectiveDueDate(task: { due: string | null; followUpAt?: string
   // colouring both keep measuring against it. This is only about when the
   // task asks for your attention.
   return task.followUpAt ?? task.due;
+}
+
+/** The date THIS person should plan by. For the task's owner that is the
+ *  effective due date. For someone it was delegated to it is the date on
+ *  their own open checklist item, because the owner's follow-up date is a
+ *  fact about the owner's week, not theirs. Without this a delegated task
+ *  lands on their list grouped by a date they were never given. */
+export function viewerDueDate(
+  task: { due: string | null; followUpAt?: string | null; assigneeId?: string | null; subtasks?: Subtask[] },
+  viewerId?: string | null,
+): string | null {
+  if (viewerId && task.assigneeId !== viewerId) {
+    const mine = (task.subtasks ?? [])
+      .filter((s) => !s.done && s.assigneeId === viewerId && s.due)
+      .map((s) => s.due!)
+      .sort();
+    if (mine.length) return mine[0];
+  }
+  return effectiveDueDate(task);
 }
 
 export function isOverdue(iso: string | null): boolean {

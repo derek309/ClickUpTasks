@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Attachment, Contact, Message, Task, TaskAction, TaskActionKind, TaskStatus, htmlToText,
-  TASK_ACTION_META, TASK_ACTION_ORDER, CLIENT_FACING_ACTIONS, STATUS_META, STATUS_ORDER, linkSpans, prettyLinkName,
+  TASK_ACTION_META, TASK_ACTION_ORDER, CLIENT_FACING_ACTIONS, STATUS_META, pickableStatuses, linkSpans, prettyLinkName,
   User, addBusinessDaysIso, TODAY, formatDue, daysUntilDue, TaskSize, SIZE_META, SIZE_ORDER, sizeLabel, userById,
+  Priority, PRIORITY_META, manualPriorityOptions, type DelegateSpec, type ClientLink,
 } from "@/lib/data";
 import { I, newId, DateChip } from "./ui";
 // Plain fetch reaches this route without a session and gets a 401 back.
@@ -21,8 +22,10 @@ import { authedFetch } from "@/lib/supabase";
 // Eleven chips permanently on screen made the bar the loudest thing in the
 // drawer for something you do a few times a day.
 
+// One string, because the group's label is also how the code recognises it.
+const GET_HELP = "Get help";
 const ICON: Record<TaskActionKind, string> = {
-  note: "📝", team: "👥", chat: "🗨", email: "✉", sms: "💬", call: "☎", met: "🗓", meeting: "📅",
+  note: "📝", team: "👥", chat: "🗨", email: "✉", sms: "💬", call: "☎", met: "🗓", meeting: "📅", delegate: "🤝",
 };
 
 // Named offsets rather than a date picker for the common cases. Picking
@@ -43,7 +46,7 @@ function whenOptions(due: string | null): { label: string; date: string }[] {
 }
 
 export function ActionDock({
-  task, client, contact, actions, messages, me, users, onLog, onSetNextStepDone, onPatch, onAddComment, onOpenCompose, canMessageClient = true, onSendDm, taskLink, askNextStepFor, onAskNextStepHandled, pushToast,
+  task, client, contact, actions, messages, me, users, onLog, onSetNextStepDone, onPatch, onAddComment, onOpenCompose, canMessageClient = true, onSendDm, onDelegate, clientLinks = [], taskLink, askNextStepFor, onAskNextStepHandled, pushToast,
 }: {
   task: Task;
   client: { name: string } | null;
@@ -70,6 +73,11 @@ export function ActionDock({
   // correctly but the message lived on the task, so it never showed up in the
   // one place that teammate actually reads.
   onSendDm?: (userId: string, body: string) => void;
+  /** Hands the task over: the checklist item, the dates, the sizing, the
+   *  stage and the ping, all written by whoever owns the task list. */
+  onDelegate?: (spec: DelegateSpec) => void;
+  /** The client's saved links, offered one tap at a time when delegating. */
+  clientLinks?: ClientLink[];
   taskLink?: () => string;
   askNextStepFor?: { kind: TaskActionKind; body: string } | null;
   onAskNextStepHandled?: () => void;
@@ -78,6 +86,14 @@ export function ActionDock({
   const [view, setView] = useState<"closed" | "menu" | "askTask" | TaskActionKind>("closed");
   const [body, setBody] = useState("");
   const [teammate, setTeammate] = useState<string | null>(null);
+  // Delegation's own fields. Their due is deliberately separate from the
+  // follow-up date every other action sets: one is when they owe it, the
+  // other is when it lands back on you, and collapsing them into one date
+  // means one of the two people is planning off the wrong day.
+  const [theirDue, setTheirDue] = useState<string | null>(null);
+  const [delegatePriority, setDelegatePriority] = useState<Priority | null>(null);
+  const [links, setLinks] = useState<string[]>([]);
+  const [linkDraft, setLinkDraft] = useState("");
   // The suggestion card is the default; "Change it" opens the fields. Editing
   // one field should not throw away the other three, so this is one flag over
   // the whole card rather than a mode per row.
@@ -165,6 +181,10 @@ export function ActionDock({
     // Whoever owns the task is who a question about it usually goes to, so
     // they start selected rather than whoever happens to sort first.
     setTeammate(task.assigneeId && task.assigneeId !== me?.id ? task.assigneeId : users.find((u) => u.id !== me?.id)?.id ?? null);
+    // Delegating starts blank rather than inheriting the task's own dates:
+    // the whole point is deciding when THEY owe it.
+    setTheirDue(null); setDelegatePriority(task.priority === "none" ? "normal" : task.priority);
+    setLinks([]); setLinkDraft("");
   };
   const openPanelRef = useRef(openPanel);
   useEffect(() => { openPanelRef.current = openPanel; });
@@ -329,6 +349,39 @@ export function ActionDock({
     // "Messaged" — five of them are sitting in the log having gone nowhere.
     // A send with no addressee is not a send.
     if (kind === "team" && !teammate) { pushToast("Pick who this goes to."); return; }
+    // Delegating writes real state, so it refuses to half happen: without a
+    // person, an instruction and a date they owe it by, there is no handoff,
+    // only a note that reads like one.
+    if (kind === "delegate") {
+      if (!teammate) { pushToast("Pick who you are handing it to."); return; }
+      if (!text) { pushToast("Say what they need to do."); return; }
+      if (!theirDue) { pushToast("Give them a date to have it by."); return; }
+      if (!onDelegate) { pushToast("Delegating is not available here."); return; }
+      onDelegate({
+        toId: teammate, instructions: text, theirDue, followUpAt: nextDue,
+        size: size ?? task.size ?? null, priority: delegatePriority ?? task.priority, links,
+      });
+      onLog({
+        id: newId("ta_"), taskId: task.id, kind, authorId: me?.id ?? null,
+        toId: teammate, parentId: null,
+        body: [text, ...links].filter(Boolean).join("\n"),
+        at: new Date().toISOString(),
+        // The next step is theirs, and so is its date: what you are waiting
+        // on is them, not your own follow-up. Your follow-up is on the task.
+        nextStep: `${userById(teammate)?.name ?? "They"} to finish this`,
+        nextStepDue: theirDue,
+        nextStepDoneAt: null,
+      });
+      // Their chat, with the task quoted, the same way a team message lands.
+      if (onSendDm) {
+        const link = taskLink?.();
+        const ref = [`Re: ${task.title}${client?.name ? ` · ${client.name}` : ""}`, link].filter(Boolean).join("\n");
+        onSendDm(teammate, [`Handing this to you, due ${formatDue(theirDue)}.`, text, ...links, ref].filter(Boolean).join("\n\n"));
+      }
+      pushToast(`Delegated to ${userById(teammate)?.name ?? "them"} · due ${formatDue(theirDue)}`);
+      setView("closed");
+      return;
+    }
     if (kind === "team" && teammate) {
       if (!text) { pushToast("Write the message first."); return; }
       // Goes to their DM thread, with the task quoted and linked so the
@@ -462,7 +515,7 @@ export function ActionDock({
                 className={`rounded-md border px-2 py-1 text-[13px] ${nextDue && !whenOptions(task.due).some((o) => o.date === nextDue) ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`} />
             </>
           ))}
-          {fieldRow("Stage", STATUS_ORDER.filter((st) => st !== "done").map((st) => (
+          {fieldRow("Stage", pickableStatuses(task.status).filter((st) => st !== "done").map((st) => (
             <button key={st} onClick={() => setStage(st)}
               className={`rounded-md border px-2 py-1 text-[13px] ${(stage ?? task.status) === st ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{STATUS_META[st].label}</button>
           )))}
@@ -543,11 +596,16 @@ export function ActionDock({
   // Split off CLIENT_FACING_ACTIONS rather than written out again, so the
   // permission rule that hides client contact from a VA lives in exactly one
   // place. A second hardcoded list is a rule that drifts.
-  const INTERNAL_ACTIONS = TASK_ACTION_ORDER.filter((k) => !CLIENT_FACING_ACTIONS.has(k));
+  // Delegate is not a record of something that happened, so it sits with Ask
+  // AI under Get help: both are the same move, getting the work off your own
+  // hands. One is a person, one is not.
+  const INTERNAL_ACTIONS = TASK_ACTION_ORDER.filter((k) => !CLIENT_FACING_ACTIONS.has(k) && k !== "delegate");
   const CLIENT_ACTIONS = TASK_ACTION_ORDER.filter((k) => CLIENT_FACING_ACTIONS.has(k));
   const menuGroups: { label: string; kinds: TaskActionKind[] }[] = [
     { label: "Just record it", kinds: INTERNAL_ACTIONS },
     { label: who ? `Reach ${who}` : "Reach the client", kinds: canMessageClient ? CLIENT_ACTIONS : [] },
+    // Nobody to hand it to means no point offering it.
+    { label: GET_HELP, kinds: users.some((u) => u.id !== me?.id) ? ["delegate"] : [] },
   ];
   // Numbered in the order they are drawn, so the digit on screen is the digit
   // you press. Nine choices is a lot to hunt through when you use the same
@@ -560,10 +618,14 @@ export function ActionDock({
   const matches = (label: string) => label.toLowerCase().includes(menuQl);
   const shownGroups = menuGroups
     .map((g) => ({ ...g, kinds: g.kinds.filter((k) => !menuQl || matches(menuLabel(k)) || matches(TASK_ACTION_META[k].label)) }))
-    .filter((g) => g.kinds.length > 0);
-  const askShown = !menuQl || matches("ask claude about this task");
-  // Flat, in draw order: what ↑/↓ walks and what Enter opens.
-  const menuHits: (TaskActionKind | "ask")[] = [...shownGroups.flatMap((g) => g.kinds), ...(askShown ? ["ask" as const] : [])];
+    // Get help still draws when the filter kills Delegate but not Ask AI.
+    .filter((g) => g.kinds.length > 0 || (g.label === GET_HELP && askShown));
+  const askShown = !menuQl || matches("ask ai");
+  // Flat, in draw order: what ↑/↓ walks and what Enter opens. Ask AI is drawn
+  // first inside the Get help group, so it takes that group's place here
+  // rather than trailing the whole menu.
+  const menuHits: (TaskActionKind | "ask")[] = shownGroups.flatMap((g) =>
+    g.label === GET_HELP ? [...(askShown ? ["ask" as const] : []), ...g.kinds] : g.kinds);
   const openHit = (h: TaskActionKind | "ask") => openPanel(h === "ask" ? "askTask" : h);
 
   // Kept current in an effect rather than during render, so the shortcut
@@ -651,6 +713,14 @@ export function ActionDock({
               <div key={g.label} className="mb-2.5">
                 <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-muted">{g.label}</div>
                 <div className="flex flex-wrap gap-1.5">
+                  {/* Not the one pale item in the row: dashed grey read as
+                      unavailable rather than as the AI one. */}
+                  {g.label === GET_HELP && askShown && (
+                    <button onClick={() => openPanel("askTask")} onMouseEnter={() => setMenuIdx(menuHits.indexOf("ask"))}
+                      className={`inline-flex items-center gap-1.5 rounded-[7px] border border-accent px-3 py-1.5 text-[15px] font-semibold hover:bg-accent hover:text-white ${menuHits[menuIdx] === "ask" ? "bg-accent text-white" : "text-accent"}`}>
+                      <span aria-hidden className="w-[17px] text-center">✦</span> Ask AI
+                    </button>
+                  )}
                   {g.kinds.map((k) => (
                     <button key={k} onClick={() => openPanel(k)} onMouseEnter={() => setMenuIdx(menuHits.indexOf(k))}
                       className={`inline-flex items-center gap-1.5 rounded-[7px] border px-3 py-1.5 text-[15px] hover:border-accent hover:bg-accent-soft ${menuHits[menuIdx] === k ? "border-accent bg-accent-soft" : "bg-surface"}`}>
@@ -663,16 +733,6 @@ export function ActionDock({
                 </div>
               </div>
             ))}
-            {/* "Get help" rather than "Ask": this is where handing the work
-                to someone else will live too, and delegating is not asking
-                (Derek). */}
-            {askShown && <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-muted">Get help</div>}
-            {/* No longer the one pale item in the row. Dashed grey read as
-                unavailable rather than as the AI one. */}
-            {askShown && <button onClick={() => openPanel("askTask")} onMouseEnter={() => setMenuIdx(menuHits.indexOf("ask"))}
-              className={`inline-flex items-center gap-1.5 rounded-[7px] border border-accent px-3 py-1.5 text-[15px] font-semibold hover:bg-accent hover:text-white ${menuHits[menuIdx] === "ask" ? "bg-accent text-white" : "bg-accent-soft text-accent"}`}>
-              <span aria-hidden className="w-[17px] text-center">✦</span> Ask AI
-            </button>}
             {menuHits.length === 0 && (
               <div className="text-[14px] text-muted">Nothing matches “{menuQ.trim()}”.</div>
             )}
@@ -735,6 +795,93 @@ export function ActionDock({
             <div className="mt-2.5">{bodyBox("How did it go?")}</div>
             {nextStepPanel("call")}
             {commitRow("call", "Log the call")}
+          </div>
+        )}
+
+        {view === "delegate" && (
+          <div>
+            {header("delegate")}
+            <div className="mb-1.5 text-[13px] text-muted">They get the task on their list and a message. It stays yours.</div>
+            <div className="mb-1 text-[12px] font-semibold uppercase tracking-wide text-muted">
+              To{!teammate && <span className="ml-1 font-medium normal-case tracking-normal text-danger">pick someone</span>}
+            </div>
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {users.filter((u) => u.id !== me?.id).map((u) => (
+                <button key={u.id} onClick={() => setTeammate(u.id)}
+                  className={`rounded-[5px] border px-2.5 py-1 text-[13px] ${teammate === u.id ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{u.name}</button>
+              ))}
+            </div>
+            {bodyBox("What do they need to do? The first line becomes their checklist item.")}
+
+            {/* Links they will need. Pasted, or taken from the ones already
+                kept on this client, because retyping a URL you have saved
+                once is the reason nobody attaches them. */}
+            {fieldRow("Links", (
+              <>
+                {links.map((l) => (
+                  <button key={l} onClick={() => setLinks((ls) => ls.filter((x) => x !== l))} title="Remove"
+                    className="inline-flex items-center gap-1 rounded-md border border-accent bg-accent-soft px-2 py-1 text-[13px] text-accent">
+                    🔗 {prettyLinkName(l)} <span aria-hidden className="text-muted">×</span>
+                  </button>
+                ))}
+                <input value={linkDraft} onChange={(e) => setLinkDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    const v = linkDraft.trim();
+                    if (v && !links.includes(v)) setLinks((ls) => [...ls, v]);
+                    setLinkDraft("");
+                  }}
+                  placeholder="Paste a link, then Enter"
+                  className="min-w-[180px] flex-1 rounded-md border bg-surface px-2 py-1 text-[13px] outline-none focus:border-accent" />
+              </>
+            ))}
+            {clientLinks.length > 0 && (
+              <div className="mt-1.5 rounded-[9px] border bg-background px-2.5 py-2">
+                <div className="mb-1 text-[11px] font-bold uppercase tracking-wider text-muted">From this client, one tap to add</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {clientLinks.filter((l) => !links.includes(l.url)).map((l) => (
+                    <button key={l.url} onClick={() => setLinks((ls) => [...ls, l.url])}
+                      className="rounded-md border bg-surface px-2 py-1 text-[13px] hover:border-accent hover:bg-accent-soft">🔗 {l.label}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {fieldRow("They owe it", (
+              <>
+                {whenOptions(null).map((o) => (
+                  <button key={o.label} onClick={() => setTheirDue(o.date)} title={formatDue(o.date)}
+                    className={`rounded-md border px-2 py-1 text-[13px] ${theirDue === o.date ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{o.label}</button>
+                ))}
+                <DateChip value={theirDue} onChange={setTheirDue}
+                  label={theirDue && !whenOptions(null).some((o) => o.date === theirDue) ? formatDue(theirDue) : "Pick a date"}
+                  className={`rounded-md border px-2 py-1 text-[13px] ${theirDue && !whenOptions(null).some((o) => o.date === theirDue) ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`} />
+              </>
+            ))}
+            {fieldRow("You follow up", (
+              <>
+                {whenOptions(theirDue).map((o) => (
+                  <button key={o.label} onClick={() => setNextDue(o.date)} title={formatDue(o.date)}
+                    className={`rounded-md border px-2 py-1 text-[13px] ${nextDue === o.date ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{o.label}</button>
+                ))}
+                <DateChip value={nextDue} onChange={setNextDue}
+                  label={nextDue && !whenOptions(theirDue).some((o) => o.date === nextDue) ? formatDue(nextDue) : "Pick a date"}
+                  className={`rounded-md border px-2 py-1 text-[13px] ${nextDue && !whenOptions(theirDue).some((o) => o.date === nextDue) ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`} />
+              </>
+            ))}
+            {fieldRow("Takes", SIZE_ORDER.map((sz) => (
+              <button key={sz} onClick={() => setSize(sz)} title={`${SIZE_META[sz].label} · ${SIZE_META[sz].hint}`}
+                className={`rounded-md border px-2 py-1 text-[13px] ${shownSize === sz ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{SIZE_META[sz].label}</button>
+            )))}
+            {fieldRow("Priority", manualPriorityOptions(delegatePriority ?? task.priority).map((pr) => (
+              <button key={pr} onClick={() => setDelegatePriority(pr)}
+                className={`rounded-md border px-2 py-1 text-[13px] ${(delegatePriority ?? task.priority) === pr ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{PRIORITY_META[pr].label}</button>
+            )))}
+            <div className="mt-2.5 flex flex-wrap items-center gap-3">
+              <button onClick={() => commit("delegate")} className="rounded-lg bg-accent px-4 py-2 text-[15px] font-semibold text-white hover:opacity-90">Delegate</button>
+              <span className="text-[13px] text-muted">Moves the task to the Delegated stage.</span>
+            </div>
           </div>
         )}
 
