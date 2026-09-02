@@ -993,9 +993,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const delegationRow = delegations.length === 0 ? null : (
     <div className="mt-2 space-y-1.5">
       {delegations.map((s) => (
-        // Orange, so a handoff is the one block in the drawer you cannot
-        // mistake for the task's own furniture (Derek).
-        <div key={s.id} className="group/deleg rounded-xl border border-orange-500 bg-orange-50/60 px-3 py-2">
+        // Purple, taken straight from the Delegated stage's own colour, so
+        // the chip above the box and the box itself are visibly the same
+        // fact (Derek: "make the box purple since the stage name is
+        // purple"). Read from STATUS_META rather than restated, so recolouring
+        // the stage recolours this with it.
+        <div key={s.id} className="group/deleg rounded-xl border px-3 py-2"
+          style={{ borderColor: STATUS_META.delegated.dot, background: STATUS_META.delegated.chip }}>
           <div className="flex items-start gap-2.5">
             <button onClick={() => onToggleSub(s.id)} title={s.done ? "Reopen" : "Mark done"}
               className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${s.done ? "border-accent bg-accent text-white" : "bg-surface hover:border-accent"}`}>
