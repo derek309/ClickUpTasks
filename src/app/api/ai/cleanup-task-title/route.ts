@@ -13,11 +13,23 @@ import { requireUser } from "@/lib/serverAuth";
 //
 // Unlike the other AI routes this one gets a real per-call timeout. Nobody is
 // watching it, so a Gemini call that hangs would hold a serverless invocation
-// open for nothing; 9s is comfortably longer than a normal flash response and
-// well under the platform ceiling.
+// open for nothing.
+//
+// It was 9 seconds, and that was the bug behind "the AI grammar and spelling
+// fix was removed": this prompt asks the model to reproduce the whole original
+// text, so the response is as long as whatever got pasted into the title box.
+// Timed against the real prompt and one of Derek's actual 500 character
+// titles, the same call took 7.1s, 5.3s and 11.1s on three tries — the
+// timeout was firing on the long ones, the route returned 502, and the client
+// swallowed it. 25s covers the slow tail with room to spare.
+//
+// Thinking is also off: on this task it is the difference between 5s and 11s,
+// and rewriting one sentence and proofreading a paragraph does not need it.
 
 const GEMINI_MODEL = "gemini-flash-latest";
-const GEMINI_TIMEOUT_MS = 9000;
+const GEMINI_TIMEOUT_MS = 25000;
+// The serverless function has to outlive its own Gemini call.
+export const maxDuration = 30;
 
 export async function POST(req: NextRequest) {
   const caller = await requireUser(req);
@@ -58,7 +70,7 @@ export async function POST(req: NextRequest) {
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { thinkingConfig: { thinkingBudget: 0 } } }),
       signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
     });
     if (!res.ok) {
