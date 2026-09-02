@@ -211,10 +211,18 @@ const ACTION_ICON: Record<TaskActionKind, string> = {
 // at all, so the common case stays plain text.
 function ActionBody({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
-  const long = text.length > 320 || text.split("\n").length > 6;
+  // Runs of blank lines are how a pasted message arrives, and they turned a
+  // five sentence reply into a screenful of gaps. Two newlines is a
+  // paragraph; three or more is still just a paragraph.
+  const tidy = text.replace(/\n{3,}/g, "\n\n").trim();
+  const long = tidy.length > 320 || tidy.split("\n").length > 6;
   return (
     <div className="mt-0.5">
-      <div className={`whitespace-pre-wrap text-[15px] ${!open && long ? "line-clamp-6" : ""}`}><LinkedText text={text} chip /></div>
+      {/* A line length, not the width of the drawer. Reading a paragraph that
+          runs 140 characters wide is the thing that made this hard to read
+          (Derek: "this is hard to read, any way we can make it visually
+          easier to read and clean it up"). */}
+      <div className={`max-w-[68ch] whitespace-pre-wrap text-[15px] leading-relaxed ${!open && long ? "line-clamp-6" : ""}`}><LinkedText text={tidy} chip /></div>
       {long && (
         <button onClick={() => setOpen((o) => !o)} className="mt-0.5 text-[13px] font-medium text-accent hover:underline">
           {open ? "Show less" : "Show more"}
@@ -908,10 +916,13 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
               messages: a note or a logged call is just as likely to be the
               thing someone wants to ask about, and the answer belongs on the
               entry rather than as a loose comment further down the feed. */}
+          {/* Each reply is its own tinted block rather than another run of
+              text under a bold name: a thread of four read as one wall, and
+              the only thing separating them was a line break. */}
           {replies.length > 0 && (
-            <div className="mt-2 space-y-2 border-l-2 pl-2.5">
+            <div className="mt-2.5 space-y-2 border-l-2 pl-3">
               {replies.map((r) => (
-                <div key={r.id} className="group/reply">
+                <div key={r.id} className="group/reply rounded-lg bg-background px-2.5 py-2">
                   <span className="text-[13px] font-semibold">{r.authorId ? (userById(r.authorId)?.name ?? "Someone") : "Someone"}</span>
                   <span className="text-[13px] text-muted"> · {timeAgo(r.at)}</span>
                   {onDeleteAction && (
@@ -920,7 +931,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
                       <I.trash className="h-3 w-3" />
                     </button>
                   )}
-                  <div className="whitespace-pre-wrap text-[14px] leading-relaxed"><LinkedText text={r.body} chip /></div>
+                  <ActionBody text={r.body} />
                 </div>
               ))}
             </div>
