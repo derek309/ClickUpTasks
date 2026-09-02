@@ -55,14 +55,19 @@ export async function POST(req: NextRequest) {
   // thousand-row window filled up with the one contact that has nine hundred
   // unlinked messages — all of them already-linked contacts — and the pass
   // came back with nothing to do while forty seven contacts waited.
-  let q = supabaseAdmin
+  // One chain rather than a reassigned builder: reassigning it makes the
+  // client's generic type recurse until the compiler gives up. A sentinel id
+  // keeps the filter valid when nothing is linked yet.
+  const exclude = alreadyLinked.size ? [...alreadyLinked] : ["__none__"];
+  const { data: pending, error } = await supabaseAdmin
     .from("messages")
     .select("contact_id, client_id")
     .not("ghl_message_id", "is", null)
     .is("ghl_conversation_id", null)
-    .not("contact_id", "is", null);
-  if (alreadyLinked.size) q = q.not("contact_id", "in", `(${[...alreadyLinked].join(",")})`);
-  const { data: pending, error } = await q.order("contact_id", { ascending: true }).limit(1000);
+    .not("contact_id", "is", null)
+    .not("contact_id", "in", `(${exclude.join(",")})`)
+    .order("contact_id", { ascending: true })
+    .limit(1000);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   const byContact = new Map<string, string>();
