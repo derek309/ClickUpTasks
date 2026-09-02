@@ -25,11 +25,14 @@ import NotificationPrefsPanel from "./NotificationPrefsPanel";
 import SignaturePanel from "./SignaturePanel";
 import TrashPanel from "./TrashPanel";
 
-export type TabKey = "integrations" | "team" | "templates" | "playbooks" | "tokens" | "notifications" | "signature" | "trash";
+export type TabKey = "account" | "integrations" | "team" | "templates" | "playbooks" | "tokens" | "notifications" | "signature" | "trash";
 
 export default function SettingsHub({
   initialTab = "integrations",
   me,
+  theme,
+  onSetTheme,
+  onSignOut,
   canAdmin,
   subAccounts,
   onSaveClient,
@@ -80,8 +83,16 @@ export default function SettingsHub({
   onPurgeClient: (id: string) => Promise<void> | void;
   onPurgeProject: (id: string) => Promise<void> | void;
   onPurgeTask: (id: string) => Promise<void> | void;
+  theme: "light" | "dark" | "auto";
+  onSetTheme: (t: "light" | "dark" | "auto") => void;
+  onSignOut: () => void;
 }) {
   const tabs: { key: TabKey; label: string; icon: keyof typeof I; visible: boolean }[] = [
+    // Theme and signing out used to be two unlabelled icons wedged beside
+    // your name in the sidebar, where they cost width on every screen to
+    // hold two things nobody touches twice a week (Derek: "move dark mode to
+    // settings", "move logout to settings").
+    { key: "account", label: "Account", icon: "user", visible: true },
     { key: "integrations", label: "Integrations", icon: "gear", visible: canAdmin },
     { key: "team", label: "Team", icon: "user", visible: canAdmin },
     { key: "templates", label: "Task templates", icon: "clipboard", visible: canAdmin },
@@ -120,6 +131,26 @@ export default function SettingsHub({
             {tab === "playbooks" && canAdmin && (
               <PlaybooksPanel playbooks={playbooks} clients={clients} projects={projects}
                 onSave={onSavePlaybook} onDelete={onDeletePlaybook} onLoad={onLoadPlaybook} />
+            )}
+            {tab === "account" && (
+              <div className="max-w-xl">
+                <div className="mb-1 text-[17px] font-semibold">Account</div>
+                <div className="mb-4 text-[15px] capitalize text-muted">Signed in as {me.name} · {me.role}</div>
+
+                <div className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-muted">Appearance</div>
+                <div className="mb-6 flex flex-wrap gap-1.5">
+                  {(["light", "dark", "auto"] as const).map((t) => (
+                    <button key={t} onClick={() => onSetTheme(t)}
+                      className={`rounded-md border px-3 py-1.5 text-[15px] ${theme === t ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>
+                      {t === "light" ? "Light" : t === "dark" ? "Dark" : "Match the system"}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-muted">Session</div>
+                <button onClick={onSignOut}
+                  className="rounded-md border border-danger/40 px-3 py-1.5 text-[15px] font-medium text-danger hover:bg-danger/10">Sign out</button>
+              </div>
             )}
             {tab === "tokens" && <ApiTokensPanel />}
             {tab === "notifications" && <NotificationPrefsPanel />}

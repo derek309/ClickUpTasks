@@ -1298,8 +1298,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const projectById = (id: string) => projectsById.get(id) ?? null;
   const contactById = (id: string | null) => contacts.find((c) => c.id === id) ?? null;
 
-  const toggleTheme = () => {
-    const next = theme === "light" ? "dark" : theme === "dark" ? "auto" : "light";
+  const setThemePref = (next: "light" | "dark" | "auto") => {
     setTheme(next);
     try { localStorage.setItem("cut_theme", next); } catch {}
   };
@@ -4489,14 +4488,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             ones: the old Team Chat button was pure duplication once Team Chat
             became the first nav item right below (which carries the unread dot
             itself), and four bordered boxes crowded the name down to "De…".
-            Dropping the borders + tightening the gap gives the name its row
-            back while keeping every action one click away. */}
+            Theme and sign out have since moved into Settings > Account
+            (Derek), leaving the gear as the only icon here: two things
+            nobody touches twice a week were costing width on every screen. */}
         <div className="flex shrink-0 items-center gap-1 border-b px-3 py-3">
           <span className="inline-flex shrink-0 items-center justify-center rounded-full text-[15px] font-semibold text-white" style={{ width: 30, height: 30, background: me.color }}>{me.initials}</span>
           <div className="ml-1 min-w-0 flex-1 leading-tight"><div className="truncate text-[15px] font-medium">{me.name}</div><div className="text-[13px] capitalize text-muted">{me.role}</div></div>
           <button onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setDirView(null); setSidebarOpen(false); setOpenTaskId(null); setSettingsView(true); }} title="Settings" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>
-          <button onClick={toggleTheme} title={`Theme: ${theme === "auto" ? `Auto (${resolveTheme(theme)} now)` : theme[0].toUpperCase() + theme.slice(1)} — click to change`} className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-foreground">{resolveTheme(theme) === "light" ? <I.moon /> : <I.sun />}</button>
-          <button onClick={onSignOut} title="Sign out" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-red-500"><I.logout /></button>
         </div>
 
         {/* Dashboard, Conversations, and Clients/Projects/Personal, all one
@@ -4835,6 +4833,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             dmEnabled={dmEnabled} onSetDmEnabled={setDmEnabled}
             onRestoreClient={restoreClient} onRestoreProject={restoreProjectFromTrash} onRestoreTask={restoreTaskFromTrash}
             onPurgeClient={purgeClient} onPurgeProject={purgeProject} onPurgeTask={purgeTask}
+            theme={theme} onSetTheme={setThemePref} onSignOut={onSignOut}
           />
         ) : inboxView && dmUserId ? (
           // A DM thread has no "Activity" sub-view (that's a Team Chat-page
