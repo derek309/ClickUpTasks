@@ -51,6 +51,7 @@ import {
   dueCountdown,
   dueOneLine,
   pickableStatuses,
+  isOnPlateOf,
   viewerDueDate,
   type Subtask,
   addDaysIso,
@@ -1092,5 +1093,21 @@ describe("viewerDueDate", () => {
   });
   it("falls back to the follow-up date, same as before, with no viewer", () => {
     expect(viewerDueDate({ ...base, followUpAt: "2026-09-05", subtasks: [] })).toBe("2026-09-05");
+  });
+});
+
+describe("isOnPlateOf", () => {
+  const item = (over: Partial<Subtask>): Subtask => ({ id: "s1", title: "x", done: false, ...over });
+  it("counts the assignee", () => {
+    expect(isOnPlateOf({ assigneeId: "u_derek", subtasks: [] }, "u_derek")).toBe(true);
+  });
+  it("counts someone holding an open delegated item", () => {
+    expect(isOnPlateOf({ assigneeId: "u_derek", subtasks: [item({ assigneeId: "u_mp" })] }, "u_mp")).toBe(true);
+  });
+  it("stops counting once they have ticked it off", () => {
+    expect(isOnPlateOf({ assigneeId: "u_derek", subtasks: [item({ assigneeId: "u_mp", done: true })] }, "u_mp")).toBe(false);
+  });
+  it("says no to someone with nothing on it", () => {
+    expect(isOnPlateOf({ assigneeId: "u_derek", subtasks: [item({ assigneeId: "u_mp" })] }, "u_justin")).toBe(false);
   });
 });

@@ -2619,6 +2619,19 @@ export function effectiveDueDate(task: { due: string | null; followUpAt?: string
   return task.followUpAt ?? task.due;
 }
 
+/** Is this task on that person's plate? True for its assignee, and for
+ *  anyone holding an open delegated checklist item on it. Delegation puts a
+ *  task on someone's list without changing who owns it, so every "whose work
+ *  is this" question has to ask both (Derek: "it's delegated to Michaella but
+ *  it's not showing up"). */
+export function isOnPlateOf(
+  task: { assigneeId?: string | null; subtasks?: Subtask[] },
+  userId: string,
+): boolean {
+  return task.assigneeId === userId
+    || (task.subtasks ?? []).some((s) => !s.done && s.assigneeId === userId);
+}
+
 /** The date THIS person should plan by. For the task's owner that is the
  *  effective due date. For someone it was delegated to it is the date on
  *  their own open checklist item, because the owner's follow-up date is a

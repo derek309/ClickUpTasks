@@ -463,6 +463,34 @@ export function ActionDock({
     </div>
   );
 
+  // A labelled block: the label on its own line above what it labels. The
+  // dock's inline fieldRow works for one or two rows; seven of them wrapped
+  // every label to two lines and left nothing to read down.
+  const block = (label: React.ReactNode, children: React.ReactNode, spacing = "mb-2.5") => (
+    <div className={spacing}>
+      <div className="mb-1 text-[11px] font-bold uppercase tracking-wider text-muted">{label}</div>
+      {children}
+    </div>
+  );
+
+  // The same four business-day offsets plus a picker, used by both dates in
+  // the delegate panel. `after` keeps a follow-up from being offered before
+  // the date they were given.
+  const dateChips = (value: string | null, set: (d: string | null) => void, after: string | null) => {
+    const opts = whenOptions(after);
+    const custom = !!value && !opts.some((o) => o.date === value);
+    return (
+      <div className="flex flex-wrap gap-1.5">
+        {opts.map((o) => (
+          <button key={o.label} onClick={() => set(o.date)} title={formatDue(o.date)}
+            className={`rounded-md border px-2 py-1.5 text-[13px] ${value === o.date ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{o.label}</button>
+        ))}
+        <DateChip value={value} onChange={set} label={custom ? formatDue(value!) : "Pick"}
+          className={`rounded-md border px-2 py-1.5 text-[13px] ${custom ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`} />
+      </div>
+    );
+  };
+
   const nextStepPanel = (kind: TaskActionKind) => (
     <div className="mt-2.5 rounded-[10px] border bg-background p-3 shadow-[inset_0_2px_5px_rgba(20,24,40,.06)]">
       <div className="mb-2 flex items-center gap-2">
@@ -801,84 +829,85 @@ export function ActionDock({
         {view === "delegate" && (
           <div>
             {header("delegate")}
-            <div className="mb-1.5 text-[13px] text-muted">They get the task on their list and a message. It stays yours.</div>
-            <div className="mb-1 text-[12px] font-semibold uppercase tracking-wide text-muted">
-              To{!teammate && <span className="ml-1 font-medium normal-case tracking-normal text-danger">pick someone</span>}
-            </div>
-            <div className="mb-2 flex flex-wrap gap-1.5">
-              {users.filter((u) => u.id !== me?.id).map((u) => (
-                <button key={u.id} onClick={() => setTeammate(u.id)}
-                  className={`rounded-[5px] border px-2.5 py-1 text-[13px] ${teammate === u.id ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{u.name}</button>
-              ))}
-            </div>
-            {bodyBox("What do they need to do? The first line becomes their checklist item.")}
+            <div className="mb-2.5 text-[13px] text-muted">They get the task on their list and a message. It stays yours.</div>
 
-            {/* Links they will need. Pasted, or taken from the ones already
-                kept on this client, because retyping a URL you have saved
-                once is the reason nobody attaches them. */}
-            {fieldRow("Links", (
-              <>
-                {links.map((l) => (
-                  <button key={l} onClick={() => setLinks((ls) => ls.filter((x) => x !== l))} title="Remove"
-                    className="inline-flex items-center gap-1 rounded-md border border-accent bg-accent-soft px-2 py-1 text-[13px] text-accent">
-                    🔗 {prettyLinkName(l)} <span aria-hidden className="text-muted">×</span>
-                  </button>
+            {/* Stacked labels, not the dock's inline 76px column: with seven
+                fields the inline labels wrapped to two lines each and the
+                rows ran together (Derek: "it's too messy, smashed
+                together"). A label above its own row reads as a form. */}
+            {block(<>To{!teammate && <span className="ml-1 font-medium normal-case tracking-normal text-danger">pick someone</span>}</>, (
+              <div className="flex flex-wrap gap-1.5">
+                {users.filter((u) => u.id !== me?.id).map((u) => (
+                  <button key={u.id} onClick={() => setTeammate(u.id)}
+                    className={`rounded-md border px-2.5 py-1.5 text-[13px] ${teammate === u.id ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{u.name}</button>
                 ))}
-                <input value={linkDraft} onChange={(e) => setLinkDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key !== "Enter") return;
-                    e.preventDefault();
-                    const v = linkDraft.trim();
-                    if (v && !links.includes(v)) setLinks((ls) => [...ls, v]);
-                    setLinkDraft("");
-                  }}
-                  placeholder="Paste a link, then Enter"
-                  className="min-w-[180px] flex-1 rounded-md border bg-surface px-2 py-1 text-[13px] outline-none focus:border-accent" />
+              </div>
+            ))}
+
+            {block("What they need to do", bodyBox("The first line becomes their checklist item."))}
+
+            {block("Links they will need", (
+              <>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {links.map((l) => (
+                    <button key={l} onClick={() => setLinks((ls) => ls.filter((x) => x !== l))} title={l}
+                      className="inline-flex max-w-[220px] items-center gap-1 rounded-md border border-accent bg-accent-soft px-2 py-1 text-[13px] text-accent">
+                      <span className="truncate">🔗 {prettyLinkName(l)}</span> <span aria-hidden className="text-muted">×</span>
+                    </button>
+                  ))}
+                  <input value={linkDraft} onChange={(e) => setLinkDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter") return;
+                      e.preventDefault();
+                      const v = linkDraft.trim();
+                      if (v && !links.includes(v)) setLinks((ls) => [...ls, v]);
+                      setLinkDraft("");
+                    }}
+                    placeholder="Paste a link, then Enter"
+                    className="min-w-[200px] flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[13px] outline-none focus:border-accent" />
+                </div>
+                {/* One tap beats retyping a URL that is already saved, which
+                    is the reason nobody attaches them. */}
+                {clientLinks.some((l) => !links.includes(l.url)) && (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    <span className="text-[12px] text-muted">From this client</span>
+                    {clientLinks.filter((l) => !links.includes(l.url)).map((l) => (
+                      <button key={l.url} onClick={() => setLinks((ls) => [...ls, l.url])} title={l.url}
+                        className="max-w-[200px] truncate rounded-md border border-dashed px-2 py-1 text-[13px] text-muted hover:border-accent hover:bg-accent-soft hover:text-accent">＋ {l.label}</button>
+                    ))}
+                  </div>
+                )}
               </>
             ))}
-            {clientLinks.length > 0 && (
-              <div className="mt-1.5 rounded-[9px] border bg-background px-2.5 py-2">
-                <div className="mb-1 text-[11px] font-bold uppercase tracking-wider text-muted">From this client, one tap to add</div>
+
+            {/* The two dates side by side, because the whole point is that
+                they are different dates doing different jobs. */}
+            <div className="mt-3 grid grid-cols-1 gap-3 border-t pt-3 sm:grid-cols-2">
+              {block(<>They owe it{!theirDue && <span className="ml-1 font-medium normal-case tracking-normal text-danger">pick a date</span>}</>,
+                dateChips(theirDue, setTheirDue, null), "mb-0")}
+              {block("You follow up", dateChips(nextDue, setNextDue, theirDue), "mb-0")}
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 gap-3 border-t pt-3 sm:grid-cols-2">
+              {block("Takes", (
                 <div className="flex flex-wrap gap-1.5">
-                  {clientLinks.filter((l) => !links.includes(l.url)).map((l) => (
-                    <button key={l.url} onClick={() => setLinks((ls) => [...ls, l.url])}
-                      className="rounded-md border bg-surface px-2 py-1 text-[13px] hover:border-accent hover:bg-accent-soft">🔗 {l.label}</button>
+                  {SIZE_ORDER.map((sz) => (
+                    <button key={sz} onClick={() => setSize(sz)} title={`${SIZE_META[sz].label} · ${SIZE_META[sz].hint}`}
+                      className={`rounded-md border px-2 py-1.5 text-[13px] ${shownSize === sz ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{SIZE_META[sz].label}</button>
                   ))}
                 </div>
-              </div>
-            )}
+              ), "mb-0")}
+              {block("Priority", (
+                <div className="flex flex-wrap gap-1.5">
+                  {manualPriorityOptions(delegatePriority ?? task.priority).map((pr) => (
+                    <button key={pr} onClick={() => setDelegatePriority(pr)}
+                      className={`rounded-md border px-2 py-1.5 text-[13px] ${(delegatePriority ?? task.priority) === pr ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{PRIORITY_META[pr].label}</button>
+                  ))}
+                </div>
+              ), "mb-0")}
+            </div>
 
-            {fieldRow("They owe it", (
-              <>
-                {whenOptions(null).map((o) => (
-                  <button key={o.label} onClick={() => setTheirDue(o.date)} title={formatDue(o.date)}
-                    className={`rounded-md border px-2 py-1 text-[13px] ${theirDue === o.date ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{o.label}</button>
-                ))}
-                <DateChip value={theirDue} onChange={setTheirDue}
-                  label={theirDue && !whenOptions(null).some((o) => o.date === theirDue) ? formatDue(theirDue) : "Pick a date"}
-                  className={`rounded-md border px-2 py-1 text-[13px] ${theirDue && !whenOptions(null).some((o) => o.date === theirDue) ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`} />
-              </>
-            ))}
-            {fieldRow("You follow up", (
-              <>
-                {whenOptions(theirDue).map((o) => (
-                  <button key={o.label} onClick={() => setNextDue(o.date)} title={formatDue(o.date)}
-                    className={`rounded-md border px-2 py-1 text-[13px] ${nextDue === o.date ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{o.label}</button>
-                ))}
-                <DateChip value={nextDue} onChange={setNextDue}
-                  label={nextDue && !whenOptions(theirDue).some((o) => o.date === nextDue) ? formatDue(nextDue) : "Pick a date"}
-                  className={`rounded-md border px-2 py-1 text-[13px] ${nextDue && !whenOptions(theirDue).some((o) => o.date === nextDue) ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`} />
-              </>
-            ))}
-            {fieldRow("Takes", SIZE_ORDER.map((sz) => (
-              <button key={sz} onClick={() => setSize(sz)} title={`${SIZE_META[sz].label} · ${SIZE_META[sz].hint}`}
-                className={`rounded-md border px-2 py-1 text-[13px] ${shownSize === sz ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{SIZE_META[sz].label}</button>
-            )))}
-            {fieldRow("Priority", manualPriorityOptions(delegatePriority ?? task.priority).map((pr) => (
-              <button key={pr} onClick={() => setDelegatePriority(pr)}
-                className={`rounded-md border px-2 py-1 text-[13px] ${(delegatePriority ?? task.priority) === pr ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{PRIORITY_META[pr].label}</button>
-            )))}
-            <div className="mt-2.5 flex flex-wrap items-center gap-3">
+            <div className="mt-3.5 flex flex-wrap items-center gap-3 border-t pt-3">
               <button onClick={() => commit("delegate")} className="rounded-lg bg-accent px-4 py-2 text-[15px] font-semibold text-white hover:opacity-90">Delegate</button>
               <span className="text-[13px] text-muted">Moves the task to the Delegated stage.</span>
             </div>

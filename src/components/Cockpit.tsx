@@ -28,7 +28,7 @@ import {
   STATUS_ORDER, HIDDEN_STATUSES, pickableStatuses,
   applyWaitingStatusSync,
   mentionsUser,
-  effectiveDueDate, viewerDueDate,
+  effectiveDueDate, viewerDueDate, isOnPlateOf,
   isSnoozed,
   isCompletionEvent,
   CLIENT_STATUS_META,
@@ -1719,7 +1719,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // (myWorkGroups, sortedClients, clientTaskCountRef, etc.) redo an O(tasks)
   // scan on every update even when tasks/canAdmin/me.id hadn't changed.
   const scopedTasks = useMemo(
-    () => (canAdmin ? tasks : tasks.filter((t) => t.assigneeId === me.id)),
+    () => (canAdmin ? tasks : tasks.filter((t) => isOnPlateOf(t, me.id))),
     [tasks, canAdmin, me.id]
   );
   // What the All Tasks row in the sidebar counts: your own open work.
@@ -1735,7 +1735,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // that is exactly why the two are separate stages — so an approved task is
   // still something you owe. Done is the only stage that is not.
   const openTaskCount = useMemo(
-    () => tasks.filter((t) => t.assigneeId === me.id && t.status !== "done").length,
+    () => tasks.filter((t) => isOnPlateOf(t, me.id) && t.status !== "done").length,
     [tasks, me.id],
   );
   // Map indices for scopedTasks/clients/projects — every lookup helper below
@@ -1840,7 +1840,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // can point this at a teammate instead of yourself.
   // Reads workableClients, not clientList: a prospect you've been assigned
   // a task on is real work and belongs on your board.
-  const assignedClientsFor = (userId: string) => workableClients.filter((c) => (scopedTasksByClientId.get(c.id) ?? []).some((t) => t.status !== "done" && (t.assigneeId === userId || t.subtasks.some((s) => s.assigneeId === userId))) || (c.assignedTo ?? []).includes(userId));
+  const assignedClientsFor = (userId: string) => workableClients.filter((c) => (scopedTasksByClientId.get(c.id) ?? []).some((t) => t.status !== "done" && isOnPlateOf(t, userId)) || (c.assignedTo ?? []).includes(userId));
   // Same rule, applied to projects — but only "Projects" in Derek's sense
   // (the sidebar's Administration/Idea board/etc. list, i.e. workspaceProjects
   // above — not tied to a real GHL client). A client's own internal
@@ -1853,7 +1853,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // non-client-scoped ids explicitly instead. A project with no assignedTo
   // field yet (pre-migration rows) just falls back to an empty follow-list,
   // matching rowToProject's `?? []`.
-  const assignedProjectsFor = (userId: string) => projects.filter((p) => (p.clientId === WORKSPACE_CLIENT_ID || p.clientId === PERSONAL_CLIENT_ID) && ((scopedTasksByProjectId.get(p.id) ?? []).some((t) => t.status !== "done" && (t.assigneeId === userId || t.subtasks.some((s) => s.assigneeId === userId))) || (p.assignedTo ?? []).includes(userId)));
+  const assignedProjectsFor = (userId: string) => projects.filter((p) => (p.clientId === WORKSPACE_CLIENT_ID || p.clientId === PERSONAL_CLIENT_ID) && ((scopedTasksByProjectId.get(p.id) ?? []).some((t) => t.status !== "done" && isOnPlateOf(t, userId)) || (p.assignedTo ?? []).includes(userId)));
   // Memoized — always computed every render (unconditionally, regardless of
   // clientListScope) via assignedClientsFor, which scans scopedTasks per
   // workable client. Same class of bug as myWorkGroups: this ran on every
@@ -2209,7 +2209,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // was O(scopedTasks × projects) every render (projectById is a linear
   // scan), and it feeds displayedGroups/vaultItems/Journal counts below.
   const baseTasks = useMemo(
-    () => scopedTasks.filter((t) => t.clientId.startsWith("cl_") && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject) && (!activeFolder || projectById(t.projectId)?.folderId === activeFolder) && (activeClient !== "all" || allTasksScope === "all" || t.assigneeId === (allTasksScope === "mine" ? me.id : allTasksScope)) && (!t.playbookStepKey || !!activeProject || !!t.assigneeId || !!t.due)),
+    () => scopedTasks.filter((t) => t.clientId.startsWith("cl_") && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject) && (!activeFolder || projectById(t.projectId)?.folderId === activeFolder) && (activeClient !== "all" || allTasksScope === "all" || isOnPlateOf(t, allTasksScope === "mine" ? me.id : allTasksScope)) && (!t.playbookStepKey || !!activeProject || !!t.assigneeId || !!t.due)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [scopedTasks, activeClient, activeProject, activeFolder, projects, allTasksScope, me.id]
   );
@@ -2457,7 +2457,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       // fills every day, leaving no room for a single client task — which is
       // exactly what the plan is for. They still take real time, so they can
       // be folded back in.
-      .filter((t) => t.status !== "done" && t.assigneeId === me.id && (planPersonal || !isPersonalTask(t)))
+      .filter((t) => t.status !== "done" && isOnPlateOf(t, me.id) && (planPersonal || !isPersonalTask(t)))
       .sort((a, b) => {
         const da = viewerDueDate(a, me.id) ?? "9999";
         const db = viewerDueDate(b, me.id) ?? "9999";
