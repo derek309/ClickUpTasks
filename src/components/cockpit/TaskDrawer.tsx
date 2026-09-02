@@ -11,7 +11,7 @@ import {
 import { I, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
 import { authedFetch } from "@/lib/supabase";
 import { ActionDock } from "./ActionDock";
-import { fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskActionDb } from "@/lib/db";
+import { fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskActionDb, editTaskActionDb } from "@/lib/db";
 import { AttachmentTile } from "./AttachmentTile";
 import { SizePicker } from "./SizePicker";
 import { InlineAssignee, InlineDate, InlineDue } from "./GroupedList";
@@ -560,6 +560,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     setLoaded((p2) => ({ ...p2, rows: p2.rows.filter((a) => a.id !== id) }));
     deleteTaskActionDb(id);
   };
+  const editAction = (id: string, body: string) => {
+    setLoaded((p2) => ({ ...p2, rows: p2.rows.map((a) => (a.id === id ? { ...a, body } : a)) }));
+    editTaskActionDb(id, body);
+  };
   const setNextStepDone = (id: string, done: boolean) => {
     const at = done ? new Date().toISOString() : null;
     setLoaded((p) => ({ ...p, rows: p.rows.map((a) => (a.id === id ? { ...a, nextStepDoneAt: at } : a)) }));
@@ -963,7 +967,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // never got set, which is how a task goes quiet after real work on it.
   const [pendingNextStep, setPendingNextStep] = useState<{ kind: TaskActionKind; body: string } | null>(null);
   const { feedArea, composerFooter, openCompose } = useTaskMessaging({
-    actions, onSetNextStepDone: setNextStepDone, onDeleteAction: deleteAction, onLogAction: logAction, meId, onSendDm, onDeleteComment,
+    actions, onSetNextStepDone: setNextStepDone, onDeleteAction: deleteAction, onEditAction: editAction, onLogAction: logAction, meId, onSendDm, onDeleteComment,
     onMessageSent: (channel, body) => setPendingNextStep({ kind: channel, body }),
     task, client, comment, setComment, onPatch, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, ccContacts, onUploadMessageImage,

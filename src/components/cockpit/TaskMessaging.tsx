@@ -224,11 +224,11 @@ function ActionBody({ text }: { text: string }) {
   );
 }
 
-export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onSetNextStepDone?: (id: string, done: boolean) => void; onDeleteAction?: (id: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel) => void } {
+export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onSetNextStepDone?: (id: string, done: boolean) => void; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel) => void } {
   const { task, client, comment, setComment, onPatch, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, ccContacts, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin,
-    onDeleteMessage, onEditMessage, hasMessaging, actions, onSetNextStepDone, onDeleteAction, onLogAction, meId, onSendDm, onDeleteComment, onMessageSent } = p;
+    onDeleteMessage, onEditMessage, hasMessaging, actions, onSetNextStepDone, onDeleteAction, onEditAction, onLogAction, meId, onSendDm, onDeleteComment, onMessageSent } = p;
 
   // C3: was a Set of independently-toggled channels (all four on by default),
   // which is how "the active tab reads Chat while the pane shows an email
@@ -243,6 +243,18 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   // log rather than in a parallel comment stream.
   const [replyingAction, setReplyingAction] = useState<string | null>(null);
   const [actionReply, setActionReply] = useState("");
+  // Which entry is open for editing, and the text being edited. A note is
+  // typed in a hurry and read for months, so fixing a typo should not mean
+  // deleting it and writing it again (Derek: "I want to be able to edit a
+  // note").
+  const [editingAction, setEditingAction] = useState<string | null>(null);
+  const [actionEdit, setActionEdit] = useState("");
+  const saveActionEdit = (id: string) => {
+    const text = actionEdit.trim();
+    if (text) onEditAction?.(id, text);
+    setEditingAction(null);
+    setActionEdit("");
+  };
   const [composingChannel, setComposingChannel] = useState<Channel | null>(null);
 
   // One shared composer-state bundle — reply and fresh-compose are kept
@@ -848,6 +860,12 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
               recorded that a teammate was messaged and lost which one, which
               is the only part of the entry anyone needs to act on. */}
           <span className="text-[13px] text-muted"> · {who}{toName ? ` → ${toName}` : ""} · {timeAgo(a.at)}</span>
+          {onEditAction && a.body && (
+            <button onClick={() => { setEditingAction(a.id); setActionEdit(a.body); }} title="Edit this entry"
+              className="ml-1.5 rounded p-0.5 align-middle text-muted opacity-0 transition hover:text-foreground group-hover:opacity-100">
+              <I.pencil className="h-3 w-3" />
+            </button>
+          )}
           {onDeleteAction && (
             <button onClick={() => onDeleteAction(a.id)} title="Delete this entry"
               className="ml-1.5 rounded p-0.5 align-middle text-muted opacity-0 transition hover:text-danger group-hover:opacity-100">
@@ -857,7 +875,20 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
           {/* Clamped with a Show more, because a logged meeting can be five
               lines of decisions and there is no reason for it to push every
               other entry off the screen. */}
-          {a.body && <ActionBody text={a.body} />}
+          {editingAction === a.id ? (
+            <div className="mt-1.5 flex items-end gap-2">
+              <textarea autoFocus value={actionEdit} rows={2}
+                onChange={(e) => setActionEdit(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") { setEditingAction(null); setActionEdit(""); return; }
+                  if (e.key !== "Enter" || e.shiftKey) return;
+                  e.preventDefault(); saveActionEdit(a.id);
+                }}
+                className="max-h-[200px] min-w-0 flex-1 resize-none overflow-y-auto rounded-lg border bg-surface px-2 py-1.5 text-[14px] leading-snug outline-none focus:border-accent" />
+              <button onClick={() => saveActionEdit(a.id)} disabled={!actionEdit.trim()}
+                className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[14px] font-medium text-white disabled:opacity-40">Save</button>
+            </div>
+          ) : a.body ? <ActionBody text={a.body} /> : null}
           {a.nextStep && (
             <div className="mt-2 flex flex-wrap items-center gap-2 rounded-r-lg border-l-[3px] bg-background px-2.5 py-1.5 text-[14px]">
               <span>↳ <b className="font-semibold">{a.nextStep}</b></span>

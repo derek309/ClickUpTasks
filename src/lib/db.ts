@@ -514,6 +514,11 @@ export const insertTaskAction = (a: TaskAction) => save(() => supabase.from("tas
 export const setNextStepDoneDb = (id: string, doneAt: string | null) =>
   save(() => supabase.from("task_actions").update({ next_step_done_at: doneAt }).eq("id", id));
 export const deleteTaskActionDb = (id: string) => save(() => supabase.from("task_actions").delete().eq("id", id));
+// Same RLS as delete: an admin or the author may rewrite the body. Typos in a
+// note used to mean deleting it and typing it again (Derek: "I want to be
+// able to edit a note").
+export const editTaskActionDb = (id: string, body: string) =>
+  save(() => supabase.from("task_actions").update({ body }).eq("id", id));
 // Loaded per task rather than all at once. Unlike tasks or clients this grows
 // without bound and only one task's worth is ever on screen, so pulling the
 // whole table into the client at boot would cost more every week.
