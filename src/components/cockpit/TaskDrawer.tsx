@@ -201,8 +201,19 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   clientLinks?: ClientLink[];
   taskLink?: () => string;
 }) {
-  const client = clientById(task.clientId)!;
-  const project = projectById(task.projectId)!;
+  // Never asserted. Delegation is exactly the case where these are missing:
+  // a delegatee can see a task through tasks.delegated_to while RLS still
+  // hides the client and the list it belongs to, so clientById returns null
+  // and `client.color` a line later threw, tearing down the whole app on
+  // open. It cost Michaella a working afternoon. A stand-in keeps the drawer
+  // readable and says plainly that the record is not shared with her.
+  const client = clientById(task.clientId) ?? {
+    id: task.clientId, name: "Not shared with you", color: "#94a3b8",
+    ghlLocationId: "", status: "active_client" as const, type: "client" as const, assignedTo: [],
+  };
+  const project = projectById(task.projectId) ?? {
+    id: task.projectId, clientId: task.clientId, name: "List", description: "",
+  };
   // The task's own client is appended when it isn't in `allClients` (an
   // archived or otherwise filtered-out one), so the field still shows where
   // the task actually lives instead of falling back to the placeholder.
