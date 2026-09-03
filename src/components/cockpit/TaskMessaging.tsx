@@ -581,8 +581,14 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
         </div>
       </div>
     );
+    // No scroll box on the email composer. An email is written top to bottom
+    // and read back the same way, and a nine point list of changes inside a
+    // 60vh window meant scrolling a box inside a scrolling drawer to check
+    // what you had written (Derek: "just have it keep growing naturally").
+    // It grows with the message now and the drawer scrolls, which is the
+    // thing that was always going to scroll anyway.
     if (channel === "email") return (
-      <div className="max-h-[60vh] shrink-0 overflow-y-auto rounded-xl border-t-2 p-3" style={{ borderTopColor: color, background: color + "0d" }}>
+      <div className="shrink-0 rounded-xl border-t-2 p-3" style={{ borderTopColor: color, background: color + "0d" }}>
         <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
           <span className="min-w-0 truncate text-[14px] text-muted">To: <span className="font-medium text-foreground">{messageDest?.email || "no email on file"}</span></span>
           <span className="flex shrink-0 items-center gap-2">
@@ -600,7 +606,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
         <input value={msgSubject} onChange={(e) => setMsgSubject(e.target.value)} placeholder="Subject"
           className="mb-2 w-full shrink-0 rounded-lg border bg-background px-3 py-2 text-[16px] font-medium outline-none placeholder:text-muted focus:border-accent" />
         {msgAttBar}
-        <div className="min-h-[160px] overflow-auto" onPaste={handleMsgPaste} onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitTaskMessage(); } }}>
+        <div className="min-h-[160px]" onPaste={handleMsgPaste} onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitTaskMessage(); } }}>
           <RichTextEditor key={`task-email-${emailFocusNonce}`} value={msgBody} onChange={setMsgBody} placeholder="Write an email… (⌘↵ to send)" autoFocus />
         </div>
         <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
