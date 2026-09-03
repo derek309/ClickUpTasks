@@ -649,11 +649,18 @@ export function ActionDock({
   // one item the keyboard cannot get to.
   const menuQl = menuQ.trim().toLowerCase();
   const matches = (label: string) => label.toLowerCase().includes(menuQl);
+  // Declared before shownGroups, which reads it. It used to sit below, and
+  // the only reason that ever worked is that the filter short-circuits: with
+  // any entry in the Get help group, askShown is never evaluated. A VA whose
+  // roster holds nobody else has no Delegate entry, so the group is empty,
+  // the filter falls through to askShown in its temporal dead zone, and
+  // "Cannot access 'askShown' before initialization" took the whole app down
+  // on every task. Michaella lost an afternoon to it.
+  const askShown = !menuQl || matches("ask ai");
   const shownGroups = menuGroups
     .map((g) => ({ ...g, kinds: g.kinds.filter((k) => !menuQl || matches(menuLabel(k)) || matches(TASK_ACTION_META[k].label)) }))
     // Get help still draws when the filter kills Delegate but not Ask AI.
     .filter((g) => g.kinds.length > 0 || (g.label === GET_HELP && askShown));
-  const askShown = !menuQl || matches("ask ai");
   // Flat, in draw order: what ↑/↓ walks and what Enter opens. Ask AI is drawn
   // first inside the Get help group, so it takes that group's place here
   // rather than trailing the whole menu.
