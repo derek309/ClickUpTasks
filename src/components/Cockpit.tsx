@@ -28,7 +28,7 @@ import {
   STATUS_ORDER, HIDDEN_STATUSES, pickableStatuses,
   applyWaitingStatusSync,
   mentionsUser,
-  viewerDueDate, isOnPlateOf, delegationTitle,
+  viewerDueDate, isOnPlateOf, delegationTitle, delegateeOf,
   isSnoozed,
   isCompletionEvent,
   CLIENT_STATUS_META,
@@ -3358,7 +3358,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!t) return;
     const s = t.subtasks.find((x) => x.id === subId);
     const nowDone = s ? !s.done : false;
-    update(taskId, { subtasks: t.subtasks.map((x) => (x.id === subId ? { ...x, done: !x.done } : x)) });
+    const subtasks = t.subtasks.map((x) => (x.id === subId ? { ...x, done: !x.done } : x));
+    const patch: Partial<Task> = { subtasks };
+    // A finished handoff has to leave the Delegated stage, or the task sits
+    // there for good claiming it is with someone who is done with it. Taking
+    // one back already did this; the happy path, where they simply finish, is
+    // the one that actually happens.
+    if (t.status === "delegated" && !delegateeOf({ assigneeId: t.assigneeId, subtasks })) patch.status = "in_progress";
+    update(taskId, patch);
     // Completing a delegated item pings the task owner so they know it's handled.
     // Bell only — a checked-off checklist row is progress on work the owner is
     // already watching, not something that needs to interrupt their inbox.
@@ -3378,7 +3385,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const isDelegation = !!s.assigneeId && s.assigneeId !== t.assigneeId;
     const who = isDelegation ? (userById(s.assigneeId!)?.name ?? "them") : "";
     const rest = t.subtasks.filter((x) => x.id !== subId);
-    const lastOne = isDelegation && !rest.some((x) => x.assigneeId && x.assigneeId !== t.assigneeId);
+    const lastOne = isDelegation && !delegateeOf({ assigneeId: t.assigneeId, subtasks: rest });
     setConfirmDialog({
       title: isDelegation ? `Take this back from ${who}?` : `Delete “${s.title || "this checklist item"}”?`,
       message: isDelegation
@@ -3433,7 +3440,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       priority: spec.priority, priorityAuto: false,
     };
     if (spec.followUpAt) patch.followUpAt = spec.followUpAt;
-    if (spec.size) patch.size = spec.size;
+    // Only when nobody has estimated it. A size the owner set by hand is
+    // theirs, and the same rule governs the dock's other actions.
+    if (spec.size && !t.size && !t.sizeHours) patch.size = spec.size;
     update(taskId, patch);
     if (spec.toId !== me.id) notify(spec.toId, `${me.name} delegated "${title}" to you on ${t.title}`, taskId);
   };
