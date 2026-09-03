@@ -30,7 +30,11 @@ const SEND_DOMAIN = "clickuplocal.com";
 // root, so treating it as untrusted is cheaper than reasoning about it.
 async function pathBelongsToClient(path: string, clientId: string): Promise<boolean> {
   if (!path || path.includes("..")) return false;
-  if (path.startsWith(`waiting/${clientId}/`) || path.startsWith(`extension/${clientId}/`)) return true;
+  // `messages/<clientId>/…` is what the task drawer's own composer uploads to.
+  // It used to upload to a bare `messages/…`, which failed the task lookup
+  // below and was silently skipped, so every email Derek sent with a pasted
+  // image went out without it.
+  if (path.startsWith(`waiting/${clientId}/`) || path.startsWith(`extension/${clientId}/`) || path.startsWith(`messages/${clientId}/`)) return true;
   // Main-app task attachments: `<taskId>/<file>`, so the owning task decides.
   const taskId = path.split("/")[0];
   if (!taskId || taskId === "waiting" || taskId === "extension") return false;
@@ -103,6 +107,10 @@ export async function POST(req: NextRequest) {
   // for the MIME parts. Cap the combined size — Gmail rejects > ~25MB raw, and
   // base64 inflates ~33%, so hold well under that.
   const attParts: { filename: string; mimeType: string; contentBase64: string }[] = [];
+  // Named, not swallowed. An attachment that cannot be proven to belong to
+  // this client is still skipped, but the caller is told which, because "it
+  // sent without my screenshot and said nothing" is the bug this had.
+  const skipped: string[] = [];
   let totalBytes = 0;
   for (const a of attachments ?? []) {
     if (!a?.path) continue;
@@ -114,7 +122,7 @@ export async function POST(req: NextRequest) {
     // by client, so a prefix check settles it) and the main app's
     // `<taskId>/<file>` (not client-namespaced — resolve the task and compare
     // its client_id). Anything else is skipped rather than sent.
-    if (!(await pathBelongsToClient(a.path, clientId))) continue;
+    if (!(await pathBelongsToClient(a.path, clientId))) { skipped.push(a.name || a.path); continue; }
     const { data: file, error } = await supabaseAdmin.storage.from(TASK_FILES_BUCKET).download(a.path);
     if (error || !file) continue;
     const buf = Buffer.from(await file.arrayBuffer());
@@ -134,7 +142,7 @@ export async function POST(req: NextRequest) {
       fromName,
       attachments: attParts.length ? attParts : undefined,
     });
-    return NextResponse.json({ ok: true, gmailMessageId: id, gmailThreadId: threadId, from: sender });
+    return NextResponse.json({ ok: true, gmailMessageId: id, gmailThreadId: threadId, from: sender, skippedAttachments: skipped.length ? skipped : undefined });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Gmail send failed." }, { status: 502 });
   }

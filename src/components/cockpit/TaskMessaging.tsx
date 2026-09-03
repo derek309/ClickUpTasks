@@ -562,13 +562,13 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   const channelComposer = (channel: "chat" | "sms" | "email", onCancel: () => void) => {
     const color = channelColor[channel];
     if (channel === "sms") return (
-      <div className="max-h-[50vh] shrink-0 overflow-y-auto rounded-xl border-t-2 p-3" style={{ borderTopColor: color, background: color + "0d" }}>
+      <div className="shrink-0 rounded-xl border-t-2 p-3" style={{ borderTopColor: color, background: color + "0d" }}>
         <div className="mb-2 shrink-0 text-[14px] text-muted">Texting: <span className="font-medium text-foreground">{messageDest?.phone || "no phone on file"}</span></div>
         {msgAttBar}
         <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)} onPaste={handleMsgPaste} autoFocus
           onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitTaskMessage(); } }}
           placeholder="Write a message… (⌘↵ to send, paste to attach an image)"
-          className="min-h-[100px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[16px] outline-none placeholder:text-muted focus:border-accent" />
+          className="min-h-[100px] w-full resize-none [field-sizing:content] rounded-xl border bg-background px-3 py-2 text-[16px] outline-none placeholder:text-muted focus:border-accent" />
         <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
           <span className="text-[14px] text-muted">{wordCount(msgBody)} word{wordCount(msgBody) === 1 ? "" : "s"} · {smsSegments(msgBody).count} segment{smsSegments(msgBody).count === 1 ? "" : "s"}{smsSegments(msgBody).count > 0 ? ` (${smsSegments(msgBody).encoding})` : ""}</span>
           <span className="flex items-center gap-1.5">
@@ -622,13 +622,13 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     );
     // chat
     return (
-      <div className="max-h-[50vh] shrink-0 overflow-y-auto rounded-xl border-t-2 p-3" style={{ borderTopColor: color, background: color + "0d" }}>
+      <div className="shrink-0 rounded-xl border-t-2 p-3" style={{ borderTopColor: color, background: color + "0d" }}>
         <div className="mb-2 shrink-0 text-[14px] text-muted">Client chat — shows up on {client.name}&apos;s waiting page, no email or text goes out.</div>
         {msgAttBar}
         <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)} onPaste={handleMsgPaste} autoFocus
           onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitTaskMessage(); } }}
           placeholder="Type a message… (⌘↵ to send, paste to attach an image)"
-          className="min-h-[100px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[16px] outline-none placeholder:text-muted focus:border-accent" />
+          className="min-h-[100px] w-full resize-none [field-sizing:content] rounded-xl border bg-background px-3 py-2 text-[16px] outline-none placeholder:text-muted focus:border-accent" />
         <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
           <span className="text-[14px] text-muted">{wordCount(msgBody)} word{wordCount(msgBody) === 1 ? "" : "s"}</span>
           <span className="flex items-center gap-1.5">
@@ -686,7 +686,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
           ))}
         </div>
       )}
-    <div className="max-h-[50vh] overflow-y-auto rounded-xl border-t-2 p-3" style={{ borderTopColor: channelColor.activity, background: "color-mix(in srgb, var(--accent) 5%, transparent)" }}>
+    <div className="rounded-xl border-t-2 p-3" style={{ borderTopColor: channelColor.activity, background: "color-mix(in srgb, var(--accent) 5%, transparent)" }}>
       <div className="mb-2 shrink-0 text-[14px] text-muted">Note — internal only, nobody outside the team sees this.</div>
       {(pendingCommentAtts.length > 0 || uploadingCommentAtt) && (
         <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
@@ -702,7 +702,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
           if (e.key === "Enter" && !e.shiftKey && mentionOpen) { e.preventDefault(); pickMention(mentionCands[0].name); }
         }}
         placeholder="Write a team message… (type @ to mention a teammate, ⌘↵ to send, paste to attach an image)"
-        className="min-h-[100px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[16px] outline-none placeholder:text-muted focus:border-accent" />
+        className="min-h-[100px] w-full resize-none [field-sizing:content] rounded-xl border bg-background px-3 py-2 text-[16px] outline-none placeholder:text-muted focus:border-accent" />
       <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
         <span className="text-[14px] text-muted">{wordCount(comment)} word{wordCount(comment) === 1 ? "" : "s"}</span>
         <span className="flex items-center gap-1.5">
