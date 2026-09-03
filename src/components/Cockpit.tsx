@@ -2402,7 +2402,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // actually looks at them, just with no special-cased entry point required
   // anymore.
   useEffect(() => {
-    if (activeClient.startsWith("cl_") && activeClient !== WORKSPACE_CLIENT_ID) {
+    // Admins only. Both of these heal data by WRITING — a Playbook project,
+    // up to fifty playbook tasks, and sales-stage completions — and a VA is
+    // allowed none of it, so for them this fired dozens of inserts that RLS
+    // refused on sight (403 "new row violates row-level security policy" on
+    // projects and tasks, in Michaella's console) every time they opened a
+    // client. Self-healing someone else's data is not a viewer's job.
+    if (canAdmin && activeClient.startsWith("cl_") && activeClient !== WORKSPACE_CLIENT_ID) {
       reconcilePlaybookTasks(activeClient);
       // cascadeSalesStageCompletion only fires forward, on an actual Stage
       // dropdown change — a client already sitting at Claimed (or further)
