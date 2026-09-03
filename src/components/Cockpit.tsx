@@ -1180,22 +1180,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [theme, setTheme] = useState<"light" | "dark" | "auto">("light");
   const [sidebarHidden, setSidebarHidden] = useState(false);
-  // The docked drawer starts at the sidebar's right edge, and the sidebar is
-  // now as wide as its own labels, so that edge has to be measured rather
-  // than assumed. Starts at the old fixed width so the first paint is not
-  // wrong, and only writes when the number actually moves.
-  const sidebarRef = useRef<HTMLElement | null>(null);
-  const [sidebarW, setSidebarW] = useState(256);
-  useEffect(() => {
-    const el = sidebarRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => {
-      const w = Math.round(el.getBoundingClientRect().width);
-      setSidebarW((prev) => (prev === w || w === 0 ? prev : w));
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
   useEffect(() => { try { setSidebarHidden(localStorage.getItem("cut_sidebarHidden") === "1"); } catch {} }, []);
   // Theme: light/dark/auto, persisted as cut_theme. Auto resolves off the
   // clock (dark 19:00–6:59) rather than prefers-color-scheme — there's no
@@ -4495,18 +4479,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // edge, or the window's left edge when the sidebar is collapsed. Set here
     // (rather than read inside the drawer) so the one place that owns the
     // sidebar's width owns this too.
-    <div className="flex h-screen w-full overflow-hidden text-[15px]" style={{ "--drawer-left": sidebarHidden ? "0px" : `${sidebarW}px` } as React.CSSProperties}>
+    <div className="flex h-screen w-full overflow-hidden text-[15px]" style={{ "--drawer-left": sidebarHidden ? "0px" : "16rem" } as React.CSSProperties}>
       {/* mobile backdrop */}
       {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={() => setSidebarOpen(false)} />}
 
       {/* ---------- Sidebar ---------- */}
-      {/* Sized to its own longest label rather than a flat 16rem, so a
-          workspace whose lists are called "CUL Tasks" gives that width back
-          to the tasks (Derek: "make this side bar always adjust to the
-          smallest possible to the titles, so save space"). Bounded at both
-          ends: narrow enough to be pointless below 11rem, and a client
-          called something enormous should not eat the window. */}
-      <aside ref={sidebarRef} className={`sidebar-dark fixed inset-y-0 left-0 z-40 flex w-max min-w-[11rem] max-w-[17rem] shrink-0 flex-col overflow-y-auto border-r bg-surface transition-transform ${sidebarHidden ? "md:hidden" : "md:static md:translate-x-0"} ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
+      {/* Back to a fixed width, and the drawer's left edge back to a
+          constant, after the content-sized version crashed the tab on
+          Windows. A w-max column that scrolls is a feedback loop wherever
+          scrollbars take layout width: the scrollbar appears, max-content
+          shrinks, the scrollbar goes, it grows, and the ResizeObserver
+          feeding the width into state re-rendered on every step until the
+          renderer died. macOS overlay scrollbars take no width, which is why
+          it only ever happened to Michaella. */}
+      <aside className={`sidebar-dark fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col overflow-y-auto border-r bg-surface transition-transform ${sidebarHidden ? "md:hidden" : "md:static md:translate-x-0"} ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
         {/* Account block, promoted from the sidebar footer to the top in place
             of the old app-branding header (Derek's call). */}
         {/* Account block. Three borderless icon buttons, not four bordered
