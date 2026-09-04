@@ -18,6 +18,12 @@ const MAX_TASKS = 40;
 export type ParsedTask = {
   title: string;
   description: string;
+  // The client's own words, carried through character for character. Kept
+  // apart from `description` so nothing downstream can tidy it up by
+  // accident: the model is told to copy into this field, never to write in
+  // it (Derek, 2026-09-04: "if a client gives us content that is very
+  // specific, we need to make sure we're not rewording those").
+  verbatim: string;
   assignee: string | null; // a roster member's exact name, "client", or null
   due: string | null;      // yyyy-mm-dd
   priority: "none" | "normal" | "urgent";
@@ -44,11 +50,16 @@ export async function POST(req: NextRequest) {
     "Rules:",
     "- One task per action. Do not merge two actions into one, and do not invent tasks that are not in the text.",
     "- Title: short and specific, starting with a verb, under 70 characters.",
-    "- Description: any supporting detail from the text that does not fit the title. Empty string if the title already says everything.",
-    "- Keep the author's own wording where you reasonably can. Fix spelling and grammar only.",
+    "- Description: any supporting detail from the text that does not fit the title, in your own words. Empty string if the title already says everything. Fix spelling and grammar here.",
     `- Today is ${today}. Resolve any date mentioned in the text to yyyy-mm-dd. Use null when no date is stated. Never invent a date.`,
     "- priority is \"urgent\" only if the text says so (urgent, ASAP, critical). Otherwise \"normal\".",
     "- Never use a hyphen, an em dash, an en dash, or any other dash punctuation in the title or description.",
+    "",
+    "Verbatim, the one rule you must not break:",
+    "- Some of the text is wording someone wants used EXACTLY: anything in quotation marks, anything set off as its own indented or bulleted block of copy, and anything the surrounding text calls out (\"use this exact wording\", \"do not change a word\", \"they sent this copy\").",
+    "- Copy that stretch into `verbatim` character for character. Do not rewrite it, shorten it, re-punctuate it, fix its spelling, or change its capitalisation. Do not put it in `description` as well.",
+    "- `verbatim` is an empty string when the text has no such wording. Never invent it, and never move ordinary narration into it.",
+    "- The dash rule above does NOT apply to `verbatim`. If their copy has a dash, it keeps the dash.",
     "",
     "Assigning:",
     "- The text may group items under a person's name. Assign each task to whoever is meant to do it.",
@@ -57,7 +68,7 @@ export async function POST(req: NextRequest) {
     "- Use null when you genuinely cannot tell who it belongs to. Do not guess.",
     "",
     "Return ONLY a JSON array, no prose and no markdown fence. Each element:",
-    '{"title": string, "description": string, "assignee": string|null, "due": string|null, "priority": "none"|"normal"|"urgent"}',
+    '{"title": string, "description": string, "verbatim": string, "assignee": string|null, "due": string|null, "priority": "none"|"normal"|"urgent"}',
     "",
     "The text:",
     text,
@@ -101,7 +112,11 @@ export async function POST(req: NextRequest) {
       const assignee = rawAssignee.toLowerCase() === "client" ? "client" : (rosterLower.get(rawAssignee.toLowerCase()) ?? null);
       const due = typeof o.due === "string" && /^\d{4}-\d{2}-\d{2}$/.test(o.due) ? o.due : null;
       const priority: ParsedTask["priority"] = o.priority === "urgent" ? "urgent" : o.priority === "none" ? "none" : "normal";
-      return { title, description: typeof o.description === "string" ? o.description.trim().slice(0, 4000) : "", assignee, due, priority };
+      // description is trimmed, verbatim deliberately is not beyond the length
+      // cap: leading indentation and trailing line breaks are part of copy
+      // someone asked to have reproduced exactly.
+      const verbatim = typeof o.verbatim === "string" ? o.verbatim.slice(0, 4000) : "";
+      return { title, description: typeof o.description === "string" ? o.description.trim().slice(0, 4000) : "", verbatim, assignee, due, priority };
     }).filter((t) => t.title.length > 0);
 
     if (tasks.length === 0) return NextResponse.json({ error: "Couldn't find any action items in that text." }, { status: 422 });

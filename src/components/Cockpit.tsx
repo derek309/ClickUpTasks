@@ -84,6 +84,9 @@ import {
   PERSONAL_CLIENT_ID,
   WORKSPACE_CLIENT_ID,
   PERSONAL_PROJECT_ID,
+  THIS_WEEK_END,
+  NEXT_WEEK_END,
+  THIS_MONTH_END,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
 import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, touchPlaybookProgress, fetchAppSetting, upsertAppSetting } from "@/lib/db";
@@ -96,7 +99,7 @@ import { PlanView } from "./cockpit/PlanView";
 
 
 import { I, Avatar, SideItem, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFromName, LIST_COLUMNS, SearchableSelect, type FilterState, type SortBy, type ViewPrefs, type Toast } from "./cockpit/ui";
-import { BulkAddModal, type ParsedRow } from "./cockpit/BulkAddModal";
+import { MindDumpModal, type ParsedRow } from "./cockpit/MindDumpModal";
 import { RemindClientModal } from "./cockpit/RemindClientModal";
 import { ConfirmModal, PromptModal, LinkFormModal, MergeTaskModal, MergeClientModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
 import { CommandK } from "./cockpit/CommandK";
@@ -117,6 +120,17 @@ import { sortTasks as sortTasksBy } from "@/lib/taskSort";
 import { URGENCY_TIER, tierForDate, urgencyDateOf, urgencyKeyFrom } from "@/lib/urgency";
 import { clientContactIds, findDuplicateTrackedClient as findDuplicateClient } from "@/lib/clientDedup";
 import { type NavState, buildSearch, parseSearch, NAV_KEY_VIEWS, LONG_TITLE_THRESHOLD, TEAM_CHAT_LINK } from "@/lib/navState";
+
+// A dumped task's description: what the AI summarised, then the client's own
+// wording underneath as a blockquote so it stays visibly theirs. The verbatim
+// half is escaped and line-broken but never reworded, which is the whole
+// point of carrying it in its own field (see api/ai/parse-tasks).
+function describeDumpRow(r: { description: string; verbatim: string }): string {
+  const parts: string[] = [];
+  if (r.description.trim()) parts.push(plainTextToHtml(r.description.trim()));
+  if (r.verbatim.trim()) parts.push(`<blockquote>${plainTextToHtml(r.verbatim)}</blockquote>`);
+  return parts.join("");
+}
 
 export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [clients, setClients] = useState<Client[]>([]);
@@ -807,7 +821,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       setRemindSending(false);
     }
   };
-  const [bulkAddOpen, setBulkAddOpen] = useState(false);
+  // The mind-dump composer. Null when closed; otherwise the group its plus
+  // was clicked on (null key = the toolbar button, which belongs to no group).
+  const [dumpGroup, setDumpGroup] = useState<{ key: string | null; personal: boolean } | null>(null);
   const [bulkAddBusy, setBulkAddBusy] = useState(false);
   const parseTaskList = async (text: string): Promise<ParsedRow[] | null> => {
     setBulkAddBusy(true);
@@ -819,7 +835,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) { pushToast(j.error || "Couldn't read that list."); return null; }
-      return (j.tasks as ParsedRow[]).map((t) => ({ ...t, keep: true }));
+      // followUpAt/size are the modal's to fill from its defaults — the AI is
+      // never asked to guess either one.
+      return (j.tasks as ParsedRow[]).map((t) => ({ ...t, followUpAt: null, size: null, keep: true }));
     } catch {
       pushToast("Couldn't read that list.");
       return null;
@@ -827,27 +845,82 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       setBulkAddBusy(false);
     }
   };
+  // Which date the plus you clicked implies. The bucket wins over the three
+  // day default, because opening the composer from "Tomorrow" and getting a
+  // task due next Tuesday reads as a bug (Derek, 2026-09-04). Buckets with no
+  // single honest date of their own (Overdue, Later, No date) fall back to
+  // the default, and so does every non-date grouping.
+  const dueForGroup = (groupKey: string | null): string | null => {
+    if (!groupKey || groupBy !== "due") return null;
+    if (groupKey === "today") return TODAY;
+    if (groupKey === "tomorrow") return addDaysIso(TODAY, 1);
+    if (groupKey === "week") return THIS_WEEK_END;
+    if (groupKey === "nextWeek") return NEXT_WEEK_END;
+    if (groupKey === "month") return THIS_MONTH_END;
+    return null;
+  };
+
   // One shared list resolution for the whole batch, so 12 tasks can't race
   // each other into creating 12 copies of a missing "Tasks" list.
-  const createTasksFromList = (rows: ParsedRow[]) => {
-    if (!rows.length || !activeClient.startsWith("cl_")) return;
+  //
+  // This is the single creation path for the composer, whichever plus opened
+  // it: the group it was opened on decides the list, and (under a status or
+  // priority grouping) the status or priority too, the same way the inline
+  // quick-add used to.
+  const createTasksFromDump = (rows: ParsedRow[], files: { file: File; row: number }[]) => {
+    if (!rows.length || !dumpGroup) return;
+    const { key: groupKey, personal } = dumpGroup;
+    const now = new Date().toISOString();
+
+    if (personal) {
+      const made: Task[] = rows.map((r) => ({
+        id: newId("t_"), projectId: PERSONAL_PROJECT_ID, clientId: PERSONAL_CLIENT_ID,
+        title: r.title.trim(), description: describeDumpRow(r),
+        status: groupKey && groupBy === "status" ? (groupKey as TaskStatus) : "todo",
+        priority: r.priority, assigneeId: me.id, contactId: null,
+        due: r.due, followUpAt: r.followUpAt, size: r.size,
+        recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: true,
+        subtasks: [], attachments: [], comments: [], createdAt: now, createdBy: me.id,
+      } as Task));
+      setTasks((ts) => [...ts, ...made]);
+      made.forEach((t) => { pinJustAdded(t.id); upsertTask(t, me.id); });
+      attachDumpFiles(made, files);
+      setDumpGroup(null);
+      pushToast(`Created ${made.length} task${made.length === 1 ? "" : "s"}`);
+      return;
+    }
+
+    if (!activeClient.startsWith("cl_")) return;
     let projectId: string;
+    // tasks.project_id is a foreign key, so a task inserted in the same tick
+    // as the project it belongs to can reach Postgres first and fail the
+    // constraint. When we create the list here, hold its write and chain the
+    // inserts behind it.
     let projectWrite: PromiseLike<unknown> | null = null;
-    if (activeProject) projectId = activeProject;
+    if (groupKey && groupBy === "project") projectId = groupKey;
+    else if (activeProject) projectId = activeProject;
     else {
       const existing = projects.find((pr) => pr.clientId === activeClient);
       if (existing) projectId = existing.id;
       else { const pr: Project = { id: newId("p_"), clientId: activeClient, name: "Tasks", description: "" }; setProjects((ps) => [...ps, pr]); projectWrite = upsertProject(pr); projectId = pr.id; }
     }
-    const now = new Date().toISOString();
     const made: Task[] = rows.map((r) => {
       const waiting = r.assignee === "client";
       const member = r.assignee && r.assignee !== "client" ? users.find((u) => u.name === r.assignee) : null;
       return {
-        id: newId("t_"), projectId, clientId: activeClient, title: r.title.trim(), description: r.description.trim() ? plainTextToHtml(r.description.trim()) : "",
-        status: waiting ? "todo" : "todo",
-        priority: r.priority, assigneeId: waiting ? null : (member?.id ?? null), waitingOnClient: waiting,
-        contactId: activeClient.slice(3), due: r.due, recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true,
+        id: newId("t_"), projectId, clientId: activeClient, title: r.title.trim(), description: describeDumpRow(r),
+        status: groupKey && groupBy === "status" ? (groupKey as TaskStatus) : "todo",
+        // isManuallyAssignable guards Conversation (auto-created-only, see
+        // data.ts): a dump into that group still lands as the row's own
+        // priority rather than manually assigning the reserved tier.
+        priority: groupKey && groupBy === "priority" && isManuallyAssignable(groupKey as Priority) ? (groupKey as Priority) : r.priority,
+        // Assignee defaults to whoever is dumping (Derek: "they're always
+        // going to be defaulted to the person who is creating them") — the AI
+        // only overrides it when the notes name someone else outright.
+        assigneeId: waiting ? null : (member?.id ?? me.id), waitingOnClient: waiting,
+        contactId: activeClient.slice(3),
+        due: r.due, followUpAt: r.followUpAt, size: r.size,
+        recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true,
         private: false, subtasks: [], attachments: [], comments: [], createdAt: now, createdBy: me.id,
       } as Task;
     });
@@ -856,12 +929,23 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // rolling it here.
     const synced = made.map((t) => ({ ...t, ...applyWaitingStatusSync({ status: t.status, waitingOnClient: t.waitingOnClient }, { waitingOnClient: t.waitingOnClient }) }));
     setTasks((ts) => [...ts, ...synced]);
-    const write = () => synced.forEach((t) => upsertTask(t, me.id));
+    // Pinned so a task created into a group the current sort or filter would
+    // hide does not vanish the moment it is made.
+    synced.forEach((t) => pinJustAdded(t.id));
+    const write = () => { synced.forEach((t) => upsertTask(t, me.id)); attachDumpFiles(synced, files); };
     if (projectWrite) projectWrite.then(write); else write();
-    setBulkAddOpen(false);
+    setDumpGroup(null);
     pushToast(`Created ${synced.length} task${synced.length === 1 ? "" : "s"}`);
-    synced.forEach((t) => { if (t.assigneeId && t.assigneeId !== me.id) notify(t.assigneeId, `${me.name} assigned you “${t.title}”`, t.id); });
+    synced.forEach((t) => { if (t.assigneeId && t.assigneeId !== me.id) notify(t.assigneeId, `${me.name} assigned you \u201C${t.title}\u201D`, t.id); });
   };
+
+  // A pasted file is uploaded after its task exists, because an attachment
+  // needs a row to hang on. The modal already decided which task each one
+  // belongs to.
+  const attachDumpFiles = (made: Task[], files: { file: File; row: number }[]) => {
+    files.forEach((f) => { const t = made[f.row]; if (t) void addFiles(t.id, [f.file]); });
+  };
+
   const regenerateAiSummary = async (clientId: string) => {
     setAiSummaryBusyId(clientId);
     try {
@@ -2613,48 +2697,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openTaskId, navTaskIds]);
 
-  const quickAdd = (groupKey: string, title: string, extras: { due: string | null; followUpAt: string | null; size: TaskSize | null }) => {
-    if (!title.trim() || !activeClient.startsWith("cl_")) return;
-    let projectId: string;
-    // tasks.project_id is a foreign key, so a task inserted in the same tick as
-    // the project it belongs to can reach Postgres first and fail the
-    // constraint ("Couldn't save"). When we create the list here, hold its
-    // write and chain the task's insert behind it. Null when the project
-    // already exists — nothing to wait for.
-    let projectWrite: PromiseLike<unknown> | null = null;
-    if (groupBy === "project") projectId = groupKey;
-    // Scoped to one project? Add straight into it — otherwise the task lands in
-    // some other project of this client and vanishes from the filtered view.
-    else if (activeProject) projectId = activeProject;
-    else {
-      const existing = projects.find((p) => p.clientId === activeClient);
-      if (existing) projectId = existing.id;
-      else { const p: Project = { id: newId("p_"), clientId: activeClient, name: "Tasks", description: "" }; setProjects((ps) => [...ps, p]); projectWrite = upsertProject(p); projectId = p.id; }
-    }
-    const t: Task = {
-      id: newId("t_"), projectId, clientId: activeClient, title: title.trim(), description: "",
-      status: groupBy === "status" ? (groupKey as TaskStatus) : "todo",
-      // isManuallyAssignable guards Conversation (auto-created-only, see
-      // data.ts) — a quick-add inside that group still lands as "normal"
-      // rather than manually assigning the reserved tier.
-      priority: groupBy === "priority" && isManuallyAssignable(groupKey as Priority) ? (groupKey as Priority) : "normal",
-      assigneeId: me.id,
-      contactId: activeClient.slice(3),
-      // Asked for in the composer now rather than inferred from the group,
-      // so a quick-added task arrives with the same three answers the full
-      // form insists on. The bucket still seeds the due date; it is just no
-      // longer the only thing that can set one.
-      due: extras.due, followUpAt: extras.followUpAt, size: extras.size,
-      recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
-      createdBy: me.id,
-    };
-    pinJustAdded(t.id);
-    setTasks((ts) => [...ts, t]);
-    if (projectWrite) projectWrite.then(() => upsertTask(t, me.id));
-    else upsertTask(t, me.id);
-    maybeCleanupTaskTitle(t.id, t.title, t.description);
-  };
-
   // Quick-add-task FAB: create a task for an explicitly-chosen client/list
   // (from the floating "+" modal). Mirrors quickAdd's Task shape and the
   // find-or-create-"Tasks"-list idiom; assignee = the creator.
@@ -2695,24 +2737,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       if (!isManuallyAssignable(groupKey as Priority)) { pushToast("Interaction is assigned automatically, not manually."); return; }
       patchTask(taskId, { priority: groupKey as Priority });
     }
-  };
-
-  const quickAddPersonal = (groupKey: string, title: string, extras: { due: string | null; followUpAt: string | null; size: TaskSize | null }) => {
-    if (!title.trim()) return;
-    const t: Task = {
-      id: newId("t_"), projectId: PERSONAL_PROJECT_ID, clientId: PERSONAL_CLIENT_ID, title: title.trim(), description: "",
-      status: groupBy === "status" ? (groupKey as TaskStatus) : "todo",
-      priority: "normal",
-      assigneeId: me.id, contactId: null,
-      // See quickAdd — the composer asks, so these arrive answered.
-      due: extras.due, followUpAt: extras.followUpAt, size: extras.size,
-      recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: true, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
-      createdBy: me.id,
-    };
-    pinJustAdded(t.id);
-    setTasks((ts) => [...ts, t]);
-    upsertTask(t, me.id);
-    maybeCleanupTaskTitle(t.id, t.title, t.description);
   };
 
   // --- mutations ------------------------------------------------------------
@@ -4398,7 +4422,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // as a component defined during render.
   const settingsClient = clientSettingsOpen && activeClient !== "all" ? clientById(activeClient) : null;
   const bulkAddControl = (
-    <button onClick={() => setBulkAddOpen(true)} title="Paste a list and let AI create the tasks"
+    <button onClick={() => setDumpGroup({ key: null, personal: false })} title="Dump your notes and let AI create the tasks"
       className="rounded-md border bg-background px-2 py-1.5 text-[13px] leading-none text-muted hover:text-foreground">
       <span aria-hidden>📋</span>
     </button>
@@ -4880,7 +4904,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             canAdmin={canAdmin} onAddProject={() => addProject(WORKSPACE_CLIENT_ID)} onRename={renameProject} onDelete={deleteProject}
             starredLists={starredLists} onToggleStarList={toggleStarList} />
         ) : personalView ? (
-          <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["followUp", "due"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onQuickAdd={quickAddPersonal} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={hideEmpty} colOrder={colOrder} onReorderCols={reorderCols} />
+          <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={["followUp", "due"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onAddInGroup={(k) => setDumpGroup({ key: k, personal: true })} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={hideEmpty} colOrder={colOrder} onReorderCols={reorderCols} />
         ) : myWork && dashboardView === "plan" ? (
           <PlanView days={planDays.days} unplanned={planDays.unplanned} budgetHours={workdayHours} onBudget={setWorkdayHours}
             clientById={clientById} projectById={projectById} onOpen={setOpenTaskId}
@@ -4998,7 +5022,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   </div>
                 )}
                 {activeFilterBar}
-                <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildPlaybookGroups(baseTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="" onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={false} colOrder={colOrder} onReorderCols={reorderCols} />
+                <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildPlaybookGroups(baseTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="" onAddInGroup={(k) => setDumpGroup({ key: k, personal: false })} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={false} colOrder={colOrder} onReorderCols={reorderCols} />
                 <div className="mt-3 rounded-xl border bg-surface p-4">
                   <div className="text-[13px] font-semibold uppercase tracking-wide text-muted">Always running for you</div>
                   <ul className="mt-2 list-disc space-y-1 pl-5 text-[14px] text-muted">
@@ -5021,7 +5045,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           ) : (
             <>
             {activeFilterBar}
-            <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onQuickAdd={quickAdd} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={hideEmpty} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
+            <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onAddInGroup={(k) => setDumpGroup({ key: k, personal: false })} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={hideEmpty} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
             </>
           )}
           </>
@@ -5078,14 +5102,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           onCancel={closeRemindClient}
         />
       )}
-      {bulkAddOpen && (
-        <BulkAddModal
-          clientName={clientById(activeClient)?.name ?? "this client"}
+      {dumpGroup && (
+        <MindDumpModal
+          // Keyed on the group so reopening on a different bar starts clean
+          // rather than inheriting the last one's text and dates.
+          key={`${dumpGroup.personal}:${dumpGroup.key ?? "-"}`}
+          clientName={dumpGroup.personal ? "you" : (clientById(activeClient)?.name ?? "this client")}
           listName={activeProject ? (projectById(activeProject)?.name ?? "Tasks") : "Tasks"}
+          destinationHint={dumpGroup.personal ? "Your own list" : undefined}
+          suggestedDue={dueForGroup(dumpGroup.key)}
           busy={bulkAddBusy}
           onParse={parseTaskList}
-          onCreate={createTasksFromList}
-          onCancel={() => setBulkAddOpen(false)}
+          onCreate={createTasksFromDump}
+          onCancel={() => setDumpGroup(null)}
         />
       )}
       {openTask && (

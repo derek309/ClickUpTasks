@@ -9,14 +9,14 @@ import {
   PRIORITY_META, manualPriorityOptions,
   STATUS_META, pickableStatuses, delegateeOf, delegatedDueFor, userById, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence,
   PLAYBOOK_STEP_BY_KEY,
-  addDaysIso, addBusinessDaysIso, SIZE_META, SIZE_ORDER,
-  type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus, type TaskSize,
+  addDaysIso,
+  type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus,
 } from "@/lib/data";
-import { I, Avatar, LabelChips, LIST_COLUMNS, DateChip } from "./ui";
+import { I, Avatar, LabelChips, LIST_COLUMNS } from "./ui";
 
 // --- grouped list view (ClickUp-style: group, quick-add, expandable subtasks) --
 
-export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onQuickAdd, onToggleSub, onAddSub, onDeleteSub, hideEmpty, lensId, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId }: {
+export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onAddInGroup, onToggleSub, onAddSub, onDeleteSub, hideEmpty, lensId, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId }: {
   groups: { key: string; label: string; color: string; tasks: Task[] }[];
   // The signed-in user — the row's assignee avatar only renders when the
   // task is assigned to someone else; seeing your own face on every one of
@@ -30,7 +30,13 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
   groupKind?: string;
   /** Start Next week / This month / Later / No date closed. All Tasks only. */
   collapseFarBuckets?: boolean;
-  onOpen: (id: string) => void; onOpenClient?: (clientId: string) => void; onPatch: (taskId: string, patch: Partial<Task>) => void; canQuickAdd: boolean; quickAddHint: string; onQuickAdd: (groupKey: string, title: string, extras: { due: string | null; followUpAt: string | null; size: TaskSize | null }) => void;
+  onOpen: (id: string) => void; onOpenClient?: (clientId: string) => void; onPatch: (taskId: string, patch: Partial<Task>) => void; canQuickAdd: boolean; quickAddHint: string;
+  // The plus on each coloured group bar. It hands back the group you clicked
+  // and nothing else — the composer that opens is the caller's (Derek,
+  // 2026-09-04: "over on the far right side of that bar, there's a plus
+  // sign"). The permanent "Add task…" row this replaced repeated under every
+  // bucket and pushed the real tasks down.
+  onAddInGroup: (groupKey: string) => void;
   onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void; onDeleteSub: (taskId: string, subId: string) => void; hideEmpty?: boolean; 
   // When set, task rows can be dragged onto a group header to move them into
   // that group (e.g. drag a row onto "Urgent" to reprioritize it) — only
@@ -191,34 +197,32 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
           {visibleGroups.map((g) => (
             <tbody key={g.key} className="block border-b-8 border-background sm:table-row-group">
               <tr className="block sm:table-row"><td colSpan={colCount} className="block p-0 sm:table-cell">
-              <button onClick={() => toggleG(g.key)}
+              {/* A div, not a button: the plus lives inside this bar and a
+                  button inside a button is invalid. Collapse and add are
+                  each their own control. */}
+              <div
                 onDragOver={(e) => { if (onDropInGroup) { e.preventDefault(); setDragOverKey(g.key); } }}
                 onDragLeave={() => setDragOverKey((k) => (k === g.key ? null : k))}
                 onDrop={(e) => { if (!onDropInGroup) return; e.preventDefault(); if (dragTaskId) onDropInGroup(dragTaskId, g.key); setDragTaskId(null); setDragOverKey(null); }}
                 className={`flex w-full items-center gap-2 border-y px-4 py-2 text-left transition ${dragOverKey === g.key ? "ring-2 ring-inset ring-accent" : ""}`} style={{ background: g.color + "22", borderColor: g.color + "40" }}>
-                <I.chevron className={`text-muted transition ${collapsedG.has(g.key) ? "rotate-180" : "-rotate-90"}`} />
-                <span className="h-2.5 w-2.5 rounded-full" style={{ background: g.color }} />
-                <span className="text-[15px] font-bold">{g.label}</span>
-                <span className="rounded-[5px] px-1.5 text-[13px] font-semibold normal-case tracking-normal text-white" style={{ background: g.color }}>{g.tasks.length}</span>
-              </button>
+                <button onClick={() => toggleG(g.key)} aria-expanded={!collapsedG.has(g.key)}
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                  <I.chevron className={`text-muted transition ${collapsedG.has(g.key) ? "rotate-180" : "-rotate-90"}`} />
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: g.color }} />
+                  <span className="truncate text-[15px] font-bold">{g.label}</span>
+                  <span className="shrink-0 rounded-[5px] px-1.5 text-[13px] font-semibold normal-case tracking-normal text-white" style={{ background: g.color }}>{g.tasks.length}</span>
+                </button>
+                {canQuickAdd && (
+                  <button onClick={() => onAddInGroup(g.key)} title={`Add a task to ${g.label}`}
+                    className="flex shrink-0 items-center gap-1.5 rounded-lg border bg-surface py-1 pl-2 pr-2.5 text-[14px] font-semibold text-accent shadow-sm transition hover:bg-accent hover:text-white">
+                    <I.plus />
+                    <span className="hidden sm:inline">Add task</span>
+                  </button>
+                )}
+              </div>
               </td></tr>
               {!collapsedG.has(g.key) && (
                 <>
-                  {/* Quick-add sits at the TOP of the group, not the bottom
-                      (Derek: "move the add task to the top of the list") — on
-                      a long group the bottom row was off screen, so adding a
-                      task meant scrolling past everything first. border-b
-                      rather than border-t since it now divides downward. */}
-                  {canQuickAdd && (
-                    <tr className="block sm:table-row"><td colSpan={colCount} className="block border-b p-0 sm:table-cell">
-                      <InlineTaskComposer
-                        // A due bucket already says when the task is due, so
-                        // adding into "Today" starts on today rather than
-                        // making you say it twice.
-                        suggestedDue={groupKind === "due" && (g.key === "today" || g.key === "tomorrow") ? (g.key === "today" ? TODAY : addDaysIso(TODAY, 1)) : null}
-                        onAdd={(title, extras) => onQuickAdd(g.key, title, extras)} />
-                    </td></tr>
-                  )}
                   {g.tasks.map((t) => (
                     <TaskRow key={t.id} task={t} colCount={colCount} cols={cols} showClient={showClient} showCrumb={showCrumb} onOpenClient={onOpenClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} lensId={lensId} delegatedTo={delegateeOf(t)}
                       selected={!!selectedIds?.has(t.id)} onToggleSelect={onToggleSelect ? (e) => handleSelectClick(t.id, e) : undefined}
@@ -238,94 +242,6 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
         {visibleGroups.length === 0 && <div className="px-4 py-10 text-center text-[13px] text-muted">No tasks yet.</div>}
       </div>
       {!canQuickAdd && quickAddHint && <div className="mt-3 text-center text-[13px] text-muted">{quickAddHint}</div>}
-    </div>
-  );
-}
-
-// Adding a task from the list asks the same questions the full form does.
-//
-// It used to take a title and create on Enter, which meant the one path
-// people actually use produced tasks with no due date, no follow-up and no
-// size — exactly what the create form was just made to refuse. Two answers to
-// "what does it take to make a task" is one too many.
-//
-// It still starts as one line. Typing opens the rest rather than creating
-// something half made, everything is chips so the whole thing is a few
-// clicks, and it never leaves the list.
-function InlineTaskComposer({ suggestedDue, onAdd }: {
-  suggestedDue: string | null;
-  onAdd: (title: string, extras: { due: string | null; followUpAt: string | null; size: TaskSize | null }) => void;
-}) {
-  const [title, setTitle] = useState("");
-  const [due, setDue] = useState<string | null>(suggestedDue);
-  const [followUpAt, setFollowUpAt] = useState<string | null>(null);
-  const [size, setSize] = useState<TaskSize | null>(null);
-
-  const missing = [!due && "a due date", !followUpAt && "a follow-up date", !size && "how long it takes"].filter(Boolean) as string[];
-  const ready = !!title.trim() && missing.length === 0;
-  const reset = () => { setTitle(""); setDue(suggestedDue); setFollowUpAt(null); setSize(null); };
-  const submit = () => { if (!ready) return; onAdd(title.trim(), { due, followUpAt, size }); reset(); };
-
-  const dayChips = (value: string | null, set: (d: string | null) => void) => (
-    <>
-      {[["Today", TODAY], ["Tomorrow", addDaysIso(TODAY, 1)], ["In 3 days", addBusinessDaysIso(TODAY, 3)]].map(([label, date]) => (
-        <button key={label} onClick={() => set(value === date ? null : date)} title={formatDue(date)}
-          className={`rounded-md border px-2 py-0.5 text-[13px] ${value === date ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{label}</button>
-      ))}
-      <DateChip value={value} onChange={set}
-        label={value && ![TODAY, addDaysIso(TODAY, 1), addBusinessDaysIso(TODAY, 3)].includes(value) ? formatDue(value) : "Pick"}
-        className={`rounded-md border px-2 py-0.5 text-[13px] ${value && ![TODAY, addDaysIso(TODAY, 1), addBusinessDaysIso(TODAY, 3)].includes(value) ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`} />
-    </>
-  );
-
-  const label = (t: string) => <span className="w-[62px] shrink-0 text-[11px] font-semibold uppercase tracking-wide text-muted">{t}</span>;
-
-  return (
-    <div className={title.trim() ? "border-b bg-background/40 px-4 py-2.5" : "px-4 py-1.5"}>
-      <div className="flex items-start gap-2">
-        <I.plus className="mt-1 shrink-0 text-muted" />
-        {/* A textarea, not an input: pasting a whole paragraph into a
-            single-line field scrolled the start of it off to the left, so you
-            could not see what you were writing (Derek). It grows with the
-            text via field-sizing and stops at about five lines, after which
-            it scrolls. Enter still submits — newlines are not the point of
-            wrapping here — and shift+Enter is left alone for the day someone
-            wants one. */}
-        <textarea value={title} onChange={(e) => setTitle(e.target.value)} rows={1}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") { reset(); return; }
-            // Enter adds once the answers are in, so the keyboard path stays
-            // as fast as it was. Before that it does nothing rather than
-            // creating something the list cannot plan.
-            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
-          }}
-          placeholder="Add task…" className="max-h-[7.5rem] flex-1 resize-none overflow-y-auto bg-transparent py-1 text-[15px] leading-snug outline-none [field-sizing:content] placeholder:text-muted" />
-      </div>
-      {!!title.trim() && (
-        <div className="mt-2 space-y-1.5">
-          <div className="flex flex-wrap items-center gap-1.5">{label("Due")}{dayChips(due, setDue)}</div>
-          <div className="flex flex-wrap items-center gap-1.5">{label("Follow up")}{dayChips(followUpAt, setFollowUpAt)}</div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {label("Takes")}
-            {SIZE_ORDER.map((sz) => (
-              <button key={sz} onClick={() => setSize(size === sz ? null : sz)} title={`${SIZE_META[sz].label} · ${SIZE_META[sz].hint}`}
-                className={`rounded-md border px-2 py-0.5 text-[13px] ${size === sz ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{SIZE_META[sz].label}</button>
-            ))}
-          </div>
-          <div className="flex flex-wrap items-center gap-3 pt-1">
-            <button onClick={submit} disabled={!ready}
-              className="rounded-md bg-accent px-3 py-1 text-[14px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">Add task</button>
-            <button onClick={reset} className="text-[13px] text-muted underline underline-offset-[3px] hover:text-foreground">Cancel</button>
-            {/* Named, not just greyed out. A disabled button with no reason is
-                a dead end you have to hunt for. */}
-            {missing.length > 0 && (
-              <span className="text-[13px] text-muted">
-                Still needs {missing.length > 1 ? `${missing.slice(0, -1).join(", ")} and ${missing[missing.length - 1]}` : missing[0]}.
-              </span>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
