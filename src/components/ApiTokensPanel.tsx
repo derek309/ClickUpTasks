@@ -28,6 +28,10 @@ export default function ApiTokensPanel() {
   const [copied, setCopied] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
   const [revoking, setRevoking] = useState<string | null>(null);
+  const [rotating, setRotating] = useState<string | null>(null);
+  // Names the reveal panel, which now serves both a fresh token and a rotated
+  // one. Without it a rotate said "created" at you.
+  const [revealedFor, setRevealedFor] = useState<{ name: string; rotated: boolean } | null>(null);
 
   async function load() {
     try {
@@ -56,6 +60,7 @@ export default function ApiTokensPanel() {
       const j = await res.json();
       if (!res.ok) throw new Error(j.error ?? "Failed to create token");
       setRevealedToken(j.token);
+      setRevealedFor({ name: j.name, rotated: false });
       setNewName("");
       load();
     } catch (e) {
@@ -63,6 +68,35 @@ export default function ApiTokensPanel() {
     } finally {
       setCreating(false);
     }
+  }
+
+  // Same secret-shaped warning as a revoke, because that is what it is: the
+  // old value stops working the instant this returns, so anything still
+  // holding it (the extension on another machine, a script) breaks until it
+  // is given the new one.
+  function rotate(t: TokenRow) {
+    setConfirmDialog({
+      title: `Rotate "${t.name}"?`,
+      message: "You'll get a new token to copy. The old one stops working immediately, so anything still using it needs the new value pasted in.",
+      confirmLabel: "Rotate",
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        setRotating(t.id);
+        setError(null);
+        try {
+          const res = await authedFetch("/api/tokens", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: t.id }) });
+          const j = await res.json();
+          if (!res.ok) throw new Error(j.error ?? "Rotate failed");
+          setRevealedToken(j.token);
+          setRevealedFor({ name: j.name, rotated: true });
+          load();
+        } catch (e) {
+          setError(e instanceof Error ? e.message : "Rotate failed");
+        } finally {
+          setRotating(null);
+        }
+      },
+    });
   }
 
   function revoke(t: TokenRow) {
@@ -90,13 +124,22 @@ export default function ApiTokensPanel() {
     <>
         {revealedToken ? (
           <div className="px-5 py-4">
-            <p className="mb-2 text-[15px] font-medium text-amber-700">Copy this now — you won&apos;t be able to see it again.</p>
+            <p className="text-[15px] font-medium text-amber-700">
+              Copy this now — you won&apos;t be able to see it again.
+            </p>
+            {/* Named, because after a rotate there are several tokens in the
+                list and "copy this" alone does not say which one you are
+                holding. */}
+            <p className="mb-2 mt-0.5 text-[13px] text-muted">
+              {revealedFor ? `${revealedFor.rotated ? "New token for" : "New token"} “${revealedFor.name}”. ` : ""}
+              Lost it later? Rotate this token for a fresh one.
+            </p>
             <div className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-2">
               <code className="min-w-0 flex-1 break-all text-[13px]">{revealedToken}</code>
               <button onClick={() => { navigator.clipboard.writeText(revealedToken).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }); }}
                 className="shrink-0 rounded-md border bg-surface px-2 py-1 text-[13px] font-medium hover:bg-background">{copied ? "Copied" : "Copy"}</button>
             </div>
-            <button onClick={() => setRevealedToken(null)} className="mt-3 rounded-md bg-accent px-3 py-1.5 text-[15px] font-medium text-white">Done</button>
+            <button onClick={() => { setRevealedToken(null); setRevealedFor(null); }} className="mt-3 rounded-md bg-accent px-3 py-1.5 text-[15px] font-medium text-white">Done</button>
           </div>
         ) : (
           <form onSubmit={createToken} className="flex items-center gap-2 border-b bg-background/40 px-5 py-3">
@@ -115,7 +158,11 @@ export default function ApiTokensPanel() {
                 <div className="truncate text-[15px] font-medium">{t.name}</div>
                 <div className="truncate text-[13px] text-muted">Created {new Date(t.created_at).toLocaleDateString()}{t.last_used_at ? ` · last used ${new Date(t.last_used_at).toLocaleDateString()}` : " · never used"}</div>
               </div>
-              <button onClick={() => revoke(t)} disabled={revoking === t.id} title="Revoke" className="rounded-md border px-2 py-1 text-[13px] text-muted hover:border-red-300 hover:text-red-500 disabled:opacity-40">✕</button>
+              <button onClick={() => rotate(t)} disabled={rotating === t.id || revoking === t.id}
+                title="Replace this token's value with a new one" className="shrink-0 rounded-md border bg-surface px-2 py-1 text-[13px] font-medium hover:bg-background disabled:opacity-40">
+                {rotating === t.id ? "Rotating…" : "Rotate"}
+              </button>
+              <button onClick={() => revoke(t)} disabled={revoking === t.id || rotating === t.id} title="Revoke" className="shrink-0 rounded-md border px-2 py-1 text-[13px] text-muted hover:border-red-300 hover:text-red-500 disabled:opacity-40">✕</button>
             </div>
           ))}
           {!loading && !error && tokens.length === 0 && <div className="py-8 text-center text-[13px] text-muted">No tokens yet.</div>}
