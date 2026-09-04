@@ -43,11 +43,12 @@ export type ParsedRow = {
 };
 
 // A dump with no date in it still has to land somewhere real. Three business
-// days out to do it, a nudge tomorrow to make sure it started (Derek: "if we
-// don't do it, then it automatically schedules it for 3 days ahead and
-// follows up tomorrow").
+// days out to do it, and the follow-up is TODAY: whatever you just dumped is
+// what you are thinking about right now, so it belongs in today's list rather
+// than waiting a day to resurface (Derek, 2026-09-04: "default do in 3 days
+// and follow up today").
 export const DEFAULT_DUE = () => addBusinessDaysIso(TODAY, 3);
-export const DEFAULT_FOLLOW_UP = () => addDaysIso(TODAY, 1);
+export const DEFAULT_FOLLOW_UP = () => TODAY;
 
 type PastedFile = { file: File; url: string; row: number };
 
@@ -150,11 +151,15 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/40" onClick={onCancel} />
-      {/* Near full screen, capped so it does not stretch to nonsense on a
-          wide monitor. A dump box you have to scroll to see the bottom of is
-          the thing this replaces. */}
-      <div className="fixed inset-x-3 inset-y-3 z-50 mx-auto flex max-w-[1180px] flex-col rounded-2xl border bg-surface shadow-xl sm:inset-x-8 sm:inset-y-6">
-        <div className="flex items-start justify-between gap-3 border-b px-6 py-4">
+      {/* Sized to what is in it, capped at the window. Five lines when it
+          opens, growing as you type until it has used the screen, and only
+          then scrolling (Derek: "make the box grow to use the full window
+          space and only scroll after it's hit the max"). Height is never
+          forced: no flex-1 anywhere on this column, because a basis-0 child
+          contributes nothing to an auto height and the panel would snap back
+          to full screen. */}
+      <div className="fixed inset-x-3 top-1/2 z-50 mx-auto flex max-h-[calc(100vh-1.5rem)] max-w-[1180px] -translate-y-1/2 flex-col rounded-2xl border bg-surface shadow-xl sm:inset-x-8 sm:max-h-[calc(100vh-3rem)]">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b px-6 py-4">
           <div className="min-w-0">
             <h2 className="text-[19px] font-semibold">{rows === null ? "What needs doing?" : `${rows.length} task${rows.length === 1 ? "" : "s"} found`}</h2>
             <p className="mt-0.5 truncate text-[14px] text-muted">
@@ -168,14 +173,21 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
 
         {rows === null ? (
           <>
-            <div className="flex min-h-0 flex-1 flex-col px-6 py-4">
+            <div className="flex min-h-0 flex-col px-6 py-4">
+              {/* field-sizing:content makes the box track what is typed.
+                  `rows` does NOT survive as a minimum next to it (Chrome
+                  sizes to the placeholder instead, which measured 3 lines),
+                  so the five line floor is an explicit min-height: 5 lines at
+                  16px/1.625 plus the padding. Above that it grows, and the
+                  panel's max-h is what eventually stops it and hands the
+                  overflow to this element's own scrollbar. */}
               <textarea ref={dumpRef} value={text} onChange={(e) => setText(e.target.value)} onPaste={onPaste}
-                onDragOver={(e) => e.preventDefault()} onDrop={onDrop} autoFocus
-                placeholder={"Type or paste anything. One thing or twenty.\n\nEvery separate action becomes its own task, so a whole set of meeting notes can go in at once.\n\nPaste an image or drop a file in and it rides along. Anything in quotes is treated as wording that must not be changed."}
-                className="min-h-0 w-full flex-1 resize-none rounded-xl border bg-background px-4 py-3 text-[16px] leading-relaxed outline-none placeholder:text-muted focus:border-accent" />
+                onDragOver={(e) => e.preventDefault()} onDrop={onDrop} autoFocus rows={5}
+                placeholder={"Type or paste anything. One thing or twenty, and every separate action becomes its own task.\n\nPaste an image or drop a file in and it rides along. Anything in quotes is kept word for word."}
+                className="min-h-[9.75rem] w-full resize-none overflow-y-auto rounded-xl border bg-background px-4 py-3 text-[16px] leading-relaxed outline-none [field-sizing:content] placeholder:text-muted focus:border-accent" />
 
               {files.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-2">
+                <div className="mt-3 flex shrink-0 flex-wrap gap-2">
                   {files.map((f, i) => (
                     <span key={i} className="flex items-center gap-2 rounded-lg border bg-background px-2.5 py-1.5 text-[14px]">
                       {f.file.type.startsWith("image/")
@@ -189,7 +201,7 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
                 </div>
               )}
 
-              <div className="mt-4 space-y-2 rounded-xl border bg-background/50 px-4 py-3">
+              <div className="mt-4 shrink-0 space-y-2 rounded-xl border bg-background/50 px-4 py-3">
                 <div className="flex flex-wrap items-center gap-2">{fieldLabel("Due")}{dayChips(due, setDue)}</div>
                 <div className="flex flex-wrap items-center gap-2">{fieldLabel("Follow up")}{dayChips(followUpAt, setFollowUpAt)}</div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -204,7 +216,7 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
                 </div>
               </div>
             </div>
-            <div className="flex items-center justify-between gap-3 border-t px-6 py-3.5">
+            <div className="flex shrink-0 items-center justify-between gap-3 border-t px-6 py-3.5">
               <span className="text-[14px] text-muted">Nothing is created until you have seen the list.</span>
               <span className="flex items-center gap-2">
                 <button onClick={onCancel} className="rounded-lg border px-3.5 py-2 text-[15px] font-medium hover:bg-background">Cancel</button>
@@ -217,7 +229,7 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
           </>
         ) : (
           <>
-            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+            <div className="min-h-0 overflow-y-auto px-6 py-4">
               <div className="space-y-2.5">
                 {rows.map((r, i) => (
                   <div key={i} className={`rounded-xl border p-3.5 transition ${r.keep ? "" : "opacity-45"}`}>
@@ -306,7 +318,7 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
                 </div>
               )}
             </div>
-            <div className="flex items-center justify-between gap-3 border-t px-6 py-3.5">
+            <div className="flex shrink-0 items-center justify-between gap-3 border-t px-6 py-3.5">
               <button onClick={() => setRows(null)} className="rounded-lg px-3 py-2 text-[15px] font-medium text-muted hover:bg-background hover:text-foreground">Back to the text</button>
               <span className="flex items-center gap-2">
                 <button onClick={onCancel} className="rounded-lg border px-3.5 py-2 text-[15px] font-medium hover:bg-background">Cancel</button>
