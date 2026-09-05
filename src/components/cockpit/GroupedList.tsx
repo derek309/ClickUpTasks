@@ -9,7 +9,7 @@ import {
   PRIORITY_META, manualPriorityOptions,
   STATUS_META, pickableStatuses, delegateeOf, delegatedDueFor, userById, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence,
   PLAYBOOK_STEP_BY_KEY,
-  addDaysIso,
+  addDaysIso, dateQuickPicks,
   type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, LabelChips, LIST_COLUMNS } from "./ui";
@@ -696,14 +696,10 @@ export function InlineDue({ value, overdue, followUpAt = null, recurrence = "non
 
 function DatePopover({ pos, value, recurrence, onSelect, onRecurrenceChange, onClose }: { pos: { top: number; left: number; width: number }; value: string | null; recurrence: Recurrence; onSelect: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; onClose: () => void }) {
   const [ym, setYm] = useState(() => { const [y, m] = (value ?? TODAY).split("-").map(Number); return { y, m: m - 1 }; });
-  const dow = dowIso(TODAY);
-  const quicks: [string, string][] = [
-    ["Today", TODAY],
-    ["Tomorrow", addDaysIso(TODAY, 1)],
-    ["This weekend", addDaysIso(TODAY, (6 - dow + 7) % 7 || 6)],
-    ["Next week", addDaysIso(TODAY, (1 - dow + 7) % 7 || 7)],
-    ["In 2 weeks", addDaysIso(TODAY, 14)],
-  ];
+  // Shared with the mind dump and the action dock — see DATE_QUICK_PICKS in
+  // lib/data. This list used to count calendar days and offer "This weekend",
+  // which is not a day anyone works.
+  const quicks = dateQuickPicks();
   const firstDow = new Date(Date.UTC(ym.y, ym.m, 1)).getUTCDay();
   const daysIn = new Date(Date.UTC(ym.y, ym.m + 1, 0)).getUTCDate();
   const cells: (number | null)[] = [...Array(firstDow).fill(null), ...Array.from({ length: daysIn }, (_, i) => i + 1)];
@@ -713,10 +709,9 @@ function DatePopover({ pos, value, recurrence, onSelect, onRecurrenceChange, onC
       <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); onClose(); }} />
       <div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }} className="z-50 flex flex-col rounded-xl border bg-surface shadow-xl sm:flex-row">
         <div className="w-full shrink-0 border-b p-1.5 sm:w-52 sm:border-b-0 sm:border-r">
-          {quicks.map(([label, iso]) => (
-            <button key={label} onClick={() => onSelect(iso)} className="flex w-full items-center justify-between gap-3 whitespace-nowrap rounded px-2 py-1.5 text-left text-[15px] hover:bg-background"><span>{label}</span><span className="text-[13px] text-muted">{formatDue(iso)}</span></button>
+          {quicks.map(({ label, date }) => (
+            <button key={label} onClick={() => onSelect(date)} className="flex w-full items-center justify-between gap-3 whitespace-nowrap rounded px-2 py-1.5 text-left text-[15px] hover:bg-background"><span>{label}</span><span className="text-[13px] text-muted">{formatDue(date)}</span></button>
           ))}
-          <button onClick={() => onSelect(null)} className="mt-0.5 w-full rounded px-2 py-1.5 text-left text-[15px] text-danger hover:bg-background">No date</button>
           {onRecurrenceChange && (
             <div className="mt-1 border-t pt-1.5">
               <div className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Repeat</div>

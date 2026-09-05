@@ -36,6 +36,32 @@ export function addBusinessDaysIso(iso: string, days: number): string {
   return out;
 }
 
+// The named dates every quick-pick offers, in one place, because there were
+// three copies of this list and they had drifted: the list view offered "This
+// weekend" and counted in calendar days, the action dock counted in business
+// days and started at Tomorrow, and the mind dump offered three options.
+// Derek, 2026-09-04: "today, tomorrow, in 3 days, next week, in 2 weeks, in a
+// month. we don't need this weekend and then no date and it always picks
+// business days as standard".
+//
+// Business days throughout. "In 3 days" from a Thursday landing on a Sunday
+// means two extra days of silence and a task that reads as overdue by Monday
+// morning. Today is today even when today is a Saturday: naming a day and
+// then moving it is worse than the weekend.
+export const DATE_QUICK_PICKS: { label: string; businessDays: number }[] = [
+  { label: "Today", businessDays: 0 },
+  { label: "Tomorrow", businessDays: 1 },
+  { label: "In 3 days", businessDays: 3 },
+  { label: "Next week", businessDays: 5 },
+  { label: "In 2 weeks", businessDays: 10 },
+  { label: "In a month", businessDays: 20 },
+];
+
+/** The quick picks resolved against a date, newest callers pass TODAY. */
+export function dateQuickPicks(from: string = TODAY): { label: string; date: string }[] {
+  return DATE_QUICK_PICKS.map((q) => ({ label: q.label, date: addBusinessDaysIso(from, q.businessDays) }));
+}
+
 /** yyyy-mm-dd of the Monday on or before `iso` (weeks start Monday) — the
  * anchor for the weekly Review reset: a client reviewed on/after this Monday
  * counts as "reviewed this week" and drops out of the Review tier until next

@@ -22,7 +22,7 @@
 //     api/ai/parse-tasks.
 import { useEffect, useRef, useState } from "react";
 import {
-  users, PRIORITY_META, manualPriorityOptions, formatDue, TODAY, addDaysIso, addBusinessDaysIso,
+  users, PRIORITY_META, manualPriorityOptions, formatDue, TODAY, addBusinessDaysIso, dateQuickPicks,
   SIZE_META, SIZE_ORDER, type Priority, type TaskSize,
 } from "@/lib/data";
 import { I, DateChip } from "./ui";
@@ -131,17 +131,20 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
     onCreate(kept, mapped);
   };
 
+  // One shared list of named dates (see DATE_QUICK_PICKS in lib/data) so the
+  // dump, the list view and the action dock all offer the same days.
   const dayChips = (value: string | null, set: (d: string | null) => void) => {
-    const known = [TODAY, addDaysIso(TODAY, 1), addBusinessDaysIso(TODAY, 3)];
+    const picks = dateQuickPicks();
+    const named = picks.some((p) => p.date === value);
     return (
       <>
-        {[["Today", known[0]], ["Tomorrow", known[1]], ["In 3 days", known[2]]].map(([label, date]) => (
+        {picks.map(({ label, date }) => (
           <button key={label} onClick={() => set(value === date ? null : date)} title={formatDue(date)}
             className={`rounded-md border px-2.5 py-1 text-[14px] ${value === date ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{label}</button>
         ))}
         <DateChip value={value} onChange={set}
-          label={value && !known.includes(value) ? formatDue(value) : "Pick a date"}
-          className={`rounded-md border px-2.5 py-1 text-[14px] ${value && !known.includes(value) ? "border-accent bg-accent text-white" : "bg-surface text-muted hover:bg-background"}`} />
+          label={value && !named ? formatDue(value) : "Pick a date"}
+          className={`rounded-md border px-2.5 py-1 text-[14px] ${value && !named ? "border-accent bg-accent text-white" : "bg-surface text-muted hover:bg-background"}`} />
       </>
     );
   };
