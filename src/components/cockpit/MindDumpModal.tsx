@@ -75,6 +75,7 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
   const [due, setDue] = useState<string | null>(suggestedDue ?? DEFAULT_DUE());
   const [followUpAt, setFollowUpAt] = useState<string | null>(DEFAULT_FOLLOW_UP());
   const [owner, setOwner] = useState<string | null>(null); // null = whoever is creating
+  const [priority, setPriority] = useState<Priority>("normal");
   const dumpRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
@@ -114,6 +115,11 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
       followUpAt: followUpAt,
       size: null,
       assignee: r.assignee ?? owner,
+      // The chosen default is what every task starts on. The AI only moves it
+      // when the text actually said so (its prompt reserves "urgent" for
+      // wording like urgent or ASAP), so a whole dump does not come back
+      // flagged just because the model felt strongly about it.
+      priority: r.priority === "urgent" ? "urgent" : priority,
     })));
   };
 
@@ -207,6 +213,14 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
               <div className="mt-4 shrink-0 space-y-2 rounded-xl border bg-background/50 px-4 py-3">
                 <div className="flex flex-wrap items-center gap-2">{fieldLabel("Due")}{dayChips(due, setDue)}</div>
                 <div className="flex flex-wrap items-center gap-2">{fieldLabel("Follow up")}{dayChips(followUpAt, setFollowUpAt)}</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {fieldLabel("Priority")}
+                  <select value={priority} onChange={(e) => setPriority(e.target.value as Priority)}
+                    className="rounded-md border bg-surface px-2.5 py-1 text-[14px] outline-none">
+                    {manualPriorityOptions(priority).map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}
+                  </select>
+                  <span className="text-[14px] text-muted">Anything the notes call urgent still comes back urgent.</span>
+                </div>
                 <div className="flex flex-wrap items-center gap-2">
                   {fieldLabel("Owner")}
                   <select value={owner ?? ""} onChange={(e) => setOwner(e.target.value || null)}
