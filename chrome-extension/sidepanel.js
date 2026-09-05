@@ -1,4 +1,6 @@
 
+import { todayIso, DEFAULT_DUE, DEFAULT_FOLLOW_UP } from "./lib/dates.js";
+
 const API_BASE = "https://clickuptasks.vercel.app";
 // Matches the /api/extension/upload route's own limit.
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
@@ -22,6 +24,7 @@ const taskResultsEl = document.getElementById("taskResults");
 const projectSel = document.getElementById("project");
 const existingProjectSel = document.getElementById("existingProject");
 const dueInput = document.getElementById("due");
+const followUpInput = document.getElementById("followUp");
 const prioritySel = document.getElementById("priority");
 const assigneeSel = document.getElementById("assignee");
 const titleLabelEl = document.getElementById("titleLabel");
@@ -44,6 +47,14 @@ let senderEmail = null;
 let mailIds = { gmailMessageId: null, rfc822MessageId: null };
 let allClients = []; // [{id, name, company, contactName}]
 let selectedClientId = "";
+// The picker ROW that was chosen, which is not always the client: a workspace
+// project is its own row (p_...) filed under the workspace client. Keeping
+// both is what lets a remembered project actually re-select. See the comment
+// on rememberClientForSender.
+let selectedEntryId = "";
+// "user" once a person picked the client themselves, "server" when it was
+// auto-matched. Only a "user" pick is ever taught to the memory.
+let clientSource = null;
 let capturedScreenshots = []; // data URLs, in the order added
 let mode = "new"; // "new" | "existing"
 let allTasks = []; // [{id, title, status}] for the current client
@@ -324,8 +335,8 @@ function renderClientResults(query) {
       row.addEventListener("mousedown", (e) => {
         e.preventDefault();
         selectClient(c.id);
-        rememberClientForSender(senderEmail, c.id);
-        maybeAutoEnrich();
+        clientSource = "user";
+        void rememberClientForSender(senderEmail, c);
       });
       clientResultsEl.appendChild(row);
     }
@@ -399,49 +410,44 @@ addContactBtn.addEventListener("click", async () => {
 // can it start to remember the client and auto select it?"). The server-side
 // match-client lookup only knows contacts and company domains; this records
 // what you actually picked, so a correction sticks for that sender next time.
-// Kept in chrome.storage.local, never synced: it's a convenience cache keyed
-// to email addresses, not something worth putting on Google's servers.
-const SENDER_MEMORY_KEY = "senderClientMap";
-const SENDER_MEMORY_MAX = 200;
-
-async function rememberClientForSender(email, clientEntryId) {
-  if (!email || !clientEntryId) return;
+//
+// This used to live in chrome.storage.local. It now lives on the server
+// (supabase/sender-client-memory.sql), so it survives a reinstall, reaches
+// every machine you sign in from, and a mapping a teammate taught can help
+// you. The old local map is deliberately NOT migrated: about half of it holds
+// malformed values from the bug described below, and there is no way to tell
+// those from the good ones.
+//
+// Two bugs are fixed in the move:
+//  1. It stored the picker ROW's id from one code path and the resolved
+//     CLIENT's id from another. Recall looks rows up by row id, so anything
+//     the Create path wrote for a workspace project could never be recalled.
+//     Hence selectedEntryId below, tracked separately from selectedClientId.
+//  2. It saved the server's own automatic guesses, so one wrong domain match
+//     became permanent. Hence clientSource: only an explicit pick is taught.
+async function rememberClientForSender(email, entry) {
+  if (!email || !entry) return;
+  const token = await getToken();
+  if (!token) return;
   try {
-    const store = await chrome.storage.local.get(SENDER_MEMORY_KEY);
-    const map = store[SENDER_MEMORY_KEY] || {};
-    map[email.toLowerCase()] = { id: clientEntryId, at: Date.now() };
-    // Prune oldest first so a long-lived install can't grow without bound.
-    const keys = Object.keys(map);
-    if (keys.length > SENDER_MEMORY_MAX) {
-      keys.sort((a, b) => (map[a].at || 0) - (map[b].at || 0))
-          .slice(0, keys.length - SENDER_MEMORY_MAX)
-          .forEach((k) => delete map[k]);
-    }
-    await chrome.storage.local.set({ [SENDER_MEMORY_KEY]: map });
-  } catch { /* storage unavailable — the picker still works by hand */ }
-}
-
-async function recalledClientForSender(email) {
-  if (!email) return null;
-  try {
-    const store = await chrome.storage.local.get(SENDER_MEMORY_KEY);
-    const hit = (store[SENDER_MEMORY_KEY] || {})[email.toLowerCase()];
-    // Only honour it if that client is still on the roster — one may have been
-    // renamed, merged, or removed since we wrote it down.
-    return hit && allClients.some((c) => c.id === hit.id) ? hit.id : null;
-  } catch { return null; }
-}
-
-function tomorrowIso() {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    await apiFetch("/api/extension/match-client", token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email,
+        // A workspace project files under the workspace pseudo-client, and the
+        // project itself is the row to re-select next time.
+        client_id: entry.kind === "project" ? entry.clientId : entry.id,
+        entry_id: entry.kind === "project" ? entry.id : null,
+      }),
+    });
+  } catch { /* the clip matters, the memory does not — never block on this */ }
 }
 
 function selectClient(id) {
   const c = allClients.find((x) => x.id === id);
   if (!c) return;
+  selectedEntryId = c.id;
   clientSearchInput.value = clientLabel(c);
   clientResultsEl.classList.remove("open");
   addContactEl.style.display = "none";
@@ -522,6 +528,9 @@ existingProjectSel.addEventListener("change", () => {
   // Changing the list invalidates a task chosen from a different one.
   selectedTaskId = "";
   taskSearchInput.value = "";
+  // renderTaskResults already opens the list, which is the point: picking a
+  // list should SHOW you its tasks, not wait for you to click into a search
+  // box and discover they were there all along (Derek, 2026-09-04).
   renderTaskResults("");
 });
 taskSearchInput.addEventListener("focus", () => renderTaskResults(taskSearchInput.value));
@@ -536,6 +545,11 @@ function setMode(next) {
   titleLabelEl.style.display = mode === "new" ? "" : "none";
   titleInput.style.display = mode === "new" ? "" : "none";
   createBtn.textContent = mode === "new" ? "Create Task" : "Add to Task";
+  // Switching to "Add to existing task" shows the client's open tasks straight
+  // away. Everything below already worked; it was simply never on screen until
+  // the search box had focus.
+  if (mode === "existing") renderTaskResults("");
+  else taskResultsEl.classList.remove("open");
 }
 modeNewBtn.addEventListener("click", () => setMode("new"));
 modeExistingBtn.addEventListener("click", () => setMode("existing"));
@@ -554,7 +568,11 @@ async function init(forceClientRefresh = false) {
     return;
   }
   formEl.style.display = "";
-  autoEnrichDone = false;
+  // enrichedKey is deliberately NOT reset here: init() re-runs on Refresh and
+  // on every new screenshot, and clearing it would re-run the AI on an email
+  // it has already read.
+  selectedEntryId = "";
+  clientSource = null;
   needsTokenEl.style.display = "none";
   statusEl.textContent = "";
   statusEl.className = "";
@@ -566,7 +584,8 @@ async function init(forceClientRefresh = false) {
   renderEmailAttachments();
   clippedListEl.innerHTML = "";
   clippedEl.style.display = "none";
-  dueInput.value = tomorrowIso();
+  dueInput.value = DEFAULT_DUE();
+  followUpInput.value = DEFAULT_FOLLOW_UP();
   prioritySel.value = "normal";
   assigneeSel.value = "";
   clearScreenshots();
@@ -613,20 +632,23 @@ async function init(forceClientRefresh = false) {
     void showAlreadyClipped(permalink);
   }
 
+  // The remembered tier is the server's now, and it is checked first there —
+  // what you picked yourself for this exact sender outranks a contact or a
+  // domain guess. See /api/extension/match-client.
+  const MATCH_HINT = {
+    remembered: "Auto-selected — remembered for this sender",
+    exact: "Auto-selected — matched sender's email",
+    domain: "Auto-selected via company domain — please verify",
+  };
   if (senderEmail) {
-    const recalled = await recalledClientForSender(senderEmail);
-    if (recalled) {
-      // Beats the server lookup on purpose — you picked this yourself last
-      // time for this exact sender, which outranks a contact or domain guess.
-      selectClient(recalled);
-      matchHintEl.textContent = "Auto-selected — remembered from last time";
-      return;
-    }
     try {
       const { match } = await apiFetch(`/api/extension/match-client?email=${encodeURIComponent(senderEmail)}`, token);
       if (match) {
-        selectClient(match.clientId);
-        matchHintEl.textContent = match.matchType === "domain" ? `Auto-selected via company domain — please verify` : `Auto-selected — matched sender's email`;
+        // entryId first: a remembered workspace project IS its own picker row,
+        // and the client it files under is never in the list to select.
+        selectClient(match.entryId || match.clientId);
+        clientSource = "server";
+        matchHintEl.textContent = MATCH_HINT[match.matchType] || MATCH_HINT.exact;
       } else {
         showAddContact();
       }
@@ -639,7 +661,8 @@ async function init(forceClientRefresh = false) {
       const domain = new URL(permalink).hostname;
       const { match } = await apiFetch(`/api/extension/match-client?domain=${encodeURIComponent(domain)}`, token);
       if (match) {
-        selectClient(match.clientId);
+        selectClient(match.entryId || match.clientId);
+        clientSource = "server";
         matchHintEl.textContent = `Auto-selected — matched this page's domain`;
       }
     } catch { /* not a valid URL, or no match — leave the picker empty */ }
@@ -651,27 +674,40 @@ async function init(forceClientRefresh = false) {
     statusEl.textContent = "Couldn't read this page — fill in the form manually below.";
     statusEl.className = "";
   }
+
+  // Last thing init() does: the title, the notes and the message ids are all
+  // populated by now, which is everything the AI call and its once-per-email
+  // key need.
+  maybeAutoEnrich();
 }
 
 refreshBtn.addEventListener("click", () => init(true));
 
-// Set once a capture has been enriched, so picking a different client
-// afterwards doesn't fire the AI again and overwrite what's on screen.
-// Cleared whenever the form is reset or repopulated.
-let autoEnrichDone = false;
+// Which capture has already been enriched, so the AI runs once per email
+// rather than once per render. A boolean was not enough: init() re-runs on
+// load, on Refresh, and whenever a new screenshot lands in storage, so a flag
+// reset at the top of init() re-fires the AI on the SAME email every time.
+// Keyed on the Gmail message id, which is stable across all three.
+let enrichedKey = null;
 
-// Fires when a client is picked from the dropdown (Derek: "make it so enrich
-// with AI auto runs when we select a contact from the dropdown"). Deliberately
-// NOT wired to the auto-match on panel open: that would spend an AI call every
-// time the panel is opened, including the times you open it and close it
-// again. Skipped when there's nothing to work with, and skipped once it has
-// already run for this capture, since it overwrites Title and Notes and would
-// otherwise wipe edits made after the first run. The button re-runs it by hand
-// any time.
+function captureKey() {
+  return mailIds.gmailMessageId || mailIds.rfc822MessageId || permalink || null;
+}
+
+// Runs on its own when the panel opens on an email (Derek, 2026-09-04). This
+// deliberately reverses the old rule of "never automatically, so opening the
+// panel never spends money": the panel is now expected to be filled in by the
+// time you look at it. The cost shape is one call per email opened, which the
+// key above holds to once per email no matter how often init() re-runs. The
+// button below still forces a re-run, and runEnrich never overwrites a field
+// you have typed in.
 function maybeAutoEnrich() {
-  if (autoEnrichDone || enrichBtn.disabled) return;
+  const key = captureKey();
+  if (!key || key === enrichedKey || enrichBtn.disabled) return;
+  // Nothing scraped yet — let Refresh try again rather than burning a call on
+  // an empty body.
   if (!titleInput.value.trim() && !notesInput.value.trim()) return;
-  autoEnrichDone = true;
+  enrichedKey = key;
   runEnrich();
 }
 
@@ -680,14 +716,28 @@ async function runEnrich() {
   if (!token) return;
   enrichBtn.disabled = true;
   enrichBtn.textContent = "Enriching…";
+  // Snapshot first. This call can take seconds and now starts without being
+  // asked, so anything you type while it is in flight has to survive it.
+  const before = {
+    title: titleInput.value, notes: notesInput.value,
+    due: dueInput.value, followUp: followUpInput.value, priority: prioritySel.value,
+  };
   try {
-    const { title, description } = await apiFetch("/api/extension/enrich", token, {
+    const r = await apiFetch("/api/extension/enrich", token, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subject: titleInput.value, senderName, senderEmail, body: notesInput.value }),
+      // today is the panel's LOCAL date: the server clamps against it, and its
+      // own UTC fallback is a day ahead for a whole evening in Pacific time.
+      body: JSON.stringify({ subject: titleInput.value, senderName, senderEmail, body: notesInput.value, today: todayIso() }),
     });
-    titleInput.value = title;
-    notesInput.value = description;
+    // Only fields you have not touched since the call went out. The `&& value`
+    // guards also mean an older server that still returns just a title and a
+    // description leaves the three new fields on their defaults.
+    if (titleInput.value === before.title && r.title) titleInput.value = r.title;
+    if (notesInput.value === before.notes && r.description) notesInput.value = r.description;
+    if (dueInput.value === before.due && r.due) dueInput.value = r.due;
+    if (followUpInput.value === before.followUp && r.followUpAt) followUpInput.value = r.followUpAt;
+    if (prioritySel.value === before.priority && r.priority) prioritySel.value = r.priority;
   } catch (e) {
     statusEl.textContent = e instanceof Error ? e.message : "AI enrichment failed.";
     statusEl.className = "err";
@@ -697,10 +747,15 @@ async function runEnrich() {
   }
 }
 
-enrichBtn.addEventListener("click", () => { autoEnrichDone = true; runEnrich(); });
+// The button forces a re-run, including on an email already enriched.
+enrichBtn.addEventListener("click", () => { enrichedKey = captureKey(); runEnrich(); });
 
 function resetFormAfterSubmit() {
-  autoEnrichDone = false;
+  // Cleared here, unlike in init(): the task was created and whatever gets
+  // clipped next is a different capture.
+  enrichedKey = null;
+  selectedEntryId = "";
+  clientSource = null;
   titleInput.value = "";
   notesInput.value = "";
   selectedClientId = "";
@@ -710,7 +765,8 @@ function resetFormAfterSubmit() {
   clippedListEl.innerHTML = "";
   clippedEl.style.display = "none";
   projectSel.value = "";
-  dueInput.value = tomorrowIso();
+  dueInput.value = DEFAULT_DUE();
+  followUpInput.value = DEFAULT_FOLLOW_UP();
   prioritySel.value = "normal";
   assigneeSel.value = "";
   matchHintEl.textContent = "";
@@ -753,7 +809,9 @@ createBtn.addEventListener("click", async () => {
   //
   // Before the request rather than after: the point is the association, and
   // it should survive a task that fails to save for some unrelated reason.
-  void rememberClientForSender(senderEmail, clientId);
+  // Only when YOU picked it. Writing back an auto-match here is how one wrong
+  // domain guess used to become permanent.
+  if (clientSource === "user") void rememberClientForSender(senderEmail, allClients.find((c) => c.id === selectedEntryId));
   try {
     const screenshotPaths = [];
     for (const dataUrl of capturedScreenshots) screenshotPaths.push(await uploadScreenshot(token, dataUrl, clientId));
@@ -767,7 +825,7 @@ createBtn.addEventListener("click", async () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           client_id: clientId, project_id: projectSel.value || undefined, title: titleInput.value.trim(), description: notesInput.value.trim(), link: permalink,
-          due: dueInput.value || undefined, priority: prioritySel.value, assignee_id: assigneeSel.value || undefined, screenshot_paths: screenshotPaths, files,
+          due: dueInput.value || undefined, follow_up_at: followUpInput.value || undefined, priority: prioritySel.value, assignee_id: assigneeSel.value || undefined, screenshot_paths: screenshotPaths, files,
         }),
       });
       // Link straight to what was just made (Derek: "make a link to it so I

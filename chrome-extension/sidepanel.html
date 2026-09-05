@@ -111,6 +111,12 @@
           <input id="due" type="date" />
         </div>
         <div>
+          <label for="followUp">Follow up</label>
+          <input id="followUp" type="date" />
+        </div>
+      </div>
+      <div class="row2">
+        <div>
           <label for="priority">Priority</label>
           <select id="priority">
             <option value="none">No priority</option>
@@ -118,9 +124,11 @@
             <option value="urgent">Urgent</option>
           </select>
         </div>
+        <div>
+          <label for="assignee">Assign to</label>
+          <select id="assignee"><option value="">Me</option></select>
+        </div>
       </div>
-      <label for="assignee">Assign to</label>
-      <select id="assignee"><option value="">Me</option></select>
     </div>
 
     <div id="existingTaskFields" style="display:none">
@@ -128,7 +136,7 @@
       <select id="existingProject"><option value="">All lists</option></select>
       <label for="taskSearch">Task</label>
       <div class="combo">
-        <input id="taskSearch" type="text" placeholder="Search this client's open tasks…" autocomplete="off" />
+        <input id="taskSearch" type="text" placeholder="Search, or pick from the list below…" autocomplete="off" />
         <div id="taskResults"></div>
       </div>
     </div>
