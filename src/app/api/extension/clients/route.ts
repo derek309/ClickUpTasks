@@ -2,14 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { requireApiToken } from "@/lib/serverAuth";
 import { visibleClientIds, isClientVisible } from "@/lib/extensionApi";
-import { WORKSPACE_CLIENT_ID } from "@/lib/data";
+import { WORKSPACE_CLIENT_ID, PERSONAL_CLIENT_ID } from "@/lib/data";
 
 export async function GET(req: NextRequest) {
   if (!adminConfigured) return NextResponse.json({ error: "Service role key not configured." }, { status: 501 });
   const caller = await requireApiToken(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { data: clients, error } = await supabaseAdmin.from("clients").select("id, name, ghl_location_id, linked_contact_id").eq("type", "client").like("id", "cl_%").neq("id", WORKSPACE_CLIENT_ID).order("name");
+  // type is the test, not the id prefix. The old `like "cl_%"` filter was
+  // standing in for "a real client", but it actually meant "created from a GHL
+  // contact" — so Agency (c_agency) and Directory (c_directory), both real
+  // clients carrying real tasks, were invisible to the Clipper and to the
+  // feedback plugin (Derek, 2026-09-06: "a lot of clients and projects are
+  // missing"). Personal and the workspace are named exclusions instead: one
+  // holds private tasks, the other is a pseudo-client whose lists are appended
+  // separately below.
+  const { data: clients, error } = await supabaseAdmin.from("clients").select("id, name, ghl_location_id, linked_contact_id").eq("type", "client").not("id", "in", `(${WORKSPACE_CLIENT_ID},${PERSONAL_CLIENT_ID})`).order("name");
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
   const visible = await visibleClientIds(caller);
