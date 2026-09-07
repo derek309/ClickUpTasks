@@ -6,7 +6,7 @@
   "requires": "6.0",
   "tested": "6.8",
   "requires_php": "7.4",
-  "last_updated": "2026-09-07 16:35:31",
+  "last_updated": "2026-09-07 18:01:16",
   "download_url": "https://clickuptasks.vercel.app/plugins/cul-review-0.9.1.zip",
   "homepage": "https://clickuptasks.vercel.app",
   "description": "Upload images, videos, and HTML for client review with pin-style comments and approvals.",

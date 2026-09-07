@@ -6,7 +6,7 @@
   "requires": "6.0",
   "tested": "6.8",
   "requires_php": "7.4",
-  "last_updated": "2026-09-07 17:36:22",
+  "last_updated": "2026-09-07 18:01:48",
   "download_url": "https://clickuptasks.vercel.app/plugins/cul-feedback-0.1.5.zip",
   "homepage": "https://clickuptasks.vercel.app",
   "description": "A question mark bubble on the client's own site. They click what is wrong, say what is wrong, and it lands as a task in ClickUpTasks with the page and the exact element attached.",
