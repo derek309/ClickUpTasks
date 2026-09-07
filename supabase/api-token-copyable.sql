@@ -1,0 +1,26 @@
+-- ClickUpTasks — let an existing API token be copied again, not only rotated.
+-- Run after api-tokens.sql.
+--
+-- api_tokens stored a sha256 hash and nothing else, which is the right shape
+-- for a credential and is exactly why "copy it again" was impossible: the raw
+-- value genuinely was not there. Derek asked for it anyway (2026-09-06: "make
+-- it so we can copy the already generated code"), so this adds a second,
+-- reversible copy beside the hash.
+--
+-- token_hash is untouched and is still the ONLY column authentication reads,
+-- so nothing about how a token is verified changes here.
+--
+-- token_enc holds AES-256-GCM ciphertext. The key lives in the TOKEN_ENC_KEY
+-- environment variable and is deliberately NOT in this database: a dump of
+-- this table, a leaked backup, or read access through the service-role key
+-- gets ciphertext and stops there. That separation is the whole security
+-- argument, so never put the key in Postgres and never log it.
+--
+-- Null for every token that already existed. Only a hash was ever kept for
+-- those, so they cannot be recovered; the UI says "rotate to make it
+-- copyable" rather than offering a button that would fail.
+--
+-- Nullable on purpose beyond that too. With no key configured the app stores
+-- nothing here and simply offers no Copy, which is the same behaviour it had
+-- before this feature rather than an error.
+alter table api_tokens add column if not exists token_enc text;
