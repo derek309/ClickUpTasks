@@ -75,6 +75,29 @@ describe("without a key configured", () => {
     expect(tokenCryptoReady()).toBe(false);
     expect(encryptToken(TOKEN)).toBeNull();
   });
+  it("treats a blank key as no key at all", () => {
+    withKey("   \n ");
+    expect(tokenCryptoReady()).toBe(false);
+  });
+});
+
+// The failure that actually happened: a key that is correct apart from the
+// whitespace around it used to report as no key at all, which is
+// indistinguishable from never having set the variable.
+describe("a key with whitespace around it", () => {
+  it("still works, however it was pasted", () => {
+    for (const wrapped of [`${KEY_A}\n`, ` ${KEY_A}`, `${KEY_A} `, `\n${KEY_A}\n`, `\t${KEY_A}\r\n`]) {
+      withKey(wrapped);
+      expect(tokenCryptoReady()).toBe(true);
+      expect(decryptToken(encryptToken(TOKEN))).toBe(TOKEN);
+    }
+  });
+  it("decrypts what a clean key encrypted", () => {
+    withKey(KEY_A);
+    const enc = encryptToken(TOKEN)!;
+    withKey(`  ${KEY_A}\n`);
+    expect(decryptToken(enc)).toBe(TOKEN);
+  });
 });
 
 describe("hashToken", () => {

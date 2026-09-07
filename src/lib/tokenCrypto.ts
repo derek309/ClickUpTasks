@@ -29,7 +29,12 @@ const ALGO = "aes-256-gcm";
  *  exactly as it did before this feature: tokens are hashed, Rotate works,
  *  and only the ability to copy an existing one is absent. */
 function key(): Buffer | null {
-  const raw = process.env.TOKEN_ENC_KEY;
+  // Trimmed before anything looks at it. A trailing newline is the normal
+  // result of piping a generated key into a form or a CLI, and without this
+  // the value fails every check below and the app reports itself as having no
+  // key at all — which looks exactly like the variable never being set, and
+  // cost an afternoon of hunting the wrong thing.
+  const raw = process.env.TOKEN_ENC_KEY?.trim();
   if (!raw) return null;
   // Either 64 hex characters or a base64 32 byte value, since which one you
   // have depends on how the key was generated.
