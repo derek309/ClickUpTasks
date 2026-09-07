@@ -8,7 +8,7 @@ import { authedFetch } from "@/lib/supabase";
 import { ConfirmModal, type ConfirmSpec } from "./cockpit/modals";
 import { I } from "./cockpit/ui";
 
-type TokenRow = { id: string; name: string; created_at: string; last_used_at: string | null };
+type TokenRow = { id: string; name: string; created_at: string; last_used_at: string | null; copyable?: boolean };
 
 // Shown on the download link so a stale copy is visible rather than silent.
 // The zip served here sat at 1.4.0 for six weeks while the source reached
@@ -29,6 +29,8 @@ export default function ApiTokensPanel() {
   const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
   const [revoking, setRevoking] = useState<string | null>(null);
   const [rotating, setRotating] = useState<string | null>(null);
+  const [copyingId, setCopyingId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   // Names the reveal panel, which now serves both a fresh token and a rotated
   // one. Without it a rotate said "created" at you.
   const [revealedFor, setRevealedFor] = useState<{ name: string; rotated: boolean } | null>(null);
@@ -67,6 +69,26 @@ export default function ApiTokensPanel() {
       setError(e instanceof Error ? e.message : "Failed to create token");
     } finally {
       setCreating(false);
+    }
+  }
+
+  // Straight to the clipboard, never onto the screen. A token sitting visible
+  // in a panel is one screenshot away from being somewhere it should not be,
+  // and this has already happened twice in a fortnight.
+  async function copyExisting(t: TokenRow) {
+    setCopyingId(t.id);
+    setError(null);
+    try {
+      const res = await authedFetch("/api/tokens/reveal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: t.id }) });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error ?? "Couldn't read that token.");
+      await navigator.clipboard.writeText(j.token);
+      setCopiedId(t.id);
+      setTimeout(() => setCopiedId((c) => (c === t.id ? null : c)), 2000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't read that token.");
+    } finally {
+      setCopyingId(null);
     }
   }
 
@@ -132,7 +154,7 @@ export default function ApiTokensPanel() {
                 holding. */}
             <p className="mb-2 mt-0.5 text-[13px] text-muted">
               {revealedFor ? `${revealedFor.rotated ? "New token for" : "New token"} “${revealedFor.name}”. ` : ""}
-              Lost it later? Rotate this token for a fresh one.
+              You can copy it again from the list below.
             </p>
             <div className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-2">
               <code className="min-w-0 flex-1 break-all text-[13px]">{revealedToken}</code>
@@ -156,8 +178,17 @@ export default function ApiTokensPanel() {
               <I.key className="shrink-0 text-muted" />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[15px] font-medium">{t.name}</div>
-                <div className="truncate text-[13px] text-muted">Created {new Date(t.created_at).toLocaleDateString()}{t.last_used_at ? ` · last used ${new Date(t.last_used_at).toLocaleDateString()}` : " · never used"}</div>
+                <div className="truncate text-[13px] text-muted">
+                  Created {new Date(t.created_at).toLocaleDateString()}{t.last_used_at ? ` · last used ${new Date(t.last_used_at).toLocaleDateString()}` : " · never used"}
+                  {!t.copyable && " · rotate to make it copyable"}
+                </div>
               </div>
+              {t.copyable && (
+                <button onClick={() => copyExisting(t)} disabled={copyingId === t.id || rotating === t.id || revoking === t.id}
+                  title="Copy this token to the clipboard" className="shrink-0 rounded-md border bg-surface px-2 py-1 text-[13px] font-medium hover:bg-background disabled:opacity-40">
+                  {copiedId === t.id ? "Copied" : copyingId === t.id ? "…" : "Copy"}
+                </button>
+              )}
               <button onClick={() => rotate(t)} disabled={rotating === t.id || revoking === t.id}
                 title="Replace this token's value with a new one" className="shrink-0 rounded-md border bg-surface px-2 py-1 text-[13px] font-medium hover:bg-background disabled:opacity-40">
                 {rotating === t.id ? "Rotating…" : "Rotate"}
