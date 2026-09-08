@@ -16,7 +16,7 @@ import { I, Avatar, LabelChips, LIST_COLUMNS } from "./ui";
 
 // --- grouped list view (ClickUp-style: group, quick-add, expandable subtasks) --
 
-export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onAddInGroup, onToggleSub, onAddSub, onDeleteSub, hideEmpty, lensId, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId }: {
+export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onAddInGroup, folderById, onToggleSub, onAddSub, onDeleteSub, hideEmpty, lensId, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId }: {
   groups: { key: string; label: string; color: string; tasks: Task[] }[];
   // The signed-in user — the row's assignee avatar only renders when the
   // task is assigned to someone else; seeing your own face on every one of
@@ -30,6 +30,9 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
   groupKind?: string;
   /** Start Next week / This month / Later / No date closed. All Tasks only. */
   collapseFarBuckets?: boolean;
+  // Looks a list's folder up, so a row can say which folder it is in and not
+  // just which list. Optional: a view without folders passes nothing.
+  folderById?: (id: string | null | undefined) => { name: string } | null;
   onOpen: (id: string) => void; onOpenClient?: (clientId: string) => void; onPatch: (taskId: string, patch: Partial<Task>) => void; canQuickAdd: boolean; quickAddHint: string;
   // A plus on each coloured group bar, handing back the group you clicked.
   //
@@ -226,7 +229,7 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
               {!collapsedG.has(g.key) && (
                 <>
                   {g.tasks.map((t) => (
-                    <TaskRow key={t.id} task={t} colCount={colCount} cols={cols} showClient={showClient} showCrumb={showCrumb} onOpenClient={onOpenClient} clientById={clientById} projectById={projectById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} lensId={lensId} delegatedTo={delegateeOf(t)}
+                    <TaskRow key={t.id} task={t} colCount={colCount} cols={cols} showClient={showClient} showCrumb={showCrumb} onOpenClient={onOpenClient} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} lensId={lensId} delegatedTo={delegateeOf(t)}
                       selected={!!selectedIds?.has(t.id)} onToggleSelect={onToggleSelect ? (e) => handleSelectClick(t.id, e) : undefined}
                       draggable={!!onDropInGroup || !!onMergeTasks} onDragStart={() => setDragTaskId(t.id)} onDragEnd={() => { setDragTaskId(null); setDragOverKey(null); setDragOverTaskId(null); }}
                       isMergeDropTarget={dragOverTaskId === t.id}
@@ -248,9 +251,9 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
   );
 }
 
-function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, clientById, projectById, contactById, onOpen, onPatch, delegatedTo, lensId, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
+function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, clientById, projectById, folderById, contactById, onOpen, onPatch, delegatedTo, lensId, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
   task: Task; colCount: number; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean; showCrumb: boolean; onOpenClient?: (clientId: string) => void;
-  clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void;  delegatedTo?: string | null; lensId?: string;
+  clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; folderById?: (id: string | null | undefined) => { name: string } | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void;  delegatedTo?: string | null; lensId?: string;
   selected?: boolean; onToggleSelect?: (e: React.MouseEvent) => void;
   draggable?: boolean; onDragStart?: () => void; onDragEnd?: () => void;
   // Drop-onto-this-row-to-merge — independent of the drag-to-reorder-groups
@@ -267,7 +270,15 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
   const client = clientById(task.clientId);
   const project = projectById(task.projectId);
   const overdue = isOverdue(task.due) && task.status !== "done";
-  const crumb = project && project.name !== "Tasks" ? project.name : "";
+  // Folder / List, so a row says where it actually lives. The generic "Tasks"
+  // name is dropped only inside one client's view, where it is the default
+  // list and every row would repeat it. In All Tasks it is worth saying,
+  // because there "Tasks" distinguishes a row from Playbook, Website and the
+  // rest (Derek, 2026-09-08: project names and folders were not showing, only
+  // the client).
+  const folder = folderById?.(project?.folderId) ?? null;
+  const listName = project && (showClient || project.name !== "Tasks") ? project.name : "";
+  const crumb = [folder?.name, listName].filter(Boolean).join(" / ");
   const isDone = task.status === "done";
   // Priority used to be its own column; it's now a 3px bar on the row's
   // leading edge so it reads at a glance without repeating the group
@@ -397,7 +408,7 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
                 you do next. All of it is in the task, one click away. The
                 project crumb stays: it says which list you are looking at,
                 which the row otherwise cannot tell you. */}
-            {showCrumb && !showClient && crumb && (
+            {showCrumb && crumb && (
               <span className="min-w-0 truncate text-[11px] leading-tight text-muted">{crumb}</span>
             )}
             {playbookStep?.youGet && task.status !== "done" && (
