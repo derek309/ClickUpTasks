@@ -2883,6 +2883,45 @@ export function advanceDue(iso: string | null, rec: Recurrence, interval?: numbe
   return dt.toISOString().slice(0, 10);
 }
 
+/** The next occurrence that is actually still ahead of you, skipping any the
+ *  date has already gone past.
+ *
+ *  advanceDue takes exactly one step, which is right for describing a
+ *  recurrence but wrong for finishing one. A daily task three weeks overdue
+ *  advanced one day at a time, so clearing it meant ticking it twenty-one
+ *  times to walk it back to today, each tick writing a task nobody would ever
+ *  do (Derek, 2026-09-08: "instead of having to complete all the days to
+ *  catch it up just move it to the next future date that follows the
+ *  sequence").
+ *
+ *  Strictly after `today`, not on it: you have just completed an occurrence,
+ *  so handing you another one due the same day is the same problem in
+ *  miniature. A task due today and completed today goes to tomorrow, which is
+ *  what it always did.
+ *
+ *  The sequence itself is untouched — this only walks it. A weekly task keeps
+ *  landing on its own weekday however long it was left, because every step is
+ *  still advanceDue.
+ */
+export function nextDueAhead(
+  iso: string | null, rec: Recurrence, interval?: number, unit?: RecurrenceUnit,
+  daysOfMonth?: number[], nth?: number, weekday?: number, today: string = TODAY,
+): string | null {
+  if (!iso || rec === "none") return iso;
+  let cur = iso;
+  // A cap, because advanceDue returns its input unchanged for a rule it
+  // cannot satisfy (see the nth-weekday fallback), and a loop that trusts it
+  // to always move would hang the tab. Ten years of daily steps is far more
+  // than any real backlog and still costs nothing.
+  for (let i = 0; i < 4000; i++) {
+    const next = advanceDue(cur, rec, interval, unit, daysOfMonth, nth, weekday);
+    if (!next || next === cur) return next; // stalled: hand back what we have
+    cur = next;
+    if (cur > today) return cur;
+  }
+  return cur;
+}
+
 // --- Notifications ----------------------------------------------------------
 
 /** "message" — a direct human communication (an @mention or comment someone

@@ -4,6 +4,7 @@ import {
   formatDue,
   isOverdue,
   advanceDue,
+  nextDueAhead,
   parseDaysOfMonth,
   daysBetween,
   mostRecentMonday,
@@ -1150,5 +1151,67 @@ describe("delegationTitle", () => {
   });
   it("ignores leading blank lines", () => {
     expect(delegationTitle("\n\n  Fix the footer email  ")).toBe("Fix the footer email");
+  });
+});
+
+describe("nextDueAhead (catching up a recurrence)", () => {
+  const TODAY = "2026-09-08"; // a Tuesday
+
+  // The case this exists for: ticking a three-week-old daily task used to
+  // produce another one three weeks old.
+  it("skips a daily task straight past a long backlog", () => {
+    expect(nextDueAhead("2026-08-18", "daily", undefined, undefined, undefined, undefined, undefined, TODAY)).toBe("2026-09-09");
+    expect(advanceDue("2026-08-18", "daily")).toBe("2026-08-19"); // what it used to do
+  });
+
+  it("still just steps one when the task is current", () => {
+    expect(nextDueAhead(TODAY, "daily", undefined, undefined, undefined, undefined, undefined, TODAY)).toBe("2026-09-09");
+  });
+
+  // Strictly after today: you have just done today's, so the next one is not
+  // also today.
+  it("never lands on today", () => {
+    for (const start of ["2026-09-08", "2026-09-07", "2026-08-01", "2026-01-01"]) {
+      expect(nextDueAhead(start, "daily", undefined, undefined, undefined, undefined, undefined, TODAY)! > TODAY).toBe(true);
+    }
+  });
+
+  it("keeps a weekly task on its own weekday", () => {
+    // Mondays. Left for five weeks, it comes back on the next Monday.
+    const r = nextDueAhead("2026-08-03", "weekly", undefined, undefined, undefined, undefined, undefined, TODAY)!;
+    expect(r).toBe("2026-09-14");
+    expect(new Date(`${r}T12:00:00Z`).getUTCDay()).toBe(1);
+  });
+
+  it("keeps a weekday task off the weekend", () => {
+    const r = nextDueAhead("2026-07-01", "weekday", undefined, undefined, undefined, undefined, undefined, TODAY)!;
+    const dow = new Date(`${r}T12:00:00Z`).getUTCDay();
+    expect(r > TODAY).toBe(true);
+    expect(dow === 0 || dow === 6).toBe(false);
+  });
+
+  it("handles monthly and yearly without drifting off the date", () => {
+    expect(nextDueAhead("2026-03-15", "monthly", undefined, undefined, undefined, undefined, undefined, TODAY)).toBe("2026-09-15");
+    expect(nextDueAhead("2020-11-30", "yearly", undefined, undefined, undefined, undefined, undefined, TODAY)).toBe("2026-11-30");
+  });
+
+  it("leaves a non-recurring task alone", () => {
+    expect(nextDueAhead("2026-01-01", "none", undefined, undefined, undefined, undefined, undefined, TODAY)).toBe("2026-01-01");
+    expect(nextDueAhead(null, "daily", undefined, undefined, undefined, undefined, undefined, TODAY)).toBeNull();
+  });
+
+  it("terminates rather than hanging when a rule cannot advance", () => {
+    // A custom nth-weekday rule advanceDue cannot satisfy returns its input;
+    // the loop must notice and stop instead of spinning.
+    const r = nextDueAhead("2026-01-01", "custom", undefined, "nth-weekday", undefined, 9, 1, TODAY);
+    expect(typeof r === "string" || r === null).toBe(true);
+  });
+
+  it("agrees with advanceDue whenever one step is already enough", () => {
+    for (const rec of ["daily", "weekly", "biweekly", "monthly", "quarterly", "yearly"] as const) {
+      const start = "2026-09-08";
+      expect(nextDueAhead(start, rec, undefined, undefined, undefined, undefined, undefined, TODAY))
+        .toBe(advanceDue(start, rec));
+    }
   });
 });
