@@ -3871,6 +3871,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   };
   // Per-column quick-add on the Kanban board — mirrors quickAdd's Task shape,
   // just scoped by stage instead of a groupBy key.
+  // Whether the folder rail is on screen. It carries the single Add task for
+  // the whole view, so when it is hidden — a non-admin looking at a client
+  // with no folders and at most one list — the per-group buttons have to come
+  // back, or that view has no way to add a task at all. Derived once so the
+  // rail and the lists beneath it can never disagree about it.
+  const railHidden = activeClient === "all" || (
+    foldersForClient(activeClient).length === 0 &&
+    projectsForClient(activeClient).filter((l) => !l.folderId).length <= 1 &&
+    !canAdmin
+  );
+
   const quickAddInStage = (projectId: string, stageId: string, title: string) => {
     if (!title.trim()) return;
     const p = projectById(projectId);
@@ -4969,13 +4980,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           />
         ) : (
           <>
-          {activeClient !== "all" && (() => {
+          {activeClient !== "all" && !railHidden && (() => {
             const cf = foldersForClient(activeClient);
             const cl = projectsForClient(activeClient);
-            // Only show the rail when there's real structure to navigate (a
-            // folder, or more than one list) — or for an admin, who always
-            // gets the +Folder/+List affordances to organize.
-            if (cf.length === 0 && cl.filter((l) => !l.folderId).length <= 1 && !canAdmin) return null;
             return (
               <FolderRail folders={cf} lists={cl} activeFolder={activeFolder} activeProject={activeProject} canAdmin={canAdmin}
                 starredLists={starredLists} onToggleStarList={toggleStarList}
@@ -4984,7 +4991,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 onSelectList={(id) => { setActiveProject(id); setActiveFolder(null); }}
                 onCreateFolder={() => createFolder(activeClient)} onCreateList={(fid) => addProject(activeClient, fid)}
                 onRenameFolder={renameFolder} onDeleteFolder={deleteFolder} onRenameList={renameProject} onDeleteList={deleteProject} onMoveList={moveListToFolder}
-                onReorderFolders={(ids) => reorderFolders(activeClient, ids)} onReorderLists={(fid, ids) => reorderLists(activeClient, fid, ids)} />
+                onReorderFolders={(ids) => reorderFolders(activeClient, ids)} onReorderLists={(fid, ids) => reorderLists(activeClient, fid, ids)}
+                onAddTask={() => setDumpGroup({ key: null, personal: false })} />
             );
           })()}
           {activeProject === playbookProjectId(activeClient) ? (() => {
@@ -5022,7 +5030,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   </div>
                 )}
                 {activeFilterBar}
-                <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildPlaybookGroups(baseTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="" onAddInGroup={(k) => setDumpGroup({ key: k, personal: false })} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={false} colOrder={colOrder} onReorderCols={reorderCols} />
+                <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildPlaybookGroups(baseTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="" onAddInGroup={railHidden ? (k) => setDumpGroup({ key: k, personal: false }) : undefined} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={false} colOrder={colOrder} onReorderCols={reorderCols} />
                 <div className="mt-3 rounded-xl border bg-surface p-4">
                   <div className="text-[13px] font-semibold uppercase tracking-wide text-muted">Always running for you</div>
                   <ul className="mt-2 list-disc space-y-1 pl-5 text-[14px] text-muted">
@@ -5045,7 +5053,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           ) : (
             <>
             {activeFilterBar}
-            <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onAddInGroup={(k) => setDumpGroup({ key: k, personal: false })} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={hideEmpty} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
+            <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onAddInGroup={railHidden ? (k) => setDumpGroup({ key: k, personal: false }) : undefined} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={hideEmpty} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
             </>
           )}
           </>

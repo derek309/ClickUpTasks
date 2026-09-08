@@ -31,12 +31,14 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
   /** Start Next week / This month / Later / No date closed. All Tasks only. */
   collapseFarBuckets?: boolean;
   onOpen: (id: string) => void; onOpenClient?: (clientId: string) => void; onPatch: (taskId: string, patch: Partial<Task>) => void; canQuickAdd: boolean; quickAddHint: string;
-  // The plus on each coloured group bar. It hands back the group you clicked
-  // and nothing else — the composer that opens is the caller's (Derek,
-  // 2026-09-04: "over on the far right side of that bar, there's a plus
-  // sign"). The permanent "Add task…" row this replaced repeated under every
-  // bucket and pushed the real tasks down.
-  onAddInGroup: (groupKey: string) => void;
+  // A plus on each coloured group bar, handing back the group you clicked.
+  //
+  // Only passed where there is nowhere better to put it — the personal list,
+  // which has no folder rail above it. Everywhere else the single Add task in
+  // FolderRail does the job, because six identical buttons down one screen is
+  // five too many (Derek, 2026-09-08: "remove add tasks to each group title
+  // and put one on" the rail instead).
+  onAddInGroup?: (groupKey: string) => void;
   onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void; onDeleteSub: (taskId: string, subId: string) => void; hideEmpty?: boolean; 
   // When set, task rows can be dragged onto a group header to move them into
   // that group (e.g. drag a row onto "Urgent" to reprioritize it) — only
@@ -212,7 +214,7 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
                   <span className="truncate text-[15px] font-bold">{g.label}</span>
                   <span className="shrink-0 rounded-[5px] px-1.5 text-[13px] font-semibold normal-case tracking-normal text-white" style={{ background: g.color }}>{g.tasks.length}</span>
                 </button>
-                {canQuickAdd && (
+                {canQuickAdd && onAddInGroup && (
                   <button onClick={() => onAddInGroup(g.key)} title={`Add a task to ${g.label}`}
                     className="flex shrink-0 items-center gap-1.5 rounded-lg border bg-surface py-1 pl-2 pr-2.5 text-[14px] font-semibold text-accent shadow-sm transition hover:bg-accent hover:text-white">
                     <I.plus />
