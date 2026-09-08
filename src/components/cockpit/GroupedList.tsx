@@ -728,6 +728,18 @@ function DatePopover({ pos, value, recurrence, onSelect, onRecurrenceChange, onC
           {quicks.map(({ label, date }) => (
             <button key={label} onClick={() => onSelect(date)} className="flex w-full items-center justify-between gap-3 whitespace-nowrap rounded px-2 py-1.5 text-left text-[15px] hover:bg-background"><span>{label}</span><span className="text-[13px] text-muted">{formatDue(date)}</span></button>
           ))}
+          {/* Clearing is an ACTION, not a date you could pick, so it sits apart
+              from the quick list rather than back in it as the old "No date"
+              row. That row was removed on request; the ability it carried was
+              not meant to go with it (Derek, 2026-09-08: "need to be able to
+              remove due date"). Only offered when there is something to
+              remove. */}
+          {value && (
+            <button onClick={() => onSelect(null)}
+              className="mt-1 flex w-full items-center gap-2 whitespace-nowrap rounded border-t px-2 pb-1 pt-2 text-left text-[13px] text-muted hover:text-danger">
+              <I.close /> Remove the date
+            </button>
+          )}
           {onRecurrenceChange && (
             <div className="mt-1 border-t pt-1.5">
               <div className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Repeat</div>
