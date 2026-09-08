@@ -4,7 +4,7 @@
 // this is the equivalent timing-safe check for the Node side, which every
 // inbound route until now compared with a plain !== (fine when the bridge
 // was read-only/fire-and-forget, worth tightening now that it's gaining
-// write capability via the Playbook toggle route).
+// write capability via the owner-facing toggle route).
 import { NextRequest } from "next/server";
 import { timingSafeEqual } from "crypto";
 

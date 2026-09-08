@@ -15,8 +15,6 @@ import {
   users,
   clientHealth,
   normalizeState,
-  playbookCompletionByCategory,
-  PLAYBOOK_ALL_STEPS,
   applyWaitingStatusSync,
   mentionQuery,
   mentionCandidates,
@@ -305,43 +303,6 @@ describe("clientHealth", () => {
   });
 });
 
-describe("playbookCompletionByCategory", () => {
-  it("totals every category to the full catalog count when nothing is done", () => {
-    const cats = playbookCompletionByCategory("cl_a", []);
-    const totals = Object.fromEntries(Object.entries(cats).map(([k, v]) => [k, v.total]));
-    const expected = { branding: 0, reputation: 0, presence: 0, income: 0 };
-    for (const step of PLAYBOOK_ALL_STEPS) expected[step.category] += 1;
-    expect(totals).toEqual(expected);
-    expect(Object.values(cats).every((v) => v.done === 0)).toBe(true);
-  });
-
-  it("counts a done task only toward its own step's category", () => {
-    const step = PLAYBOOK_ALL_STEPS.find((s) => s.key === "complete_listing")!; // category: branding
-    const tasks = [mkTask({ clientId: "cl_a", status: "done", playbookStepKey: step.key })];
-    const cats = playbookCompletionByCategory("cl_a", tasks);
-    expect(cats.branding.done).toBe(1);
-    expect(cats.reputation.done).toBe(0);
-    expect(cats.presence.done).toBe(0);
-    expect(cats.income.done).toBe(0);
-  });
-
-  it("ignores tasks from other clients", () => {
-    const step = PLAYBOOK_ALL_STEPS.find((s) => s.key === "complete_listing")!;
-    const tasks = [mkTask({ clientId: "cl_other", status: "done", playbookStepKey: step.key })];
-    const cats = playbookCompletionByCategory("cl_a", tasks);
-    expect(cats.branding.done).toBe(0);
-  });
-
-  it("ignores non-playbook tasks and not-done playbook tasks", () => {
-    const step = PLAYBOOK_ALL_STEPS.find((s) => s.key === "connect_gbp")!; // category: reputation
-    const tasks = [
-      mkTask({ clientId: "cl_a", status: "done", playbookStepKey: null }),
-      mkTask({ clientId: "cl_a", status: "todo", playbookStepKey: step.key }),
-    ];
-    const cats = playbookCompletionByCategory("cl_a", tasks);
-    expect(cats.reputation.done).toBe(0);
-  });
-});
 
 describe("applyWaitingStatusSync", () => {
   it("moving status to waiting sets waitingOnClient and clears the assignee", () => {

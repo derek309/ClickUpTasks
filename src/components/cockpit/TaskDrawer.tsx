@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, clientStatusMeta,
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus,
-  STATUS_META, pickableStatuses, type DelegateSpec, type ClientLink, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, PLAYBOOK_STEP_BY_KEY, WEEKDAY_LABEL, startSignal, isSnoozed, daysUntilDue, formatDue, dueCountdown,
+  STATUS_META, pickableStatuses, type DelegateSpec, type ClientLink, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, startSignal, isSnoozed, daysUntilDue, formatDue, dueCountdown,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -606,16 +606,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // Owner Growth Plan steps stay word-for-word in sync with the catalog
-  // (reconcilePlaybookTasks resyncs the title if it ever drifts) — letting an
-  // ambassador rename one here would just get silently reverted next time,
-  // so it's read-only instead, with a title explaining why.
   const titleBlock = (
-    <textarea value={titleDraft} readOnly={!!task.playbookStepKey}
+    <textarea value={titleDraft}
       onChange={(e) => { const v = e.target.value; setTitleDraft(v); titleCommit.schedule(() => onPatch({ title: v })); }}
       onBlur={titleCommit.flush}
-      title={task.playbookStepKey ? "Synced from the Owner Growth Plan — always the same for every business" : undefined}
-      rows={1} className={`-mx-1 w-full resize-none rounded-md bg-transparent px-1 font-semibold leading-snug outline-none [field-sizing:content] transition focus:bg-background ${full ? "text-[28px]" : "text-[18px]"} ${task.playbookStepKey ? "cursor-default" : ""}`} />
+      rows={1} className={`-mx-1 w-full resize-none rounded-md bg-transparent px-1 font-semibold leading-snug outline-none [field-sizing:content] transition focus:bg-background ${full ? "text-[28px]" : "text-[18px]"} `} />
   );
   // Completion checkbox to the title's left (item 4) — the fastest way to
   // close out a task without hunting for the Status chip.
@@ -809,24 +804,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     <div className="mt-3 rounded-xl border bg-surface p-4">
     <div className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-muted">Details</div>
     <dl className={full ? "grid grid-cols-1 gap-x-12 gap-y-1.5 lg:grid-cols-2" : "space-y-2"}>
-      {/* Owner Growth Plan steps stay put — moving one to a different client or
-          list would pull it out of that business's checklist (and its fixed
-          position) entirely, which reconcilePlaybookTasks would just quietly
-          patch over by recreating the step, orphaning the moved task. */}
-      {task.playbookStepKey ? (
-        <>
-          <Row label="Client" icon={<I.folder />}><span title="Part of the Owner Growth Plan — can't be moved" className="px-2 py-1 text-[14px] text-muted">{client?.name ?? "—"}</span></Row>
-          <Row label="Project" icon={<I.list />}><span title="Part of the Owner Growth Plan — can't be moved" className="px-2 py-1 text-[14px] text-muted">{project?.name ?? "—"}</span></Row>
-        </>
-      ) : (
-        <>
           {/* Type-to-filter rather than a plain select: this list is every
               client on the account, which is far past the point where
               scrolling a native dropdown is the fast way to find one. */}
           <Row label="Client" icon={<I.folder />}><div className="w-[200px]"><SearchableSelect value={task.clientId} onChange={onMoveClient} options={clientSelectOptions} searchPlaceholder="Search clients…" className="rounded-md border border-transparent px-2 py-1 text-[14px] transition hover:border-border hover:bg-background" /></div></Row>
           <Row label="Project" icon={<I.list />}><select value={task.projectId} onChange={(e) => { if (e.target.value === "__new") onNewProject(); else onSetProject(e.target.value); }} className="max-w-[200px] rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background">{clientProjects.map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}{clientProjects.every((p) => p.id !== task.projectId) && <option value={task.projectId}>{project?.name ?? "—"}</option>}<option value="__new">+ New project…</option></select></Row>
-        </>
-      )}
       <Row label="Contact">{(() => { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return ct ? (<span className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[14px] text-muted"><I.user /> {ct.name}</span>) : <span className="text-[14px] text-muted">—</span>; })()}</Row>
       {/* The "Push to GHL" row is gone. Reaching a client's GoHighLevel
           account is only ever about emailing, texting or calling them, and
@@ -841,33 +823,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // since it's the reason this task just landed back on someone's plate.
   // Read-only reference panel for an Owner Growth Plan step — looked up live
   // from the catalog by key, never stored on the task, so it can't drift per
-  // client and needs no reconciliation if the wording changes later. Fully
-  // separate from the Description field below, which stays free for the
-  // ambassador's own working notes on this business.
-  const playbookStep = task.playbookStepKey ? PLAYBOOK_STEP_BY_KEY.get(task.playbookStepKey) : undefined;
-  const scoreImpactDots: Record<string, string> = { low: "⚡", medium: "⚡⚡", high: "⚡⚡⚡" };
-  const playbookGuideBlock = playbookStep ? (
-    <div className="mt-4 rounded-xl border bg-surface p-4">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="text-[15px] font-semibold">Playbook guide</div>
-        <span className="shrink-0 rounded-md bg-background px-2 py-0.5 text-[12px] font-medium text-muted" title="Score impact">{scoreImpactDots[playbookStep.scoreImpact]} · {playbookStep.timeEstimate}</span>
-      </div>
-      <p className="text-[14px]">{playbookStep.whyItMatters}</p>
-      <div className="mt-3 text-[13px] font-semibold uppercase tracking-wide text-muted">How to do it</div>
-      <ol className="mt-1 list-decimal space-y-1 pl-5 text-[14px]">
-        {playbookStep.howTo.map((step, i) => <li key={i}>{step}</li>)}
-      </ol>
-      {playbookStep.commonMistake && (
-        <div className="mt-3 rounded-lg bg-background p-2.5 text-[13px]"><span className="font-medium">Common mistake:</span> {playbookStep.commonMistake}</div>
-      )}
-      {(playbookStep.weGive || playbookStep.youGet) && (
-        <div className="mt-3 space-y-1 text-[13px] text-muted">
-          {playbookStep.weGive && <div>🎁 {playbookStep.weGive}</div>}
-          {playbookStep.youGet && <div>📈 {playbookStep.youGet}</div>}
-        </div>
-      )}
-    </div>
-  ) : null;
 
   const clientResponseBlock = task.clientResponse && (task.clientResponse.body || task.clientResponse.attachments.length > 0) ? (
     <div className="mt-4 rounded-xl border border-accent/30 bg-surface p-4">
@@ -1327,7 +1282,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               </button>
             )}
             <button onClick={onToggleFull} title={full ? "Collapse to sidebar" : "Expand to full page"} className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground">{full ? <I.minimize /> : <I.expand />}</button>
-            {!task.playbookStepKey && (
+            {(
               <button onClick={onDelete} title="Delete task" className="rounded-md p-1 text-muted hover:bg-background hover:text-danger"><I.trash /></button>
             )}
             <button onClick={onClose} className="rounded-md p-1 text-muted hover:bg-background"><I.close /></button>
@@ -1346,7 +1301,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 {delegationRow}
                 {detailsBlock}
                 <div className="my-4 border-t" />
-                {playbookGuideBlock}
                 {clientResponseBlock}
                 {descriptionBlock}
                 {subtasksBlock}
@@ -1384,7 +1338,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 {metaLine}
                 {chipRow}
                 {delegationRow}
-                {playbookGuideBlock}
                 {clientResponseBlock}
                 {/* Composer above the feed, because the feed is newest-first:
                     what you write next belongs at the end you are reading

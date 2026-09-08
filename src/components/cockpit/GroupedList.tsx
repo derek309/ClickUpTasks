@@ -8,7 +8,6 @@ import {
   users, formatDue, isOverdue, TODAY, COLLAPSED_DUE_BUCKETS, effectivePriority, effectiveStatus, clientInitials, dueOneLine, isSnoozed,
   PRIORITY_META, manualPriorityOptions,
   STATUS_META, pickableStatuses, delegateeOf, delegatedDueFor, userById, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence,
-  PLAYBOOK_STEP_BY_KEY,
   addDaysIso, dateQuickPicks,
   type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus,
 } from "@/lib/data";
@@ -273,7 +272,7 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
   // Folder / List, so a row says where it actually lives. The generic "Tasks"
   // name is dropped only inside one client's view, where it is the default
   // list and every row would repeat it. In All Tasks it is worth saying,
-  // because there "Tasks" distinguishes a row from Playbook, Website and the
+  // because there "Tasks" distinguishes a row from Website and the
   // rest (Derek, 2026-09-08: project names and folders were not showing, only
   // the client).
   const folder = folderById?.(project?.folderId) ?? null;
@@ -288,10 +287,6 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
   // in the column.
   const shownPriority = effectivePriority(task);
   const priorityBarColor = shownPriority !== "none" ? PRIORITY_META[shownPriority].color : "transparent";
-  // The payoff for this Playbook step, surfaced right on the row — so an
-  // ambassador scanning the list before walking into a business sees "if
-  // they do this, they get that" without opening every task individually.
-  const playbookStep = task.playbookStepKey ? PLAYBOOK_STEP_BY_KEY.get(task.playbookStepKey) : undefined;
   // No done circle beside the Stage label any more (Derek, 2026-09-01:
   // "remove the done check mark circle"). It said the same thing the Stage
   // column already says, and an empty ring on every row read as an unticked
@@ -410,9 +405,6 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
                 which the row otherwise cannot tell you. */}
             {showCrumb && crumb && (
               <span className="min-w-0 truncate text-[11px] leading-tight text-muted">{crumb}</span>
-            )}
-            {playbookStep?.youGet && task.status !== "done" && (
-              <span className="block truncate text-[12px] text-muted" title={playbookStep.youGet}>📈 {playbookStep.youGet}</span>
             )}
           </div>
         </div>

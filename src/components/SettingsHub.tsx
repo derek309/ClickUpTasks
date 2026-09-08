@@ -14,18 +14,17 @@
 // close button — you navigate away the same way you leave any other page,
 // by clicking somewhere else in the sidebar.
 import { useState } from "react";
-import { type Me, type Client, type TaskTemplate, type Playbook, type PlaybookTask, type Project } from "@/lib/data";
+import { type Me, type Client, type TaskTemplate, type Project } from "@/lib/data";
 import { I } from "./cockpit/ui";
 import SettingsPanel from "./SettingsPanel";
 import TeamPanel from "./TeamPanel";
 import TemplatesPanel from "./TemplatesPanel";
-import PlaybooksPanel from "./PlaybooksPanel";
 import ApiTokensPanel from "./ApiTokensPanel";
 import NotificationPrefsPanel from "./NotificationPrefsPanel";
 import SignaturePanel from "./SignaturePanel";
 import TrashPanel from "./TrashPanel";
 
-export type TabKey = "account" | "integrations" | "team" | "templates" | "playbooks" | "tokens" | "notifications" | "signature" | "trash";
+export type TabKey = "account" | "integrations" | "team" | "templates" | "tokens" | "notifications" | "signature" | "trash";
 
 export default function SettingsHub({
   initialTab = "integrations",
@@ -43,10 +42,6 @@ export default function SettingsHub({
   onSaveTemplate,
   onDeleteTemplate,
   onUseTemplateAsTask,
-  playbooks,
-  onSavePlaybook,
-  onDeletePlaybook,
-  onLoadPlaybook,
   dmEnabled,
   onSetDmEnabled,
   onRestoreClient,
@@ -68,10 +63,6 @@ export default function SettingsHub({
   onSaveTemplate: (id: string | undefined, spec: { name: string; checklistItems: string[] }) => void;
   onDeleteTemplate: (id: string) => void;
   onUseTemplateAsTask: (templateId: string, clientId: string, projectId: string) => void;
-  playbooks: Playbook[];
-  onSavePlaybook: (id: string | undefined, spec: { name: string; tasks: PlaybookTask[] }) => void;
-  onDeletePlaybook: (id: string) => void;
-  onLoadPlaybook: (playbookId: string, clientId: string, projectId: string) => void;
   // Shared, workspace-wide — whether the sidebar's DM list is on. Lives here
   // (the admin-only Team tab) rather than in the sidebar itself, where it
   // used to be a switch right next to the Chat section.
@@ -96,7 +87,6 @@ export default function SettingsHub({
     { key: "integrations", label: "Integrations", icon: "gear", visible: canAdmin },
     { key: "team", label: "Team", icon: "user", visible: canAdmin },
     { key: "templates", label: "Task templates", icon: "clipboard", visible: canAdmin },
-    { key: "playbooks", label: "Playbooks", icon: "bookmark", visible: canAdmin },
     { key: "tokens", label: "API tokens", icon: "key", visible: true },
     { key: "notifications", label: "Notifications", icon: "bell", visible: true },
     // Per-person, not team management — same footing as Notifications.
@@ -127,10 +117,6 @@ export default function SettingsHub({
             {tab === "templates" && canAdmin && (
               <TemplatesPanel templates={templates} clients={clients} projects={projects}
                 onSave={onSaveTemplate} onDelete={onDeleteTemplate} onUseAsTask={onUseTemplateAsTask} />
-            )}
-            {tab === "playbooks" && canAdmin && (
-              <PlaybooksPanel playbooks={playbooks} clients={clients} projects={projects}
-                onSave={onSavePlaybook} onDelete={onDeletePlaybook} onLoad={onLoadPlaybook} />
             )}
             {tab === "account" && (
               <div className="max-w-xl">

@@ -31,7 +31,7 @@ export default function SettingsPanel({
   const [editing, setEditing] = useState<Record<string, boolean>>({});
 
   // The Sales checklist was retired Aug 4, 2026 — superseded by the new
-  // "Free Marketing Package" section at the top of the Playbook. This is a
+  // "Free Marketing Package" section. This is a
   // one-time cleanup for the leftover p_sales_* projects/tasks it left
   // behind; nothing creates new ones anymore. Count-then-confirm-then-delete
   // so a stray click can't silently wipe data.
@@ -291,7 +291,7 @@ export default function SettingsPanel({
           </div>
           <div className="rounded-lg border bg-background px-3 py-2.5">
             <p className="text-[13px] text-muted">
-              The old Sales checklist was retired — every business now works through the Free Marketing Package section at the top of its Playbook instead. This permanently deletes the leftover Sales lists it left behind on existing clients.
+              The old Sales checklist was retired. This permanently deletes the leftover Sales lists it left behind on existing clients.
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               {salesCleanup.kind === "confirm" ? (

@@ -21,7 +21,7 @@ export type WaitingScope = {
   canRequestNewTasks: boolean;
   // Whether the "Your growth plan" progress card is client-visible at all —
   // same reasoning as canRequestNewTasks above (a project-scoped token is
-  // whole-client Playbook out of scope, so it's forced false there too).
+  // whole-client context out of scope, so it's forced false there too).
   showGrowthPlan: boolean;
   // Whether the portal lists the whole account rather than only what involves
   // the client. Unlike the two flags above this is NOT forced false for a

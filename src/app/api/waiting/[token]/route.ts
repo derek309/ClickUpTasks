@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import {
-  htmlToText, initialsOf, playbookCompletion,
-  PLAYBOOK_ALL_STEPS, PLAYBOOK_PHASES, PLAYBOOK_A2P_PHASE, PLAYBOOK_EMAIL_DOMAIN_PHASE, PLAYBOOK_ONGOING_PHASE,
+  htmlToText, initialsOf,
   type Attachment,
 } from "@/lib/data";
-import { reconcilePlaybookTasksServer } from "@/lib/playbookReconcileServer";
 import { TASK_FILES_BUCKET } from "@/lib/db";
 import { rateLimit } from "@/lib/rateLimit";
 import { resolveWaitingToken } from "@/lib/waitingToken";
@@ -46,13 +44,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   const scope = await resolveWaitingToken(token);
   if (!scope) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  // Ensures this client's Playbook step tasks exist even if no rep has ever
-  // opened their Businesses page entry — the first thing that touches a
-  // client (an invite reply, a claim, or just this page loading) shouldn't
-  // be a prerequisite for seeing accurate progress below. Skipped for a
-  // project-scoped token — Playbook is a whole-client concept and isn't
-  // returned below anyway (see the playbook section further down).
-  if (!scope.projectId) await reconcilePlaybookTasksServer(scope.clientId);
 
   // A link composed from one specific task (see the task drawer's email
   // composer) carries ?task=<id> so that task shows up here even when it's
@@ -106,18 +97,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     deepLinkTaskId
       ? scopedTaskQuery().eq("id", deepLinkTaskId)
       : Promise.resolve({ data: [] as Row[] }),
-    // Playbook step tasks are excluded from the all-tasks expansion on
-    // purpose (Derek: "do not show the playbook in the client link"). There
-    // are ~28 of them per client, they're generated rather than written for
-    // the client to read, and they already have their own client-facing
-    // surface: the growth plan card, with its own separate toggle. Without
-    // this filter, switching "sees all tasks" on buried the real work under
-    // the entire Playbook checklist.
     scope.showAllTasks
-      ? scopedTaskQuery().is("playbook_step_key", null).neq("status", "done")
+      ? scopedTaskQuery().neq("status", "done")
       : Promise.resolve({ data: [] as Row[] }),
     scope.showAllTasks
-      ? scopedTaskQuery().is("playbook_step_key", null).eq("status", "done").order("due", { ascending: false, nullsFirst: false }).limit(DONE_LIMIT)
+      ? scopedTaskQuery().eq("status", "done").order("due", { ascending: false, nullsFirst: false }).limit(DONE_LIMIT)
       : Promise.resolve({ data: [] as Row[] }),
   ]);
   const byId = new Map<string, Row>();
@@ -197,55 +181,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     };
   }));
 
-  // Playbook progress — reuses playbookCompletion()'s exact definition of
-  // "next" (the main PLAYBOOK_STEPS path only, same as Cockpit.tsx's own
-  // dashboard), so this page never tells a business something different from
-  // what a rep sees internally about the same account. SALES_STAGE_STEPS is
-  // never imported here — those are the rep's own pipeline stages, not
-  // something a business should see about its own account. Skipped entirely
-  // for a project-scoped token (Playbook is whole-client progress, out of
-  // scope for a "just this one list" link even as read-only context) or
-  // when the client's showGrowthPlan flag is off — no reason to do the work
-  // below if the page won't render it.
-  let playbook: { doneCount: number; total: number; pct: number; next: { key: string; label: string } | null; phases: unknown[] } | null = null;
-  if (!scope.projectId && scope.showGrowthPlan) {
-    const { data: pbTaskRows } = await supabaseAdmin.from("tasks").select("playbook_step_key, status").eq("client_id", scope.clientId).not("playbook_step_key", "is", null);
-    const pbRows = (pbTaskRows ?? []) as { playbook_step_key: string; status: string }[];
-    const doneKeys = new Set(pbRows.filter((t) => t.status === "done").map((t) => t.playbook_step_key));
-    const existingKeys = new Set(pbRows.map((t) => t.playbook_step_key));
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const completion = playbookCompletion(scope.clientId, pbRows.map((t) => ({ clientId: scope.clientId, playbookStepKey: t.playbook_step_key, status: t.status })) as any);
-
-    // Display order: same as Cockpit's buildPlaybookGroups — A2P/email-domain
-    // spliced right after "Get on the map" ("do it early," per the source
-    // docs), monthly retention at the very end. PLAYBOOK_PHASES[0] is "sales"
-    // (the internal pipeline) — filtered out, never reaches this response.
-    const orderedPhases = PLAYBOOK_PHASES.filter((p) => p.key !== "sales");
-    const mapIdx = orderedPhases.findIndex((p) => p.key === "map");
-    orderedPhases.splice(mapIdx + 1, 0, PLAYBOOK_A2P_PHASE, PLAYBOOK_EMAIL_DOMAIN_PHASE);
-    orderedPhases.push(PLAYBOOK_ONGOING_PHASE);
-
-    const stepsByPhase = new Map<string, { key: string; label: string; done: boolean }[]>();
-    for (const step of PLAYBOOK_ALL_STEPS) {
-      if (!existingKeys.has(step.key)) continue; // e.g. A2P steps for a client who doesn't text
-      const list = stepsByPhase.get(step.phase) ?? [];
-      list.push({ key: step.key, label: step.label, done: doneKeys.has(step.key) });
-      stepsByPhase.set(step.phase, list);
-    }
-    playbook = {
-      doneCount: completion.doneCount, total: completion.total, pct: completion.pct,
-      next: completion.next ? { key: completion.next.key, label: completion.next.label } : null,
-      phases: orderedPhases
-        .map((p) => ({ key: p.key, label: CLIENT_PHASE_LABEL[p.key] ?? p.label, steps: stepsByPhase.get(p.key) ?? [] }))
-        .filter((p) => p.steps.length > 0),
-    };
-  }
-
   // Whether this client may raise brand-new tasks here at all — the page uses
   // it to show or hide the "Add Something" composer. Not a permission the
   // page enforces: ./request/route.ts re-checks the same column before it
   // writes anything, so this is purely so the client isn't offered a button
   // that would only refuse them (see supabase/client-request-new-tasks.sql).
   // Always false for a project-scoped token (see resolveWaitingToken).
-  return NextResponse.json({ clientName: scope.clientName, canRequestNewTasks: scope.canRequestNewTasks, projects, tasks, playbook, deepLinkTaskId: deepLinkTaskId || null });
+  return NextResponse.json({ clientName: scope.clientName, canRequestNewTasks: scope.canRequestNewTasks, projects, tasks, deepLinkTaskId: deepLinkTaskId || null });
 }

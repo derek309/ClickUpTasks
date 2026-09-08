@@ -60,21 +60,6 @@ import {
   type ScheduledMessage,
   type Me,
   type TaskTemplate,
-  type Playbook,
-  type PlaybookTask,
-  playbookCompletion,
-  PLAYBOOK_PHASES,
-  PLAYBOOK_A2P_PHASE,
-  PLAYBOOK_EMAIL_DOMAIN_PHASE,
-  PLAYBOOK_ONGOING_PHASE,
-  PLAYBOOK_ALL_STEPS,
-  SALES_STAGE_STEPS, SALES_STAGE_ORDER, STATUS_IMPLIES_SALES_STAGE,
-  playbookStepsForClient,
-  PLAYBOOK_INTRO,
-  PLAYBOOK_MILESTONE,
-  PLAYBOOK_ALWAYS_RUNNING,
-  PLAYBOOK_FINISH_LINE,
-  playbookProjectId,
   type VaultFolder,
   type Folder,
   type Stage,
@@ -89,7 +74,7 @@ import {
   THIS_MONTH_END,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, upsertPlaybook, deletePlaybookDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, touchPlaybookProgress, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import TeamChat from "./TeamChat";
@@ -150,7 +135,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [clientNotes, setClientNotes] = useState<ClientNote[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
-  const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
   const [vaultFolders, setVaultFolders] = useState<VaultFolder[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [stages, setStages] = useState<Stage[]>([]);
@@ -595,25 +579,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return Date.now() - ts < CLIENT_ECHO_TTL_MS;
   };
 
-  // Client-side twin of playbookReconcileServer.ts's completePlaybookStepServer
-  // — no supabaseAdmin here, this goes through patchTask like any other
-  // status change a rep makes, so it gets the same comment/history and the
-  // same playbook_last_progress_at bump every other completion gets.
-  // SALES_STAGE_ORDER/STATUS_IMPLIES_SALES_STAGE live in data.ts as the
-  // shared source of truth (also used by the one-off bulk-backfill script),
-  // rather than duplicated here.
-  const cascadeSalesStageCompletion = (clientId: string, status: ClientStatus) => {
-    const throughKey = STATUS_IMPLIES_SALES_STAGE[status];
-    const throughIdx = throughKey ? SALES_STAGE_ORDER.indexOf(throughKey) : -1;
-    if (throughIdx < 0) return;
-    const byKey = new Map(
-      (playbookTasksByClient.get(clientId) ?? []).map((t) => [t.playbookStepKey as string, t])
-    );
-    for (let i = 0; i <= throughIdx; i++) {
-      const task = byKey.get(SALES_STAGE_ORDER[i]);
-      if (task && task.status !== "done") patchTask(task.id, { status: "done" });
-    }
-  };
   const setClientStatus = (id: string, status: ClientStatus) => {
     const c = clientById(id);
     if (!c || c.status === status) return;
@@ -626,13 +591,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // bug: it fires a full step BEFORE the business is actually won and
     // paying, so unclosed deals landed on the main dashboard alongside real
     // clients. active_client is now the sole trigger.
-    //
-    // Reconciled against SALES_STAGE_STEPS below (cascadeSalesStageCompletion)
-    // rather than flipping the direction (sales_pitch completing being
-    // what promotes, instead of this dropdown) — only 1 of the 6 sales
-    // stages has a real automated trigger today (sales_invite, via claim or
-    // invite reply); the other 5, including sales_pitch itself, are still a
-    // checkbox in a collapsed accordion section. Making promotion depend on that checkbox
     // risked a real business silently never reaching the main dashboard
     // because nobody remembered to tick it, worse than today's imperfect but
     // reliable trigger. So the Stage dropdown stays the driver, and now also
@@ -653,11 +611,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setClients((cs) => cs.map((x) => (x.id === id ? nc : x)));
     markOwnClientWrite(nc.id);
     upsertClient(nc);
-    // Always, not just on promotion — a Stage move on a Playbook nobody's
-    // ever opened still needs its rows to exist before the cascade below has
-    // anything to complete.
-    reconcilePlaybookTasks(id);
-    cascadeSalesStageCompletion(id, status);
     pushToast(promoted ? `${c.name} → ${CLIENT_STATUS_META[status].label} · now a client` : `${c.name} → ${CLIENT_STATUS_META[status].label}`);
   };
   // "Follow" a client: adds/removes a team member from assigned_to, which
@@ -720,40 +673,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     markOwnClientWrite(nc.id);
     upsertClient(nc);
     pushToast(on ? `${c.name} now sees every task on their account.` : `${c.name} now only sees what involves them.`);
-  };
-  // Whether this client's Playbook includes the A2P texting setup steps and
-  // the dedicated email domain step. Off by default (see
-  // playbookStepsForClient in data.ts): not every business does SMS
-  // marketing, and creating those tasks unconditionally for everyone used to
-  // be a real bug. Admin only, same reasoning as the toggle above.
-  const toggleClientDoesA2P = (clientId: string) => {
-    const c = clientById(clientId);
-    if (!c) return;
-    const on = c.doesA2P !== true;
-    const nc = { ...c, doesA2P: on };
-    setClients((cs) => cs.map((x) => (x.id === clientId ? nc : x)));
-    markOwnClientWrite(nc.id);
-    upsertClient(nc);
-    // The page-view effect only reconciles on a client switch, so without
-    // this the new A2P steps wouldn't appear until you navigated away and
-    // back. Turning it off intentionally does NOT remove anything already
-    // created, same as every other reconcile call in this file.
-    if (on) reconcilePlaybookTasks(clientId);
-    pushToast(on ? `${c.name} now gets the A2P setup steps.` : `${c.name} no longer gets the A2P setup steps.`);
-  };
-  // Whether the public /waiting/[token] page shows the "Your growth plan"
-  // progress card. Off by default — same reasoning as the toggles above,
-  // just for whether the Playbook itself is client-visible at all, not one
-  // client's specific steps. Admin only, same reasoning as the toggles above.
-  const toggleClientShowGrowthPlan = (clientId: string) => {
-    const c = clientById(clientId);
-    if (!c) return;
-    const on = c.showGrowthPlan !== true;
-    const nc = { ...c, showGrowthPlan: on };
-    setClients((cs) => cs.map((x) => (x.id === clientId ? nc : x)));
-    markOwnClientWrite(nc.id);
-    upsertClient(nc);
-    pushToast(on ? `${c.name}'s client link now shows their growth plan.` : `${c.name}'s client link no longer shows their growth plan.`);
   };
   // Stamp reviewedAt = today, clearing this client/project from the Review
   // tier until next Monday (weekly) or its next nurture cycle. See
@@ -1343,7 +1262,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setClients(d.clients); setProjects(d.projects); setContacts(d.contacts); setTasks(d.tasks); setNotifications(d.notifications);
         setClientLinks(d.clientLinks); setClientNotes(d.clientNotes); setMessages(d.messages);
         setTaskTemplates(d.taskTemplates);
-        setPlaybooks(d.playbooks);
         setVaultFolders(d.vaultFolders);
         setFolders(d.folders);
         setStages(d.stages);
@@ -1529,7 +1447,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         }
         const row = p.new;
         // Every server-side write (client portal response, inbound email/SMS,
-        // owner Playbook completion) must send updated_by: null. Without it
+        // owner-side completion) must send updated_by: null. Without it
         // this stays pinned to whichever rep last touched the row from the
         // browser, so a real client reply gets silently dropped by this check
         // as if it were an echo of that rep's own edit — and their next save
@@ -2279,15 +2197,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // restricted by scopedTasks; only changes anything for admins.
   // Owner Growth Plan tasks are excluded from any unscoped-by-project view
   // (activeProject === null — "All" for a client, or the cross-client All
-  // Tasks tab) UNLESS someone has actually made it active work — given it an
-  // assignee or a due date. Untouched, it's just a checklist item living in
-  // its own Playbook list; the moment either is set, it's real work and
-  // should surface like any other task (Derek: "when we assign a task or a
-  // due date it can then start to show up on all because it's active,
-  // otherwise it sits there a checklist"). Once a specific project IS
-  // selected, the existing t.projectId === activeProject check already
-  // scopes correctly (only matches when that project happens to be the
-  // Playbook one), so this only needs to guard the unscoped case.
   // Whose list is on screen. Everything that answers "when is this due" or
   // "whose face goes on the row" reads this rather than me.id, so scoping All
   // Tasks to Michaella shows her dates and her face on a task delegated to
@@ -2300,7 +2209,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // was O(scopedTasks × projects) every render (projectById is a linear
   // scan), and it feeds displayedGroups/vaultItems/Journal counts below.
   const baseTasks = useMemo(
-    () => scopedTasks.filter((t) => t.clientId.startsWith("cl_") && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject) && (!activeFolder || projectById(t.projectId)?.folderId === activeFolder) && (activeClient !== "all" || allTasksScope === "all" || isOnPlateOf(t, allTasksScope === "mine" ? me.id : allTasksScope)) && (!t.playbookStepKey || !!activeProject || !!t.assigneeId || !!t.due)),
+    () => scopedTasks.filter((t) => t.clientId.startsWith("cl_") && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject) && (!activeFolder || projectById(t.projectId)?.folderId === activeFolder) && (activeClient !== "all" || allTasksScope === "all" || isOnPlateOf(t, allTasksScope === "mine" ? me.id : allTasksScope))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [scopedTasks, activeClient, activeProject, activeFolder, projects, allTasksScope, me.id]
   );
@@ -2409,109 +2318,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     }
     return m;
   }, [scopedTasks]);
-  // Owner Growth Plan tasks, bucketed by client — same one-pass-not-memoized
-  // shape as openTasksByClient above, but WITHOUT the status==="done"
-  // exclusion (playbookCompletion needs to see done steps too, to count them).
-  // Memoized — one pass over the full unfiltered tasks table (~28k rows).
-  const playbookTasksByClient = useMemo(() => {
-    const m = new Map<string, Task[]>();
-    for (const t of tasks) {
-      if (!t.playbookStepKey) continue;
-      const list = m.get(t.clientId);
-      if (list) list.push(t); else m.set(t.clientId, [t]);
-    }
-    return m;
-  }, [tasks]);
-  // Owner Growth Plan — every client's Playbook is the SAME fixed catalog
-  // (PLAYBOOK_STEPS), never a per-client copy. This is the one place that
-  // keeps a client's real Task rows in sync with whatever the catalog
-  // currently says: creates any step that doesn't have a task yet, and fixes
-  // a task's title if the catalog's wording for that step has since changed.
-  // Never touches status/assignee/due/comments — those are the ambassador's
-  // own per-client progress. Idempotent — safe to call repeatedly. Called
-  // both eagerly (the moment a business becomes a client, see
-  // addClientContact/setClientStatus) and lazily (openClientPlaybook below),
-  // so a pre-existing client self-heals to the current catalog instead of
-  // needing a one-time bulk backfill across every business.
-  const reconcilePlaybookTasks = (clientId: string) => {
-    const pbProjectId = playbookProjectId(clientId);
-    let projectWrite: PromiseLike<unknown> | null = null;
-    if (!projects.some((p) => p.id === pbProjectId)) {
-      const p: Project = { id: pbProjectId, clientId, name: "Playbook", description: "" };
-      setProjects((ps) => [...ps, p]);
-      projectWrite = upsertProject(p);
-    }
-    const byKey = new Map((playbookTasksByClient.get(clientId) ?? []).map((t) => [t.playbookStepKey as string, t]));
-    const toWrite: Task[] = [];
-    // The sales pipeline stages and the A2P/email-domain/ongoing side quests
-    // all ride the same reconciliation as the main growth plan
-    // (same project, same create/retitle logic) — they're just excluded from
-    // playbookCompletion()'s total and rendered as their own groups
-    // (buildPlaybookGroups below). A2P and email-domain additionally only
-    // apply to a business that texts its list, hence playbookStepsForClient:
-    // every other business was being handed five setup tasks it would never
-    // do. Narrowing the catalog only affects what this loop CREATES (and
-    // retitles): an A2P row already written for a business that turns out
-    // not to text is simply left alone — never deleted, never hidden, still
-    // in its group and still resolving its guide panel through
-    // PLAYBOOK_STEP_BY_KEY, which stays the full catalog.
-    const steps = playbookStepsForClient(clientById(clientId)?.doesA2P === true);
-    for (const step of steps) {
-      const existing = byKey.get(step.key);
-      if (!existing) {
-        toWrite.push({
-          id: newId("t_"), projectId: pbProjectId, clientId, title: step.label, description: "",
-          status: "todo", priority: "none", assigneeId: null, contactId: clientId.slice(3), due: null,
-          recurrence: step.recurring ? "monthly" : "none", labelIds: [], ghlTaskId: null, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
-          playbookStepKey: step.key, createdBy: null,
-        });
-      } else if (existing.title !== step.label) {
-        toWrite.push({ ...existing, title: step.label });
-      }
-    }
-    if (!toWrite.length) return;
-    const writeIds = new Set(toWrite.map((t) => t.id));
-    setTasks((ts) => [...ts.filter((t) => !writeIds.has(t.id)), ...toWrite]);
-    // void: the chained write is awaited for ordering (the project row has to
-    // exist before its tasks reference it), not for a value.
-    if (projectWrite) void projectWrite.then(() => { void bulkUpsertTasks(toWrite); });
-    else bulkUpsertTasks(toWrite);
-  };
-  // The Playbook is standard on every contact, not just ones that came
-  // through the claim flow (addClientContact/setClientStatus already
-  // reconcile eagerly there) — this is what makes it "just show up" for a
-  // plain agency client too: opening ANY real client's page reconciles its
-  // Playbook, so a client added before this feature existed (or added
-  // through some other path entirely) self-heals the first time anyone
-  // actually looks at them, just with no special-cased entry point required
-  // anymore.
-  useEffect(() => {
-    // Admins only. Both of these heal data by WRITING — a Playbook project,
-    // up to fifty playbook tasks, and sales-stage completions — and a VA is
-    // allowed none of it, so for them this fired dozens of inserts that RLS
-    // refused on sight (403 "new row violates row-level security policy" on
-    // projects and tasks, in Michaella's console) every time they opened a
-    // client. Self-healing someone else's data is not a viewer's job.
-    if (canAdmin && activeClient.startsWith("cl_") && activeClient !== WORKSPACE_CLIENT_ID) {
-      reconcilePlaybookTasks(activeClient);
-      // cascadeSalesStageCompletion only fires forward, on an actual Stage
-      // dropdown change — a client already sitting at Claimed (or further)
-      // from before that shipped never gets a transition to trigger it. This
-      // is the same self-heal moment as the reconcile above: opening the
-      // page catches the sales pipeline up to whatever the client's current
-      // status already implies, so the backlog clears itself as reps browse
-      // rather than needing a one-off migration or a re-click on a dropdown
-      // that already shows the right value.
-      const c = clientById(activeClient);
-      if (c) cascadeSalesStageCompletion(activeClient, c.status);
-    }
-    // reconcilePlaybookTasks/cascadeSalesStageCompletion/clientById
-    // intentionally excluded — all three are redefined every render (close
-    // over live `tasks`/`projects`/`clients`), and including them here would
-    // refire this effect every render instead of only on a real client
-    // switch, which is the only time re-reconciling is meaningful.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeClient]);
   // Not gated by myWorkUser (the admin-only "viewing work for" selector) —
   // RLS never even returns another person's private tasks in `tasks`, so
   // filtering by `me.id` here is correct regardless of who's being viewed.
@@ -2598,58 +2404,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return visibleProjects.map((p) => ({ key: p.id, label: p.name, color: clientById(p.clientId)?.color ?? "#94a3b8", tasks: list.filter((t) => t.projectId === p.id) }));
   };
 
-  // Owner Growth Plan view: fixed Level sections (PLAYBOOK_PHASES), each in
-  // catalog order (PLAYBOOK_STEPS) — never the caller's current sortBy/sortDir,
-  // so the sequence can't drift no matter what column-sort is active elsewhere
-  // in the app. Any non-step task that ends up in the Playbook project (a
-  // one-off note an ambassador quick-added) still shows, under "Other", so
-  // nothing silently disappears.
-  // Sales stages first, so both maps below carry them: they're real step-tasks
-  // in the same Playbook project, just kept out of the owner-facing
-  // PLAYBOOK_ALL_STEPS (see SALES_STAGE_STEPS in data.ts). Without them here a
-  // sales task would fall through to the "Other" bucket at the bottom.
-  const playbookOrderedSteps = [...SALES_STAGE_STEPS, ...PLAYBOOK_ALL_STEPS];
-  const stepPhase = new Map(playbookOrderedSteps.map((s) => [s.key, s.phase]));
-  const stepOrder = new Map(playbookOrderedSteps.map((s, i) => [s.key, i]));
-  // Every phase that isn't part of the owner's main growth-plan sequence gets
-  // its own color, so a rep can tell the pipeline and the side quests apart
-  // from the plan itself at a glance.
-  const phaseColor: Record<string, string> = { sales: "#f59e0b", a2p: "#a855f7", email_domain: "#a855f7", ongoing: "#0ea5e9" };
-  const buildPlaybookGroups = (list: Task[]): Grp[] => {
-    const groupFor = (phase: { key: string; label: string }) => ({
-      key: phase.key, label: phase.label, color: phaseColor[phase.key] ?? "#5c8ac4",
-      tasks: list.filter((t) => t.playbookStepKey && stepPhase.get(t.playbookStepKey) === phase.key)
-        .sort((a, b) => (stepOrder.get(a.playbookStepKey!) ?? 0) - (stepOrder.get(b.playbookStepKey!) ?? 0)),
-    });
-    // A2P + email-domain sit right after "Get on the map" (PLAYBOOK_PHASES[2] —
-    // [0] is the sales pipeline, which runs first, then [1] "package") — "do
-    // it early," per both source docs — not folded into the phase array itself
-    // so playbookCompletion()'s "X of 25" total never counts them. The sales
-    // stages DO live in PLAYBOOK_PHASES (they're core to the funnel, not
-    // optional side work) but still stay out of that total, by living outside
-    // PLAYBOOK_STEPS instead — see SALES_STAGE_STEPS in data.ts.
-    // Monthly retention sits at the very end — an ongoing duty, not something
-    // to front-load, and distinct from the fully-passive PLAYBOOK_ALWAYS_RUNNING
-    // banner since it needs an ambassador to actually act on it each month.
-    // Those two side quests are the only groups that can legitimately be
-    // empty now that they're gated on Client.doesA2P — this list renders with
-    // hideEmpty off (so a phase you've cleared still shows its heading), which
-    // would otherwise leave a business that doesn't text staring at two
-    // permanently blank sections. Dropped only when empty, so a client who
-    // already has A2P rows from before the gate keeps seeing them.
-    const sideQuest = [groupFor(PLAYBOOK_A2P_PHASE), groupFor(PLAYBOOK_EMAIL_DOMAIN_PHASE)].filter((g) => g.tasks.length > 0);
-    const byPhase = [
-      groupFor(PLAYBOOK_PHASES[0]), groupFor(PLAYBOOK_PHASES[1]), groupFor(PLAYBOOK_PHASES[2]), ...sideQuest,
-      ...PLAYBOOK_PHASES.slice(3).map(groupFor),
-      groupFor(PLAYBOOK_ONGOING_PHASE),
-    ];
-    // Latest activity first, same reasoning and same lastActivityAt field as
-    // Follow Up's replyRows (Derek, 2026-08-11) — falls back to due (date-
-    // only) for anything upsertConversationTask hasn't stamped.
-    const extra = list.filter((t) => !t.playbookStepKey)
-      .sort((a, b) => (b.lastActivityAt ?? b.due ?? "").localeCompare(a.lastActivityAt ?? a.due ?? ""));
-    return extra.length ? [...byPhase, { key: "extra", label: "Other", color: "#94a3b8", tasks: extra }] : byPhase;
-  };
 
   // Flat, in-display-order list of the tasks currently shown — drives prev/next
   // navigation inside the open task (j/k + header arrows).
@@ -2854,14 +2608,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setTasks((prev) => { let next = prev.map((x) => (x.id === id ? updated : x)); if (clone) next = [...next, clone]; return next; });
     upsertTask(updated, me.id);
     if (clone) upsertTask(clone, me.id);
-    // Bumps clients.playbook_last_progress_at whenever a real Owner Growth
-    // Plan step's status changes (done or reopened) — see playbookCheckinsServer.ts's
-    // stall check, which uses this to tell "quiet because it's done" apart
-    // from "quiet because it's stuck." The owner-toggle route bumps this
-    // server-side for its own completion path.
-    if (before.playbookStepKey && synced.status !== undefined && synced.status !== before.status) {
-      touchPlaybookProgress(before.clientId);
-    }
     if (patch.assigneeId && patch.assigneeId !== me.id && patch.assigneeId !== before.assigneeId) {
       notify(patch.assigneeId, `${me.name} assigned you “${before.title}”`, id);
       pushToast(`Notified ${userById(patch.assigneeId)?.name}`);
@@ -2939,20 +2685,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   };
   // Same confirm-then-undo-toast shape as bulkPatch above, but a real delete
   // has no undo — the toast just reports what happened, it doesn't offer one.
-  // Locked checklist steps (Playbook/Sales) are silently skipped rather than
-  // blocking the whole batch, same "defense in depth" reasoning as deleteTask
-  // below; the confirm message says how many were skipped so it's never a
-  // silent surprise.
   const bulkDelete = () => {
     const ids = [...selectedTaskIds];
     if (!ids.length) return;
-    const deletable = ids.filter((id) => { const t = tasksRef.current.find((x) => x.id === id); return !!t && !t.playbookStepKey; });
+    const deletable = ids.filter((id) => { const t = tasksRef.current.find((x) => x.id === id); return !!t; });
     const skipped = ids.length - deletable.length;
-    if (!deletable.length) { pushToast("Playbook/Sales steps can't be deleted."); return; }
+    if (!deletable.length) { pushToast("Nothing selected can be deleted."); return; }
     const n = deletable.length;
     setConfirmDialog({
       title: `Delete ${n} task${n === 1 ? "" : "s"}?`,
-      message: `This can't be undone.${skipped ? ` ${skipped} selected Playbook/Sales step${skipped === 1 ? "" : "s"} will be skipped.` : ""}`,
+      message: `This can't be undone.${skipped ? ` ${skipped} selected step${skipped === 1 ? "" : "s"} will be skipped.` : ""}`,
       confirmLabel: `Delete ${n} task${n === 1 ? "" : "s"}`,
       onConfirm: () => {
         setConfirmDialog(null);
@@ -3001,7 +2743,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       // A Growth Plan step is pinned to its client's checklist by this key; a
       // copy carrying it would be treated as that same step somewhere else
       // and get reconciled away.
-      playbookStepKey: null,
     };
     setTasks((ts) => [...ts, copy]);
     upsertTask(copy, me.id);
@@ -3014,7 +2755,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // business gets — defense in depth alongside the hidden delete button in
     // TaskDrawer, in case some other path ever calls this directly.
     const lockedStep = tasksRef.current.find((x) => x.id === id);
-    if (lockedStep?.playbookStepKey) { pushToast("Playbook steps can't be deleted."); return; }
     setConfirmDialog({
       title: "Delete this task?", message: "Moves to Trash — restorable there for 30 days.", confirmLabel: "Delete",
       onConfirm: () => {
@@ -3508,7 +3248,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setClients((cs) => [...cs, c]);
     markOwnClientWrite(c.id);
     upsertClient(c);
-    if (type === "client") reconcilePlaybookTasks(id);
     // Bring any of this contact's stranded conversation onto the new client's
     // page — inbound created a Conversation task under the GHL sub-account
     // before they were a tracked client. Re-point those tasks (by contact_id)
@@ -3580,42 +3319,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setTasks((ts) => [...ts, t]);
     upsertTask(t, me.id);
     pushToast(`Created "${t.title}" from template`);
-  };
-  const savePlaybook = (id: string | undefined, spec: { name: string; tasks: PlaybookTask[] }) => {
-    const p: Playbook = { id: id ?? newId("pb_"), ...spec };
-    setPlaybooks((ps) => (id ? ps.map((x) => (x.id === id ? p : x)) : [...ps, p]));
-    upsertPlaybook(p);
-  };
-  const deletePlaybook = (id: string) => {
-    const pb = playbooks.find((x) => x.id === id);
-    setConfirmDialog({
-      title: `Delete playbook “${pb?.name ?? "this playbook"}”?`,
-      message: "Tasks already loaded from it are not affected. This can't be undone.",
-      confirmLabel: "Delete",
-      onConfirm: () => {
-        setConfirmDialog(null);
-        setPlaybooks((ps) => ps.filter((x) => x.id !== id));
-        deletePlaybookDb(id);
-      },
-    });
-  };
-  // Manual for now, per Derek: author + load here; auto-loading a playbook
-  // when a client enters a given stage is planned but not wired up yet — no
-  // stage-change hook calls this.
-  const loadPlaybook = (playbookId: string, clientId: string, projectId: string) => {
-    const pb = playbooks.find((p) => p.id === playbookId);
-    if (!pb || !pb.tasks.length) return;
-    const contactId = clientId.startsWith("cl_") ? clientId.slice(3) : null;
-    const created: Task[] = pb.tasks.map((pt) => ({
-      id: newId("t_"), projectId, clientId, title: pt.title, description: "",
-      status: "todo", priority: pt.priority ?? "normal", assigneeId: me.id, contactId,
-      due: typeof pt.dueOffsetDays === "number" ? addDaysIso(TODAY, pt.dueOffsetDays) : null,
-      recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: false,
-      subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(), createdBy: me.id,
-    }));
-    setTasks((ts) => [...ts, ...created]);
-    created.forEach((t) => upsertTask(t, me.id));
-    pushToast(`Loaded "${pb.name}" — ${created.length} task${created.length === 1 ? "" : "s"} added.`);
   };
   const renameClient = (id: string) => {
     const c = clientById(id);
@@ -3922,7 +3625,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // Owner Growth Plan steps stay on their business — defense in depth
     // alongside the hidden Client/Project selects in TaskDrawer, in case
     // some other path (bulk move, a future feature) ever calls this directly.
-    if (t.playbookStepKey) { pushToast("Playbook steps can't be moved to a different client."); return; }
     // A named target wins; otherwise land in the client's first project, and
     // failing that make one. Without the named target, "move to Tracy, CA"
     // could only ever mean "move to ClickUpLocal", dumping the task into
@@ -3961,7 +3663,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const ids = [...selectedTaskIds];
     if (!ids.length) return;
     const name = (targetProjectId && projectById(targetProjectId)?.name) || clientById(clientId)?.name || "client";
-    const movable = ids.filter((id) => { const t = tasks.find((x) => x.id === id); return t && !t.playbookStepKey && (targetProjectId ? t.projectId !== targetProjectId : t.clientId !== clientId); });
+    const movable = ids.filter((id) => { const t = tasks.find((x) => x.id === id); return t && (targetProjectId ? t.projectId !== targetProjectId : t.clientId !== clientId); });
     if (!movable.length) { pushToast(`Already in ${name}`); return; }
     const n = movable.length;
     const plural = n === 1 ? "" : "s";
@@ -4736,7 +4438,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   <button onClick={() => { setDirView("clients"); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
                   <span>›</span>
                 </>)}
-                <span>{settingsView ? "Integrations, team, templates, playbooks, and API tokens" : inboxView ? (dmUserId ? "Private — only the two of you can see this" : "Talk to the team — everyone's in this one") : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</span>
+                <span>{settingsView ? "Integrations, team, templates, and API tokens" : inboxView ? (dmUserId ? "Private — only the two of you can see this" : "Talk to the team — everyone's in this one") : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</span>
               </p>
             </>)}
           </div>
@@ -4881,7 +4583,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             clients={clients}
             templates={taskTemplates} projects={projects}
             onSaveTemplate={saveTemplate} onDeleteTemplate={deleteTemplate} onUseTemplateAsTask={useTemplateAsTask}
-            playbooks={playbooks} onSavePlaybook={savePlaybook} onDeletePlaybook={deletePlaybook} onLoadPlaybook={loadPlaybook}
             dmEnabled={dmEnabled} onSetDmEnabled={setDmEnabled}
             onRestoreClient={restoreClient} onRestoreProject={restoreProjectFromTrash} onRestoreTask={restoreTaskFromTrash}
             onPurgeClient={purgeClient} onPurgeProject={purgeProject} onPurgeTask={purgeTask}
@@ -4995,57 +4696,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 onAddTask={() => setDumpGroup({ key: null, personal: false })} />
             );
           })()}
-          {activeProject === playbookProjectId(activeClient) ? (() => {
-            // Owner Growth Plan: fixed Level sections, catalog order. No
-            // onDropInGroup/onMergeTasks (no drag-to-recategorize or merge),
-            // and no selectedIds/onToggleSelect either — that's what the
-            // multi-select bulk action bar (Move to…/merge) keys off of, so
-            // omitting it here means a playbook step can never be selected
-            // for a bulk move in the first place. Combined with the
-            // per-task Client/Project lock in TaskDrawer.tsx (playbookStepKey
-            // gate), there's no path left to relocate a step out of its
-            // business's Playbook or out of its fixed Level — status,
-            // priority, and due date remain fully editable, only the plan's
-            // shape itself is locked.
-            const pb = playbookCompletion(activeClient, tasks);
-            const foundationDone = ["claim_listing", "complete_listing", "first_offer", "add_events"].every((k) => pb.done.has(k));
-            const allDone = pb.doneCount === pb.total;
-            return (
-              <>
-                <div className="mb-3 rounded-xl border bg-surface p-4">
-                  <div className="text-[13px] font-semibold uppercase tracking-wide text-muted">{PLAYBOOK_INTRO.title}</div>
-                  <div className="mt-1 text-[14px] text-muted">{PLAYBOOK_INTRO.body}</div>
-                  <ul className="mt-2 list-disc space-y-1 pl-5 text-[14px]">
-                    {PLAYBOOK_INTRO.items.map((it) => <li key={it}>{it}</li>)}
-                  </ul>
-                  <div className="mt-2 text-[13px] text-muted">📈 {PLAYBOOK_INTRO.youGet}</div>
-                </div>
-                {foundationDone && (
-                  <div className="mb-3 rounded-xl border border-accent/30 bg-accent-soft p-4">
-                    <div className="text-[15px] font-semibold text-accent">🎉 {PLAYBOOK_MILESTONE.title}</div>
-                    <div className="mt-1 text-[14px]">{PLAYBOOK_MILESTONE.intro}</div>
-                    <ul className="mt-2 list-disc space-y-1 pl-5 text-[14px]">
-                      {PLAYBOOK_MILESTONE.items.map((it) => <li key={it}>{it}</li>)}
-                    </ul>
-                  </div>
-                )}
-                {activeFilterBar}
-                <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildPlaybookGroups(baseTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="" onAddInGroup={railHidden ? (k) => setDumpGroup({ key: k, personal: false }) : undefined} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={false} colOrder={colOrder} onReorderCols={reorderCols} />
-                <div className="mt-3 rounded-xl border bg-surface p-4">
-                  <div className="text-[13px] font-semibold uppercase tracking-wide text-muted">Always running for you</div>
-                  <ul className="mt-2 list-disc space-y-1 pl-5 text-[14px] text-muted">
-                    {PLAYBOOK_ALWAYS_RUNNING.map((it) => <li key={it}>{it}</li>)}
-                  </ul>
-                </div>
-                {allDone && (
-                  <div className="mt-3 rounded-xl border border-accent/30 bg-accent-soft p-4">
-                    <div className="text-[15px] font-semibold text-accent">🎓 You&apos;ve graduated</div>
-                    <div className="mt-1 text-[14px]">{PLAYBOOK_FINISH_LINE}</div>
-                  </div>
-                )}
-              </>
-            );
-          })() : activeProject && stagesForProject(activeProject).length > 0 ? (
+          {activeProject && stagesForProject(activeProject).length > 0 ? (
             <StageBoard stages={stagesForProject(activeProject)} tasks={baseTasks.filter(passesFilters)} canAdmin={canAdmin}
               onOpenTask={setOpenTaskId} onSetTaskStage={setTaskStage} onQuickAdd={(stageId, title) => quickAddInStage(activeProject, stageId, title)}
               onCreateStage={() => createStage(activeProject)} onRenameStage={renameStage} onToggleStageIsDone={toggleStageIsDone} onDeleteStage={deleteStage}
@@ -5139,7 +4790,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={navTaskIds.length} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(body, attachments) => addComment(openTask.id, body, attachments)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onDownloadAll={downloadAllAsZip} zippingIds={zippingIds} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { if (openTask.playbookStepKey) { pushToast("Playbook steps can't be moved to a different list."); return; } patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null })} onDuplicate={(target) => duplicateTask(openTask.id, target)} projectsFor={projectsForClient} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => openClientList(openTask.clientId, openTask.projectId)} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} onMarkChannelRead={(channel) => markTaskChannelRead(openTask.id, channel)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage(`messages/${openTask.clientId}`, file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} onScheduleTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, scheduledAt, attachments, cc, bcc) => scheduleMessage(openTask.clientId, channel, subject, body, scheduledAt, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId)} draftingMessage={draftingMessage} onGetTaskLink={() => getClientShareUrl(openTask.clientId, { projectId: openTask.projectId, taskId: openTask.id })} canAdmin={canAdmin} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onCopyClientLink={() => copyClientShareLink(openTask.clientId, openTask.projectId)} onDeleteComment={(cid) => deleteComment(openTask.id, cid)} onDraftDescription={draftDescription} draftingDescription={draftingDescription} pushToast={pushToast} meId={me.id}
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onDownloadAll={downloadAllAsZip} zippingIds={zippingIds} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null })} onDuplicate={(target) => duplicateTask(openTask.id, target)} projectsFor={projectsForClient} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => openClientList(openTask.clientId, openTask.projectId)} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} onMarkChannelRead={(channel) => markTaskChannelRead(openTask.id, channel)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage(`messages/${openTask.clientId}`, file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} onScheduleTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, scheduledAt, attachments, cc, bcc) => scheduleMessage(openTask.clientId, channel, subject, body, scheduledAt, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId)} draftingMessage={draftingMessage} onGetTaskLink={() => getClientShareUrl(openTask.clientId, { projectId: openTask.projectId, taskId: openTask.id })} canAdmin={canAdmin} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onCopyClientLink={() => copyClientShareLink(openTask.clientId, openTask.projectId)} onDeleteComment={(cid) => deleteComment(openTask.id, cid)} onDraftDescription={draftDescription} draftingDescription={draftingDescription} pushToast={pushToast} meId={me.id}
           onSendDm={(userId, body) => sendDmMessage(userId, body)}
           onDelegate={(spec) => delegateTask(openTask.id, spec)}
           clientLinks={clientLinks.filter((l) => l.clientId === openTask.clientId)}
@@ -5199,14 +4850,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   <label className="flex items-start justify-between gap-3">
                     <span><span className="block text-[14px] font-medium">Client sees all tasks</span><span className="block text-[13px] text-muted">Their portal also lists what the team is working on and what&apos;s been completed, not just what needs them. Every non-private task on this account becomes readable by the client.</span></span>
                     <button onClick={() => toggleClientPortalShowsAllTasks(activeClient)} className={`mt-0.5 flex h-5 w-9 shrink-0 items-center rounded-full transition ${settingsClient.portalShowsAllTasks ? "bg-accent" : "bg-border"}`}><span className={`h-4 w-4 rounded-full bg-white shadow transition ${settingsClient.portalShowsAllTasks ? "translate-x-4" : "translate-x-0.5"}`} /></button>
-                  </label>
-                  <label className="flex items-start justify-between gap-3">
-                    <span><span className="block text-[14px] font-medium">Client sees growth plan</span><span className="block text-[13px] text-muted">Their portal shows the Playbook progress card — what&apos;s done and what&apos;s next.</span></span>
-                    <button onClick={() => toggleClientShowGrowthPlan(activeClient)} className={`mt-0.5 flex h-5 w-9 shrink-0 items-center rounded-full transition ${settingsClient.showGrowthPlan ? "bg-accent" : "bg-border"}`}><span className={`h-4 w-4 rounded-full bg-white shadow transition ${settingsClient.showGrowthPlan ? "translate-x-4" : "translate-x-0.5"}`} /></button>
-                  </label>
-                  <label className="flex items-start justify-between gap-3">
-                    <span><span className="block text-[14px] font-medium">Client does A2P texting</span><span className="block text-[13px] text-muted">Includes the A2P registration steps in this client&apos;s Playbook checklist.</span></span>
-                    <button onClick={() => toggleClientDoesA2P(activeClient)} className={`mt-0.5 flex h-5 w-9 shrink-0 items-center rounded-full transition ${settingsClient.doesA2P ? "bg-accent" : "bg-border"}`}><span className={`h-4 w-4 rounded-full bg-white shadow transition ${settingsClient.doesA2P ? "translate-x-4" : "translate-x-0.5"}`} /></button>
                   </label>
                 </div>
                 <button onClick={() => copyClientShareLink(activeClient)} className="mt-3 flex items-center gap-1.5 text-[13px] font-medium text-accent hover:underline"><I.link className="h-3.5 w-3.5" /> Copy portal link</button>

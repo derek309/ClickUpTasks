@@ -8,7 +8,7 @@ import { titleCase, conversationSignalRank } from "./data";
 // erroring out. Real contact ids are alphanumeric plus dash/underscore, so
 // anything else is refused. The public entry points that feed this a
 // caller-controlled id validate against the same shape and 400 early (see
-// api/external/playbook/[ghlContactId]); this is the last line of defence for
+// external owner-facing routes); this is the last line of defence for
 // any future caller that forgets.
 export const SAFE_CONTACT_ID = /^[A-Za-z0-9_-]+$/;
 
@@ -122,7 +122,7 @@ export function toPacificDate(iso: string): string {
 // else (including any manually attached files) untouched.
 const MEETING_LOCATION_ATTACHMENT_NAME = "Meeting location";
 // Same system author every other server-side event line uses (see the
-// playbook toggle route, granolaSync) so these render identically in the
+// granolaSync) so these render identically in the
 // feed. The synthetic "Claude" roster entry this used to point at was
 // removed (Derek: "we no longer need Claude as a user") — attributed to
 // Derek's own account now, same as every other automated comment.

@@ -28,7 +28,6 @@ import {
   type MessageChannel,
   type MessageDirection,
   type TaskTemplate,
-  type Playbook,
   type Priority,
   type TeamMessage,
   type DmMessage,
@@ -43,12 +42,6 @@ export { titleCase };
 
 // --- mappers ----------------------------------------------------------------
 
-// playbook_last_progress_at deliberately NOT included here: clientToRow
-// feeds the general-purpose upsertClient(), called on nearly every client
-// edit — including it would 400 that entire write path until the migration
-// runs (PostgREST rejects an upsert naming an unknown column). It's written
-// only through its own narrow, dedicated touchPlaybookProgress() below,
-// which only fires on an actual step completion.
 // can_request_new_tasks IS included, and that's the same trade in reverse:
 // it's an ordinary admin-editable setting, so it belongs on the normal edit
 // path — which makes supabase/client-request-new-tasks.sql a migrate-before-
@@ -56,7 +49,7 @@ export { titleCase };
 // (supabase/client-trial-and-a2p.sql) are on that same normal edit path for
 // the same reason, so that migration is also migrate-before-deploy.
 const clientToRow = (c: Client) => ({ id: c.id, name: c.name, color: c.color, ghl_location_id: c.ghlLocationId, status: c.status ?? "claimed", type: c.type ?? "client", assigned_to: c.assignedTo ?? [], can_message: c.canMessage ?? [], linked_contact_id: c.linkedContactId ?? null, linked_contact_ids: c.linkedContactIds ?? [], reviewed_at: c.reviewedAt ?? null, share_token: c.shareToken ?? null, can_request_new_tasks: c.canRequestNewTasks === true, in_trial: c.inTrial === true, trial_ends_at: c.trialEndsAt ?? null, does_a2p: c.doesA2P === true, show_growth_plan: c.showGrowthPlan === true, portal_shows_all_tasks: c.portalShowsAllTasks === true });
-export const rowToClient = (r: any): Client => ({ id: r.id, name: titleCase(r.name), color: r.color, ghlLocationId: r.ghl_location_id ?? "", status: (r.status as Client["status"]) ?? "claimed", type: (r.type as Client["type"]) ?? "client", assignedTo: r.assigned_to ?? [], canMessage: r.can_message ?? [], linkedContactId: r.linked_contact_id ?? null, linkedContactIds: r.linked_contact_ids ?? [], aiSummary: r.ai_summary ?? null, aiSummaryAt: r.ai_summary_at ?? null, reviewedAt: r.reviewed_at ?? null, shareToken: r.share_token ?? null, playbookLastProgressAt: r.playbook_last_progress_at ?? null, canRequestNewTasks: r.can_request_new_tasks === true, inTrial: r.in_trial === true, trialEndsAt: r.trial_ends_at ?? null, doesA2P: r.does_a2p === true, showGrowthPlan: r.show_growth_plan === true, portalShowsAllTasks: r.portal_shows_all_tasks === true });
+export const rowToClient = (r: any): Client => ({ id: r.id, name: titleCase(r.name), color: r.color, ghlLocationId: r.ghl_location_id ?? "", status: (r.status as Client["status"]) ?? "claimed", type: (r.type as Client["type"]) ?? "client", assignedTo: r.assigned_to ?? [], canMessage: r.can_message ?? [], linkedContactId: r.linked_contact_id ?? null, linkedContactIds: r.linked_contact_ids ?? [], aiSummary: r.ai_summary ?? null, aiSummaryAt: r.ai_summary_at ?? null, reviewedAt: r.reviewed_at ?? null, shareToken: r.share_token ?? null, canRequestNewTasks: r.can_request_new_tasks === true, inTrial: r.in_trial === true, trialEndsAt: r.trial_ends_at ?? null, doesA2P: r.does_a2p === true, showGrowthPlan: r.show_growth_plan === true, portalShowsAllTasks: r.portal_shows_all_tasks === true });
 
 const contactToRow = (c: Contact) => ({ id: c.id, client_id: c.clientId, name: c.name, email: c.email, phone: c.phone ?? null, ghl_contact_id: c.ghlContactId, company_name: c.company ?? null, city: c.city ?? null, state: c.state ?? null, saas_url: c.saasUrl ?? null });
 export const rowToContact = (r: any): Contact => ({ id: r.id, clientId: r.client_id, name: titleCase(r.name), email: r.email ?? "", phone: r.phone ?? "", ghlContactId: r.ghl_contact_id ?? "", company: r.company_name ?? "", city: r.city ?? "", state: r.state ?? "", saasUrl: r.saas_url ?? "" });
@@ -78,8 +71,7 @@ const taskToRow = (t: Task, updatedBy?: string | null) => ({
   recurrence_days_of_month: t.recurrenceDaysOfMonth ?? null, follow_up_at: t.followUpAt ?? null, priority_auto: t.priorityAuto ?? false, size: t.size ?? null, size_hours: t.sizeHours ?? null, recurrence_nth: t.recurrenceNth ?? null, recurrence_weekday: t.recurrenceWeekday ?? null,
   ghl_task_id: t.ghlTaskId, label_ids: t.labelIds, subtasks: t.subtasks,
   attachments: t.attachments, comments: t.comments, updated_by: updatedBy ?? null, is_private: t.private,
-  stage_id: t.stageId ?? null, client_response: t.clientResponse ?? null, draft_email: t.draftEmail ?? null,
-  playbook_step_key: t.playbookStepKey ?? null, created_by: t.createdBy ?? null, checkin_kind: t.checkinKind ?? null,
+  stage_id: t.stageId ?? null, client_response: t.clientResponse ?? null, draft_email: t.draftEmail ?? null, created_by: t.createdBy ?? null,
   // Derived from checklist-item assignees so RLS can let a delegatee see a
   // task delegated to them even when they don't own it or follow the client.
   delegated_to: [...new Set(t.subtasks.map((s) => s.assigneeId).filter((id): id is string => !!id && id !== t.assigneeId))],
@@ -102,9 +94,7 @@ export const rowToTask = (r: any): Task => ({
   stageId: r.stage_id ?? null,
   clientResponse: r.client_response ?? null,
   draftEmail: r.draft_email ?? null,
-  playbookStepKey: r.playbook_step_key ?? null,
   createdBy: r.created_by ?? null,
-  checkinKind: r.checkin_kind ?? null,
 });
 
 const notifToRow = (n: Notification) => ({ id: n.id, recipient_id: n.recipientId, text: n.text, task_id: n.taskId, actor_id: n.actorId ?? null, client_id: n.clientId ?? null, project_id: n.projectId ?? null, at: n.at, read: n.read, kind: n.kind ?? "activity" });
@@ -128,8 +118,6 @@ const rowToVaultFolder = (r: any): VaultFolder => ({ id: r.id, clientId: r.clien
 const taskTemplateToRow = (t: TaskTemplate) => ({ id: t.id, name: t.name, checklist_items: t.checklistItems });
 const rowToTaskTemplate = (r: any): TaskTemplate => ({ id: r.id, name: r.name, checklistItems: r.checklist_items ?? [] });
 
-const playbookToRow = (p: Playbook) => ({ id: p.id, name: p.name, tasks: p.tasks });
-const rowToPlaybook = (r: any): Playbook => ({ id: r.id, name: r.name, tasks: r.tasks ?? [] });
 
 const messageToRow = (m: Message) => ({
   id: m.id, contact_id: m.contactId, client_id: m.clientId, task_id: m.taskId ?? null, channel: m.channel, direction: m.direction,
@@ -284,7 +272,7 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true, 
 }
 
 export async function fetchAll() {
-  const [c, ct, p, t, n, cl, cn, m, tt, vf, fd, um, sg, tm, pb, dm, gu] = await Promise.all([
+  const [c, ct, p, t, n, cl, cn, m, tt, vf, fd, um, sg, tm, dm, gu] = await Promise.all([
     fetchAllRows("clients", "created_at", true, true),
     fetchAllRows("contacts"),
     fetchAllRows("projects", undefined, true, true),
@@ -302,7 +290,6 @@ export async function fetchAll() {
     fetchAllRows("inbound_unmatched", "created_at", false),
     fetchAllRows("stages", "position"),
     fetchAllRows("team_messages", "created_at", false),
-    fetchAllRows("playbooks", "created_at"),
     fetchAllRows("dm_messages", "created_at", false),
     fetchAllRows("granola_unmatched", "created_at", false),
   ]);
@@ -320,7 +307,6 @@ export async function fetchAll() {
   if (um.error) console.warn("[db] inbound_unmatched unavailable — run supabase/inbound-unmatched.sql", um.error.message);
   if (sg.error) console.warn("[db] stages unavailable — run supabase/stages.sql", sg.error.message);
   if (tm.error) console.warn("[db] team_messages unavailable — run supabase/team-chat.sql", tm.error.message);
-  if (pb.error) console.warn("[db] playbooks unavailable — run supabase/playbooks.sql", pb.error.message);
   if (dm.error) console.warn("[db] dm_messages unavailable — run supabase/dm-chat.sql", dm.error.message);
   if (gu.error) console.warn("[db] granola_unmatched unavailable — run supabase/granola-sync.sql", gu.error.message);
   return {
@@ -338,7 +324,6 @@ export async function fetchAll() {
     unmatchedEmails: um.error ? [] : (um.data ?? []).filter((r: any) => !r.handled).map(rowToUnmatched),
     stages: sg.error ? [] : (sg.data ?? []).map(rowToStage),
     teamMessages: tm.error ? [] : (tm.data ?? []).map(rowToTeamMessage),
-    playbooks: pb.error ? [] : (pb.data ?? []).map(rowToPlaybook),
     dmMessages: dm.error ? [] : (dm.data ?? []).map(rowToDmMessage),
     granolaUnmatched: gu.error ? [] : (gu.data ?? []).filter((r: any) => !r.handled).map(rowToGranolaUnmatched),
   };
@@ -380,7 +365,7 @@ export async function fetchContacts(): Promise<Contact[]> {
 // --- mutations (fire-and-forget from the UI; errors surface via console) -----
 
 export const upsertTask = (t: Task, updatedBy?: string | null) => save(() => supabase.from("tasks").upsert(taskToRow(t, updatedBy)));
-// One request for many new/updated tasks at once — used by reconcilePlaybookTasks
+// One request for many new/updated tasks at once
 // (up to 18 rows per client) instead of N separate round trips.
 export const bulkUpsertTasks = (ts: Task[]) => (ts.length ? save(() => supabase.from("tasks").upsert(ts.map((t) => taskToRow(t)))) : Promise.resolve());
 
@@ -397,10 +382,6 @@ export const deleteTaskDb = (id: string) => save(() => supabase.from("tasks").up
 export const restoreTaskDb = (id: string) => save(() => supabase.from("tasks").update({ deleted_at: null }).eq("id", id));
 export const hardDeleteTaskDb = (id: string) => save(() => supabase.from("tasks").delete().eq("id", id));
 export const upsertClient = (c: Client) => save(() => supabase.from("clients").upsert(clientToRow(c)));
-// Bumped whenever a Playbook step completes (patchTask here; the owner
-// toggle route has its own server-side twin) — see playbookLastProgressAt's
-// doc comment on Client and playbookCheckinsServer.ts's stall check.
-export const touchPlaybookProgress = (clientId: string) => save(() => supabase.from("clients").update({ playbook_last_progress_at: new Date().toISOString() }).eq("id", clientId));
 // One request for many new clients at once instead of N separate round trips.
 export const bulkUpsertClients = (cs: Client[]) => (cs.length ? save(() => supabase.from("clients").upsert(cs.map(clientToRow))) : Promise.resolve());
 export const upsertProject = (p: Project) => save(() => supabase.from("projects").upsert(projectToRow(p)));
@@ -469,8 +450,6 @@ export const upsertClientNote = (n: ClientNote) => save(() => supabase.from("cli
 
 export const upsertTaskTemplate = (t: TaskTemplate) => save(() => supabase.from("task_templates").upsert(taskTemplateToRow(t)));
 export const deleteTaskTemplateDb = (id: string) => save(() => supabase.from("task_templates").delete().eq("id", id));
-export const upsertPlaybook = (p: Playbook) => save(() => supabase.from("playbooks").upsert(playbookToRow(p)));
-export const deletePlaybookDb = (id: string) => save(() => supabase.from("playbooks").delete().eq("id", id));
 export const deleteClientNoteDb = (id: string) => save(() => supabase.from("client_notes").delete().eq("id", id));
 export const insertTeamMessage = (m: TeamMessage) => save(() => supabase.from("team_messages").insert(teamMessageToRow(m)));
 export const deleteTeamMessageDb = (id: string) => save(() => supabase.from("team_messages").delete().eq("id", id));
