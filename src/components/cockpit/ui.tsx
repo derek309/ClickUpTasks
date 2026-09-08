@@ -124,11 +124,28 @@ export function DateChip({ value, onChange, label, className = "" }: {
   label: React.ReactNode;
   className?: string;
 }) {
+  const ref = useRef<HTMLInputElement>(null);
+  // showPicker(), not just an invisible input laid over the chip.
+  //
+  // A transparent <input type="date"> stretched across the label LOOKS
+  // clickable everywhere, but Chrome only opens the calendar when the click
+  // lands on its indicator — which here is invisible and a few pixels wide.
+  // Every other click silently focused a field nobody could see, so the chip
+  // read as broken (Derek, 2026-09-08: "date picker is not working").
+  //
+  // The handler sits on the whole chip so any part of it is a hit target, and
+  // falls back to focus() if showPicker throws, which it does on a browser
+  // that lacks it or when the call is not user-activated.
+  const open = () => {
+    const el = ref.current;
+    if (!el) return;
+    try { el.showPicker(); } catch { el.focus(); }
+  };
   return (
-    <span className={`relative inline-flex cursor-pointer items-center ${className}`}>
+    <span onClick={open} className={`relative inline-flex cursor-pointer items-center ${className}`}>
       {label}
-      <input type="date" value={value ?? ""} onChange={(e) => onChange(e.target.value || null)}
-        aria-label="Pick a date"
+      <input ref={ref} type="date" value={value ?? ""} onChange={(e) => onChange(e.target.value || null)}
+        aria-label="Pick a date" tabIndex={-1}
         className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
     </span>
   );
