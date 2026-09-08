@@ -1198,12 +1198,12 @@ export const users: User[] = [
 
 // --- @mentions --------------------------------------------------------------
 // One definition of "what counts as a mention", shared by every composer that
-// offers the picker (task comments, Client Journal, Team Chat) and by every
-// notifier that scans a sent body for one. They used to be six separate
-// inline regexes that had already drifted: Team Chat guarded against email
-// addresses opening the picker and matched names case-insensitively on a word
-// boundary, task comments did neither — so "@michaella" notified nobody and
-// "derek@" popped the picker mid-address.
+// offers the picker (task comments, Client Journal) and by every notifier
+// that scans a sent body for one. They used to be six separate inline regexes
+// that had already drifted: some guarded against email addresses opening the
+// picker and matched names case-insensitively on a word boundary, task
+// comments did neither — so "@michaella" notified nobody and "derek@" popped
+// the picker mid-address.
 
 /** The half-typed "@quer" at the very end of a draft, or null. The @ must
  *  start the draft or follow whitespace so an email address never triggers
@@ -2121,9 +2121,9 @@ export function nextDueAhead(
 /** "message" — a direct human communication (an @mention or comment someone
  * wrote to you). "activity" — an automatic side-effect notice from normal
  * task work (assignment, status/due-date change, checklist completion).
- * "dm" — someone sent you a private 1:1 message; routes to that DM thread
- * instead of Team Chat (see openNotification), but still counts as a
- * "Messages" notification for Inbox's filter tab. Lets the Inbox filter the
+ * "dm" — someone sent you a private 1:1 message; routes straight to that DM
+ * thread (see openNotification), but still counts as a "Messages"
+ * notification for Inbox's filter tab. Lets the Inbox filter the
  * two apart; missing on older rows, treated as "activity" (the more common
  * case) via `?? "activity"` wherever read. */
 export type NotificationKind = "message" | "activity" | "dm";
@@ -2145,34 +2145,17 @@ export const seedNotifications: Notification[] = [
   { id: "n_2", recipientId: "u_derek", text: "James Okoro completed “Map intake questions to custom fields”", taskId: "t_6", at: "3d ago", read: true },
 ];
 
-/** One message in the workspace-wide Team Chat — internal team talk that
- * isn't tied to any client or project (see supabase/team-chat.sql).
- * Deliberately not modeled on ClientNote/Message: no clientId/projectId, no
- * channel — a plain flat feed for "who's covering X today"-style talk, plus
- * the three optional extras any chat needs: quote-reply (replyToId, a
- * same-table message id — resolved client-side, no join), attachments
- * (mirrors Comment.attachments' shape exactly), and pin (pinned/pinnedBy/
- * pinnedAt — any team member can toggle it, a shared curation flag, not
- * message ownership like delete is). */
-export interface TeamMessage {
-  id: string;
-  authorId: string;
-  body: string;
-  at: string;
-  replyToId?: string | null;
-  attachments?: Attachment[];
-  pinned?: boolean;
-  pinnedBy?: string | null;
-  pinnedAt?: string | null;
-}
-
 /** One message in a private 1:1 DM thread between two teammates (see
- * supabase/dm-chat.sql). Modeled directly on TeamMessage — same flat,
- * insert-only-plus-pin shape — plus the two participant columns a DM needs
- * that a single global feed doesn't: recipientId (who this is addressed to,
- * for RLS/unread/notify) and conversationId (the sorted-pair thread key, so
- * a thread's messages are one indexed lookup instead of an OR of two id
- * checks). 1:1 only — no group DMs. */
+ * supabase/dm-chat.sql). Deliberately not modeled on ClientNote/Message: no
+ * clientId/projectId, no channel — a flat, insert-only feed plus the three
+ * extras any chat needs: quote-reply (replyToId, a same-table message id,
+ * resolved client-side with no join), attachments (mirrors Comment.attachments'
+ * shape exactly) and pin (pinned/pinnedBy/pinnedAt — either participant can
+ * toggle it, a shared curation flag, not ownership like delete is). The two
+ * participant columns are what make it a DM: recipientId (who this is
+ * addressed to, for RLS/unread/notify) and conversationId (the sorted-pair
+ * thread key, so a thread's messages are one indexed lookup instead of an OR
+ * of two id checks). 1:1 only — no group DMs. */
 export interface DmMessage {
   id: string;
   conversationId: string; // dmConversationId(authorId, recipientId)

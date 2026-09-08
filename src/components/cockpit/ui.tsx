@@ -277,8 +277,8 @@ export function SearchableSelect({
   );
 }
 
-// "Sticky scroll to latest" for a message feed — shared by TeamChat (team +
-// DMs) and ClientJournal (notes/email/SMS feed). Auto-follows new messages
+// "Sticky scroll to latest" for a message feed — shared by DmChat and
+// ClientJournal (notes/email/SMS feed). Auto-follows new messages
 // only while already scrolled to the bottom, so reading older history isn't
 // yanked away by an incoming message; also exposes what a "Jump to latest"
 // button needs. Wire the scroll container's ref + onScroll to this, and

@@ -5,7 +5,6 @@
 // (supabase/messages.sql — an inbound GHL reply appears in an open thread
 // without a manual reload), client_notes (supabase/realtime-client-
 // notes.sql — the Chat tab, so a teammate's message shows up live), and
-// team_messages (supabase/team-chat.sql — Team Chat is pointless without live updates),
 // and dm_messages (supabase/dm-chat.sql — same reasoning, for private 1:1 DMs).
 //
 // All 7 tables share ONE channel (one `.on()` binding each, one `.subscribe()`
@@ -28,7 +27,6 @@ export function subscribeRealtime(handlers: {
   onNotification: (p: Payload) => void;
   onMessage: (p: Payload) => void;
   onClientNote: (p: Payload) => void;
-  onTeamMessage: (p: Payload) => void;
   onDmMessage: (p: Payload) => void;
   onStatusChange?: (status: string) => void;
 }): () => void {
@@ -45,7 +43,6 @@ export function subscribeRealtime(handlers: {
       .on("postgres_changes", { event: "*", schema: "public", table: "notifications" }, handlers.onNotification)
       .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, handlers.onMessage)
       .on("postgres_changes", { event: "*", schema: "public", table: "client_notes" }, handlers.onClientNote)
-      .on("postgres_changes", { event: "*", schema: "public", table: "team_messages" }, handlers.onTeamMessage)
       .on("postgres_changes", { event: "*", schema: "public", table: "dm_messages" }, handlers.onDmMessage)
       .subscribe((status) => {
         handlers.onStatusChange?.(status);

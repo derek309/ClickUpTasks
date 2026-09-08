@@ -29,7 +29,6 @@ import {
   type MessageDirection,
   type TaskTemplate,
   type Priority,
-  type TeamMessage,
   type DmMessage,
   titleCase,
   PRIORITY_META,
@@ -107,8 +106,6 @@ const rowToClientLink = (r: any): ClientLink => ({ id: r.id, clientId: r.client_
 const clientNoteToRow = (n: ClientNote) => ({ id: n.id, client_id: n.clientId, project_id: n.projectId ?? null, type: n.type, body: n.body, author_id: n.authorId, created_at: n.at, attachments: n.attachments ?? [] });
 export const rowToClientNote = (r: any): ClientNote => ({ id: r.id, clientId: r.client_id, projectId: r.project_id ?? null, type: (r.type as NoteType) ?? "note", body: r.body ?? "", authorId: r.author_id, at: r.created_at, attachments: r.attachments ?? [] });
 
-const teamMessageToRow = (m: TeamMessage) => ({ id: m.id, author_id: m.authorId, body: m.body, created_at: m.at, reply_to_id: m.replyToId ?? null, attachments: m.attachments ?? [], pinned: m.pinned ?? false, pinned_by: m.pinnedBy ?? null, pinned_at: m.pinnedAt ?? null });
-export const rowToTeamMessage = (r: any): TeamMessage => ({ id: r.id, authorId: r.author_id, body: r.body ?? "", at: r.created_at, replyToId: r.reply_to_id ?? null, attachments: r.attachments ?? [], pinned: r.pinned ?? false, pinnedBy: r.pinned_by ?? null, pinnedAt: r.pinned_at ?? null });
 const dmMessageToRow = (m: DmMessage) => ({ id: m.id, conversation_id: m.conversationId, author_id: m.authorId, recipient_id: m.recipientId, body: m.body, created_at: m.at, reply_to_id: m.replyToId ?? null, attachments: m.attachments ?? [], pinned: m.pinned ?? false, pinned_by: m.pinnedBy ?? null, pinned_at: m.pinnedAt ?? null });
 export const rowToDmMessage = (r: any): DmMessage => ({ id: r.id, conversationId: r.conversation_id, authorId: r.author_id, recipientId: r.recipient_id, body: r.body ?? "", at: r.created_at, replyToId: r.reply_to_id ?? null, attachments: r.attachments ?? [], pinned: r.pinned ?? false, pinnedBy: r.pinned_by ?? null, pinnedAt: r.pinned_at ?? null });
 
@@ -272,7 +269,7 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true, 
 }
 
 export async function fetchAll() {
-  const [c, ct, p, t, n, cl, cn, m, tt, vf, fd, um, sg, tm, dm, gu] = await Promise.all([
+  const [c, ct, p, t, n, cl, cn, m, tt, vf, fd, um, sg, dm, gu] = await Promise.all([
     fetchAllRows("clients", "created_at", true, true),
     fetchAllRows("contacts"),
     fetchAllRows("projects", undefined, true, true),
@@ -289,7 +286,6 @@ export async function fetchAll() {
     fetchAllRows("folders", "position"),
     fetchAllRows("inbound_unmatched", "created_at", false),
     fetchAllRows("stages", "position"),
-    fetchAllRows("team_messages", "created_at", false),
     fetchAllRows("dm_messages", "created_at", false),
     fetchAllRows("granola_unmatched", "created_at", false),
   ]);
@@ -306,7 +302,6 @@ export async function fetchAll() {
   if (fd.error) console.warn("[db] folders unavailable — run supabase/folders.sql", fd.error.message);
   if (um.error) console.warn("[db] inbound_unmatched unavailable — run supabase/inbound-unmatched.sql", um.error.message);
   if (sg.error) console.warn("[db] stages unavailable — run supabase/stages.sql", sg.error.message);
-  if (tm.error) console.warn("[db] team_messages unavailable — run supabase/team-chat.sql", tm.error.message);
   if (dm.error) console.warn("[db] dm_messages unavailable — run supabase/dm-chat.sql", dm.error.message);
   if (gu.error) console.warn("[db] granola_unmatched unavailable — run supabase/granola-sync.sql", gu.error.message);
   return {
@@ -323,7 +318,6 @@ export async function fetchAll() {
     folders: fd.error ? [] : (fd.data ?? []).map(rowToFolder),
     unmatchedEmails: um.error ? [] : (um.data ?? []).filter((r: any) => !r.handled).map(rowToUnmatched),
     stages: sg.error ? [] : (sg.data ?? []).map(rowToStage),
-    teamMessages: tm.error ? [] : (tm.data ?? []).map(rowToTeamMessage),
     dmMessages: dm.error ? [] : (dm.data ?? []).map(rowToDmMessage),
     granolaUnmatched: gu.error ? [] : (gu.data ?? []).filter((r: any) => !r.handled).map(rowToGranolaUnmatched),
   };
@@ -451,12 +445,6 @@ export const upsertClientNote = (n: ClientNote) => save(() => supabase.from("cli
 export const upsertTaskTemplate = (t: TaskTemplate) => save(() => supabase.from("task_templates").upsert(taskTemplateToRow(t)));
 export const deleteTaskTemplateDb = (id: string) => save(() => supabase.from("task_templates").delete().eq("id", id));
 export const deleteClientNoteDb = (id: string) => save(() => supabase.from("client_notes").delete().eq("id", id));
-export const insertTeamMessage = (m: TeamMessage) => save(() => supabase.from("team_messages").insert(teamMessageToRow(m)));
-export const deleteTeamMessageDb = (id: string) => save(() => supabase.from("team_messages").delete().eq("id", id));
-// Narrow patch, not a full-row upsert — pin toggle is the only in-place edit
-// a chat message supports (see chat-reply-attachments-pins.sql's update policy).
-export const updateTeamMessageDb = (id: string, patch: { pinned: boolean; pinnedBy: string | null; pinnedAt: string | null }) =>
-  save(() => supabase.from("team_messages").update({ pinned: patch.pinned, pinned_by: patch.pinnedBy, pinned_at: patch.pinnedAt }).eq("id", id));
 // How far this member has read each DM thread. Server-side because read state
 // is a property of a person, not of a browser: it used to live in localStorage,
 // so a message read on one machine stayed unread on every other one.
@@ -472,6 +460,8 @@ export const markDmReadDb = (memberId: string, conversationId: string, at: strin
 
 export const insertDmMessage = (m: DmMessage) => save(() => supabase.from("dm_messages").insert(dmMessageToRow(m)));
 export const deleteDmMessageDb = (id: string) => save(() => supabase.from("dm_messages").delete().eq("id", id));
+// Narrow patch, not a full-row upsert — pin toggle is the only in-place edit
+// a chat message supports (see chat-reply-attachments-pins.sql's update policy).
 export const updateDmMessageDb = (id: string, patch: { pinned: boolean; pinnedBy: string | null; pinnedAt: string | null }) =>
   save(() => supabase.from("dm_messages").update({ pinned: patch.pinned, pinned_by: patch.pinnedBy, pinned_at: patch.pinnedAt }).eq("id", id));
 export const upsertVaultFolder = (f: VaultFolder) => save(() => supabase.from("vault_folders").upsert(vaultFolderToRow(f)));

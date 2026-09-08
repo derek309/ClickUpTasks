@@ -63,7 +63,6 @@ import {
   type VaultFolder,
   type Folder,
   type Stage,
-  type TeamMessage,
   type DmMessage,
   dmConversationId,
   PERSONAL_CLIENT_ID,
@@ -74,10 +73,10 @@ import {
   THIS_MONTH_END,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToTeamMessage, insertTeamMessage, deleteTeamMessageDb, updateTeamMessageDb, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import SettingsHub, { type TabKey } from "./SettingsHub";
-import TeamChat from "./TeamChat";
+import DmChat from "./DmChat";
 import AddClientModal from "./AddClientModal";
 import { usePersisted } from "@/lib/usePersisted";
 import { PlanView } from "./cockpit/PlanView";
@@ -263,7 +262,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
 
-  // A real page, like My Work/Personal/Team Chat — not a popup or slide-out
+  // A real page, like My Work or Personal — not a popup or slide-out
   // (it used to be a fixed-position overlay; Derek asked more than once for
   // it to render in the normal content area instead).
   const [settingsView, setSettingsView] = useState(false);
@@ -274,60 +273,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // A constant since openSettingsTab went: nothing sets it any more, and a
   // useState nobody writes to is a variable pretending to be state.
   const settingsInitialTab: TabKey = "integrations";
-  const [teamMessages, setTeamMessages] = useState<TeamMessage[]>([]);
   const [dmMessages, setDmMessages] = useState<DmMessage[]>([]);
-  // Which half of the Team Chat page is showing. Chat leads — per Derek, the
-  // inbox "is really what team chat was supposed to be": talk to the team
-  // first, review the task comments/mentions addressed to you second.
-  // Per-user "last seen" timestamp for the unread badge. Server-side now
-  // (profiles.team_chat_last_read_at, see supabase/team-chat-read-state.sql):
-  // as a localStorage value it was per-browser, so reading the channel on a
-  // laptop left the badge showing on a phone, and clearing site data made
-  // every message unread again. localStorage is kept as an instant local echo
-  // so the badge clears without waiting on a round trip.
-  const [teamChatLastRead, setTeamChatLastRead] = useState<string>("");
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { try { setTeamChatLastRead(localStorage.getItem("cut_teamChatLastRead") ?? ""); } catch {} }, []);
-  // Then the server's value, which wins when it's newer — another device may
-  // have read the channel since this tab last wrote its local copy.
-  useEffect(() => {
-    let cancelled = false;
-    authedFetch("/api/notifications/prefs")
-      .then((r) => r.json())
-      .then((j) => {
-        const remote: string | null = j?.teamChatLastReadAt ?? null;
-        if (cancelled || !remote) return;
-        setTeamChatLastRead((local) => (Date.parse(remote) > (local ? Date.parse(local) : 0) ? remote : local));
-      })
-      .catch(() => { /* offline — the local echo still works */ });
-    return () => { cancelled = true; };
-  }, []);
-  // Another tab reading the channel clears this one too. Without this a
-  // second window keeps showing a badge for messages you've already read,
-  // which looks exactly like a phantom notification — the server value is
-  // only fetched once, at mount, so nothing else would ever tell this tab.
-  useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      if (e.key !== "cut_teamChatLastRead" || !e.newValue) return;
-      setTeamChatLastRead((local) => (Date.parse(e.newValue!) > (local ? Date.parse(local) : 0) ? e.newValue! : local));
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, []);
-  const markTeamChatRead = () => {
-    const now = new Date().toISOString();
-    setTeamChatLastRead(now);
-    try { localStorage.setItem("cut_teamChatLastRead", now); } catch {}
-    authedFetch("/api/notifications/prefs", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ teamChatLastReadAt: now }),
-    }).catch(() => { /* best effort — the local echo already cleared it here */ });
-  };
-  // Which DM thread (if any) is open — the Chat hub's "Conversations" row
-  // and each teammate's row are mutually exclusive, so a non-null value here
-  // means "showing a DM thread" and null means "showing team chat" (see the
-  // Conversations page's render branch further down).
+  // Which DM thread is open, by teammate id. Non-null is the only state
+  // that shows a thread: null means no DM page at all (see the render branch
+  // further down), so it always moves in lockstep with inboxView.
   const [dmUserId, setDmUserId] = useState<string | null>(null);
   // Shared, admin-controlled — "we don't need DMs for now... make it so we
   // can turn it on and off in case we want it later" (Derek). Off by
@@ -337,8 +286,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   useEffect(() => { fetchAppSetting("dm_enabled", false).then(setDmEnabledState); }, []);
   const setDmEnabled = (v: boolean) => { setDmEnabledState(v); upsertAppSetting("dm_enabled", v); };
   // If an admin turns DMs off while someone's actually looking at a thread,
-  // don't leave them stranded on a now-hidden feature — same "Conversations"
-  // row openTeamChat already goes to.
+  // don't leave them stranded on a now-hidden feature — closing the thread
+  // drops them back to the view they came from.
   useEffect(() => { if (!dmEnabled && dmUserId !== null) setDmUserId(null); }, [dmEnabled, dmUserId]);
   // Declared up here rather than down with the other layout state because
   // goToView (just below) closes over it — every navigation also dismisses
@@ -349,10 +298,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // set identical state by construction rather than by two hand-maintained
   // copies that quietly drift — and so adding a view later is one edit, not
   // five. NAV_KEY_VIEWS maps the number keys onto these.
-  const goToView = (view: "dashboard" | "alltasks" | "clients" | "projects" | "personal" | "teamchat") => {
+  const goToView = (view: "dashboard" | "alltasks" | "clients" | "projects" | "personal") => {
     setMyWork(view === "dashboard");
     setPersonalView(view === "personal");
-    setInboxView(view === "teamchat");
+    setInboxView(false);
     setDirView(view === "clients" ? "clients" : view === "projects" ? "projects" : null);
     setDmUserId(null);
     setSettingsView(false);
@@ -363,7 +312,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // elsewhere preserves the previously-open project when you bounce to
     // Dashboard/Personal/Chat and back.
     if (view === "clients" || view === "projects") setActiveProject(null);
-    if (view === "teamchat") markTeamChatRead();
     // All Tasks is the flat everything-list, so it can't stay scoped to one
     // client or project. Its due-date grouping is now a default for that
     // section rather than something reapplied here on every visit, which was
@@ -373,56 +321,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       setActiveProject(null);
     }
   };
-  // Team Chat is a real view now, not an overlay — open the page on its Chat
-  // tab and clear the unread dot. Used by both the sidebar item and the
-  // header shortcut so there's exactly one home for it.
-  const openTeamChat = () => goToView("teamchat");
-  // Memoized — .some over teamMessages every render, and it also sits in a
-  // useEffect's dependency array below, so an unstable value here re-ran
-  // that effect on every render too.
-  // A count, not a boolean. Team Chat was the only nav item showing a bare
-  // dot while My Work, Clients, Projects and Personal all showed a number —
-  // a dot says "something happened", a number says how much you've missed
-  // (Derek: make it so "people see it and use it more").
-  //
-  // Two rules, both from Derek chasing a badge that lit with nothing new to
-  // read: "you should only notify when there's a new message from a team
-  // member only."
-  //
-  // 1. Compare instants, not strings. The read marker can arrive in either of
-  //    two spellings of the same moment — "…277Z" when this browser wrote it,
-  //    "…277+00:00" when Postgres handed it back — and `>` on those compares
-  //    characters, not time. Date.parse removes the whole class of problem.
-  // 2. Only messages from a real, current teammate count. An author who no
-  //    longer resolves on the roster (a removed teammate, or a non-human like
-  //    the u_claude bot row) is not someone you can go and read a reply from,
-  //    so it must never light the badge.
-  const teamChatUnread = useMemo(() => {
-    const readAt = teamChatLastRead ? Date.parse(teamChatLastRead) : 0;
-    return teamMessages.filter((m) => {
-      if (m.authorId === me.id) return false;
-      if (!users.some((u) => u.id === m.authorId)) return false;
-      const at = Date.parse(m.at);
-      return Number.isFinite(at) && at > readAt;
-    }).length;
-  }, [teamMessages, me.id, teamChatLastRead]);
-  // Team channel plus direct messages: one number for how much chat you have
-  // missed, since the sidebar row is the only place either is visible when
-  // the DM list is collapsed.
-  // Chat is always on screen now (the whole Conversations page is Chat, full
-  // width), so this fires any time you're on that page at all. Messages
-  // arriving while you're already there are already read — without this the
-  // realtime insert lights an unread dot for a message that's on screen, and
-  // it only clears by navigating away and back.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { if (inboxView && dmUserId === null && teamChatUnread) markTeamChatRead(); }, [inboxView, dmUserId, teamChatUnread]);
-
-  // DM read-state — same local-only "last seen" idiom as Team Chat above,
-  // just one timestamp per conversation instead of one global timestamp.
-  // Not a DB-backed read table: this is a 5-10 person internal tool that
-  // already accepts a single shared Message.read boolean for client SMS/
-  // email, so an occasionally-stale-across-devices unread dot is a
-  // proportionate cost for how much simpler this is to ship and maintain.
+  // DM read-state — one "last seen" timestamp per conversation.
   // Read state follows the person, not the browser. It lived in localStorage,
   // which made a message read on a laptop still unread on a desktop and turned
   // a cleared cache into months of resurrected unreads.
@@ -464,37 +363,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const cid = dmConversationId(me.id, otherUserId);
     return dmMessages.some((m) => m.conversationId === cid && m.authorId !== me.id && m.at > (dmLastRead[cid] ?? ""));
   };
-  // Every unread direct message, across every thread. The per-person rows
-  // below Team Chat each carry their own dot, but the dots are only visible
-  // when DMs are switched on and the list is expanded, so the parent row has
-  // to be able to say how many you have missed on its own.
-  // Only what you can actually open and clear. Team Chat read 1 with every
-  // per-person dot below it dark, because the count included a DM thread that
-  // is not rendered at all when direct messages are switched off — an unread
-  // you cannot see, cannot open and therefore cannot clear.
-  //
-  // Read state for DMs lives in this browser's localStorage, not the
-  // database, so an old message read on another machine still looks unread
-  // here. Counting only reachable threads keeps that from surfacing as a
-  // number with nothing behind it.
-  const dmUnreadTotal = useMemo(() => {
-    if (!dmEnabled) return 0;
-    return dmMessages.filter((m) => {
-      // Addressed to me, not merely not-from-me: dm_messages is fetched
-      // whole, so this also keeps two other people's thread out of my count.
-      if (m.recipientId !== me.id) return false;
-      if (!users.some((u) => u.id === m.authorId && u.id !== me.id)) return false;
-      return m.at > (dmLastRead[m.conversationId] ?? "");
-    }).length;
-    // `users` is a module-level roster, not state, so it is not a dependency.
-  }, [dmEnabled, dmMessages, dmLastRead, me.id]);
-  // One number for how much chat you have missed. The sidebar row is the only
-  // place either kind is visible when the DM list is collapsed, so splitting
-  // them across two badges would mean the row could read zero while three
-  // people were waiting on you.
-  const chatsMissed = teamChatUnread + dmUnreadTotal;
-  // Mirrors openTeamChat exactly, for a specific teammate's thread instead
-  // of the shared feed.
+  // Opens a specific teammate's DM thread.
   const openDm = (userId: string) => {
     setInboxView(true); setDmUserId(userId);
     setMyWork(false); setPersonalView(false); setDirView(null); setSettingsView(false);
@@ -502,8 +371,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     markDmRead(dmConversationId(me.id, userId));
     markDmNotifsRead(userId);
   };
-  // Same reasoning as the Team Chat effect above: a DM message arriving
-  // while its thread is already open is already read.
+  // A DM arriving while its thread is already open is already read.
   const openDmThreadUnread = dmUserId !== null && dmUnread(dmUserId);
   // Two suppressions, both load-bearing. markDmRead still sets the optimistic
   // read marker, so this is a setState in an effect by design: the alternative
@@ -1105,7 +973,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   });
   const applyNav = (s: NavState) => {
     setSettingsView(s.view === "settings");
-    setMyWork(s.view === "work"); setPersonalView(s.view === "personal"); setInboxView(s.view === "inbox");
+    setMyWork(s.view === "work"); setPersonalView(s.view === "personal");
+    // "inbox" is a DM thread and nothing else now that Team Chat is gone, so a
+    // bare view=inbox with no dm (an old bookmark) must not open a blank page.
+    setInboxView(s.view === "inbox" && !!s.dm);
     setDmUserId(s.view === "inbox" ? s.dm : null);
     setDirView(s.view === "clients" || s.view === "projects" ? s.view : null);
     setActiveClient(s.view ? "all" : s.client); setActiveProject(s.view ? null : s.project);
@@ -1215,7 +1086,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // The four primary nav items always show now — the hide/show toggle went
   // away when the account block replaced the sidebar's branding header. Kept
   // as a lookup so the render below stays unchanged.
-  const navVisible: Record<string, boolean> = { inbox: true, work: true, personal: true };
+  const navVisible: Record<string, boolean> = { work: true, personal: true };
   // All Tasks is back as a primary nav item under My Work (Derek,
   // 2026-08-26) after a spell as a de-emphasized button on the Dashboard
   // header. It's a plain goToView case now rather than its own hand-rolled
@@ -1265,7 +1136,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setVaultFolders(d.vaultFolders);
         setFolders(d.folders);
         setStages(d.stages);
-        setTeamMessages(d.teamMessages);
         setDmMessages(d.dmMessages);
       } catch (e) {
         setDbError(e instanceof Error ? e.message : "Failed to load data.");
@@ -1512,16 +1382,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setClientNotes((ns) => (ns.some((x) => x.id === n.id) ? ns.map((x) => (x.id === n.id ? n : x)) : [n, ...ns]));
       },
       // Same reasoning as messages/client_notes: append-only, so id dedup covers it.
-      onTeamMessage: (p) => {
-        if (p.eventType === "DELETE") {
-          const id = (p.old as { id: string }).id;
-          setTeamMessages((ms) => ms.filter((m) => m.id !== id));
-          return;
-        }
-        const m = rowToTeamMessage(p.new);
-        setTeamMessages((ms) => (ms.some((x) => x.id === m.id) ? ms.map((x) => (x.id === m.id ? m : x)) : [...ms, m]));
-      },
-      // Same reasoning as team_messages: append-only, so id dedup covers it.
       onDmMessage: (p) => {
         if (p.eventType === "DELETE") {
           const id = (p.old as { id: string }).id;
@@ -1573,7 +1433,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setVaultFolders((prev) => mergeById(prev, d.vaultFolders));
         setFolders((prev) => mergeById(prev, d.folders));
         setStages((prev) => mergeById(prev, d.stages));
-        setTeamMessages((prev) => mergeById(prev, d.teamMessages));
         setDmMessages((prev) => mergeById(prev, d.dmMessages));
       } catch (e) { console.warn("[realtime] visibility refetch failed", e); }
     };
@@ -1911,8 +1770,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return rows.slice(0, 300); // a running log, not a full export
   }, [showCompletedLog, tasks]);
   // Memoized for the same reason — the sidebar's "My Work" nav badge
-  // (below) calls this inline on every render of every view, including
-  // Team Chat, which is what made typing/sending there feel laggy even
+  // (below) calls this inline on every render of every view, including the
+  // chat pages, which is what made typing/sending there feel laggy even
   // after the myWorkGroups and sidebar-client-list fixes.
   const myAssignedProjects = useMemo(
     () => assignedProjectsFor(me.id),
@@ -3790,74 +3649,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     reordered.forEach((l) => upsertClientLink(l));
   };
 
-  // --- team chat -----------------------------------------------------------
-  // Workspace-wide, not tied to any client/project — see supabase/team-chat.sql.
-  const sendTeamMessage = (body: string, attachments?: Attachment[], replyToId?: string | null) => {
-    if (!body.trim() && !attachments?.length) return;
-    const m: TeamMessage = { id: newId("tm_"), authorId: me.id, body: body.trim(), at: new Date().toISOString(), replyToId: replyToId ?? null, attachments: attachments ?? [] };
-    setTeamMessages((ms) => [...ms, m]);
-    insertTeamMessage(m);
-    // @mention detection. The composer's picker inserts the exact "@Full Name"
-    // this looks for; the lowercase compare is a safety net for someone typing
-    // it by hand with different casing. A bare first name still won't match —
-    // that's what the picker is for.
-    // Word-boundary match, not a bare substring: "@Samantha" must not also
-    // notify a "Sam" on the roster. Case-insensitive so a hand-typed
-    // "@derek fox" still lands; the picker inserts the exact name anyway.
-    // Who gets told, and how loudly. Before this, ONLY an exact @Full Name
-    // match notified anyone — so posting without mentioning someone reached
-    // nobody at all until they happened to open the page, which is most of
-    // why the channel went quiet (Derek: "how can we implement team chat more
-    // so people see it and use it").
-    //
-    // Three tiers, loudest first:
-    //   mentioned      — you were named. Bell + email.
-    //   replied to     — someone quoted your message. Bell + email; being
-    //                    answered is as direct as being named.
-    //   everyone else  — bell only. "the people involved in the chat or chat
-    //                    thread" get the email (Derek); the rest get the
-    //                    badge, because emailing the whole team on every
-    //                    message is how a channel gets muted for good.
-    const repliedToAuthorId = replyToId ? teamMessages.find((x) => x.id === replyToId)?.authorId ?? null : null;
-    users.forEach((u) => {
-      if (u.id === me.id) return;
-      if (mentionsUser(body, u.name)) {
-        notify(u.id, `${me.name} mentioned you in Team Chat`, null, { kind: "message", link: TEAM_CHAT_LINK });
-      } else if (u.id === repliedToAuthorId) {
-        notify(u.id, `${me.name} replied to you in Team Chat`, null, { kind: "message", link: TEAM_CHAT_LINK });
-      } else {
-        notify(u.id, `${me.name} posted in Team Chat`, null, { kind: "message", skipEmail: true, link: TEAM_CHAT_LINK });
-      }
-    });
-  };
-  // Confirmed like the client-facing message delete in TaskMessaging — team
-  // chat had no prompt at all, so a mis-click silently destroyed a message
-  // for everyone.
-  const deleteTeamMessage = (id: string) => {
-    setConfirmDialog({
-      title: "Delete this message?",
-      message: "It disappears for everyone in Team Chat. This can't be undone.",
-      confirmLabel: "Delete",
-      onConfirm: () => {
-        setConfirmDialog(null);
-        setTeamMessages((ms) => ms.filter((m) => m.id !== id));
-        deleteTeamMessageDb(id);
-      },
-    });
-  };
-  // Pin is a shared team curation flag, not message ownership — any teammate
-  // can toggle it (see chat-reply-attachments-pins.sql's team_messages_update
-  // policy, deliberately open unlike the author-scoped delete policy).
-  const pinTeamMessage = (id: string, pinned: boolean) => {
-    const patch = { pinned, pinnedBy: pinned ? me.id : null, pinnedAt: pinned ? new Date().toISOString() : null };
-    setTeamMessages((ms) => ms.map((m) => (m.id === id ? { ...m, ...patch } : m)));
-    updateTeamMessageDb(id, patch);
-  };
-
   // --- direct messages -----------------------------------------------------
   // Private 1:1 chat between two teammates — see supabase/dm-chat.sql. A DM
-  // has exactly one addressee by construction, so unlike sendTeamMessage
-  // there's no @mention scan: every send notifies the recipient directly.
+  // has exactly one addressee by construction, so there's no @mention scan:
+  // every send notifies the recipient directly.
   const sendDmMessage = (otherUserId: string, body: string, attachments?: Attachment[], replyToId?: string | null) => {
     if (!body.trim() && !attachments?.length) return;
     const cid = dmConversationId(me.id, otherUserId);
@@ -3941,7 +3736,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // "All Tasks" is the flat list with no other view claiming the screen —
   // the same condition headerTitleText falls through to below.
   const allTasksView = !settingsView && !inboxView && !dirView && !personalView && !myWork && activeClient === "all";
-  const headerTitleText = settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Team Chat") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "My Work" : activeClient === "all" ? "All Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? ""));
+  const headerTitleText = settingsView ? "Settings" : inboxView ? (userById(dmUserId)?.name ?? "Direct Message") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "My Work" : activeClient === "all" ? "All Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? ""));
   const isClientDetail = !myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && !!clientById(activeClient);
   const showFilterControl = !inboxView && !dirView && !myWork && !settingsView && !(activeClient !== "all" && clientTab === "chat");
   // Whose tasks All Tasks is showing: me, everyone, or one named member.
@@ -4238,13 +4033,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       <aside className={`sidebar-dark fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col overflow-y-auto border-r bg-surface transition-transform ${sidebarHidden ? "md:hidden" : "md:static md:translate-x-0"} ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
         {/* Account block, promoted from the sidebar footer to the top in place
             of the old app-branding header (Derek's call). */}
-        {/* Account block. Three borderless icon buttons, not four bordered
-            ones: the old Team Chat button was pure duplication once Team Chat
-            became the first nav item right below (which carries the unread dot
-            itself), and four bordered boxes crowded the name down to "De…".
-            Theme and sign out have since moved into Settings > Account
-            (Derek), leaving the gear as the only icon here: two things
-            nobody touches twice a week were costing width on every screen. */}
+        {/* Account block. Borderless icon buttons, not bordered boxes, which
+            crowded the name down to "De…". Theme and sign out have since moved
+            into Settings > Account (Derek), leaving the gear as the only icon
+            here: two things nobody touches twice a week were costing width on
+            every screen. */}
         <div className="flex shrink-0 items-center gap-1 border-b px-3 py-3">
           <span className="inline-flex shrink-0 items-center justify-center rounded-full text-[15px] font-semibold text-white" style={{ width: 30, height: 30, background: me.color }}>{me.initials}</span>
           <div className="ml-1 min-w-0 flex-1 leading-tight"><div className="truncate text-[15px] font-medium">{me.name}</div><div className="text-[13px] capitalize text-muted">{me.role}</div></div>
@@ -4263,9 +4056,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           {/* Directly under My Work, which stays exactly as it was — this is
               a second way in, not a replacement. Deliberately has no number
               shortcut: NAV_KEY_VIEWS is documented as sidebar order, and
-              slotting All Tasks in at 2 would have shifted Team Chat through
-              Personal down one and broken existing muscle memory for a key
-              nobody asked for. */}
+              slotting All Tasks in at 2 would have shifted every row below it
+              down one and broken existing muscle memory for a key nobody
+              asked for. */}
           {/* Your open tasks, not every task in the database. Every other row
               in this nav carries its count; this one was the exception. */}
           {navVisible.work && <SideItem active={allTasksView} title={`${openTaskCount} open task${openTaskCount === 1 ? "" : "s"} assigned to you`} onClick={() => goToView("alltasks")}><I.list className="text-muted" /> <span>All Tasks</span><span className="ml-auto text-[13px] text-muted">{openTaskCount}</span></SideItem>}
@@ -4274,25 +4067,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               task each their own way (hasOpenConversationTask / Follow Up's
               own task-driven tiers); a third place to check the same signal
               was redundant, not additional coverage. */}
-          {navVisible.inbox && (<>
-            <SideItem active={inboxView && dmUserId === null} title="Team Chat (press 2)" onClick={openTeamChat}><I.comment className="text-muted" /> <span>Team Chat</span>{chatsMissed > 0 && (
-              // Unread chat only — team channel plus every direct message
-              // (Derek: "team chat show the number of chats missed"). General
-              // notifications, task assignments and client replies have their
-              // own home on the bell, not this nav item (Derek, Aug 4).
-              // Capped display so a long weekend doesn't stretch the row.
-              <span title={[
-                teamChatUnread ? `${teamChatUnread} in Team Chat` : "",
-                dmUnreadTotal ? `${dmUnreadTotal} direct` : "",
-              ].filter(Boolean).join(" · ")} className="ml-auto rounded-full bg-accent px-1.5 text-[12px] font-semibold leading-[18px] text-white">{chatsMissed > 99 ? "99+" : chatsMissed}</span>
-            )}</SideItem>
-            {dmEnabled && users.filter((u) => u.id !== me.id).map((u) => (
-              <SideItem key={u.id} active={inboxView && dmUserId === u.id} onClick={() => openDm(u.id)}>
-                <Avatar id={u.id} size={20} /> <span className="min-w-0 flex-1 truncate text-left">{u.name}</span>
-                {dmUnread(u.id) && <span title="Unread messages" className="ml-auto h-2 w-2 rounded-full bg-accent" />}
-              </SideItem>
-            ))}
-          </>)}
+          {dmEnabled && users.filter((u) => u.id !== me.id).map((u) => (
+            <SideItem key={u.id} active={inboxView && dmUserId === u.id} onClick={() => openDm(u.id)}>
+              <Avatar id={u.id} size={20} /> <span className="min-w-0 flex-1 truncate text-left">{u.name}</span>
+              {dmUnread(u.id) && <span title="Unread messages" className="ml-auto h-2 w-2 rounded-full bg-accent" />}
+            </SideItem>
+          ))}
           <SideItem active={dirView === "clients"} title="Clients (press 3)" onClick={() => goToView("clients")}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{clientList.length}</span></SideItem>
           {clients.some((c) => c.id === WORKSPACE_CLIENT_ID) && (
             <SideItem active={dirView === "projects"} title="Projects (press 4)" onClick={() => goToView("projects")}><I.folder className="text-muted" /> <span>Projects</span><span className="ml-auto text-[13px] text-muted">{workspaceProjects.length}</span></SideItem>
@@ -4419,7 +4199,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </p>
             </>) : (<>
               <h1 className="flex items-center gap-2 truncate text-[20px] font-semibold">
-                {settingsView ? "Settings" : inboxView ? (dmUserId ? (userById(dmUserId)?.name ?? "Direct Message") : "Team Chat") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "My Work" : activeClient === "all" ? "All Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
+                {settingsView ? "Settings" : inboxView ? (userById(dmUserId)?.name ?? "Direct Message") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "My Work" : activeClient === "all" ? "All Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
                 {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
                 {/* Same star as the Clients directory row — pinning to the
                     sidebar shouldn't require leaving the client's own page
@@ -4438,7 +4218,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   <button onClick={() => { setDirView("clients"); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
                   <span>›</span>
                 </>)}
-                <span>{settingsView ? "Integrations, team, templates, and API tokens" : inboxView ? (dmUserId ? "Private — only the two of you can see this" : "Talk to the team — everyone's in this one") : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</span>
+                <span>{settingsView ? "Integrations, team, templates, and API tokens" : inboxView ? "Private — only the two of you can see this" : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</span>
               </p>
             </>)}
           </div>
@@ -4546,16 +4326,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             </div>
           )}
 
-          {/* Hidden on the Conversations page (team chat) — the bell's own
-              notifications already surface everything relevant elsewhere,
-              and it was redundant/unwanted floating over a page that's
-              already a live feed (Derek, Aug 4). Still shown on DMs,
-              Dashboard, client pages, etc. */}
           {/* No notification bell (Derek, 2026-09-01: "not useful"). It
               restated things the app already surfaces where you act on them:
               assignments show up in your task list, client replies raise a
-              Conversation task, and unread chat is counted on the Team Chat
-              row. A second inbox for the same signals is one more thing to
+              Conversation task, and unread chat is counted on the teammate's
+              own row. A second inbox for the same signals is one more thing to
               clear rather than one more thing you learn from. */}
 
           </div>
@@ -4589,20 +4364,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             theme={theme} onSetTheme={setThemePref} onSignOut={onSignOut}
           />
         ) : inboxView && dmUserId ? (
-          // A DM thread has no "Activity" sub-view (that's a Team Chat-page
-          // concept — task comments/mentions addressed to you, not private
-          // messages), so it skips the Chat/Activity tab bar entirely.
-          <TeamChat key={dmUserId} me={me} scope={{ type: "dm", other: userById(dmUserId)! }}
+          <DmChat key={dmUserId} me={me} other={userById(dmUserId)!}
             messages={dmMessages.filter((m) => m.conversationId === dmConversationId(me.id, dmUserId))}
             onSend={(body, attachments, replyToId) => sendDmMessage(dmUserId, body, attachments, replyToId)} onDelete={deleteDmMessage}
             onPin={pinDmMessage} onUploadFile={(file) => uploadOneImage(`dm/${dmConversationId(me.id, dmUserId)}`, file)} onOpenFile={downloadFile} onGetSignedUrl={signedUrlForFile} />
-        ) : inboxView ? (
-          // Team-wide chat, full width — task comments/mentions ("Activity")
-          // moved to its own Dashboard tab (Derek: "everything is wired into
-          // each contact or tasks... it doesn't belong here"), so this is
-          // just the workspace feed now, same footing as a DM thread above.
-          <TeamChat me={me} scope={{ type: "team" }} messages={teamMessages} onSend={sendTeamMessage} onDelete={deleteTeamMessage}
-            onPin={pinTeamMessage} onUploadFile={(file) => uploadOneImage("team-chat", file)} onOpenFile={downloadFile} onGetSignedUrl={signedUrlForFile} />
         ) : dirView === "clients" ? (
           <ClientsDirectory clients={sortedClients} clientCompany={(c) => clientCompany(c)} taskCount={clientTaskCount} tasksByClient={openTasksByClient} starred={starred} onToggleStar={toggleStar}
             needsReview={(id) => clientNeedsReview(id, me.id)}

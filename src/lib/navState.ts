@@ -8,7 +8,7 @@
 // The whole app lives on "/", so we encode what you're looking at into the
 // query string: shareable links, refresh-safe, and back/forward navigation.
 //   ?view=work|clients|personal|settings   the special boards
-//   ?view=inbox[&dm=<userId>]              team chat, optionally a DM thread
+//   ?view=inbox&dm=<userId>                a DM thread
 //   ?client=<id>[&project=<id>]   a client (optionally scoped to one project)
 //   ?task=<id>                    the task drawer (layers over any of the above)
 export type NavState = { view: "work" | "personal" | "inbox" | "clients" | "projects" | "settings" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | null; vaultFolder: string | null; dm: string | null };
@@ -48,9 +48,8 @@ export function parseSearch(search: string): NavState {
 
 // Number-key shortcuts for the top-level views, in sidebar order. Shown as
 // a hint on each sidebar item and handled by the keydown effect below.
-export const NAV_KEY_VIEWS: Record<string, "dashboard" | "clients" | "projects" | "personal" | "teamchat"> = {
+export const NAV_KEY_VIEWS: Record<string, "dashboard" | "clients" | "projects" | "personal"> = {
   "1": "dashboard",
-  "2": "teamchat",
   "3": "clients",
   "4": "projects",
   "5": "personal",

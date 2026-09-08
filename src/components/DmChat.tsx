@@ -1,18 +1,21 @@
 "use client";
 
-// Team Chat + Direct Messages — one component renders both. Team Chat is the
-// workspace-wide feed (see supabase/team-chat.sql); a DM is a private 1:1
-// thread with one teammate (see supabase/dm-chat.sql). The `scope` prop is
-// the only thing that differs structurally: which feed, who to notify, and
-// whether @mention makes sense at all (a DM has exactly one addressee by
-// construction, so mentioning is meaningless there).
+// Direct Messages — a private 1:1 thread with one teammate (see
+// supabase/dm-chat.sql).
+//
+// This used to render the workspace-wide Team Chat too, off a `scope` prop.
+// That feed was turned off (Derek, 2026-09-08: "turn off team chat no one
+// uses it") — 47 messages in its whole life, last touched a week before DMs
+// were. The scope prop went with it, and so did @mention: a DM has exactly
+// one addressee by construction, so mentioning was already meaningless here
+// and only existed for the team feed.
 //
 // Also carries quote-reply, file/image attachments, and pin — see
 // supabase/chat-reply-attachments-pins.sql. Reply and attachments mirror the
 // task-comment composer's staging-area pattern (TaskDrawer.tsx); pin is a
 // shared team curation flag anyone can toggle, not message ownership.
 //
-// Renders two ways off one implementation (orthogonal to `scope`):
+// Renders two ways off one implementation:
 //   • embedded (no onClose) — fills the Chat hub's pane. This is the only
 //     mount today: "the inbox is really where you review task comments and
 //     chat with the team."
@@ -20,17 +23,16 @@
 //     SettingsHub. Currently unused; kept because it's a few lines and the
 //     obvious shape for a future quick-peek from another view.
 import { useEffect, useRef, useState } from "react";
-import { type Me, type User, type Attachment, type TeamMessage, type DmMessage, users, userById, timeAgo, mentionCandidates, applyMention } from "@/lib/data";
+import { type Me, type User, type Attachment, type DmMessage, userById, timeAgo } from "@/lib/data";
 import { I, Avatar, renderRichText, useStickyBottom, JumpToLatestButton } from "./cockpit/ui";
 import { AttachmentThumbs } from "./cockpit/AttachmentThumbs";
 import { AttachmentTile } from "./cockpit/AttachmentTile";
 
-type Scope = { type: "team" } | { type: "dm"; other: User };
-type ChatMessage = TeamMessage | DmMessage;
+type ChatMessage = DmMessage;
 
-export default function TeamChat({ me, scope, messages, onSend, onDelete, onPin, onUploadFile, onOpenFile, onGetSignedUrl, onClose }: {
+export default function DmChat({ me, other, messages, onSend, onDelete, onPin, onUploadFile, onOpenFile, onGetSignedUrl, onClose }: {
   me: Me;
-  scope: Scope;
+  other: User;
   messages: ChatMessage[];
   onSend: (body: string, attachments?: Attachment[], replyToId?: string | null) => void;
   onDelete: (id: string) => void;
@@ -133,19 +135,6 @@ export default function TeamChat({ me, scope, messages, onSend, onDelete, onPin,
     setDraft(""); setPendingAtts([]); setReplyTo(null);
   };
 
-  // @mention autocomplete — team-scope only. Same idiom as TaskDrawer's and
-  // ClientJournal's comment composers. This isn't just a convenience:
-  // Cockpit's sendTeamMessage notifies on an exact `@Full Name` match, so
-  // picking from this list is what actually makes the mention reach the
-  // person. Typing "@justin" by hand matches nobody. A DM has exactly one
-  // addressee already, so there's nothing to mention.
-  // The @ must start the draft or follow whitespace, so an email address
-  // ("derek@", "me@clickuplocal.com") never opens the picker and never gets
-  // its Enter key hijacked into a name completion.
-  const [mentionDismissed, setMentionDismissed] = useState(false);
-  const mentionCands = scope.type === "team" && !mentionDismissed ? mentionCandidates(draft, users) : [];
-  const mentionOpen = mentionCands.length > 0;
-  const pickMention = (name: string) => setDraft(applyMention(draft, name));
 
   // The feed + composer, identical in both modes — only the chrome around
   // them differs (page pane vs centered modal).
@@ -163,11 +152,10 @@ export default function TeamChat({ me, scope, messages, onSend, onDelete, onPin,
         <div ref={feedRef} onScroll={checkAtBottom} className="h-full space-y-3 overflow-y-auto px-5 py-4">
           {visible.length === 0 && (
             <div className="py-10 text-center text-[13px] text-muted">
-              {scope.type === "dm" ? `No messages yet — say hi to ${scope.other.name} 👋` : "No messages yet — say hi 👋"}
+              {`No messages yet — say hi to ${other.name} 👋`}
             </div>
           )}
           {visible.map((m) => {
-            const author = userById(m.authorId);
             const isMe = m.authorId === me.id;
             const canDelete = me.role === "admin" || m.authorId === me.id;
             const original = m.replyToId ? byId.get(m.replyToId) : null;
@@ -177,7 +165,6 @@ export default function TeamChat({ me, scope, messages, onSend, onDelete, onPin,
                 <div className={`flex min-w-0 max-w-[70%] flex-col ${isMe ? "items-end" : "items-start"}`}>
                   <div className={`flex items-baseline gap-1.5 px-1 ${isMe ? "flex-row-reverse" : ""}`}>
                     {/* In a DM the other person's name is already the thread header — repeating it per-bubble is redundant. */}
-                    {!isMe && scope.type === "team" && <span className="text-[12px] font-semibold">{author?.name ?? "Someone"}</span>}
                     <span className="text-[11px] text-muted">{timeAgo(m.at)}</span>
                     <button onClick={() => setReplyTo(m)} title="Reply"
                       className="rounded p-0.5 text-muted opacity-0 hover:text-foreground group-hover/msg:opacity-100">↩</button>
@@ -218,19 +205,6 @@ export default function TeamChat({ me, scope, messages, onSend, onDelete, onPin,
         </div>
 
         <div className="relative border-t p-3">
-          {mentionOpen && (
-            // max-h + scroll: the embedded wrapper is overflow-hidden, so an
-            // unbounded list would get clipped at the top and be unreachable
-            // once the roster outgrows the window.
-            <div className="absolute bottom-full left-3 mb-1 z-10 max-h-56 w-56 overflow-y-auto rounded-lg border bg-surface shadow-lg">
-              {mentionCands.map((u) => (
-                <button key={u.id} onClick={() => pickMention(u.name)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[14px] hover:bg-background">
-                  <Avatar id={u.id} size={22} /> <span className="min-w-0 flex-1 truncate">{u.name}</span>
-                  {u.role === "va" && <span className="shrink-0 text-[13px] text-muted">VA</span>}
-                </button>
-              ))}
-            </div>
-          )}
           {replyTo && (
             <div className="mb-2 flex items-start gap-2 rounded-lg border-l-2 border-accent bg-background px-2.5 py-1.5 text-[13px]">
               <div className="min-w-0 flex-1">
@@ -248,17 +222,13 @@ export default function TeamChat({ me, scope, messages, onSend, onDelete, onPin,
           )}
           <textarea
             value={draft}
-            onChange={(e) => { setDraft(e.target.value); setMentionDismissed(false); }}
+            onChange={(e) => setDraft(e.target.value)}
             onPaste={handlePaste}
             onKeyDown={(e) => {
-              // ⌘↵/Ctrl↵ always sends — checked first, so mentioning someone
-              // and sending in one motion doesn't silently swallow the send.
               if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submit(); return; }
-              if (e.key === "Escape" && mentionOpen) { e.preventDefault(); setMentionDismissed(true); return; }
               // Plain Enter picks the top match only while the list is open.
-              if (e.key === "Enter" && !e.shiftKey && mentionOpen) { e.preventDefault(); pickMention(mentionCands[0].name); return; }
             }}
-            placeholder={scope.type === "dm" ? `Message ${scope.other.name}… (⌘↵ to send)` : "Message the team… (type @ to mention, ⌘↵ to send)"}
+            placeholder={`Message ${other.name}… (⌘↵ to send)`}
             rows={2}
             className="w-full resize-none rounded-lg border bg-background px-3 py-2 text-[14px] outline-none focus:border-accent"
           />
@@ -295,7 +265,7 @@ export default function TeamChat({ me, scope, messages, onSend, onDelete, onPin,
       <div className="fixed left-1/2 top-1/2 z-50 flex h-[80vh] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border bg-surface shadow-xl"
         onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
         <div className="flex items-center justify-between border-b px-5 py-3">
-          <h2 className="flex items-center gap-1.5 text-[16px] font-semibold"><I.comment /> {scope.type === "dm" ? scope.other.name : "Conversations"}</h2>
+          <h2 className="flex items-center gap-1.5 text-[16px] font-semibold"><I.comment /> {other.name}</h2>
           <button onClick={onClose} className="rounded-md p-1 text-muted hover:bg-background"><I.close /></button>
         </div>
         {inner}
