@@ -455,6 +455,20 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
 // silently clipped whenever a row is near the bottom or right edge. Fixed
 // positioning off the trigger's own screen rect (clamped to the viewport)
 // sidesteps that — the same approach InlineDue/DatePopover already used.
+// A dropdown is as wide as its longest row. Hardcoding a pixel width meant
+// "Changes requested" hung out over the edge of the status menu (Derek,
+// 2026-09-08), and the same trap was set in the priority menu for "Client
+// request" — the labels are 15px while the control that opens them is 13px,
+// so eyeballing the trigger width always underestimates.
+//
+// max-content sizes to the longest row; minWidth keeps a short menu from
+// looking mean next to its trigger; MENU_MAX stops one long client name from
+// producing a menu half the screen wide.
+const MENU_MAX = 280;
+function menuStyle(pos: { top: number; left: number }, minWidth: number): React.CSSProperties {
+  return { position: "fixed", top: pos.top, left: pos.left, minWidth, width: "max-content", maxWidth: MENU_MAX };
+}
+
 function menuPos(ref: React.RefObject<HTMLElement | null>, width: number, height = 240) {
   const r = ref.current?.getBoundingClientRect();
   if (!r) return { top: 0, left: 0 };
@@ -495,14 +509,14 @@ function InlineStatus({ value, onChange }: { value: TaskStatus; onChange: (s: Ta
   return (
     <div className="relative inline-flex items-center gap-1.5">
       <StatusDot value={value} onChange={onChange} />
-      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 144, pickableStatuses(value).length * 32 + 8)); setOpen((o) => !o); }} className="inline-flex items-center rounded px-1 py-0.5 text-[13px] font-medium hover:bg-background">
+      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, MENU_MAX, pickableStatuses(value).length * 32 + 8)); setOpen((o) => !o); }} className="inline-flex items-center rounded px-1 py-0.5 text-[13px] font-medium hover:bg-background">
         {STATUS_META[value].label}
       </button>
       {open && (<>
         <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
-        <div style={{ position: "fixed", top: pos.top, left: pos.left, width: 144 }} className="z-40 rounded-lg border bg-surface p-1 shadow-lg">
+        <div style={menuStyle(pos, 144)} className="z-40 rounded-lg border bg-surface p-1 shadow-lg">
           {pickableStatuses(value).map((s) => (
-            <button key={s} onClick={(e) => { e.stopPropagation(); onChange(s); setOpen(false); }} className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[15px] hover:bg-background">
+            <button key={s} onClick={(e) => { e.stopPropagation(); onChange(s); setOpen(false); }} className="flex w-full items-center gap-1.5 whitespace-nowrap rounded px-2 py-1 text-left text-[15px] hover:bg-background">
               <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[s].dot }} /> {STATUS_META[s].label}
             </button>
           ))}
@@ -526,7 +540,7 @@ function InlinePriority({ value, auto = false, onChange }: { value: Priority; au
           longest label and was wrapping onto two lines, which made its row
           taller than every other row in the list (Derek, 2026-08-27). The
           column now sizes itself to fit it. */}
-      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 128, options.length * 32 + 8)); setOpen((o) => !o); }}
+      <button ref={ref} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, MENU_MAX, options.length * 32 + 8)); setOpen((o) => !o); }}
         title={auto ? "Following the due date. Pick one to fix it." : "Set by hand"}
         className="inline-flex items-center gap-1 whitespace-nowrap rounded px-1 py-0.5 text-[13px] font-medium hover:bg-background" style={{ color: value === "none" ? "var(--muted)" : PRIORITY_META[value].color }}>
         {value === "none" ? "—" : (<><I.flag className="shrink-0" />{PRIORITY_META[value].label}</>)}
@@ -536,9 +550,9 @@ function InlinePriority({ value, auto = false, onChange }: { value: Priority; au
       </button>
       {open && (<>
         <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
-        <div style={{ position: "fixed", top: pos.top, left: pos.left, width: 128 }} className="z-40 rounded-lg border bg-surface p-1 shadow-lg">
+        <div style={menuStyle(pos, 128)} className="z-40 rounded-lg border bg-surface p-1 shadow-lg">
           {options.map((p) => (
-            <button key={p} onClick={(e) => { e.stopPropagation(); onChange(p); setOpen(false); }} className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[15px] hover:bg-background" style={{ color: p === "none" ? "var(--muted)" : PRIORITY_META[p].color }}>
+            <button key={p} onClick={(e) => { e.stopPropagation(); onChange(p); setOpen(false); }} className="flex w-full items-center gap-1.5 whitespace-nowrap rounded px-2 py-1 text-left text-[15px] hover:bg-background" style={{ color: p === "none" ? "var(--muted)" : PRIORITY_META[p].color }}>
               {p !== "none" && <I.flag />} {PRIORITY_META[p].label}
             </button>
           ))}
@@ -567,7 +581,7 @@ export function InlineAssignee({ value, onChange, waiting, onSetWaiting, client,
       </button>
       {open && (<>
         <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
-        <div style={{ position: "fixed", top: pos.top, left: pos.left, width: 190 }} className="z-40 rounded-lg border bg-surface p-1 shadow-xl">
+        <div style={menuStyle(pos, 190)} className="z-40 rounded-lg border bg-surface p-1 shadow-xl">
           {onSetWaiting && (
             <button onClick={(e) => { e.stopPropagation(); onSetWaiting(true); setOpen(false); }} className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[13px] hover:bg-background ${waiting ? "font-medium text-amber-600" : "text-muted"}`}><I.user /> {client ? client.name : "Waiting on client"}</button>
           )}
