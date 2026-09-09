@@ -130,6 +130,23 @@ function rawQuickAddRow(text: string): ParsedRow {
   return { title, description: rest, verbatim: "", assignee: null, due: null, followUpAt: null, size: null, priority: "normal", keep: true };
 }
 
+// Guards the recurrence-clone step in update()/patchTask() against creating
+// two next-occurrence clones for one completion. Caught in production
+// 2026-09-09: a single checkbox click on a "weekday" recurring task left two
+// identical "Find images for Lincoln business listings" clones five seconds
+// apart, and every other recurring task completed in the same session that
+// day cloned exactly once — so this is a rare double-fire on one click, not
+// a systemic issue, but it leaves a silent stray duplicate every time it
+// happens (Derek: "I keep tryin to delete it... it clears out then
+// reappears" — the surviving twin, not the one he deleted).
+// Matches on the fields that make two clones indistinguishable as work — a
+// legitimate second task that merely shares a title would also share the
+// project and due date, which recurring siblings from separate templates
+// essentially never do in practice.
+function hasFreshClone(pool: Task[], src: Task, nextDue: string | null): boolean {
+  return pool.some((t) => t.id !== src.id && t.clientId === src.clientId && t.projectId === src.projectId && t.title === src.title && t.due === nextDue && t.status !== "done");
+}
+
 export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [clients, setClients] = useState<Client[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -2412,8 +2429,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     let clone: Task | null = null;
     if (cur && synced.status === "done" && cur.status !== "done" && cur.recurrence !== "none") {
       const nextDue = nextDueAhead(cur.due, cur.recurrence, cur.recurrenceInterval, cur.recurrenceUnit, cur.recurrenceDaysOfMonth, cur.recurrenceNth, cur.recurrenceWeekday);
-      clone = { ...cur, id: newId("t_"), status: "todo", due: nextDue, ...recurrenceResetFields(cur.due), subtasks: cur.subtasks.map((s) => ({ ...s, id: newId("s_"), done: false })), comments: [], attachments: [...cur.attachments], ghlTaskId: null };
-      pushToast(`🔁 Recurring — next occurrence created for ${formatDue(nextDue)}`);
+      if (!hasFreshClone(tasksRef.current, cur, nextDue)) {
+        clone = { ...cur, id: newId("t_"), status: "todo", due: nextDue, ...recurrenceResetFields(cur.due), subtasks: cur.subtasks.map((s) => ({ ...s, id: newId("s_"), done: false })), comments: [], attachments: [...cur.attachments], ghlTaskId: null };
+        pushToast(`🔁 Recurring — next occurrence created for ${formatDue(nextDue)}`);
+      }
     }
     if (cur && synced.status === "done" && cur.status !== "done") keepDoneVisible(id);
     setTasks((ts) => { let next = ts.map((t) => (t.id === id ? { ...t, ...synced } : t)); if (clone) next = [...next, clone]; return next; });
@@ -2501,8 +2520,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     let clone: Task | null = null;
     if (synced.status === "done" && before.status !== "done" && before.recurrence !== "none") {
       const nextDue = nextDueAhead(before.due, before.recurrence, before.recurrenceInterval, before.recurrenceUnit, before.recurrenceDaysOfMonth, before.recurrenceNth, before.recurrenceWeekday);
-      clone = { ...before, id: newId("t_"), status: "todo", due: nextDue, ...recurrenceResetFields(before.due), subtasks: before.subtasks.map((s) => ({ ...s, id: newId("s_"), done: false })), comments: [], attachments: [...before.attachments], ghlTaskId: null };
-      pushToast(`🔁 Recurring — next occurrence created for ${formatDue(nextDue)}`);
+      if (!hasFreshClone(tasksRef.current, before, nextDue)) {
+        clone = { ...before, id: newId("t_"), status: "todo", due: nextDue, ...recurrenceResetFields(before.due), subtasks: before.subtasks.map((s) => ({ ...s, id: newId("s_"), done: false })), comments: [], attachments: [...before.attachments], ghlTaskId: null };
+        pushToast(`🔁 Recurring — next occurrence created for ${formatDue(nextDue)}`);
+      }
     }
     if (synced.status === "done" && before.status !== "done") keepDoneVisible(id);
     setTasks((prev) => { let next = prev.map((x) => (x.id === id ? updated : x)); if (clone) next = [...next, clone]; return next; });
