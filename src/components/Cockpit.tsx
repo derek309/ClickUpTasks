@@ -40,6 +40,7 @@ import {
   PRIORITY_META,
   PRIORITY_ORDER,
   isManuallyAssignable,
+  isMessageConversationTask,
   type Task,
   type TaskStatus,
   type Priority,
@@ -1850,7 +1851,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // boosted for as long as its task is open, even after the message itself
   // is marked read, and clears only when the task is completed.
   function hasOpenConversationTask(clientId: string): boolean {
-    return (scopedTasksByClientId.get(clientId) ?? []).some((t) => t.status !== "done" && t.priority === "conversation");
+    return (scopedTasksByClientId.get(clientId) ?? []).some((t) => t.status !== "done" && t.priority === "conversation" && isMessageConversationTask(t.title));
   }
   // The Review/Check-in tier (Derek + Justin, Jul 17): a client with open work
   // but nothing actually dated silently sinks to the bottom and gets

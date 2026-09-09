@@ -255,6 +255,20 @@ export function conversationSignalRank(title: string | null | undefined): number
   if (!title) return 0;
   return CONVERSATION_SIGNAL_RANK.find((s) => s.test.test(title))?.rank ?? 5; // unrecognized title = treat as mid-value
 }
+// Which Conversation-priority titles represent an actual message waiting on
+// a reply, versus a booked-appointment task that only logs what happened.
+// Read by Cockpit.tsx's hasOpenConversationTask, which drives the sidebar's
+// "New message" tier: a synced appointment (title "Meeting with …", see
+// sync-appointments/route.ts) used to sit in that tier looking exactly like
+// an unread reply, with nothing to read once you opened it — its only
+// comment is a system-logged event, not something the client sent (Derek,
+// 2026-09-09). Everything else defaults to true: an unread reply must never
+// be missed because its title didn't match a known non-message pattern.
+const NON_MESSAGE_CONVERSATION_TITLES = [/^Meeting with /];
+export function isMessageConversationTask(title: string | null | undefined): boolean {
+  if (!title) return true;
+  return !NON_MESSAGE_CONVERSATION_TITLES.some((p) => p.test(title));
+}
 /** How long a newly won business's trial runs, in days — the window that
  * opens the moment the deal actually closes (card on file), and the source
  * of Client.trialEndsAt. One constant so the length is changed in one
