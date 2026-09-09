@@ -4,11 +4,18 @@
 // the lot (Derek, 2026-09-04: "we can just mind dump into it, and then it
 // will create the task for us").
 //
-// Two stages on purpose. The AI's output is never written straight to the
-// database: it lands in an editable list first, with every row individually
-// droppable, because a parse that quietly invents or merges an action item is
-// worse than no parse at all when it's already a real task by the time you
-// notice.
+// Two ways in, because a dump is sometimes one thing and sometimes twenty
+// (Derek, 2026-09-09: "sometimes we have to just add a task quickly, other
+// times we want to add a list of tasks"):
+//  - Quick add — a grammar pass, one task, created immediately. No review
+//    screen, because there's only one thing to look at and it's already on
+//    screen in the textarea.
+//  - Split into tasks — the AI reads the whole dump for every distinct
+//    action item, and its output is never written straight to the database:
+//    it lands in an editable list first, with every row individually
+//    droppable, because a parse that quietly invents or merges an action
+//    item is worse than no parse at all when it's already a real task by the
+//    time you notice.
 //
 // Three things this owes the person using it:
 //  1. Room. It fills the screen rather than sitting in a small box, because
@@ -52,7 +59,7 @@ export const DEFAULT_FOLLOW_UP = () => TODAY;
 
 type PastedFile = { file: File; url: string; row: number };
 
-export function MindDumpModal({ clientName, listName, destinationHint, suggestedDue, busy, onParse, onCreate, onCancel }: {
+export function MindDumpModal({ clientName, listName, destinationHint, suggestedDue, busy, onParse, onQuickAdd, onCreate, onCancel }: {
   clientName: string;
   listName: string;
   // Named so the header can say where these land without this component
@@ -64,6 +71,10 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
   suggestedDue: string | null;
   busy: boolean;
   onParse: (text: string) => Promise<ParsedRow[] | null>;
+  // Quick add: hands back one already-cleaned row and nothing else — the
+  // modal builds it into a full task with the current defaults and creates
+  // it right away, skipping the review screen entirely.
+  onQuickAdd: (text: string) => Promise<ParsedRow | null>;
   onCreate: (rows: ParsedRow[], files: { file: File; row: number }[]) => void;
   onCancel: () => void;
 }) {
@@ -77,6 +88,9 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
   const [owner, setOwner] = useState<string | null>(null); // null = whoever is creating
   const [priority, setPriority] = useState<Priority>("normal");
   const dumpRef = useRef<HTMLTextAreaElement | null>(null);
+  // Which button is waiting on its request — busy alone can't tell the two
+  // apart since both routes through the same in-flight flag one level up.
+  const [pending, setPending] = useState<"quick" | "split" | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onCancel(); };
@@ -104,7 +118,9 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
   };
 
   const read = async () => {
+    setPending("split");
     const parsed = await onParse(text);
+    setPending(null);
     if (!parsed) return;
     // The AI answers what is in the text. Everything it was not asked to
     // guess at (follow-up, size) and everything the defaults already answer
@@ -121,6 +137,26 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
       // flagged just because the model felt strongly about it.
       priority: r.priority === "urgent" ? "urgent" : priority,
     })));
+  };
+
+  // Same default fill as `read`, just for the one row and skipping straight
+  // to onCreate — quick add's whole point is that nothing stands between
+  // typing and a task existing.
+  const quickAdd = async () => {
+    setPending("quick");
+    const r = await onQuickAdd(text);
+    setPending(null);
+    if (!r) return;
+    const row: ParsedRow = {
+      ...r,
+      due: r.due ?? due,
+      followUpAt,
+      size: null,
+      assignee: r.assignee ?? owner,
+      priority: r.priority === "urgent" ? "urgent" : priority,
+      keep: true,
+    };
+    onCreate([row], files.map((f) => ({ file: f.file, row: 0 })));
   };
 
   const patch = (i: number, p: Partial<ParsedRow>) => setRows((rs) => rs?.map((r, n) => (n === i ? { ...r, ...p } : r)) ?? rs);
@@ -234,12 +270,18 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
               </div>
             </div>
             <div className="flex shrink-0 items-center justify-between gap-3 border-t px-6 py-3.5">
-              <span className="text-[14px] text-muted">Nothing is created until you have seen the list.</span>
-              <span className="flex items-center gap-2">
+              <span className="min-w-0 flex-1 truncate text-[14px] text-muted" title="Split into tasks shows you the list before anything is created. Quick add creates the one task right away.">
+                Split into tasks shows you the list first. Quick add creates the one task right away.
+              </span>
+              <span className="flex shrink-0 items-center gap-2">
                 <button onClick={onCancel} className="rounded-lg border px-3.5 py-2 text-[15px] font-medium hover:bg-background">Cancel</button>
-                <button onClick={read} disabled={!text.trim() || busy}
+                <button onClick={quickAdd} disabled={!text.trim() || busy} title="Grammar cleaned up, created as one task right away"
+                  className="rounded-lg border px-3.5 py-2 text-[15px] font-medium hover:bg-background disabled:opacity-40">
+                  {pending === "quick" ? "Adding…" : "Quick add"}
+                </button>
+                <button onClick={read} disabled={!text.trim() || busy} title="Read the whole dump for every distinct action item, then review before creating"
                   className="rounded-lg bg-accent px-4 py-2 text-[15px] font-semibold text-white disabled:opacity-40">
-                  {busy ? "Reading…" : "Make the tasks"}
+                  {pending === "split" ? "Reading…" : "Split into tasks"}
                 </button>
               </span>
             </div>

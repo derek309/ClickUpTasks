@@ -9,6 +9,11 @@ import { requireUser } from "@/lib/serverAuth";
 // It only ever RETURNS structured tasks — the caller shows them for editing
 // and does the creating. Nothing here writes to the database, so a bad parse
 // costs a glance, not a cleanup.
+//
+// body.single=true is the composer's other button: same endpoint, same
+// contract, but told to keep the text as one task instead of splitting it —
+// a grammar clean-up, not a read (Derek, 2026-09-09: "sometimes we have to
+// just add a task quickly, other times we want to add a list of tasks").
 
 const GEMINI_MODEL = "gemini-flash-latest";
 const GEMINI_TIMEOUT_MS = 20000;
@@ -41,14 +46,25 @@ export async function POST(req: NextRequest) {
   const roster: string[] = Array.isArray(b.roster) ? b.roster.filter((n: unknown) => typeof n === "string").slice(0, 40) : [];
   const clientName = typeof b.clientName === "string" ? b.clientName.trim() : "";
   const today = typeof b.today === "string" && /^\d{4}-\d{2}-\d{2}$/.test(b.today) ? b.today : new Date().toISOString().slice(0, 10);
+  // The composer's fast path (Derek, 2026-09-09: "sometimes we have to just
+  // add a task quickly, other times we want to add a list of tasks"). Same
+  // prompt and same JSON contract as the split path, so nothing downstream
+  // has to branch on it — the only difference is the model is told to keep
+  // everything as one task instead of splitting, and the result is capped to
+  // one element regardless of what comes back.
+  const single = b.single === true;
   if (!text) return NextResponse.json({ error: "Nothing to read — paste a list first." }, { status: 400 });
 
   const prompt = [
-    "You are turning someone's pasted notes into tasks in a project management tool.",
-    "Read the text and return every distinct action item as its own task.",
+    "You are turning someone's pasted notes into a task in a project management tool.",
+    single
+      ? "Clean the text up into ONE task: fix its spelling and grammar, do not split it into several tasks even if it touches more than one thing, and do not invent detail that isn't there."
+      : "Read the text and return every distinct action item as its own task.",
     "",
     "Rules:",
-    "- One task per action. Do not merge two actions into one, and do not invent tasks that are not in the text.",
+    single
+      ? "- Exactly one task. Everything in the text belongs to it — use the description for whatever doesn't fit the title, never a second task."
+      : "- One task per action. Do not merge two actions into one, and do not invent tasks that are not in the text.",
     "- Title: short and specific, starting with a verb, under 70 characters.",
     "- Description: any supporting detail from the text that does not fit the title, in your own words. Empty string if the title already says everything. Fix spelling and grammar here.",
     `- Today is ${today}. Resolve any date mentioned in the text to yyyy-mm-dd. Use null when no date is stated. Never invent a date.`,
@@ -105,7 +121,7 @@ export async function POST(req: NextRequest) {
     // Normalize hard rather than trusting the model: a bad assignee name or a
     // malformed date must never reach the task-creation path.
     const rosterLower = new Map(roster.map((n) => [n.toLowerCase(), n]));
-    const tasks: ParsedTask[] = arr.slice(0, MAX_TASKS).map((t) => {
+    const tasks: ParsedTask[] = arr.slice(0, single ? 1 : MAX_TASKS).map((t) => {
       const o = (t ?? {}) as Record<string, unknown>;
       const title = typeof o.title === "string" ? o.title.trim().slice(0, 200) : "";
       const rawAssignee = typeof o.assignee === "string" ? o.assignee.trim() : "";

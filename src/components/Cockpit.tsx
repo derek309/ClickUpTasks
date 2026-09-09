@@ -117,6 +117,19 @@ function describeDumpRow(r: { description: string; verbatim: string }): string {
   return parts.join("");
 }
 
+// Quick add's offline fallback: the AI grammar pass failed or timed out, but
+// the whole point of the fast button is that it still works. First line (or
+// first 70 characters, whichever is shorter) becomes the title, the rest —
+// ungraded, ungrammared — becomes the description, so nothing typed is lost.
+function rawQuickAddRow(text: string): ParsedRow {
+  const trimmed = text.trim();
+  const firstBreak = trimmed.indexOf("\n");
+  const titleLine = firstBreak === -1 ? trimmed : trimmed.slice(0, firstBreak).trim();
+  const title = titleLine.length > 70 ? titleLine.slice(0, 70).trim() : titleLine;
+  const rest = (titleLine.length > 70 ? trimmed.slice(70) : trimmed.slice(firstBreak + 1)).trim();
+  return { title, description: rest, verbatim: "", assignee: null, due: null, followUpAt: null, size: null, priority: "normal", keep: true };
+}
+
 export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [clients, setClients] = useState<Client[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -629,6 +642,33 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     } catch {
       pushToast("Couldn't read that list.");
       return null;
+    } finally {
+      setBulkAddBusy(false);
+    }
+  };
+  // The composer's other button: one task, grammar cleaned up, created
+  // straight away with no review step (Derek, 2026-09-09: "sometimes we have
+  // to just add a task quickly, other times we want to add a list of
+  // tasks"). Same endpoint as parseTaskList, just told not to split — see
+  // api/ai/parse-tasks' single flag. If the AI call fails, quick add still
+  // has to work: it falls back to the raw text itself (first line as the
+  // title, the rest as description) rather than blocking on Gemini being
+  // slow or down, which the review path is allowed to do because a person is
+  // about to look the result over anyway.
+  const quickAddTask = async (text: string): Promise<ParsedRow | null> => {
+    setBulkAddBusy(true);
+    try {
+      const res = await authedFetch("/api/ai/parse-tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, single: true, roster: users.map((u) => u.name), clientName: clientById(activeClient)?.name ?? "", today: TODAY }),
+      });
+      const j = await res.json().catch(() => ({}));
+      const t = (j.tasks as ParsedRow[] | undefined)?.[0];
+      if (!res.ok || j.error || !t) return rawQuickAddRow(text);
+      return { ...t, followUpAt: null, size: null, keep: true };
+    } catch {
+      return rawQuickAddRow(text);
     } finally {
       setBulkAddBusy(false);
     }
@@ -4538,6 +4578,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           suggestedDue={dueForGroup(dumpGroup.key)}
           busy={bulkAddBusy}
           onParse={parseTaskList}
+          onQuickAdd={quickAddTask}
           onCreate={createTasksFromDump}
           onCancel={() => setDumpGroup(null)}
         />
