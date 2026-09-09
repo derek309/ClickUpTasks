@@ -6,12 +6,20 @@ import { buildSearch, parseSearch, type NavState } from "./navState";
 // survive build → parse → build sends someone somewhere else.
 const base: NavState = {
   view: null, client: "all", project: null, task: null,
-  clientTab: null, vaultFolder: null, dm: null,
+  clientTab: null, vaultFolder: null, dm: null, assignee: null,
 };
 
 describe("the deep-link URL", () => {
   it("is empty when there is nothing to say", () => {
     expect(buildSearch(base)).toBe("");
+  });
+
+  // All Tasks with an assignee selected is the one case where "client: all"
+  // still needs to say something — see currentNav's comment in Cockpit.tsx.
+  it("round-trips an All Tasks assignee, but not the default", () => {
+    expect(buildSearch({ ...base, assignee: "mine" })).toBe("");
+    const s: NavState = { ...base, assignee: "u_michaella" };
+    expect(parseSearch(buildSearch(s))).toMatchObject({ client: "all", assignee: "u_michaella" });
   });
 
   it("round-trips a client, its project and an open task", () => {

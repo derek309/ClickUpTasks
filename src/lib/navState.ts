@@ -10,8 +10,10 @@
 //   ?view=work|clients|personal|settings   the special boards
 //   ?view=inbox&dm=<userId>                a DM thread
 //   ?client=<id>[&project=<id>]   a client (optionally scoped to one project)
+//   ?assignee=<id>|all            All Tasks scoped to one person or everyone
+//                                  (the default "mine" is never encoded)
 //   ?task=<id>                    the task drawer (layers over any of the above)
-export type NavState = { view: "work" | "personal" | "inbox" | "clients" | "projects" | "settings" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | null; vaultFolder: string | null; dm: string | null };
+export type NavState = { view: "work" | "personal" | "inbox" | "clients" | "projects" | "settings" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | null; vaultFolder: string | null; dm: string | null; assignee: string | null };
 export function buildSearch(s: NavState): string {
   const p = new URLSearchParams();
   if (s.view) {
@@ -24,6 +26,13 @@ export function buildSearch(s: NavState): string {
     // every pre-existing shared link (no ?tab= at all) still keeps working.
     if (s.clientTab && s.clientTab !== "tasks") p.set("tab", s.clientTab);
     if (s.vaultFolder) p.set("folder", s.vaultFolder);
+  } else if (s.assignee && s.assignee !== "mine") {
+    // All Tasks with nothing else selected still carries meaning — WHOSE
+    // tasks it's showing — and that's exactly what a shared link is for
+    // (Derek, 2026-09-09: "when I click on all tasks I need a real link so
+    // I can share it"). "mine" is the default every fresh visit already
+    // lands on, so it's the one value worth leaving off the URL.
+    p.set("assignee", s.assignee);
   }
   if (s.task) p.set("task", s.task);
   const q = p.toString();
@@ -43,6 +52,7 @@ export function parseSearch(search: string): NavState {
     clientTab: tab === "chat" || tab === "vault" ? "chat" : null,
     vaultFolder: p.get("folder"),
     dm: p.get("dm"),
+    assignee: p.get("assignee"),
   };
 }
 
