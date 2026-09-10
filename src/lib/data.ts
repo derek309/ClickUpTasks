@@ -1884,12 +1884,23 @@ export function delegatedDueFor(
   task: { assigneeId?: string | null; subtasks?: Subtask[] },
   userId: string,
 ): string | null {
+  return delegatedItemFor(task, userId)?.due ?? null;
+}
+
+/** The handoff this person is holding on someone else's task: their open
+ *  delegated checklist item, the soonest dated one first. Null for the
+ *  task's owner. Their row reads its title and date from this one item, so
+ *  the name and the date on their list can never come from two different
+ *  handoffs (Derek: her list showed the task's title, not the one he gave
+ *  her). */
+export function delegatedItemFor(
+  task: { assigneeId?: string | null; subtasks?: Subtask[] },
+  userId: string,
+): Subtask | null {
   if (task.assigneeId === userId) return null;
-  const dates = (task.subtasks ?? [])
-    .filter((s) => !s.done && s.assigneeId === userId && s.due)
-    .map((s) => s.due!)
-    .sort();
-  return dates[0] ?? null;
+  const mine = (task.subtasks ?? []).filter((s) => !s.done && s.assigneeId === userId);
+  mine.sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999"));
+  return mine[0] ?? null;
 }
 
 /** Who a task is currently with, if it has been handed off: the assignee of

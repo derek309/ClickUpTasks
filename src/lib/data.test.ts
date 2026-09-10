@@ -52,6 +52,7 @@ import {
   pickableStatuses,
   isOnPlateOf,
   delegateeOf,
+  delegatedItemFor,
   delegationTitle,
   viewerDueDate,
   type Subtask,
@@ -1073,6 +1074,30 @@ describe("isOnPlateOf", () => {
   });
   it("says no to someone with nothing on it", () => {
     expect(isOnPlateOf({ assigneeId: "u_derek", subtasks: [item({ assigneeId: "u_mp" })] }, "u_justin")).toBe(false);
+  });
+});
+
+describe("delegatedItemFor", () => {
+  const item = (over: Partial<Subtask>): Subtask => ({ id: "s1", title: "x", done: false, ...over });
+  it("returns the handoff they were given", () => {
+    const t = { assigneeId: "u_derek", subtasks: [item({ title: "Schedule Promotional Newsletter", assigneeId: "u_mp" })] };
+    expect(delegatedItemFor(t, "u_mp")?.title).toBe("Schedule Promotional Newsletter");
+  });
+  it("is null for the task's owner", () => {
+    const t = { assigneeId: "u_derek", subtasks: [item({ assigneeId: "u_derek" })] };
+    expect(delegatedItemFor(t, "u_derek")).toBe(null);
+  });
+  it("ignores one they have finished", () => {
+    const t = { assigneeId: "u_derek", subtasks: [item({ assigneeId: "u_mp", done: true })] };
+    expect(delegatedItemFor(t, "u_mp")).toBe(null);
+  });
+  it("takes the soonest dated when they hold two, ahead of an undated one", () => {
+    const t = { assigneeId: "u_derek", subtasks: [
+      item({ id: "s1", title: "undated", assigneeId: "u_mp" }),
+      item({ id: "s2", title: "later", assigneeId: "u_mp", due: "2026-09-20" }),
+      item({ id: "s3", title: "sooner", assigneeId: "u_mp", due: "2026-09-08" }),
+    ] };
+    expect(delegatedItemFor(t, "u_mp")?.title).toBe("sooner");
   });
 });
 

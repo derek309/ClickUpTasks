@@ -7,7 +7,7 @@ import { usePersisted } from "@/lib/usePersisted";
 import {
   users, formatDue, isOverdue, TODAY, COLLAPSED_DUE_BUCKETS, effectivePriority, effectiveStatus, clientInitials, dueOneLine, isSnoozed,
   PRIORITY_META, manualPriorityOptions,
-  STATUS_META, pickableStatuses, delegateeOf, delegatedDueFor, userById, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence,
+  STATUS_META, pickableStatuses, delegateeOf, delegatedItemFor, userById, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence,
   addDaysIso, dateQuickPicks,
   type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus,
 } from "@/lib/data";
@@ -265,7 +265,11 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
   // the delegatee's it wears their face and the date they were given. Same
   // row, same task, two honest readings of it.
   const mineByDelegation = !!lensId && delegatedTo === lensId;
-  const lensDue = lensId ? delegatedDueFor(task, lensId) : null;
+  const lensItem = lensId ? delegatedItemFor(task, lensId) : null;
+  const lensDue = lensItem?.due ?? null;
+  // Their row is named for what they were asked to do. The task it belongs to
+  // moves to the line underneath, so they can still tell whose it is.
+  const shownTitle = lensItem?.title.trim() || task.title;
   const client = clientById(task.clientId);
   const project = projectById(task.projectId);
   const overdue = isOverdue(task.due) && task.status !== "done";
@@ -278,6 +282,7 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
   const folder = folderById?.(project?.folderId) ?? null;
   const listName = project && (showClient || project.name !== "Tasks") ? project.name : "";
   const crumb = [folder?.name, listName].filter(Boolean).join(" / ");
+  const subline = [shownTitle !== task.title && task.title, showCrumb && crumb].filter(Boolean).join(" · ");
   const isDone = task.status === "done";
   // Priority used to be its own column; it's now a 3px bar on the row's
   // leading edge so it reads at a glance without repeating the group
@@ -394,7 +399,7 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
                   column is worse than a taller row). Clamped at two lines so
                   one essay of a title cannot own the screen; the full text is
                   in the title attribute and the task is one click away. */}
-              <span className={`line-clamp-2 min-w-0 flex-1 break-words text-[15px] font-medium leading-snug ${isDone ? "text-muted line-through" : ""}`} title={task.title}>{task.title}</span>
+              <span className={`line-clamp-2 min-w-0 flex-1 break-words text-[15px] font-medium leading-snug ${isDone ? "text-muted line-through" : ""}`} title={task.title}>{shownTitle}</span>
             </span>
             {/* No icon row (Derek, 2026-09-01: "remove the icons not needed
                 on tasks list view"). A repeat arrow, a paperclip, a comment
@@ -403,8 +408,8 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
                 you do next. All of it is in the task, one click away. The
                 project crumb stays: it says which list you are looking at,
                 which the row otherwise cannot tell you. */}
-            {showCrumb && crumb && (
-              <span className="min-w-0 truncate text-[11px] leading-tight text-muted">{crumb}</span>
+            {subline && (
+              <span className="min-w-0 truncate text-[11px] leading-tight text-muted">{subline}</span>
             )}
           </div>
         </div>
