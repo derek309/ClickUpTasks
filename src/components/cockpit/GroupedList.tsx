@@ -270,6 +270,13 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
   // Their row is named for what they were asked to do. The task it belongs to
   // moves to the line underneath, so they can still tell whose it is.
   const shownTitle = lensItem?.title.trim() || task.title;
+  // Done on their row finishes their handoff, not the owner's task. The dot
+  // is the one-click done on every other row of their list, so it would
+  // otherwise close a task the owner still has work left on (Derek: "when
+  // she completes the task it will only complete the delegation").
+  const setStatus = (s: TaskStatus) => lensItem && s === "done"
+    ? onToggleSub(task.id, lensItem.id)
+    : onPatch(task.id, { status: s });
   const client = clientById(task.clientId);
   const project = projectById(task.projectId);
   const overdue = isOverdue(task.due) && task.status !== "done";
@@ -299,7 +306,7 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
   // from the drawer.
   const cell = (key: string) => {
     if (key === "status") return (
-      <InlineStatus value={effectiveStatus(task)} onChange={(s) => onPatch(task.id, { status: s })} />
+      <InlineStatus value={effectiveStatus(task)} onChange={setStatus} />
     );
     if (key === "assignee") return <InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a, waitingOnClient: false })} onSetWaiting={() => onPatch(task.id, { waitingOnClient: true, assigneeId: null })} />;
     if (key === "priority") return <InlinePriority value={shownPriority} auto={task.priorityAuto !== false} onChange={(p) => onPatch(task.id, { priority: p })} />;
@@ -353,7 +360,7 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
           {/* Only when the Stage column is off, so there is never two of
               them on one row. */}
           {!cols.some((c) => c.key === "status") && (
-            <span className="mr-1"><StatusDot value={effectiveStatus(task)} onChange={(st) => onPatch(task.id, { status: st })} /></span>
+            <span className="mr-1"><StatusDot value={effectiveStatus(task)} onChange={setStatus} /></span>
           )}
           <button onClick={onToggleExpand} className={`shrink-0 rounded p-0.5 text-muted hover:text-foreground ${task.subtasks.length ? "" : "opacity-0 group-hover/tr:opacity-40"}`} title="Subtasks"><I.chevron className={`transition ${expanded ? "-rotate-90" : "rotate-180"}`} /></button>
           {/* Always visible (Derek, 2026-08-24): hiding it whenever the
