@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, clientStatusMeta,
-  TaskAction, TaskActionKind, prettyLinkName, effectiveStatus,
+  TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, delegatedItemFor,
   STATUS_META, pickableStatuses, type DelegateSpec, type ClientLink, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, startSignal, isSnoozed, daysUntilDue, formatDue, dueCountdown,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
@@ -597,6 +597,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // icon, who it's assigned to"). Split here, shown as its own row below the
   // stage chips, and left out of the checklist and its progress entirely.
   const delegations = task.subtasks.filter((s) => !!s.assigneeId && s.assigneeId !== task.assigneeId);
+  // Picking Done on a task someone handed you finishes your handoff, not
+  // their task, same as the dot on your list (see setStatus in GroupedList).
+  const myHandoff = delegatedItemFor(task, meId);
+  const setStage = (s: TaskStatus) => myHandoff && s === "done"
+    ? onToggleSub(myHandoff.id)
+    : onPatch({ status: s });
   const plainSubs = task.subtasks.filter((s) => !delegations.includes(s));
   const doneSubs = plainSubs.filter((s) => s.done).length;
 
@@ -722,7 +728,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     <div className="mt-4 flex flex-wrap items-center gap-1.5">
       <span className={chip} style={{ borderColor: STATUS_META[effectiveStatus(task)].dot + "55" }}>
         <span className="ml-2 h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: STATUS_META[effectiveStatus(task)].dot }} />
-        <select value={effectiveStatus(task)} onChange={(e) => onPatch({ status: e.target.value as TaskStatus })} className="rounded-[5px] bg-transparent py-0.5 pl-1.5 pr-1 text-[13px] font-medium outline-none" style={{ color: STATUS_META[effectiveStatus(task)].dot }}>
+        <select value={effectiveStatus(task)} onChange={(e) => setStage(e.target.value as TaskStatus)} className="rounded-[5px] bg-transparent py-0.5 pl-1.5 pr-1 text-[13px] font-medium outline-none" style={{ color: STATUS_META[effectiveStatus(task)].dot }}>
           {pickableStatuses(effectiveStatus(task)).map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
         </select>
       </span>
