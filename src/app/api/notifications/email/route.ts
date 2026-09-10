@@ -26,11 +26,14 @@ export async function POST(req: NextRequest) {
   if (!recipientMemberId || !subject?.trim())
     return NextResponse.json({ error: "Missing recipientMemberId or subject." }, { status: 400 });
 
-  const { data: recipient } = await supabaseAdmin
-    .from("profiles")
-    .select("email, email_notify_activity, email_notify_message, email_notify_dm")
-    .eq("member_id", recipientMemberId)
-    .maybeSingle();
+  const [{ data: recipient }, { data: sender }] = await Promise.all([
+    supabaseAdmin
+      .from("profiles")
+      .select("email, email_notify_activity, email_notify_message, email_notify_dm")
+      .eq("member_id", recipientMemberId)
+      .maybeSingle(),
+    supabaseAdmin.from("profiles").select("name").eq("id", caller.id).maybeSingle(),
+  ]);
   if (!recipient?.email) return NextResponse.json({ error: "Recipient has no email on file." }, { status: 404 });
   if (recipient.email.toLowerCase() === caller.email.toLowerCase())
     return NextResponse.json({ ok: true, skipped: "self-notify" });
@@ -42,6 +45,11 @@ export async function POST(req: NextRequest) {
   try {
     const { id } = await sendGmailAs(caller.email, {
       to: recipient.email,
+      // Name the sender in the From header, as mention-email does. Without it
+      // the header is a bare address and the recipient's mail client supplies
+      // whatever name it associates with that address, which is how an update
+      // Justin made could arrive looking like it came from Derek Fox.
+      fromName: (sender?.name as string | null)?.trim() || undefined,
       subject: subject.trim().slice(0, 200),
       body: `${subject.trim()}\n\nView in ClickUpTasks: ${url}`,
     });
