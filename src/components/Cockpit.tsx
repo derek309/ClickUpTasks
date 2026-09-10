@@ -28,7 +28,7 @@ import {
   STATUS_ORDER, HIDDEN_STATUSES, pickableStatuses,
   applyWaitingStatusSync,
   mentionsUser,
-  viewerDueDate, isOnPlateOf, delegationTitle, delegateeOf,
+  viewerDueDate, isOnPlateOf, delegationTitle, delegateeOf, delegatedItemFor,
   isSnoozed,
   isCompletionEvent,
   CLIENT_STATUS_META,
@@ -2510,9 +2510,28 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return lines;
   };
 
+  // Someone a task was handed to marks it Done: that finishes THEIR handoff,
+  // never the owner's task (Derek: "when she completes the task it will only
+  // complete the delegation"). RLS lets a delegatee update the task, so this
+  // is the only thing stopping it. One check where status writes converge, so
+  // the row dot, the drawer's stage chip, bulk Status, and dragging into a
+  // status group all agree. Returns true when it handled the Done.
+  const finishHandoffInstead = (task: Task): boolean => {
+    const handoff = delegatedItemFor(task, me.id);
+    if (!handoff) return false;
+    toggleSub(task.id, handoff.id);
+    return true;
+  };
+
   const patchTask = (id: string, patch: Partial<Task>) => {
     const before = tasksRef.current.find((x) => x.id === id);
     if (!before) return;
+    if (patch.status === "done" && finishHandoffInstead(before)) {
+      const rest = { ...patch };
+      delete rest.status;
+      if (!Object.keys(rest).length) return;
+      patch = rest;
+    }
     // Keeps status:"waiting" and waitingOnClient in lockstep — see update()'s
     // matching comment for why this can't just live in one place.
     // Choosing a priority by hand takes this task off automatic for good: the
@@ -3495,6 +3514,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const t = tasks.find((x) => x.id === taskId);
     if (!t) return;
     const targetStage = stageId ? stages.find((s) => s.id === stageId) : null;
+    // Dragging into a done stage is Done too; see finishHandoffInstead.
+    if (targetStage?.isDone && finishHandoffInstead(t)) return;
     const nextStatus: TaskStatus = targetStage?.isDone ? "done" : t.status === "done" ? "todo" : t.status;
     update(taskId, { stageId, status: nextStatus });
   };
