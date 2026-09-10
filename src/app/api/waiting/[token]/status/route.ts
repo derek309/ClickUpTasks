@@ -36,14 +36,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   if (!task || task.client_id !== scope.clientId || (scope.projectId && task.project_id !== scope.projectId)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (task.status === "done") return NextResponse.json({ error: "This item has already been completed." }, { status: 400 });
 
-  const notifyRecipient = await resolveNotifyRecipient(scope.assignedTo);
+  // The task's own owner first, same as respond/route.ts: waiting keeps the
+  // assignee, so only a task nobody owns falls back to the client's followers.
+  const owner = (task.assignee_id as string | null) ?? null;
+  const notifyRecipient = owner ?? await resolveNotifyRecipient(scope.assignedTo);
   const patch: Record<string, unknown> = { status };
   // Same "answering the call" reasoning as respond/route.ts — setting a
   // status is itself a response, so a task that was waiting on the client
   // reopens for the team the same way replying to it would.
   if (task.waiting_on_client === true) {
     patch.waiting_on_client = false;
-    patch.assignee_id = notifyRecipient;
+    if (!owner) patch.assignee_id = notifyRecipient;
     patch.due = todayIso();
   }
 

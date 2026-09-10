@@ -308,7 +308,7 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
     if (key === "status") return (
       <InlineStatus value={effectiveStatus(task)} onChange={setStatus} />
     );
-    if (key === "assignee") return <InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a, waitingOnClient: false })} onSetWaiting={() => onPatch(task.id, { waitingOnClient: true, assigneeId: null })} />;
+    if (key === "assignee") return <InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a })} onSetWaiting={(v) => onPatch(task.id, { waitingOnClient: v })} />;
     if (key === "priority") return <InlinePriority value={shownPriority} auto={task.priorityAuto !== false} onChange={(p) => onPatch(task.id, { priority: p })} />;
     if (key === "followUp") return (
       <InlineDate value={task.followUpAt ?? null} onChange={(d) => onPatch(task.id, { followUpAt: d })}
@@ -368,7 +368,7 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
               assignee shown at all, since most tasks are assigned to the
               admin viewing the list. */}
           {mineByDelegation && <Avatar id={delegatedTo!} size={20} />}
-          <InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a, waitingOnClient: false })} onSetWaiting={() => onPatch(task.id, { waitingOnClient: true, assigneeId: null })} size={30} />
+          <InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a })} onSetWaiting={(v) => onPatch(task.id, { waitingOnClient: v })} size={30} />
           {/* Owner first, then who it is with. One avatar said "Derek" on a
               task sitting on Michaella's list, which reads as hers being his
               (Derek: "it's assigning to me... make it clear it's
@@ -400,6 +400,9 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
             <span className="flex min-w-0 items-center gap-1.5">
               {mineByDelegation && <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">From {userById(task.assigneeId)?.name?.split(" ")[0] ?? "the owner"}</span>}
               {!mineByDelegation && delegatedTo && <span className="shrink-0 rounded bg-accent-soft px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-accent">With {userById(delegatedTo)?.name?.split(" ")[0] ?? "them"}</span>}
+              {/* Waiting reads like a handoff to the client: the owner keeps
+                  the row, and this says who has the next move. */}
+              {task.waitingOnClient && <span className="shrink-0 rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700" title={client ? `Waiting on ${client.name}` : "Waiting on the client"}>Waiting on {client?.name?.split(" ")[0] ?? "client"}</span>}
               {/* Wraps to a second line rather than pushing the table wider
                   than the window (Derek: "go ahead and wordwrap the titles if
                   you have to" — a sideways scrollbar that hides the Name
@@ -586,7 +589,9 @@ export function InlineAssignee({ value, onChange, waiting, onSetWaiting, client,
   return (
     <div className="relative">
       <button ref={ref} title={waiting ? (client ? `Waiting on ${client.name}` : "Waiting on the client") : undefined} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 190, (users.length + 2) * 32 + 8)); setOpen((o) => !o); }} className="rounded-full hover:opacity-80">
-        {waiting
+        {/* The client only stands in when nobody owns a waiting task. With an
+            owner the face stays theirs, and the row says who it waits on. */}
+        {waiting && !value
           // Same visual language as a user's own Avatar (colored circle +
           // initials) — this task's blocker is that specific client, not a
           // generic "someone external" state, so it should read like one at
@@ -600,7 +605,7 @@ export function InlineAssignee({ value, onChange, waiting, onSetWaiting, client,
         <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
         <div style={menuStyle(pos, 190)} className="z-40 rounded-lg border bg-surface p-1 shadow-xl">
           {onSetWaiting && (
-            <button onClick={(e) => { e.stopPropagation(); onSetWaiting(true); setOpen(false); }} className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[13px] hover:bg-background ${waiting ? "font-medium text-amber-600" : "text-muted"}`}><I.user /> {client ? client.name : "Waiting on client"}</button>
+            <button onClick={(e) => { e.stopPropagation(); onSetWaiting(!waiting); setOpen(false); }} title={waiting ? "No longer waiting" : "Waiting on the client, and still yours to follow up"} className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[13px] hover:bg-background ${waiting ? "font-medium text-amber-600" : "text-muted"}`}><I.user /> <span className="min-w-0 flex-1 truncate">{client ? `Waiting on ${client.name}` : "Waiting on client"}</span>{waiting && <I.check />}</button>
           )}
           <button onClick={(e) => { e.stopPropagation(); onChange(null); setOpen(false); }} className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[13px] text-muted hover:bg-background">Unassigned</button>
           {users.map((u) => (

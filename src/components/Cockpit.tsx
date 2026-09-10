@@ -761,8 +761,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         priority: groupKey && groupBy === "priority" && isManuallyAssignable(groupKey as Priority) ? (groupKey as Priority) : r.priority,
         // Assignee defaults to whoever is dumping (Derek: "they're always
         // going to be defaulted to the person who is creating them") — the AI
-        // only overrides it when the notes name someone else outright.
-        assigneeId: waiting ? null : (member?.id ?? me.id), waitingOnClient: waiting,
+        // only overrides it when the notes name someone else outright. A task
+        // waiting on the client still has that owner (see applyWaitingStatusSync).
+        assigneeId: member?.id ?? me.id, waitingOnClient: waiting,
         contactId: activeClient.slice(3),
         due: r.due, followUpAt: r.followUpAt, size: r.size,
         recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true,
@@ -1575,7 +1576,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   const passesFilters = (t: Task) =>
     (filters.status === "all" || effectiveStatus(t) === filters.status) &&
-    (filters.assignee === "all" || (filters.assignee === "waiting" ? !!t.waitingOnClient : filters.assignee === "unassigned" ? (t.assigneeId === null && !t.waitingOnClient) : t.assigneeId === filters.assignee)) &&
+    (filters.assignee === "all" || (filters.assignee === "waiting" ? !!t.waitingOnClient : filters.assignee === "unassigned" ? t.assigneeId === null : t.assigneeId === filters.assignee)) &&
     (filters.priority === "all" || effectivePriority(t) === filters.priority) &&
     // Explicitly filtering to Done overrides the hide-done toggle — asking
     // to see done tasks and then hiding them would show nothing.
@@ -4573,13 +4574,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <span className="text-[15px] font-medium">{selectedTaskIds.size} selected</span>
           <select defaultValue="" onChange={(e) => {
             const v = e.target.value;
-            // "waiting" is a task flag, not a real member id — mirror the
-            // single-task pickers (InlineAssignee/TaskDrawer): set the flag and
-            // clear the assignee. And any real assignment must clear the flag,
-            // else the row keeps rendering the client "waiting" badge.
-            if (v === "waiting") bulkPatch({ waitingOnClient: true, assigneeId: null }, "Set waiting on client");
-            else if (v === "unassigned") bulkPatch({ assigneeId: null, waitingOnClient: false }, "Unassign");
-            else if (v) bulkPatch({ assigneeId: v, waitingOnClient: false }, `Assign to ${users.find((u) => u.id === v)?.name ?? "user"}`);
+            // "waiting" is a task flag, not a real member id. It never touches
+            // the assignee, and assigning never clears it: a waiting task
+            // stays with whoever follows up on it (see applyWaitingStatusSync).
+            if (v === "waiting") bulkPatch({ waitingOnClient: true }, "Set waiting on client");
+            else if (v === "unassigned") bulkPatch({ assigneeId: null }, "Unassign");
+            else if (v) bulkPatch({ assigneeId: v }, `Assign to ${users.find((u) => u.id === v)?.name ?? "user"}`);
             e.target.value = "";
           }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Assignee…</option><option value="unassigned">Unassigned</option><option value="waiting">⏳ Waiting on client</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
           <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ status: e.target.value as TaskStatus }, `Set status to ${STATUS_META[e.target.value as TaskStatus]?.label ?? e.target.value}`); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Status…</option>{pickableStatuses().map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}</select>

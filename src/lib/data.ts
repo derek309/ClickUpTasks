@@ -703,15 +703,16 @@ export interface Task {
   assigneeId: string | null;
   /** "Assigned to the client" — we're waiting on the client for this, so it's
    * not a team member's action item. Set from the assignee picker; when true
-   * the row shows a "Waiting on client" pill and the task drops out of anyone's
-   * My Work (it still shows on the client's own task list and keeps the client
-   * visible on the Dashboard). */
+   * the row shows a "Waiting on client" pill. It keeps its assignee, so it stays
+   * on the owner's list for them to follow up (it used to drop off everyone's,
+   * Derek 2026-09-10), and it keeps the client visible on the Dashboard. */
   waitingOnClient?: boolean;
   /** The client's own reply, submitted through the public /waiting/[token]
    * page — a single overwritable field (not a growing thread), so the
    * client can revise it right up until the team marks the task done.
-   * Submitting while waitingOnClient is true clears that flag, reassigns,
-   * and bumps due to today (see /api/waiting/[token]/respond); editing an
+   * Submitting while waitingOnClient is true clears that flag, hands the task
+   * back to its owner (or the client's follower when it has none), and bumps
+   * due to today (see /api/waiting/[token]/respond); editing an
    * already-submitted response afterward just updates this field in place. */
   clientResponse?: { body: string; attachments: Attachment[]; submittedAt: string } | null;
   /** An outbound email Claude (via the MCP server's draft_email tool)
@@ -842,16 +843,20 @@ export function pickableStatuses(current?: TaskStatus | null): TaskStatus[] {
 // run its patch through this before writing, so the "⏳ Waiting on client"
 // assignee option, the public client-response page, and the Waiting column
 // never drift out of agreement with each other.
+//
+// Waiting never touches the assignee. The client has the next move, but the
+// task still belongs to whoever follows up on it. Clearing the assignee took it
+// off their list until the client answered, so 15 open waiting tasks had no
+// owner at all (Derek, 2026-09-10: "it's complete gone from justin who needs
+// to follow up with it").
 export function applyWaitingStatusSync(before: { status: TaskStatus; waitingOnClient?: boolean }, patch: Partial<Task>): Partial<Task> {
   const out: Partial<Task> = {};
   if (patch.status === "waiting") {
     out.waitingOnClient = true;
-    if (patch.assigneeId === undefined) out.assigneeId = null;
   } else if (patch.status !== undefined && before.status === "waiting") {
     out.waitingOnClient = false;
   } else if (patch.waitingOnClient === true && patch.status === undefined) {
     out.status = "waiting";
-    if (patch.assigneeId === undefined) out.assigneeId = null;
   } else if (patch.waitingOnClient === false && patch.status === undefined && before.status === "waiting") {
     out.status = "review";
   }

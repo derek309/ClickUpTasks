@@ -306,9 +306,9 @@ describe("clientHealth", () => {
 
 
 describe("applyWaitingStatusSync", () => {
-  it("moving status to waiting sets waitingOnClient and clears the assignee", () => {
+  it("moving status to waiting sets waitingOnClient and keeps the assignee", () => {
     const before = { status: "todo" as const, waitingOnClient: false };
-    expect(applyWaitingStatusSync(before, { status: "waiting" })).toEqual({ waitingOnClient: true, assigneeId: null });
+    expect(applyWaitingStatusSync(before, { status: "waiting" })).toEqual({ waitingOnClient: true });
   });
 
   it("moving status to waiting respects an explicit assigneeId already in the patch", () => {
@@ -321,9 +321,9 @@ describe("applyWaitingStatusSync", () => {
     expect(applyWaitingStatusSync(before, { status: "done" })).toEqual({ waitingOnClient: false });
   });
 
-  it("setting waitingOnClient true directly (no explicit status) sets status to waiting", () => {
+  it("setting waitingOnClient true directly (no explicit status) sets status to waiting and keeps the assignee", () => {
     const before = { status: "todo" as const, waitingOnClient: false };
-    expect(applyWaitingStatusSync(before, { waitingOnClient: true })).toEqual({ status: "waiting", assigneeId: null });
+    expect(applyWaitingStatusSync(before, { waitingOnClient: true })).toEqual({ status: "waiting" });
   });
 
   it("clearing waitingOnClient while status was waiting advances status to review", () => {

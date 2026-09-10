@@ -772,13 +772,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           </select>
         </span>
       )}
-      {/* w-full/min-w-0: a native <select> sizes itself to its WIDEST option,
-          and "⏳ Waiting on {long business name}" pushed it clean out of the
-          properties grid (Derek, 2026-08-11). Filling the cell instead keeps
-          the layout stable no matter how long a client's name is. */}
+      {/* w-full/min-w-0: a native <select> sizes itself to its WIDEST option;
+          filling the cell keeps the layout stable (Derek, 2026-08-11).
+          Waiting on the client is no longer an option here. It is a stage, set
+          from the stage chip, and it keeps the owner: as an assignee option it
+          replaced whoever was following up on the task (Derek, 2026-09-10). */}
       <span className={`${chip} max-w-[220px] gap-1`}>
         <I.user className="ml-1.5 shrink-0 text-muted" />
-        <select value={task.waitingOnClient ? "__waiting__" : (task.assigneeId ?? "")} onChange={(e) => { const v = e.target.value; if (v === "__waiting__") onPatch({ waitingOnClient: true, assigneeId: null }); else onPatch({ assigneeId: v || null, waitingOnClient: false }); }} className="w-full min-w-0 rounded-[5px] bg-transparent py-0.5 pl-0.5 pr-1 text-[13px] outline-none"><option value="__waiting__">⏳ {client ? `Waiting on ${client.name}` : "Waiting on client"}</option><option value="">Unassigned</option>{users.map((u) => (<option key={u.id} value={u.id}>{u.name} {u.role === "va" ? "(VA)" : "(Admin)"}</option>))}</select>
+        <select value={task.assigneeId ?? ""} onChange={(e) => onPatch({ assigneeId: e.target.value || null })} className="w-full min-w-0 rounded-[5px] bg-transparent py-0.5 pl-0.5 pr-1 text-[13px] outline-none"><option value="">Unassigned</option>{users.map((u) => (<option key={u.id} value={u.id}>{u.name} {u.role === "va" ? "(VA)" : "(Admin)"}</option>))}</select>
       </span>
       <span className={chip} style={{ borderColor: PRIORITY_META[task.priority].color + "55" }}>
         <span className="ml-1.5 shrink-0" style={{ color: PRIORITY_META[task.priority].color }}><I.flag /></span>

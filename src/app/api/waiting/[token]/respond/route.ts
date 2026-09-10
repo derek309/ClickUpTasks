@@ -31,7 +31,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   if (!taskId) return NextResponse.json({ error: "Missing taskId." }, { status: 400 });
   if (!text && attachments.length === 0) return NextResponse.json({ error: "Add a note or attachment before saving." }, { status: 400 });
 
-  const { data: task } = await supabaseAdmin.from("tasks").select("id, client_id, project_id, title, waiting_on_client, status").eq("id", taskId).eq("is_private", false).maybeSingle();
+  const { data: task } = await supabaseAdmin.from("tasks").select("id, client_id, project_id, title, waiting_on_client, status, assignee_id").eq("id", taskId).eq("is_private", false).maybeSingle();
   if (!task || task.client_id !== scope.clientId || (scope.projectId && task.project_id !== scope.projectId)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (task.status === "done") return NextResponse.json({ error: "This item has already been completed." }, { status: 400 });
 
@@ -47,16 +47,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   // plain text-only reply.
   if (attachments.some((a) => a.kind === "image")) camelPatch.status = "changes_requested";
 
-  // Resolve who should hear about this: the client's own followers, else
-  // the earliest admin — same fallback either way. Only reassignment/due-
-  // bump is exclusive to the "this was waiting on them" case below; a reply
-  // on a task shared via its own ticket link (never flagged waiting) still
-  // needs to reach someone, it just doesn't reassign/reopen anything.
-  const notifyRecipient = await resolveNotifyRecipient(scope.assignedTo);
+  // Resolve who should hear about this: the task's own owner first, because
+  // waiting keeps the assignee (whoever is following up on it). Only a task
+  // nobody owns falls back to the client's followers, else the earliest admin.
+  // Assigning and the due bump stay exclusive to the "this was waiting on
+  // them" case below; a reply on a task shared via its own ticket link (never
+  // flagged waiting) still needs to reach someone, it just doesn't reassign
+  // or reopen anything.
+  const owner = (task.assignee_id as string | null) ?? null;
+  const notifyRecipient = owner ?? await resolveNotifyRecipient(scope.assignedTo);
   let dueToday = false;
   if (task.waiting_on_client === true) {
     camelPatch.waitingOnClient = false;
-    camelPatch.assigneeId = notifyRecipient;
+    if (!owner) camelPatch.assigneeId = notifyRecipient;
     dueToday = true;
   }
 
