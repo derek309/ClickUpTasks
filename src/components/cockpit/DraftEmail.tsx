@@ -226,7 +226,7 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
       </div>
 
       </div>
-      <div>
+      <div className="lg:sticky lg:top-0 lg:max-h-[calc(100dvh-9rem)] lg:overflow-y-auto">
         <FileDropLine label="Attachments" count={count} busy={uploading} disabled={!onUpload} onFiles={(list) => void addFiles(list)}>
           {previewImages.length > 0 && <ImageThumbGrid images={previewImages} onOpen={setLightbox} />}
           {count > 0 && (

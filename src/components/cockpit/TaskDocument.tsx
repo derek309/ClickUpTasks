@@ -545,7 +545,8 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
       )}
 
       </div>
-      <div className="space-y-3">
+      {/* Files and Comments stay beside the writing as it scrolls (Derek, 2026-09-11). */}
+      <div className="space-y-3 lg:sticky lg:top-0 lg:max-h-[calc(100dvh-9rem)] lg:overflow-y-auto">
         <FileDropLine label="Files" count={activeFiles.length} busy={adding} disabled={locked} onFiles={(list) => void addFiles(list)}>
           {previewImages.length > 0 && <ImageThumbGrid images={previewImages} onOpen={setLightbox} />}
           {activeFiles.length > 0 && (

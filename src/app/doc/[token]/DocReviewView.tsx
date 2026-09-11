@@ -307,7 +307,10 @@ export default function DocReviewView({ token }: { token: string }) {
                   placeholder="This document is empty." />
               </article>
 
-              <aside className="space-y-4">
+              {/* Stays beside the document as it scrolls (Derek, 2026-09-11: "make side
+                  bar sticky"), clear of the Approve bar at the bottom. */}
+              <aside className="space-y-4 lg:sticky lg:top-6 lg:max-h-[calc(100dvh-9rem)] lg:overflow-y-auto">
+
                 {(data.files.length > 0 || !locked) && (
                   <FileDropLine label="Files" count={data.files.length} busy={adding} disabled={locked} onFiles={(list) => void addFiles(list)}>
                     {previewImages.length > 0 && <ImageThumbGrid images={previewImages} onOpen={setLightbox} />}

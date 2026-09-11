@@ -118,6 +118,7 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
   const [draft, setDraft] = useState("");
   const [posting, setPosting] = useState(false);
   const [showOlder, setShowOlder] = useState(false);
+  const [showDone, setShowDone] = useState(false);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const act = async (id: string, work: () => Promise<boolean>) => {
@@ -142,8 +143,12 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
   // fold away behind a toggle (Derek, 2026-09-11: "as the comments get longer can
   // we toggle the older ones ... newest at the top").
   const newestFirst = [...comments].reverse();
-  const older = Math.max(0, newestFirst.length - LATEST_COMMENTS);
-  const shown = showOlder ? newestFirst : newestFirst.slice(0, LATEST_COMMENTS);
+  // Done comments fold away on their own, behind their own toggle (Derek,
+  // 2026-09-11: "hide done comments?"); the latest few rule counts open ones.
+  const openOnes = newestFirst.filter((c) => !c.completedAt);
+  const doneOnes = newestFirst.filter((c) => !!c.completedAt);
+  const older = Math.max(0, openOnes.length - LATEST_COMMENTS);
+  const shown = [...(showOlder ? openOnes : openOnes.slice(0, LATEST_COMMENTS)), ...(showDone ? doneOnes : [])];
   return (
     <section className="rounded-xl border bg-surface px-4 py-3">
       <h3 className="text-[16px] font-semibold">Comments{comments.length ? ` · ${comments.length}` : ""}</h3>
@@ -208,11 +213,21 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
           })}
         </ul>
       )}
-      {older > 0 && (
-        <button onClick={() => setShowOlder((s) => !s)} aria-expanded={showOlder}
-          className="mt-2 text-[16px] font-medium text-accent hover:underline">
-          {showOlder ? "Hide older comments" : `Show ${older} older ${older === 1 ? "comment" : "comments"}`}
-        </button>
+      {(older > 0 || doneOnes.length > 0) && (
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+          {older > 0 && (
+            <button onClick={() => setShowOlder((s) => !s)} aria-expanded={showOlder}
+              className="text-[16px] font-medium text-accent hover:underline">
+              {showOlder ? "Hide older comments" : `Show ${older} older ${older === 1 ? "comment" : "comments"}`}
+            </button>
+          )}
+          {doneOnes.length > 0 && (
+            <button onClick={() => setShowDone((s) => !s)} aria-expanded={showDone}
+              className="text-[16px] font-medium text-accent hover:underline">
+              {showDone ? "Hide done" : `Show ${doneOnes.length} done`}
+            </button>
+          )}
+        </div>
       )}
     </section>
   );
