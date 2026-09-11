@@ -194,13 +194,13 @@ export default function DocReviewView({ token }: { token: string }) {
   return (
     <div className="min-h-[100dvh] bg-background text-foreground">
       <header style={{ background: NAVY }} className="text-white">
-        <div className="mx-auto flex max-w-[760px] flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-5 py-5">
+        <div className="mx-auto flex max-w-[1280px] flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-5 py-5">
           <span className="text-[18px] font-bold tracking-wide">ClickUpLocal</span>
           {data && <span className="text-[16px] text-white/85">Prepared for {data.clientName}</span>}
         </div>
       </header>
 
-      <main className={`mx-auto max-w-[760px] px-5 pt-7 ${state === "ready" && !locked ? "pb-44" : "pb-16"}`}>
+      <main className={`mx-auto max-w-[1280px] px-5 pt-7 ${state === "ready" && !locked ? "pb-44" : "pb-16"}`}>
         {state === "loading" && <p className="text-[18px] text-muted">Loading your document…</p>}
 
         {state === "error" && (
@@ -312,7 +312,7 @@ export default function DocReviewView({ token }: { token: string }) {
 
       {state === "ready" && data && !locked && (
         <div className="fixed inset-x-0 bottom-0 z-20 border-t bg-surface/95 backdrop-blur" style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}>
-          <div className="mx-auto flex max-w-[760px] flex-wrap items-center gap-3 px-5 pt-3">
+          <div className="mx-auto flex max-w-[1280px] flex-wrap items-center gap-3 px-5 pt-3">
             {dirty && (
               <button onClick={undoEdits} className="min-h-[48px] px-1 text-[16px] font-medium text-muted underline underline-offset-4">Undo my edits</button>
             )}

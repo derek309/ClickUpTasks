@@ -19,6 +19,7 @@ import { RichTextEditor } from "./RichTextEditor";
 import { useTaskMessaging } from "./TaskMessaging";
 import { useDebouncedCommit } from "./useDebouncedCommit";
 import { TaskDocument } from "./TaskDocument";
+import { DraftEmail } from "./DraftEmail";
 
 const ATT_KIND_ORDER: Record<Attachment["kind"], number> = { image: 0, pdf: 1, doc: 2, sheet: 3, link: 4 };
 
@@ -866,7 +867,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const canHaveDocument = !task.private && task.clientId !== PERSONAL_CLIENT_ID;
   const [docPresence, setDocPresence] = useState<{ taskId: string; exists: boolean }>({ taskId: task.id, exists: false });
   const docExists = docPresence.taskId === task.id && docPresence.exists;
-  const showDocument = canHaveDocument && (docExists || sectionOpen("document"));
+  const showDocument = canHaveDocument && docExists;
+  // The document and the draft email each open full screen from their line, and
+  // their chips open them straight away. Bumping a number is the signal, so a
+  // second click opens it again after it was closed.
+  const [docStartNonce, setDocStartNonce] = useState(0);
+  const [emailOpenNonce, setEmailOpenNonce] = useState(0);
   // The hidden file input lives in whichever of the two is actually mounted
   // (never both, since they're mutually exclusive) so fileRef always resolves.
   const hiddenFileInput = (
@@ -876,7 +882,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
 
   const documentBlock = !canHaveDocument ? null : (
     <TaskDocument key={task.id} task={task} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin}
-      open={sectionOpen("document")}
+      startNonce={docStartNonce}
       onPresence={(exists) => setDocPresence((p) => (p.taskId === task.id && p.exists === exists ? p : { taskId: task.id, exists }))} />
   );
   const descriptionBlock = !showDescription ? null : (
@@ -933,7 +939,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // happens next. Sending used to end the interaction; the follow-up date
   // never got set, which is how a task goes quiet after real work on it.
   const [pendingNextStep, setPendingNextStep] = useState<{ kind: TaskActionKind; body: string } | null>(null);
-  const { feedArea, composerFooter, openCompose } = useTaskMessaging({
+  const { feedArea, composerFooter, openCompose, openDraftInComposer } = useTaskMessaging({
     actions, onSetNextStepDone: setNextStepDone, onDeleteAction: deleteAction, onEditAction: editAction, onLogAction: logAction, meId, onSendDm, onDeleteComment,
     onMessageSent: (channel, body) => setPendingNextStep({ kind: channel, body }),
     task, client, comment, setComment, onPatch, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
@@ -1166,7 +1172,23 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // target, so dragging a file in still works when Attachments is collapsed
   // (the expanded block has its own dropzone).
   const addChip = "rounded-lg border border-dashed px-3 py-1.5 text-[13px] font-medium text-muted transition hover:bg-background hover:text-foreground";
-  const emptySectionsRow = (showDescription && showChecklist && showAttachments && (showDocument || !canHaveDocument)) ? null : (
+  // The draft email line: shown whenever a draft exists, from Claude, the drafter
+  // or the chip below. Sending goes through the same path as the composer.
+  const draftEmailBlock = (
+    <DraftEmail key={task.id} task={task} onPatch={onPatch} toEmail={messageDest?.email || null} messages={messages}
+      onSend={hasMessaging ? (subject, body, attachments) => {
+        onSendTaskMessage!("email", subject, body, attachments);
+        setPendingNextStep({ kind: "email", body: htmlToText(body).trim() });
+      } : undefined}
+      onUpload={onUploadMessageImage} onMoreOptions={hasMessaging ? openDraftInComposer : undefined}
+      openNonce={emailOpenNonce} pushToast={pushToast} />
+  );
+  const startDraftEmail = () => {
+    const now = new Date().toISOString();
+    onPatch({ draftEmail: { subject: task.title, body: "", createdAt: now, updatedAt: now } });
+    setEmailOpenNonce((n) => n + 1);
+  };
+  const emptySectionsRow = (showDescription && showChecklist && showAttachments && (showDocument || !canHaveDocument) && (!!task.draftEmail || !hasMessaging)) ? null : (
     <div
       onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setAttFileDragOver(true); } }}
       onDragLeave={(e) => { if (e.currentTarget === e.target) setAttFileDragOver(false); }}
@@ -1174,7 +1196,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       className={`mt-4 flex flex-wrap items-center gap-2 rounded-xl p-1 transition ${attFileDragOver ? "outline-2 outline-dashed outline-accent bg-accent-soft/30" : ""}`}
     >
       {!showDescription && <button onClick={() => openSection("description")} className={addChip}>+ Description</button>}
-      {canHaveDocument && !showDocument && <button onClick={() => openSection("document")} className={addChip}>+ Client document</button>}
+      {canHaveDocument && !showDocument && <button onClick={() => setDocStartNonce((n) => n + 1)} className={addChip}>+ Client document</button>}
+      {hasMessaging && !task.draftEmail && <button onClick={startDraftEmail} className={addChip}>+ Draft email</button>}
       {!showChecklist && <button onClick={() => openSection("checklist")} className={addChip}>+ Checklist</button>}
       {!showAttachments && (<>
         {hiddenFileInput}
@@ -1293,6 +1316,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 <div className="my-4 border-t" />
                 {clientResponseBlock}
                 {documentBlock}
+                {draftEmailBlock}
                 {descriptionBlock}
                 {subtasksBlock}
                 {attachmentsBlock}
@@ -1334,6 +1358,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                     reference you consult, so it takes the wide column. In the
                     rail it was a 400px box (Derek, 2026-09-11: "way to small"). */}
                 {documentBlock}
+                {draftEmailBlock}
                 {/* Composer above the feed, because the feed is newest-first:
                     what you write next belongs at the end you are reading
                     from. Below it, opening a composer from the dock scrolled

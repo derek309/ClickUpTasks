@@ -19,13 +19,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   if (!scope) return docNotFound();
   const [latest, { data: doc }, files] = await Promise.all([
     latestPublished(scope.documentId),
-    supabaseAdmin.from("task_documents").select("status, approved_at").eq("id", scope.documentId).maybeSingle(),
+    supabaseAdmin.from("task_documents").select("status, approved_at, title").eq("id", scope.documentId).maybeSingle(),
     sharedDocFiles(scope.documentId),
   ]);
   if (!latest || !doc) return docNotFound();
 
   return NextResponse.json({
-    title: scope.taskTitle,
+    // The document's own name when the team gave it one, else the task's title.
+    title: ((doc.title as string | null) ?? "").trim() || scope.taskTitle,
     clientName: scope.clientName,
     body: latest.body,
     version: latest.version,

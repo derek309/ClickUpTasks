@@ -721,8 +721,10 @@ export interface Task {
    * above: a second draft_email call just replaces the pending one rather
    * than stacking drafts. Body is HTML (paragraph-wrapped plain text from
    * Claude), so it loads straight into the same RichTextEditor the Journal
-   * composer uses. Cleared (set null) once sent or explicitly discarded. */
-  draftEmail?: { subject: string; body: string; createdAt: string } | null;
+   * composer uses. Cleared (set null) once sent or explicitly discarded.
+   * Edited in place in the task's Draft email line (DraftEmail.tsx), which
+   * keeps its attachments (stored files, same shape as task attachments). */
+  draftEmail?: { subject: string; body: string; createdAt: string; updatedAt?: string; attachments?: Attachment[] } | null;
   contactId: string | null;
   due: string | null; // ISO yyyy-mm-dd
   /** Full-precision "last touched," written only by upsertConversationTask

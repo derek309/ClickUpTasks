@@ -43,7 +43,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const text = await req.text();
   if (text.length > DOC_MAX_RAW_CHARS) return json({ error: "This document is too long." }, 413);
-  let payload: { body?: unknown; reopen?: unknown; restoreVersion?: unknown; restoreCheckpoint?: unknown; checkpoint?: unknown };
+  let payload: { body?: unknown; reopen?: unknown; restoreVersion?: unknown; restoreCheckpoint?: unknown; checkpoint?: unknown; title?: unknown };
   try { payload = JSON.parse(text); } catch { return json({ error: "Invalid request." }, 400); }
 
   const { data: doc } = await supabaseAdmin.from("task_documents")
@@ -56,6 +56,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const { data, error } = await supabaseAdmin.from("task_documents")
       .update({ approved_at: null, approved_version: null, status: "draft", ...stamp })
       .eq("id", doc.id).select("*").single();
+    return error ? json({ error: error.message }, 400) : json({ document: data });
+  }
+  // Rename. Allowed on an approved document too: the name is the team's label,
+  // not part of what the client approved. Empty means "use the task's title".
+  if (typeof payload?.title === "string") {
+    const title = payload.title.replace(/[\x00-\x1f\x7f]/g, "").trim().slice(0, 200);
+    const { data, error } = await supabaseAdmin.from("task_documents")
+      .update({ title, ...stamp }).eq("id", doc.id).select("*").single();
     return error ? json({ error: error.message }, 400) : json({ document: data });
   }
   if (doc.approved_at) return json({ error: "This document is approved. Reopen it to make changes." }, 409);

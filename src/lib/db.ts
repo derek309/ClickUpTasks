@@ -504,7 +504,7 @@ export const fetchTaskActions = async (taskId: string): Promise<TaskAction[]> =>
 // every write goes through /api/tasks/[id]/document.
 export type TaskDocumentStatus = "draft" | "with_client" | "client_submitted" | "approved";
 export type TaskDocument = {
-  id: string; taskId: string; body: string; draftDirty: boolean; version: number;
+  id: string; taskId: string; title: string; body: string; draftDirty: boolean; version: number;
   status: TaskDocumentStatus; approvedAt: string | null; approvedVersion: number | null; updatedAt: string;
 };
 export type TaskDocumentVersion = {
@@ -512,7 +512,7 @@ export type TaskDocumentVersion = {
   body: string; authorId: string | null; authorLabel: string | null; createdAt: string;
 };
 export const rowToTaskDocument = (r: any): TaskDocument => ({
-  id: r.id, taskId: r.task_id, body: r.body ?? "", draftDirty: !!r.draft_dirty, version: r.version ?? 0,
+  id: r.id, taskId: r.task_id, title: r.title ?? "", body: r.body ?? "", draftDirty: !!r.draft_dirty, version: r.version ?? 0,
   status: r.status, approvedAt: r.approved_at ?? null, approvedVersion: r.approved_version ?? null, updatedAt: r.updated_at,
 });
 export const fetchTaskDocument = async (taskId: string): Promise<TaskDocument | null> => {

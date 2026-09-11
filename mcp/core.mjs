@@ -426,7 +426,7 @@ export function createServer(opts = {}) {
       const live = !!links[0]?.token_hash && !links[0]?.revoked_at;
       const latest = versions[0];
       const text = [
-        `Client document on [${task.id}] ${task.title}`,
+        `Client document "${doc.title || task.title}" on [${task.id}] ${task.title}`,
         `status: ${doc.status} · version ${doc.version}${doc.version ? "" : " (never sent)"} · link ${live ? "on" : "off"}${doc.draft_dirty ? " · has unsent team edits" : ""}${doc.approved_at ? " · locked until reopened in the app" : ""}`,
         `\nWorking copy (the team's draft; the client only sees what was last sent):\n${docHtmlToText(doc.body) || "(empty)"}`,
         latest && latest.kind !== "sent" ? `\nLatest from the client (version ${latest.version}, ${DOC_KIND[latest.kind]}${latest.author_label ? ` by ${latest.author_label}` : ""}):\n${docHtmlToText(latest.body)}` : "",
@@ -438,8 +438,12 @@ export function createServer(opts = {}) {
 
   server.tool("write_client_document",
     "Create the client review document on a task, or replace its draft, for a teammate to review and send. Never sends anything to the client and never touches the client's link: the draft shows in the task in the app, where a person reads it and clicks Send for review. Pass the WHOLE document every time (read it with get_client_document first when editing). Plain text with simple markdown: \"## \" heading, \"### \" subheading, \"- \" bullets, \"1. \" numbered, \"> \" quote, **bold**, *italic*, [label](https://url); a blank line starts a new paragraph. Merge fields like {{contact.first_name}} are kept as typed. Refused on private or Personal tasks, and once the client has approved (a person reopens it in the app first).",
-    { task_id: z.string(), body: z.string().min(1).describe("the whole document, in the simple markdown described above") },
-    async ({ task_id, body }) => {
+    {
+      task_id: z.string(),
+      body: z.string().min(1).describe("the whole document, in the simple markdown described above"),
+      title: z.string().optional().describe("the document's name, shown on the task and as the client's heading; omit to keep it (a new document uses the task's title)"),
+    },
+    async ({ task_id, body, title }) => {
       const found = await documentFor(task_id);
       if (found.error) return reply(found.error);
       if (found.doc?.approved_at) return reply("The client already approved this document. A teammate reopens it in the app before it can change.");
@@ -448,15 +452,16 @@ export function createServer(opts = {}) {
       if (html.length > 200_000) return reply("That document is too long to save.");
 
       const now = nowIso();
+      const named = title === undefined ? {} : { title: title.replace(/[\x00-\x1f\x7f]/g, "").trim().slice(0, 200) };
       let doc;
       if (!found.doc) {
         [doc] = await sb("task_documents", "POST", {
-          id: `tdoc_${globalThis.crypto.randomUUID()}`, task_id, body: html, draft_dirty: true,
+          id: `tdoc_${globalThis.crypto.randomUUID()}`, task_id, body: html, draft_dirty: true, ...named,
           created_by: ME, updated_by: ME, created_at: now, updated_at: now,
         });
       } else {
         // approved_at in the filter: a client approving in the meantime makes this match nothing.
-        [doc] = await sb(`task_documents?id=eq.${enc(found.doc.id)}&approved_at=is.null`, "PATCH", { body: html, draft_dirty: true, updated_by: ME, updated_at: now });
+        [doc] = await sb(`task_documents?id=eq.${enc(found.doc.id)}&approved_at=is.null`, "PATCH", { body: html, draft_dirty: true, ...named, updated_by: ME, updated_at: now });
         if (!doc) return reply("The client approved this document a moment ago. A teammate reopens it in the app before it can change.");
       }
 
