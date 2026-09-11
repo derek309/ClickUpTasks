@@ -4,7 +4,19 @@ import { describe, it, expect, vi } from "vitest";
 vi.mock("./supabaseAdmin", () => ({ supabaseAdmin: {} }));
 vi.mock("./db", () => ({ TASK_FILES_BUCKET: "task-files" }));
 
-const { isDocFilePath, checkFileName, checkFileSize, shouldCheckpoint, CHECKPOINT_EVERY_MS, docFileFolder } = await import("./taskDocumentFiles");
+const { isDocFilePath, checkFileName, checkFileSize, shouldCheckpoint, CHECKPOINT_EVERY_MS, docFileFolder, cleanCommentBody } = await import("./taskDocumentFiles");
+
+describe("cleanCommentBody", () => {
+  it("keeps line breaks, drops other control characters and folds blank runs", () => {
+    expect(cleanCommentBody("  Looks good\r\n\r\n\r\n\r\nShip it  ")).toBe("Looks good\n\nShip it");
+  });
+  it("refuses empty, too long and non text", () => {
+    expect(cleanCommentBody("   ")).toBeNull();
+    expect(cleanCommentBody("x".repeat(4001))).toBeNull();
+    expect(cleanCommentBody("x".repeat(4000))).toHaveLength(4000);
+    expect(cleanCommentBody(42)).toBeNull();
+  });
+});
 
 const DOC = "tdoc_1";
 const UUID = "0b3c2a57-1f7e-4c11-9d2e-6a0c9f1b2e3d";

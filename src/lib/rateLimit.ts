@@ -20,7 +20,7 @@ import { hashToken } from "./tokenCrypto";
 // below must stay well under that 1-hour sweep, or a long window's rows get
 // deleted mid-window and the counter silently resets.
 
-export type WaitingAction = "read" | "message" | "respond" | "status" | "request" | "upload" | "doc_read" | "doc_submit" | "doc_approve" | "doc_upload";
+export type WaitingAction = "read" | "message" | "respond" | "status" | "request" | "upload" | "doc_read" | "doc_submit" | "doc_approve" | "doc_upload" | "doc_comment";
 
 type Rule = {
   /** Max requests per window for one token+IP pair. */
@@ -77,6 +77,9 @@ export const RATE_LIMITS: Record<WaitingAction, Rule> = {
   // Each file is two calls (an upload link, then confirming it), so this is
   // about 25 files per half hour, the same as the portal's upload.
   doc_upload:  { limit: 50,  windowMs: 30 * MINUTE, tokenLimit: 120 },
+  // A comment is a row plus a line on the task, and at most one email to the
+  // owner per 15 minutes, so the budget is the chat composers' own.
+  doc_comment: { limit: 20,  windowMs: 10 * MINUTE, tokenLimit: 60 },
 };
 
 /** Seconds until the current fixed window rolls over — exact for this

@@ -159,6 +159,23 @@ export async function logClientDocEvent(taskId: string, body: string): Promise<v
   await supabaseAdmin.from("tasks").update({ updated_by: null }).eq("id", taskId);
 }
 
+/** Tell the task owner (else the client's follower) that the client did something
+ *  on the document, by bell and email. An approval always sends; sent changes and
+ *  comments share one email every 15 minutes per document. Pass the recipient
+ *  when it is already known, so it is not looked up twice. */
+export async function notifyOwnerOfClientDoc(
+  scope: DocScope,
+  n: { text: string; subject: string; always: boolean },
+  knownRecipient?: string | null,
+): Promise<void> {
+  const recipient = knownRecipient !== undefined ? knownRecipient : scope.assigneeId ?? await resolveNotifyRecipient(scope.assignedTo);
+  if (!recipient || !(n.always || await claimSubmitEmail(scope.documentId))) return;
+  await notifyTeamOfClientActivity({
+    notifyRecipient: recipient, clientId: scope.clientId, taskId: scope.taskId, projectId: scope.projectId,
+    clientName: scope.clientName, taskTitle: scope.taskTitle, notifText: n.text, subject: n.subject,
+  });
+}
+
 export type PublishOutcome =
   | { ok: true; version: number }
   | { ok: false; status: number; error: string; current?: { version: number; body: string } | null };
@@ -209,18 +226,15 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
   );
   await supabaseAdmin.from("tasks").update({ ...patch, updated_by: null }).eq("id", scope.taskId);
 
-  if (recipient && (approved || await claimSubmitEmail(scope.documentId))) {
-    await notifyTeamOfClientActivity({
-      notifyRecipient: recipient, clientId: scope.clientId, taskId: scope.taskId, projectId: scope.projectId,
-      clientName: scope.clientName, taskTitle: scope.taskTitle,
-      notifText: approved
-        ? `${scope.clientName} approved the client document on "${scope.taskTitle}".`
-        : `${scope.clientName} sent changes to the client document on "${scope.taskTitle}".`,
-      subject: approved
-        ? `${scope.clientName} approved "${scope.taskTitle}"`
-        : `${scope.clientName} sent changes on "${scope.taskTitle}"`,
-    });
-  }
+  await notifyOwnerOfClientDoc(scope, {
+    always: approved,
+    text: approved
+      ? `${scope.clientName} approved the client document on "${scope.taskTitle}".`
+      : `${scope.clientName} sent changes to the client document on "${scope.taskTitle}".`,
+    subject: approved
+      ? `${scope.clientName} approved "${scope.taskTitle}"`
+      : `${scope.clientName} sent changes on "${scope.taskTitle}"`,
+  }, recipient);
   return { ok: true, version };
 }
 

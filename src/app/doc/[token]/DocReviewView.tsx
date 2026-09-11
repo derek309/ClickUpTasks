@@ -13,11 +13,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { RichTextEditor } from "@/components/cockpit/RichTextEditor";
 import { addDocFiles } from "@/lib/docFileUpload";
 import { extOf, formatFileSize, isPreviewableImage } from "@/lib/uploadTypes";
-import { ImageLightbox, type PreviewImage } from "@/components/cockpit/TaskWorkItem";
+import { CommentThread, ImageLightbox, type PreviewImage, type ThreadComment } from "@/components/cockpit/TaskWorkItem";
 
 type DocStatus = "draft" | "with_client" | "client_submitted" | "approved";
 type DocFile = { id: string; name: string; size: number; kind: string; addedBy: string; fromClient: boolean; createdAt: string };
-type DocData = { title: string; clientName: string; body: string; version: number; status: DocStatus; approvedAt: string | null; closed: boolean; files: DocFile[] };
+type DocData = { title: string; clientName: string; body: string; version: number; status: DocStatus; approvedAt: string | null; closed: boolean; files: DocFile[]; comments: ThreadComment[] };
 type Notice = { tone: "good" | "info" | "warn"; text: string } | null;
 
 const NAVY = "#1b3a5c";
@@ -36,6 +36,7 @@ function writeDraft(key: string, html: string | null) {
   } catch { /* private browsing: drafts just are not kept */ }
 }
 const longDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
+const commentTime = (iso: string) => new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 export default function DocReviewView({ token }: { token: string }) {
   const [data, setData] = useState<DocData | null>(null);
@@ -185,6 +186,24 @@ export default function DocReviewView({ token }: { token: string }) {
     else setNotice({ tone: "good", text: "Added. Send your changes when you're ready so the team knows." });
   };
 
+  // A comment shows at once; the 15 second refresh brings the team's replies.
+  const postComment = async (body: string) => {
+    try {
+      const res = await fetch(`/api/doc/${encodeURIComponent(token)}/comments`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ body }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (res.status === 404) { setState("gone"); return false; }
+      if (res.status === 429) { setNotice({ tone: "warn", text: "Too many tries. Please wait a moment and try again." }); return false; }
+      if (!res.ok) { setNotice({ tone: "warn", text: j.error ?? "We couldn't post that. Please try again." }); return false; }
+      setData((d) => d ? { ...d, comments: [...(d.comments ?? []), j.comment as ThreadComment] } : d);
+      return true;
+    } catch {
+      setNotice({ tone: "warn", text: "We couldn't reach the server. Check your connection and try again." });
+      return false;
+    }
+  };
+
   const removeFile = async (f: DocFile) => {
     if (!window.confirm(`Remove ${f.name}?`)) return;
     const res = await filesApi("DELETE")({ fileId: f.id });
@@ -316,6 +335,10 @@ export default function DocReviewView({ token }: { token: string }) {
                 )}
               </section>
             )}
+
+            <div className="mt-6">
+              <CommentThread comments={data.comments ?? []} onPost={postComment} when={commentTime} viewer="client" buttonStyle={{ background: NAVY }} />
+            </div>
           </>
         )}
       </main>

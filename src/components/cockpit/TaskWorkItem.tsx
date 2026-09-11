@@ -6,7 +6,7 @@
 // 2026-09-11: "toggle this close by default ... Make it a line item with buttons
 // to toggle open or full window open", then "I like the show and hide just add
 // open full").
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 export const quietButton = "rounded-lg border bg-surface px-3 py-1.5 text-[16px] font-medium text-muted transition hover:bg-background hover:text-foreground disabled:opacity-50";
@@ -91,6 +91,62 @@ export function WorkItemWindow({ icon, title, badge, status, onClose, children }
       </div>
     </div>,
     document.body,
+  );
+}
+
+export type ThreadComment = { id: string; body: string; authorLabel: string; fromClient: boolean; createdAt: string };
+
+/** The comment thread on a client document, one thread the team and the client
+ *  both see (Derek, 2026-09-11: "a chat box for comments"). Shown to the team in
+ *  the document and to the client on their review page. */
+export function CommentThread({ comments, onPost, when, viewer, buttonStyle }: {
+  comments: ThreadComment[];
+  /** Resolves true once the comment is in, which clears the box. */
+  onPost: (body: string) => Promise<boolean>;
+  when: (iso: string) => string;
+  /** Which side is reading, to mark their own comments and say who else sees them. */
+  viewer: "team" | "client";
+  buttonStyle?: React.CSSProperties;
+}) {
+  const [draft, setDraft] = useState("");
+  const [posting, setPosting] = useState(false);
+  const post = async () => {
+    const body = draft.trim();
+    if (!body || posting) return;
+    setPosting(true);
+    const ok = await onPost(body);
+    setPosting(false);
+    if (ok) setDraft("");
+  };
+  return (
+    <section className="rounded-xl border bg-surface px-4 py-3">
+      <h3 className="text-[16px] font-semibold">Comments{comments.length ? ` · ${comments.length}` : ""}</h3>
+      <p className="text-[16px] text-muted">{viewer === "team" ? "The client sees these on their review page." : "Your ClickUpLocal team sees these."}</p>
+      {comments.length > 0 && (
+        <ul className="mt-2 space-y-2">
+          {comments.map((c) => (
+            <li key={c.id} className={`rounded-lg px-3 py-2 ${(viewer === "client") === c.fromClient ? "bg-accent-soft/40" : "bg-background"}`}>
+              <div className="flex flex-wrap items-baseline gap-x-2 text-[16px]">
+                <span className="font-semibold">{c.authorLabel || (c.fromClient ? "Client" : "Team")}</span>
+                <span className="text-muted">{when(c.createdAt)}</span>
+              </div>
+              <p className="whitespace-pre-wrap break-words text-[16px] leading-relaxed">{c.body}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+      <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={3} maxLength={4000}
+        onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void post(); } }}
+        placeholder="Write a comment…" aria-label="Write a comment"
+        className="mt-3 w-full resize-y rounded-lg border bg-background px-3 py-2 text-[16px] outline-none focus:border-accent" />
+      <div className="mt-2 flex items-center justify-end gap-3">
+        <span className="hidden text-[16px] text-muted sm:inline">⌘ Enter posts it</span>
+        <button onClick={() => void post()} disabled={posting || !draft.trim()} style={buttonStyle}
+          className="rounded-lg bg-accent px-4 py-1.5 text-[16px] font-semibold text-white disabled:opacity-50">
+          {posting ? "Posting…" : "Post comment"}
+        </button>
+      </div>
+    </section>
   );
 }
 

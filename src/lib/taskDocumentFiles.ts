@@ -142,6 +142,49 @@ export async function sharedDocFileUrl(documentId: string, fileId: string, downl
 }
 
 // ---------------------------------------------------------------------------
+// Comments: one thread the team and the client both see.
+
+export const MAX_COMMENT_CHARS = 4000;
+export type DocComment = { id: string; body: string; authorLabel: string; fromClient: boolean; createdAt: string };
+
+/** Plain text only: line breaks stay, other control characters go, and long
+ *  runs of blank lines fold to one. Null when empty or too long. */
+export function cleanCommentBody(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const body = raw.replace(/\r\n?/g, "\n").replace(/[\x00-\x09\x0b-\x1f\x7f]/g, "").replace(/\n{3,}/g, "\n\n").trim();
+  return body && body.length <= MAX_COMMENT_CHARS ? body : null;
+}
+
+const toComment = (r: Record<string, unknown>): DocComment => ({
+  id: r.id as string, body: r.body as string, authorLabel: (r.author_label as string | null) ?? "",
+  fromClient: r.author_id === null, createdAt: r.created_at as string,
+});
+
+export async function postDocComment(documentId: string, rawBody: unknown, actor: DocActor): Promise<{ ok: true; comment: DocComment } | Fail> {
+  const body = cleanCommentBody(rawBody);
+  if (!body) {
+    return typeof rawBody === "string" && rawBody.trim().length > MAX_COMMENT_CHARS
+      ? fail(413, "A comment can be up to 4,000 characters.")
+      : fail(400, "Write a comment first.");
+  }
+  const row = {
+    id: "tdm_" + randomUUID(), document_id: documentId, body,
+    author_id: actor.id, author_label: actor.label, created_at: new Date().toISOString(),
+  };
+  const { error } = await supabaseAdmin.from("task_document_comments").insert(row);
+  if (error) return fail(500, "Could not post the comment. Please try again.");
+  return { ok: true, comment: toComment(row) };
+}
+
+/** The thread, oldest first. */
+export async function docComments(documentId: string): Promise<DocComment[]> {
+  const { data } = await supabaseAdmin.from("task_document_comments")
+    .select("id, body, author_id, author_label, created_at")
+    .eq("document_id", documentId).order("created_at", { ascending: true }).limit(300);
+  return (data ?? []).map(toComment);
+}
+
+// ---------------------------------------------------------------------------
 // Saved drafts
 
 /** Whether a teammate's save goes in the history. Nothing empty or unchanged;

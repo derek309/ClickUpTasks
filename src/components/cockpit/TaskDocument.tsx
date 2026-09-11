@@ -14,10 +14,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { STATUS_META, timeAgo, type Task, type TaskStatus } from "@/lib/data";
 import { authedFetch } from "@/lib/supabase";
 import {
-  fetchTaskDocument, fetchTaskDocumentVersions, fetchTaskDocumentFiles, fetchTaskDocumentCheckpoints,
+  fetchTaskDocument, fetchTaskDocumentVersions, fetchTaskDocumentFiles, fetchTaskDocumentCheckpoints, fetchTaskDocumentComments,
   rowToTaskDocument, signedUrlForFile,
   type TaskDocument as Doc, type TaskDocumentStatus, type TaskDocumentVersion,
-  type TaskDocumentFile, type TaskDocumentCheckpoint,
+  type TaskDocumentFile, type TaskDocumentCheckpoint, type TaskDocumentComment,
 } from "@/lib/db";
 import { diffDocText } from "@/lib/docDiff";
 import { addDocFiles } from "@/lib/docFileUpload";
@@ -25,7 +25,7 @@ import { formatFileSize, isPreviewableImage } from "@/lib/uploadTypes";
 import { RichTextEditor } from "./RichTextEditor";
 import { useDebouncedCommit } from "./useDebouncedCommit";
 import {
-  FileDropLine, ImageLightbox, ImageThumbGrid, WorkItemBadge, WorkItemInline, WorkItemRow, WorkItemWindow,
+  CommentThread, FileDropLine, ImageLightbox, ImageThumbGrid, WorkItemBadge, WorkItemInline, WorkItemRow, WorkItemWindow,
   quietButton as quiet, type PreviewImage,
 } from "./TaskWorkItem";
 
@@ -64,6 +64,8 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
   const [files, setFiles] = useState<TaskDocumentFile[]>([]);
   const [versions, setVersions] = useState<TaskDocumentVersion[]>([]);
   const [checkpoints, setCheckpoints] = useState<TaskDocumentCheckpoint[]>([]);
+  // The thread shared with the client (Derek, 2026-09-11: "a chat box for comments").
+  const [comments, setComments] = useState<TaskDocumentComment[]>([]);
   const [shown, setShown] = useState(false);
   const [full, setFull] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
@@ -100,6 +102,8 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
     setLoaded(true);
     if (!fresh) return;
     void fetchTaskDocumentFiles(fresh.id).then(setFiles);
+    // A client's comment logs an event on the task too, so it arrives here the same way.
+    void fetchTaskDocumentComments(fresh.id).then(setComments);
     if (previous !== null && fresh.version > previous) {
       const latest = (await fetchTaskDocumentVersions(fresh.id))[0];
       if (latest && latest.kind !== "sent") {
@@ -308,6 +312,14 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
     setNonce((n) => n + 1);
     setClientCrossed(null);
     pushToast(done);
+  };
+
+  const postComment = async (body: string) => {
+    const res = await docApi(task.id, "/comments", { method: "POST", body: JSON.stringify({ body }) });
+    const j = await readJson(res);
+    if (!res.ok) { pushToast((j.error as string) ?? "Could not post the comment."); return false; }
+    setComments((c) => [...c, j.comment as TaskDocumentComment]);
+    return true;
   };
 
   const addFiles = async (list: FileList) => {
@@ -532,6 +544,7 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
             </button>
           )}
         </section>
+        <CommentThread comments={comments} onPost={postComment} when={timeAgo} viewer="team" />
       </div>
     </div>
   );
