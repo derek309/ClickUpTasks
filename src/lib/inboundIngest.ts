@@ -77,15 +77,23 @@ async function resolveTaskForThread(contactId: string, gmailThreadId: string | n
   return (data?.[0]?.task_id as string | undefined) ?? null;
 }
 
+// The contact's open Conversation-priority ("Reply to X") task, if one exists.
+// Read only: the inbound path below bumps or creates it, the outbound path only
+// files a sent reply onto it.
+async function findOpenConversationTask(contactId: string): Promise<string | null> {
+  const { data: openTasks } = await supabaseAdmin
+    .from("tasks").select("id").eq("contact_id", contactId).eq("priority", "conversation").neq("status", "done").limit(1);
+  return (openTasks?.[0]?.id as string | undefined) ?? null;
+}
+
 // One open Conversation-priority task per contact — bump due if one exists,
 // else create it under the client's first project (or a fallback "Tasks").
 async function upsertConversationTask(contact: Contact, ghlContactId: string | null): Promise<string | null> {
   const today = todayPacific();
-  const { data: openTasks } = await supabaseAdmin
-    .from("tasks").select("id").eq("contact_id", contact.id).eq("priority", "conversation").neq("status", "done").limit(1);
-  if (openTasks && openTasks.length > 0) {
-    await supabaseAdmin.from("tasks").update({ due: today, updated_by: null }).eq("id", openTasks[0].id);
-    return openTasks[0].id;
+  const existing = await findOpenConversationTask(contact.id);
+  if (existing) {
+    await supabaseAdmin.from("tasks").update({ due: today, updated_by: null }).eq("id", existing);
+    return existing;
   }
   let projectId: string | undefined = (
     await supabaseAdmin.from("projects").select("id").eq("client_id", contact.client_id).limit(1).maybeSingle()
@@ -297,9 +305,13 @@ export async function isDuplicateOutboundBody(contactId: string, body: string, d
 
 // Twin of ingestInboundMessage, for a teammate's own reply sent directly from
 // their Gmail (not the in-app composer) — see /api/google/poll-replies'
-// Sent-folder pass. Deliberately minimal: just makes the message visible in
-// the Journal. Does NOT touch the Conversation task or fire a notification —
-// nobody needs pinging that the team sent something, unlike an inbound reply.
+// Sent-folder pass. It lands on a task so the reply shows where the work is
+// (Derek, 2026-09-11: "I reply to emails in gmail, connect those to a task"):
+// the task its Gmail thread already belongs to, else the contact's open
+// "Reply to X" task. Until then 107 of 123 sent emails in two weeks were
+// visible only on the client. Still deliberately quiet: it never creates a
+// task, never moves one's dates or stage, and fires no notification — the
+// team sending something is not news, unlike an inbound reply.
 export async function ingestOutboundMessage(opts: {
   contact: Contact; channel: "email"; subject?: string | null; body: string; gmailMessageId: string; gmailThreadId?: string | null; createdBy: string; at?: string;
 }): Promise<boolean> {
@@ -307,9 +319,10 @@ export async function ingestOutboundMessage(opts: {
   const { data: dupe } = await supabaseAdmin.from("messages").select("id").eq("gmail_message_id", opts.gmailMessageId).limit(1);
   if (dupe && dupe.length > 0) return false;
   if (await isDuplicateOutboundBody(contact.id, opts.body, opts.at ?? new Date().toISOString())) return false;
+  const taskId = (await resolveTaskForThread(contact.id, opts.gmailThreadId)) ?? (await findOpenConversationTask(contact.id));
   const { error } = await supabaseAdmin.from("messages").insert({
     id: "msg_" + crypto.randomUUID(), contact_id: contact.id, client_id: contact.client_id,
-    channel: opts.channel, direction: "outbound",
+    channel: opts.channel, direction: "outbound", task_id: taskId,
     subject: opts.subject?.trim() || null, body: opts.body, gmail_message_id: opts.gmailMessageId, gmail_thread_id: opts.gmailThreadId ?? null, created_by: opts.createdBy,
     ...(opts.at ? { created_at: opts.at } : {}),
   });
