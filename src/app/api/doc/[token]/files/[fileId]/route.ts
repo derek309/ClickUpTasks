@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminConfigured } from "@/lib/supabaseAdmin";
 import { rateLimit } from "@/lib/rateLimit";
-import { hashToken } from "@/lib/tokenCrypto";
 import { DOC_TOKEN_PATTERN, NO_STORE, docNotFound, resolveDocToken } from "@/lib/taskDocumentServer";
 import { sharedDocFileUrl } from "@/lib/taskDocumentFiles";
 
@@ -12,7 +11,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   if (!adminConfigured) return NextResponse.json({ error: "Not configured" }, { status: 501, headers: NO_STORE });
   const { token, fileId } = await params;
   if (!DOC_TOKEN_PATTERN.test(token) || !/^tdf_[0-9a-f-]{36}$/.test(fileId)) return docNotFound();
-  const limited = await rateLimit(req, hashToken(token), "doc_read");
+  const limited = await rateLimit(req, token, "doc_read");
   if (limited) return limited;
   const scope = await resolveDocToken(token);
   if (!scope) return docNotFound();

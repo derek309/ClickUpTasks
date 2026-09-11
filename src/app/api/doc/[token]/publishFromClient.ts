@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminConfigured } from "@/lib/supabaseAdmin";
 import { rateLimit } from "@/lib/rateLimit";
-import { hashToken } from "@/lib/tokenCrypto";
 import { DOC_TOKEN_PATTERN, NO_STORE, docNotFound, resolveDocToken, readPublicJson, clientPublish } from "@/lib/taskDocumentServer";
 
 // Shared by the client's two writes, submit and approve, so the checks they must
@@ -16,7 +15,7 @@ export async function publishFromClient(
   if (!adminConfigured) return NextResponse.json({ error: "Not configured" }, { status: 501, headers: NO_STORE });
   const { token } = await params;
   if (!DOC_TOKEN_PATTERN.test(token)) return docNotFound();
-  const limited = await rateLimit(req, hashToken(token), kind === "client_approved" ? "doc_approve" : "doc_submit");
+  const limited = await rateLimit(req, token, kind === "client_approved" ? "doc_approve" : "doc_submit");
   if (limited) return limited;
 
   const read = await readPublicJson(req);

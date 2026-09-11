@@ -60,8 +60,10 @@ const MINUTE = 60_000;
 //           15s poll (40/10min) with room for two tabs. doc_submit and
 //           doc_approve each publish a version and email the task owner, so
 //           they get the tighter budgets plus a cap across every IP on the
-//           link. Document routes pass the token's HASH as `token`, so a raw
-//           document link never lands in waiting_rate_limit.key.
+//           link.
+//
+// Every caller passes the raw token; rateLimit() hashes it before building a
+// key (see below), so no share or document link lands in waiting_rate_limit.key.
 export const RATE_LIMITS: Record<WaitingAction, Rule> = {
   read:    { limit: 150, windowMs: 10 * MINUTE },
   message: { limit: 20,  windowMs: 10 * MINUTE },

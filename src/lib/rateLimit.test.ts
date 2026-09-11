@@ -132,8 +132,9 @@ describe("rateLimit", () => {
       await rateLimit(req(), token, action);
     }
     const keys = rpc.mock.calls.map((c) => (c[1] as { p_key: string }).p_key);
-    // Every action, plus the token-wide counter on request and upload.
-    expect(keys).toHaveLength(Object.keys(RATE_LIMITS).length + 2);
+    // One key per action, plus one more for each action with a token-wide cap.
+    const tokenWide = Object.values(RATE_LIMITS).filter((r) => r.tokenLimit !== undefined).length;
+    expect(keys).toHaveLength(Object.keys(RATE_LIMITS).length + tokenWide);
     for (const key of keys) {
       expect(key).not.toContain(token);
       expect(key).toContain(hashToken(token));

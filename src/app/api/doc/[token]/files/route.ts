@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { rateLimit } from "@/lib/rateLimit";
-import { hashToken } from "@/lib/tokenCrypto";
 import {
   DOC_TOKEN_PATTERN, NO_STORE, docNotFound, resolveDocToken, readPublicJson, logClientDocEvent,
 } from "@/lib/taskDocumentServer";
@@ -17,7 +16,7 @@ async function open(req: NextRequest, params: Promise<{ token: string }>) {
   if (!adminConfigured) return { ok: false as const, res: json({ error: "Not configured" }, 501) };
   const { token } = await params;
   if (!DOC_TOKEN_PATTERN.test(token)) return { ok: false as const, res: docNotFound() };
-  const limited = await rateLimit(req, hashToken(token), "doc_upload");
+  const limited = await rateLimit(req, token, "doc_upload");
   if (limited) return { ok: false as const, res: limited };
   const read = await readPublicJson(req);
   if (!read.ok) return read;
