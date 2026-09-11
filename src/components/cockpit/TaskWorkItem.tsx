@@ -94,6 +94,71 @@ export function WorkItemWindow({ icon, title, badge, status, onClose, children }
   );
 }
 
+export type PreviewImage = { id: string; name: string; url: string; downloadUrl?: string };
+
+/** Image files as thumbnails; clicking one opens the lightbox at it. */
+export function ImageThumbGrid({ images, onOpen }: { images: PreviewImage[]; onOpen: (index: number) => void }) {
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {images.map((img, i) => (
+        <button key={img.id} onClick={() => onOpen(i)} title={img.name} aria-label={`Preview ${img.name}`}
+          className="group h-24 w-24 overflow-hidden rounded-lg border bg-background transition hover:border-accent">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={img.url} alt="" className="h-full w-full object-cover transition group-hover:scale-105" />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** A full screen preview of one image, with the others a click or an arrow key
+ *  away (Derek, 2026-09-11: "show the images if they are added and open in light
+ *  box if opened so we can preview"). */
+export function ImageLightbox({ images, index, onIndex, onClose }: {
+  images: PreviewImage[];
+  index: number;
+  onIndex: (index: number) => void;
+  onClose: () => void;
+}) {
+  const nav = useRef({ index, count: images.length, onIndex, onClose });
+  useEffect(() => { nav.current = { index, count: images.length, onIndex, onClose }; });
+  useEffect(() => {
+    // On window in the capture phase, so it runs before the full screen window's
+    // and the drawer's Esc handlers on document: Esc closes only the preview.
+    const onKey = (e: KeyboardEvent) => {
+      const n = nav.current;
+      if (e.key === "Escape") { e.stopPropagation(); n.onClose(); }
+      else if (e.key === "ArrowRight" && n.count > 1) { e.stopPropagation(); n.onIndex((n.index + 1) % n.count); }
+      else if (e.key === "ArrowLeft" && n.count > 1) { e.stopPropagation(); n.onIndex((n.index - 1 + n.count) % n.count); }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+
+  const img = images[index];
+  if (!img) return null;
+  const step = (delta: number) => (e: React.MouseEvent) => { e.stopPropagation(); onIndex((index + delta + images.length) % images.length); };
+  const control = "rounded-lg border border-white/40 px-3 py-1.5 text-[16px] font-medium text-white hover:bg-white/10";
+  return createPortal(
+    <div role="dialog" aria-modal="true" aria-label={img.name} onClick={onClose} className="fixed inset-0 z-[110] flex flex-col bg-black/85">
+      <div onClick={(e) => e.stopPropagation()} className="flex flex-wrap items-center gap-3 px-4 py-3">
+        <span className="min-w-0 flex-1 truncate text-[16px] font-medium text-white">
+          {img.name}{images.length > 1 ? ` · ${index + 1} of ${images.length}` : ""}
+        </span>
+        <a href={img.downloadUrl ?? img.url} target="_blank" rel="noopener noreferrer" className={control}>{img.downloadUrl ? "Download" : "Open original"}</a>
+        <button onClick={onClose} className={control}>Close</button>
+      </div>
+      <div className="relative flex min-h-0 flex-1 items-center justify-center px-4 pb-6">
+        {images.length > 1 && <button onClick={step(-1)} aria-label="Previous image" className="absolute left-3 rounded-full bg-white/15 px-4 py-2 text-[28px] text-white hover:bg-white/25">‹</button>}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={img.url} alt={img.name} onClick={(e) => e.stopPropagation()} className="max-h-full max-w-full rounded-lg object-contain shadow-2xl" />
+        {images.length > 1 && <button onClick={step(1)} aria-label="Next image" className="absolute right-3 rounded-full bg-white/15 px-4 py-2 text-[28px] text-white hover:bg-white/25">›</button>}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 /** A small drop target with an Add button, for files. Drops stop here: the
  *  drawer around it would otherwise take them as task attachments, and React
  *  events cross the full window's portal. */

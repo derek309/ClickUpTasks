@@ -31,6 +31,11 @@ export function sharedFileKind(name: string): SharedFileKind {
   return "doc";
 }
 
+const PREVIEW_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
+/** Images every browser can draw, so they get a thumbnail and open in the
+ *  lightbox. HEIC and the rest open by name instead. */
+export const isPreviewableImage = (name: string) => PREVIEW_EXT.has(extOf(name));
+
 /** Storage keeps the content type the uploader declared. A browser runs these. */
 export const isActiveContentType = (type: string) => /html|svg|xml|javascript|ecmascript/i.test(type);
 

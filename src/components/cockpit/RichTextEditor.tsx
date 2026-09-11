@@ -30,11 +30,9 @@ function ToolbarButton({ onClick, active, title, children, large }: { onClick: (
   );
 }
 
-export function RichTextEditor({ value, onChange, placeholder, autoFocus, editable = true, variant = "task", tall = false }: {
+export function RichTextEditor({ value, onChange, placeholder, autoFocus, editable = true, variant = "task" }: {
   value: string; onChange: (html: string) => void; placeholder?: string; autoFocus?: boolean;
   editable?: boolean; variant?: "task" | "doc";
-  /** A document in the full window: the writing surface fills most of the screen. */
-  tall?: boolean;
 }) {
   const doc = variant === "doc";
   const editor = useEditor({
@@ -62,7 +60,10 @@ export function RichTextEditor({ value, onChange, placeholder, autoFocus, editab
       // at 18px, since reading it is the whole job.
       attributes: {
         class: doc
-          ? `rte-content ${tall ? "min-h-[65vh]" : "min-h-[320px]"} text-[18px] leading-relaxed text-foreground outline-none`
+          // As tall as the writing plus about five empty lines (pb-36) to click
+          // into, so the page scrolls and the editor never holds dead space
+          // (Derek, 2026-09-11: "adjust to the content length ... leave 5 lines").
+          ? "rte-content min-h-[12rem] pb-36 text-[18px] leading-relaxed text-foreground outline-none"
           : "rte-content min-h-[80px] text-[16px] text-foreground outline-none",
       },
       // Plain click still just positions the cursor while editing — Cmd/Ctrl

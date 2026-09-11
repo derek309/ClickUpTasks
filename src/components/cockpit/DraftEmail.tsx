@@ -12,10 +12,14 @@
 // failed send, or cancelling the full composer, never loses it.
 import { useEffect, useRef, useState } from "react";
 import { STATUS_META, htmlToText, timeAgo, type Attachment, type Message, type Task } from "@/lib/data";
-import { MAX_SHARED_FILE_BYTES, isShareableFileName } from "@/lib/uploadTypes";
+import { MAX_SHARED_FILE_BYTES, isPreviewableImage, isShareableFileName } from "@/lib/uploadTypes";
+import { signedUrlForFile } from "@/lib/db";
 import { RichTextEditor } from "./RichTextEditor";
 import { useDebouncedCommit } from "./useDebouncedCommit";
-import { FileDropLine, WorkItemBadge, WorkItemInline, WorkItemRow, WorkItemWindow, quietButton as quiet } from "./TaskWorkItem";
+import {
+  FileDropLine, ImageLightbox, ImageThumbGrid, WorkItemBadge, WorkItemInline, WorkItemRow, WorkItemWindow,
+  quietButton as quiet, type PreviewImage,
+} from "./TaskWorkItem";
 import { newId } from "./ui";
 
 export type DraftEmailValue = NonNullable<Task["draftEmail"]>;
@@ -50,6 +54,9 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
   const [saveState, setSaveState] = useState<"idle" | "unsaved" | "saved">("idle");
   const [uploading, setUploading] = useState(false);
   const [editorNonce, setEditorNonce] = useState(0);
+  // Signed links for image thumbnails, by storage path, and the open preview.
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  const [lightbox, setLightbox] = useState<number | null>(null);
   const pending = useRef<Partial<DraftEmailValue>>({});
   // Set once the draft is sent or discarded, so a save still waiting can't bring it back.
   const finished = useRef(false);
@@ -63,6 +70,31 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
     if (draft && sentAlready) onPatch({ draftEmail: null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [task.id, !!draft, sentAlready?.id]);
+
+  // Typing is never left waiting: the pending save lands when the tab is hidden,
+  // the page closes, or the task closes (the commit hook flushes on unmount).
+  useEffect(() => {
+    const onVisibility = () => { if (document.visibilityState === "hidden") commit.flush(); };
+    window.addEventListener("pagehide", commit.flush);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", commit.flush);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [commit.flush]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Thumbnails load only while the draft is open, an hour's link each.
+  const open = shown || full || requested;
+  const imagePaths = local.attachments.filter((a) => a.path && isPreviewableImage(a.name)).map((a) => a.path!).join("|");
+  useEffect(() => {
+    const missing = imagePaths ? imagePaths.split("|").filter((p) => !thumbs[p]) : [];
+    if (!open || !missing.length) return;
+    let cancelled = false;
+    void Promise.all(missing.map(async (p) => [p, await signedUrlForFile(p, 3600)] as const)).then((pairs) => {
+      if (!cancelled) setThumbs((t) => ({ ...t, ...Object.fromEntries(pairs.filter((pair): pair is readonly [string, string] => !!pair[1])) }));
+    });
+    return () => { cancelled = true; };
+  }, [open, imagePaths]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!draft) return null;
 
@@ -148,6 +180,9 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
   };
 
   const count = attachments.length;
+  const previewImages: PreviewImage[] = attachments
+    .filter((a) => a.path && isPreviewableImage(a.name) && thumbs[a.path])
+    .map((a) => ({ id: a.id, name: a.name, url: thumbs[a.path!] }));
   const badge = <WorkItemBadge label="Not sent" chip={STATUS_META.todo.chip} dot={STATUS_META.todo.dot} />;
   const meta = [
     toEmail ? `To ${toEmail}` : "No linked contact to send to",
@@ -162,8 +197,10 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
   );
   if (!isShown && !full) return row;
 
+  // Full screen puts Attachments in a right column beside the email, like the document.
   const content = (
-    <>
+    <div className={full ? "grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]" : ""}>
+      <div className="min-w-0">
       <div className={full ? "overflow-hidden rounded-2xl border bg-surface shadow-sm" : "overflow-hidden rounded-xl border"}>
         <div className="flex flex-wrap items-center gap-3 border-b px-4 py-2.5 text-[16px] sm:px-6">
           <span className="w-16 shrink-0 font-semibold text-muted">To</span>
@@ -177,7 +214,7 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
             placeholder={task.title} className="min-w-0 flex-1 bg-transparent text-[18px] font-semibold outline-none" />
         </label>
         <div className="p-4 sm:p-6">
-          <RichTextEditor key={`email-${local.key}-${editorNonce}-${full ? "full" : "inline"}`} value={draft.body} variant="doc" tall={full}
+          <RichTextEditor key={`email-${local.key}-${editorNonce}-${full ? "full" : "inline"}`} value={draft.body} variant="doc"
             placeholder="Write your email…" onChange={(html) => keep({ body: html })} />
         </div>
       </div>
@@ -191,8 +228,10 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
         <button onClick={discard} className={`ml-auto ${quiet} hover:text-danger`}>Discard</button>
       </div>
 
-      <div className="mt-5">
+      </div>
+      <div className={full ? "" : "mt-5"}>
         <FileDropLine label="Attachments" count={count} busy={uploading} disabled={!onUpload} onFiles={(list) => void addFiles(list)}>
+          {previewImages.length > 0 && <ImageThumbGrid images={previewImages} onOpen={setLightbox} />}
           {count > 0 && (
             <ul className="mt-1.5 divide-y">
               {attachments.map((a) => (
@@ -217,7 +256,7 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
           )}
         </FileDropLine>
       </div>
-    </>
+    </div>
   );
 
   return (
@@ -235,6 +274,9 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
         </WorkItemWindow>
       ) : (
         <WorkItemInline>{content}</WorkItemInline>
+      )}
+      {lightbox !== null && previewImages[lightbox] && (
+        <ImageLightbox images={previewImages} index={lightbox} onIndex={setLightbox} onClose={() => setLightbox(null)} />
       )}
     </>
   );

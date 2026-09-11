@@ -12,14 +12,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RichTextEditor } from "@/components/cockpit/RichTextEditor";
 import { addDocFiles } from "@/lib/docFileUpload";
-import { extOf, formatFileSize } from "@/lib/uploadTypes";
+import { extOf, formatFileSize, isPreviewableImage } from "@/lib/uploadTypes";
+import { ImageLightbox, type PreviewImage } from "@/components/cockpit/TaskWorkItem";
 
 type DocStatus = "draft" | "with_client" | "client_submitted" | "approved";
 type DocFile = { id: string; name: string; size: number; kind: string; addedBy: string; fromClient: boolean; createdAt: string };
 type DocData = { title: string; clientName: string; body: string; version: number; status: DocStatus; approvedAt: string | null; closed: boolean; files: DocFile[] };
-// Shown as a small picture in the list. HEIC and the rest open by name instead,
-// since most browsers cannot draw them.
-const THUMB_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
 type Notice = { tone: "good" | "info" | "warn"; text: string } | null;
 
 const NAVY = "#1b3a5c";
@@ -57,10 +55,16 @@ export default function DocReviewView({ token }: { token: string }) {
   const [filesAdded, setFilesAdded] = useState(false);
   const [adding, setAdding] = useState(false);
   const [dropping, setDropping] = useState(false);
+  const [lightbox, setLightbox] = useState<number | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const dirty = html.trim() !== startHtml.trim();
   const locked = !!data && (data.status === "approved" || data.closed);
+  const fileHref = (id: string) => `/api/doc/${encodeURIComponent(token)}/files/${id}`;
+  // Photos show as pictures and open in a full screen preview.
+  const previewImages: PreviewImage[] = (data?.files ?? [])
+    .filter((f) => isPreviewableImage(f.name))
+    .map((f) => ({ id: f.id, name: f.name, url: fileHref(f.id), downloadUrl: `${fileHref(f.id)}?download=1` }));
   const baseRef = useRef(0);
   const dirtyRef = useRef(false);
   useEffect(() => { baseRef.current = baseVersion; }, [baseVersion]);
@@ -280,17 +284,23 @@ export default function DocReviewView({ token }: { token: string }) {
                 ) : (
                   <ul className="mt-4 divide-y">
                     {data.files.map((f) => {
-                      const href = `/api/doc/${encodeURIComponent(token)}/files/${f.id}`;
+                      const href = fileHref(f.id);
+                      const preview = previewImages.findIndex((p) => p.id === f.id);
+                      const nameClass = "block break-words text-left text-[17px] font-semibold underline underline-offset-4";
                       return (
                         <li key={f.id} className="flex flex-wrap items-center gap-4 py-3">
-                          {THUMB_EXT.has(extOf(f.name)) ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={href} alt="" className="h-16 w-16 shrink-0 rounded-lg border object-cover" />
+                          {preview >= 0 ? (
+                            <button onClick={() => setLightbox(preview)} aria-label={`Preview ${f.name}`} className="h-20 w-20 shrink-0 overflow-hidden rounded-lg border">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={href} alt="" className="h-full w-full object-cover" />
+                            </button>
                           ) : (
-                            <span aria-hidden className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg border text-[16px] font-bold uppercase text-muted">{extOf(f.name)}</span>
+                            <span aria-hidden className="flex h-20 w-20 shrink-0 items-center justify-center rounded-lg border text-[16px] font-bold uppercase text-muted">{extOf(f.name)}</span>
                           )}
                           <div className="min-w-0 flex-1">
-                            <a href={href} target="_blank" rel="noopener noreferrer" className="block break-words text-[17px] font-semibold underline underline-offset-4" style={{ color: NAVY }}>{f.name}</a>
+                            {preview >= 0
+                              ? <button onClick={() => setLightbox(preview)} className={nameClass} style={{ color: NAVY }}>{f.name}</button>
+                              : <a href={href} target="_blank" rel="noopener noreferrer" className={nameClass} style={{ color: NAVY }}>{f.name}</a>}
                             <p className="text-[16px] text-muted">{formatFileSize(f.size)} · Added by {f.fromClient ? "you" : f.addedBy}</p>
                           </div>
                           <div className="flex items-center gap-4">
@@ -343,6 +353,10 @@ export default function DocReviewView({ token }: { token: string }) {
             </div>
           </div>
         </div>
+      )}
+
+      {lightbox !== null && previewImages[lightbox] && (
+        <ImageLightbox images={previewImages} index={lightbox} onIndex={setLightbox} onClose={() => setLightbox(null)} />
       )}
     </div>
   );

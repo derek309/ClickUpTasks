@@ -21,10 +21,13 @@ import {
 } from "@/lib/db";
 import { diffDocText } from "@/lib/docDiff";
 import { addDocFiles } from "@/lib/docFileUpload";
-import { formatFileSize } from "@/lib/uploadTypes";
+import { formatFileSize, isPreviewableImage } from "@/lib/uploadTypes";
 import { RichTextEditor } from "./RichTextEditor";
 import { useDebouncedCommit } from "./useDebouncedCommit";
-import { FileDropLine, WorkItemBadge, WorkItemInline, WorkItemRow, WorkItemWindow, quietButton as quiet } from "./TaskWorkItem";
+import {
+  FileDropLine, ImageLightbox, ImageThumbGrid, WorkItemBadge, WorkItemInline, WorkItemRow, WorkItemWindow,
+  quietButton as quiet, type PreviewImage,
+} from "./TaskWorkItem";
 
 const STATUS_VIEW: Record<TaskDocumentStatus, { label: string; tone: TaskStatus }> = {
   draft: { label: "Draft", tone: "todo" },
@@ -73,12 +76,18 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
   const [seed, setSeed] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  // Signed links for image thumbnails, by storage path, and the open preview.
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  const [lightbox, setLightbox] = useState<number | null>(null);
   // The client sent changes while this teammate still had unsent edits.
   const [clientCrossed, setClientCrossed] = useState<TaskDocumentVersion | null>(null);
   // Typing saves on its own; this is what says so (Derek, 2026-09-11: "add a save draft").
   const [saveState, setSaveState] = useState<"idle" | "unsaved" | "saving" | "saved">("idle");
   const commit = useDebouncedCommit();
+  const titleCommit = useDebouncedCommit(800);
   const saving = useRef<Promise<boolean> | null>(null);
+  // A save that failed tries again on its own (Derek: "make sure the edits auto save for sure").
+  const retry = useRef<number | null>(null);
   const versionRef = useRef<number | null>(null);
   // What the editor holds right now, for Save draft and for switching views.
   const latestHtml = useRef<string | null>(null);
@@ -117,6 +126,20 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { onPresence(exists); }, [exists]);
 
+  // Typing is never left waiting: the pending save lands when the tab is hidden,
+  // the page closes, or the task closes (the commit hook flushes on unmount).
+  useEffect(() => {
+    const flushAll = () => { commit.flush(); titleCommit.flush(); };
+    const onVisibility = () => { if (document.visibilityState === "hidden") flushAll(); };
+    window.addEventListener("pagehide", flushAll);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", flushAll);
+      document.removeEventListener("visibilitychange", onVisibility);
+      if (retry.current) window.clearTimeout(retry.current);
+    };
+  }, [commit.flush, titleCommit.flush]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const visible = shown || full;
   useEffect(() => {
     if (!visible || !doc) return;
@@ -127,12 +150,25 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
     return () => { cancelled = true; };
   }, [visible, doc?.id, doc?.version, doc?.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Thumbnails load only while the document is open, an hour's link each.
+  const imagePaths = files.filter((f) => !f.removedAt && isPreviewableImage(f.name)).map((f) => f.path).join("|");
+  useEffect(() => {
+    const missing = imagePaths ? imagePaths.split("|").filter((p) => !thumbs[p]) : [];
+    if (!visible || !missing.length) return;
+    let cancelled = false;
+    void Promise.all(missing.map(async (p) => [p, await signedUrlForFile(p, 3600)] as const)).then((pairs) => {
+      if (!cancelled) setThumbs((t) => ({ ...t, ...Object.fromEntries(pairs.filter((pair): pair is readonly [string, string] => !!pair[1])) }));
+    });
+    return () => { cancelled = true; };
+  }, [visible, imagePaths]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const readJson = async (res: Response) => res.json().catch(() => ({} as Record<string, unknown>));
   const copy = async (url: string) => { try { await navigator.clipboard.writeText(url); return true; } catch { return false; } };
 
   // Each switch lands the pending save and carries what was typed across.
   const switchView = (next: { shown?: boolean; full?: boolean }, d: Doc | null = doc) => {
     commit.flush();
+    titleCommit.flush();
     setSeed(latestHtml.current);
     if (d && !visible) setTitleDraft(d.title);
     setLinkMenu(false);
@@ -164,14 +200,32 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
     })();
   }, [startNonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const save = (html: string) => {
+  const save = (html: string): Promise<boolean> => {
     setSaveState("saving");
-    const p = docApi(task.id, "", { method: "PATCH", body: JSON.stringify({ body: html }) }).then(async (res) => {
-      const j = await readJson(res);
-      if (res.ok) { setDoc(rowToTaskDocument(j.document)); setSaveState("saved"); }
-      else { setSaveState("unsaved"); pushToast((j.error as string) ?? "Could not save the document."); }
-      return res.ok;
-    });
+    if (retry.current) { window.clearTimeout(retry.current); retry.current = null; }
+    const payload = JSON.stringify({ body: html });
+    // A failed save waits five seconds and tries again, unless newer typing has
+    // taken over (that typing brings its own save).
+    const tryAgain = (message: string) => {
+      if (!retry.current) pushToast(`${message} Trying again in a few seconds.`);
+      retry.current = window.setTimeout(() => {
+        retry.current = null;
+        if ((latestHtml.current ?? html) === html) void save(html);
+      }, 5000);
+    };
+    // keepalive lets a save started as the page closes still reach the server;
+    // browsers only allow it for small bodies.
+    const p = docApi(task.id, "", { method: "PATCH", body: payload, keepalive: payload.length < 60_000 })
+      .then(async (res) => {
+        const j = await readJson(res);
+        if (res.ok) { setDoc(rowToTaskDocument(j.document)); setSaveState("saved"); return true; }
+        setSaveState("unsaved");
+        // Approved or otherwise refused: trying again would be refused again.
+        if (res.status === 409 || res.status === 400 || res.status === 413) pushToast((j.error as string) ?? "Could not save the document.");
+        else tryAgain((j.error as string) ?? "Could not save the document.");
+        return false;
+      })
+      .catch(() => { setSaveState("unsaved"); tryAgain("Could not reach the server to save."); return false; });
     saving.current = p;
     return p;
   };
@@ -189,9 +243,9 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
     pushToast("Draft saved.");
   };
 
-  const saveTitle = async () => {
-    if (!doc || titleDraft.trim() === doc.title.trim()) return;
-    const res = await docApi(task.id, "", { method: "PATCH", body: JSON.stringify({ title: titleDraft }) });
+  const saveTitle = async (value: string) => {
+    if (!doc || value.trim() === doc.title.trim()) return;
+    const res = await docApi(task.id, "", { method: "PATCH", body: JSON.stringify({ title: value }), keepalive: true });
     const j = await readJson(res);
     if (!res.ok) { pushToast((j.error as string) ?? "Could not rename the document."); return; }
     setDoc(rowToTaskDocument(j.document));
@@ -293,6 +347,14 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
   const needsSend = !locked && (doc.version === 0 || doc.draftDirty);
   const name = doc.title.trim() || task.title;
   const activeFiles = files.filter((f) => !f.removedAt);
+  const previewImages: PreviewImage[] = activeFiles
+    .filter((f) => isPreviewableImage(f.name) && thumbs[f.path])
+    .map((f) => ({ id: f.id, name: f.name, url: thumbs[f.path] }));
+  const openFileOrPreview = (f: TaskDocumentFile) => {
+    const i = previewImages.findIndex((p) => p.id === f.id);
+    if (i >= 0) setLightbox(i);
+    else void openFile(f);
+  };
   const copyLinkButton = link?.live && link.copyable
     ? <button onClick={() => void linkAction("copy")} disabled={busy !== null} className={quiet}>Copy link</button>
     : null;
@@ -334,14 +396,19 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
   const shownTimeline = allHistory ? timeline : timeline.slice(0, HISTORY_PREVIEW);
 
   const titleInput = (
-    <input value={titleDraft} onChange={(e) => setTitleDraft(e.target.value)} onBlur={() => void saveTitle()}
+    <input value={titleDraft}
+      onChange={(e) => { const value = e.target.value; setTitleDraft(value); titleCommit.schedule(() => { void saveTitle(value); }); }}
+      onBlur={() => titleCommit.flush()}
       onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
       placeholder={task.title} aria-label="Document name" maxLength={200}
       className="w-full rounded-md bg-transparent px-1 py-0.5 text-[22px] font-bold outline-none placeholder:text-foreground hover:bg-background focus:bg-background" />
   );
 
+  // Full screen puts Files and History in a right column beside the writing
+  // (Derek, 2026-09-11); in place they stack under it, since the task column is narrow.
   const content = (
-    <>
+    <div className={full ? "grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px]" : ""}>
+      <div className="min-w-0">
       {clientCrossed && (
         <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-accent/40 bg-accent-soft/40 px-4 py-3 text-[16px]">
           <span className="min-w-0 flex-1">{clientCrossed.authorLabel ?? "The client"} sent changes while you had unsent edits.</span>
@@ -378,7 +445,7 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
       </div>
 
       <article className={full ? "rounded-2xl border bg-surface p-5 shadow-sm sm:p-8" : ""}>
-        <RichTextEditor key={`doc-${doc.id}-${nonce}-${full ? "full" : "inline"}`} value={seed ?? doc.body} editable={!locked} variant="doc" tall={full}
+        <RichTextEditor key={`doc-${doc.id}-${nonce}-${full ? "full" : "inline"}`} value={seed ?? doc.body} editable={!locked} variant="doc"
           placeholder="Write the content for your client…"
           onChange={(html) => { latestHtml.current = html; setSaveState("unsaved"); commit.schedule(() => { void save(html); }); }} />
       </article>
@@ -396,13 +463,15 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
         </div>
       )}
 
-      <div className="mt-5 space-y-3">
+      </div>
+      <div className={full ? "space-y-3" : "mt-5 space-y-3"}>
         <FileDropLine label="Files" count={activeFiles.length} busy={adding} disabled={locked} onFiles={(list) => void addFiles(list)}>
+          {previewImages.length > 0 && <ImageThumbGrid images={previewImages} onOpen={setLightbox} />}
           {activeFiles.length > 0 && (
             <ul className="mt-1.5 divide-y">
               {activeFiles.map((f) => (
                 <li key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-[16px]">
-                  <button onClick={() => void openFile(f)} className="min-w-0 break-words text-left font-medium text-accent hover:underline">{f.name}</button>
+                  <button onClick={() => openFileOrPreview(f)} className="min-w-0 break-words text-left font-medium text-accent hover:underline">{f.name}</button>
                   <span className="text-muted">{formatFileSize(f.sizeBytes)} · {f.addedByLabel ?? "Someone"}</span>
                   {!f.sharedAt && <span className="rounded-full bg-background px-2 py-0.5 text-muted">Not sent yet</span>}
                   {!locked && <button onClick={() => void removeFile(f)} className="ml-auto text-muted hover:text-danger hover:underline">Remove</button>}
@@ -464,7 +533,7 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
           )}
         </section>
       </div>
-    </>
+    </div>
   );
 
   return (
@@ -479,6 +548,9 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
           <div className="mb-3">{titleInput}</div>
           {content}
         </WorkItemInline>
+      )}
+      {lightbox !== null && previewImages[lightbox] && (
+        <ImageLightbox images={previewImages} index={lightbox} onIndex={setLightbox} onClose={() => setLightbox(null)} />
       )}
     </>
   );

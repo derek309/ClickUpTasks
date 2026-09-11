@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
 import {
-  extOf, isShareableFileName, sharedFileKind, isActiveContentType,
+  extOf, isShareableFileName, isPreviewableImage, sharedFileKind, isActiveContentType,
   cleanFileName, storageSafeName, formatFileSize, MAX_SHARED_FILE_BYTES,
 } from "./uploadTypes";
 
@@ -15,6 +15,13 @@ describe("isShareableFileName", () => {
     for (const n of ["page.html", "icon.svg", "feed.xml", "app.js", "x.htm", "README", "trick.pdf.html"]) {
       expect(isShareableFileName(n)).toBe(false);
     }
+  });
+});
+
+describe("isPreviewableImage", () => {
+  it("previews what a browser can draw and nothing else", () => {
+    for (const n of ["a.PNG", "b.jpg", "c.jpeg", "d.gif", "e.webp"]) expect(isPreviewableImage(n)).toBe(true);
+    for (const n of ["f.heic", "g.pdf", "h.svg", "photo"]) expect(isPreviewableImage(n)).toBe(false);
   });
 });
 
