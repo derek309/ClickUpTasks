@@ -32,7 +32,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   const status = payload?.status;
   if (!taskId || !status || !ALLOWED_STATUSES.has(status)) return NextResponse.json({ error: "Invalid request." }, { status: 400 });
 
-  const { data: task } = await supabaseAdmin.from("tasks").select("*").eq("id", taskId).eq("is_private", false).maybeSingle();
+  const { data: task } = await supabaseAdmin.from("tasks").select("*").eq("id", taskId).eq("is_private", false).is("deleted_at", null).maybeSingle();
   if (!task || task.client_id !== scope.clientId || (scope.projectId && task.project_id !== scope.projectId)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (task.status === "done") return NextResponse.json({ error: "This item has already been completed." }, { status: 400 });
 

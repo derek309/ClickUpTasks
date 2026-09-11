@@ -61,14 +61,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   // request can't land a task under a different client's list.
   let projectId: string | null = null;
   if (payload?.projectId) {
-    const { data: owned } = await supabaseAdmin.from("projects").select("id").eq("id", payload.projectId).eq("client_id", scope.clientId).maybeSingle();
+    const { data: owned } = await supabaseAdmin.from("projects").select("id").eq("id", payload.projectId).eq("client_id", scope.clientId).is("deleted_at", null).maybeSingle();
     if (owned) projectId = owned.id;
   }
   // No (valid) project named — reuse (or create) the client's default
   // "Tasks" list, same find-or-create idiom mcp/server.mjs's create_task
   // and the GHL webhook already use.
   if (!projectId) {
-    const { data: existingProjects } = await supabaseAdmin.from("projects").select("id").eq("client_id", scope.clientId).limit(1);
+    const { data: existingProjects } = await supabaseAdmin.from("projects").select("id").eq("client_id", scope.clientId).is("deleted_at", null).limit(1);
     if (existingProjects?.length) {
       projectId = existingProjects[0].id;
     } else {

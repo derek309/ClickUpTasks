@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "./supabaseAdmin";
+import { hashToken } from "./tokenCrypto";
 
 // Rate limiting for the public /api/waiting/[token]/* routes — token-gated
 // but otherwise unauthenticated, so nothing else stops a scripted loop once
@@ -109,13 +110,18 @@ export async function rateLimit(req: NextRequest, token: string, action: Waiting
   const rule = RATE_LIMITS[action];
   const bucket = Math.floor(Date.now() / rule.windowMs);
   const ip = clientIp(req);
+  // Keys hold a sha256 of the share token, never the token itself: the token
+  // IS the access control for the portal, and waiting_rate_limit.key is a
+  // plain column anyone with table read access could harvest links from.
+  // Hashed here rather than by each route so no caller can forget.
+  const tokenKey = hashToken(token);
 
   // Both counters in one round trip. The action is part of the key so a
   // chatty poll on `read` can never starve the budget a client needs to
   // actually send a message or upload a file.
   const [perIp, perToken] = await Promise.all([
-    bump(`${action}:${token}:${ip}:${bucket}`),
-    rule.tokenLimit === undefined ? Promise.resolve(null) : bump(`${action}:${token}:all:${bucket}`),
+    bump(`${action}:${tokenKey}:${ip}:${bucket}`),
+    rule.tokenLimit === undefined ? Promise.resolve(null) : bump(`${action}:${tokenKey}:all:${bucket}`),
   ]);
 
   const overIp = perIp !== null && perIp > rule.limit;

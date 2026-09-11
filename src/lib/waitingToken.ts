@@ -34,13 +34,18 @@ export type WaitingScope = {
   projectId: string | null;
 };
 
+// A trashed client or project (see supabase/soft-delete.sql) resolves to null,
+// exactly like an unknown token: trash is meant to be reversible for the team,
+// not a state the public link can still see into. Callers must also exclude
+// trashed tasks themselves, since a live client can have trashed tasks.
 export async function resolveWaitingToken(token: string): Promise<WaitingScope | null> {
-  const { data: project } = await supabaseAdmin.from("projects").select("id, client_id").eq("share_token", token).maybeSingle();
+  const { data: project } = await supabaseAdmin.from("projects").select("id, client_id, deleted_at").eq("share_token", token).maybeSingle();
   if (project) {
+    if (project.deleted_at) return null;
     const { data: client } = await supabaseAdmin.from("clients")
-      .select("id, name, assigned_to, linked_contact_id, portal_shows_all_tasks")
+      .select("id, name, assigned_to, linked_contact_id, portal_shows_all_tasks, deleted_at")
       .eq("id", project.client_id as string).maybeSingle();
-    if (!client || client.id === PERSONAL_CLIENT_ID) return null;
+    if (!client || client.deleted_at || client.id === PERSONAL_CLIENT_ID) return null;
     return {
       clientId: client.id as string,
       clientName: client.name as string,
@@ -53,9 +58,9 @@ export async function resolveWaitingToken(token: string): Promise<WaitingScope |
     };
   }
   const { data: client } = await supabaseAdmin.from("clients")
-    .select("id, name, assigned_to, can_request_new_tasks, show_growth_plan, portal_shows_all_tasks, linked_contact_id")
+    .select("id, name, assigned_to, can_request_new_tasks, show_growth_plan, portal_shows_all_tasks, linked_contact_id, deleted_at")
     .eq("share_token", token).maybeSingle();
-  if (!client || client.id === PERSONAL_CLIENT_ID) return null;
+  if (!client || client.deleted_at || client.id === PERSONAL_CLIENT_ID) return null;
   return {
     clientId: client.id as string,
     clientName: client.name as string,

@@ -58,7 +58,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   // A project-scoped token additionally filters this down to its own id, so
   // there is exactly one project here and the page's own switcher never
   // renders (same `projects.length > 1` check it already uses).
-  let projectQuery = supabaseAdmin.from("projects").select("id, name").eq("client_id", scope.clientId).order("position", { ascending: true });
+  let projectQuery = supabaseAdmin.from("projects").select("id, name").eq("client_id", scope.clientId).is("deleted_at", null).order("position", { ascending: true });
   if (scope.projectId) projectQuery = projectQuery.eq("id", scope.projectId);
   const { data: projectRows } = await projectQuery;
   const projects = (projectRows ?? []).map((p) => ({ id: p.id as string, name: p.name as string }));
@@ -75,8 +75,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   // token adds project_id to every one of these — the entire reason a list
   // token exists is that nothing outside that one project should ever be
   // reachable through it, regardless of what a caller passes as ?task=.
+  // Trashed tasks are excluded the same way, so a deep link to one 404s too.
   const scopedTaskQuery = () => {
-    let q = supabaseAdmin.from("tasks").select(cols).eq("client_id", scope.clientId).eq("is_private", false);
+    let q = supabaseAdmin.from("tasks").select(cols).eq("client_id", scope.clientId).eq("is_private", false).is("deleted_at", null);
     if (scope.projectId) q = q.eq("project_id", scope.projectId);
     return q;
   };

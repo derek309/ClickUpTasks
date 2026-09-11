@@ -35,7 +35,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   // project, if scoped) before writing anywhere — same boundary the respond
   // route enforces.
   if (typeof taskId === "string" && taskId) {
-    const { data: task } = await supabaseAdmin.from("tasks").select("id, client_id, project_id").eq("id", taskId).eq("is_private", false).maybeSingle();
+    const { data: task } = await supabaseAdmin.from("tasks").select("id, client_id, project_id").eq("id", taskId).eq("is_private", false).is("deleted_at", null).maybeSingle();
     if (!task || task.client_id !== scope.clientId || (scope.projectId && task.project_id !== scope.projectId)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   } else if (scope.projectId) {
     // No taskId means this is for the "request a new task" composer's

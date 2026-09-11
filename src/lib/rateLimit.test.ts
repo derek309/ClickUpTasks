@@ -10,6 +10,7 @@ vi.mock("./supabaseAdmin", () => ({
 }));
 
 const { rateLimit, retryAfterSeconds, RATE_LIMITS } = await import("./rateLimit");
+const { hashToken } = await import("./tokenCrypto");
 
 /** Minimal stand-in for the one NextRequest field the limiter reads. */
 const req = (ip = "203.0.113.9") =>
@@ -120,6 +121,23 @@ describe("rateLimit", () => {
     const keys = rpc.mock.calls.map((c) => (c[1] as { p_key: string }).p_key);
     expect(keys).toHaveLength(2);
     expect(keys.filter((k) => k.includes(":all:"))).toHaveLength(1);
+  });
+
+  // The share token is the portal's only access control, so the counters
+  // table must never become a list of working links (found 2026-09-11).
+  it("never stores the raw share token in a counter key", async () => {
+    counterAt(1);
+    const token = "tok_abcdefghijklmnop";
+    for (const action of Object.keys(RATE_LIMITS) as (keyof typeof RATE_LIMITS)[]) {
+      await rateLimit(req(), token, action);
+    }
+    const keys = rpc.mock.calls.map((c) => (c[1] as { p_key: string }).p_key);
+    // Every action, plus the token-wide counter on request and upload.
+    expect(keys).toHaveLength(Object.keys(RATE_LIMITS).length + 2);
+    for (const key of keys) {
+      expect(key).not.toContain(token);
+      expect(key).toContain(hashToken(token));
+    }
   });
 
   it("does not spend a second round trip on routes with no token-wide cap", async () => {
