@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
-import { teamDocAccess, NO_STORE } from "@/lib/taskDocumentServer";
+import { teamDocAccess, memberLabel, NO_STORE } from "@/lib/taskDocumentServer";
+import { recordCheckpoint } from "@/lib/taskDocumentFiles";
 import { sanitizeDocHtml, DOC_MAX_RAW_CHARS, DOC_MAX_HTML_CHARS } from "@/lib/docHtml";
 
 // The team's side of a task's client review document: create it, save the
@@ -42,10 +43,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const text = await req.text();
   if (text.length > DOC_MAX_RAW_CHARS) return json({ error: "This document is too long." }, 413);
-  let payload: { body?: unknown; reopen?: unknown; restoreVersion?: unknown };
+  let payload: { body?: unknown; reopen?: unknown; restoreVersion?: unknown; restoreCheckpoint?: unknown; checkpoint?: unknown };
   try { payload = JSON.parse(text); } catch { return json({ error: "Invalid request." }, 400); }
 
-  const { data: doc } = await supabaseAdmin.from("task_documents").select("id, approved_at").eq("task_id", id).maybeSingle();
+  const { data: doc } = await supabaseAdmin.from("task_documents")
+    .select("id, approved_at, body, updated_by, created_at").eq("task_id", id).maybeSingle();
   if (!doc) return json({ error: "This task has no client document yet." }, 404);
   const stamp = { updated_by: access.user.memberId, updated_at: new Date().toISOString() };
 
@@ -65,6 +67,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       .select("body").eq("document_id", doc.id).eq("version", payload.restoreVersion).maybeSingle();
     if (!v) return json({ error: "That version no longer exists." }, 404);
     body = sanitizeDocHtml(v.body as string);
+  } else if (typeof payload?.restoreCheckpoint === "string") {
+    // "Use this version" on a saved draft.
+    const { data: c } = await supabaseAdmin.from("task_document_checkpoints")
+      .select("body").eq("document_id", doc.id).eq("id", payload.restoreCheckpoint).maybeSingle();
+    if (!c) return json({ error: "That saved draft no longer exists." }, 404);
+    body = sanitizeDocHtml(c.body as string);
   } else if (typeof payload?.body === "string") {
     body = sanitizeDocHtml(payload.body);
   } else {
@@ -75,9 +83,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // approved_at in the filter closes the gap between the check above and this
   // write: a client approving in between makes this update match nothing.
   const { data, error } = await supabaseAdmin.from("task_documents")
-    .update({ body, draft_dirty: true, ...stamp })
+    // Unchanged text (a Save draft click with no edits) leaves "something to send" alone.
+    .update({ body, ...(body !== doc.body ? { draft_dirty: true } : {}), ...stamp })
     .eq("id", doc.id).is("approved_at", null).select("*").maybeSingle();
   if (error) return json({ error: error.message }, 400);
   if (!data) return json({ error: "This document is approved. Reopen it to make changes." }, 409);
+
+  // The history of team edits. A Save draft click or bringing back a version is
+  // always kept; plain typing is kept every ten minutes or when the draft
+  // changes hands (see recordCheckpoint).
+  const user = access.user;
+  await recordCheckpoint(
+    { documentId: doc.id as string, body: (doc.body as string) ?? "", updatedBy: (doc.updated_by as string | null) ?? null, createdAt: doc.created_at as string },
+    { id: user.memberId ?? user.id, label: () => memberLabel(user) },
+    body,
+    payload.checkpoint === true || typeof payload.restoreVersion === "number" || typeof payload.restoreCheckpoint === "string",
+  ).catch(() => { /* the save itself landed; a missed history entry must not fail it */ });
   return json({ document: data });
 }

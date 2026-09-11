@@ -520,6 +520,29 @@ export const fetchTaskDocument = async (taskId: string): Promise<TaskDocument | 
   if (error) { logErr({ error }); return null; }
   return data ? rowToTaskDocument(data) : null;
 };
+// Files on the document and the team's saved drafts between sends (see
+// supabase/task-document-files.sql). Read the same way, written by the server.
+export type TaskDocumentFile = {
+  id: string; name: string; path: string; sizeBytes: number; kind: string;
+  addedBy: string | null; addedByLabel: string | null; createdAt: string;
+  sharedAt: string | null; removedAt: string | null; removedByLabel: string | null;
+};
+export type TaskDocumentCheckpoint = { id: string; body: string; authorId: string | null; authorLabel: string | null; createdAt: string };
+export const fetchTaskDocumentFiles = async (documentId: string): Promise<TaskDocumentFile[]> => {
+  const { data, error } = await supabase.from("task_document_files").select("*").eq("document_id", documentId).order("created_at", { ascending: true });
+  if (error) { logErr({ error }); return []; }
+  return (data ?? []).map((r: any) => ({
+    id: r.id, name: r.name, path: r.path, sizeBytes: Number(r.size_bytes ?? 0), kind: r.kind,
+    addedBy: r.added_by ?? null, addedByLabel: r.added_by_label ?? null, createdAt: r.created_at,
+    sharedAt: r.shared_at ?? null, removedAt: r.removed_at ?? null, removedByLabel: r.removed_by_label ?? null,
+  }));
+};
+export const fetchTaskDocumentCheckpoints = async (documentId: string): Promise<TaskDocumentCheckpoint[]> => {
+  const { data, error } = await supabase.from("task_document_checkpoints").select("*").eq("document_id", documentId)
+    .order("created_at", { ascending: false }).limit(200);
+  if (error) { logErr({ error }); return []; }
+  return (data ?? []).map((r: any) => ({ id: r.id, body: r.body ?? "", authorId: r.author_id ?? null, authorLabel: r.author_label ?? null, createdAt: r.created_at }));
+};
 export const fetchTaskDocumentVersions = async (documentId: string): Promise<TaskDocumentVersion[]> => {
   const { data, error } = await supabase.from("task_document_versions").select("*").eq("document_id", documentId).order("version", { ascending: false });
   if (error) { logErr({ error }); return []; }

@@ -4,21 +4,10 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { TASK_FILES_BUCKET } from "@/lib/db";
 import { rateLimit } from "@/lib/rateLimit";
 import { resolveWaitingToken } from "@/lib/waitingToken";
-
-const MAX_BYTES = 25 * 1024 * 1024;
-
-// Allowlist of extensions a client may attach. Deliberately excludes anything
-// that executes when a signed URL is opened directly (html, svg, xml, js, …) —
-// this is a public, unauthenticated upload, so we don't want the bucket serving
-// attacker-controlled active content behind a trusted-looking link.
-const ALLOWED_EXT = new Set([
-  "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", // images
-  "pdf", "doc", "docx", "txt", "rtf", "pages", // docs
-  "xls", "xlsx", "csv", "numbers", // sheets
-  "ppt", "pptx", "key", // slides
-  "mp4", "mov", "webm", "m4v", // short clips (screen recordings of an issue)
-]);
-const extOf = (name: string) => name.split(".").pop()?.toLowerCase() ?? "";
+// The extension allowlist is shared with the client review document's files, and
+// deliberately excludes anything that executes when a signed URL is opened
+// directly (html, svg, xml, js): this is a public, unauthenticated upload.
+import { MAX_SHARED_FILE_BYTES as MAX_BYTES, isShareableFileName } from "@/lib/uploadTypes";
 
 // Public, token-gated file upload for the client-response form on
 // /waiting/[token] — mirrors src/app/api/extension/upload/route.ts's
@@ -40,7 +29,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   const file = form?.get("file");
   if (!(file instanceof File)) return NextResponse.json({ error: "Missing file." }, { status: 400 });
   if (file.size > MAX_BYTES) return NextResponse.json({ error: "File must be under 25MB." }, { status: 400 });
-  if (!ALLOWED_EXT.has(extOf(file.name))) return NextResponse.json({ error: "That file type isn't supported. Attach an image, PDF, document, or video." }, { status: 400 });
+  if (!isShareableFileName(file.name)) return NextResponse.json({ error: "That file type isn't supported. Attach an image, PDF, document, or video." }, { status: 400 });
 
   // Confirm the task actually belongs to this token's own client (and
   // project, if scoped) before writing anywhere — same boundary the respond

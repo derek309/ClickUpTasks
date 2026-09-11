@@ -11,9 +11,15 @@
 // Every string here is client facing: 16px or larger, and no dashes.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RichTextEditor } from "@/components/cockpit/RichTextEditor";
+import { addDocFiles } from "@/lib/docFileUpload";
+import { extOf, formatFileSize } from "@/lib/uploadTypes";
 
 type DocStatus = "draft" | "with_client" | "client_submitted" | "approved";
-type DocData = { title: string; clientName: string; body: string; version: number; status: DocStatus; approvedAt: string | null; closed: boolean };
+type DocFile = { id: string; name: string; size: number; kind: string; addedBy: string; fromClient: boolean; createdAt: string };
+type DocData = { title: string; clientName: string; body: string; version: number; status: DocStatus; approvedAt: string | null; closed: boolean; files: DocFile[] };
+// Shown as a small picture in the list. HEIC and the rest open by name instead,
+// since most browsers cannot draw them.
+const THUMB_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
 type Notice = { tone: "good" | "info" | "warn"; text: string } | null;
 
 const NAVY = "#1b3a5c";
@@ -46,6 +52,12 @@ export default function DocReviewView({ token }: { token: string }) {
   const [newer, setNewer] = useState<{ version: number; body: string } | null>(null);
   const [busy, setBusy] = useState<"send" | "approve" | null>(null);
   const [confirmApprove, setConfirmApprove] = useState(false);
+  // Files the client added since they last sent, so Send my changes can tell the
+  // team about them even when the text is untouched.
+  const [filesAdded, setFilesAdded] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [dropping, setDropping] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   const dirty = html.trim() !== startHtml.trim();
   const locked = !!data && (data.status === "approved" || data.closed);
@@ -124,6 +136,7 @@ export default function DocReviewView({ token }: { token: string }) {
       if (!res.ok) { setNotice({ tone: "warn", text: j.error ?? "We couldn't save that. Please try again." }); return; }
 
       writeDraft(draftKey(token, baseVersion), null);
+      setFilesAdded(false);
       const version = j.version as number;
       setBaseVersion(version);
       setStartHtml(html);
@@ -153,6 +166,27 @@ export default function DocReviewView({ token }: { token: string }) {
     setHtml(startHtml);
     setEditorKey((k) => k + 1);
     setNotice(null);
+  };
+
+  const filesApi = (method: "POST" | "DELETE") => (payload: Record<string, unknown>) =>
+    fetch(`/api/doc/${encodeURIComponent(token)}/files`, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+
+  const addFiles = async (list: FileList | null) => {
+    if (!list?.length || adding) return;
+    setAdding(true);
+    setNotice(null);
+    const error = await addDocFiles(Array.from(list), filesApi("POST"), () => { setFilesAdded(true); void load(false); });
+    setAdding(false);
+    if (error) setNotice({ tone: "warn", text: error });
+    else setNotice({ tone: "good", text: "Added. Send your changes when you're ready so the team knows." });
+  };
+
+  const removeFile = async (f: DocFile) => {
+    if (!window.confirm(`Remove ${f.name}?`)) return;
+    const res = await filesApi("DELETE")({ fileId: f.id });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) { setNotice({ tone: "warn", text: j.error ?? "We couldn't remove that file. Please try again." }); return; }
+    void load(false);
   };
 
   const noticeTone = { good: "border-[#15803d] bg-[#f0fdf4] text-[#14532d]", info: "border-[#1b3a5c] bg-[#eef4fb] text-[#1b3a5c]", warn: "border-[#b45309] bg-[#fffbeb] text-[#78350f]" };
@@ -220,6 +254,58 @@ export default function DocReviewView({ token }: { token: string }) {
               <RichTextEditor key={editorKey} value={html} onChange={setHtml} variant="doc" editable={!locked}
                 placeholder="This document is empty." />
             </article>
+
+            {(data.files.length > 0 || !locked) && (
+              <section
+                onDragOver={(e) => { if (!locked && e.dataTransfer.types.includes("Files")) { e.preventDefault(); setDropping(true); } }}
+                onDragLeave={() => setDropping(false)}
+                onDrop={(e) => { if (locked) return; e.preventDefault(); setDropping(false); void addFiles(e.dataTransfer.files); }}
+                className={`mt-6 rounded-2xl border-2 bg-surface p-5 sm:p-8 ${dropping ? "border-dashed" : "border-transparent shadow-sm"}`}
+                style={dropping ? { borderColor: NAVY } : undefined}>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h2 className="text-[22px] font-bold">Files</h2>
+                  {!locked && (
+                    <>
+                      <input ref={fileInput} type="file" multiple className="hidden" onChange={(e) => { void addFiles(e.target.files); e.target.value = ""; }} />
+                      <button onClick={() => fileInput.current?.click()} disabled={adding}
+                        className="min-h-[48px] rounded-xl border-2 px-5 text-[17px] font-semibold disabled:opacity-50" style={{ borderColor: NAVY, color: NAVY }}>
+                        {adding ? "Adding…" : "Add files"}
+                      </button>
+                    </>
+                  )}
+                </div>
+                {!locked && <p className="mt-1 text-[16px] text-muted">Photos, PDFs, documents, spreadsheets, slides or videos, up to 25 MB each. You can also drop them here.</p>}
+                {data.files.length === 0 ? (
+                  <p className="mt-4 text-[17px] text-muted">No files yet.</p>
+                ) : (
+                  <ul className="mt-4 divide-y">
+                    {data.files.map((f) => {
+                      const href = `/api/doc/${encodeURIComponent(token)}/files/${f.id}`;
+                      return (
+                        <li key={f.id} className="flex flex-wrap items-center gap-4 py-3">
+                          {THUMB_EXT.has(extOf(f.name)) ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={href} alt="" className="h-16 w-16 shrink-0 rounded-lg border object-cover" />
+                          ) : (
+                            <span aria-hidden className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg border text-[16px] font-bold uppercase text-muted">{extOf(f.name)}</span>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <a href={href} target="_blank" rel="noopener noreferrer" className="block break-words text-[17px] font-semibold underline underline-offset-4" style={{ color: NAVY }}>{f.name}</a>
+                            <p className="text-[16px] text-muted">{formatFileSize(f.size)} · Added by {f.fromClient ? "you" : f.addedBy}</p>
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <a href={`${href}?download=1`} className="min-h-[44px] content-center text-[16px] font-medium underline underline-offset-4" style={{ color: NAVY }}>Download</a>
+                            {f.fromClient && !locked && (
+                              <button onClick={() => void removeFile(f)} className="min-h-[44px] text-[16px] font-medium text-muted underline underline-offset-4">Remove</button>
+                            )}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </section>
+            )}
           </>
         )}
       </main>
@@ -231,7 +317,7 @@ export default function DocReviewView({ token }: { token: string }) {
               <button onClick={undoEdits} className="min-h-[48px] px-1 text-[16px] font-medium text-muted underline underline-offset-4">Undo my edits</button>
             )}
             <div className="ml-auto flex w-full gap-3 sm:w-auto">
-              <button onClick={() => void publish("submit")} disabled={!dirty || busy !== null}
+              <button onClick={() => void publish("submit")} disabled={!(dirty || filesAdded) || busy !== null}
                 className="min-h-[52px] flex-1 rounded-xl border-2 px-5 text-[17px] font-semibold transition disabled:opacity-40 sm:flex-none"
                 style={{ borderColor: NAVY, color: NAVY }}>
                 {busy === "send" ? "Sending…" : "Send my changes"}

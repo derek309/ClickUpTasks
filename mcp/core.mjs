@@ -47,6 +47,56 @@ const draftPlainTextToHtml = (text) => {
 };
 const NOTE_TYPES = ["meeting", "decision", "note"];
 
+// The client review document is stored as HTML the app's editor reads. Claude
+// works in plain text with a little markdown, both ways:
+//   docTextToHtml  what Claude writes -> document HTML. Every character of input
+//                  is escaped first and only these tags are ever produced, so it
+//                  is safe without the app's sanitizer (which still runs again
+//                  on every save, send and client read).
+//   docHtmlToText  document HTML -> the same markdown, so an edit round trips.
+// Supported: "## " heading, "### " subheading, "- " bullets, "1. " numbers,
+// "> " quote, **bold**, *italic*, [label](https://url). Blank line = new block.
+export function docTextToHtml(text) {
+  const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const inline = (s) => esc(s.trim())
+    .replace(/\[([^\]]+)\]\(((?:https?:\/\/|mailto:|tel:)[^\s)]+)\)/g, '<a href="$2">$1</a>')
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*\s][^*]*)\*/g, "<em>$1</em>");
+  const block = (lines) => {
+    if (!lines.length) return "";
+    const heading = lines[0].match(/^(#{2,3})\s+(.*)$/) || lines[0].match(/^(#)\s+(.*)$/);
+    if (heading) {
+      const tag = heading[1] === "###" ? "h3" : "h2";
+      return `<${tag}>${inline(heading[2])}</${tag}>${block(lines.slice(1))}`;
+    }
+    if (lines.every((l) => /^[-*]\s+/.test(l))) return `<ul>${lines.map((l) => `<li><p>${inline(l.replace(/^[-*]\s+/, ""))}</p></li>`).join("")}</ul>`;
+    if (lines.every((l) => /^\d+[.)]\s+/.test(l))) return `<ol>${lines.map((l) => `<li><p>${inline(l.replace(/^\d+[.)]\s+/, ""))}</p></li>`).join("")}</ol>`;
+    if (lines.every((l) => /^>\s?/.test(l))) return `<blockquote><p>${lines.map((l) => inline(l.replace(/^>\s?/, ""))).join("<br>")}</p></blockquote>`;
+    return `<p>${lines.map(inline).join("<br>")}</p>`;
+  };
+  return String(text || "").replace(/\r\n?/g, "\n").split(/\n\s*\n/)
+    .map((b) => block(b.split("\n").map((l) => l.trim()).filter(Boolean))).join("");
+}
+
+export function docHtmlToText(html) {
+  return (html || "")
+    .replace(/<li([^>]*)>\s*<p[^>]*>([\s\S]*?)<\/p>\s*<\/li>/gi, "<li$1>$2</li>")
+    .replace(/<a\s[^>]*?href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, "[$2]($1)")
+    .replace(/<\/?(strong|b)>/gi, "**")
+    .replace(/<\/?(em|i)>/gi, "*")
+    .replace(/<h2[^>]*>/gi, "## ").replace(/<h3[^>]*>/gi, "### ")
+    .replace(/<ol[^>]*>([\s\S]*?)<\/ol>/gi, (_, inner) => `${inner.replace(/<li[^>]*>/gi, "1. ")}\n`)
+    .replace(/<li[^>]*>/gi, "- ")
+    .replace(/<blockquote[^>]*>\s*<p[^>]*>([\s\S]*?)<\/p>\s*<\/blockquote>/gi, (_, inner) => `${inner.split(/<br\s*\/?>/i).map((l) => `> ${l}`).join("\n")}\n\n`)
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/li>/gi, "\n")
+    .replace(/<\/(p|h2|h3|ul|ol)>/gi, "\n\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 /**
  * @param {{ url?: string, key?: string, memberId?: string }} [opts]
  *   Falls back to CLICKUPTASKS_URL/CLICKUPTASKS_KEY/CLICKUPTASKS_MEMBER_ID
@@ -345,6 +395,84 @@ export function createServer(opts = {}) {
       const draft_email = { subject, body: draftPlainTextToHtml(body), createdAt: nowIso() };
       await sb(`tasks?id=eq.${enc(id)}`, "PATCH", { draft_email });
       return { content: [{ type: "text", text: `Draft email saved on ${id} — waiting for review in the app.` }] };
+    });
+
+  // The client review document (supabase/task-documents.sql). Claude reads it
+  // and writes the team's working copy. Sending it to the client, and the private
+  // link, stay with a person in the app: the same rule as draft_email.
+  const reply = (text) => ({ content: [{ type: "text", text }] });
+  const DOC_KIND = { sent: "sent to the client", client_submitted: "changes from the client", client_approved: "approved by the client" };
+  async function documentFor(taskId) {
+    const [t] = await sb(`tasks?select=id,title,client_id,is_private,deleted_at&id=eq.${enc(taskId)}`);
+    if (!t || t.deleted_at) return { error: `No task ${taskId}.` };
+    if (t.is_private || t.client_id === PERSONAL_CLIENT_ID) return { error: "Private and Personal tasks can't have a client document." };
+    const [doc] = await sb(`task_documents?select=*&task_id=eq.${enc(taskId)}`);
+    return { task: t, doc: doc || null };
+  }
+
+  server.tool("get_client_document",
+    "Read the client review document on a task: its status (draft, with_client, client_submitted, approved), version, whether the client's private link is on, the team's working copy as editable text, the client's latest changes if they sent any, recent versions, and files. The text uses the same simple markdown write_client_document takes, so read it, change it, and write it back.",
+    { task_id: z.string() },
+    async ({ task_id }) => {
+      const found = await documentFor(task_id);
+      if (found.error) return reply(found.error);
+      const { task, doc } = found;
+      if (!doc) return reply(`"${task.title}" has no client document yet. write_client_document creates one.`);
+      const [versions, links, files] = await Promise.all([
+        sb(`task_document_versions?select=version,kind,body,author_label,created_at&document_id=eq.${enc(doc.id)}&order=version.desc&limit=5`),
+        sb(`task_document_links?select=token_hash,revoked_at&document_id=eq.${enc(doc.id)}`),
+        sb(`task_document_files?select=name,size_bytes,added_by_label,shared_at&document_id=eq.${enc(doc.id)}&removed_at=is.null&order=created_at.asc`).catch(() => []),
+      ]);
+      const live = !!links[0]?.token_hash && !links[0]?.revoked_at;
+      const latest = versions[0];
+      const text = [
+        `Client document on [${task.id}] ${task.title}`,
+        `status: ${doc.status} · version ${doc.version}${doc.version ? "" : " (never sent)"} · link ${live ? "on" : "off"}${doc.draft_dirty ? " · has unsent team edits" : ""}${doc.approved_at ? " · locked until reopened in the app" : ""}`,
+        `\nWorking copy (the team's draft; the client only sees what was last sent):\n${docHtmlToText(doc.body) || "(empty)"}`,
+        latest && latest.kind !== "sent" ? `\nLatest from the client (version ${latest.version}, ${DOC_KIND[latest.kind]}${latest.author_label ? ` by ${latest.author_label}` : ""}):\n${docHtmlToText(latest.body)}` : "",
+        versions.length ? `\nVersions:\n${versions.map((v) => `  - v${v.version} ${DOC_KIND[v.kind]}${v.author_label ? ` by ${v.author_label}` : ""} (${v.created_at})`).join("\n")}` : "",
+        files.length ? `\nFiles:\n${files.map((f) => `  - ${f.name} (${Math.max(1, Math.round(f.size_bytes / 1024))} KB, added by ${f.added_by_label || "someone"}${f.shared_at ? "" : ", not sent yet"})`).join("\n")}` : "",
+      ].filter(Boolean).join("\n");
+      return reply(text);
+    });
+
+  server.tool("write_client_document",
+    "Create the client review document on a task, or replace its draft, for a teammate to review and send. Never sends anything to the client and never touches the client's link: the draft shows in the task in the app, where a person reads it and clicks Send for review. Pass the WHOLE document every time (read it with get_client_document first when editing). Plain text with simple markdown: \"## \" heading, \"### \" subheading, \"- \" bullets, \"1. \" numbered, \"> \" quote, **bold**, *italic*, [label](https://url); a blank line starts a new paragraph. Merge fields like {{contact.first_name}} are kept as typed. Refused on private or Personal tasks, and once the client has approved (a person reopens it in the app first).",
+    { task_id: z.string(), body: z.string().min(1).describe("the whole document, in the simple markdown described above") },
+    async ({ task_id, body }) => {
+      const found = await documentFor(task_id);
+      if (found.error) return reply(found.error);
+      if (found.doc?.approved_at) return reply("The client already approved this document. A teammate reopens it in the app before it can change.");
+      const html = docTextToHtml(body);
+      if (!docHtmlToText(html)) return reply("The document is empty.");
+      if (html.length > 200_000) return reply("That document is too long to save.");
+
+      const now = nowIso();
+      let doc;
+      if (!found.doc) {
+        [doc] = await sb("task_documents", "POST", {
+          id: `tdoc_${globalThis.crypto.randomUUID()}`, task_id, body: html, draft_dirty: true,
+          created_by: ME, updated_by: ME, created_at: now, updated_at: now,
+        });
+      } else {
+        // approved_at in the filter: a client approving in the meantime makes this match nothing.
+        [doc] = await sb(`task_documents?id=eq.${enc(found.doc.id)}&approved_at=is.null`, "PATCH", { body: html, draft_dirty: true, updated_by: ME, updated_at: now });
+        if (!doc) return reply("The client approved this document a moment ago. A teammate reopens it in the app before it can change.");
+      }
+
+      await members();
+      const label = memberNames[ME] || "Claude";
+      // The history entry and the activity line are best effort: the draft itself is saved.
+      await sb("task_document_checkpoints", "POST", {
+        id: `tdc_${globalThis.crypto.randomUUID()}`, document_id: doc.id, body: html, author_id: ME, author_label: label, created_at: now,
+      }).catch(() => {});
+      // An event on the task is what makes an open task in the app reload the document.
+      await sb("rpc/append_comment", "POST", {
+        task_id, comment: { id: rid("cm_"), authorId: ME, kind: "event", at: now, body: `${label} ${found.doc ? "updated" : "wrote"} the client document draft` },
+      }).catch(() => {});
+
+      const seen = doc.version ? `The client still sees version ${doc.version} until a teammate sends this.` : "It hasn't been sent to the client.";
+      return reply(`${found.doc ? "Updated" : "Created"} the client document on "${found.task.title}" as a draft. ${seen} A teammate reviews it in the app and clicks Send for review.`);
     });
 
   server.tool("check_item",

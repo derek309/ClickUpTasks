@@ -17,6 +17,7 @@ import { hashToken, mintToken, decryptToken } from "./tokenCrypto";
 import { PERSONAL_CLIENT_ID, clientAnswerPatch, htmlToText, type TaskStatus } from "./data";
 import { resolveNotifyRecipient, notifyTeamOfClientActivity } from "./waitingNotify";
 import { sanitizeDocHtml, DOC_MAX_RAW_CHARS, DOC_MAX_HTML_CHARS } from "./docHtml";
+import { shareTeamFiles } from "./taskDocumentFiles";
 
 /** A document link token: `doc_` plus 32 random bytes in base64url. Checked
  *  before anything touches the database, so garbage never costs a query. */
@@ -143,6 +144,21 @@ async function claimSubmitEmail(documentId: string): Promise<boolean> {
   return (data ?? []).length > 0;
 }
 
+/** A line in the task's activity for something the client did. */
+async function appendClientEvent(taskId: string, body: string): Promise<void> {
+  await supabaseAdmin.rpc("append_comment", {
+    task_id: taskId,
+    comment: { id: "cm_" + randomUUID(), authorId: "client", kind: "event", at: new Date().toISOString(), body },
+  });
+}
+
+/** Log a client action on the task and touch the task, in the order clientPublish
+ *  explains below, so the team's open drawer refreshes live. */
+export async function logClientDocEvent(taskId: string, body: string): Promise<void> {
+  await appendClientEvent(taskId, body);
+  await supabaseAdmin.from("tasks").update({ updated_by: null }).eq("id", taskId);
+}
+
 export type PublishOutcome =
   | { ok: true; version: number }
   | { ok: false; status: number; error: string; current?: { version: number; body: string } | null };
@@ -181,16 +197,9 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
   if (version < 0) return { ok: false, status: 404, error: "Not found" };
 
   const approved = kind === "client_approved";
-  const now = new Date().toISOString();
-  await supabaseAdmin.rpc("append_comment", {
-    task_id: scope.taskId,
-    comment: {
-      id: "cm_" + randomUUID(), authorId: "client", kind: "event", at: now,
-      body: approved
-        ? `${scope.clientName} approved the client document (version ${version})`
-        : `${scope.clientName} sent changes to the client document (version ${version})`,
-    },
-  });
+  await appendClientEvent(scope.taskId, approved
+    ? `${scope.clientName} approved the client document (version ${version})`
+    : `${scope.clientName} sent changes to the client document (version ${version})`);
 
   const recipient = scope.assigneeId ?? await resolveNotifyRecipient(scope.assignedTo);
   const patch = clientAnswerPatch(
@@ -291,5 +300,6 @@ export async function teamSend(documentId: string, baseVersion: number, user: Au
   if (version === -1) return { ok: false, status: 409, error: "The client sent a newer version. Review it before sending again.", current: await latestPublished(documentId) };
   if (version === -2) return { ok: false, status: 409, error: "This document is approved. Reopen it to send changes." };
   if (version < 0) return { ok: false, status: 404, error: "Not found" };
+  await shareTeamFiles(documentId);
   return { ok: true, version };
 }

@@ -3,6 +3,7 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { rateLimit } from "@/lib/rateLimit";
 import { hashToken } from "@/lib/tokenCrypto";
 import { DOC_TOKEN_PATTERN, NO_STORE, docNotFound, resolveDocToken, latestPublished } from "@/lib/taskDocumentServer";
+import { sharedDocFiles } from "@/lib/taskDocumentFiles";
 
 // Public, no login: what the client review page shows. It reads and never
 // writes. Mail security scanners (Outlook Safe Links and others) open links
@@ -17,9 +18,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
 
   const scope = await resolveDocToken(token);
   if (!scope) return docNotFound();
-  const [latest, { data: doc }] = await Promise.all([
+  const [latest, { data: doc }, files] = await Promise.all([
     latestPublished(scope.documentId),
     supabaseAdmin.from("task_documents").select("status, approved_at").eq("id", scope.documentId).maybeSingle(),
+    sharedDocFiles(scope.documentId),
   ]);
   if (!latest || !doc) return docNotFound();
 
@@ -31,5 +33,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     status: doc.status,
     approvedAt: (doc.approved_at as string | null) ?? null,
     closed: scope.taskStatus === "done",
+    files,
   }, { headers: NO_STORE });
 }

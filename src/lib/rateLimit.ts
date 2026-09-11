@@ -19,7 +19,7 @@ import { supabaseAdmin } from "./supabaseAdmin";
 // below must stay well under that 1-hour sweep, or a long window's rows get
 // deleted mid-window and the counter silently resets.
 
-export type WaitingAction = "read" | "message" | "respond" | "status" | "request" | "upload" | "doc_read" | "doc_submit" | "doc_approve";
+export type WaitingAction = "read" | "message" | "respond" | "status" | "request" | "upload" | "doc_read" | "doc_submit" | "doc_approve" | "doc_upload";
 
 type Rule = {
   /** Max requests per window for one token+IP pair. */
@@ -71,6 +71,9 @@ export const RATE_LIMITS: Record<WaitingAction, Rule> = {
   doc_read:    { limit: 120, windowMs: 10 * MINUTE },
   doc_submit:  { limit: 10,  windowMs: 10 * MINUTE, tokenLimit: 30 },
   doc_approve: { limit: 5,   windowMs: 10 * MINUTE, tokenLimit: 10 },
+  // Each file is two calls (an upload link, then confirming it), so this is
+  // about 25 files per half hour, the same as the portal's upload.
+  doc_upload:  { limit: 50,  windowMs: 30 * MINUTE, tokenLimit: 120 },
 };
 
 /** Seconds until the current fixed window rolls over — exact for this

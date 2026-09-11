@@ -17,8 +17,13 @@ same tool definitions (`core.mjs`):
 `list_my_tasks`, `list_client_tasks`, `get_task`, `create_task`, `update_task`,
 `delete_task`, `set_task_status`, `add_comment`, `draft_email`, `check_item`,
 `add_checklist_items`, `list_members`, `list_clients`, `list_projects`,
-`list_notes`, `add_note`, `list_links`, `get_client_link`, `get_client_overview` — see each
-tool's own description in `core.mjs` for its exact arguments.
+`list_notes`, `add_note`, `list_links`, `get_client_link`, `get_client_overview`,
+`get_client_document`, `write_client_document` — see each tool's own description
+in `core.mjs` for its exact arguments.
+
+`write_client_document` only writes the team's draft of a task's client review
+document. Sending it to the client and its private link stay with a person in
+the app, the same rule as `draft_email`.
 
 ## Install — Claude Code
 
