@@ -14,7 +14,7 @@ const json = (body: unknown, status = 200) => NextResponse.json(body, { status, 
 async function documentFor(req: NextRequest, id: string) {
   const access = await teamDocAccess(req, id);
   if (!access.ok) return { ok: false as const, res: access.res };
-  const { data: doc } = await supabaseAdmin.from("task_documents").select("id").eq("task_id", id).maybeSingle();
+  const { data: doc } = await supabaseAdmin.from("task_documents").select("id").eq("task_id", id).is("deleted_at", null).maybeSingle();
   if (!doc) return { ok: false as const, res: json({ error: "This task has no client document yet." }, 404) };
   return { ok: true as const, access, documentId: doc.id as string };
 }

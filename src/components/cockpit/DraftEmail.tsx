@@ -21,14 +21,11 @@ import {
   quietButton as quiet, type PreviewImage,
 } from "./TaskWorkItem";
 import { newId } from "./ui";
+import { placeDraftLink, draftLinkAsButton, escapeHtml } from "@/lib/draftLink";
 
 export type DraftEmailValue = NonNullable<Task["draftEmail"]>;
 
 const normalize = (s: string) => htmlToText(s).replace(/\s+/g, " ").trim().toLowerCase();
-export const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-/** The link a draft keeps under its text through every AI rewrite, as its own paragraph. */
-export const draftLinkHtml = (link: { url: string; label: string } | null | undefined) =>
-  link ? `<p><a href="${escapeHtml(link.url)}">${escapeHtml(link.label)}</a></p>` : "";
 
 export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOptions, messages, openNonce, pushToast, onAiDraft, aiNonce }: {
   task: Task;
@@ -110,7 +107,7 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
     if (!d || !latest) return;
     const subject = d.subject?.trim() || latest.subject;
     pending.current = {};
-    onPatch({ draftEmail: { ...latest, subject, body: plainTextToHtml(d.body) + draftLinkHtml(latest.link), updatedAt: new Date().toISOString() } });
+    onPatch({ draftEmail: { ...latest, subject, body: placeDraftLink(plainTextToHtml(d.body), latest.link), updatedAt: new Date().toISOString() } });
     setLocal((l) => ({ ...l, subject }));
     setEditorNonce((n) => n + 1);
     setSaveState("saved");
@@ -199,7 +196,7 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
     finished.current = true;
     onPatch({ draftEmail: { ...draft, ...pending.current, subject, body, attachments, updatedAt: new Date().toISOString() } });
     pending.current = {};
-    onSend(subject, body, attachments.length ? attachments : undefined);
+    onSend(subject, draftLinkAsButton(body, draft.link), attachments.length ? attachments : undefined);
     closeAll();
   };
   const moreOptions = () => {

@@ -73,11 +73,12 @@ export async function resolveDocToken(token: string): Promise<DocScope | null> {
     task.project_id
       ? supabaseAdmin.from("projects").select("id, deleted_at").eq("id", task.project_id as string).maybeSingle()
       : Promise.resolve({ data: null }),
-    supabaseAdmin.from("task_documents").select("id, task_id, status").eq("id", link.document_id as string).maybeSingle(),
+    supabaseAdmin.from("task_documents").select("id, task_id, status, deleted_at").eq("id", link.document_id as string).maybeSingle(),
   ]);
   if (!client || client.deleted_at) return null;
   if (project?.deleted_at) return null;
-  if (!doc || doc.task_id !== task.id) return null;
+  // A deleted document's link stops opening, and opens again if it is restored.
+  if (!doc || doc.task_id !== task.id || doc.deleted_at) return null;
 
   return {
     documentId: doc.id as string,

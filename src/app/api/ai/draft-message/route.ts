@@ -95,7 +95,7 @@ export async function POST(req: NextRequest) {
     "",
     context ? "What this message is about (use it for facts; don't paste it back whole):" : null,
     context || null,
-    context ? "Never write a link or URL: the link is added under the message automatically." : null,
+    context ? "Never write a link or URL. Where the client should click, write [[LINK]] alone on its own line: right after you ask them to open it, before the sign off. A button is put there automatically." : null,
     context ? "" : null,
     `Client: ${client.name}`,
     "",

@@ -19,7 +19,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const baseVersion = payload?.baseVersion;
   if (typeof baseVersion !== "number" || !Number.isInteger(baseVersion)) return json({ error: "Invalid request." }, 400);
 
-  const { data: doc } = await supabaseAdmin.from("task_documents").select("id").eq("task_id", id).maybeSingle();
+  const { data: doc } = await supabaseAdmin.from("task_documents").select("id").eq("task_id", id).is("deleted_at", null).maybeSingle();
   if (!doc) return json({ error: "This task has no client document yet." }, 404);
 
   // Turning a link on is admin only, the same rule as a client's portal link.

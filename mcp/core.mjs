@@ -406,7 +406,7 @@ export function createServer(opts = {}) {
     const [t] = await sb(`tasks?select=id,title,client_id,is_private,deleted_at&id=eq.${enc(taskId)}`);
     if (!t || t.deleted_at) return { error: `No task ${taskId}.` };
     if (t.is_private || t.client_id === PERSONAL_CLIENT_ID) return { error: "Private and Personal tasks can't have a client document." };
-    const [doc] = await sb(`task_documents?select=*&task_id=eq.${enc(taskId)}`);
+    const [doc] = await sb(`task_documents?select=*&task_id=eq.${enc(taskId)}&deleted_at=is.null`);
     return { task: t, doc: doc || null };
   }
 

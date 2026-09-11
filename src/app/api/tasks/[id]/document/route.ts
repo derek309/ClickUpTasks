@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { teamDocAccess, memberLabel, NO_STORE } from "@/lib/taskDocumentServer";
-import { recordCheckpoint, deleteDocStorage } from "@/lib/taskDocumentFiles";
+import { recordCheckpoint } from "@/lib/taskDocumentFiles";
 import { sanitizeDocHtml, DOC_MAX_RAW_CHARS, DOC_MAX_HTML_CHARS } from "@/lib/docHtml";
 
 // The team's side of a task's client review document: create it, save the
@@ -20,7 +20,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const access = await teamDocAccess(req, id);
   if (!access.ok) return access.res;
 
-  const { data: existing } = await supabaseAdmin.from("task_documents").select("*").eq("task_id", id).maybeSingle();
+  const { data: existing } = await supabaseAdmin.from("task_documents").select("*").eq("task_id", id).is("deleted_at", null).maybeSingle();
   if (existing) return json({ document: existing });
 
   const now = new Date().toISOString();
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (error) {
     // Two teammates creating at once: task_id is unique, so the second insert
     // fails and gets the document the first one made.
-    const { data: winner } = await supabaseAdmin.from("task_documents").select("*").eq("task_id", id).maybeSingle();
+    const { data: winner } = await supabaseAdmin.from("task_documents").select("*").eq("task_id", id).is("deleted_at", null).maybeSingle();
     return winner ? json({ document: winner }) : json({ error: error.message }, 400);
   }
   return json({ document: data });
@@ -48,7 +48,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try { payload = JSON.parse(text); } catch { return json({ error: "Invalid request." }, 400); }
 
   const { data: doc } = await supabaseAdmin.from("task_documents")
-    .select("id, approved_at, body, updated_by, created_at").eq("task_id", id).maybeSingle();
+    .select("id, approved_at, body, updated_by, created_at").eq("task_id", id).is("deleted_at", null).maybeSingle();
   if (!doc) return json({ error: "This task has no client document yet." }, 404);
   const stamp = { updated_by: access.user.memberId, updated_at: new Date().toISOString() };
 
@@ -121,18 +121,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   return json({ document: data });
 }
 
-// Delete the document for good (Derek, 2026-09-11: "we also need to be able to
-// delete the document", from the full window only). Its stored files go first;
-// the row's cascade then removes versions, saved drafts, file rows, comments and
-// the client's link, so the link stops opening at once.
+// Delete the document (Derek, 2026-09-11: "we also need to be able to delete the
+// document", then "restore them for 30 days"). It moves to the task's deleted
+// documents: the client's link stops opening (resolveDocToken), nothing else is
+// removed, and /restore brings it all back. The daily purge-trash cron removes it
+// and its stored files for good after 30 days (trashCleanupServer.ts).
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!adminConfigured) return json({ error: "Not configured" }, 501);
   const { id } = await params;
   const access = await teamDocAccess(req, id);
   if (!access.ok) return access.res;
-  const { data: doc } = await supabaseAdmin.from("task_documents").select("id").eq("task_id", id).maybeSingle();
+  const { data: doc } = await supabaseAdmin.from("task_documents").select("id").eq("task_id", id).is("deleted_at", null).maybeSingle();
   if (!doc) return json({ ok: true });
-  await deleteDocStorage(doc.id as string);
-  const { error } = await supabaseAdmin.from("task_documents").delete().eq("id", doc.id);
+  const now = new Date().toISOString();
+  const { error } = await supabaseAdmin.from("task_documents")
+    .update({ deleted_at: now, deleted_by: access.user.memberId, updated_by: access.user.memberId, updated_at: now })
+    .eq("id", doc.id);
   return error ? json({ error: error.message }, 400) : json({ ok: true });
 }

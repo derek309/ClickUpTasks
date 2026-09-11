@@ -516,9 +516,19 @@ export const rowToTaskDocument = (r: any): TaskDocument => ({
   status: r.status, approvedAt: r.approved_at ?? null, approvedVersion: r.approved_version ?? null, updatedAt: r.updated_at,
 });
 export const fetchTaskDocument = async (taskId: string): Promise<TaskDocument | null> => {
-  const { data, error } = await supabase.from("task_documents").select("*").eq("task_id", taskId).maybeSingle();
+  const { data, error } = await supabase.from("task_documents").select("*").eq("task_id", taskId).is("deleted_at", null).maybeSingle();
   if (error) { logErr({ error }); return null; }
   return data ? rowToTaskDocument(data) : null;
+};
+// Documents deleted from a task that can still be restored: the last 30 days,
+// newest first (supabase/task-document-trash.sql).
+export type DeletedTaskDocument = { id: string; title: string; version: number; deletedAt: string };
+export const fetchDeletedTaskDocuments = async (taskId: string): Promise<DeletedTaskDocument[]> => {
+  const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  const { data, error } = await supabase.from("task_documents").select("id, title, version, deleted_at")
+    .eq("task_id", taskId).gt("deleted_at", since).order("deleted_at", { ascending: false });
+  if (error) { logErr({ error }); return []; }
+  return (data ?? []).map((r: any) => ({ id: r.id, title: r.title ?? "", version: r.version ?? 0, deletedAt: r.deleted_at }));
 };
 // Files on the document and the team's saved drafts between sends (see
 // supabase/task-document-files.sql). Read the same way, written by the server.

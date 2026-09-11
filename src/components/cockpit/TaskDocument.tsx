@@ -14,6 +14,7 @@ import { STATUS_META, htmlToText, timeAgo, type Task, type TaskStatus } from "@/
 import { authedFetch } from "@/lib/supabase";
 import {
   fetchTaskDocument, fetchTaskDocumentVersions, fetchTaskDocumentFiles, fetchTaskDocumentCheckpoints, fetchTaskDocumentComments,
+  fetchDeletedTaskDocuments, type DeletedTaskDocument,
   rowToTaskDocument, signedUrlForFile,
   type TaskDocument as Doc, type TaskDocumentStatus, type TaskDocumentVersion,
   type TaskDocumentFile, type TaskDocumentCheckpoint, type TaskDocumentComment,
@@ -77,6 +78,8 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
   const [checkpoints, setCheckpoints] = useState<TaskDocumentCheckpoint[]>([]);
   // The thread shared with the client (Derek, 2026-09-11: "a chat box for comments").
   const [comments, setComments] = useState<TaskDocumentComment[]>([]);
+  // Documents deleted from this task that can still be restored (30 days).
+  const [deletedDocs, setDeletedDocs] = useState<DeletedTaskDocument[]>([]);
   const [full, setFull] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const [openEntry, setOpenEntry] = useState<string | null>(null);
@@ -111,6 +114,7 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
     versionRef.current = fresh?.version ?? null;
     setDoc(fresh);
     setLoaded(true);
+    void fetchDeletedTaskDocuments(task.id).then(setDeletedDocs);
     if (!fresh) return;
     void fetchTaskDocumentFiles(fresh.id).then(setFiles);
     // A client's comment logs an event on the task too, so it arrives here the same way.
@@ -353,7 +357,7 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
   };
 
   const deleteDocument = async () => {
-    if (!doc || !window.confirm("Delete this document for good? Its versions, files, comments and the client's link are all removed. This can't be undone.")) return;
+    if (!doc || !window.confirm("Delete this document? You can restore it from this task for 30 days, with its versions, files and comments. The client's link stops working until then.")) return;
     commit.flush();
     titleCommit.flush();
     await saving.current;
@@ -368,7 +372,19 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
     setFiles([]);
     setComments([]);
     setLink(null);
-    pushToast("Document deleted.");
+    void fetchDeletedTaskDocuments(task.id).then(setDeletedDocs);
+    pushToast("Document deleted. Restore it from this task within 30 days.");
+  };
+
+  const restoreDocument = async (documentId: string) => {
+    setBusy("restore");
+    const res = await docApi(task.id, "/restore", { method: "POST", body: JSON.stringify({ documentId }) });
+    const j = await readJson(res);
+    setBusy(null);
+    if (!res.ok) { pushToast((j.error as string) ?? "Could not restore the document."); return; }
+    versionRef.current = null;
+    await load();
+    pushToast("Document restored.");
   };
 
   const postComment = async (body: string) => {
@@ -424,7 +440,21 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
     else pushToast("Could not open the file.");
   };
 
-  if (!doc) return null;
+  const deletedLine = deletedDocs.length > 0 ? (
+    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-dashed px-4 py-2 text-[16px] text-muted">
+      <span>Deleted:</span>
+      {deletedDocs.map((d) => (
+        <span key={d.id} className="flex flex-wrap items-center gap-x-2">
+          <span className="text-foreground">{d.title.trim() || task.title}</span>
+          <span>{timeAgo(d.deletedAt)}</span>
+          <button onClick={() => void restoreDocument(d.id)} disabled={busy !== null}
+            className="font-semibold text-accent hover:underline disabled:opacity-50">{busy === "restore" ? "Restoring…" : "Restore"}</button>
+        </span>
+      ))}
+    </div>
+  ) : null;
+
+  if (!doc) return deletedLine;
 
   const view = STATUS_VIEW[doc.status];
   const tone = STATUS_META[view.tone];
@@ -471,7 +501,7 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
     <WorkItemRow icon="📄" title={name} badge={badge} meta={meta} actions={copyLinkButton}
       onOpen={() => switchView({ full: true })} />
   );
-  if (!visible) return row;
+  if (!visible) return <>{row}{deletedLine}</>;
 
   const saveLabel = saveState === "unsaved" ? "Unsaved changes" : saveState === "saving" ? "Saving…" : saveState === "saved" ? "Draft saved" : `Edited ${timeAgo(doc.updatedAt)}`;
 
@@ -623,6 +653,7 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
   return (
     <>
       {row}
+      {deletedLine}
       {full && (
         <WorkItemWindow icon="📄" title={titleInput} badge={stageSelect} actions={headerActions} onClose={() => switchView({ full: false })}>
           {content}

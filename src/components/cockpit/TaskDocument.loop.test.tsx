@@ -25,6 +25,7 @@ vi.mock("@/lib/db", () => ({
   fetchTaskDocumentFiles: async () => [],
   fetchTaskDocumentCheckpoints: async () => [],
   fetchTaskDocumentComments: async () => [],
+  fetchDeletedTaskDocuments: async () => [],
   rowToTaskDocument: (r: any) => r,
   signedUrlForFile: async () => null,
 }));

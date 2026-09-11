@@ -15,7 +15,7 @@ async function open(req: NextRequest, params: Promise<{ id: string }>) {
   const { id } = await params;
   const access = await teamDocAccess(req, id);
   if (!access.ok) return access;
-  const { data: doc } = await supabaseAdmin.from("task_documents").select("id").eq("task_id", id).maybeSingle();
+  const { data: doc } = await supabaseAdmin.from("task_documents").select("id").eq("task_id", id).is("deleted_at", null).maybeSingle();
   if (!doc) return { ok: false as const, res: json({ error: "This task has no client document yet." }, 404) };
   const payload = (await req.json().catch(() => null) ?? {}) as { body?: unknown; commentId?: unknown; done?: unknown };
   const user = access.user;

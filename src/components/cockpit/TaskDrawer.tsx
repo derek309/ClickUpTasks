@@ -19,7 +19,8 @@ import { RichTextEditor } from "./RichTextEditor";
 import { useTaskMessaging } from "./TaskMessaging";
 import { useDebouncedCommit } from "./useDebouncedCommit";
 import { TaskDocument } from "./TaskDocument";
-import { DraftEmail, draftLinkHtml, escapeHtml } from "./DraftEmail";
+import { DraftEmail } from "./DraftEmail";
+import { draftLinkHtml, escapeHtml } from "@/lib/draftLink";
 
 const ATT_KIND_ORDER: Record<Attachment["kind"], number> = { image: 0, pdf: 1, doc: 2, sheet: 3, link: 4 };
 
@@ -1198,7 +1199,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const startReviewEmail = (review: { url: string | null; name: string; text: string; changes: string | null }) => {
     if (!hasMessaging) return false;
     const now = new Date().toISOString();
-    const link = review.url ? { url: review.url, label: `Review "${review.name}"` } : null;
+    const link = review.url ? { url: review.url, label: `Open "${review.name}" to review` } : null;
     const name = escapeHtml(review.name);
     const intro = review.changes
       ? `<p>Hi,</p><p>We made some updates to "${name}". Take a look and approve it when it looks right:</p>`
