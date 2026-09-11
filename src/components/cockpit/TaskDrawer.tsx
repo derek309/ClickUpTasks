@@ -479,8 +479,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const copyForClaude = async () => {
     const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId);
     const descText = htmlToText(task.description);
+    // The link opens this task, not the app's front page (Derek: "can we have
+    // the direct link please not just the link to task manager"). taskLink is
+    // the same builder the dock uses for a delegated task; new URL makes it
+    // absolute whether it comes back as a full URL or just "?task=...".
+    const taskUrl = new URL(taskLink?.() ?? "", window.location.origin).href;
     const brief = [
-      `Work on this task from ClickUpTasks (https://clickuptasks.vercel.app):`,
+      `Work on this task from ClickUpTasks (${taskUrl}):`,
       ``,
       `Task: ${task.title}`,
       `Client: ${client.name}${ct?.email ? ` (${ct.email})` : ""}`,
