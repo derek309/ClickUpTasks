@@ -13,7 +13,7 @@ import {
   users, userById, timeAgo, htmlToText, looksLikeHtml, plainTextToHtml, parseEventDiff, STATUS_META, PRIORITY_META,
   mentionCandidates, applyMention,
   type Task, type Client, type Contact, type Attachment, type MessageChannel, type Message, type Comment,
-  TaskAction, TaskActionKind, TASK_ACTION_META, daysUntilDue, formatDue, splitQuotedEmail,
+  TaskAction, TaskActionKind, TASK_ACTION_META, daysUntilDue, formatDue, splitQuotedEmail, tidyEmailText,
 } from "@/lib/data";
 import { I, Avatar, CollapsibleText, LinkedText, newId } from "./ui";
 import { AttachmentThumbs } from "./AttachmentThumbs";
@@ -62,6 +62,8 @@ function splitMessageUrls(rawText: string): { cleanText: string; imageUrls: stri
       (IMAGE_URL_RE.test(url) ? imageUrls : linkUrls).push(url);
       return "";
     })
+    // A "label<url>" link loses its URL above and would leave "label<>".
+    .replace(/<\s*>/g, "")
     // Gmail (and most clients) build the text/plain half of an HTML email by
     // marking bold as *like this*, so an inbound email arrived reading
     // "*Hi Derek!* *I'm currently updating...*" — the markers are noise, not
@@ -1022,7 +1024,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     // The reply chain and the signature block under it are not what anyone
     // opened the task to read: one line of "I edited it. Its ready." was
     // rendering as a screen and a half of quoted history.
-    const { visible: ownText, quoted } = splitQuotedEmail(rawBodyText);
+    const { visible: ownText, quoted } = splitQuotedEmail(tidyEmailText(rawBodyText));
     const { cleanText, imageUrls, linkUrls } = splitMessageUrls(ownText || rawBodyText);
     const quotedOpen = openQuotes.has(m.id);
     return (
@@ -1114,7 +1116,11 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
                     <button onClick={() => toggleQuote(m.id)}
                       className="mt-1 rounded border px-1.5 py-0 text-[13px] leading-5 text-muted hover:bg-background hover:text-foreground"
                       title={quotedOpen ? "Hide the earlier thread" : "Show the earlier thread"}>···</button>
-                    {quotedOpen && <div className="mt-1 whitespace-pre-wrap border-l-2 pl-2 text-[14px] text-muted">{quoted}</div>}
+                    {/* A forwarded email's substance lives here, so it gets the same
+                        link treatment as the text above: "label<tracking url>" shows
+                        just the label as the link, and overflow-wrap keeps any long
+                        leftover string inside the card instead of off its edge. */}
+                    {quotedOpen && <div className="mt-1 whitespace-pre-wrap border-l-2 pl-2 text-[14px] text-muted [overflow-wrap:anywhere]"><LinkedText text={quoted} angleLabels /></div>}
                   </>
                 )}
                 {imageUrls.length > 0 && (

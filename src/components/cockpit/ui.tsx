@@ -458,12 +458,13 @@ export type ViewPrefs = {
 // sentence (Derek: "make the links buttons so we can see them better"). A
 // link inside a note is a place to go, and underlined blue text in the middle
 // of a paragraph reads as emphasis until you hover it.
-export function LinkedText({ text, className = "", chip = false }: { text: string; className?: string; chip?: boolean }) {
+// `angleLabels` is for email text only: a "label<url>" link shows its label.
+export function LinkedText({ text, className = "", chip = false, angleLabels = false }: { text: string; className?: string; chip?: boolean; angleLabels?: boolean }) {
   // The matching lives in data.ts (linkSpans) so it can be unit tested;
   // getting it wrong mangles every note anyone has written.
   const out: React.ReactNode[] = [];
   let last = 0;
-  for (const { start, end, href } of linkSpans(text)) {
+  for (const { start, end, href, label } of linkSpans(text, { angleLabels })) {
     if (start > last) out.push(<span key={`t${last}`}>{text.slice(last, start)}</span>);
     out.push(
       <span key={`l${start}`} className={`group/link max-w-full gap-1 ${chip
@@ -472,7 +473,7 @@ export function LinkedText({ text, className = "", chip = false }: { text: strin
         <a href={href} target="_blank" rel="noopener noreferrer" title={href}
           className={`inline-flex max-w-full gap-1 font-medium text-accent ${chip ? "items-center text-[14px]" : "items-baseline align-baseline hover:underline"}`}>
           <LinkFavicon url={href} className={chip ? "" : "translate-y-[2px]"} />
-          <span className="truncate">{prettyLinkName(href)}</span>
+          <span className="truncate">{label ?? prettyLinkName(href)}</span>
         </a>
         {/* The pretty name hides the URL, so there has to be a way to get the
             real thing back out without opening the page first. Always visible

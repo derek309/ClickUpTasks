@@ -28,6 +28,7 @@ import {
   prettyLinkName,
   linkSpans,
   splitQuotedEmail,
+  tidyEmailText,
   addBusinessDaysIso,
   derivedPriority,
   effectivePriority,
@@ -777,6 +778,46 @@ describe("splitQuotedEmail", () => {
   });
   it("leaves an email with no quoted chain alone", () => {
     expect(splitQuotedEmail("Just a short note.").quoted).toBe("");
+  });
+});
+
+describe("tidyEmailText", () => {
+  it("strips the invisible spacer run a marketing email pads its preview with", () => {
+    expect(tidyEmailText("1 for $29\r\n \u200C \u200C \u200C\r\n\r\nHello,")).toBe("1 for $29\n\nHello,");
+  });
+  it("collapses blank runs and keeps the line breaks the sender typed", () => {
+    expect(tidyEmailText("one\n\n\n\ntwo\nthree")).toBe("one\n\ntwo\nthree");
+  });
+});
+
+describe("linkSpans with angleLabels", () => {
+  const url = "https://u1.ct.sendgrid.net/ls/click?upn=u001.A-2F-3D-3D";
+  const t = `Get a custom hoodie now for $29<${url}> (normally $39)`;
+
+  it("names an email link by the words in front of it", () => {
+    const [s] = linkSpans(t, { angleLabels: true });
+    expect(s.label).toBe("Get a custom hoodie now for $29");
+    expect(s.href).toBe(url);
+    expect(t.slice(s.start, s.end)).toBe(`Get a custom hoodie now for $29<${url}>`);
+  });
+  it("takes only this line's words as the label", () => {
+    const [s] = linkSpans("Hello,\nUnsubscribe<https://x.com/u>", { angleLabels: true });
+    expect(s.label).toBe("Unsubscribe");
+  });
+  it("keeps a footer's divider out of the second link's name", () => {
+    const t = "Privacy Policy<https://x.com/p> | Unsubscribe<https://x.com/u>";
+    const spans = linkSpans(t, { angleLabels: true });
+    expect(spans.map((s) => s.label)).toEqual(["Privacy Policy", "Unsubscribe"]);
+    expect(t.slice(spans[1].start, spans[1].end)).toBe("Unsubscribe<https://x.com/u>");
+  });
+  it("leaves a bracketed link with no words before it unlabeled", () => {
+    const [s] = linkSpans("<https://x.com/u>", { angleLabels: true });
+    expect(s.label).toBeUndefined();
+    expect(s.start).toBe(0);
+  });
+  it("is off by default, so notes keep their plain behaviour", () => {
+    expect(linkSpans(t)[0].label).toBeUndefined();
+    expect(linkSpans(t)[0].href).toBe(url);
   });
 });
 

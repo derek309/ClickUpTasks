@@ -1725,14 +1725,32 @@ export function recurrenceResetFields(previousDue: string | null, now: string = 
 //
 // Pulled out of the component so the matching can actually be tested; getting
 // this wrong mangles every note anyone has written.
-export function linkSpans(text: string): { start: number; end: number; href: string }[] {
+export function linkSpans(text: string, opts?: { angleLabels?: boolean }): { start: number; end: number; href: string; label?: string }[] {
   const re = /(https?:\/\/[^\s<>"']+|[a-z0-9-]+(?:\.[a-z0-9-]+)+\/[^\s<>"']*)/gi;
-  const out: { start: number; end: number; href: string }[] = [];
+  const out: { start: number; end: number; href: string; label?: string }[] = [];
+  const withScheme = (u: string) => (/^https?:\/\//i.test(u) ? u : `https://${u}`);
+  let prevEnd = 0;
   for (const m of text.matchAll(re)) {
     const start = m.index ?? 0;
     const raw = m[0];
+    // angleLabels: the text/plain half of an HTML email writes each link as
+    // "Get a custom hoodie now for $29<https://...tracking url...>". The words
+    // in front are the link's real name, so the span covers them and the
+    // brackets, and the renderer shows the words instead of the URL. Off by
+    // default: a note never uses this shape, and linkify must not guess there.
+    if (opts?.angleLabels && text[start - 1] === "<" && text[start + raw.length] === ">") {
+      const lineStart = Math.max(text.lastIndexOf("\n", start - 2) + 1, prevEnd);
+      // Drop a divider left over from the previous link on the same line, as in
+      // an email footer's "Privacy Policy<url> | Unsubscribe<url>".
+      const label = text.slice(lineStart, start - 1).trim().replace(/^[|·•/\\,;:–—-]+\s*/, "");
+      const end = start + raw.length + 1;
+      out.push({ start: label ? text.indexOf(label, lineStart) : start - 1, end, href: withScheme(raw), ...(label ? { label } : {}) });
+      prevEnd = end;
+      continue;
+    }
     const trimmed = raw.replace(/[.,;:!?)\]"']+$/, "") || raw;
-    out.push({ start, end: start + trimmed.length, href: /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}` });
+    out.push({ start, end: start + trimmed.length, href: withScheme(trimmed) });
+    prevEnd = start + trimmed.length;
   }
   return out;
 }
@@ -1811,6 +1829,21 @@ export function splitQuotedEmail(body: string): { visible: string; quoted: strin
   }
   if (cut === -1) return { visible: text, quoted: "" };
   return { visible: text.slice(0, cut).trim(), quoted: text.slice(cut).trim() };
+}
+
+/** A marketing email pads its preview line with invisible spacer characters
+ *  (zero width non joiners and friends) so the inbox preview stays short. In
+ *  the text/plain half they render as rows of gaps, and a forwarded Sticker Mule
+ *  email opened on a task with a line of them (Derek: "can you clean it up").
+ *  Strip them, empty the lines they leave holding only spaces, and collapse
+ *  blank runs. Line breaks the sender actually typed survive. */
+export function tidyEmailText(text: string): string {
+  return text
+    .replace(/[\u200B-\u200D\u2060\uFEFF\u00AD\u034F]/g, "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n").map((l) => (l.trim() ? l.replace(/\s+$/, "") : "")).join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 export function prettyLinkName(url: string): string {
