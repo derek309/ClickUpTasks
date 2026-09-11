@@ -248,7 +248,7 @@ export default function DocReviewView({ token }: { token: string }) {
         </div>
       </header>
 
-      <main className={`mx-auto max-w-[1280px] px-5 pt-7 ${state === "ready" && !locked ? "pb-44" : "pb-16"}`}>
+      <main className="mx-auto max-w-[1280px] px-5 pb-16 pt-7">
         {state === "loading" && <p className="text-[18px] text-muted">Loading your document…</p>}
 
         {state === "error" && (
@@ -308,8 +308,28 @@ export default function DocReviewView({ token }: { token: string }) {
               </article>
 
               {/* Stays beside the document as it scrolls (Derek, 2026-09-11: "make side
-                  bar sticky"), clear of the Approve bar at the bottom. */}
-              <aside className="space-y-4 lg:sticky lg:top-6 lg:max-h-[calc(100dvh-9rem)] lg:overflow-y-auto">
+                  bar sticky"). Send my changes and Approve sit at its top, above
+                  Files, in place of a bar fixed to the bottom of the screen. */}
+              <aside className="space-y-4 lg:sticky lg:top-6 lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto">
+                {!locked && (
+                  <div className="rounded-2xl border bg-surface p-4 shadow-sm">
+                    <div className="flex gap-3">
+                      <button onClick={() => void publish("submit")} disabled={!dirty || busy !== null}
+                        className="min-h-[52px] flex-1 rounded-xl border-2 px-4 text-[17px] font-semibold transition disabled:opacity-40"
+                        style={{ borderColor: NAVY, color: NAVY }}>
+                        {busy === "send" ? "Sending…" : "Send my changes"}
+                      </button>
+                      <button onClick={approve} disabled={busy !== null}
+                        className="min-h-[52px] flex-1 rounded-xl px-4 text-[17px] font-bold text-white transition disabled:opacity-60"
+                        style={{ background: GREEN }}>
+                        {busy === "approve" ? "Approving…" : "Approve"}
+                      </button>
+                    </div>
+                    {dirty && (
+                      <button onClick={undoEdits} className="mt-2 min-h-[44px] text-[16px] font-medium text-muted underline underline-offset-4">Undo my edits</button>
+                    )}
+                  </div>
+                )}
 
                 {(data.files.length > 0 || !locked) && (
                   <FileDropLine label="Files" count={data.files.length} busy={adding} disabled={locked} onFiles={(list) => void addFiles(list)}>
@@ -349,28 +369,6 @@ export default function DocReviewView({ token }: { token: string }) {
           </>
         )}
       </main>
-
-      {state === "ready" && data && !locked && (
-        <div className="fixed inset-x-0 bottom-0 z-20 border-t bg-surface/95 backdrop-blur" style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}>
-          <div className="mx-auto flex max-w-[1280px] flex-wrap items-center gap-3 px-5 pt-3">
-            {dirty && (
-              <button onClick={undoEdits} className="min-h-[48px] px-1 text-[16px] font-medium text-muted underline underline-offset-4">Undo my edits</button>
-            )}
-            <div className="ml-auto flex w-full gap-3 sm:w-auto">
-              <button onClick={() => void publish("submit")} disabled={!dirty || busy !== null}
-                className="min-h-[52px] flex-1 rounded-xl border-2 px-5 text-[17px] font-semibold transition disabled:opacity-40 sm:flex-none"
-                style={{ borderColor: NAVY, color: NAVY }}>
-                {busy === "send" ? "Sending…" : "Send my changes"}
-              </button>
-              <button onClick={approve} disabled={busy !== null}
-                className="min-h-[52px] flex-1 rounded-xl px-6 text-[17px] font-bold text-white transition disabled:opacity-60 sm:flex-none"
-                style={{ background: GREEN }}>
-                {busy === "approve" ? "Approving…" : "Approve"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {confirmApprove && (
         <div className="fixed inset-0 z-30 flex items-end justify-center bg-black/40 p-4 sm:items-center" onClick={() => setConfirmApprove(false)}>
