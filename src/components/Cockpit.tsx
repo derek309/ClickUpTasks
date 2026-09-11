@@ -4804,10 +4804,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       </>)}
       {cmdkOpen && <CommandK tasks={scopedTasks} clients={workableClients} projects={projects} contacts={contacts} addedContactIds={addedContactIds} clientById={clientById}
         onOpenTask={(id) => { setOpenTaskId(id); setCmdkOpen(false); }}
-        onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(id); setActiveProject(null); setCmdkOpen(false); }}
+        // Picking a client or list goes there the one way (openClientList), which
+        // also closes an open task: search used to switch the client behind a
+        // task still open on top (Derek, 2026-09-11).
+        onOpenClient={(id) => { openClientList(id, null); setCmdkOpen(false); }}
         onOpenProject={(id) => {
-          if (id === PERSONAL_PROJECT_ID) { setMyWork(false); setPersonalView(true); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setCmdkOpen(false); return; }
-          const p = projects.find((x) => x.id === id); if (p) { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(p.clientId); setActiveProject(id); } setCmdkOpen(false);
+          if (id === PERSONAL_PROJECT_ID) { setMyWork(false); setPersonalView(true); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setOpenTaskId(null); setCmdkOpen(false); return; }
+          const p = projects.find((x) => x.id === id); if (p) openClientList(p.clientId, id); setCmdkOpen(false);
         }}
         onAddContact={(contact) => { addClientContact(contact); setCmdkOpen(false); }}
         onClose={() => setCmdkOpen(false)} />}
