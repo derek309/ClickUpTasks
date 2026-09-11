@@ -226,7 +226,7 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
   const saveLabel = saveState === "unsaved" ? "Unsaved changes" : saveState === "saved" ? "Draft saved" : `Edited ${timeAgo(draft.updatedAt ?? draft.createdAt)}`;
 
   const row = (
-    <WorkItemRow icon="✉️" title={local.subject.trim() || draft.subject.trim() || "Draft email"} badge={badge} meta={meta}
+    <WorkItemRow tone="email" icon="✉️" title={local.subject.trim() || draft.subject.trim() || "Draft email"} badge={badge} meta={meta}
       onOpen={() => setOpen(true)} />
   );
   if (!open) return row;

@@ -498,7 +498,7 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
   ].filter(Boolean).join(" · ");
 
   const row = (
-    <WorkItemRow icon="📄" title={name} badge={badge} meta={meta} actions={copyLinkButton}
+    <WorkItemRow tone="doc" icon="📄" title={name} badge={badge} meta={meta} actions={copyLinkButton}
       onOpen={() => switchView({ full: true })} />
   );
   if (!visible) return <>{row}{deletedLine}</>;

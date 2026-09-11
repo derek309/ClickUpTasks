@@ -15,7 +15,14 @@ export function WorkItemBadge({ label, chip, dot }: { label: string; chip: strin
 }
 
 /** The line in the task. Clicking the name opens it too. */
-export function WorkItemRow({ icon, title, badge, meta, actions, onOpen }: {
+// Each kind of line item has its own color so they read apart at a glance
+// (Derek, 2026-09-11: "can we make them different colors").
+const ROW_TONE = {
+  doc: { box: "border-highlight/40 border-l-highlight bg-highlight-soft/60", tile: "bg-highlight-soft" },
+  email: { box: "border-accent/30 border-l-accent bg-accent-soft/60", tile: "bg-accent-soft" },
+} as const;
+
+export function WorkItemRow({ icon, title, badge, meta, actions, onOpen, tone }: {
   icon: string;
   title: string;
   badge?: React.ReactNode;
@@ -23,11 +30,13 @@ export function WorkItemRow({ icon, title, badge, meta, actions, onOpen }: {
   /** Quiet buttons before Open, like Copy link. */
   actions?: React.ReactNode;
   onOpen: () => void;
+  tone: keyof typeof ROW_TONE;
 }) {
+  const colors = ROW_TONE[tone];
   return (
-    <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-surface px-4 py-3">
+    <div className={`mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-l-[6px] px-4 py-3 ${colors.box}`}>
       <button onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-        <span aria-hidden className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-[22px]">{icon}</span>
+        <span aria-hidden className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-[22px] ${colors.tile}`}>{icon}</span>
         <span className="min-w-0">
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="min-w-0 truncate text-[17px] font-semibold">{title}</span>
