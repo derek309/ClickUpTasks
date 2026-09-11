@@ -432,7 +432,7 @@ export function createServer(opts = {}) {
         `\nWorking copy (the team's draft; the client only sees what was last sent):\n${docHtmlToText(doc.body) || "(empty)"}`,
         latest && latest.kind !== "sent" ? `\nLatest from the client (version ${latest.version}, ${DOC_KIND[latest.kind]}${latest.author_label ? ` by ${latest.author_label}` : ""}):\n${docHtmlToText(latest.body)}` : "",
         versions.length ? `\nVersions:\n${versions.map((v) => `  - v${v.version} ${DOC_KIND[v.kind]}${v.author_label ? ` by ${v.author_label}` : ""} (${v.created_at})`).join("\n")}` : "",
-        files.length ? `\nFiles:\n${files.map((f) => `  - ${f.name} (${Math.max(1, Math.round(f.size_bytes / 1024))} KB, added by ${f.added_by_label || "someone"}${f.shared_at ? "" : ", not sent yet"})`).join("\n")}` : "",
+        files.length ? `\nFiles:\n${files.map((f) => `  - ${f.name} (${Math.max(1, Math.round(f.size_bytes / 1024))} KB, added by ${f.added_by_label || "someone"})`).join("\n")}` : "",
         comments.length ? `\nComments (the client sees these too):\n${comments.map((c) => `  - ${c.author_label || (c.author_id ? "Team" : "Client")}${c.author_id ? "" : " (client)"}, ${c.created_at}: ${c.body}`).join("\n")}` : "",
       ].filter(Boolean).join("\n");
       return reply(text);
@@ -449,6 +449,7 @@ export function createServer(opts = {}) {
       const found = await documentFor(task_id);
       if (found.error) return reply(found.error);
       if (found.doc?.approved_at) return reply("The client already approved this document. A teammate reopens it in the app before it can change.");
+      if (found.doc?.status === "completed") return reply("This document is completed. A teammate reopens it in the app before it can change.");
       const html = docTextToHtml(body);
       if (!docHtmlToText(html)) return reply("The document is empty.");
       if (html.length > 200_000) return reply("That document is too long to save.");

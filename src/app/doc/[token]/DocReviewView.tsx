@@ -12,10 +12,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RichTextEditor } from "@/components/cockpit/RichTextEditor";
 import { addDocFiles } from "@/lib/docFileUpload";
-import { extOf, formatFileSize, isPreviewableImage } from "@/lib/uploadTypes";
-import { CommentThread, ImageLightbox, type PreviewImage, type ThreadComment } from "@/components/cockpit/TaskWorkItem";
+import { formatFileSize, isPreviewableImage } from "@/lib/uploadTypes";
+import {
+  CommentThread, FileDropLine, ImageLightbox, ImageThumbGrid, type PreviewImage, type ThreadComment,
+} from "@/components/cockpit/TaskWorkItem";
 
-type DocStatus = "draft" | "with_client" | "client_submitted" | "approved";
+type DocStatus = "draft" | "with_client" | "client_submitted" | "approved" | "completed";
 type DocFile = { id: string; name: string; size: number; kind: string; addedBy: string; fromClient: boolean; createdAt: string };
 type DocData = { title: string; clientName: string; body: string; version: number; status: DocStatus; approvedAt: string | null; closed: boolean; files: DocFile[]; comments: ThreadComment[] };
 type Notice = { tone: "good" | "info" | "warn"; text: string } | null;
@@ -51,13 +53,8 @@ export default function DocReviewView({ token }: { token: string }) {
   const [newer, setNewer] = useState<{ version: number; body: string } | null>(null);
   const [busy, setBusy] = useState<"send" | "approve" | null>(null);
   const [confirmApprove, setConfirmApprove] = useState(false);
-  // Files the client added since they last sent, so Send my changes can tell the
-  // team about them even when the text is untouched.
-  const [filesAdded, setFilesAdded] = useState(false);
   const [adding, setAdding] = useState(false);
-  const [dropping, setDropping] = useState(false);
   const [lightbox, setLightbox] = useState<number | null>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
 
   const dirty = html.trim() !== startHtml.trim();
   const locked = !!data && (data.status === "approved" || data.closed);
@@ -141,7 +138,6 @@ export default function DocReviewView({ token }: { token: string }) {
       if (!res.ok) { setNotice({ tone: "warn", text: j.error ?? "We couldn't save that. Please try again." }); return; }
 
       writeDraft(draftKey(token, baseVersion), null);
-      setFilesAdded(false);
       const version = j.version as number;
       setBaseVersion(version);
       setStartHtml(html);
@@ -180,10 +176,10 @@ export default function DocReviewView({ token }: { token: string }) {
     if (!list?.length || adding) return;
     setAdding(true);
     setNotice(null);
-    const error = await addDocFiles(Array.from(list), filesApi("POST"), () => { setFilesAdded(true); void load(false); });
+    const error = await addDocFiles(Array.from(list), filesApi("POST"), () => { void load(false); });
     setAdding(false);
     if (error) setNotice({ tone: "warn", text: error });
-    else setNotice({ tone: "good", text: "Added. Send your changes when you're ready so the team knows." });
+    else setNotice({ tone: "good", text: "Added. Your team can see it now." });
   };
 
   // A comment shows at once; the 15 second refresh brings the team's replies.
@@ -273,71 +269,46 @@ export default function DocReviewView({ token }: { token: string }) {
               </div>
             )}
 
-            <article className="mt-6 rounded-2xl border bg-surface p-5 shadow-sm sm:p-8">
-              <RichTextEditor key={editorKey} value={html} onChange={setHtml} variant="doc" editable={!locked}
-                placeholder="This document is empty." />
-            </article>
+            {/* The document on the left, Files and Comments in a sidebar on the
+                right, laid out like the team's full screen view (Derek,
+                2026-09-11). On a phone the sidebar stacks under the document. */}
+            <div className="mt-6 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
+              <article className="min-w-0 rounded-2xl border bg-surface p-5 shadow-sm sm:p-8">
+                <RichTextEditor key={editorKey} value={html} onChange={setHtml} variant="doc" editable={!locked}
+                  placeholder="This document is empty." />
+              </article>
 
-            {(data.files.length > 0 || !locked) && (
-              <section
-                onDragOver={(e) => { if (!locked && e.dataTransfer.types.includes("Files")) { e.preventDefault(); setDropping(true); } }}
-                onDragLeave={() => setDropping(false)}
-                onDrop={(e) => { if (locked) return; e.preventDefault(); setDropping(false); void addFiles(e.dataTransfer.files); }}
-                className={`mt-6 rounded-2xl border-2 bg-surface p-5 sm:p-8 ${dropping ? "border-dashed" : "border-transparent shadow-sm"}`}
-                style={dropping ? { borderColor: NAVY } : undefined}>
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h2 className="text-[22px] font-bold">Files</h2>
-                  {!locked && (
-                    <>
-                      <input ref={fileInput} type="file" multiple className="hidden" onChange={(e) => { void addFiles(e.target.files); e.target.value = ""; }} />
-                      <button onClick={() => fileInput.current?.click()} disabled={adding}
-                        className="min-h-[48px] rounded-xl border-2 px-5 text-[17px] font-semibold disabled:opacity-50" style={{ borderColor: NAVY, color: NAVY }}>
-                        {adding ? "Adding…" : "Add files"}
-                      </button>
-                    </>
-                  )}
-                </div>
-                {!locked && <p className="mt-1 text-[16px] text-muted">Photos, PDFs, documents, spreadsheets, slides or videos, up to 25 MB each. You can also drop them here.</p>}
-                {data.files.length === 0 ? (
-                  <p className="mt-4 text-[17px] text-muted">No files yet.</p>
-                ) : (
-                  <ul className="mt-4 divide-y">
-                    {data.files.map((f) => {
-                      const href = fileHref(f.id);
-                      const preview = previewImages.findIndex((p) => p.id === f.id);
-                      const nameClass = "block break-words text-left text-[17px] font-semibold underline underline-offset-4";
-                      return (
-                        <li key={f.id} className="flex flex-wrap items-center gap-4 py-3">
-                          {preview >= 0 ? (
-                            <button onClick={() => setLightbox(preview)} aria-label={`Preview ${f.name}`} className="h-20 w-20 shrink-0 overflow-hidden rounded-lg border">
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={href} alt="" className="h-full w-full object-cover" />
-                            </button>
-                          ) : (
-                            <span aria-hidden className="flex h-20 w-20 shrink-0 items-center justify-center rounded-lg border text-[16px] font-bold uppercase text-muted">{extOf(f.name)}</span>
-                          )}
-                          <div className="min-w-0 flex-1">
-                            {preview >= 0
-                              ? <button onClick={() => setLightbox(preview)} className={nameClass} style={{ color: NAVY }}>{f.name}</button>
-                              : <a href={href} target="_blank" rel="noopener noreferrer" className={nameClass} style={{ color: NAVY }}>{f.name}</a>}
-                            <p className="text-[16px] text-muted">{formatFileSize(f.size)} · Added by {f.fromClient ? "you" : f.addedBy}</p>
-                          </div>
-                          <div className="flex items-center gap-4">
-                            <a href={`${href}?download=1`} className="min-h-[44px] content-center text-[16px] font-medium underline underline-offset-4" style={{ color: NAVY }}>Download</a>
-                            {f.fromClient && !locked && (
-                              <button onClick={() => void removeFile(f)} className="min-h-[44px] text-[16px] font-medium text-muted underline underline-offset-4">Remove</button>
-                            )}
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
+              <aside className="space-y-4">
+                {(data.files.length > 0 || !locked) && (
+                  <FileDropLine label="Files" count={data.files.length} busy={adding} disabled={locked} onFiles={(list) => void addFiles(list)}>
+                    {previewImages.length > 0 && <ImageThumbGrid images={previewImages} onOpen={setLightbox} />}
+                    {data.files.length > 0 && (
+                      <ul className="mt-1.5 divide-y">
+                        {data.files.map((f) => {
+                          const href = fileHref(f.id);
+                          const preview = previewImages.findIndex((p) => p.id === f.id);
+                          const nameClass = "min-w-0 break-words text-left font-semibold underline underline-offset-4";
+                          return (
+                            <li key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-[16px]">
+                              {preview >= 0
+                                ? <button onClick={() => setLightbox(preview)} className={nameClass} style={{ color: NAVY }}>{f.name}</button>
+                                : <a href={href} target="_blank" rel="noopener noreferrer" className={nameClass} style={{ color: NAVY }}>{f.name}</a>}
+                              <span className="text-muted">{formatFileSize(f.size)} · {f.fromClient ? "You" : f.addedBy}</span>
+                              <span className="ml-auto flex items-center gap-3">
+                                <a href={`${href}?download=1`} className="min-h-[44px] content-center font-medium underline underline-offset-4" style={{ color: NAVY }}>Download</a>
+                                {f.fromClient && !locked && (
+                                  <button onClick={() => void removeFile(f)} className="min-h-[44px] font-medium text-muted underline underline-offset-4">Remove</button>
+                                )}
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </FileDropLine>
                 )}
-              </section>
-            )}
-
-            <div className="mt-6">
-              <CommentThread comments={data.comments ?? []} onPost={postComment} when={commentTime} viewer="client" buttonStyle={{ background: NAVY }} />
+                <CommentThread comments={data.comments ?? []} onPost={postComment} when={commentTime} viewer="client" buttonStyle={{ background: NAVY }} />
+              </aside>
             </div>
           </>
         )}
@@ -350,7 +321,7 @@ export default function DocReviewView({ token }: { token: string }) {
               <button onClick={undoEdits} className="min-h-[48px] px-1 text-[16px] font-medium text-muted underline underline-offset-4">Undo my edits</button>
             )}
             <div className="ml-auto flex w-full gap-3 sm:w-auto">
-              <button onClick={() => void publish("submit")} disabled={!(dirty || filesAdded) || busy !== null}
+              <button onClick={() => void publish("submit")} disabled={!dirty || busy !== null}
                 className="min-h-[52px] flex-1 rounded-xl border-2 px-5 text-[17px] font-semibold transition disabled:opacity-40 sm:flex-none"
                 style={{ borderColor: NAVY, color: NAVY }}>
                 {busy === "send" ? "Sending…" : "Send my changes"}

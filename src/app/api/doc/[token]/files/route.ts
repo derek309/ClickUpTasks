@@ -24,7 +24,7 @@ async function open(req: NextRequest, params: Promise<{ token: string }>) {
   if (!scope) return { ok: false as const, res: docNotFound() };
   const { data: doc } = await supabaseAdmin.from("task_documents").select("approved_at").eq("id", scope.documentId).maybeSingle();
   if (!doc) return { ok: false as const, res: docNotFound() };
-  if (doc.approved_at || scope.taskStatus === "done") return { ok: false as const, res: json({ error: "This document is closed." }, 409) };
+  if (doc.approved_at || scope.taskStatus === "done" || scope.documentStatus === "completed") return { ok: false as const, res: json({ error: "This document is closed." }, 409) };
   return { ok: true as const, scope, payload: read.body, actor: { id: null, label: scope.clientName } };
 }
 
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     return r.ok ? json({ path: r.path, uploadUrl: r.uploadUrl }) : json({ error: r.error }, r.status);
   }
   if (o.payload.action === "confirm") {
-    const r = await finishDocUpload(o.scope.documentId, o.payload.path, o.payload.name, o.actor, true);
+    const r = await finishDocUpload(o.scope.documentId, o.payload.path, o.payload.name, o.actor);
     if (!r.ok) return json({ error: r.error }, r.status);
     await logClientDocEvent(o.scope.taskId, `${o.scope.clientName} added ${r.name} to the client document`);
     return json({ ok: true, fileId: r.fileId });

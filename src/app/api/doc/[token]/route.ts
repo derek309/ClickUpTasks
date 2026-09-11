@@ -33,7 +33,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     version: latest.version,
     status: doc.status,
     approvedAt: (doc.approved_at as string | null) ?? null,
-    closed: scope.taskStatus === "done",
+    closed: scope.taskStatus === "done" || doc.status === "completed",
     files,
     comments,
   }, { headers: NO_STORE });

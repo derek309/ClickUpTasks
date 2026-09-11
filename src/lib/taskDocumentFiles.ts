@@ -67,8 +67,10 @@ export async function startDocUpload(documentId: string, rawName: unknown, rawSi
 
 /** Record a file that finished uploading. The object must be in this document's
  *  folder, exist, be under the cap and not carry a type a browser would run;
- *  otherwise it is deleted and nothing is recorded. */
-export async function finishDocUpload(documentId: string, rawPath: unknown, rawName: unknown, actor: DocActor, sharedNow: boolean): Promise<{ ok: true; fileId: string; name: string } | Fail> {
+ *  otherwise it is deleted and nothing is recorded. The client sees it at once,
+ *  whoever added it (Derek, 2026-09-11: the client link "is not showing the files
+ *  that have already been attached"). */
+export async function finishDocUpload(documentId: string, rawPath: unknown, rawName: unknown, actor: DocActor): Promise<{ ok: true; fileId: string; name: string } | Fail> {
   const named = checkFileName(rawName);
   if (!named.ok) return named;
   if (!isDocFilePath(documentId, rawPath) || extOf(rawPath) !== extOf(named.name)) return fail(400, "Invalid file.");
@@ -89,7 +91,7 @@ export async function finishDocUpload(documentId: string, rawPath: unknown, rawN
   const { error: insertError } = await supabaseAdmin.from("task_document_files").insert({
     id: fileId, document_id: documentId, path: rawPath, name: named.name, size_bytes: size,
     kind: sharedFileKind(named.name), added_by: actor.id, added_by_label: actor.label,
-    created_at: now, shared_at: sharedNow ? now : null,
+    created_at: now, shared_at: now,
   });
   if (insertError) return fail(409, "That file is already on the document.");
   return { ok: true, fileId, name: named.name };
@@ -110,19 +112,23 @@ export async function removeDocFile(documentId: string, fileId: unknown, actor: 
   return { ok: true, name: f.name as string };
 }
 
-/** A send shares the team's new files along with the text. */
-export async function shareTeamFiles(documentId: string): Promise<void> {
-  await supabaseAdmin.from("task_document_files").update({ shared_at: new Date().toISOString() })
-    .eq("document_id", documentId).is("shared_at", null).is("removed_at", null);
+/** Every stored object in the document's folder, including uploads that were
+ *  started and never confirmed. Used when the document itself is deleted. */
+export async function deleteDocStorage(documentId: string): Promise<void> {
+  const storage = supabaseAdmin.storage.from(TASK_FILES_BUCKET);
+  const folder = docFileFolder(documentId);
+  const { data } = await storage.list(folder.slice(0, -1), { limit: 1000 });
+  const paths = (data ?? []).filter((o) => o.name).map((o) => `${folder}${o.name}`);
+  if (paths.length) await storage.remove(paths);
 }
 
 export type SharedDocFile = { id: string; name: string; size: number; kind: SharedFileKind; addedBy: string; fromClient: boolean; createdAt: string };
 
-/** The files the client can see: shared and not removed. No paths leave here. */
+/** The files the client can see: every file not removed. No paths leave here. */
 export async function sharedDocFiles(documentId: string): Promise<SharedDocFile[]> {
   const { data } = await supabaseAdmin.from("task_document_files")
     .select("id, name, size_bytes, kind, added_by, added_by_label, created_at")
-    .eq("document_id", documentId).is("removed_at", null).not("shared_at", "is", null)
+    .eq("document_id", documentId).is("removed_at", null)
     .order("created_at", { ascending: true });
   return (data ?? []).map((r) => ({
     id: r.id as string, name: r.name as string, size: Number(r.size_bytes ?? 0), kind: r.kind as SharedFileKind,
@@ -134,7 +140,7 @@ export async function sharedDocFiles(documentId: string): Promise<SharedDocFile[
 export async function sharedDocFileUrl(documentId: string, fileId: string, download: boolean): Promise<string | null> {
   const { data: f } = await supabaseAdmin.from("task_document_files")
     .select("path, name").eq("id", fileId).eq("document_id", documentId)
-    .is("removed_at", null).not("shared_at", "is", null).maybeSingle();
+    .is("removed_at", null).maybeSingle();
   if (!f) return null;
   const { data } = await supabaseAdmin.storage.from(TASK_FILES_BUCKET)
     .createSignedUrl(f.path as string, 300, download ? { download: f.name as string } : undefined);

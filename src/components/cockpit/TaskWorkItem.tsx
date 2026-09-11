@@ -2,10 +2,9 @@
 
 // A piece of work on a task with its own space: the client review document and
 // the draft email. In the task it is one line, closed until someone opens it:
-// Show opens it in place, Open full opens it over the whole screen (Derek,
-// 2026-09-11: "toggle this close by default ... Make it a line item with buttons
-// to toggle open or full window open", then "I like the show and hide just add
-// open full").
+// Open shows it over the whole screen, the only view it has (Derek, 2026-09-11:
+// "remove the show and hide feature and change full to just open we only need one
+// screen").
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -15,21 +14,19 @@ export function WorkItemBadge({ label, chip, dot }: { label: string; chip: strin
   return <span className="shrink-0 rounded-full px-2.5 py-0.5 text-[16px] font-semibold" style={{ background: chip, color: dot }}>{label}</span>;
 }
 
-/** The line in the task. Clicking the name toggles it like Show and Hide. */
-export function WorkItemRow({ icon, title, badge, meta, actions, shown, onToggle, onOpenFull }: {
+/** The line in the task. Clicking the name opens it too. */
+export function WorkItemRow({ icon, title, badge, meta, actions, onOpen }: {
   icon: string;
   title: string;
   badge?: React.ReactNode;
   meta?: string;
-  /** Quiet buttons before Show, like Copy link. */
+  /** Quiet buttons before Open, like Copy link. */
   actions?: React.ReactNode;
-  shown: boolean;
-  onToggle: () => void;
-  onOpenFull: () => void;
+  onOpen: () => void;
 }) {
   return (
     <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-surface px-4 py-3">
-      <button onClick={onToggle} aria-expanded={shown} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+      <button onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-3 text-left">
         <span aria-hidden className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-[22px]">{icon}</span>
         <span className="min-w-0">
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -41,16 +38,10 @@ export function WorkItemRow({ icon, title, badge, meta, actions, shown, onToggle
       </button>
       <span className="flex shrink-0 flex-wrap items-center gap-2">
         {actions}
-        <button onClick={onToggle} aria-expanded={shown} className={quietButton}>{shown ? "Hide" : "Show"}</button>
-        <button onClick={onOpenFull} className="rounded-lg bg-accent px-4 py-1.5 text-[16px] font-semibold text-white">Open full</button>
+        <button onClick={onOpen} className="rounded-lg bg-accent px-5 py-1.5 text-[16px] font-semibold text-white">Open</button>
       </span>
     </div>
   );
-}
-
-/** The work shown in place, under its line. */
-export function WorkItemInline({ children }: { children: React.ReactNode }) {
-  return <div className="mt-2 rounded-xl border bg-surface p-4 sm:p-6">{children}</div>;
 }
 
 /** The full screen window. Esc or Close shuts it; onClose should land any

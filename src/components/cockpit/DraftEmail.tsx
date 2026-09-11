@@ -17,7 +17,7 @@ import { signedUrlForFile } from "@/lib/db";
 import { RichTextEditor } from "./RichTextEditor";
 import { useDebouncedCommit } from "./useDebouncedCommit";
 import {
-  FileDropLine, ImageLightbox, ImageThumbGrid, WorkItemBadge, WorkItemInline, WorkItemRow, WorkItemWindow,
+  FileDropLine, ImageLightbox, ImageThumbGrid, WorkItemBadge, WorkItemRow, WorkItemWindow,
   quietButton as quiet, type PreviewImage,
 } from "./TaskWorkItem";
 import { newId } from "./ui";
@@ -43,7 +43,6 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
   pushToast: (text: string) => void;
 }) {
   const draft = task.draftEmail ?? null;
-  const [shown, setShown] = useState(false);
   const [full, setFull] = useState(false);
   const [seenNonce, setSeenNonce] = useState(openNonce);
   const requested = openNonce !== seenNonce;
@@ -84,7 +83,7 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
   }, [commit.flush]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Thumbnails load only while the draft is open, an hour's link each.
-  const open = shown || full || requested;
+  const open = full || requested;
   const imagePaths = local.attachments.filter((a) => a.path && isPreviewableImage(a.name)).map((a) => a.path!).join("|");
   useEffect(() => {
     const missing = imagePaths ? imagePaths.split("|").filter((p) => !thumbs[p]) : [];
@@ -112,14 +111,12 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
     });
   };
   // Switching views remounts the editor, so what is pending lands first.
-  const switchView = (next: { shown?: boolean; full?: boolean }) => {
+  const setOpen = (next: boolean) => {
     commit.flush();
     if (requested) setSeenNonce(openNonce);
-    if (next.shown !== undefined) setShown(next.shown);
-    if (next.full !== undefined) setFull(next.full);
+    setFull(next);
   };
-  const isShown = shown || requested;
-  const closeAll = () => { if (requested) setSeenNonce(openNonce); setShown(false); setFull(false); };
+  const closeAll = () => { if (requested) setSeenNonce(openNonce); setFull(false); };
 
   const currentBody = () => pending.current.body ?? draft.body;
   const attachments = local.attachments;
@@ -193,15 +190,15 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
 
   const row = (
     <WorkItemRow icon="✉️" title={local.subject.trim() || draft.subject.trim() || "Draft email"} badge={badge} meta={meta}
-      shown={isShown} onToggle={() => switchView({ shown: !isShown })} onOpenFull={() => switchView({ full: true })} />
+      onOpen={() => setOpen(true)} />
   );
-  if (!isShown && !full) return row;
+  if (!open) return row;
 
   // Full screen puts Attachments in a right column beside the email, like the document.
   const content = (
-    <div className={full ? "grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]" : ""}>
+    <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
       <div className="min-w-0">
-      <div className={full ? "overflow-hidden rounded-2xl border bg-surface shadow-sm" : "overflow-hidden rounded-xl border"}>
+      <div className="overflow-hidden rounded-2xl border bg-surface shadow-sm">
         <div className="flex flex-wrap items-center gap-3 border-b px-4 py-2.5 text-[16px] sm:px-6">
           <span className="w-16 shrink-0 font-semibold text-muted">To</span>
           {toEmail
@@ -214,7 +211,7 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
             placeholder={task.title} className="min-w-0 flex-1 bg-transparent text-[18px] font-semibold outline-none" />
         </label>
         <div className="p-4 sm:p-6">
-          <RichTextEditor key={`email-${local.key}-${editorNonce}-${full ? "full" : "inline"}`} value={draft.body} variant="doc"
+          <RichTextEditor key={`email-${local.key}-${editorNonce}`} value={draft.body} variant="doc"
             placeholder="Write your email…" onChange={(html) => keep({ body: html })} />
         </div>
       </div>
@@ -229,7 +226,7 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
       </div>
 
       </div>
-      <div className={full ? "" : "mt-5"}>
+      <div>
         <FileDropLine label="Attachments" count={count} busy={uploading} disabled={!onUpload} onFiles={(list) => void addFiles(list)}>
           {previewImages.length > 0 && <ImageThumbGrid images={previewImages} onOpen={setLightbox} />}
           {count > 0 && (
@@ -262,8 +259,8 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
   return (
     <>
       {row}
-      {full ? (
-        <WorkItemWindow icon="✉️" badge={badge} status={saveLabel} onClose={() => switchView({ full: false })}
+      {open && (
+        <WorkItemWindow icon="✉️" badge={badge} status={saveLabel} onClose={() => setOpen(false)}
           title={
             <div>
               <p className="px-1 text-[22px] font-bold leading-tight">Draft email</p>
@@ -272,8 +269,6 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
           }>
           {content}
         </WorkItemWindow>
-      ) : (
-        <WorkItemInline>{content}</WorkItemInline>
       )}
       {lightbox !== null && previewImages[lightbox] && (
         <ImageLightbox images={previewImages} index={lightbox} onIndex={setLightbox} onClose={() => setLightbox(null)} />

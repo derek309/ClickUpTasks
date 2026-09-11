@@ -502,7 +502,7 @@ export const fetchTaskActions = async (taskId: string): Promise<TaskAction[]> =>
 // security decides who sees them, which is exactly who can see the task. They
 // are never part of Task, so the full-row task upsert can never overwrite them;
 // every write goes through /api/tasks/[id]/document.
-export type TaskDocumentStatus = "draft" | "with_client" | "client_submitted" | "approved";
+export type TaskDocumentStatus = "draft" | "with_client" | "client_submitted" | "approved" | "completed";
 export type TaskDocument = {
   id: string; taskId: string; title: string; body: string; draftDirty: boolean; version: number;
   status: TaskDocumentStatus; approvedAt: string | null; approvedVersion: number | null; updatedAt: string;

@@ -22,7 +22,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   if (!read.ok) return read.res;
   const scope = await resolveDocToken(token);
   if (!scope) return docNotFound();
-  if (scope.taskStatus === "done") return json({ error: "This document is closed." }, 409);
+  if (scope.taskStatus === "done" || scope.documentStatus === "completed") return json({ error: "This document is closed." }, 409);
 
   const r = await postDocComment(scope.documentId, read.body.body, { id: null, label: scope.clientName });
   if (!r.ok) return json({ error: r.error }, r.status);

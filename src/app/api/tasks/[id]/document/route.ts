@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { teamDocAccess, memberLabel, NO_STORE } from "@/lib/taskDocumentServer";
-import { recordCheckpoint } from "@/lib/taskDocumentFiles";
+import { recordCheckpoint, deleteDocStorage } from "@/lib/taskDocumentFiles";
 import { sanitizeDocHtml, DOC_MAX_RAW_CHARS, DOC_MAX_HTML_CHARS } from "@/lib/docHtml";
 
 // The team's side of a task's client review document: create it, save the
@@ -12,6 +12,7 @@ import { sanitizeDocHtml, DOC_MAX_RAW_CHARS, DOC_MAX_HTML_CHARS } from "@/lib/do
 // an approved document stays locked.
 
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: NO_STORE });
+const DOC_STAGES: unknown[] = ["draft", "with_client", "client_submitted", "approved", "completed"];
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!adminConfigured) return json({ error: "Not configured" }, 501);
@@ -43,7 +44,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const text = await req.text();
   if (text.length > DOC_MAX_RAW_CHARS) return json({ error: "This document is too long." }, 413);
-  let payload: { body?: unknown; reopen?: unknown; restoreVersion?: unknown; restoreCheckpoint?: unknown; checkpoint?: unknown; title?: unknown };
+  let payload: { body?: unknown; reopen?: unknown; restoreVersion?: unknown; restoreCheckpoint?: unknown; checkpoint?: unknown; title?: unknown; status?: unknown };
   try { payload = JSON.parse(text); } catch { return json({ error: "Invalid request." }, 400); }
 
   const { data: doc } = await supabaseAdmin.from("task_documents")
@@ -56,6 +57,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const { data, error } = await supabaseAdmin.from("task_documents")
       .update({ approved_at: null, approved_version: null, status: "draft", ...stamp })
       .eq("id", doc.id).select("*").single();
+    return error ? json({ error: error.message }, 400) : json({ document: data });
+  }
+  // Pick a stage by hand. Completed locks the document for the team and closes it
+  // for the client; any stage but Approved clears a client approval's lock, the
+  // same as Reopen. Sends and client actions still move the stage on their own.
+  if (typeof payload?.status === "string") {
+    if (!DOC_STAGES.includes(payload.status)) return json({ error: "Unknown stage." }, 400);
+    const unlock = payload.status === "approved" ? {} : { approved_at: null, approved_version: null };
+    const { data, error } = await supabaseAdmin.from("task_documents")
+      .update({ status: payload.status, ...unlock, ...stamp }).eq("id", doc.id).select("*").single();
     return error ? json({ error: error.message }, 400) : json({ document: data });
   }
   // Rename. Allowed on an approved document too: the name is the team's label,
@@ -108,4 +119,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     payload.checkpoint === true || typeof payload.restoreVersion === "number" || typeof payload.restoreCheckpoint === "string",
   ).catch(() => { /* the save itself landed; a missed history entry must not fail it */ });
   return json({ document: data });
+}
+
+// Delete the document for good (Derek, 2026-09-11: "we also need to be able to
+// delete the document", from the full window only). Its stored files go first;
+// the row's cascade then removes versions, saved drafts, file rows, comments and
+// the client's link, so the link stops opening at once.
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  if (!adminConfigured) return json({ error: "Not configured" }, 501);
+  const { id } = await params;
+  const access = await teamDocAccess(req, id);
+  if (!access.ok) return access.res;
+  const { data: doc } = await supabaseAdmin.from("task_documents").select("id").eq("task_id", id).maybeSingle();
+  if (!doc) return json({ ok: true });
+  await deleteDocStorage(doc.id as string);
+  const { error } = await supabaseAdmin.from("task_documents").delete().eq("id", doc.id);
+  return error ? json({ error: error.message }, 400) : json({ ok: true });
 }

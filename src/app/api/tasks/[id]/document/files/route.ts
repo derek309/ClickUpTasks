@@ -3,9 +3,8 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { teamDocAccess, memberLabel, NO_STORE } from "@/lib/taskDocumentServer";
 import { startDocUpload, finishDocUpload, removeDocFile } from "@/lib/taskDocumentFiles";
 
-// The team adds and removes files on a task's client document. A teammate's new
-// file reaches the client with the next send, like the text, so adding one marks
-// the draft as having something to send.
+// The team adds and removes files on a task's client document. The client sees a
+// new file on their review page straight away; removing one takes it away too.
 
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: NO_STORE });
 
@@ -31,10 +30,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return r.ok ? json({ path: r.path, uploadUrl: r.uploadUrl }) : json({ error: r.error }, r.status);
   }
   if (o.payload.action === "confirm") {
-    const r = await finishDocUpload(o.documentId, o.payload.path, o.payload.name, o.actor, false);
-    if (!r.ok) return json({ error: r.error }, r.status);
-    await supabaseAdmin.from("task_documents").update({ draft_dirty: true, updated_at: new Date().toISOString() }).eq("id", o.documentId);
-    return json({ ok: true, fileId: r.fileId });
+    const r = await finishDocUpload(o.documentId, o.payload.path, o.payload.name, o.actor);
+    return r.ok ? json({ ok: true, fileId: r.fileId }) : json({ error: r.error }, r.status);
   }
   return json({ error: "Invalid request." }, 400);
 }

@@ -61,7 +61,7 @@ describe("TaskDocument", () => {
     await act(async () => { root.render(<Drawer task={task} docKey={`doc-${task.id}`} emailKey={`email-${task.id}`} />); });
     for (let i = 0; i < 20; i++) await act(async () => { await new Promise((r) => setTimeout(r, 5)); });
     const linkCalls = calls.filter((u) => u.endsWith("/link")).length;
-    const rows = Array.from(host.querySelectorAll("button")).filter((b) => b.textContent === "Open full").length;
+    const rows = Array.from(host.querySelectorAll("button")).filter((b) => b.textContent === "Open").length;
     expect({ rows, linkCalls }).toEqual({ rows: 1, linkCalls: 1 });
     await act(async () => root.unmount());
   });

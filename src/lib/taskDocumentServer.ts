@@ -17,7 +17,6 @@ import { hashToken, mintToken, decryptToken } from "./tokenCrypto";
 import { PERSONAL_CLIENT_ID, clientAnswerPatch, htmlToText, type TaskStatus } from "./data";
 import { resolveNotifyRecipient, notifyTeamOfClientActivity } from "./waitingNotify";
 import { sanitizeDocHtml, DOC_MAX_RAW_CHARS, DOC_MAX_HTML_CHARS } from "./docHtml";
-import { shareTeamFiles } from "./taskDocumentFiles";
 
 /** A document link token: `doc_` plus 32 random bytes in base64url. Checked
  *  before anything touches the database, so garbage never costs a query. */
@@ -47,6 +46,8 @@ export type DocScope = {
   clientId: string;
   clientName: string;
   assignedTo: string[];
+  /** The document's stage; "completed" closes it to the client like a finished task. */
+  documentStatus: string;
 };
 
 /** The task a link opens, or null for ANY reason it should not open: a bad
@@ -72,7 +73,7 @@ export async function resolveDocToken(token: string): Promise<DocScope | null> {
     task.project_id
       ? supabaseAdmin.from("projects").select("id, deleted_at").eq("id", task.project_id as string).maybeSingle()
       : Promise.resolve({ data: null }),
-    supabaseAdmin.from("task_documents").select("id, task_id").eq("id", link.document_id as string).maybeSingle(),
+    supabaseAdmin.from("task_documents").select("id, task_id, status").eq("id", link.document_id as string).maybeSingle(),
   ]);
   if (!client || client.deleted_at) return null;
   if (project?.deleted_at) return null;
@@ -89,6 +90,7 @@ export async function resolveDocToken(token: string): Promise<DocScope | null> {
     clientId: client.id as string,
     clientName: client.name as string,
     assignedTo: (client.assigned_to as string[] | null) ?? [],
+    documentStatus: (doc.status as string | null) ?? "draft",
   };
 }
 
@@ -193,7 +195,7 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
   if (typeof rawHtml !== "string" || typeof baseVersion !== "number" || !Number.isInteger(baseVersion)) {
     return { ok: false, status: 400, error: "Invalid request." };
   }
-  if (scope.taskStatus === "done") return { ok: false, status: 400, error: "This document is closed." };
+  if (scope.taskStatus === "done" || scope.documentStatus === "completed") return { ok: false, status: 400, error: "This document is closed." };
   const html = sanitizeDocHtml(rawHtml);
   if (html.length > DOC_MAX_HTML_CHARS) return { ok: false, status: 413, error: "This document is too long to send." };
   if (!htmlToText(html).trim()) return { ok: false, status: 400, error: "The document is empty." };
@@ -301,8 +303,9 @@ export async function revokeDocLink(documentId: string): Promise<void> {
 
 /** The team sends the current working copy as a new version. */
 export async function teamSend(documentId: string, baseVersion: number, user: AuthedUser): Promise<PublishOutcome> {
-  const { data: doc } = await supabaseAdmin.from("task_documents").select("body").eq("id", documentId).maybeSingle();
+  const { data: doc } = await supabaseAdmin.from("task_documents").select("body, status").eq("id", documentId).maybeSingle();
   if (!doc) return { ok: false, status: 404, error: "Not found" };
+  if (doc.status === "completed") return { ok: false, status: 409, error: "This document is completed. Reopen it to send changes." };
   const html = sanitizeDocHtml(doc.body as string);
   if (!htmlToText(html).trim()) return { ok: false, status: 400, error: "Write the document before sending it." };
   let version: number;
@@ -314,6 +317,5 @@ export async function teamSend(documentId: string, baseVersion: number, user: Au
   if (version === -1) return { ok: false, status: 409, error: "The client sent a newer version. Review it before sending again.", current: await latestPublished(documentId) };
   if (version === -2) return { ok: false, status: 409, error: "This document is approved. Reopen it to send changes." };
   if (version < 0) return { ok: false, status: 404, error: "Not found" };
-  await shareTeamFiles(documentId);
   return { ok: true, version };
 }

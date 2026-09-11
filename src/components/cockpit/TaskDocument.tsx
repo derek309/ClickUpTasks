@@ -4,8 +4,7 @@
 // link (no login), and sees what the client changed or approved. See
 // supabase/task-documents.sql and src/lib/taskDocumentServer.ts.
 //
-// In the task it is one line, closed until Show opens it in place or Open full
-// opens it over the whole screen (TaskWorkItem). Reads go through the browser
+// In the task it is one line; Open shows it over the whole screen (TaskWorkItem). Reads go through the browser
 // client and row level security (db.ts); every write goes through
 // /api/tasks/[id]/document so the HTML is cleaned on the server and an approved
 // document stays locked. A client's send, approval or file lands on the task row
@@ -25,16 +24,21 @@ import { formatFileSize, isPreviewableImage } from "@/lib/uploadTypes";
 import { RichTextEditor } from "./RichTextEditor";
 import { useDebouncedCommit } from "./useDebouncedCommit";
 import {
-  CommentThread, FileDropLine, ImageLightbox, ImageThumbGrid, WorkItemBadge, WorkItemInline, WorkItemRow, WorkItemWindow,
+  CommentThread, FileDropLine, ImageLightbox, ImageThumbGrid, WorkItemBadge, WorkItemRow, WorkItemWindow,
   quietButton as quiet, type PreviewImage,
 } from "./TaskWorkItem";
 
+// The document's stages, in order (Derek, 2026-09-11: "draft, client review,
+// changes, approved, completed"). Sends and client actions move it on their own;
+// the team can also pick one. Completed locks it like a client approval does.
 const STATUS_VIEW: Record<TaskDocumentStatus, { label: string; tone: TaskStatus }> = {
   draft: { label: "Draft", tone: "todo" },
-  with_client: { label: "With client", tone: "waiting" },
-  client_submitted: { label: "Client sent changes", tone: "review" },
+  with_client: { label: "Client review", tone: "waiting" },
+  client_submitted: { label: "Changes", tone: "changes_requested" },
   approved: { label: "Approved", tone: "approved" },
+  completed: { label: "Completed", tone: "done" },
 };
+const STAGES = Object.keys(STATUS_VIEW) as TaskDocumentStatus[];
 const KIND_LABEL: Record<TaskDocumentVersion["kind"], string> = {
   sent: "Sent to client",
   client_submitted: "Client sent changes",
@@ -66,11 +70,12 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
   const [checkpoints, setCheckpoints] = useState<TaskDocumentCheckpoint[]>([]);
   // The thread shared with the client (Derek, 2026-09-11: "a chat box for comments").
   const [comments, setComments] = useState<TaskDocumentComment[]>([]);
-  const [shown, setShown] = useState(false);
   const [full, setFull] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const [openEntry, setOpenEntry] = useState<string | null>(null);
   const [allHistory, setAllHistory] = useState(false);
+  // History sits under the Send buttons, closed until asked for (Derek, 2026-09-11).
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [linkMenu, setLinkMenu] = useState(false);
   const [nonce, setNonce] = useState(0);
   // Moving between in place and full screen remounts the editor; it starts from
@@ -144,7 +149,7 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
     };
   }, [commit.flush, titleCommit.flush]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const visible = shown || full;
+  const visible = full;
   useEffect(() => {
     if (!visible || !doc) return;
     let cancelled = false;
@@ -170,14 +175,13 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
   const copy = async (url: string) => { try { await navigator.clipboard.writeText(url); return true; } catch { return false; } };
 
   // Each switch lands the pending save and carries what was typed across.
-  const switchView = (next: { shown?: boolean; full?: boolean }, d: Doc | null = doc) => {
+  const switchView = (next: { full: boolean }, d: Doc | null = doc) => {
     commit.flush();
     titleCommit.flush();
     setSeed(latestHtml.current);
     if (d && !visible) setTitleDraft(d.title);
     setLinkMenu(false);
-    if (next.shown !== undefined) setShown(next.shown);
-    if (next.full !== undefined) setFull(next.full);
+    setFull(next.full);
   };
 
   const create = async (): Promise<Doc | null> => {
@@ -200,7 +204,7 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
     startSeen.current = startNonce;
     void (async () => {
       const d = doc ?? await create();
-      if (d) switchView({ shown: true }, d);
+      if (d) switchView({ full: true }, d);
     })();
   }, [startNonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -314,6 +318,35 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
     pushToast(done);
   };
 
+  const setStage = async (status: TaskDocumentStatus) => {
+    if (!doc || status === doc.status) return;
+    commit.flush();
+    await saving.current;
+    const res = await docApi(task.id, "", { method: "PATCH", body: JSON.stringify({ status }) });
+    const j = await readJson(res);
+    if (!res.ok) { pushToast((j.error as string) ?? "Could not change the stage."); return; }
+    setDoc(rowToTaskDocument(j.document));
+  };
+
+  const deleteDocument = async () => {
+    if (!doc || !window.confirm("Delete this document for good? Its versions, files, comments and the client's link are all removed. This can't be undone.")) return;
+    commit.flush();
+    titleCommit.flush();
+    await saving.current;
+    setBusy("delete");
+    const res = await docApi(task.id, "", { method: "DELETE" });
+    const j = await readJson(res);
+    setBusy(null);
+    if (!res.ok) { pushToast((j.error as string) ?? "Could not delete the document."); return; }
+    setFull(false);
+    versionRef.current = null;
+    setDoc(null);
+    setFiles([]);
+    setComments([]);
+    setLink(null);
+    pushToast("Document deleted.");
+  };
+
   const postComment = async (body: string) => {
     const res = await docApi(task.id, "/comments", { method: "POST", body: JSON.stringify({ body }) });
     const j = await readJson(res);
@@ -332,12 +365,11 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
     );
     setAdding(false);
     if (error) pushToast(error);
-    // A new file is something to send, so the document reloads to show Send changes.
     await load();
   };
 
   const removeFile = async (f: TaskDocumentFile) => {
-    if (!doc || !window.confirm(f.sharedAt ? `Remove ${f.name}? The client stops seeing it too.` : `Remove ${f.name}?`)) return;
+    if (!doc || !window.confirm(`Remove ${f.name}? The client stops seeing it too.`)) return;
     const res = await docApi(task.id, "/files", { method: "DELETE", body: JSON.stringify({ fileId: f.id }) });
     const j = await readJson(res);
     if (!res.ok) { pushToast((j.error as string) ?? "Could not remove the file."); return; }
@@ -355,7 +387,14 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
   const view = STATUS_VIEW[doc.status];
   const tone = STATUS_META[view.tone];
   const badge = <WorkItemBadge label={view.label} chip={tone.chip} dot={tone.dot} />;
-  const locked = !!doc.approvedAt;
+  const completed = doc.status === "completed";
+  const locked = !!doc.approvedAt || completed;
+  const stageSelect = (
+    <select value={doc.status} onChange={(e) => void setStage(e.target.value as TaskDocumentStatus)} aria-label="Document stage"
+      className="cursor-pointer rounded-full border-0 px-3 py-1 text-[16px] font-semibold outline-none" style={{ background: tone.chip, color: tone.dot }}>
+      {STAGES.map((s) => <option key={s} value={s}>{STATUS_VIEW[s].label}</option>)}
+    </select>
+  );
   const needsSend = !locked && (doc.version === 0 || doc.draftDirty);
   const name = doc.title.trim() || task.title;
   const activeFiles = files.filter((f) => !f.removedAt);
@@ -380,7 +419,7 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
 
   const row = (
     <WorkItemRow icon="📄" title={name} badge={badge} meta={meta} actions={copyLinkButton}
-      shown={shown} onToggle={() => switchView({ shown: !shown })} onOpenFull={() => switchView({ full: true })} />
+      onOpen={() => switchView({ full: true })} />
   );
   if (!visible) return row;
 
@@ -419,7 +458,7 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
   // Full screen puts Files and History in a right column beside the writing
   // (Derek, 2026-09-11); in place they stack under it, since the task column is narrow.
   const content = (
-    <div className={full ? "grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px]" : ""}>
+    <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
       <div className="min-w-0">
       {clientCrossed && (
         <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-accent/40 bg-accent-soft/40 px-4 py-3 text-[16px]">
@@ -430,7 +469,11 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
       )}
       {locked && (
         <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl px-4 py-3 text-[16px]" style={{ background: STATUS_META.approved.chip, color: STATUS_META.approved.dot }}>
-          <span className="min-w-0 flex-1">The client approved {doc.approvedVersion ? `version ${doc.approvedVersion}` : "this document"}. Reopen it to make changes.</span>
+          <span className="min-w-0 flex-1">
+            {completed
+              ? "This document is completed. Reopen it to make changes."
+              : <>The client approved {doc.approvedVersion ? `version ${doc.approvedVersion}` : "this document"}. Reopen it to make changes.</>}
+          </span>
           <button onClick={() => void patchDoc({ reopen: true }, "Reopened. Send your changes when they're ready.")} className={quiet}>Reopen for changes</button>
         </div>
       )}
@@ -456,45 +499,28 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
         )}
       </div>
 
-      <article className={full ? "rounded-2xl border bg-surface p-5 shadow-sm sm:p-8" : ""}>
-        <RichTextEditor key={`doc-${doc.id}-${nonce}-${full ? "full" : "inline"}`} value={seed ?? doc.body} editable={!locked} variant="doc"
+      <article className="rounded-2xl border bg-surface p-5 shadow-sm sm:p-8">
+        <RichTextEditor key={`doc-${doc.id}-${nonce}`} value={seed ?? doc.body} editable={!locked} variant="doc"
           placeholder="Write the content for your client…"
           onChange={(html) => { latestHtml.current = html; setSaveState("unsaved"); commit.schedule(() => { void save(html); }); }} />
       </article>
 
-      {!locked && (
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          {needsSend && (
-            <button onClick={send} disabled={busy !== null}
-              className="rounded-lg bg-accent px-6 py-2.5 text-[16px] font-semibold text-white disabled:opacity-50">
-              {busy === "send" ? "Sending…" : doc.version === 0 ? "Send for review" : "Send changes"}
-            </button>
-          )}
-          <button onClick={() => void saveDraft()} disabled={busy !== null || saveState === "saving"} className={quiet}>Save draft</button>
-          <span className="text-[16px] text-muted">{needsSend ? saveLabel : "Everything here has been sent."}</span>
-        </div>
-      )}
-
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        {!locked && needsSend && (
+          <button onClick={send} disabled={busy !== null}
+            className="rounded-lg bg-accent px-6 py-2.5 text-[16px] font-semibold text-white disabled:opacity-50">
+            {busy === "send" ? "Sending…" : doc.version === 0 ? "Send for review" : "Send changes"}
+          </button>
+        )}
+        {!locked && <button onClick={() => void saveDraft()} disabled={busy !== null || saveState === "saving"} className={quiet}>Save draft</button>}
+        {!locked && <span className="text-[16px] text-muted">{needsSend ? saveLabel : "Everything here has been sent."}</span>}
+        <button onClick={() => setHistoryOpen((o) => !o)} aria-expanded={historyOpen} className={`ml-auto ${quiet}`}>
+          {historyOpen ? "Hide history" : `History${timeline.length ? ` · ${timeline.length}` : ""}`}
+        </button>
       </div>
-      <div className={full ? "space-y-3" : "mt-5 space-y-3"}>
-        <FileDropLine label="Files" count={activeFiles.length} busy={adding} disabled={locked} onFiles={(list) => void addFiles(list)}>
-          {previewImages.length > 0 && <ImageThumbGrid images={previewImages} onOpen={setLightbox} />}
-          {activeFiles.length > 0 && (
-            <ul className="mt-1.5 divide-y">
-              {activeFiles.map((f) => (
-                <li key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-[16px]">
-                  <button onClick={() => openFileOrPreview(f)} className="min-w-0 break-words text-left font-medium text-accent hover:underline">{f.name}</button>
-                  <span className="text-muted">{formatFileSize(f.sizeBytes)} · {f.addedByLabel ?? "Someone"}</span>
-                  {!f.sharedAt && <span className="rounded-full bg-background px-2 py-0.5 text-muted">Not sent yet</span>}
-                  {!locked && <button onClick={() => void removeFile(f)} className="ml-auto text-muted hover:text-danger hover:underline">Remove</button>}
-                </li>
-              ))}
-            </ul>
-          )}
-        </FileDropLine>
 
-        <section className="rounded-xl border bg-surface px-4 py-2.5">
-          <h3 className="text-[16px] font-semibold">History{timeline.length ? ` · ${timeline.length}` : ""}</h3>
+      {historyOpen && (
+        <section className="mt-3 rounded-xl border bg-surface px-4 py-2.5">
           {timeline.length === 0 && <p className="text-[16px] text-muted">Saves, sends, client changes and files show up here with who did them.</p>}
           <div className="mt-1.5 space-y-1.5">
             {shownTimeline.map((entry) => {
@@ -544,6 +570,24 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
             </button>
           )}
         </section>
+      )}
+
+      </div>
+      <div className="space-y-3">
+        <FileDropLine label="Files" count={activeFiles.length} busy={adding} disabled={locked} onFiles={(list) => void addFiles(list)}>
+          {previewImages.length > 0 && <ImageThumbGrid images={previewImages} onOpen={setLightbox} />}
+          {activeFiles.length > 0 && (
+            <ul className="mt-1.5 divide-y">
+              {activeFiles.map((f) => (
+                <li key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-[16px]">
+                  <button onClick={() => openFileOrPreview(f)} className="min-w-0 break-words text-left font-medium text-accent hover:underline">{f.name}</button>
+                  <span className="text-muted">{formatFileSize(f.sizeBytes)} · {f.addedByLabel ?? "Someone"}</span>
+                  {!locked && <button onClick={() => void removeFile(f)} className="ml-auto text-muted hover:text-danger hover:underline">Remove</button>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </FileDropLine>
         <CommentThread comments={comments} onPost={postComment} when={timeAgo} viewer="team" />
       </div>
     </div>
@@ -552,15 +596,16 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
   return (
     <>
       {row}
-      {full ? (
-        <WorkItemWindow icon="📄" title={titleInput} badge={badge} status={saveLabel} onClose={() => switchView({ full: false })}>
+      {full && (
+        <WorkItemWindow icon="📄" title={titleInput} badge={stageSelect} status={saveLabel} onClose={() => switchView({ full: false })}>
           {content}
+          {/* Deleting lives only here, small and at the very end (Derek, 2026-09-11). */}
+          <div className="mt-12 flex justify-end border-t pt-4">
+            <button onClick={() => void deleteDocument()} disabled={busy !== null} className="text-[16px] text-muted hover:text-danger hover:underline disabled:opacity-50">
+              {busy === "delete" ? "Deleting…" : "Delete document"}
+            </button>
+          </div>
         </WorkItemWindow>
-      ) : (
-        <WorkItemInline>
-          <div className="mb-3">{titleInput}</div>
-          {content}
-        </WorkItemInline>
       )}
       {lightbox !== null && previewImages[lightbox] && (
         <ImageLightbox images={previewImages} index={lightbox} onIndex={setLightbox} onClose={() => setLightbox(null)} />
