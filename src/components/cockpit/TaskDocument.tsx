@@ -10,6 +10,7 @@
 // updates the task row, which arrives here live as a change to the task's
 // status and comments, and that is what makes this block refetch.
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { STATUS_META, timeAgo, type Task, type TaskStatus } from "@/lib/data";
 import { authedFetch } from "@/lib/supabase";
 import {
@@ -60,8 +61,27 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, open, onPrese
   const [clientCrossed, setClientCrossed] = useState<TaskDocumentVersion | null>(null);
   // Typing saves on its own; this is what says so (Derek, 2026-09-11: "add a save draft").
   const [saveState, setSaveState] = useState<"idle" | "unsaved" | "saving" | "saved">("idle");
+  // The draft over the whole window, for real writing (Derek, 2026-09-11).
+  const [full, setFull] = useState(false);
   const commit = useDebouncedCommit();
   const saving = useRef<Promise<boolean> | null>(null);
+
+  // Moving in or out of the window remounts the editor, which starts from the
+  // saved body, so the pending save lands first.
+  const setFullWindow = async (next: boolean) => {
+    commit.flush();
+    await saving.current;
+    setFull(next);
+  };
+  useEffect(() => {
+    if (!full) return;
+    // Capture phase, so Esc closes the window and not the whole task drawer.
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); void setFullWindow(false); } };
+    document.addEventListener("keydown", onKey, true);
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.removeEventListener("keydown", onKey, true); document.body.style.overflow = overflow; };
+  }, [full]); // eslint-disable-line react-hooks/exhaustive-deps
   const versionRef = useRef<number | null>(null);
 
   const load = useCallback(async () => {
@@ -217,13 +237,18 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, open, onPrese
   const needsSend = !locked && (doc.version === 0 || doc.draftDirty);
   const quiet = "rounded-lg border px-2.5 py-1 text-[16px] font-medium text-muted transition hover:bg-background hover:text-foreground disabled:opacity-50";
 
-  return (
-    <div className="mt-4 rounded-xl border bg-surface p-5 sm:p-6">
+  const block = (
+    <div className={full
+      ? "mx-auto w-full max-w-[920px] rounded-2xl border bg-surface p-6 shadow-xl sm:p-10"
+      : "mt-4 rounded-xl border bg-surface p-5 sm:p-6"}>
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <span className="text-[16px] font-semibold uppercase tracking-wide text-muted">Client document</span>
         <span className="rounded-full px-2 py-0.5 text-[16px] font-semibold" style={{ background: tone.chip, color: tone.dot }}>{view.label}</span>
         {doc.version > 0 && <span className="text-[16px] text-muted">Version {doc.version}</span>}
         {doc.version > 0 && link && <span className="text-[16px] text-muted">· Link {link.live ? "on" : "off"}</span>}
+        <button onClick={() => void setFullWindow(!full)} className={`ml-auto ${quiet}`}>
+          {full ? "Close full window" : "Full window"}
+        </button>
       </div>
 
       {clientCrossed && (
@@ -239,7 +264,7 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, open, onPrese
         </div>
       )}
 
-      <RichTextEditor key={`doc-${doc.id}-${nonce}`} value={doc.body} editable={!locked} variant="doc"
+      <RichTextEditor key={`doc-${doc.id}-${nonce}`} value={doc.body} editable={!locked} variant="doc" tall={full}
         placeholder="Write the content for your client…"
         onChange={(html) => { setSaveState("unsaved"); commit.schedule(() => { void save(html); }); }} />
 
@@ -305,5 +330,12 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, open, onPrese
         </div>
       )}
     </div>
+  );
+
+  if (!full) return block;
+  // Portalled to the body so it sits above the drawer and the app chrome.
+  return createPortal(
+    <div className="fixed inset-0 z-[100] overflow-y-auto bg-background px-4 py-6 sm:py-10">{block}</div>,
+    document.body,
   );
 }

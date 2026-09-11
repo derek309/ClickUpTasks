@@ -30,9 +30,11 @@ function ToolbarButton({ onClick, active, title, children, large }: { onClick: (
   );
 }
 
-export function RichTextEditor({ value, onChange, placeholder, autoFocus, editable = true, variant = "task" }: {
+export function RichTextEditor({ value, onChange, placeholder, autoFocus, editable = true, variant = "task", tall = false }: {
   value: string; onChange: (html: string) => void; placeholder?: string; autoFocus?: boolean;
   editable?: boolean; variant?: "task" | "doc";
+  /** A document in the full window: the writing surface fills most of the screen. */
+  tall?: boolean;
 }) {
   const doc = variant === "doc";
   const editor = useEditor({
@@ -60,7 +62,7 @@ export function RichTextEditor({ value, onChange, placeholder, autoFocus, editab
       // at 18px, since reading it is the whole job.
       attributes: {
         class: doc
-          ? "rte-content min-h-[320px] text-[18px] leading-relaxed text-foreground outline-none"
+          ? `rte-content ${tall ? "min-h-[65vh]" : "min-h-[320px]"} text-[18px] leading-relaxed text-foreground outline-none`
           : "rte-content min-h-[80px] text-[16px] text-foreground outline-none",
       },
       // Plain click still just positions the cursor while editing — Cmd/Ctrl
