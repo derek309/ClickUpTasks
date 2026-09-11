@@ -58,8 +58,10 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, open, onPrese
   const [busy, setBusy] = useState<string | null>(null);
   // The client sent changes while this teammate still had unsent edits.
   const [clientCrossed, setClientCrossed] = useState<TaskDocumentVersion | null>(null);
+  // Typing saves on its own; this is what says so (Derek, 2026-09-11: "add a save draft").
+  const [saveState, setSaveState] = useState<"idle" | "unsaved" | "saving" | "saved">("idle");
   const commit = useDebouncedCommit();
-  const saving = useRef<Promise<unknown> | null>(null);
+  const saving = useRef<Promise<boolean> | null>(null);
   const versionRef = useRef<number | null>(null);
 
   const load = useCallback(async () => {
@@ -106,13 +108,20 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, open, onPrese
   const copy = async (url: string) => { try { await navigator.clipboard.writeText(url); return true; } catch { return false; } };
 
   const save = (html: string) => {
+    setSaveState("saving");
     const p = docApi(task.id, "", { method: "PATCH", body: JSON.stringify({ body: html }) }).then(async (res) => {
       const j = await readJson(res);
-      if (res.ok) setDoc(rowToTaskDocument(j.document));
-      else pushToast((j.error as string) ?? "Could not save the document.");
+      if (res.ok) { setDoc(rowToTaskDocument(j.document)); setSaveState("saved"); }
+      else { setSaveState("unsaved"); pushToast((j.error as string) ?? "Could not save the document."); }
+      return res.ok;
     });
     saving.current = p;
     return p;
+  };
+
+  const saveDraft = async () => {
+    commit.flush();
+    if (await saving.current !== false) pushToast("Draft saved.");
   };
 
   const create = async () => {
@@ -185,15 +194,15 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, open, onPrese
   if (!doc) {
     if (!open) return null;
     return (
-      <div className="mt-3 rounded-xl border bg-surface p-3.5">
-        <div className="mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-muted">Client document</div>
+      <div className="mt-4 rounded-xl border bg-surface p-5 sm:p-6">
+        <div className="mb-1.5 text-[16px] font-semibold uppercase tracking-wide text-muted">Client document</div>
         {!loaded ? (
-          <p className="text-[14px] text-muted">Loading…</p>
+          <p className="text-[16px] text-muted">Loading…</p>
         ) : (
           <>
-            <p className="text-[14px] leading-relaxed">Write content for the client to review. They get a private link, no login needed, and can edit it or approve it.</p>
+            <p className="text-[16px] leading-relaxed">Write content for the client to review. They get a private link, no login needed, and can edit it or approve it.</p>
             <button onClick={create} disabled={busy === "create"}
-              className="mt-2.5 rounded-lg bg-accent px-3 py-1.5 text-[14px] font-medium text-white disabled:opacity-50">
+              className="mt-2.5 rounded-lg bg-accent px-5 py-2.5 text-[16px] font-medium text-white disabled:opacity-50">
               {busy === "create" ? "Starting…" : "Start the document"}
             </button>
           </>
@@ -206,40 +215,44 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, open, onPrese
   const tone = STATUS_META[view.tone];
   const locked = !!doc.approvedAt;
   const needsSend = !locked && (doc.version === 0 || doc.draftDirty);
-  const quiet = "rounded-lg border px-2.5 py-1 text-[13px] font-medium text-muted transition hover:bg-background hover:text-foreground disabled:opacity-50";
+  const quiet = "rounded-lg border px-2.5 py-1 text-[16px] font-medium text-muted transition hover:bg-background hover:text-foreground disabled:opacity-50";
 
   return (
-    <div className="mt-3 rounded-xl border bg-surface p-3.5">
+    <div className="mt-4 rounded-xl border bg-surface p-5 sm:p-6">
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Client document</span>
-        <span className="rounded-full px-2 py-0.5 text-[12px] font-semibold" style={{ background: tone.chip, color: tone.dot }}>{view.label}</span>
-        {doc.version > 0 && <span className="text-[12px] text-muted">Version {doc.version}</span>}
-        {doc.version > 0 && link && <span className="text-[12px] text-muted">· Link {link.live ? "on" : "off"}</span>}
+        <span className="text-[16px] font-semibold uppercase tracking-wide text-muted">Client document</span>
+        <span className="rounded-full px-2 py-0.5 text-[16px] font-semibold" style={{ background: tone.chip, color: tone.dot }}>{view.label}</span>
+        {doc.version > 0 && <span className="text-[16px] text-muted">Version {doc.version}</span>}
+        {doc.version > 0 && link && <span className="text-[16px] text-muted">· Link {link.live ? "on" : "off"}</span>}
       </div>
 
       {clientCrossed && (
-        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-accent/40 bg-accent-soft/40 px-3 py-2 text-[14px]">
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-accent/40 bg-accent-soft/40 px-3 py-2 text-[16px]">
           <span className="min-w-0 flex-1">{clientCrossed.authorLabel ?? "The client"} sent changes while you had unsent edits.</span>
           <button onClick={() => void patchDoc({ restoreVersion: clientCrossed.version }, "Their version is in. Send it when it's ready.")} className="font-medium text-accent hover:underline">Use their version</button>
           <button onClick={() => setClientCrossed(null)} className="font-medium text-muted hover:underline">Keep mine</button>
         </div>
       )}
       {locked && (
-        <div className="mb-2 rounded-lg px-3 py-2 text-[14px]" style={{ background: STATUS_META.approved.chip, color: STATUS_META.approved.dot }}>
+        <div className="mb-2 rounded-lg px-3 py-2 text-[16px]" style={{ background: STATUS_META.approved.chip, color: STATUS_META.approved.dot }}>
           The client approved {doc.approvedVersion ? `version ${doc.approvedVersion}` : "this document"}. Reopen it to make changes.
         </div>
       )}
 
-      <RichTextEditor key={`doc-${doc.id}-${nonce}`} value={doc.body} editable={!locked}
+      <RichTextEditor key={`doc-${doc.id}-${nonce}`} value={doc.body} editable={!locked} variant="doc"
         placeholder="Write the content for your client…"
-        onChange={(html) => commit.schedule(() => { void save(html); })} />
+        onChange={(html) => { setSaveState("unsaved"); commit.schedule(() => { void save(html); }); }} />
 
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
         {needsSend && (
           <button onClick={send} disabled={busy !== null}
-            className="rounded-lg bg-accent px-3 py-1.5 text-[14px] font-medium text-white disabled:opacity-50">
+            className="rounded-lg bg-accent px-5 py-2.5 text-[16px] font-medium text-white disabled:opacity-50">
             {busy === "send" ? "Sending…" : doc.version === 0 ? "Send for review" : "Send changes"}
           </button>
+        )}
+        {!locked && <button onClick={() => void saveDraft()} disabled={busy !== null || saveState === "saving"} className={quiet}>Save draft</button>}
+        {!locked && saveState !== "idle" && (
+          <span className="text-[16px] text-muted">{saveState === "unsaved" ? "Unsaved changes" : saveState === "saving" ? "Saving…" : "Draft saved"}</span>
         )}
         {link?.live && link.copyable && <button onClick={() => void linkAction("copy")} disabled={busy !== null} className={quiet}>Copy link</button>}
         {doc.version > 0 && canAdmin && <button onClick={makeNewLink} disabled={busy !== null} className={quiet}>{link?.live ? "Make a new link" : "Turn link on"}</button>}
@@ -250,7 +263,7 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, open, onPrese
 
       {historyOpen && (
         <div className="mt-3 space-y-1.5 border-t pt-3">
-          {versions.length === 0 && <p className="text-[13px] text-muted">Loading versions…</p>}
+          {versions.length === 0 && <p className="text-[16px] text-muted">Loading versions…</p>}
           {versions.map((v, i) => {
             const previous = versions[i + 1];
             const showing = diffVersion === v.version;
@@ -258,7 +271,7 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, open, onPrese
             const changed = !!d && d.parts.some((p) => p.type !== "same");
             return (
               <div key={v.id} className="rounded-lg border px-2.5 py-2">
-                <button onClick={() => setDiffVersion(showing ? null : v.version)} className="flex w-full flex-wrap items-center gap-x-2 text-left text-[13px]">
+                <button onClick={() => setDiffVersion(showing ? null : v.version)} className="flex w-full flex-wrap items-center gap-x-2 text-left text-[16px]">
                   <span className="font-semibold">Version {v.version}</span>
                   <span className="text-muted">{KIND_LABEL[v.kind]}{v.authorLabel ? ` by ${v.authorLabel}` : ""}</span>
                   <span className="text-muted">{timeAgo(v.createdAt)}</span>
@@ -266,13 +279,13 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, open, onPrese
                 {showing && (
                   <div className="mt-2">
                     {!previous ? (
-                      <p className="text-[13px] text-muted">The first version, so there is nothing to compare yet.</p>
+                      <p className="text-[16px] text-muted">The first version, so there is nothing to compare yet.</p>
                     ) : d?.formattingOnly ? (
-                      <p className="text-[13px] text-muted">Only the formatting changed.</p>
+                      <p className="text-[16px] text-muted">Only the formatting changed.</p>
                     ) : !changed ? (
-                      <p className="text-[13px] text-muted">No changes to the text.</p>
+                      <p className="text-[16px] text-muted">No changes to the text.</p>
                     ) : (
-                      <div className="whitespace-pre-wrap text-[14px] leading-relaxed">
+                      <div className="whitespace-pre-wrap text-[16px] leading-relaxed">
                         {d!.parts.map((p, k) => p.type === "same"
                           ? <span key={k}>{p.text}</span>
                           : p.type === "added"
@@ -282,7 +295,7 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, open, onPrese
                     )}
                     {!locked && (
                       <button onClick={() => void patchDoc({ restoreVersion: v.version }, `Version ${v.version} is back. Send it when it's ready.`)}
-                        className="mt-2 text-[13px] font-medium text-accent hover:underline">Use this version</button>
+                        className="mt-2 text-[16px] font-medium text-accent hover:underline">Use this version</button>
                     )}
                   </div>
                 )}

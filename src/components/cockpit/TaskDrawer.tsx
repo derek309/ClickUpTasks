@@ -1330,6 +1330,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 {chipRow}
                 {delegationRow}
                 {clientResponseBlock}
+                {/* The client document is work you write and send, not
+                    reference you consult, so it takes the wide column. In the
+                    rail it was a 400px box (Derek, 2026-09-11: "way to small"). */}
+                {documentBlock}
                 {/* Composer above the feed, because the feed is newest-first:
                     what you write next belongs at the end you are reading
                     from. Below it, opening a composer from the dock scrolled
@@ -1413,7 +1417,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   Only scrolls at that breakpoint; below it the rail stacks
                   under the document and the page scroll is the right one. */}
               <div className="flex min-h-0 flex-1 flex-col px-4 py-4 min-[1100px]:overflow-y-auto">
-                {documentBlock}
                 {descriptionBlock}
                 {subtasksBlock}
                 {attachmentsBlock}
