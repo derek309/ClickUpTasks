@@ -52,11 +52,13 @@ const docApi = (taskId: string, path: string, init?: RequestInit) =>
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
 
-export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, onPresence }: {
+export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence, meId }: {
   task: Task;
   onPatch: (patch: Partial<Task>) => void;
   pushToast: (text: string) => void;
   canAdmin: boolean;
+  /** The viewer's member id, the id a teammate's comment is saved under, so their own comments can be edited. */
+  meId?: string | null;
   /** Bumped by the "+ Client document" chip: start the document if there is none, then show it. */
   startNonce: number;
   /** Tells the drawer whether a document exists, so it can hide the chip. */
@@ -76,7 +78,6 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
   const [allHistory, setAllHistory] = useState(false);
   // History sits under the Send buttons, closed until asked for (Derek, 2026-09-11).
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [linkMenu, setLinkMenu] = useState(false);
   const [nonce, setNonce] = useState(0);
   // Moving between in place and full screen remounts the editor; it starts from
   // what was last typed, which may not be saved back from the server yet.
@@ -180,7 +181,6 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
     titleCommit.flush();
     setSeed(latestHtml.current);
     if (d && !visible) setTitleDraft(d.title);
-    setLinkMenu(false);
     setFull(next.full);
   };
 
@@ -276,32 +276,16 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
     else pushToast("Sent for review. Make a new link to get one you can share.");
   };
 
-  const linkAction = async (action: "copy" | "new") => {
-    setLinkMenu(false);
-    setBusy(action);
-    const res = await docApi(task.id, "/link", { method: "POST", body: JSON.stringify({ action }) });
+  // The one link control (Derek, 2026-09-11: "just need a copy link button that's
+  // all keep it simple"). Sending makes the link; deleting the document ends it.
+  const copyLink = async () => {
+    setBusy("copy");
+    const res = await docApi(task.id, "/link", { method: "POST", body: JSON.stringify({ action: "copy" }) });
     const j = await readJson(res);
     setBusy(null);
     if (!res.ok) { pushToast((j.error as string) ?? "Could not get the link."); return; }
     const url = j.url as string;
-    if (action === "new") setLink({ live: true, copyable: true });
-    pushToast(await copy(url) ? (action === "new" ? "New link copied." : "Link copied.") : `Share this link: ${url}`);
-  };
-
-  const makeNewLink = () => {
-    if (link?.live && !window.confirm("Make a new link? The old link stops working.")) return;
-    void linkAction("new");
-  };
-
-  const turnOff = async () => {
-    setLinkMenu(false);
-    if (!window.confirm("Turn the link off? The client's link stops working, and turning it back on makes a new link.")) return;
-    setBusy("off");
-    const res = await docApi(task.id, "/link", { method: "DELETE" });
-    setBusy(null);
-    if (!res.ok) { pushToast("Could not turn the link off."); return; }
-    setLink({ live: false, copyable: false });
-    pushToast("Link turned off.");
+    pushToast(await copy(url) ? "Link copied." : `Share this link: ${url}`);
   };
 
   const patchDoc = async (payload: Record<string, unknown>, done: string) => {
@@ -351,7 +335,25 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
     const res = await docApi(task.id, "/comments", { method: "POST", body: JSON.stringify({ body }) });
     const j = await readJson(res);
     if (!res.ok) { pushToast((j.error as string) ?? "Could not post the comment."); return false; }
-    setComments((c) => [...c, j.comment as TaskDocumentComment]);
+    setComments((c) => [...c, { ...(j.comment as TaskDocumentComment), authorId: meId ?? null }]);
+    return true;
+  };
+
+  // Edit your own comment, tick any comment done, delete any comment.
+  const changeComment = async (commentId: string, change: { body?: string; done?: boolean }) => {
+    const res = await docApi(task.id, "/comments", { method: "PATCH", body: JSON.stringify({ commentId, ...change }) });
+    const j = await readJson(res);
+    if (!res.ok) { pushToast((j.error as string) ?? "Could not update the comment."); return false; }
+    const next = j.comment as TaskDocumentComment;
+    setComments((cs) => cs.map((c) => (c.id === commentId ? { ...next, authorId: c.authorId } : c)));
+    return true;
+  };
+  const removeComment = async (commentId: string) => {
+    if (!window.confirm("Delete this comment? The client stops seeing it too.")) return false;
+    const res = await docApi(task.id, "/comments", { method: "DELETE", body: JSON.stringify({ commentId }) });
+    const j = await readJson(res);
+    if (!res.ok) { pushToast((j.error as string) ?? "Could not delete the comment."); return false; }
+    setComments((cs) => cs.filter((c) => c.id !== commentId));
     return true;
   };
 
@@ -407,7 +409,7 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
     else void openFile(f);
   };
   const copyLinkButton = link?.live && link.copyable
-    ? <button onClick={() => void linkAction("copy")} disabled={busy !== null} className={quiet}>Copy link</button>
+    ? <button onClick={() => void copyLink()} disabled={busy !== null} className={quiet}>Copy link</button>
     : null;
 
   const meta = [
@@ -424,15 +426,6 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
   if (!visible) return row;
 
   const saveLabel = saveState === "unsaved" ? "Unsaved changes" : saveState === "saving" ? "Saving…" : saveState === "saved" ? "Draft saved" : `Edited ${timeAgo(doc.updatedAt)}`;
-  const shareText = doc.version === 0
-    ? "Not sent yet. Send for review makes a private link for the client, no login needed."
-    : link?.live
-      ? `Link is on. The client can read, edit and approve version ${doc.version}.`
-      : "Link is off. The client can't open this document.";
-  const linkMenuItems = [
-    doc.version > 0 && canAdmin ? { label: link?.live ? "Make a new link" : "Turn link on", run: makeNewLink } : null,
-    link?.live ? { label: "Turn link off", run: () => void turnOff() } : null,
-  ].filter((x): x is { label: string; run: () => void } => !!x);
 
   // One history, newest first: sends and client versions, the team's saved
   // drafts, and files coming and going, each with who and when. "What changed"
@@ -477,27 +470,6 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
           <button onClick={() => void patchDoc({ reopen: true }, "Reopened. Send your changes when they're ready.")} className={quiet}>Reopen for changes</button>
         </div>
       )}
-
-      <div className="relative mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-accent/30 bg-accent-soft/40 px-4 py-2.5">
-        <span aria-hidden className="text-[18px]">🔗</span>
-        <span className="min-w-0 flex-1 text-[16px]">{shareText}</span>
-        {copyLinkButton}
-        {linkMenuItems.length > 0 && (
-          <>
-            <button onClick={() => setLinkMenu((m) => !m)} aria-label="Link options" aria-expanded={linkMenu} className={quiet}>•••</button>
-            {linkMenu && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setLinkMenu(false)} />
-                <div className="absolute right-3 top-full z-20 mt-1 min-w-[220px] overflow-hidden rounded-xl border bg-surface py-1 shadow-xl">
-                  {linkMenuItems.map((item) => (
-                    <button key={item.label} onClick={item.run} disabled={busy !== null} className="block w-full px-4 py-2.5 text-left text-[16px] hover:bg-background disabled:opacity-50">{item.label}</button>
-                  ))}
-                </div>
-              </>
-            )}
-          </>
-        )}
-      </div>
 
       <article className="rounded-2xl border bg-surface p-5 shadow-sm sm:p-8">
         <RichTextEditor key={`doc-${doc.id}-${nonce}`} value={seed ?? doc.body} editable={!locked} variant="doc"
@@ -588,7 +560,12 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
             </ul>
           )}
         </FileDropLine>
-        <CommentThread comments={comments} onPost={postComment} when={timeAgo} viewer="team" />
+        <CommentThread comments={comments} onPost={postComment} when={timeAgo} viewer="team"
+          isMine={(c) => !!meId && comments.find((x) => x.id === c.id)?.authorId === meId}
+          canDelete={() => true}
+          onEdit={(id, body) => changeComment(id, { body })}
+          onToggleDone={(id, done) => changeComment(id, { done })}
+          onDelete={removeComment} />
       </div>
     </div>
   );
@@ -597,7 +574,7 @@ export function TaskDocument({ task, onPatch, pushToast, canAdmin, startNonce, o
     <>
       {row}
       {full && (
-        <WorkItemWindow icon="📄" title={titleInput} badge={stageSelect} status={saveLabel} onClose={() => switchView({ full: false })}>
+        <WorkItemWindow icon="📄" title={titleInput} badge={stageSelect} status={saveLabel} actions={copyLinkButton} onClose={() => switchView({ full: false })}>
           {content}
           {/* Deleting lives only here, small and at the very end (Derek, 2026-09-11). */}
           <div className="mt-12 flex justify-end border-t pt-4">

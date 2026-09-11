@@ -200,6 +200,35 @@ export default function DocReviewView({ token }: { token: string }) {
     }
   };
 
+  // Edit or delete their own comments, tick any comment done.
+  const commentRequest = async (method: "PATCH" | "DELETE", payload: Record<string, unknown>) => {
+    try {
+      const res = await fetch(`/api/doc/${encodeURIComponent(token)}/comments`, {
+        method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (res.status === 404) { setState("gone"); return null; }
+      if (!res.ok) { setNotice({ tone: "warn", text: j.error ?? "We couldn't save that. Please try again." }); return null; }
+      return j as { comment?: ThreadComment };
+    } catch {
+      setNotice({ tone: "warn", text: "We couldn't reach the server. Check your connection and try again." });
+      return null;
+    }
+  };
+  const changeComment = async (commentId: string, change: { body?: string; done?: boolean }) => {
+    const j = await commentRequest("PATCH", { commentId, ...change });
+    if (!j?.comment) return false;
+    const next = j.comment;
+    setData((d) => d ? { ...d, comments: (d.comments ?? []).map((c) => (c.id === commentId ? next : c)) } : d);
+    return true;
+  };
+  const removeComment = async (commentId: string) => {
+    if (!window.confirm("Delete this comment?")) return false;
+    if (!(await commentRequest("DELETE", { commentId }))) return false;
+    setData((d) => d ? { ...d, comments: (d.comments ?? []).filter((c) => c.id !== commentId) } : d);
+    return true;
+  };
+
   const removeFile = async (f: DocFile) => {
     if (!window.confirm(`Remove ${f.name}?`)) return;
     const res = await filesApi("DELETE")({ fileId: f.id });
@@ -307,7 +336,11 @@ export default function DocReviewView({ token }: { token: string }) {
                     )}
                   </FileDropLine>
                 )}
-                <CommentThread comments={data.comments ?? []} onPost={postComment} when={commentTime} viewer="client" buttonStyle={{ background: NAVY }} />
+                <CommentThread comments={data.comments ?? []} onPost={postComment} when={commentTime} viewer="client" buttonStyle={{ background: NAVY }}
+                  isMine={(c) => c.fromClient} canDelete={(c) => c.fromClient}
+                  onEdit={(id, body) => changeComment(id, { body })}
+                  onToggleDone={(id, done) => changeComment(id, { done })}
+                  onDelete={removeComment} />
               </aside>
             </div>
           </>

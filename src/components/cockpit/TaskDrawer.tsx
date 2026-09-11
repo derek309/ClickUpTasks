@@ -884,7 +884,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // Keyed apart from the draft email line beside it: two siblings sharing a
     // key made React mount a new document line on every render and never drop
     // the old ones (Derek, 2026-09-11: "there's like 100 on there").
-    <TaskDocument key={`doc-${task.id}`} task={task} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin}
+    <TaskDocument key={`doc-${task.id}`} task={task} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin} meId={meId}
       startNonce={docStartNonce}
       onPresence={(exists) => setDocPresence((p) => (p.taskId === task.id && p.exists === exists ? p : { taskId: task.id, exists }))} />
   );

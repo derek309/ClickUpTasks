@@ -46,12 +46,14 @@ export function WorkItemRow({ icon, title, badge, meta, actions, onOpen }: {
 
 /** The full screen window. Esc or Close shuts it; onClose should land any
  *  pending save first. */
-export function WorkItemWindow({ icon, title, badge, status, onClose, children }: {
+export function WorkItemWindow({ icon, title, badge, status, actions, onClose, children }: {
   icon: string;
   /** Usually an input, so the name is edited where it is read. */
   title: React.ReactNode;
   badge?: React.ReactNode;
   status?: React.ReactNode;
+  /** Buttons just before Close, like Copy link. */
+  actions?: React.ReactNode;
   onClose: () => void;
   children: React.ReactNode;
 }) {
@@ -74,6 +76,7 @@ export function WorkItemWindow({ icon, title, badge, status, onClose, children }
         <div className="min-w-0 flex-1">{title}</div>
         {badge}
         {status && <span className="text-[16px] text-muted">{status}</span>}
+        {actions}
         <button onClick={onClose} className="rounded-lg border px-4 py-2 text-[16px] font-medium hover:bg-background">Close</button>
       </header>
       <div className="flex-1 overflow-y-auto px-4 pb-16 pt-6 sm:px-8">
@@ -85,22 +88,48 @@ export function WorkItemWindow({ icon, title, badge, status, onClose, children }
   );
 }
 
-export type ThreadComment = { id: string; body: string; authorLabel: string; fromClient: boolean; createdAt: string };
+export type ThreadComment = {
+  id: string; body: string; authorLabel: string; fromClient: boolean; createdAt: string;
+  editedAt?: string | null; completedAt?: string | null; completedBy?: string | null;
+};
+/** How many of the newest comments show before the rest fold away. */
+const LATEST_COMMENTS = 3;
 
 /** The comment thread on a client document, one thread the team and the client
  *  both see (Derek, 2026-09-11: "a chat box for comments"). Shown to the team in
- *  the document and to the client on their review page. */
-export function CommentThread({ comments, onPost, when, viewer, buttonStyle }: {
+ *  the document and to the client on their review page. Each comment has a tick
+ *  box like a task, and its author can edit it ("edit, delete and mark a comment
+ *  complete like a task"). */
+export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isMine, canDelete, onEdit, onDelete, onToggleDone }: {
   comments: ThreadComment[];
   /** Resolves true once the comment is in, which clears the box. */
   onPost: (body: string) => Promise<boolean>;
   when: (iso: string) => string;
-  /** Which side is reading, to mark their own comments and say who else sees them. */
+  /** Which side is reading, to say who else sees the thread. */
   viewer: "team" | "client";
   buttonStyle?: React.CSSProperties;
+  /** Whether the viewer wrote this comment: shaded, and theirs to edit. */
+  isMine: (c: ThreadComment) => boolean;
+  canDelete: (c: ThreadComment) => boolean;
+  onEdit: (id: string, body: string) => Promise<boolean>;
+  onDelete: (id: string) => Promise<boolean>;
+  onToggleDone: (id: string, done: boolean) => Promise<boolean>;
 }) {
   const [draft, setDraft] = useState("");
   const [posting, setPosting] = useState(false);
+  const [showOlder, setShowOlder] = useState(false);
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const act = async (id: string, work: () => Promise<boolean>) => {
+    setBusyId(id);
+    const ok = await work();
+    setBusyId(null);
+    return ok;
+  };
+  const saveEdit = async () => {
+    if (!editing || !editing.text.trim()) return;
+    if (await act(editing.id, () => onEdit(editing.id, editing.text.trim()))) setEditing(null);
+  };
   const post = async () => {
     const body = draft.trim();
     if (!body || posting) return;
@@ -109,27 +138,20 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle }: {
     setPosting(false);
     if (ok) setDraft("");
   };
+  // Newest first, under the box you write in; past the latest few, the older ones
+  // fold away behind a toggle (Derek, 2026-09-11: "as the comments get longer can
+  // we toggle the older ones ... newest at the top").
+  const newestFirst = [...comments].reverse();
+  const older = Math.max(0, newestFirst.length - LATEST_COMMENTS);
+  const shown = showOlder ? newestFirst : newestFirst.slice(0, LATEST_COMMENTS);
   return (
     <section className="rounded-xl border bg-surface px-4 py-3">
       <h3 className="text-[16px] font-semibold">Comments{comments.length ? ` · ${comments.length}` : ""}</h3>
       <p className="text-[16px] text-muted">{viewer === "team" ? "The client sees these on their review page." : "Your ClickUpLocal team sees these."}</p>
-      {comments.length > 0 && (
-        <ul className="mt-2 space-y-2">
-          {comments.map((c) => (
-            <li key={c.id} className={`rounded-lg px-3 py-2 ${(viewer === "client") === c.fromClient ? "bg-accent-soft/40" : "bg-background"}`}>
-              <div className="flex flex-wrap items-baseline gap-x-2 text-[16px]">
-                <span className="font-semibold">{c.authorLabel || (c.fromClient ? "Client" : "Team")}</span>
-                <span className="text-muted">{when(c.createdAt)}</span>
-              </div>
-              <p className="whitespace-pre-wrap break-words text-[16px] leading-relaxed">{c.body}</p>
-            </li>
-          ))}
-        </ul>
-      )}
-      <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={3} maxLength={4000}
+      <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={2} maxLength={4000}
         onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void post(); } }}
         placeholder="Write a comment…" aria-label="Write a comment"
-        className="mt-3 w-full resize-y rounded-lg border bg-background px-3 py-2 text-[16px] outline-none focus:border-accent" />
+        className="mt-2 w-full resize-y rounded-lg border bg-background px-3 py-2 text-[16px] outline-none focus:border-accent" />
       <div className="mt-2 flex items-center justify-end gap-3">
         <span className="hidden text-[16px] text-muted sm:inline">⌘ Enter posts it</span>
         <button onClick={() => void post()} disabled={posting || !draft.trim()} style={buttonStyle}
@@ -137,6 +159,61 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle }: {
           {posting ? "Posting…" : "Post comment"}
         </button>
       </div>
+      {shown.length > 0 && (
+        <ul className="mt-3 space-y-2">
+          {shown.map((c) => {
+            const mine = isMine(c);
+            const done = !!c.completedAt;
+            const busy = busyId === c.id;
+            const isEditing = editing?.id === c.id;
+            return (
+              <li key={c.id} className={`flex gap-3 rounded-lg px-3 py-2 ${mine ? "bg-accent-soft/40" : "bg-background"}`}>
+                <button role="checkbox" aria-checked={done} aria-label={done ? "Mark not done" : "Mark done"} title={done ? "Mark not done" : "Mark done"}
+                  onClick={() => void act(c.id, () => onToggleDone(c.id, !done))} disabled={busy}
+                  className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded border text-[16px] leading-none disabled:opacity-50 ${done ? "border-accent bg-accent text-white" : "bg-surface hover:border-accent"}`}>
+                  {done ? "✓" : ""}
+                </button>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-baseline gap-x-2 text-[16px]">
+                    <span className="font-semibold">{c.authorLabel || (c.fromClient ? "Client" : "Team")}</span>
+                    <span className="text-muted">{when(c.createdAt)}{c.editedAt ? " · edited" : ""}</span>
+                  </div>
+                  {isEditing ? (
+                    <>
+                      <textarea value={editing.text} onChange={(e) => setEditing({ id: c.id, text: e.target.value })} rows={3} maxLength={4000} autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void saveEdit(); }
+                          if (e.key === "Escape") { e.stopPropagation(); setEditing(null); }
+                        }}
+                        aria-label="Edit comment"
+                        className="mt-1 w-full resize-y rounded-lg border bg-surface px-3 py-2 text-[16px] outline-none focus:border-accent" />
+                      <div className="mt-1 flex gap-4 text-[16px]">
+                        <button onClick={() => void saveEdit()} disabled={busy || !editing.text.trim()} className="font-semibold text-accent hover:underline disabled:opacity-50">{busy ? "Saving…" : "Save"}</button>
+                        <button onClick={() => setEditing(null)} className="text-muted hover:underline">Cancel</button>
+                      </div>
+                    </>
+                  ) : (
+                    <p className={`whitespace-pre-wrap break-words text-[16px] leading-relaxed ${done ? "text-muted line-through" : ""}`}>{c.body}</p>
+                  )}
+                  {done && c.completedBy && <p className="text-[16px] text-muted">Done by {c.completedBy}</p>}
+                  {!isEditing && (mine || canDelete(c)) && (
+                    <div className="mt-1 flex gap-4 text-[16px]">
+                      {mine && <button onClick={() => setEditing({ id: c.id, text: c.body })} className="text-muted hover:text-foreground hover:underline">Edit</button>}
+                      {canDelete(c) && <button onClick={() => void act(c.id, () => onDelete(c.id))} disabled={busy} className="text-muted hover:text-danger hover:underline disabled:opacity-50">Delete</button>}
+                    </div>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {older > 0 && (
+        <button onClick={() => setShowOlder((s) => !s)} aria-expanded={showOlder}
+          className="mt-2 text-[16px] font-medium text-accent hover:underline">
+          {showOlder ? "Hide older comments" : `Show ${older} older ${older === 1 ? "comment" : "comments"}`}
+        </button>
+      )}
     </section>
   );
 }

@@ -151,7 +151,11 @@ export async function sharedDocFileUrl(documentId: string, fileId: string, downl
 // Comments: one thread the team and the client both see.
 
 export const MAX_COMMENT_CHARS = 4000;
-export type DocComment = { id: string; body: string; authorLabel: string; fromClient: boolean; createdAt: string };
+export type DocComment = {
+  id: string; body: string; authorLabel: string; fromClient: boolean; createdAt: string;
+  editedAt: string | null; completedAt: string | null; completedBy: string | null;
+};
+const COMMENT_COLUMNS = "id, body, author_id, author_label, created_at, edited_at, completed_at, completed_by_label";
 
 /** Plain text only: line breaks stay, other control characters go, and long
  *  runs of blank lines fold to one. Null when empty or too long. */
@@ -164,6 +168,9 @@ export function cleanCommentBody(raw: unknown): string | null {
 const toComment = (r: Record<string, unknown>): DocComment => ({
   id: r.id as string, body: r.body as string, authorLabel: (r.author_label as string | null) ?? "",
   fromClient: r.author_id === null, createdAt: r.created_at as string,
+  editedAt: (r.edited_at as string | null) ?? null,
+  completedAt: (r.completed_at as string | null) ?? null,
+  completedBy: (r.completed_by_label as string | null) ?? null,
 });
 
 export async function postDocComment(documentId: string, rawBody: unknown, actor: DocActor): Promise<{ ok: true; comment: DocComment } | Fail> {
@@ -185,9 +192,50 @@ export async function postDocComment(documentId: string, rawBody: unknown, actor
 /** The thread, oldest first. */
 export async function docComments(documentId: string): Promise<DocComment[]> {
   const { data } = await supabaseAdmin.from("task_document_comments")
-    .select("id, body, author_id, author_label, created_at")
+    .select(COMMENT_COLUMNS)
     .eq("document_id", documentId).order("created_at", { ascending: true }).limit(300);
   return (data ?? []).map(toComment);
+}
+
+async function findComment(documentId: string, commentId: unknown) {
+  if (typeof commentId !== "string") return null;
+  const { data } = await supabaseAdmin.from("task_document_comments")
+    .select("id, author_id").eq("id", commentId).eq("document_id", documentId).maybeSingle();
+  return data;
+}
+
+/** Edit a comment's text (its author only) and tick it done or open again
+ *  (anyone in the thread), like a checklist item. */
+export async function editDocComment(documentId: string, commentId: unknown, change: { body?: unknown; done?: unknown }, actor: DocActor): Promise<{ ok: true; comment: DocComment } | Fail> {
+  const found = await findComment(documentId, commentId);
+  if (!found) return fail(404, "That comment is gone.");
+  const now = new Date().toISOString();
+  const patch: Record<string, unknown> = {};
+  if (change.body !== undefined) {
+    if (found.author_id !== actor.id) return fail(403, "You can edit the comments you wrote.");
+    const body = cleanCommentBody(change.body);
+    if (!body) return fail(400, "Write a comment first.");
+    patch.body = body;
+    patch.edited_at = now;
+  }
+  if (typeof change.done === "boolean") {
+    patch.completed_at = change.done ? now : null;
+    patch.completed_by_label = change.done ? actor.label : null;
+  }
+  if (!Object.keys(patch).length) return fail(400, "Invalid request.");
+  const { data, error } = await supabaseAdmin.from("task_document_comments")
+    .update(patch).eq("id", found.id as string).select(COMMENT_COLUMNS).single();
+  if (error || !data) return fail(500, "Could not update the comment. Please try again.");
+  return { ok: true, comment: toComment(data) };
+}
+
+/** Delete a comment: its author, or any teammate when anyTeammate is set. */
+export async function deleteDocComment(documentId: string, commentId: unknown, actor: DocActor, anyTeammate: boolean): Promise<{ ok: true } | Fail> {
+  const found = await findComment(documentId, commentId);
+  if (!found) return fail(404, "That comment is gone.");
+  if (!anyTeammate && found.author_id !== actor.id) return fail(403, "You can delete the comments you wrote.");
+  const { error } = await supabaseAdmin.from("task_document_comments").delete().eq("id", found.id as string);
+  return error ? fail(500, "Could not delete the comment. Please try again.") : { ok: true };
 }
 
 // ---------------------------------------------------------------------------
