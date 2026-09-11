@@ -22,3 +22,22 @@ export function diffDocText(beforeHtml: string, afterHtml: string): { parts: Dif
   }));
   return { parts, formattingOnly: before === after && beforeHtml.trim() !== afterHtml.trim() };
 }
+
+/** What changed between two versions, in a few plain lines for an email drafter:
+ *  the wording added and the wording removed. Null when the text is the same
+ *  (Derek, 2026-09-11: an email that says "we made changes, here's what changed"). */
+export function summarizeDocChanges(beforeHtml: string, afterHtml: string, maxChars = 1500): string | null {
+  const { parts } = diffDocText(beforeHtml, afterHtml);
+  const pick = (type: DiffPart["type"]) => parts
+    .filter((p) => p.type === type)
+    .map((p) => p.text.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const added = pick("added");
+  const removed = pick("removed");
+  if (!added.length && !removed.length) return null;
+  const summary = [
+    added.length ? `Added: ${added.map((t) => `"${t}"`).join(", ")}` : null,
+    removed.length ? `Removed: ${removed.map((t) => `"${t}"`).join(", ")}` : null,
+  ].filter(Boolean).join("\n");
+  return summary.length > maxChars ? `${summary.slice(0, maxChars)}…` : summary;
+}

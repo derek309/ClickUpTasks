@@ -724,7 +724,13 @@ export interface Task {
    * composer uses. Cleared (set null) once sent or explicitly discarded.
    * Edited in place in the task's Draft email line (DraftEmail.tsx), which
    * keeps its attachments (stored files, same shape as task attachments). */
-  draftEmail?: { subject: string; body: string; createdAt: string; updatedAt?: string; attachments?: Attachment[] } | null;
+  draftEmail?: {
+    subject: string; body: string; createdAt: string; updatedAt?: string; attachments?: Attachment[];
+    /** A link kept under the email through every AI rewrite, like a document's review link. */
+    link?: { url: string; label: string } | null;
+    /** What the email is about, handed to the AI drafter (a document sent for review). */
+    aiContext?: string;
+  } | null;
   contactId: string | null;
   due: string | null; // ISO yyyy-mm-dd
   /** Full-precision "last touched," written only by upsertConversationTask

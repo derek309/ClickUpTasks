@@ -192,7 +192,7 @@ export interface TaskMessagingProps {
   onSendTaskMessage?: (channel: MessageChannel, subject: string, body: string, attachments?: Attachment[], cc?: string[], bcc?: string[]) => void;
   onScheduleTaskMessage?: (channel: MessageChannel, subject: string, body: string, scheduledAt: string, attachments?: Attachment[], cc?: string[], bcc?: string[]) => void;
   sendingMessage?: boolean;
-  onDraftMessage?: (channel: "email" | "sms" | "chat", prompt?: string) => Promise<{ subject?: string; body: string } | null>;
+  onDraftMessage?: (channel: "email" | "sms" | "chat", prompt?: string, context?: string) => Promise<{ subject?: string; body: string } | null>;
   draftingMessage?: boolean;
   onGetTaskLink?: () => string | null;
   canAdmin?: boolean;

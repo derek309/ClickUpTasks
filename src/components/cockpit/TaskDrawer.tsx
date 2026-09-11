@@ -19,7 +19,7 @@ import { RichTextEditor } from "./RichTextEditor";
 import { useTaskMessaging } from "./TaskMessaging";
 import { useDebouncedCommit } from "./useDebouncedCommit";
 import { TaskDocument } from "./TaskDocument";
-import { DraftEmail } from "./DraftEmail";
+import { DraftEmail, draftLinkHtml, escapeHtml } from "./DraftEmail";
 
 const ATT_KIND_ORDER: Record<Attachment["kind"], number> = { image: 0, pdf: 1, doc: 2, sheet: 3, link: 4 };
 
@@ -150,7 +150,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   onSendTaskMessage?: (channel: MessageChannel, subject: string, body: string, attachments?: Attachment[], cc?: string[], bcc?: string[]) => void;
   onScheduleTaskMessage?: (channel: MessageChannel, subject: string, body: string, scheduledAt: string, attachments?: Attachment[], cc?: string[], bcc?: string[]) => void;
   sendingMessage?: boolean;
-  onDraftMessage?: (channel: "email" | "sms" | "chat", prompt?: string) => Promise<{ subject?: string; body: string } | null>; // Gemini draft, never sends
+  onDraftMessage?: (channel: "email" | "sms" | "chat", prompt?: string, context?: string) => Promise<{ subject?: string; body: string } | null>; // Gemini draft, never sends
   draftingMessage?: boolean;
   // Mints/reuses this task's client's public /waiting/[token] link, scoped to
   // this one task (?task=<id>) — used by the email composer's "Add task
@@ -873,6 +873,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // second click opens it again after it was closed.
   const [docStartNonce, setDocStartNonce] = useState(0);
   const [emailOpenNonce, setEmailOpenNonce] = useState(0);
+  // Bumped to have the draft email write itself with AI as it opens.
+  const [emailAiNonce, setEmailAiNonce] = useState(0);
   // The hidden file input lives in whichever of the two is actually mounted
   // (never both, since they're mutually exclusive) so fileRef always resolves.
   const hiddenFileInput = (
@@ -885,6 +887,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // key made React mount a new document line on every render and never drop
     // the old ones (Derek, 2026-09-11: "there's like 100 on there").
     <TaskDocument key={`doc-${task.id}`} task={task} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin} meId={meId}
+      onEmailClient={(review) => startReviewEmail(review)}
       startNonce={docStartNonce}
       onPresence={(exists) => setDocPresence((p) => (p.taskId === task.id && p.exists === exists ? p : { taskId: task.id, exists }))} />
   );
@@ -1184,8 +1187,39 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         setPendingNextStep({ kind: "email", body: htmlToText(body).trim() });
       } : undefined}
       onUpload={onUploadMessageImage} onMoreOptions={hasMessaging ? openDraftInComposer : undefined}
-      openNonce={emailOpenNonce} pushToast={pushToast} />
+      openNonce={emailOpenNonce} pushToast={pushToast}
+      onAiDraft={onDraftMessage ? (instruction, context) => onDraftMessage("email", instruction || undefined, context) : undefined}
+      aiNonce={emailAiNonce} />
   );
+  // The client document was sent for review, or its Email client button was
+  // clicked: a draft email to the client with the review link, which then writes
+  // itself with AI from the document and what changed (Derek, 2026-09-11). It
+  // replaces any draft already here. False when there is nobody to email.
+  const startReviewEmail = (review: { url: string | null; name: string; text: string; changes: string | null }) => {
+    if (!hasMessaging) return false;
+    const now = new Date().toISOString();
+    const link = review.url ? { url: review.url, label: `Review "${review.name}"` } : null;
+    const name = escapeHtml(review.name);
+    const intro = review.changes
+      ? `<p>Hi,</p><p>We made some updates to "${name}". Take a look and approve it when it looks right:</p>`
+      : `<p>Hi,</p><p>"${name}" is ready for your review. You can read it, make changes, leave comments or approve it here:</p>`;
+    const aiContext = [
+      review.changes
+        ? `We updated the document "${review.name}" and are asking the client to review the changes and approve it.`
+        : `We are asking the client to review the document "${review.name}". From the link they can read it, edit it, comment and approve it.`,
+      review.changes ? `What changed since the version they saw before:\n${review.changes}` : null,
+      `The document's text:\n${review.text}`,
+    ].filter(Boolean).join("\n\n");
+    onPatch({
+      draftEmail: {
+        subject: review.changes ? `Updated for your review: ${review.name}` : `Please review: ${review.name}`,
+        body: intro + draftLinkHtml(link), createdAt: now, updatedAt: now, link, aiContext,
+      },
+    });
+    setEmailOpenNonce((n) => n + 1);
+    setEmailAiNonce((n) => n + 1);
+    return true;
+  };
   const startDraftEmail = () => {
     const now = new Date().toISOString();
     onPatch({ draftEmail: { subject: task.title, body: "", createdAt: now, updatedAt: now } });

@@ -11,7 +11,7 @@
 // retires it once an outbound email with the same subject and body exists, so a
 // failed send, or cancelling the full composer, never loses it.
 import { useEffect, useRef, useState } from "react";
-import { STATUS_META, htmlToText, timeAgo, type Attachment, type Message, type Task } from "@/lib/data";
+import { STATUS_META, htmlToText, plainTextToHtml, timeAgo, type Attachment, type Message, type Task } from "@/lib/data";
 import { MAX_SHARED_FILE_BYTES, isPreviewableImage, isShareableFileName } from "@/lib/uploadTypes";
 import { signedUrlForFile } from "@/lib/db";
 import { RichTextEditor } from "./RichTextEditor";
@@ -25,9 +25,12 @@ import { newId } from "./ui";
 export type DraftEmailValue = NonNullable<Task["draftEmail"]>;
 
 const normalize = (s: string) => htmlToText(s).replace(/\s+/g, " ").trim().toLowerCase();
-const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+export const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+/** The link a draft keeps under its text through every AI rewrite, as its own paragraph. */
+export const draftLinkHtml = (link: { url: string; label: string } | null | undefined) =>
+  link ? `<p><a href="${escapeHtml(link.url)}">${escapeHtml(link.label)}</a></p>` : "";
 
-export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOptions, messages, openNonce, pushToast }: {
+export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOptions, messages, openNonce, pushToast, onAiDraft, aiNonce }: {
   task: Task;
   onPatch: (patch: Partial<Task>) => void;
   /** The linked contact's address, or null when there is nobody to send to yet. */
@@ -41,6 +44,10 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
   /** Bumped by the "+ Draft email" chip to show it. */
   openNonce: number;
   pushToast: (text: string) => void;
+  /** Writes the email with AI from an instruction and the draft's own context. */
+  onAiDraft?: (instruction: string, context?: string) => Promise<{ subject?: string; body: string } | null>;
+  /** Bumped to write the email with AI as soon as it opens (a document just sent for review). */
+  aiNonce?: number;
 }) {
   const draft = task.draftEmail ?? null;
   const [full, setFull] = useState(false);
@@ -53,6 +60,11 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
   const [saveState, setSaveState] = useState<"idle" | "unsaved" | "saved">("idle");
   const [uploading, setUploading] = useState(false);
   const [editorNonce, setEditorNonce] = useState(0);
+  const [aiInstruction, setAiInstruction] = useState("");
+  const [aiBusy, setAiBusy] = useState(false);
+  // The draft as of the last render, for AI results that arrive after it changed.
+  const draftRef = useRef(draft);
+  useEffect(() => { draftRef.current = task.draftEmail ?? null; });
   // Signed links for image thumbnails, by storage path, and the open preview.
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const [lightbox, setLightbox] = useState<number | null>(null);
@@ -81,6 +93,34 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [commit.flush]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Write (or rewrite) the email with AI (Derek, 2026-09-11: "use AI to help write
+  // that email"). The draft's link goes back under whatever the AI wrote, so the
+  // client always gets it however many times the text is rewritten.
+  const writeWithAi = async (instruction: string) => {
+    const current = draftRef.current;
+    if (!onAiDraft || !current || aiBusy) return;
+    commit.flush();
+    setAiBusy(true);
+    // Left blank on an email about something (a document), the context says what to write.
+    const ask = instruction || (current.aiContext ? "Write the email this context describes: short, friendly, and asking them to open the link below." : "");
+    const d = await onAiDraft(ask, current.aiContext);
+    setAiBusy(false);
+    const latest = draftRef.current;
+    if (!d || !latest) return;
+    const subject = d.subject?.trim() || latest.subject;
+    pending.current = {};
+    onPatch({ draftEmail: { ...latest, subject, body: plainTextToHtml(d.body) + draftLinkHtml(latest.link), updatedAt: new Date().toISOString() } });
+    setLocal((l) => ({ ...l, subject }));
+    setEditorNonce((n) => n + 1);
+    setSaveState("saved");
+  };
+  const aiSeen = useRef(aiNonce);
+  useEffect(() => {
+    if (aiNonce === undefined || aiNonce === aiSeen.current) return;
+    aiSeen.current = aiNonce;
+    void writeWithAi("");
+  }, [aiNonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Thumbnails load only while the draft is open, an hour's link each.
   const open = full || requested;
@@ -198,6 +238,20 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
   const content = (
     <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
       <div className="min-w-0">
+      {onAiDraft && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-accent/30 bg-accent-soft/40 px-3 py-2">
+          <span aria-hidden className="text-[18px]">✨</span>
+          <input value={aiInstruction} onChange={(e) => setAiInstruction(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void writeWithAi(aiInstruction.trim()); } }}
+            placeholder={draft.aiContext ? "Tell AI anything to add, or leave it blank" : "Tell AI what this email should say"}
+            aria-label="Tell AI what to write" disabled={aiBusy}
+            className="min-w-0 flex-1 bg-transparent py-1 text-[16px] outline-none" />
+          <button onClick={() => void writeWithAi(aiInstruction.trim())} disabled={aiBusy}
+            className="rounded-lg bg-accent px-4 py-1.5 text-[16px] font-semibold text-white disabled:opacity-50">
+            {aiBusy ? "Writing…" : "Write with AI"}
+          </button>
+        </div>
+      )}
       <div className="overflow-hidden rounded-2xl border bg-surface shadow-sm">
         <div className="flex flex-wrap items-center gap-3 border-b px-4 py-2.5 text-[16px] sm:px-6">
           <span className="w-16 shrink-0 font-semibold text-muted">To</span>
@@ -260,7 +314,7 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onUpload, onMoreOpt
     <>
       {row}
       {open && (
-        <WorkItemWindow icon="✉️" badge={badge} status={saveLabel} onClose={() => setOpen(false)}
+        <WorkItemWindow icon="✉️" badge={badge} onClose={() => setOpen(false)}
           title={
             <div>
               <p className="px-1 text-[22px] font-bold leading-tight">Draft email</p>

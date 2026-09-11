@@ -22,7 +22,11 @@ export async function POST(req: NextRequest) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "AI drafting isn't configured yet (missing GEMINI_API_KEY)." }, { status: 501 });
 
-  const { clientId, projectId, channel, prompt: userPrompt } = (await req.json().catch(() => ({}))) as { clientId?: string; projectId?: string; channel?: "email" | "sms"; prompt?: string };
+  const { clientId, projectId, channel, prompt: userPrompt, context: rawContext } = (await req.json().catch(() => ({}))) as { clientId?: string; projectId?: string; channel?: "email" | "sms"; prompt?: string; context?: string };
+  // What this one message is about, when the caller knows more than the client's
+  // task list: the client review document being sent for review (Derek,
+  // 2026-09-11: "draft an email to the client to review it and use AI").
+  const context = typeof rawContext === "string" ? rawContext.trim().slice(0, 4000) : "";
   if (!clientId || !channel) return NextResponse.json({ error: "Missing clientId or channel." }, { status: 400 });
   // Same visibility gate as the extension routes — this pulls the client's
   // tasks, messages and internal notes into the draft, so requireUser (which
@@ -89,6 +93,10 @@ export async function POST(req: NextRequest) {
         : "Sign off with a brief, generic closing — no name is available, so don't invent one.")
       : null,
     "",
+    context ? "What this message is about (use it for facts; don't paste it back whole):" : null,
+    context || null,
+    context ? "Never write a link or URL: the link is added under the message automatically." : null,
+    context ? "" : null,
     `Client: ${client.name}`,
     "",
     "Recently completed tasks:", completedLines, "",

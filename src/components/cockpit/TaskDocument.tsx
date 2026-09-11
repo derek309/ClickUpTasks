@@ -10,7 +10,7 @@
 // document stays locked. A client's send, approval or file lands on the task row
 // live (status and an event comment), and that is what makes this refetch.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { STATUS_META, timeAgo, type Task, type TaskStatus } from "@/lib/data";
+import { STATUS_META, htmlToText, timeAgo, type Task, type TaskStatus } from "@/lib/data";
 import { authedFetch } from "@/lib/supabase";
 import {
   fetchTaskDocument, fetchTaskDocumentVersions, fetchTaskDocumentFiles, fetchTaskDocumentCheckpoints, fetchTaskDocumentComments,
@@ -18,7 +18,7 @@ import {
   type TaskDocument as Doc, type TaskDocumentStatus, type TaskDocumentVersion,
   type TaskDocumentFile, type TaskDocumentCheckpoint, type TaskDocumentComment,
 } from "@/lib/db";
-import { diffDocText } from "@/lib/docDiff";
+import { diffDocText, summarizeDocChanges } from "@/lib/docDiff";
 import { addDocFiles } from "@/lib/docFileUpload";
 import { formatFileSize, isPreviewableImage } from "@/lib/uploadTypes";
 import { RichTextEditor } from "./RichTextEditor";
@@ -52,13 +52,18 @@ const docApi = (taskId: string, path: string, init?: RequestInit) =>
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
 
-export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence, meId }: {
+export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence, meId, onEmailClient }: {
   task: Task;
   onPatch: (patch: Partial<Task>) => void;
   pushToast: (text: string) => void;
   canAdmin: boolean;
   /** The viewer's member id, the id a teammate's comment is saved under, so their own comments can be edited. */
   meId?: string | null;
+  /** Opens an email to the client with the review link, written with AI: after a
+   *  send, or from the Email client button. `changes` sums up what changed since
+   *  the version before. Returns true when it opened one (there is a contact to
+   *  email), so this window steps aside. */
+  onEmailClient?: (review: { url: string | null; name: string; text: string; changes: string | null }) => boolean;
   /** Bumped by the "+ Client document" chip: start the document if there is none, then show it. */
   startNonce: number;
   /** Tells the drawer whether a document exists, so it can hide the chip. */
@@ -268,24 +273,59 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
     const j = await readJson(res);
     setBusy(null);
     if (!res.ok) { pushToast((j.error as string) ?? "Could not send."); if (res.status === 409) void load(); return; }
+    const sentBody = doc.body;
+    // The last version the client saw, to say what this send changed.
+    const previousBody = doc.version > 0 ? versions[0]?.body : undefined;
     await load();
     if (task.status !== "waiting") onPatch({ status: "waiting" });
     const url = j.url as string | null;
-    if (url && await copy(url)) pushToast("Sent for review. Link copied, paste it to your client.");
+    const copied = !!url && await copy(url);
+    // Straight into an email to the client, written with AI (Derek, 2026-09-11:
+    // "when we send for review can it pop up a box to draft an email to the
+    // client"). The document window closes so the email is the one on screen.
+    const emailing = onEmailClient?.({
+      url, name: doc.title.trim() || task.title, text: htmlToText(sentBody).slice(0, 3000),
+      changes: previousBody ? summarizeDocChanges(previousBody, sentBody) : null,
+    }) ?? false;
+    if (emailing) switchView({ full: false });
+    if (copied) pushToast(emailing ? "Sent for review. Link copied and added to the email." : "Sent for review. Link copied, paste it to your client.");
     else if (url) pushToast(`Sent for review. Share this link: ${url}`);
-    else pushToast("Sent for review. Make a new link to get one you can share.");
+    else pushToast("Sent for review.");
   };
 
   // The one link control (Derek, 2026-09-11: "just need a copy link button that's
   // all keep it simple"). Sending makes the link; deleting the document ends it.
-  const copyLink = async () => {
-    setBusy("copy");
+  const fetchLink = async (): Promise<string | null> => {
     const res = await docApi(task.id, "/link", { method: "POST", body: JSON.stringify({ action: "copy" }) });
     const j = await readJson(res);
+    if (!res.ok) { pushToast((j.error as string) ?? "Could not get the link."); return null; }
+    return j.url as string;
+  };
+  const copyLink = async () => {
+    setBusy("copy");
+    const url = await fetchLink();
     setBusy(null);
-    if (!res.ok) { pushToast((j.error as string) ?? "Could not get the link."); return; }
-    const url = j.url as string;
-    pushToast(await copy(url) ? "Link copied." : `Share this link: ${url}`);
+    if (url) pushToast(await copy(url) ? "Link copied." : `Share this link: ${url}`);
+  };
+
+  // Email the client about the document at any time (Derek, 2026-09-11: "if we
+  // make updates and changes we can click a button to draft an email to the
+  // client"). Says what changed between the last two versions sent.
+  const emailClient = async () => {
+    if (!doc || !onEmailClient) return;
+    commit.flush();
+    await saving.current;
+    setBusy("email");
+    const url = link?.live && link.copyable ? await fetchLink() : null;
+    setBusy(null);
+    const [latest, before] = versions;
+    const opened = onEmailClient({
+      url, name: doc.title.trim() || task.title,
+      text: htmlToText(latest?.body ?? doc.body).slice(0, 3000),
+      changes: latest && before ? summarizeDocChanges(before.body, latest.body) : null,
+    });
+    if (opened) switchView({ full: false });
+    else pushToast("Link a contact to this client to email them from here.");
   };
 
   const patchDoc = async (payload: Record<string, unknown>, done: string) => {
@@ -411,6 +451,14 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
   const copyLinkButton = link?.live && link.copyable
     ? <button onClick={() => void copyLink()} disabled={busy !== null} className={quiet}>Copy link</button>
     : null;
+  const headerActions = (
+    <>
+      {onEmailClient && doc.version > 0 && (
+        <button onClick={() => void emailClient()} disabled={busy !== null} className={quiet}>{busy === "email" ? "Opening…" : "Email client"}</button>
+      )}
+      {copyLinkButton}
+    </>
+  );
 
   const meta = [
     doc.version ? `Version ${doc.version}` : "Not sent yet",
@@ -485,7 +533,8 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
           </button>
         )}
         {!locked && <button onClick={() => void saveDraft()} disabled={busy !== null || saveState === "saving"} className={quiet}>Save draft</button>}
-        {!locked && <span className="text-[16px] text-muted">{needsSend ? saveLabel : "Everything here has been sent."}</span>}
+        {/* When it last saved sits beside Save draft (Derek, 2026-09-11). */}
+        {!locked && <span className="text-[16px] text-muted">{saveLabel}{needsSend ? "" : " · Everything here has been sent"}</span>}
         <button onClick={() => setHistoryOpen((o) => !o)} aria-expanded={historyOpen} className={`ml-auto ${quiet}`}>
           {historyOpen ? "Hide history" : `History${timeline.length ? ` · ${timeline.length}` : ""}`}
         </button>
@@ -575,7 +624,7 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
     <>
       {row}
       {full && (
-        <WorkItemWindow icon="📄" title={titleInput} badge={stageSelect} status={saveLabel} actions={copyLinkButton} onClose={() => switchView({ full: false })}>
+        <WorkItemWindow icon="📄" title={titleInput} badge={stageSelect} actions={headerActions} onClose={() => switchView({ full: false })}>
           {content}
           {/* Deleting lives only here, small and at the very end (Derek, 2026-09-11). */}
           <div className="mt-12 flex justify-end border-t pt-4">
