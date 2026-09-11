@@ -4,6 +4,7 @@
 // RLS enabled.
 import { NextRequest } from "next/server";
 import { createHash } from "node:crypto";
+import { createClient } from "@supabase/supabase-js";
 import { supabaseAdmin, adminConfigured } from "./supabaseAdmin";
 
 // `id` is the Supabase auth uuid (profiles.id) — use it for anything keyed
@@ -63,4 +64,21 @@ export async function requireApiToken(req: NextRequest): Promise<AuthedUser | nu
   if (!profile) return null;
   const isAdmin = profile.role === "admin";
   return { id: row.owner_id, memberId: profile.member_id ?? null, email: profile.email ?? "", role: isAdmin ? "admin" : "va", canSendMessages: isAdmin || !!profile.can_send_messages };
+}
+
+/** Whether the signed-in caller can see this task, decided by the database's
+ *  own tasks_select policy (admin, assignee, or delegatee) by reading the row
+ *  AS the caller. Asking Postgres instead of restating the rule in code is the
+ *  point: isClientVisible, a copy of it, never learned about delegated_to. */
+export async function callerCanSeeTask(req: NextRequest, taskId: string): Promise<boolean> {
+  const token = req.headers.get("authorization")?.replace("Bearer ", "");
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!token || !url || !anonKey) return false;
+  const asCaller = createClient(url, anonKey, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+  const { data, error } = await asCaller.from("tasks").select("id").eq("id", taskId).maybeSingle();
+  return !error && !!data;
 }

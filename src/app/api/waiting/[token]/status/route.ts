@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
-import { todayIso, advanceDue, type Recurrence, type RecurrenceUnit, type Subtask } from "@/lib/data";
+import { advanceDue, clientAnswerPatch, type Recurrence, type RecurrenceUnit, type Subtask, type TaskStatus } from "@/lib/data";
 import { rateLimit } from "@/lib/rateLimit";
 import { resolveNotifyRecipient } from "@/lib/waitingNotify";
 import { resolveWaitingToken } from "@/lib/waitingToken";
@@ -40,15 +40,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   // assignee, so only a task nobody owns falls back to the client's followers.
   const owner = (task.assignee_id as string | null) ?? null;
   const notifyRecipient = owner ?? await resolveNotifyRecipient(scope.assignedTo);
-  const patch: Record<string, unknown> = { status };
   // Same "answering the call" reasoning as respond/route.ts — setting a
   // status is itself a response, so a task that was waiting on the client
-  // reopens for the team the same way replying to it would.
-  if (task.waiting_on_client === true) {
-    patch.waiting_on_client = false;
-    if (!owner) patch.assignee_id = notifyRecipient;
-    patch.due = todayIso();
-  }
+  // reopens for the team the same way replying to it would. The rule lives in
+  // clientAnswerPatch, shared with respond and the client review document.
+  const patch = clientAnswerPatch(task, notifyRecipient, status as TaskStatus);
 
   const { error } = await supabaseAdmin.from("tasks").update({ ...patch, updated_by: null }).eq("id", taskId);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });

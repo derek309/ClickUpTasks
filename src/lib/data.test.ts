@@ -29,6 +29,7 @@ import {
   linkSpans,
   splitQuotedEmail,
   tidyEmailText,
+  clientAnswerPatch,
   addBusinessDaysIso,
   derivedPriority,
   effectivePriority,
@@ -818,6 +819,27 @@ describe("linkSpans with angleLabels", () => {
   it("is off by default, so notes keep their plain behaviour", () => {
     expect(linkSpans(t)[0].label).toBeUndefined();
     expect(linkSpans(t)[0].href).toBe(url);
+  });
+});
+
+// One rule for what a client's answer does to a task, shared by the portal's
+// reply and review routes and the client review document.
+describe("clientAnswerPatch", () => {
+  it("reopens a waiting task for its owner: stops waiting, due today, owner kept", () => {
+    expect(clientAnswerPatch({ status: "waiting", waiting_on_client: true, assignee_id: "u_justin" }, "u_justin", "review"))
+      .toEqual({ status: "review", waiting_on_client: false, due: todayIso() });
+  });
+  it("assigns the recipient only when nobody owns the task", () => {
+    expect(clientAnswerPatch({ status: "waiting", waiting_on_client: true, assignee_id: null }, "u_derek", "approved"))
+      .toEqual({ status: "approved", waiting_on_client: false, assignee_id: "u_derek", due: todayIso() });
+  });
+  it("leaves the due date and owner alone when the task was not waiting", () => {
+    expect(clientAnswerPatch({ status: "in_progress", waiting_on_client: false, assignee_id: null }, "u_derek", "approved"))
+      .toEqual({ status: "approved" });
+  });
+  it("moves a waiting task to review when the answer sets no status", () => {
+    expect(clientAnswerPatch({ status: "waiting", waiting_on_client: true, assignee_id: "u_justin" }, "u_justin"))
+      .toEqual({ status: "review", waiting_on_client: false, due: todayIso() });
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { encryptToken, decryptToken, hashToken, tokenCryptoReady } from "./tokenCrypto";
+import { encryptToken, decryptToken, hashToken, tokenCryptoReady, mintToken } from "./tokenCrypto";
 
 // A round trip is the easy half. The half worth testing is everything that
 // must NOT come back: a wrong key, a tampered row, a missing key.
@@ -112,5 +112,27 @@ describe("hashToken", () => {
     const a = hashToken(TOKEN);
     withKey(KEY_B);
     expect(hashToken(TOKEN)).toBe(a);
+  });
+});
+
+// The one generator behind personal API tokens and client document links.
+describe("mintToken", () => {
+  it("prefixes and sizes a document link token (32 random bytes, base64url)", () => {
+    expect(mintToken("doc_").raw).toMatch(/^doc_[A-Za-z0-9_-]{43}$/);
+  });
+  it("never repeats", () => {
+    const seen = new Set(Array.from({ length: 1000 }, () => mintToken("doc_").raw));
+    expect(seen.size).toBe(1000);
+  });
+  it("hashes the exact token it returns, so a lookup by hash finds it", () => {
+    const { raw, hash } = mintToken("cut_");
+    expect(hash).toBe(hashToken(raw));
+  });
+  it("encrypts it for copying only when a key is set", () => {
+    withKey(KEY_A);
+    const withKeySet = mintToken("doc_");
+    expect(decryptToken(withKeySet.enc)).toBe(withKeySet.raw);
+    withKey(undefined);
+    expect(mintToken("doc_").enc).toBeNull();
   });
 });

@@ -19,7 +19,7 @@ import { supabaseAdmin } from "./supabaseAdmin";
 // below must stay well under that 1-hour sweep, or a long window's rows get
 // deleted mid-window and the counter silently resets.
 
-export type WaitingAction = "read" | "message" | "respond" | "status" | "request" | "upload";
+export type WaitingAction = "read" | "message" | "respond" | "status" | "request" | "upload" | "doc_read" | "doc_submit" | "doc_approve";
 
 type Rule = {
   /** Max requests per window for one token+IP pair. */
@@ -55,6 +55,12 @@ const MINUTE = 60_000;
 //           unbounded money cost. 25/30min covers a client dragging in a
 //           batch of screenshots and stays far above the 2-3 files a normal
 //           session sends.
+//  doc_*    The client review document at /doc/[token]. doc_read covers its
+//           15s poll (40/10min) with room for two tabs. doc_submit and
+//           doc_approve each publish a version and email the task owner, so
+//           they get the tighter budgets plus a cap across every IP on the
+//           link. Document routes pass the token's HASH as `token`, so a raw
+//           document link never lands in waiting_rate_limit.key.
 export const RATE_LIMITS: Record<WaitingAction, Rule> = {
   read:    { limit: 150, windowMs: 10 * MINUTE },
   message: { limit: 20,  windowMs: 10 * MINUTE },
@@ -62,6 +68,9 @@ export const RATE_LIMITS: Record<WaitingAction, Rule> = {
   status:  { limit: 20,  windowMs: 10 * MINUTE },
   request: { limit: 10,  windowMs: 30 * MINUTE, tokenLimit: 30 },
   upload:  { limit: 25,  windowMs: 30 * MINUTE, tokenLimit: 60 },
+  doc_read:    { limit: 120, windowMs: 10 * MINUTE },
+  doc_submit:  { limit: 10,  windowMs: 10 * MINUTE, tokenLimit: 30 },
+  doc_approve: { limit: 5,   windowMs: 10 * MINUTE, tokenLimit: 10 },
 };
 
 /** Seconds until the current fixed window rolls over — exact for this

@@ -80,3 +80,13 @@ export function decryptToken(stored: string | null | undefined): string | null {
 /** What authentication compares against. Unchanged by any of the above, and
  *  deliberately still the only column requireApiToken reads. */
 export const hashToken = (plain: string) => createHash("sha256").update(plain).digest("hex");
+
+/** The one generator for every hashed and encrypted token: personal API tokens
+ *  (`cut_`) and client review document links (`doc_`). Sharing it means a token
+ *  can never come out shorter, encoded differently, or hashed differently from
+ *  its siblings. 32 random bytes is 256 bits, far past guessing. `enc` is null
+ *  without TOKEN_ENC_KEY: the token still works but cannot be copied again. */
+export function mintToken(prefix: string): { raw: string; hash: string; enc: string | null } {
+  const raw = prefix + randomBytes(32).toString("base64url");
+  return { raw, hash: hashToken(raw), enc: encryptToken(raw) };
+}

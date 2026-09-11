@@ -30,6 +30,9 @@ export async function notifyTeamOfClientActivity(opts: {
   notifyRecipient: string; clientId: string; taskId: string; projectId: string | null;
   clientName: string; taskTitle: string; notifText: string; previewText?: string | null;
   kind?: "activity" | "message";
+  /** Email subject. Defaults to `<client> replied on "<task>"`, which is wrong
+   *  for anything that is not a reply (an approval, a document sent back). */
+  subject?: string;
 }): Promise<void> {
   await supabaseAdmin.from("notifications").insert({
     id: "n_" + randomUUID(), recipient_id: opts.notifyRecipient,
@@ -56,7 +59,7 @@ export async function notifyTeamOfClientActivity(opts: {
     ].join("");
     await sendGmailAs(recipientEmail, {
       to: recipientEmail,
-      subject: `${opts.clientName} replied on "${opts.taskTitle}"`.slice(0, 200),
+      subject: (opts.subject ?? `${opts.clientName} replied on "${opts.taskTitle}"`).slice(0, 200),
       body: html,
       isHtml: true,
     });

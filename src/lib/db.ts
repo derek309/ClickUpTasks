@@ -497,6 +497,37 @@ export const fetchTaskActions = async (taskId: string): Promise<TaskAction[]> =>
   return (data ?? []).map(rowToTaskAction);
 };
 
+// The client review document for one task and its versions (see
+// supabase/task-documents.sql). Read through the browser client so row level
+// security decides who sees them, which is exactly who can see the task. They
+// are never part of Task, so the full-row task upsert can never overwrite them;
+// every write goes through /api/tasks/[id]/document.
+export type TaskDocumentStatus = "draft" | "with_client" | "client_submitted" | "approved";
+export type TaskDocument = {
+  id: string; taskId: string; body: string; draftDirty: boolean; version: number;
+  status: TaskDocumentStatus; approvedAt: string | null; approvedVersion: number | null; updatedAt: string;
+};
+export type TaskDocumentVersion = {
+  id: string; version: number; kind: "sent" | "client_submitted" | "client_approved";
+  body: string; authorId: string | null; authorLabel: string | null; createdAt: string;
+};
+export const rowToTaskDocument = (r: any): TaskDocument => ({
+  id: r.id, taskId: r.task_id, body: r.body ?? "", draftDirty: !!r.draft_dirty, version: r.version ?? 0,
+  status: r.status, approvedAt: r.approved_at ?? null, approvedVersion: r.approved_version ?? null, updatedAt: r.updated_at,
+});
+export const fetchTaskDocument = async (taskId: string): Promise<TaskDocument | null> => {
+  const { data, error } = await supabase.from("task_documents").select("*").eq("task_id", taskId).maybeSingle();
+  if (error) { logErr({ error }); return null; }
+  return data ? rowToTaskDocument(data) : null;
+};
+export const fetchTaskDocumentVersions = async (documentId: string): Promise<TaskDocumentVersion[]> => {
+  const { data, error } = await supabase.from("task_document_versions").select("*").eq("document_id", documentId).order("version", { ascending: false });
+  if (error) { logErr({ error }); return []; }
+  return (data ?? []).map((r: any) => ({
+    id: r.id, version: r.version, kind: r.kind, body: r.body ?? "", authorId: r.author_id ?? null, authorLabel: r.author_label ?? null, createdAt: r.created_at,
+  }));
+};
+
 export const insertMessage = (m: Message) => save(() => supabase.from("messages").insert(messageToRow(m)));
 // One write per opened conversation, not per message — flips every unread
 // inbound row for that contact in a single UPDATE.

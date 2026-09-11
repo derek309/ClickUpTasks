@@ -863,6 +863,35 @@ export function applyWaitingStatusSync(before: { status: TaskStatus; waitingOnCl
   return out;
 }
 
+/** What a client's answer does to a task, as the snake_case columns to write.
+ *
+ *  The one rule for every public route where a client answers: a reply, a review
+ *  outcome, a document submit or approval. When the task was waiting on them it
+ *  stops waiting, comes due today, and is assigned to `notifyRecipient` only if
+ *  nobody owns it. `status` is what the answer sets, if anything; the waiting
+ *  sync still applies, so an answer that sets no status moves a waiting task to
+ *  review. Before this, status/route.ts and respond/route.ts each built the same
+ *  patch by hand, and the document routes would have been a third copy. */
+export function clientAnswerPatch(
+  task: { status: string; waiting_on_client?: boolean | null; assignee_id?: string | null },
+  notifyRecipient: string | null,
+  status?: TaskStatus,
+): Record<string, unknown> {
+  const wasWaiting = task.waiting_on_client === true;
+  const change: Partial<Task> = status ? { status } : {};
+  if (wasWaiting) {
+    change.waitingOnClient = false;
+    if (!task.assignee_id) change.assigneeId = notifyRecipient;
+  }
+  const synced: Partial<Task> = { ...change, ...applyWaitingStatusSync({ status: task.status as TaskStatus, waitingOnClient: wasWaiting }, change) };
+  const patch: Record<string, unknown> = {};
+  if (synced.status !== undefined) patch.status = synced.status;
+  if (synced.waitingOnClient !== undefined) patch.waiting_on_client = synced.waitingOnClient;
+  if (synced.assigneeId !== undefined) patch.assignee_id = synced.assigneeId;
+  if (wasWaiting) patch.due = todayIso();
+  return patch;
+}
+
 // Parses describeFieldChange's (Cockpit.tsx) event strings into a structured
 // before/after pair — used by TaskDrawer's Activity diff cards and by the
 // Client Journal feed's completion detection, without a schema change:

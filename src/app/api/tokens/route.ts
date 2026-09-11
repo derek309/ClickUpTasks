@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/serverAuth";
-import { encryptToken, hashToken, tokenCryptoReady } from "@/lib/tokenCrypto";
+import { mintToken, tokenCryptoReady } from "@/lib/tokenCrypto";
 
 // Personal API tokens for external clients (the Gmail Chrome extension) that
 // can't do an interactive login — see requireApiToken in serverAuth.ts.
@@ -16,13 +16,6 @@ import { encryptToken, hashToken, tokenCryptoReady } from "@/lib/tokenCrypto";
 // reading this table is not the same as holding the tokens — see
 // lib/tokenCrypto. Tokens created before that existed have no ciphertext and
 // cannot be recovered; Rotate is still the answer for those.
-
-// One generator for both POST and PATCH, so a rotated token can never end up
-// shorter, differently prefixed, or hashed differently from a fresh one.
-function mintToken() {
-  const raw = "cut_" + randomBytes(32).toString("base64url");
-  return { raw, hash: hashToken(raw), enc: encryptToken(raw) };
-}
 
 export async function GET(req: NextRequest) {
   if (!adminConfigured) return NextResponse.json({ error: "Service role key not configured." }, { status: 501 });
@@ -43,7 +36,7 @@ export async function POST(req: NextRequest) {
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const body = await req.json().catch(() => ({}));
   const name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : "Chrome extension";
-  const { raw, hash, enc } = mintToken();
+  const { raw, hash, enc } = mintToken("cut_");
   const id = "tok_" + randomUUID();
   const { error } = await supabaseAdmin.from("api_tokens").insert({ id, owner_id: caller.id, name, token_hash: hash, token_enc: enc });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
@@ -61,7 +54,7 @@ export async function PATCH(req: NextRequest) {
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await req.json().catch(() => ({}));
   if (!id || typeof id !== "string") return NextResponse.json({ error: "Missing token id." }, { status: 400 });
-  const { raw, hash, enc } = mintToken();
+  const { raw, hash, enc } = mintToken("cut_");
   // owner_id in the filter is what stops one signed-in user rotating another
   // user's token by guessing an id, and `select` is what tells us whether the
   // row actually matched rather than silently updating nothing.

@@ -1,9 +1,9 @@
 "use client";
 
 // The task detail window (sidebar or full-page "document" view).
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, clientStatusMeta,
+  users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, clientStatusMeta, PERSONAL_CLIENT_ID,
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus,
   STATUS_META, pickableStatuses, type DelegateSpec, type ClientLink, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, startSignal, isSnoozed, daysUntilDue, formatDue, dueCountdown,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
@@ -17,39 +17,10 @@ import { SizePicker } from "./SizePicker";
 import { InlineAssignee, InlineDate, InlineDue } from "./GroupedList";
 import { RichTextEditor } from "./RichTextEditor";
 import { useTaskMessaging } from "./TaskMessaging";
+import { useDebouncedCommit } from "./useDebouncedCommit";
+import { TaskDocument } from "./TaskDocument";
 
 const ATT_KIND_ORDER: Record<Attachment["kind"], number> = { image: 0, pdf: 1, doc: 2, sheet: 3, link: 4 };
-
-// Title/description onChange used to call onPatch on every keystroke, which
-// writes through Cockpit.tsx's top-level `tasks` state (a full-array clone +
-// re-render of the whole unmemoized app tree, on a client with thousands of
-// tasks) AND fires a Supabase write, per character typed — the cause of the
-// multi-second-per-keystroke lag reported live (screenshot: 5-10s to see
-// typed text appear, on task titles specifically). Debouncing the commit
-// keeps the field itself instant (it's driven by local/editor-internal state,
-// not the patched value) while the expensive save only fires once typing
-// pauses. The commit closure is captured fresh at schedule() time (not read
-// from a ref later), so it stays bound to whichever task was open when the
-// keystroke happened even if the drawer has since switched to a different
-// task by the time the timer fires — no cross-task write-to-the-wrong-task
-// risk from debouncing.
-function useDebouncedCommit(delayMs = 600) {
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingRef = useRef<(() => void) | null>(null);
-  const flush = useCallback(() => {
-    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
-    const commit = pendingRef.current;
-    pendingRef.current = null;
-    if (commit) commit();
-  }, []);
-  const schedule = useCallback((commit: () => void) => {
-    pendingRef.current = commit;
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(flush, delayMs);
-  }, [flush, delayMs]);
-  useEffect(() => flush, [flush]); // flush on unmount rather than drop a trailing edit
-  return { schedule, flush };
-}
 
 // Each date gets an identity colour: follow-up amber, due red, created
 // green (Derek's call). The colour marks WHICH date you're looking at, not
@@ -888,6 +859,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const showDescription = htmlToText(task.description).trim().length > 0 || sectionOpen("description");
   const showChecklist = task.subtasks.length > 0 || sectionOpen("checklist");
   const showAttachments = task.attachments.length > 0 || sectionOpen("attachments");
+  // A client document is for sharing, so a private task and the Personal client
+  // never get one. Whether one exists is only known once TaskDocument loads it,
+  // so it reports back; keyed by task id like openSections, because this drawer
+  // is not remounted when the task changes.
+  const canHaveDocument = !task.private && task.clientId !== PERSONAL_CLIENT_ID;
+  const [docPresence, setDocPresence] = useState<{ taskId: string; exists: boolean }>({ taskId: task.id, exists: false });
+  const docExists = docPresence.taskId === task.id && docPresence.exists;
+  const showDocument = canHaveDocument && (docExists || sectionOpen("document"));
   // The hidden file input lives in whichever of the two is actually mounted
   // (never both, since they're mutually exclusive) so fileRef always resolves.
   const hiddenFileInput = (
@@ -895,6 +874,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       onChange={(e) => { if (e.target.files) onAddFiles(e.target.files); e.target.value = ""; }} />
   );
 
+  const documentBlock = !canHaveDocument ? null : (
+    <TaskDocument key={task.id} task={task} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin}
+      open={sectionOpen("document")}
+      onPresence={(exists) => setDocPresence((p) => (p.taskId === task.id && p.exists === exists ? p : { taskId: task.id, exists }))} />
+  );
   const descriptionBlock = !showDescription ? null : (
     <div className="mt-3 rounded-xl border bg-surface p-3.5">
       <div className="mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-muted">Description</div>
@@ -1182,7 +1166,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // target, so dragging a file in still works when Attachments is collapsed
   // (the expanded block has its own dropzone).
   const addChip = "rounded-lg border border-dashed px-3 py-1.5 text-[13px] font-medium text-muted transition hover:bg-background hover:text-foreground";
-  const emptySectionsRow = (showDescription && showChecklist && showAttachments) ? null : (
+  const emptySectionsRow = (showDescription && showChecklist && showAttachments && (showDocument || !canHaveDocument)) ? null : (
     <div
       onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setAttFileDragOver(true); } }}
       onDragLeave={(e) => { if (e.currentTarget === e.target) setAttFileDragOver(false); }}
@@ -1190,6 +1174,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       className={`mt-4 flex flex-wrap items-center gap-2 rounded-xl p-1 transition ${attFileDragOver ? "outline-2 outline-dashed outline-accent bg-accent-soft/30" : ""}`}
     >
       {!showDescription && <button onClick={() => openSection("description")} className={addChip}>+ Description</button>}
+      {canHaveDocument && !showDocument && <button onClick={() => openSection("document")} className={addChip}>+ Client document</button>}
       {!showChecklist && <button onClick={() => openSection("checklist")} className={addChip}>+ Checklist</button>}
       {!showAttachments && (<>
         {hiddenFileInput}
@@ -1307,6 +1292,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 {detailsBlock}
                 <div className="my-4 border-t" />
                 {clientResponseBlock}
+                {documentBlock}
                 {descriptionBlock}
                 {subtasksBlock}
                 {attachmentsBlock}
@@ -1427,6 +1413,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   Only scrolls at that breakpoint; below it the rail stacks
                   under the document and the page scroll is the right one. */}
               <div className="flex min-h-0 flex-1 flex-col px-4 py-4 min-[1100px]:overflow-y-auto">
+                {documentBlock}
                 {descriptionBlock}
                 {subtasksBlock}
                 {attachmentsBlock}
