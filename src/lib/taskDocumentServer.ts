@@ -2,6 +2,11 @@
 // private link that opens only it, and the version history behind both. See
 // supabase/task-documents.sql for the tables and publish_task_document_version.
 //
+// A task can also have an image review, the same document with kind "image"
+// (supabase/task-image-reviews.sql): its body is the id of the uploaded image to
+// send next, the client pins comments on it, and they approve it or ask for
+// changes without editing it.
+//
 // Two audiences, two doors:
 //   the team   signed in, checked against the task's own read policy
 //   the client no login, a doc_ link token that resolves to exactly one task
@@ -17,12 +22,20 @@ import { hashToken, mintToken, decryptToken } from "./tokenCrypto";
 import { PERSONAL_CLIENT_ID, clientAnswerPatch, htmlToText, type TaskStatus } from "./data";
 import { resolveNotifyRecipient, notifyTeamOfClientActivity } from "./waitingNotify";
 import { sanitizeDocHtml, DOC_MAX_RAW_CHARS, DOC_MAX_HTML_CHARS } from "./docHtml";
+import { docImageFile } from "./taskDocumentFiles";
+import type { TaskDocumentKind } from "./db";
 
 /** A document link token: `doc_` plus 32 random bytes in base64url. Checked
  *  before anything touches the database, so garbage never costs a query. */
 export const DOC_TOKEN_PATTERN = /^doc_[A-Za-z0-9_-]{43}$/;
 export const NO_STORE = { "Cache-Control": "private, no-store" };
 export type DocKind = "sent" | "client_submitted" | "client_approved";
+
+/** The kind of document a team route acts on: ?kind=image, else the text document. */
+export const kindOf = (req: NextRequest): TaskDocumentKind => (req.nextUrl.searchParams.get("kind") === "image" ? "image" : "doc");
+/** What activity lines and notifications call it. */
+export const kindNoun = (kind: TaskDocumentKind) => (kind === "image" ? "image" : "client document");
+export const noDocumentYet = (kind: TaskDocumentKind) => (kind === "image" ? "This task has no image review yet." : "This task has no client document yet.");
 
 // Sending changes emails the owner at most this often per document; approval
 // always emails, since it happens once and someone has to act on it.
@@ -37,6 +50,8 @@ export const docNotFound = () => json({ error: "Not found" }, 404);
 
 export type DocScope = {
   documentId: string;
+  /** "image" for an image review. */
+  kind: TaskDocumentKind;
   taskId: string;
   taskTitle: string;
   taskStatus: string;
@@ -73,7 +88,7 @@ export async function resolveDocToken(token: string): Promise<DocScope | null> {
     task.project_id
       ? supabaseAdmin.from("projects").select("id, deleted_at").eq("id", task.project_id as string).maybeSingle()
       : Promise.resolve({ data: null }),
-    supabaseAdmin.from("task_documents").select("id, task_id, status, deleted_at").eq("id", link.document_id as string).maybeSingle(),
+    supabaseAdmin.from("task_documents").select("id, task_id, status, deleted_at, kind").eq("id", link.document_id as string).maybeSingle(),
   ]);
   if (!client || client.deleted_at) return null;
   if (project?.deleted_at) return null;
@@ -82,6 +97,7 @@ export async function resolveDocToken(token: string): Promise<DocScope | null> {
 
   return {
     documentId: doc.id as string,
+    kind: doc.kind === "image" ? "image" : "doc",
     taskId: task.id as string,
     taskTitle: task.title as string,
     taskStatus: task.status as string,
@@ -96,12 +112,14 @@ export async function resolveDocToken(token: string): Promise<DocScope | null> {
 }
 
 /** The last version the team sent or the client submitted, cleaned again on the
- *  way out. The client always sees this, never the team's unsent working copy. */
-export async function latestPublished(documentId: string): Promise<{ version: number; body: string } | null> {
+ *  way out. The client always sees this, never the team's unsent working copy.
+ *  An image review's body is an image file id, not HTML, so it is left as it is. */
+export async function latestPublished(documentId: string, kind: TaskDocumentKind = "doc"): Promise<{ version: number; body: string } | null> {
   const { data } = await supabaseAdmin.from("task_document_versions")
     .select("version, body").eq("document_id", documentId)
     .order("version", { ascending: false }).limit(1).maybeSingle();
-  return data ? { version: data.version as number, body: sanitizeDocHtml(data.body as string) } : null;
+  if (!data) return null;
+  return { version: data.version as number, body: kind === "image" ? data.body as string : sanitizeDocHtml(data.body as string) };
 }
 
 /** A public POST body, refused unless it is JSON from this site and not huge.
@@ -185,7 +203,8 @@ export type PublishOutcome =
 
 /** A client sends changes or approves. In order: refuse a closed task, clean the
  *  HTML, publish against the version they started from, log it on the task,
- *  update the task, then tell the owner.
+ *  update the task, then tell the owner. On an image review the client never
+ *  changes the image, so both publish the image they were looking at.
  *
  *  The comment goes in BEFORE the task update, and the update sets updated_by to
  *  null. append_comment stamps updated_by with the comment's author (keeping the
@@ -193,33 +212,44 @@ export type PublishOutcome =
  *  event whose updated_by is the viewer, so writing the task last is what makes
  *  the change show up live for whoever last touched it. */
 export async function clientPublish(scope: DocScope, kind: "client_submitted" | "client_approved", rawHtml: unknown, baseVersion: unknown): Promise<PublishOutcome> {
-  if (typeof rawHtml !== "string" || typeof baseVersion !== "number" || !Number.isInteger(baseVersion)) {
+  const image = scope.kind === "image";
+  if ((!image && typeof rawHtml !== "string") || typeof baseVersion !== "number" || !Number.isInteger(baseVersion)) {
     return { ok: false, status: 400, error: "Invalid request." };
   }
   if (scope.taskStatus === "done" || scope.documentStatus === "completed") return { ok: false, status: 400, error: "This document is closed." };
-  const html = sanitizeDocHtml(rawHtml);
-  if (html.length > DOC_MAX_HTML_CHARS) return { ok: false, status: 413, error: "This document is too long to send." };
-  if (!htmlToText(html).trim()) return { ok: false, status: 400, error: "The document is empty." };
+  let body: string;
+  if (image) {
+    // A newer image sent in the meantime is still refused below: its version moved on.
+    const latest = await latestPublished(scope.documentId, "image");
+    if (!latest) return { ok: false, status: 404, error: "Not found" };
+    body = latest.body;
+  } else {
+    body = sanitizeDocHtml(rawHtml as string);
+    if (body.length > DOC_MAX_HTML_CHARS) return { ok: false, status: 413, error: "This document is too long to send." };
+    if (!htmlToText(body).trim()) return { ok: false, status: 400, error: "The document is empty." };
+  }
 
   let version: number;
   try {
-    version = await publishVersion(scope.documentId, baseVersion, kind, html, null, scope.clientName);
+    version = await publishVersion(scope.documentId, baseVersion, kind, body, null, scope.clientName);
   } catch {
     return { ok: false, status: 500, error: "Could not save. Please try again." };
   }
   if (version === -1 || version === -2) {
     return {
       ok: false, status: 409,
-      error: version === -2 ? "This document is already approved." : "The team posted a newer version while you were editing.",
-      current: await latestPublished(scope.documentId),
+      error: version === -2 ? `This ${image ? "image" : "document"} is already approved.` : "The team posted a newer version while you were looking.",
+      current: await latestPublished(scope.documentId, scope.kind),
     };
   }
   if (version < 0) return { ok: false, status: 404, error: "Not found" };
 
   const approved = kind === "client_approved";
+  const noun = kindNoun(scope.kind);
+  const changed = image ? `asked for changes on the ${noun}` : `sent changes to the ${noun}`;
   await appendClientEvent(scope.taskId, approved
-    ? `${scope.clientName} approved the client document (version ${version})`
-    : `${scope.clientName} sent changes to the client document (version ${version})`);
+    ? `${scope.clientName} approved the ${noun} (version ${version})`
+    : `${scope.clientName} ${changed} (version ${version})`);
 
   const recipient = scope.assigneeId ?? await resolveNotifyRecipient(scope.assignedTo);
   const patch = clientAnswerPatch(
@@ -232,11 +262,11 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
   await notifyOwnerOfClientDoc(scope, {
     always: approved,
     text: approved
-      ? `${scope.clientName} approved the client document on "${scope.taskTitle}".`
-      : `${scope.clientName} sent changes to the client document on "${scope.taskTitle}".`,
+      ? `${scope.clientName} approved the ${noun} on "${scope.taskTitle}".`
+      : `${scope.clientName} ${changed} on "${scope.taskTitle}".`,
     subject: approved
       ? `${scope.clientName} approved "${scope.taskTitle}"`
-      : `${scope.clientName} sent changes on "${scope.taskTitle}"`,
+      : `${scope.clientName} ${image ? "asked for changes" : "sent changes"} on "${scope.taskTitle}"`,
   }, recipient);
   return { ok: true, version };
 }
@@ -260,6 +290,27 @@ export async function teamDocAccess(req: NextRequest, taskId: string): Promise<{
     return { ok: false, res: json({ error: "A private task can't have a client document." }, 400) };
   }
   return { ok: true, user, task: task as TeamTask };
+}
+
+export type LiveDocument = { id: string } & Record<string, unknown>;
+
+/** The task's live (not deleted) document of a kind, with the columns asked for (id always). */
+export async function liveDocument(taskId: string, kind: TaskDocumentKind, columns = "id"): Promise<LiveDocument | null> {
+  const { data } = await supabaseAdmin.from("task_documents")
+    .select(columns).eq("task_id", taskId).eq("kind", kind).is("deleted_at", null).maybeSingle();
+  return (data as unknown as LiveDocument | null) ?? null;
+}
+
+/** teamDocAccess, then the live document of the kind the request names. */
+export async function teamDocument(req: NextRequest, taskId: string, columns = "id"): Promise<
+  { ok: true; user: AuthedUser; task: TeamTask; kind: TaskDocumentKind; doc: LiveDocument } | { ok: false; res: NextResponse }
+> {
+  const access = await teamDocAccess(req, taskId);
+  if (!access.ok) return access;
+  const kind = kindOf(req);
+  const doc = await liveDocument(taskId, kind, columns);
+  if (!doc) return { ok: false, res: json({ error: noDocumentYet(kind) }, 404) };
+  return { ...access, kind, doc };
 }
 
 /** The teammate's name for the version history, falling back to their email. */
@@ -302,21 +353,35 @@ export async function revokeDocLink(documentId: string): Promise<void> {
     .eq("document_id", documentId);
 }
 
-/** The team sends the current working copy as a new version. */
+/** The team sends the current working copy as a new version: the text, or on an
+ *  image review the image uploaded last. */
 export async function teamSend(documentId: string, baseVersion: number, user: AuthedUser): Promise<PublishOutcome> {
-  const { data: doc } = await supabaseAdmin.from("task_documents").select("body, status").eq("id", documentId).maybeSingle();
+  const { data: doc } = await supabaseAdmin.from("task_documents").select("body, status, kind").eq("id", documentId).maybeSingle();
   if (!doc) return { ok: false, status: 404, error: "Not found" };
-  if (doc.status === "completed") return { ok: false, status: 409, error: "This document is completed. Reopen it to send changes." };
-  const html = sanitizeDocHtml(doc.body as string);
-  if (!htmlToText(html).trim()) return { ok: false, status: 400, error: "Write the document before sending it." };
+  const kind: TaskDocumentKind = doc.kind === "image" ? "image" : "doc";
+  const what = kind === "image" ? "image" : "document";
+  if (doc.status === "completed") return { ok: false, status: 409, error: `This ${what} is completed. Reopen it to send changes.` };
+  let body: string;
+  if (kind === "image") {
+    body = doc.body as string;
+    if (!(await docImageFile(documentId, body, false))) return { ok: false, status: 400, error: "Upload the image before sending it." };
+  } else {
+    body = sanitizeDocHtml(doc.body as string);
+    if (!htmlToText(body).trim()) return { ok: false, status: 400, error: "Write the document before sending it." };
+  }
   let version: number;
   try {
-    version = await publishVersion(documentId, baseVersion, "sent", html, user.memberId, await memberLabel(user));
+    version = await publishVersion(documentId, baseVersion, "sent", body, user.memberId, await memberLabel(user));
   } catch (e) {
     return { ok: false, status: 500, error: e instanceof Error ? e.message : "Could not send." };
   }
-  if (version === -1) return { ok: false, status: 409, error: "The client sent a newer version. Review it before sending again.", current: await latestPublished(documentId) };
-  if (version === -2) return { ok: false, status: 409, error: "This document is approved. Reopen it to send changes." };
+  if (version === -1) {
+    return {
+      ok: false, status: 409, current: await latestPublished(documentId, kind),
+      error: kind === "image" ? "The client answered in the meantime. Look at their answer before sending again." : "The client sent a newer version. Review it before sending again.",
+    };
+  }
+  if (version === -2) return { ok: false, status: 409, error: `This ${what} is approved. Reopen it to send changes.` };
   if (version < 0) return { ok: false, status: 404, error: "Not found" };
   return { ok: true, version };
 }

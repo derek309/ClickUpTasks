@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { adminConfigured } from "@/lib/supabaseAdmin";
 import { rateLimit } from "@/lib/rateLimit";
 import {
-  DOC_TOKEN_PATTERN, NO_STORE, docNotFound, resolveDocToken, readPublicJson, logClientDocEvent, notifyOwnerOfClientDoc,
+  DOC_TOKEN_PATTERN, NO_STORE, docNotFound, resolveDocToken, readPublicJson, logClientDocEvent, notifyOwnerOfClientDoc, kindNoun,
   type DocScope,
 } from "@/lib/taskDocumentServer";
 import { postDocComment, editDocComment, deleteDocComment } from "@/lib/taskDocumentFiles";
@@ -10,7 +10,8 @@ import { postDocComment, editDocComment, deleteDocComment } from "@/lib/taskDocu
 // Public, no login: the client's side of the comment thread. They post, edit and
 // delete their own comments, and tick any comment done. A new comment is logged on
 // the task so the team sees it live, and the task owner is told (at most one email
-// every 15 minutes per document, the same cooldown as sent changes).
+// every 15 minutes per document, the same cooldown as sent changes). On an image
+// review a comment can sit on a numbered pin, and any comment can carry a file.
 
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: NO_STORE });
 
@@ -35,15 +36,19 @@ const clientActor = (scope: DocScope) => ({ id: null, label: scope.clientName })
 export async function POST(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   const o = await open(req, params);
   if (!o.ok) return o.res;
-  const { scope } = o;
-  const r = await postDocComment(scope.documentId, o.payload.body, clientActor(scope), o.payload.quote);
+  const { scope, payload } = o;
+  const r = await postDocComment(scope.documentId, payload.body, clientActor(scope), {
+    quote: payload.quote, pin: payload.pin, attachmentFileId: payload.attachmentFileId, clientSide: true,
+  });
   if (!r.ok) return json({ error: r.error }, r.status);
 
-  const snippet = r.comment.body.length > 140 ? `${r.comment.body.slice(0, 140)}…` : r.comment.body;
-  await logClientDocEvent(scope.taskId, `${scope.clientName} commented on the client document: "${snippet}"`);
+  const noun = kindNoun(scope.kind);
+  const { body, pin } = r.comment;
+  const snippet = body.length > 140 ? `${body.slice(0, 140)}…` : body;
+  await logClientDocEvent(scope.taskId, `${scope.clientName} commented on the ${noun}${pin ? ` on pin ${pin.number}` : ""}: ${body ? `"${snippet}"` : "added a file"}`);
   await notifyOwnerOfClientDoc(scope, {
     always: false,
-    text: `${scope.clientName} commented on the client document on "${scope.taskTitle}".`,
+    text: `${scope.clientName} commented on the ${noun} on "${scope.taskTitle}".`,
     subject: `${scope.clientName} commented on "${scope.taskTitle}"`,
   });
   return json({ comment: r.comment });

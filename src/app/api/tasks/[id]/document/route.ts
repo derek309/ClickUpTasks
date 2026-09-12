@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
-import { teamDocAccess, memberLabel, NO_STORE } from "@/lib/taskDocumentServer";
-import { recordCheckpoint } from "@/lib/taskDocumentFiles";
+import { teamDocAccess, memberLabel, kindOf, liveDocument, noDocumentYet, NO_STORE } from "@/lib/taskDocumentServer";
+import { recordCheckpoint, docImageFile } from "@/lib/taskDocumentFiles";
 import { sanitizeDocHtml, DOC_MAX_RAW_CHARS, DOC_MAX_HTML_CHARS } from "@/lib/docHtml";
 
 // The team's side of a task's client review document: create it, save the
 // working copy, reopen it after the client approved, or bring back an earlier
-// version. Reads happen in the browser through row level security (db.ts
-// fetchTaskDocument); every write comes through here so the HTML is cleaned and
-// an approved document stays locked.
+// version. ?kind=image does the same for the task's image review, whose working
+// copy is the uploaded image to send next. Reads happen in the browser through
+// row level security (db.ts fetchTaskDocument); every write comes through here so
+// the HTML is cleaned and an approved document stays locked.
 
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: NO_STORE });
 const DOC_STAGES: unknown[] = ["draft", "with_client", "client_submitted", "approved", "completed"];
@@ -19,18 +20,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params;
   const access = await teamDocAccess(req, id);
   if (!access.ok) return access.res;
+  const kind = kindOf(req);
 
-  const { data: existing } = await supabaseAdmin.from("task_documents").select("*").eq("task_id", id).is("deleted_at", null).maybeSingle();
+  const existing = await liveDocument(id, kind, "*");
   if (existing) return json({ document: existing });
 
   const now = new Date().toISOString();
   const { data, error } = await supabaseAdmin.from("task_documents")
-    .insert({ id: "tdoc_" + randomUUID(), task_id: id, created_by: access.user.memberId, updated_by: access.user.memberId, created_at: now, updated_at: now })
+    .insert({ id: "tdoc_" + randomUUID(), task_id: id, kind, created_by: access.user.memberId, updated_by: access.user.memberId, created_at: now, updated_at: now })
     .select("*").single();
   if (error) {
-    // Two teammates creating at once: task_id is unique, so the second insert
-    // fails and gets the document the first one made.
-    const { data: winner } = await supabaseAdmin.from("task_documents").select("*").eq("task_id", id).is("deleted_at", null).maybeSingle();
+    // Two teammates creating at once: one live document per task and kind, so the
+    // second insert fails and gets the document the first one made.
+    const winner = await liveDocument(id, kind, "*");
     return winner ? json({ document: winner }) : json({ error: error.message }, 400);
   }
   return json({ document: data });
@@ -41,16 +43,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const { id } = await params;
   const access = await teamDocAccess(req, id);
   if (!access.ok) return access.res;
+  const kind = kindOf(req);
 
   const text = await req.text();
   if (text.length > DOC_MAX_RAW_CHARS) return json({ error: "This document is too long." }, 413);
-  let payload: { body?: unknown; reopen?: unknown; restoreVersion?: unknown; restoreCheckpoint?: unknown; checkpoint?: unknown; title?: unknown; status?: unknown };
+  let payload: { body?: unknown; image?: unknown; reopen?: unknown; restoreVersion?: unknown; restoreCheckpoint?: unknown; checkpoint?: unknown; title?: unknown; status?: unknown };
   try { payload = JSON.parse(text); } catch { return json({ error: "Invalid request." }, 400); }
 
-  const { data: doc } = await supabaseAdmin.from("task_documents")
-    .select("id, approved_at, body, updated_by, created_at").eq("task_id", id).is("deleted_at", null).maybeSingle();
-  if (!doc) return json({ error: "This task has no client document yet." }, 404);
+  const doc = await liveDocument(id, kind, "id, approved_at, body, updated_by, created_at");
+  if (!doc) return json({ error: noDocumentYet(kind) }, 404);
   const stamp = { updated_by: access.user.memberId, updated_at: new Date().toISOString() };
+  const what = kind === "image" ? "image" : "document";
 
   // Reopen: the client approved, and the team wants to change it anyway.
   if (payload?.reopen === true) {
@@ -77,7 +80,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       .update({ title, ...stamp }).eq("id", doc.id).select("*").single();
     return error ? json({ error: error.message }, 400) : json({ document: data });
   }
-  if (doc.approved_at) return json({ error: "This document is approved. Reopen it to make changes." }, 409);
+  if (doc.approved_at) return json({ error: `This ${what} is approved. Reopen it to make changes.` }, 409);
+
+  // An image review's working copy is the image to send next, one the team
+  // uploaded to it (Derek, 2026-09-12: a revised image is a new version).
+  if (kind === "image") {
+    const file = await docImageFile(doc.id, payload?.image, false);
+    if (!file) return json({ error: "Upload the image first." }, 400);
+    const { data, error } = await supabaseAdmin.from("task_documents")
+      .update({ body: file.id, ...(file.id !== doc.body ? { draft_dirty: true } : {}), ...stamp })
+      .eq("id", doc.id).is("approved_at", null).select("*").maybeSingle();
+    if (error) return json({ error: error.message }, 400);
+    return data ? json({ document: data }) : json({ error: "This image is approved. Reopen it to make changes." }, 409);
+  }
 
   let body: string;
   if (typeof payload?.restoreVersion === "number") {
@@ -113,7 +128,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // changes hands (see recordCheckpoint).
   const user = access.user;
   await recordCheckpoint(
-    { documentId: doc.id as string, body: (doc.body as string) ?? "", updatedBy: (doc.updated_by as string | null) ?? null, createdAt: doc.created_at as string },
+    { documentId: doc.id, body: (doc.body as string) ?? "", updatedBy: (doc.updated_by as string | null) ?? null, createdAt: doc.created_at as string },
     { id: user.memberId ?? user.id, label: () => memberLabel(user) },
     body,
     payload.checkpoint === true || typeof payload.restoreVersion === "number" || typeof payload.restoreCheckpoint === "string",
@@ -131,7 +146,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const { id } = await params;
   const access = await teamDocAccess(req, id);
   if (!access.ok) return access.res;
-  const { data: doc } = await supabaseAdmin.from("task_documents").select("id").eq("task_id", id).is("deleted_at", null).maybeSingle();
+  const doc = await liveDocument(id, kindOf(req));
   if (!doc) return json({ ok: true });
   const now = new Date().toISOString();
   const { error } = await supabaseAdmin.from("task_documents")

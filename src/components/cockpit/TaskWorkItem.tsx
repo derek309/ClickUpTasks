@@ -1,10 +1,10 @@
 "use client";
 
-// A piece of work on a task with its own space: the client review document and
-// the draft email. In the task it is one line, closed until someone opens it:
-// Open shows it over the whole screen, the only view it has (Derek, 2026-09-11:
-// "remove the show and hide feature and change full to just open we only need one
-// screen").
+// A piece of work on a task with its own space: the client review document, the
+// image review and the draft email. In the task it is one line, closed until
+// someone opens it: Open shows it over the whole screen, the only view it has
+// (Derek, 2026-09-11: "remove the show and hide feature and change full to just
+// open we only need one screen").
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -19,6 +19,7 @@ export function WorkItemBadge({ label, chip, dot }: { label: string; chip: strin
 // (Derek, 2026-09-11: "can we make them different colors").
 const ROW_TONE = {
   doc: { box: "border-highlight/40 border-l-highlight bg-highlight-soft/60", tile: "bg-highlight-soft" },
+  image: { box: "border-success/30 border-l-success bg-success-soft/60", tile: "bg-success-soft" },
   email: { box: "border-accent/30 border-l-accent bg-accent-soft/60", tile: "bg-accent-soft" },
 } as const;
 
@@ -102,27 +103,50 @@ export type ThreadComment = {
   editedAt?: string | null; completedAt?: string | null; completedBy?: string | null;
   /** The words in the document this comment is about. */
   quote?: string | null;
+  /** The numbered pin on an image review's image this comment is about. */
+  pin?: { fileId: string; x: number; y: number; number: number } | null;
+  /** A file added with the comment. */
+  attachmentFileId?: string | null;
 };
 /** How many of the newest comments show before the rest fold away. */
 const LATEST_COMMENTS = 3;
+
+/** A pin's number in a circle, the same in the thread as on the image. */
+function PinNumber({ number, color }: { number: number; color?: string }) {
+  return (
+    <span className="inline-flex h-8 min-w-8 shrink-0 items-center justify-center rounded-full bg-accent px-2 text-[16px] font-bold leading-none text-white"
+      style={color ? { background: color } : undefined}>{number}</span>
+  );
+}
 
 /** The comment thread on a client document, one thread the team and the client
  *  both see (Derek, 2026-09-11: "a chat box for comments"). Shown to the team in
  *  the document and to the client on their review page. Each comment has a tick
  *  box like a task, and its author can edit it ("edit, delete and mark a comment
- *  complete like a task"). */
-export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isMine, canDelete, onEdit, onDelete, onToggleDone, quote, onClearQuote, focusedId, onQuoteClick }: {
+ *  complete like a task"). A comment can carry a file, and on an image review it
+ *  can sit on a numbered pin (Derek, 2026-09-12). */
+export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isMine, canDelete, onEdit, onDelete, onToggleDone, quote, onClearQuote, focusedId, onQuoteClick, pinDraft, placeholder, onAttach, renderAttachment }: {
   comments: ThreadComment[];
-  /** Resolves true once the comment is in, which clears the box. quote: the words it is about. */
-  onPost: (body: string, quote?: string | null) => Promise<boolean>;
+  /** Resolves true once the comment is in, which clears the box. quote: the words
+   *  it is about; attachmentFileId: a file added with it. */
+  onPost: (body: string, quote?: string | null, attachmentFileId?: string | null) => Promise<boolean>;
   /** Words selected in the document for the next comment, shown above the box
    *  (Derek, 2026-09-12: comments on a specific sentence). */
   quote?: string | null;
+  /** The number of a pin just dropped on the image for the next comment. */
+  pinDraft?: number | null;
+  /** Takes the words or the pin off the next comment. */
   onClearQuote?: () => void;
-  /** A comment picked from its highlight in the document: shown and scrolled to. */
+  /** A comment picked from its highlight or pin: shown and scrolled to. */
   focusedId?: string | null;
-  /** Clicking a comment's quote shows those words in the document. */
+  /** Clicking a comment's quote or pin shows it in the document or on the image. */
   onQuoteClick?: (id: string) => void;
+  /** What the empty box says. */
+  placeholder?: string;
+  /** Uploads a file for the next comment (Derek, 2026-09-12: "add a comment or upload a file"). */
+  onAttach?: (file: File) => Promise<{ id: string; name: string } | null>;
+  /** How a comment's file shows: something to click to open it. */
+  renderAttachment?: (fileId: string) => React.ReactNode;
   when: (iso: string) => string;
   /** Which side is reading, to say who else sees the thread. */
   viewer: "team" | "client";
@@ -136,6 +160,8 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
 }) {
   const [draft, setDraft] = useState("");
   const [posting, setPosting] = useState(false);
+  const [attached, setAttached] = useState<{ id: string; name: string } | null>(null);
+  const [attaching, setAttaching] = useState(false);
   const [showOlder, setShowOlder] = useState(false);
   const [showDone, setShowDone] = useState(false);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
@@ -151,16 +177,24 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
     if (await act(editing.id, () => onEdit(editing.id, editing.text.trim()))) setEditing(null);
   };
   const boxRef = useRef<HTMLTextAreaElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
   const itemRefs = useRef(new Map<string, HTMLLIElement>());
-  // Picking words in the document puts the cursor in the box, ready to write.
-  useEffect(() => { if (quote) boxRef.current?.focus(); }, [quote]);
+  // Picking words in the document or a spot on the image puts the cursor in the box, ready to write.
+  useEffect(() => { if (quote || pinDraft) boxRef.current?.focus(); }, [quote, pinDraft]);
   const post = async () => {
     const body = draft.trim();
-    if (!body || posting) return;
+    if ((!body && !attached) || posting) return;
     setPosting(true);
-    const ok = await onPost(body, quote ?? null);
+    const ok = await onPost(body, quote ?? null, attached?.id ?? null);
     setPosting(false);
-    if (ok) setDraft("");
+    if (ok) { setDraft(""); setAttached(null); }
+  };
+  const attach = async (file: File | undefined) => {
+    if (!file || !onAttach) return;
+    setAttaching(true);
+    const added = await onAttach(file);
+    setAttaching(false);
+    if (added) { setAttached(added); boxRef.current?.focus(); }
   };
   // Newest first, under the box you write in; past the latest few, the older ones
   // fold away behind a toggle (Derek, 2026-09-11: "as the comments get longer can
@@ -172,7 +206,7 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
   const doneOnes = newestFirst.filter((c) => !!c.completedAt);
   const older = Math.max(0, openOnes.length - LATEST_COMMENTS);
   const shown = [...(showOlder ? openOnes : openOnes.slice(0, LATEST_COMMENTS)), ...(showDone ? doneOnes : [])];
-  // A highlight clicked in the document opens its comment wherever it is folded away.
+  // A highlight or pin clicked opens its comment wherever it is folded away.
   useEffect(() => {
     if (!focusedId) return;
     const target = comments.find((c) => c.id === focusedId);
@@ -182,26 +216,49 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
     else if (openOnes.findIndex((c) => c.id === focusedId) >= LATEST_COMMENTS) setShowOlder(true);
     requestAnimationFrame(() => itemRefs.current.get(focusedId)?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
   }, [focusedId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pinColor = buttonStyle?.background as string | undefined;
   return (
     <section className="rounded-xl border bg-surface px-4 py-3">
       <h3 className="text-[16px] font-semibold">Comments{comments.length ? ` · ${comments.length}` : ""}</h3>
       {viewer === "team" && <p className="text-[16px] text-muted">The client sees these on their review page.</p>}
-      {quote && (
-        <div className="mt-2 flex items-start gap-2 rounded-lg border-l-4 border-highlight bg-highlight-soft/60 px-3 py-2 text-[16px]">
-          <span className="min-w-0 flex-1 break-words"><span className="text-muted">On </span>“{quote.replace(/\n/g, " … ")}”</span>
+      {(quote || pinDraft) && (
+        <div className="mt-2 flex items-center gap-2 rounded-lg border-l-4 border-highlight bg-highlight-soft/60 px-3 py-2 text-[16px]">
+          <span className="flex min-w-0 flex-1 items-center gap-2 break-words">
+            {pinDraft
+              ? <><PinNumber number={pinDraft} color={pinColor} /><span className="text-muted">On this spot</span></>
+              : <span><span className="text-muted">On </span>“{(quote ?? "").replace(/\n/g, " … ")}”</span>}
+          </span>
           {onClearQuote && (
-            <button onClick={onClearQuote} title="Comment on the whole document instead" aria-label="Comment on the whole document instead"
+            <button onClick={onClearQuote} title={pinDraft ? "Take the pin off" : "Comment on the whole document instead"}
+              aria-label={pinDraft ? "Take the pin off" : "Comment on the whole document instead"}
               className="shrink-0 px-1 text-[18px] leading-none text-muted hover:text-foreground">×</button>
           )}
         </div>
       )}
       <textarea ref={boxRef} value={draft} onChange={(e) => setDraft(e.target.value)} rows={2} maxLength={4000}
         onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void post(); } }}
-        placeholder={quote ? "Write a comment on these words…" : "Write a comment, or select words in the document to comment on them…"} aria-label="Write a comment"
+        placeholder={pinDraft ? "Write a comment on this spot…" : quote ? "Write a comment on these words…" : placeholder ?? "Write a comment, or select words in the document to comment on them…"}
+        aria-label="Write a comment"
         className="mt-2 w-full resize-y rounded-lg border bg-background px-3 py-2 text-[16px] outline-none focus:border-accent" />
-      <div className="mt-2 flex items-center justify-end gap-3">
+      {attached && (
+        <div className="mt-1 flex items-center gap-2 text-[16px]">
+          <span className="min-w-0 flex-1 truncate">📎 {attached.name}</span>
+          <button onClick={() => setAttached(null)} title="Leave the file off this comment" aria-label="Leave the file off this comment"
+            className="shrink-0 px-1 text-[18px] leading-none text-muted hover:text-foreground">×</button>
+        </div>
+      )}
+      <div className="mt-2 flex flex-wrap items-center justify-end gap-3">
+        {onAttach && (
+          <>
+            <input ref={fileInput} type="file" className="hidden" onChange={(e) => { void attach(e.target.files?.[0]); e.target.value = ""; }} />
+            <button onClick={() => fileInput.current?.click()} disabled={attaching || posting}
+              className="mr-auto text-[16px] font-medium text-muted hover:text-foreground hover:underline disabled:opacity-50">
+              {attaching ? "Adding the file…" : "📎 Attach a file"}
+            </button>
+          </>
+        )}
         <span className="hidden text-[16px] text-muted sm:inline">⌘ Enter posts it</span>
-        <button onClick={() => void post()} disabled={posting || !draft.trim()} style={buttonStyle}
+        <button onClick={() => void post()} disabled={posting || attaching || (!draft.trim() && !attached)} style={buttonStyle}
           className="rounded-lg bg-accent px-4 py-1.5 text-[16px] font-semibold text-white disabled:opacity-50">
           {posting ? "Posting…" : "Post comment"}
         </button>
@@ -222,7 +279,13 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
                   {done ? "✓" : ""}
                 </button>
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-baseline gap-x-2 text-[16px]">
+                  <div className="flex flex-wrap items-center gap-x-2 text-[16px]">
+                    {c.pin && (
+                      <button onClick={() => onQuoteClick?.(c.id)} disabled={!onQuoteClick} title={`Show pin ${c.pin.number} on the image`}
+                        aria-label={`Show pin ${c.pin.number} on the image`} className={done ? "opacity-50" : ""}>
+                        <PinNumber number={c.pin.number} color={pinColor} />
+                      </button>
+                    )}
                     <span className="font-semibold">{c.authorLabel || (c.fromClient ? "Client" : "Team")}</span>
                     <span className="text-muted">{when(c.createdAt)}{c.editedAt ? " · edited" : ""}</span>
                   </div>
@@ -246,9 +309,10 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
                         <button onClick={() => setEditing(null)} className="text-muted hover:underline">Cancel</button>
                       </div>
                     </>
-                  ) : (
+                  ) : c.body && (
                     <p className={`whitespace-pre-wrap break-words text-[16px] leading-relaxed ${done ? "text-muted line-through" : ""}`}>{c.body}</p>
                   )}
+                  {c.attachmentFileId && renderAttachment && <div className="mt-1 text-[16px]">{renderAttachment(c.attachmentFileId)}</div>}
                   {done && c.completedBy && <p className="text-[16px] text-muted">Done by {c.completedBy}</p>}
                   {!isEditing && (mine || canDelete(c)) && (
                     <div className="mt-1 flex gap-4 text-[16px]">
@@ -279,6 +343,84 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
         </div>
       )}
     </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Image review (Derek, 2026-09-12: "click on a spot ... to add a number then add
+// a comment or upload a file"). Shared by the team's window and the client's page.
+
+/** The comments to list beside an image: the general ones, and the pins on the image shown. */
+export const commentsFor = <C extends ThreadComment>(comments: C[], fileId: string | null): C[] =>
+  comments.filter((c) => !c.pin || c.pin.fileId === fileId);
+
+/** The number the next pin on this image gets, as the server will give it. */
+export const nextPin = (comments: ThreadComment[], fileId: string | null): number =>
+  Math.max(0, ...comments.filter((c) => c.pin && c.pin.fileId === fileId).map((c) => c.pin!.number)) + 1;
+
+/** One button per version of the image. Nothing when there is only one. */
+export function ImageVersionPicker({ options, value, onChange }: {
+  options: { fileId: string; label: string }[];
+  value: string | null;
+  onChange: (fileId: string) => void;
+}) {
+  if (options.length < 2) return null;
+  return (
+    <div role="tablist" aria-label="Versions of the image" className="flex flex-wrap gap-2">
+      {options.map((o) => (
+        <button key={o.fileId} role="tab" aria-selected={o.fileId === value} onClick={() => onChange(o.fileId)}
+          className={`rounded-full border px-3 py-1 text-[16px] font-medium transition ${o.fileId === value ? "border-foreground bg-foreground text-background" : "bg-surface text-muted hover:text-foreground"}`}>
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The image with its numbered pins. Clicking the image drops the next pin there
+ *  when onPlace is given; clicking a pin picks its comment. Pins sit at a share of
+ *  the image's width and height, so they stay put at any size. */
+export function ImagePinBoard({ src, alt, comments, fileId, pending, activeId, onPlace, onPinClick, color }: {
+  src: string;
+  alt: string;
+  comments: ThreadComment[];
+  /** The image shown; only its pins are drawn. */
+  fileId: string | null;
+  /** The pin dropped for the comment being written. */
+  pending?: { fileId: string; x: number; y: number; number: number } | null;
+  activeId?: string | null;
+  onPlace?: (spot: { x: number; y: number }) => void;
+  onPinClick: (commentId: string) => void;
+  /** The pin color: the client page's navy, else the app's accent. */
+  color?: string;
+}) {
+  const place = (e: React.MouseEvent<HTMLImageElement>) => {
+    if (!onPlace) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const clamp = (v: number) => Math.min(1, Math.max(0, v));
+    onPlace({ x: clamp((e.clientX - r.left) / r.width), y: clamp((e.clientY - r.top) / r.height) });
+  };
+  const marker = "absolute flex h-9 min-w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-white px-1 text-[16px] font-bold leading-none text-white shadow-lg";
+  const pins = comments.filter((c) => c.pin && c.pin.fileId === fileId);
+  return (
+    <div className="relative mx-auto w-fit max-w-full select-none">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={src} alt={alt} onClick={place} draggable={false}
+        className={`block h-auto max-w-full rounded-lg ${onPlace ? "cursor-crosshair" : ""}`} />
+      {pins.map((c) => (
+        <button key={c.id} onClick={() => onPinClick(c.id)} title={`Pin ${c.pin!.number}`} aria-label={`Pin ${c.pin!.number}`}
+          className={`${marker} transition hover:scale-110 ${activeId === c.id ? "z-10 ring-4 ring-highlight" : ""} ${c.completedAt ? "opacity-60" : ""}`}
+          style={{ left: `${c.pin!.x * 100}%`, top: `${c.pin!.y * 100}%`, background: c.completedAt ? "#6b7280" : color ?? "var(--accent)" }}>
+          {c.pin!.number}
+        </button>
+      ))}
+      {pending && pending.fileId === fileId && (
+        <span aria-hidden className={`${marker} z-10 ring-4 ring-highlight`}
+          style={{ left: `${pending.x * 100}%`, top: `${pending.y * 100}%`, background: color ?? "var(--accent)" }}>
+          {pending.number}
+        </span>
+      )}
+    </div>
   );
 }
 

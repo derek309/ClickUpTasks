@@ -4,6 +4,13 @@
 // link (no login), and sees what the client changed or approved. See
 // supabase/task-documents.sql and src/lib/taskDocumentServer.ts.
 //
+// kind "image" is the task's image review (Derek, 2026-09-12, supabase/
+// task-image-reviews.sql): the team uploads an image, the client clicks spots on it
+// to leave numbered comments or files, then asks for changes or approves. A revised
+// image is a new version, and the old ones keep their pins a click away. Everything
+// else here is shared with the document: the link, stages, files, comments,
+// history, the review email and delete.
+//
 // In the task it is one line; Open shows it over the whole screen (TaskWorkItem). Reads go through the browser
 // client and row level security (db.ts); every write goes through
 // /api/tasks/[id]/document so the HTML is cleaned on the server and an approved
@@ -16,17 +23,18 @@ import {
   fetchTaskDocument, fetchTaskDocumentVersions, fetchTaskDocumentFiles, fetchTaskDocumentCheckpoints, fetchTaskDocumentComments,
   fetchDeletedTaskDocuments, type DeletedTaskDocument,
   rowToTaskDocument, signedUrlForFile,
-  type TaskDocument as Doc, type TaskDocumentStatus, type TaskDocumentVersion,
+  type TaskDocument as Doc, type TaskDocumentKind, type TaskDocumentStatus, type TaskDocumentVersion,
   type TaskDocumentFile, type TaskDocumentCheckpoint, type TaskDocumentComment,
 } from "@/lib/db";
 import { diffDocText, summarizeDocChanges } from "@/lib/docDiff";
-import { addDocFiles } from "@/lib/docFileUpload";
+import { addDocFiles, uploadSharedFile } from "@/lib/docFileUpload";
+import { sentImages } from "@/lib/imagePins";
 import { formatFileSize, isPreviewableImage } from "@/lib/uploadTypes";
 import { RichTextEditor } from "./RichTextEditor";
 import { useDebouncedCommit } from "./useDebouncedCommit";
 import {
-  CommentThread, FileDropLine, ImageLightbox, ImageThumbGrid, WorkItemBadge, WorkItemRow, WorkItemWindow,
-  quietButton as quiet, type PreviewImage,
+  CommentThread, FileDropLine, ImageLightbox, ImagePinBoard, ImageThumbGrid, ImageVersionPicker, WorkItemBadge, WorkItemRow, WorkItemWindow,
+  commentsFor, nextPin, quietButton as quiet, type PreviewImage,
 } from "./TaskWorkItem";
 
 // The document's stages, in order (Derek, 2026-09-11: "draft, client review,
@@ -40,21 +48,23 @@ const STATUS_VIEW: Record<TaskDocumentStatus, { label: string; tone: TaskStatus 
   completed: { label: "Completed", tone: "done" },
 };
 const STAGES = Object.keys(STATUS_VIEW) as TaskDocumentStatus[];
-const KIND_LABEL: Record<TaskDocumentVersion["kind"], string> = {
-  sent: "Sent to client",
-  client_submitted: "Client sent changes",
-  client_approved: "Client approved",
+const KIND_LABEL: Record<TaskDocumentKind, Record<TaskDocumentVersion["kind"], string>> = {
+  doc: { sent: "Sent to client", client_submitted: "Client sent changes", client_approved: "Client approved" },
+  image: { sent: "Sent to client", client_submitted: "Client asked for changes", client_approved: "Client approved" },
 };
 const HISTORY_PREVIEW = 5;
+const IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
 
-const docApi = (taskId: string, path: string, init?: RequestInit) =>
-  authedFetch(`/api/tasks/${encodeURIComponent(taskId)}/document${path}`, {
+const docApi = (taskId: string, kind: TaskDocumentKind, path: string, init?: RequestInit) =>
+  authedFetch(`/api/tasks/${encodeURIComponent(taskId)}/document${path}${kind === "image" ? "?kind=image" : ""}`, {
     ...init,
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
 
-export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence, meId, onEmailClient }: {
+export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonce, onPresence, meId, onEmailClient }: {
   task: Task;
+  /** "image" for the task's image review. */
+  kind?: TaskDocumentKind;
   onPatch: (patch: Partial<Task>) => void;
   pushToast: (text: string) => void;
   canAdmin: boolean;
@@ -64,12 +74,15 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
    *  send, or from the Email client button. `changes` sums up what changed since
    *  the version before. Returns true when it opened one (there is a contact to
    *  email), so this window steps aside. */
-  onEmailClient?: (review: { url: string | null; name: string; text: string; changes: string | null }) => boolean;
-  /** Bumped by the "+ Client document" chip: start the document if there is none, then show it. */
+  onEmailClient?: (review: { kind: TaskDocumentKind; url: string | null; name: string; text: string; changes: string | null }) => boolean;
+  /** Bumped by the "+ Client document" or "+ Image review" chip: start it if there is none, then show it. */
   startNonce: number;
   /** Tells the drawer whether a document exists, so it can hide the chip. */
   onPresence: (exists: boolean) => void;
 }) {
+  const image = kind === "image";
+  const what = image ? "image review" : "document";
+  const api = (path: string, init?: RequestInit) => docApi(task.id, kind, path, init);
   const [doc, setDoc] = useState<Doc | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [link, setLink] = useState<{ live: boolean; copyable: boolean } | null>(null);
@@ -82,6 +95,11 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
   // are shown (Derek, 2026-09-12: comments on a specific sentence).
   const [quoteDraft, setQuoteDraft] = useState<string | null>(null);
   const [focusedComment, setFocusedComment] = useState<string | null>(null);
+  // Image review: the pin dropped for the next comment, and the version looked at
+  // (null follows the newest).
+  const [pinDraft, setPinDraft] = useState<{ fileId: string; x: number; y: number; number: number } | null>(null);
+  const [viewingImage, setViewingImage] = useState<string | null>(null);
+  const imageInput = useRef<HTMLInputElement>(null);
   // Documents deleted from this task that can still be restored (30 days).
   const [deletedDocs, setDeletedDocs] = useState<DeletedTaskDocument[]>([]);
   const [full, setFull] = useState(false);
@@ -113,17 +131,17 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
   const latestHtml = useRef<string | null>(null);
 
   const load = useCallback(async () => {
-    const fresh = await fetchTaskDocument(task.id);
+    const fresh = await fetchTaskDocument(task.id, kind);
     const previous = versionRef.current;
     versionRef.current = fresh?.version ?? null;
     setDoc(fresh);
     setLoaded(true);
-    void fetchDeletedTaskDocuments(task.id).then(setDeletedDocs);
+    void fetchDeletedTaskDocuments(task.id, kind).then(setDeletedDocs);
     if (!fresh) return;
     void fetchTaskDocumentFiles(fresh.id).then(setFiles);
     // A client's comment logs an event on the task too, so it arrives here the same way.
     void fetchTaskDocumentComments(fresh.id).then(setComments);
-    if (previous !== null && fresh.version > previous) {
+    if (kind === "doc" && previous !== null && fresh.version > previous) {
       const latest = (await fetchTaskDocumentVersions(fresh.id))[0];
       if (latest && latest.kind !== "sent") {
         // The client published. Show their text, unless the team is mid edit:
@@ -132,9 +150,9 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
         else { latestHtml.current = null; setSeed(null); setNonce((n) => n + 1); }
       }
     }
-    const res = await docApi(task.id, "/link");
+    const res = await docApi(task.id, kind, "/link");
     if (res.ok) setLink(await res.json());
-  }, [task.id]);
+  }, [task.id, kind]);
 
   // Fetch when the task opens. State is set only after the request resolves; the
   // rule flags any fetch on mount, and this app marks each one the same way.
@@ -173,7 +191,7 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
     return () => { cancelled = true; };
   }, [visible, doc?.id, doc?.version, doc?.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Thumbnails load only while the document is open, an hour's link each.
+  // Thumbnails (and an image review's images) load only while it is open, an hour's link each.
   const imagePaths = files.filter((f) => !f.removedAt && isPreviewableImage(f.name)).map((f) => f.path).join("|");
   useEffect(() => {
     const missing = imagePaths ? imagePaths.split("|").filter((p) => !thumbs[p]) : [];
@@ -199,10 +217,10 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
 
   const create = async (): Promise<Doc | null> => {
     setBusy("create");
-    const res = await docApi(task.id, "", { method: "POST", body: "{}" });
+    const res = await api("", { method: "POST", body: "{}" });
     const j = await readJson(res);
     setBusy(null);
-    if (!res.ok) { pushToast((j.error as string) ?? "Could not start the document."); return null; }
+    if (!res.ok) { pushToast((j.error as string) ?? `Could not start the ${what}.`); return null; }
     const created = rowToTaskDocument(j.document);
     versionRef.current = created.version;
     setDoc(created);
@@ -236,7 +254,7 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
     };
     // keepalive lets a save started as the page closes still reach the server;
     // browsers only allow it for small bodies.
-    const p = docApi(task.id, "", { method: "PATCH", body: payload, keepalive: payload.length < 60_000 })
+    const p = api("", { method: "PATCH", body: payload, keepalive: payload.length < 60_000 })
       .then(async (res) => {
         const j = await readJson(res);
         if (res.ok) { setDoc(rowToTaskDocument(j.document)); setSaveState("saved"); return true; }
@@ -256,7 +274,7 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
     commit.flush();
     if (await saving.current === false || !doc) return;
     setSaveState("saving");
-    const res = await docApi(task.id, "", { method: "PATCH", body: JSON.stringify({ body: latestHtml.current ?? doc.body, checkpoint: true }) });
+    const res = await api("", { method: "PATCH", body: JSON.stringify({ body: latestHtml.current ?? doc.body, checkpoint: true }) });
     const j = await readJson(res);
     if (!res.ok) { setSaveState("unsaved"); pushToast((j.error as string) ?? "Could not save the document."); return; }
     setDoc(rowToTaskDocument(j.document));
@@ -266,10 +284,30 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
 
   const saveTitle = async (value: string) => {
     if (!doc || value.trim() === doc.title.trim()) return;
-    const res = await docApi(task.id, "", { method: "PATCH", body: JSON.stringify({ title: value }), keepalive: true });
+    const res = await api("", { method: "PATCH", body: JSON.stringify({ title: value }), keepalive: true });
     const j = await readJson(res);
-    if (!res.ok) { pushToast((j.error as string) ?? "Could not rename the document."); return; }
+    if (!res.ok) { pushToast((j.error as string) ?? `Could not rename the ${what}.`); return; }
     setDoc(rowToTaskDocument(j.document));
+  };
+
+  // An image review: upload an image and make it the one to send next. The first
+  // image, or a new version of it (Derek, 2026-09-12: keep the old pins).
+  const uploadImage = async (list: FileList) => {
+    if (!doc || adding) return;
+    const file = Array.from(list).find((f) => isPreviewableImage(f.name));
+    if (!file) { pushToast("Upload a JPG, PNG, WebP or GIF image."); return; }
+    setAdding(true);
+    const up = await uploadSharedFile(file, (payload) => api("/files", { method: "POST", body: JSON.stringify({ ...payload, purpose: "image" }) }));
+    if (!up.ok) { setAdding(false); pushToast(up.error); return; }
+    const res = await api("", { method: "PATCH", body: JSON.stringify({ image: up.result.fileId }) });
+    const j = await readJson(res);
+    setAdding(false);
+    if (!res.ok) { pushToast((j.error as string) ?? "Could not use that image."); return; }
+    setDoc(rowToTaskDocument(j.document));
+    setViewingImage(null);
+    setPinDraft(null);
+    await load();
+    pushToast(doc.version > 0 ? "New version uploaded. Send it when you're ready." : "Image added. Send it for review when you're ready.");
   };
 
   const send = async () => {
@@ -277,7 +315,7 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
     commit.flush();
     await saving.current;
     setBusy("send");
-    const res = await docApi(task.id, "/send", { method: "POST", body: JSON.stringify({ baseVersion: doc.version }) });
+    const res = await api("/send", { method: "POST", body: JSON.stringify({ baseVersion: doc.version }) });
     const j = await readJson(res);
     setBusy(null);
     if (!res.ok) { pushToast((j.error as string) ?? "Could not send."); if (res.status === 409) void load(); return; }
@@ -292,8 +330,11 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
     // "when we send for review can it pop up a box to draft an email to the
     // client"). The document window closes so the email is the one on screen.
     const emailing = onEmailClient?.({
-      url, name: doc.title.trim() || task.title, text: htmlToText(sentBody).slice(0, 3000),
-      changes: previousBody ? summarizeDocChanges(previousBody, sentBody) : null,
+      kind, url, name: doc.title.trim() || task.title,
+      text: image ? "" : htmlToText(sentBody).slice(0, 3000),
+      changes: image
+        ? (sentImages(versions).length ? "A new version of the image." : null)
+        : previousBody ? summarizeDocChanges(previousBody, sentBody) : null,
     }) ?? false;
     if (emailing) switchView({ full: false });
     if (copied) pushToast(emailing ? "Sent for review. Link copied and added to the email." : "Sent for review. Link copied, paste it to your client.");
@@ -304,7 +345,7 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
   // The one link control (Derek, 2026-09-11: "just need a copy link button that's
   // all keep it simple"). Sending makes the link; deleting the document ends it.
   const fetchLink = async (): Promise<string | null> => {
-    const res = await docApi(task.id, "/link", { method: "POST", body: JSON.stringify({ action: "copy" }) });
+    const res = await api("/link", { method: "POST", body: JSON.stringify({ action: "copy" }) });
     const j = await readJson(res);
     if (!res.ok) { pushToast((j.error as string) ?? "Could not get the link."); return null; }
     return j.url as string;
@@ -328,9 +369,11 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
     setBusy(null);
     const [latest, before] = versions;
     const opened = onEmailClient({
-      url, name: doc.title.trim() || task.title,
-      text: htmlToText(latest?.body ?? doc.body).slice(0, 3000),
-      changes: latest && before ? summarizeDocChanges(before.body, latest.body) : null,
+      kind, url, name: doc.title.trim() || task.title,
+      text: image ? "" : htmlToText(latest?.body ?? doc.body).slice(0, 3000),
+      changes: image
+        ? (sentImages(versions).length > 1 ? "A new version of the image." : null)
+        : latest && before ? summarizeDocChanges(before.body, latest.body) : null,
     });
     if (opened) switchView({ full: false });
     else pushToast("Link a contact to this client to email them from here.");
@@ -339,9 +382,9 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
   const patchDoc = async (payload: Record<string, unknown>, done: string) => {
     commit.flush();
     await saving.current;
-    const res = await docApi(task.id, "", { method: "PATCH", body: JSON.stringify(payload) });
+    const res = await api("", { method: "PATCH", body: JSON.stringify(payload) });
     const j = await readJson(res);
-    if (!res.ok) { pushToast((j.error as string) ?? "Could not update the document."); return; }
+    if (!res.ok) { pushToast((j.error as string) ?? `Could not update the ${what}.`); return; }
     setDoc(rowToTaskDocument(j.document));
     latestHtml.current = null;
     setSeed(null);
@@ -354,56 +397,67 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
     if (!doc || status === doc.status) return;
     commit.flush();
     await saving.current;
-    const res = await docApi(task.id, "", { method: "PATCH", body: JSON.stringify({ status }) });
+    const res = await api("", { method: "PATCH", body: JSON.stringify({ status }) });
     const j = await readJson(res);
     if (!res.ok) { pushToast((j.error as string) ?? "Could not change the stage."); return; }
     setDoc(rowToTaskDocument(j.document));
   };
 
   const deleteDocument = async () => {
-    if (!doc || !window.confirm("Delete this document? You can restore it from this task for 30 days, with its versions, files and comments. The client's link stops working until then.")) return;
+    if (!doc || !window.confirm(`Delete this ${what}? You can restore it from this task for 30 days, with its versions, files and comments. The client's link stops working until then.`)) return;
     commit.flush();
     titleCommit.flush();
     await saving.current;
     setBusy("delete");
-    const res = await docApi(task.id, "", { method: "DELETE" });
+    const res = await api("", { method: "DELETE" });
     const j = await readJson(res);
     setBusy(null);
-    if (!res.ok) { pushToast((j.error as string) ?? "Could not delete the document."); return; }
+    if (!res.ok) { pushToast((j.error as string) ?? `Could not delete the ${what}.`); return; }
     setFull(false);
     versionRef.current = null;
     setDoc(null);
     setFiles([]);
     setComments([]);
     setLink(null);
-    void fetchDeletedTaskDocuments(task.id).then(setDeletedDocs);
-    pushToast("Document deleted. Restore it from this task within 30 days.");
+    void fetchDeletedTaskDocuments(task.id, kind).then(setDeletedDocs);
+    pushToast(`${image ? "Image review" : "Document"} deleted. Restore it from this task within 30 days.`);
   };
 
   const restoreDocument = async (documentId: string) => {
     setBusy("restore");
-    const res = await docApi(task.id, "/restore", { method: "POST", body: JSON.stringify({ documentId }) });
+    const res = await api("/restore", { method: "POST", body: JSON.stringify({ documentId }) });
     const j = await readJson(res);
     setBusy(null);
-    if (!res.ok) { pushToast((j.error as string) ?? "Could not restore the document."); return; }
+    if (!res.ok) { pushToast((j.error as string) ?? `Could not restore the ${what}.`); return; }
     versionRef.current = null;
     await load();
-    pushToast("Document restored.");
+    pushToast(`${image ? "Image review" : "Document"} restored.`);
   };
 
-  const postComment = async (body: string, quote?: string | null) => {
-    const res = await docApi(task.id, "/comments", { method: "POST", body: JSON.stringify({ body, quote: quote ?? null }) });
+  const postComment = async (body: string, quote?: string | null, attachmentFileId?: string | null) => {
+    const pin = image && pinDraft ? { fileId: pinDraft.fileId, x: pinDraft.x, y: pinDraft.y } : null;
+    const res = await api("/comments", { method: "POST", body: JSON.stringify({ body, quote: quote ?? null, pin, attachmentFileId: attachmentFileId ?? null }) });
     const j = await readJson(res);
     if (!res.ok) { pushToast((j.error as string) ?? "Could not post the comment."); return false; }
     setComments((c) => [...c, { ...(j.comment as TaskDocumentComment), authorId: meId ?? null }]);
     setQuoteDraft(null);
+    setPinDraft(null);
     if (j.emailedClient) pushToast("Comment posted. We emailed the client a link to it.");
     return true;
   };
 
+  // A file for the next comment: it goes on the document's files first.
+  const attachFile = async (file: File) => {
+    if (!doc) return null;
+    const up = await uploadSharedFile(file, (payload) => api("/files", { method: "POST", body: JSON.stringify(payload) }));
+    if (!up.ok) { pushToast(up.error); return null; }
+    void fetchTaskDocumentFiles(doc.id).then(setFiles);
+    return { id: up.result.fileId as string, name: file.name };
+  };
+
   // Edit your own comment, tick any comment done, delete any comment.
   const changeComment = async (commentId: string, change: { body?: string; done?: boolean }) => {
-    const res = await docApi(task.id, "/comments", { method: "PATCH", body: JSON.stringify({ commentId, ...change }) });
+    const res = await api("/comments", { method: "PATCH", body: JSON.stringify({ commentId, ...change }) });
     const j = await readJson(res);
     if (!res.ok) { pushToast((j.error as string) ?? "Could not update the comment."); return false; }
     const next = j.comment as TaskDocumentComment;
@@ -412,7 +466,7 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
   };
   const removeComment = async (commentId: string) => {
     if (!window.confirm("Delete this comment? The client stops seeing it too.")) return false;
-    const res = await docApi(task.id, "/comments", { method: "DELETE", body: JSON.stringify({ commentId }) });
+    const res = await api("/comments", { method: "DELETE", body: JSON.stringify({ commentId }) });
     const j = await readJson(res);
     if (!res.ok) { pushToast((j.error as string) ?? "Could not delete the comment."); return false; }
     setComments((cs) => cs.filter((c) => c.id !== commentId));
@@ -424,7 +478,7 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
     setAdding(true);
     const error = await addDocFiles(
       Array.from(list),
-      (payload) => docApi(task.id, "/files", { method: "POST", body: JSON.stringify(payload) }),
+      (payload) => api("/files", { method: "POST", body: JSON.stringify(payload) }),
       () => { void fetchTaskDocumentFiles(doc.id).then(setFiles); },
     );
     setAdding(false);
@@ -434,7 +488,7 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
 
   const removeFile = async (f: TaskDocumentFile) => {
     if (!doc || !window.confirm(`Remove ${f.name}? The client stops seeing it too.`)) return;
-    const res = await docApi(task.id, "/files", { method: "DELETE", body: JSON.stringify({ fileId: f.id }) });
+    const res = await api("/files", { method: "DELETE", body: JSON.stringify({ fileId: f.id }) });
     const j = await readJson(res);
     if (!res.ok) { pushToast((j.error as string) ?? "Could not remove the file."); return; }
     setFiles(await fetchTaskDocumentFiles(doc.id));
@@ -448,7 +502,7 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
 
   const deletedLine = deletedDocs.length > 0 ? (
     <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-dashed px-4 py-2 text-[16px] text-muted">
-      <span>Deleted:</span>
+      <span>{image ? "Deleted image review:" : "Deleted:"}</span>
       {deletedDocs.map((d) => (
         <span key={d.id} className="flex flex-wrap items-center gap-x-2">
           <span className="text-foreground">{d.title.trim() || task.title}</span>
@@ -468,14 +522,15 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
   const completed = doc.status === "completed";
   const locked = !!doc.approvedAt || completed;
   const stageSelect = (
-    <select value={doc.status} onChange={(e) => void setStage(e.target.value as TaskDocumentStatus)} aria-label="Document stage"
+    <select value={doc.status} onChange={(e) => void setStage(e.target.value as TaskDocumentStatus)} aria-label={`${image ? "Image review" : "Document"} stage`}
       className="cursor-pointer rounded-full border-0 px-3 py-1 text-[16px] font-semibold outline-none" style={{ background: tone.chip, color: tone.dot }}>
       {STAGES.map((s) => <option key={s} value={s}>{STATUS_VIEW[s].label}</option>)}
     </select>
   );
-  const needsSend = !locked && (doc.version === 0 || doc.draftDirty);
+  // An image review has nothing to send until there is an image.
+  const needsSend = !locked && (!image || !!doc.body) && (doc.version === 0 || doc.draftDirty);
   const name = doc.title.trim() || task.title;
-  const activeFiles = files.filter((f) => !f.removedAt);
+  const activeFiles = files.filter((f) => !f.removedAt && f.purpose === "file");
   const previewImages: PreviewImage[] = activeFiles
     .filter((f) => isPreviewableImage(f.name) && thumbs[f.path])
     .map((f) => ({ id: f.id, name: f.name, url: thumbs[f.path] }));
@@ -484,6 +539,24 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
     if (i >= 0) setLightbox(i);
     else void openFile(f);
   };
+  const renderAttachment = (fileId: string) => {
+    const f = activeFiles.find((x) => x.id === fileId);
+    return f
+      ? <button onClick={() => openFileOrPreview(f)} className="break-words text-left font-medium text-accent hover:underline">📎 {f.name}</button>
+      : <span className="text-muted">📎 File removed</span>;
+  };
+
+  // The image review's versions: every image sent, then one uploaded since, if any.
+  const sent = image ? sentImages(versions) : [];
+  const imageOptions = image ? [
+    ...sent.map((fileId, i) => ({ fileId, label: `Version ${i + 1}` })),
+    ...(doc.body && !sent.includes(doc.body) ? [{ fileId: doc.body, label: "New, not sent" }] : []),
+  ] : [];
+  const shownImage = viewingImage && imageOptions.some((o) => o.fileId === viewingImage) ? viewingImage : (doc.body || null);
+  const shownFile = files.find((f) => f.id === shownImage);
+  const shownUrl = shownFile ? thumbs[shownFile.path] : undefined;
+  const openPins = comments.filter((c) => c.pin && !c.completedAt).length;
+
   const copyLinkButton = link?.live && link.copyable
     ? <button onClick={() => void copyLink()} disabled={busy !== null} className={quiet}>Copy link</button>
     : null;
@@ -497,15 +570,17 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
   );
 
   const meta = [
-    doc.version ? `Version ${doc.version}` : "Not sent yet",
+    doc.version ? (image ? "Sent" : `Version ${doc.version}`) : image && !doc.body ? "No image yet" : "Not sent yet",
     doc.version > 0 && link ? `Link ${link.live ? "on" : "off"}` : null,
     doc.version > 0 ? (doc.clientViewedAt ? `Viewed ${timeAgo(doc.clientViewedAt)}` : "Not viewed yet") : null,
+    openPins ? `${openPins} open ${openPins === 1 ? "pin" : "pins"}` : null,
     activeFiles.length ? `${activeFiles.length} ${activeFiles.length === 1 ? "file" : "files"}` : null,
     `Edited ${timeAgo(doc.updatedAt)}`,
   ].filter(Boolean).join(" · ");
 
+  const icon = image ? "🖼️" : "📄";
   const row = (
-    <WorkItemRow tone="doc" icon="📄" title={name} badge={badge} meta={meta} actions={copyLinkButton}
+    <WorkItemRow tone={kind} icon={icon} title={name} badge={badge} meta={meta} actions={copyLinkButton}
       onOpen={() => switchView({ full: true })} />
   );
   if (!visible) return <>{row}{deletedLine}</>;
@@ -515,11 +590,14 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
   // One history, newest first: sends and client versions, the team's saved
   // drafts, and files coming and going, each with who and when. "What changed"
   // compares a text entry with the text entry before it, whichever kind it was.
+  // An image review has no text to compare: its entries only say what happened.
   type Entry = { key: string; at: string; title: string; who: string | null; body?: string; restore?: Record<string, unknown>; restored?: string };
   const timeline: Entry[] = [
-    ...versions.map((v): Entry => ({ key: v.id, at: v.createdAt, title: `Version ${v.version}: ${KIND_LABEL[v.kind]}`, who: v.authorLabel, body: v.body, restore: { restoreVersion: v.version }, restored: `Version ${v.version} is back.` })),
-    ...checkpoints.map((c): Entry => ({ key: c.id, at: c.createdAt, title: "Saved draft", who: c.authorLabel, body: c.body, restore: { restoreCheckpoint: c.id }, restored: "That draft is back." })),
-    ...files.map((f): Entry => ({ key: `${f.id}:added`, at: f.createdAt, title: `Added ${f.name}`, who: f.addedByLabel })),
+    ...versions.map((v): Entry => image
+      ? { key: v.id, at: v.createdAt, title: v.kind === "sent" ? `Version ${sent.indexOf(v.body) + 1}: Sent to client` : KIND_LABEL.image[v.kind], who: v.authorLabel }
+      : { key: v.id, at: v.createdAt, title: `Version ${v.version}: ${KIND_LABEL.doc[v.kind]}`, who: v.authorLabel, body: v.body, restore: { restoreVersion: v.version }, restored: `Version ${v.version} is back.` }),
+    ...(image ? [] : checkpoints.map((c): Entry => ({ key: c.id, at: c.createdAt, title: "Saved draft", who: c.authorLabel, body: c.body, restore: { restoreCheckpoint: c.id }, restored: "That draft is back." }))),
+    ...files.map((f): Entry => ({ key: `${f.id}:added`, at: f.createdAt, title: `${f.purpose === "image" ? "Uploaded" : "Added"} ${f.name}`, who: f.addedByLabel })),
     ...files.filter((f) => f.removedAt).map((f): Entry => ({ key: `${f.id}:removed`, at: f.removedAt!, title: `Removed ${f.name}`, who: f.removedByLabel })),
   ].sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   const shownTimeline = allHistory ? timeline : timeline.slice(0, HISTORY_PREVIEW);
@@ -529,8 +607,40 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
       onChange={(e) => { const value = e.target.value; setTitleDraft(value); titleCommit.schedule(() => { void saveTitle(value); }); }}
       onBlur={() => titleCommit.flush()}
       onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-      placeholder={task.title} aria-label="Document name" maxLength={200}
+      placeholder={task.title} aria-label={`${image ? "Image review" : "Document"} name`} maxLength={200}
       className="w-full rounded-md bg-transparent px-1 py-0.5 text-[22px] font-bold outline-none placeholder:text-foreground hover:bg-background focus:bg-background" />
+  );
+
+  const imageArticle = (
+    <article className="rounded-2xl border bg-surface p-4 shadow-sm sm:p-6">
+      <input ref={imageInput} type="file" accept={IMAGE_ACCEPT} className="hidden"
+        onChange={(e) => { if (e.target.files) void uploadImage(e.target.files); e.target.value = ""; }} />
+      {!doc.body ? (
+        <FileDropLine label="Image" count={0} busy={adding} disabled={locked} onFiles={(list) => void uploadImage(list)}>
+          <p className="py-8 text-center text-[16px] text-muted">Add the image your client should review. They click any spot on it to leave a numbered comment.</p>
+        </FileDropLine>
+      ) : (
+        <>
+          <div className="mb-3 flex flex-wrap items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <ImageVersionPicker options={imageOptions} value={shownImage} onChange={(id) => { setViewingImage(id); setPinDraft(null); }} />
+            </div>
+            {!locked && (
+              <button onClick={() => imageInput.current?.click()} disabled={adding} className={quiet}>
+                {adding ? "Uploading…" : "Upload new version"}
+              </button>
+            )}
+          </div>
+          {shownUrl ? (
+            <ImagePinBoard src={shownUrl} alt={shownFile?.name ?? name} comments={comments} fileId={shownImage}
+              pending={pinDraft} activeId={focusedComment} onPinClick={setFocusedComment}
+              onPlace={locked || !shownImage ? undefined : (spot) => setPinDraft({ fileId: shownImage, ...spot, number: nextPin(comments, shownImage) })} />
+          ) : (
+            <p className="py-10 text-center text-[16px] text-muted">Loading the image…</p>
+          )}
+        </>
+      )}
+    </article>
   );
 
   // Full screen puts Files and History in a right column beside the writing
@@ -538,7 +648,7 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
   const content = (
     <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
       <div className="min-w-0">
-      {clientCrossed && (
+      {!image && clientCrossed && (
         <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-accent/40 bg-accent-soft/40 px-4 py-3 text-[16px]">
           <span className="min-w-0 flex-1">{clientCrossed.authorLabel ?? "The client"} sent changes while you had unsent edits.</span>
           <button onClick={() => void patchDoc({ restoreVersion: clientCrossed.version }, "Their version is in. Send it when it's ready.")} className="font-semibold text-accent hover:underline">Use their version</button>
@@ -549,31 +659,36 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
         <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl px-4 py-3 text-[16px]" style={{ background: STATUS_META.approved.chip, color: STATUS_META.approved.dot }}>
           <span className="min-w-0 flex-1">
             {completed
-              ? "This document is completed. Reopen it to make changes."
-              : <>The client approved {doc.approvedVersion ? `version ${doc.approvedVersion}` : "this document"}. Reopen it to make changes.</>}
+              ? `This ${image ? "image" : "document"} is completed. Reopen it to make changes.`
+              : image
+                ? "The client approved this image. Reopen it to make changes."
+                : <>The client approved {doc.approvedVersion ? `version ${doc.approvedVersion}` : "this document"}. Reopen it to make changes.</>}
           </span>
           <button onClick={() => void patchDoc({ reopen: true }, "Reopened. Send your changes when they're ready.")} className={quiet}>Reopen for changes</button>
         </div>
       )}
 
-      <article className="rounded-2xl border bg-surface p-5 shadow-sm sm:p-8">
-        <RichTextEditor key={`doc-${doc.id}-${nonce}`} value={seed ?? doc.body} editable={!locked} variant="doc"
-          placeholder="Write the content for your client…"
-          highlights={comments.filter((c) => c.quote && !c.completedAt).map((c) => ({ id: c.id, quote: c.quote as string }))}
-          activeHighlightId={focusedComment} onHighlightClick={setFocusedComment} onSelectionComment={setQuoteDraft}
-          onChange={(html) => { latestHtml.current = html; setSaveState("unsaved"); commit.schedule(() => { void save(html); }); }} />
-      </article>
+      {image ? imageArticle : (
+        <article className="rounded-2xl border bg-surface p-5 shadow-sm sm:p-8">
+          <RichTextEditor key={`doc-${doc.id}-${nonce}`} value={seed ?? doc.body} editable={!locked} variant="doc"
+            placeholder="Write the content for your client…"
+            highlights={comments.filter((c) => c.quote && !c.completedAt).map((c) => ({ id: c.id, quote: c.quote as string }))}
+            activeHighlightId={focusedComment} onHighlightClick={setFocusedComment} onSelectionComment={setQuoteDraft}
+            onChange={(html) => { latestHtml.current = html; setSaveState("unsaved"); commit.schedule(() => { void save(html); }); }} />
+        </article>
+      )}
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        {!locked && needsSend && (
+        {needsSend && (
           <button onClick={send} disabled={busy !== null}
             className="rounded-lg bg-accent px-6 py-2.5 text-[16px] font-semibold text-white disabled:opacity-50">
-            {busy === "send" ? "Sending…" : doc.version === 0 ? "Send for review" : "Send changes"}
+            {busy === "send" ? "Sending…" : doc.version === 0 ? "Send for review" : image ? "Send new version" : "Send changes"}
           </button>
         )}
-        {!locked && <button onClick={() => void saveDraft()} disabled={busy !== null || saveState === "saving"} className={quiet}>Save draft</button>}
+        {!image && !locked && <button onClick={() => void saveDraft()} disabled={busy !== null || saveState === "saving"} className={quiet}>Save draft</button>}
         {/* When it last saved sits beside Save draft (Derek, 2026-09-11). */}
-        {!locked && <span className="text-[16px] text-muted">{saveLabel}{needsSend ? "" : " · Everything here has been sent"}</span>}
+        {!image && !locked && <span className="text-[16px] text-muted">{saveLabel}{needsSend ? "" : " · Everything here has been sent"}</span>}
+        {image && !locked && doc.body && !needsSend && <span className="text-[16px] text-muted">Everything here has been sent</span>}
         <button onClick={() => setHistoryOpen((o) => !o)} aria-expanded={historyOpen} className={`ml-auto ${quiet}`}>
           {historyOpen ? "Hide history" : `History${timeline.length ? ` · ${timeline.length}` : ""}`}
         </button>
@@ -581,7 +696,7 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
 
       {historyOpen && (
         <section className="mt-3 rounded-xl border bg-surface px-4 py-2.5">
-          {timeline.length === 0 && <p className="text-[16px] text-muted">Saves, sends, client changes and files show up here with who did them.</p>}
+          {timeline.length === 0 && <p className="text-[16px] text-muted">{image ? "Uploads, sends, client answers and files" : "Saves, sends, client changes and files"} show up here with who did them.</p>}
           <div className="mt-1.5 space-y-1.5">
             {shownTimeline.map((entry) => {
               const i = timeline.indexOf(entry);
@@ -649,13 +764,16 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
             </ul>
           )}
         </FileDropLine>
-        <CommentThread comments={comments} onPost={postComment} when={timeAgo} viewer="team"
+        <CommentThread comments={image ? commentsFor(comments, shownImage) : comments} onPost={postComment} when={timeAgo} viewer="team"
           isMine={(c) => !!meId && comments.find((x) => x.id === c.id)?.authorId === meId}
           canDelete={() => true}
           onEdit={(id, body) => changeComment(id, { body })}
           onToggleDone={(id, done) => changeComment(id, { done })}
           onDelete={removeComment}
-          quote={quoteDraft} onClearQuote={() => setQuoteDraft(null)}
+          quote={image ? null : quoteDraft} pinDraft={image ? pinDraft?.number ?? null : null}
+          onClearQuote={() => { setQuoteDraft(null); setPinDraft(null); }}
+          placeholder={image ? "Write a comment, or click the image to drop a numbered pin…" : undefined}
+          onAttach={locked ? undefined : attachFile} renderAttachment={renderAttachment}
           focusedId={focusedComment} onQuoteClick={setFocusedComment} />
       </div>
     </div>
@@ -666,12 +784,12 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
       {row}
       {deletedLine}
       {full && (
-        <WorkItemWindow icon="📄" title={titleInput} badge={stageSelect} actions={headerActions} onClose={() => switchView({ full: false })}>
+        <WorkItemWindow icon={icon} title={titleInput} badge={stageSelect} actions={headerActions} onClose={() => switchView({ full: false })}>
           {content}
           {/* Deleting lives only here, small and at the very end (Derek, 2026-09-11). */}
           <div className="mt-12 flex justify-end border-t pt-4">
             <button onClick={() => void deleteDocument()} disabled={busy !== null} className="text-[16px] text-muted hover:text-danger hover:underline disabled:opacity-50">
-              {busy === "delete" ? "Deleting…" : "Delete document"}
+              {busy === "delete" ? "Deleting…" : `Delete ${what}`}
             </button>
           </div>
         </WorkItemWindow>

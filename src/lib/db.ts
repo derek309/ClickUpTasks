@@ -511,8 +511,11 @@ export const fetchTaskActions = async (taskId: string): Promise<TaskAction[]> =>
 // are never part of Task, so the full-row task upsert can never overwrite them;
 // every write goes through /api/tasks/[id]/document.
 export type TaskDocumentStatus = "draft" | "with_client" | "client_submitted" | "approved" | "completed";
+/** A task's two kinds of client document: the text document, and an image review
+ *  whose body is the uploaded image to send next (supabase/task-image-reviews.sql). */
+export type TaskDocumentKind = "doc" | "image";
 export type TaskDocument = {
-  id: string; taskId: string; title: string; body: string; draftDirty: boolean; version: number;
+  id: string; taskId: string; kind: TaskDocumentKind; title: string; body: string; draftDirty: boolean; version: number;
   status: TaskDocumentStatus; approvedAt: string | null; approvedVersion: number | null; updatedAt: string;
   /** Last time the client's review page opened in a browser (supabase/task-document-followups.sql). */
   clientViewedAt: string | null;
@@ -522,7 +525,7 @@ export type TaskDocumentVersion = {
   body: string; authorId: string | null; authorLabel: string | null; createdAt: string;
 };
 export const rowToTaskDocument = (r: any): TaskDocument => ({
-  id: r.id, taskId: r.task_id, title: r.title ?? "", body: r.body ?? "", draftDirty: !!r.draft_dirty, version: r.version ?? 0,
+  id: r.id, taskId: r.task_id, kind: r.kind === "image" ? "image" : "doc", title: r.title ?? "", body: r.body ?? "", draftDirty: !!r.draft_dirty, version: r.version ?? 0,
   status: r.status, approvedAt: r.approved_at ?? null, approvedVersion: r.approved_version ?? null, updatedAt: r.updated_at,
   clientViewedAt: r.client_viewed_at ?? null,
 });
@@ -539,18 +542,18 @@ export const saveClientEmailDraft = (clientId: string, draft: EmailDraft, member
 export const deleteClientEmailDraft = (clientId: string) =>
   save(() => supabase.from("client_email_drafts").delete().eq("client_id", clientId));
 
-export const fetchTaskDocument = async (taskId: string): Promise<TaskDocument | null> => {
-  const { data, error } = await supabase.from("task_documents").select("*").eq("task_id", taskId).is("deleted_at", null).maybeSingle();
+export const fetchTaskDocument = async (taskId: string, kind: TaskDocumentKind = "doc"): Promise<TaskDocument | null> => {
+  const { data, error } = await supabase.from("task_documents").select("*").eq("task_id", taskId).eq("kind", kind).is("deleted_at", null).maybeSingle();
   if (error) { logErr({ error }); return null; }
   return data ? rowToTaskDocument(data) : null;
 };
 // Documents deleted from a task that can still be restored: the last 30 days,
 // newest first (supabase/task-document-trash.sql).
 export type DeletedTaskDocument = { id: string; title: string; version: number; deletedAt: string };
-export const fetchDeletedTaskDocuments = async (taskId: string): Promise<DeletedTaskDocument[]> => {
+export const fetchDeletedTaskDocuments = async (taskId: string, kind: TaskDocumentKind = "doc"): Promise<DeletedTaskDocument[]> => {
   const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
   const { data, error } = await supabase.from("task_documents").select("id, title, version, deleted_at")
-    .eq("task_id", taskId).gt("deleted_at", since).order("deleted_at", { ascending: false });
+    .eq("task_id", taskId).eq("kind", kind).gt("deleted_at", since).order("deleted_at", { ascending: false });
   if (error) { logErr({ error }); return []; }
   return (data ?? []).map((r: any) => ({ id: r.id, title: r.title ?? "", version: r.version ?? 0, deletedAt: r.deleted_at }));
 };
@@ -558,6 +561,8 @@ export const fetchDeletedTaskDocuments = async (taskId: string): Promise<Deleted
 // supabase/task-document-files.sql). Read the same way, written by the server.
 export type TaskDocumentFile = {
   id: string; name: string; path: string; sizeBytes: number; kind: string;
+  /** "image": an uploaded version of an image review's image, kept out of the Files list. */
+  purpose: "file" | "image";
   addedBy: string | null; addedByLabel: string | null; createdAt: string;
   sharedAt: string | null; removedAt: string | null; removedByLabel: string | null;
 };
@@ -566,7 +571,7 @@ export const fetchTaskDocumentFiles = async (documentId: string): Promise<TaskDo
   const { data, error } = await supabase.from("task_document_files").select("*").eq("document_id", documentId).order("created_at", { ascending: true });
   if (error) { logErr({ error }); return []; }
   return (data ?? []).map((r: any) => ({
-    id: r.id, name: r.name, path: r.path, sizeBytes: Number(r.size_bytes ?? 0), kind: r.kind,
+    id: r.id, name: r.name, path: r.path, sizeBytes: Number(r.size_bytes ?? 0), kind: r.kind, purpose: r.purpose === "image" ? "image" : "file",
     addedBy: r.added_by ?? null, addedByLabel: r.added_by_label ?? null, createdAt: r.created_at,
     sharedAt: r.shared_at ?? null, removedAt: r.removed_at ?? null, removedByLabel: r.removed_by_label ?? null,
   }));
@@ -583,6 +588,10 @@ export type TaskDocumentComment = {
   editedAt: string | null; completedAt: string | null; completedBy: string | null;
   /** The words this comment is about (supabase/task-document-comment-quotes.sql). */
   quote: string | null;
+  /** The numbered pin on an image review's image (supabase/task-image-reviews.sql). */
+  pin: { fileId: string; x: number; y: number; number: number } | null;
+  /** A file added with the comment. */
+  attachmentFileId: string | null;
 };
 export const fetchTaskDocumentComments = async (documentId: string): Promise<TaskDocumentComment[]> => {
   const { data, error } = await supabase.from("task_document_comments").select("*").eq("document_id", documentId)
@@ -591,6 +600,8 @@ export const fetchTaskDocumentComments = async (documentId: string): Promise<Tas
   return (data ?? []).map((r: any) => ({
     id: r.id, body: r.body ?? "", authorId: r.author_id ?? null, authorLabel: r.author_label ?? "", fromClient: r.author_id === null,
     createdAt: r.created_at, editedAt: r.edited_at ?? null, completedAt: r.completed_at ?? null, completedBy: r.completed_by_label ?? null, quote: r.quote ?? null,
+    pin: r.pin_file_id && r.pin_number ? { fileId: r.pin_file_id, x: Number(r.pin_x), y: Number(r.pin_y), number: Number(r.pin_number) } : null,
+    attachmentFileId: r.attachment_file_id ?? null,
   }));
 };
 export const fetchTaskDocumentVersions = async (documentId: string): Promise<TaskDocumentVersion[]> => {

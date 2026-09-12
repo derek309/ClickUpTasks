@@ -54,6 +54,7 @@ vi.mock("./waitingNotify", () => ({
   notifyTeamOfClientActivity: (...args: unknown[]) => notify(...args),
 }));
 vi.mock("./serverAuth", () => ({ requireUser: async () => null, callerCanSeeTask: async () => false }));
+vi.mock("./taskDocumentFiles", () => ({ docImageFile: async () => null }));
 
 const { resolveDocToken, clientPublish } = await import("./taskDocumentServer");
 const { mintToken, hashToken } = await import("./tokenCrypto");
@@ -130,7 +131,7 @@ describe("resolveDocToken", () => {
 });
 
 const scope = {
-  documentId: "tdoc_1", taskId: "t_1", taskTitle: "Hoodie email", taskStatus: "waiting", waitingOnClient: true,
+  documentId: "tdoc_1", kind: "doc" as const, taskId: "t_1", taskTitle: "Hoodie email", taskStatus: "waiting", waitingOnClient: true,
   assigneeId: "u_owner" as string | null, projectId: "p_1", clientId: "cl_1", clientName: "Brian Goodell", assignedTo: ["u_follower"], documentStatus: "with_client",
 };
 

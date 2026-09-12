@@ -5,21 +5,32 @@
 // src/app/api/doc/[token] for the routes and src/lib/taskDocumentServer.ts for
 // the rules behind them.
 //
+// The same link can open an image review (Derek, 2026-09-12): the client clicks a
+// spot on the image to drop a numbered pin, writes a comment or adds a file there,
+// then asks for changes or approves. Earlier versions of the image stay a click
+// away with their pins.
+//
 // Nothing reaches the server until the client clicks. Their unsent edits live in
 // this browser (localStorage, per document version), so closing the tab, a
 // dropped connection, or the team posting a newer version never loses them.
 // Every string here is client facing: 16px or larger, and no dashes.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RichTextEditor } from "@/components/cockpit/RichTextEditor";
-import { addDocFiles } from "@/lib/docFileUpload";
+import { addDocFiles, uploadSharedFile } from "@/lib/docFileUpload";
 import { formatFileSize, isPreviewableImage } from "@/lib/uploadTypes";
 import {
-  CommentThread, FileDropLine, ImageLightbox, ImageThumbGrid, type PreviewImage, type ThreadComment,
+  CommentThread, FileDropLine, ImageLightbox, ImagePinBoard, ImageThumbGrid, ImageVersionPicker, commentsFor, nextPin,
+  type PreviewImage, type ThreadComment,
 } from "@/components/cockpit/TaskWorkItem";
 
 type DocStatus = "draft" | "with_client" | "client_submitted" | "approved" | "completed";
 type DocFile = { id: string; name: string; size: number; kind: string; addedBy: string; fromClient: boolean; createdAt: string };
-type DocData = { title: string; clientName: string; body: string; version: number; status: DocStatus; approvedAt: string | null; closed: boolean; files: DocFile[]; comments: ThreadComment[] };
+type DocData = {
+  kind: "doc" | "image"; title: string; clientName: string; body: string; version: number; status: DocStatus; approvedAt: string | null;
+  closed: boolean; files: DocFile[]; comments: ThreadComment[];
+  /** An image review's images the client was sent, oldest first. body is the newest. */
+  images: { fileId: string; name: string }[];
+};
 type Notice = { tone: "good" | "info" | "warn"; text: string } | null;
 
 const NAVY = "#1b3a5c";
@@ -55,8 +66,18 @@ export default function DocReviewView({ token }: { token: string }) {
   const [confirmApprove, setConfirmApprove] = useState(false);
   const [adding, setAdding] = useState(false);
   const [lightbox, setLightbox] = useState<number | null>(null);
+  // Words picked in the document for the next comment, and the comment whose words
+  // are shown (Derek, 2026-09-12: comments on a specific sentence).
+  const [quoteDraft, setQuoteDraft] = useState<string | null>(null);
+  const [focusedComment, setFocusedComment] = useState<string | null>(null);
+  // Image review: the pin dropped for the next comment, and the version looked at
+  // (null follows the newest).
+  const [pinDraft, setPinDraft] = useState<{ fileId: string; x: number; y: number; number: number } | null>(null);
+  const [viewingImage, setViewingImage] = useState<string | null>(null);
 
-  const dirty = html.trim() !== startHtml.trim();
+  const image = data?.kind === "image";
+  // An image is never edited, so there is nothing unsent to keep.
+  const dirty = !image && html.trim() !== startHtml.trim();
   const locked = !!data && (data.status === "approved" || data.closed);
   const fileHref = (id: string) => `/api/doc/${encodeURIComponent(token)}/files/${id}`;
   // Photos show as pictures and open in a full screen preview.
@@ -71,7 +92,7 @@ export default function DocReviewView({ token }: { token: string }) {
   // Open a version in the editor, bringing back edits the client left unsent on
   // this device for that same version.
   const openVersion = useCallback((d: DocData) => {
-    const kept = readDraft(draftKey(token, d.version));
+    const kept = d.kind === "image" ? null : readDraft(draftKey(token, d.version));
     const start = kept && kept.trim() !== d.body.trim() ? kept : d.body;
     setBaseVersion(d.version);
     setStartHtml(d.body);
@@ -129,10 +150,10 @@ export default function DocReviewView({ token }: { token: string }) {
 
   // Keep unsent edits on this device as the client types.
   useEffect(() => {
-    if (state !== "ready" || locked) return;
+    if (state !== "ready" || locked || image) return;
     const t = window.setTimeout(() => writeDraft(draftKey(token, baseVersion), dirty ? html : null), 400);
     return () => window.clearTimeout(t);
-  }, [html, dirty, baseVersion, token, state, locked]);
+  }, [html, dirty, baseVersion, token, state, locked, image]);
 
   const publish = async (kind: "submit" | "approve") => {
     setBusy(kind === "submit" ? "send" : "approve");
@@ -163,7 +184,12 @@ export default function DocReviewView({ token }: { token: string }) {
         status: kind === "approve" ? "approved" : "client_submitted",
         approvedAt: kind === "approve" ? new Date().toISOString() : d.approvedAt,
       } : d);
-      setNotice(kind === "approve" ? null : { tone: "good", text: "Thanks! We got your changes. You can keep editing and send again anytime." });
+      setNotice(kind === "approve" ? null : {
+        tone: "good",
+        text: image
+          ? "Thanks! We sent your notes to the team. You can add more anytime."
+          : "Thanks! We got your changes. You can keep editing and send again anytime.",
+      });
     } catch {
       setNotice({ tone: "warn", text: "We couldn't reach the server. Check your connection and try again." });
     } finally {
@@ -199,16 +225,21 @@ export default function DocReviewView({ token }: { token: string }) {
     else setNotice({ tone: "good", text: "Added. Your team can see it now." });
   };
 
-  // Words picked in the document for the next comment, and the comment whose words
-  // are shown (Derek, 2026-09-12: comments on a specific sentence).
-  const [quoteDraft, setQuoteDraft] = useState<string | null>(null);
-  const [focusedComment, setFocusedComment] = useState<string | null>(null);
+  // A file for the next comment: it goes on the document's files first.
+  const attachFile = async (file: File) => {
+    const up = await uploadSharedFile(file, filesApi("POST"));
+    if (!up.ok) { setNotice({ tone: "warn", text: up.error }); return null; }
+    void load(false);
+    return { id: up.result.fileId as string, name: file.name };
+  };
 
   // A comment shows at once; the 15 second refresh brings the team's replies.
-  const postComment = async (body: string, quote?: string | null) => {
+  const postComment = async (body: string, quote?: string | null, attachmentFileId?: string | null) => {
+    const pin = image && pinDraft ? { fileId: pinDraft.fileId, x: pinDraft.x, y: pinDraft.y } : null;
     try {
       const res = await fetch(`/api/doc/${encodeURIComponent(token)}/comments`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ body, quote: quote ?? null }),
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body, quote: quote ?? null, pin, attachmentFileId: attachmentFileId ?? null }),
       });
       const j = await res.json().catch(() => ({}));
       if (res.status === 404) { setState("gone"); return false; }
@@ -216,6 +247,7 @@ export default function DocReviewView({ token }: { token: string }) {
       if (!res.ok) { setNotice({ tone: "warn", text: j.error ?? "We couldn't post that. Please try again." }); return false; }
       setData((d) => d ? { ...d, comments: [...(d.comments ?? []), j.comment as ThreadComment] } : d);
       setQuoteDraft(null);
+      setPinDraft(null);
       return true;
     } catch {
       setNotice({ tone: "warn", text: "We couldn't reach the server. Check your connection and try again." });
@@ -260,7 +292,27 @@ export default function DocReviewView({ token }: { token: string }) {
     void load(false);
   };
 
+  const renderAttachment = (fileId: string) => {
+    const f = data?.files.find((x) => x.id === fileId);
+    if (!f) return <span className="text-muted">📎 File removed</span>;
+    const preview = previewImages.findIndex((p) => p.id === f.id);
+    const cls = "break-words text-left font-semibold underline underline-offset-4";
+    return preview >= 0
+      ? <button onClick={() => setLightbox(preview)} className={cls} style={{ color: NAVY }}>📎 {f.name}</button>
+      : <a href={fileHref(f.id)} target="_blank" rel="noopener noreferrer" className={cls} style={{ color: NAVY }}>📎 {f.name}</a>;
+  };
+
   const noticeTone = { good: "border-[#15803d] bg-[#f0fdf4] text-[#14532d]", info: "border-[#1b3a5c] bg-[#eef4fb] text-[#1b3a5c]", warn: "border-[#b45309] bg-[#fffbeb] text-[#78350f]" };
+
+  // The image review's versions, and the one shown: the newest unless another was picked.
+  const images = data?.images ?? [];
+  const imageOptions = images.map((img, i) => ({ fileId: img.fileId, label: i === images.length - 1 ? `Version ${i + 1}, newest` : `Version ${i + 1}` }));
+  const shownImage = image && data ? (viewingImage && images.some((i) => i.fileId === viewingImage) ? viewingImage : data.body) : null;
+  const onNewest = !!data && shownImage === data.body;
+  // Asking for changes needs something to change: a note from the client still open
+  // on the newest image (pins left on an earlier version do not count).
+  const openNotes = commentsFor(data?.comments ?? [], data?.body ?? null).filter((c) => c.fromClient && !c.completedAt).length;
+  const what = image ? "image" : "document";
 
   return (
     <div className="min-h-[100dvh] bg-background text-foreground">
@@ -272,11 +324,11 @@ export default function DocReviewView({ token }: { token: string }) {
       </header>
 
       <main className="mx-auto max-w-[1280px] px-5 pb-16 pt-7">
-        {state === "loading" && <p className="text-[18px] text-muted">Loading your document…</p>}
+        {state === "loading" && <p className="text-[18px] text-muted">Loading…</p>}
 
         {state === "error" && (
           <div className="rounded-2xl border bg-surface p-6">
-            <p className="text-[20px] font-semibold">We couldn&apos;t load this document.</p>
+            <p className="text-[20px] font-semibold">We couldn&apos;t load this page.</p>
             <p className="mt-1 text-[17px] text-muted">Check your connection and try again.</p>
             <button onClick={() => { setState("loading"); void load(true); }}
               className="mt-4 min-h-[48px] rounded-xl px-6 text-[17px] font-semibold text-white" style={{ background: NAVY }}>Try again</button>
@@ -293,7 +345,13 @@ export default function DocReviewView({ token }: { token: string }) {
         {state === "ready" && data && (
           <>
             <h1 className="text-[30px] font-bold leading-tight">{data.title}</h1>
-            {!locked && <p className="mt-2 text-[18px] text-muted">Edit anything you like and send your changes, or approve it as is.</p>}
+            {!locked && (
+              <p className="mt-2 text-[18px] text-muted">
+                {image
+                  ? "Click any spot on the image to add a numbered comment or a file. Then ask for changes, or approve it as is."
+                  : "Edit anything you like and send your changes, or approve it as is."}
+              </p>
+            )}
 
             {data.status === "approved" && (
               <div className="mt-5 flex items-start gap-4 rounded-2xl border-2 p-5" style={{ borderColor: GREEN, background: "#f0fdf4" }}>
@@ -306,7 +364,7 @@ export default function DocReviewView({ token }: { token: string }) {
             )}
             {data.closed && data.status !== "approved" && (
               <div className="mt-5 rounded-2xl border bg-surface p-5">
-                <p className="text-[20px] font-semibold">This document is closed.</p>
+                <p className="text-[20px] font-semibold">This {what} is closed.</p>
                 <p className="mt-1 text-[17px] text-muted">It can&apos;t be changed anymore.</p>
               </div>
             )}
@@ -325,13 +383,30 @@ export default function DocReviewView({ token }: { token: string }) {
                 right, laid out like the team's full screen view (Derek,
                 2026-09-11). On a phone the sidebar stacks under the document. */}
             <div className="mt-6 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
-              <article className="min-w-0 rounded-2xl border bg-surface p-5 shadow-sm sm:p-8">
-                <RichTextEditor key={editorKey} value={html} onChange={setHtml} variant="doc" editable={!locked}
-                  placeholder="This document is empty."
-                  highlights={(data.comments ?? []).filter((c) => c.quote && !c.completedAt).map((c) => ({ id: c.id, quote: c.quote as string }))}
-                  activeHighlightId={focusedComment} onHighlightClick={setFocusedComment}
-                  onSelectionComment={data.closed ? undefined : setQuoteDraft} />
-              </article>
+              {image ? (
+                <article className="min-w-0 rounded-2xl border bg-surface p-4 shadow-sm sm:p-6">
+                  {imageOptions.length > 1 && (
+                    <div className="mb-3">
+                      <ImageVersionPicker options={imageOptions} value={shownImage} onChange={(id) => { setViewingImage(id); setPinDraft(null); }} />
+                    </div>
+                  )}
+                  {!onNewest && <p className="mb-3 text-[17px] text-muted">This is an earlier version. Its pins are from that round.</p>}
+                  {shownImage && (
+                    <ImagePinBoard src={fileHref(shownImage)} alt={images.find((i) => i.fileId === shownImage)?.name ?? data.title}
+                      comments={data.comments ?? []} fileId={shownImage} pending={pinDraft} activeId={focusedComment} color={NAVY}
+                      onPinClick={setFocusedComment}
+                      onPlace={locked || !onNewest ? undefined : (spot) => setPinDraft({ fileId: shownImage, ...spot, number: nextPin(data.comments ?? [], shownImage) })} />
+                  )}
+                </article>
+              ) : (
+                <article className="min-w-0 rounded-2xl border bg-surface p-5 shadow-sm sm:p-8">
+                  <RichTextEditor key={editorKey} value={html} onChange={setHtml} variant="doc" editable={!locked}
+                    placeholder="This document is empty."
+                    highlights={(data.comments ?? []).filter((c) => c.quote && !c.completedAt).map((c) => ({ id: c.id, quote: c.quote as string }))}
+                    activeHighlightId={focusedComment} onHighlightClick={setFocusedComment}
+                    onSelectionComment={data.closed ? undefined : setQuoteDraft} />
+                </article>
+              )}
 
               {/* Stays beside the document as it scrolls (Derek, 2026-09-11: "make side
                   bar sticky"). Send my changes and Approve sit at its top, above
@@ -340,10 +415,10 @@ export default function DocReviewView({ token }: { token: string }) {
                 {!locked && (
                   <div className="rounded-2xl border bg-surface p-4 shadow-sm">
                     <div className="flex gap-3">
-                      <button onClick={() => void publish("submit")} disabled={!dirty || busy !== null}
+                      <button onClick={() => void publish("submit")} disabled={(image ? openNotes === 0 : !dirty) || busy !== null}
                         className="min-h-[52px] flex-[1.3] whitespace-nowrap rounded-xl border-2 px-2 text-[17px] font-semibold transition disabled:opacity-40"
                         style={{ borderColor: NAVY, color: NAVY }}>
-                        {busy === "send" ? "Sending…" : "Send my changes"}
+                        {busy === "send" ? "Sending…" : image ? "Ask for changes" : "Send my changes"}
                       </button>
                       <button onClick={approve} disabled={busy !== null}
                         className="min-h-[52px] flex-1 rounded-xl px-4 text-[17px] font-bold text-white transition disabled:opacity-60"
@@ -354,6 +429,7 @@ export default function DocReviewView({ token }: { token: string }) {
                     {dirty && (
                       <button onClick={undoEdits} className="mt-2 min-h-[44px] text-[16px] font-medium text-muted underline underline-offset-4">Undo my edits</button>
                     )}
+                    {image && openNotes === 0 && <p className="mt-2 text-[16px] text-muted">Leave a note on the image first, then ask for changes.</p>}
                   </div>
                 )}
 
@@ -385,12 +461,15 @@ export default function DocReviewView({ token }: { token: string }) {
                     )}
                   </FileDropLine>
                 )}
-                <CommentThread comments={data.comments ?? []} onPost={postComment} when={commentTime} viewer="client" buttonStyle={{ background: NAVY }}
+                <CommentThread comments={image ? commentsFor(data.comments ?? [], shownImage) : data.comments ?? []} onPost={postComment} when={commentTime} viewer="client" buttonStyle={{ background: NAVY }}
                   isMine={(c) => c.fromClient} canDelete={(c) => c.fromClient}
                   onEdit={(id, body) => changeComment(id, { body })}
                   onToggleDone={(id, done) => changeComment(id, { done })}
                   onDelete={removeComment}
-                  quote={quoteDraft} onClearQuote={() => setQuoteDraft(null)}
+                  quote={image ? null : quoteDraft} pinDraft={image ? pinDraft?.number ?? null : null}
+                  onClearQuote={() => { setQuoteDraft(null); setPinDraft(null); }}
+                  placeholder={image ? "Write a comment, or click the image to drop a numbered pin…" : undefined}
+                  onAttach={locked ? undefined : attachFile} renderAttachment={renderAttachment}
                   focusedId={focusedComment} onQuoteClick={setFocusedComment} />
               </aside>
             </div>

@@ -2,11 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { rateLimit } from "@/lib/rateLimit";
 import { DOC_TOKEN_PATTERN, NO_STORE, docNotFound, resolveDocToken, latestPublished } from "@/lib/taskDocumentServer";
-import { sharedDocFiles, docComments } from "@/lib/taskDocumentFiles";
+import { sharedDocFiles, sharedDocImages, docComments } from "@/lib/taskDocumentFiles";
 
 // Public, no login: what the client review page shows. It reads and never
 // writes. Mail security scanners (Outlook Safe Links and others) open links
 // before the client does, so opening the link must change nothing.
+// For an image review, body is the image file shown now and images lists every
+// image the client was sent, oldest first.
 export async function GET(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   if (!adminConfigured) return NextResponse.json({ error: "Not configured" }, { status: 501, headers: NO_STORE });
   const { token } = await params;
@@ -17,15 +19,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
 
   const scope = await resolveDocToken(token);
   if (!scope) return docNotFound();
-  const [latest, { data: doc }, files, comments] = await Promise.all([
-    latestPublished(scope.documentId),
+  const [latest, { data: doc }, files, comments, images] = await Promise.all([
+    latestPublished(scope.documentId, scope.kind),
     supabaseAdmin.from("task_documents").select("status, approved_at, title").eq("id", scope.documentId).maybeSingle(),
     sharedDocFiles(scope.documentId),
     docComments(scope.documentId),
+    scope.kind === "image" ? sharedDocImages(scope.documentId) : Promise.resolve([]),
   ]);
   if (!latest || !doc) return docNotFound();
 
   return NextResponse.json({
+    kind: scope.kind,
     // The document's own name when the team gave it one, else the task's title.
     title: ((doc.title as string | null) ?? "").trim() || scope.taskTitle,
     clientName: scope.clientName,
@@ -36,5 +40,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     closed: scope.taskStatus === "done" || doc.status === "completed",
     files,
     comments,
+    images,
   }, { headers: NO_STORE });
 }

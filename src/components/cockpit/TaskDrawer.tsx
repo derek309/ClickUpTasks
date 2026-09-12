@@ -864,10 +864,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const [docPresence, setDocPresence] = useState<{ taskId: string; exists: boolean }>({ taskId: task.id, exists: false });
   const docExists = docPresence.taskId === task.id && docPresence.exists;
   const showDocument = canHaveDocument && docExists;
-  // The document and the draft email each open full screen from their line, and
-  // their chips open them straight away. Bumping a number is the signal, so a
-  // second click opens it again after it was closed.
+  // The image review reports the same way (Derek, 2026-09-12).
+  const [imagePresence, setImagePresence] = useState<{ taskId: string; exists: boolean }>({ taskId: task.id, exists: false });
+  const showImageReview = canHaveDocument && imagePresence.taskId === task.id && imagePresence.exists;
+  // The document, the image review and the draft email each open full screen from
+  // their line, and their chips open them straight away. Bumping a number is the
+  // signal, so a second click opens it again after it was closed.
   const [docStartNonce, setDocStartNonce] = useState(0);
+  const [imageStartNonce, setImageStartNonce] = useState(0);
   const [emailOpenNonce, setEmailOpenNonce] = useState(0);
   // Email on this task, from the dock, the "+ Draft email" chip or Reply on a
   // message, opens the draft email window. A draft already here opens as it is;
@@ -1205,20 +1209,27 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // ready to send. It no longer rewrites itself with AI as it opens (Derek,
   // 2026-09-12: "not sure that needs to happen"); Write with AI uses what changed
   // when asked. It replaces any draft already here. False when there is nobody to email.
-  const startReviewEmail = (review: { url: string | null; name: string; text: string; changes: string | null }) => {
+  // An image review's email says how to leave a note on the image, and has no text to quote.
+  const startReviewEmail = (review: { kind: "doc" | "image"; url: string | null; name: string; text: string; changes: string | null }) => {
     if (!hasMessaging) return false;
+    const image = review.kind === "image";
+    const noun = image ? "image" : "document";
     const now = new Date().toISOString();
     const link = review.url ? { url: review.url, label: `Open "${review.name}" to review` } : null;
     const name = escapeHtml(review.name);
     const intro = review.changes
-      ? `<p>Hi,</p><p>We made some updates to "${name}". Take a look and approve it when it looks right:</p>`
-      : `<p>Hi,</p><p>"${name}" is ready for your review. You can read it, make changes, leave comments or approve it here:</p>`;
+      ? `<p>Hi,</p><p>We made ${image ? "a new version of" : "some updates to"} "${name}". Take a look and approve it when it looks right:</p>`
+      : image
+        ? `<p>Hi,</p><p>"${name}" is ready for your review. Click any spot on the image to leave a comment, or approve it here:</p>`
+        : `<p>Hi,</p><p>"${name}" is ready for your review. You can read it, make changes, leave comments or approve it here:</p>`;
     const aiContext = [
       review.changes
-        ? `We updated the document "${review.name}" and are asking the client to review the changes and approve it.`
-        : `We are asking the client to review the document "${review.name}". From the link they can read it, edit it, comment and approve it.`,
+        ? `We updated the ${noun} "${review.name}" and are asking the client to review the changes and approve it.`
+        : image
+          ? `We are asking the client to review the image "${review.name}". From the link they can click any spot on it to leave a numbered comment or a file, ask for changes, or approve it.`
+          : `We are asking the client to review the document "${review.name}". From the link they can read it, edit it, comment and approve it.`,
       review.changes ? `What changed since the version they saw before:\n${review.changes}` : null,
-      `The document's text:\n${review.text}`,
+      image ? null : `The document's text:\n${review.text}`,
     ].filter(Boolean).join("\n\n");
     onPatch({
       draftEmail: {
@@ -1229,7 +1240,16 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     setEmailOpenNonce((n) => n + 1);
     return true;
   };
-  const emptySectionsRow = (showDescription && showChecklist && showAttachments && (showDocument || !canHaveDocument) && (!!task.draftEmail || !hasMessaging)) ? null : (
+  // The image review (Derek, 2026-09-12): the same line and window as the client
+  // document, on an image the client pins comments to. Its own key, apart from the
+  // lines beside it; below startReviewEmail so it never reads it before it exists.
+  const imageBlock = !canHaveDocument ? null : (
+    <TaskDocument key={`image-${task.id}`} kind="image" task={task} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin} meId={meId}
+      onEmailClient={startReviewEmail}
+      startNonce={imageStartNonce}
+      onPresence={(exists) => setImagePresence((p) => (p.taskId === task.id && p.exists === exists ? p : { taskId: task.id, exists }))} />
+  );
+  const emptySectionsRow = (showDescription && showChecklist && showAttachments && ((showDocument && showImageReview) || !canHaveDocument) && (!!task.draftEmail || !hasMessaging)) ? null : (
     <div
       onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setAttFileDragOver(true); } }}
       onDragLeave={(e) => { if (e.currentTarget === e.target) setAttFileDragOver(false); }}
@@ -1238,6 +1258,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     >
       {!showDescription && <button onClick={() => openSection("description")} className={addChip}>+ Description</button>}
       {canHaveDocument && !showDocument && <button onClick={() => setDocStartNonce((n) => n + 1)} className={addChip}>+ Client document</button>}
+      {canHaveDocument && !showImageReview && <button onClick={() => setImageStartNonce((n) => n + 1)} className={addChip}>+ Image review</button>}
       {hasMessaging && !task.draftEmail && <button onClick={() => startDraftEmail()} className={addChip}>+ Draft email</button>}
       {!showChecklist && <button onClick={() => openSection("checklist")} className={addChip}>+ Checklist</button>}
       {!showAttachments && (<>
@@ -1357,6 +1378,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 <div className="my-4 border-t" />
                 {clientResponseBlock}
                 {documentBlock}
+                {imageBlock}
                 {draftEmailBlock}
                 {descriptionBlock}
                 {subtasksBlock}
@@ -1399,6 +1421,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                     reference you consult, so it takes the wide column. In the
                     rail it was a 400px box (Derek, 2026-09-11: "way to small"). */}
                 {documentBlock}
+                {imageBlock}
                 {draftEmailBlock}
                 {/* Composer above the feed, because the feed is newest-first:
                     what you write next belongs at the end you are reading

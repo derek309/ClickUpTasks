@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { rateLimit } from "@/lib/rateLimit";
 import {
-  DOC_TOKEN_PATTERN, NO_STORE, docNotFound, resolveDocToken, readPublicJson, logClientDocEvent,
+  DOC_TOKEN_PATTERN, NO_STORE, docNotFound, resolveDocToken, readPublicJson, logClientDocEvent, kindNoun,
 } from "@/lib/taskDocumentServer";
 import { startDocUpload, finishDocUpload, removeDocFile } from "@/lib/taskDocumentFiles";
 
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   if (o.payload.action === "confirm") {
     const r = await finishDocUpload(o.scope.documentId, o.payload.path, o.payload.name, o.actor);
     if (!r.ok) return json({ error: r.error }, r.status);
-    await logClientDocEvent(o.scope.taskId, `${o.scope.clientName} added ${r.name} to the client document`);
+    await logClientDocEvent(o.scope.taskId, `${o.scope.clientName} added ${r.name} to the ${kindNoun(o.scope.kind)}`);
     return json({ ok: true, fileId: r.fileId });
   }
   return json({ error: "Invalid request." }, 400);

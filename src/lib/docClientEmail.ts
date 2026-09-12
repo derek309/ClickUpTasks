@@ -19,13 +19,13 @@ import { linkState, type TeamTask } from "./taskDocumentServer";
 const SEND_DOMAIN = "clickuplocal.com";
 const COOLDOWN_MS = 15 * 60_000;
 
-export async function emailClientAboutComment(opts: { user: AuthedUser; task: TeamTask; documentId: string; comment: string; quote?: string | null; origin: string }): Promise<boolean> {
+export async function emailClientAboutComment(opts: { user: AuthedUser; task: TeamTask; documentId: string; comment: string; quote?: string | null; pinNumber?: number | null; origin: string }): Promise<boolean> {
   const { user, task, documentId } = opts;
   const sender = user.email ?? "";
   if (!googleConfigured || !sender.toLowerCase().endsWith(`@${SEND_DOMAIN}`) || task.status === "done") return false;
   if (await canCallerMessageClient(user, task.client_id)) return false;
 
-  const { data: doc } = await supabaseAdmin.from("task_documents").select("title, status, deleted_at").eq("id", documentId).maybeSingle();
+  const { data: doc } = await supabaseAdmin.from("task_documents").select("title, status, deleted_at, kind").eq("id", documentId).maybeSingle();
   if (!doc || doc.deleted_at || doc.status === "completed") return false;
   const link = await linkState(documentId, opts.origin);
   if (!link.live || !link.url) return false;
@@ -44,12 +44,13 @@ export async function emailClientAboutComment(opts: { user: AuthedUser; task: Te
   const { data: prof } = await supabaseAdmin.from("profiles").select("name, email_signature").ilike("email", sender).maybeSingle();
   const fromName = ((prof?.name as string | null) ?? "").trim();
   const name = ((doc.title as string | null) ?? "").trim() || task.title;
-  const button = { url: link.url, label: "Open the document to reply" };
+  const button = { url: link.url, label: `Open the ${doc.kind === "image" ? "image" : "document"} to reply` };
   const subject = `New comment on "${name}"`.slice(0, 200);
+  const on = (text: string) => `<p style="margin:12px 0 4px;color:#6b7280">${text}</p>`;
   const body = [
     `<p>Hi,</p>`,
     `<p>${escapeHtml(fromName || "We")} left a comment on "${escapeHtml(name)}":</p>`,
-    opts.quote ? `<p style="margin:12px 0 4px;color:#6b7280">On “${escapeHtml(opts.quote.replace(/\n/g, " … "))}”</p>` : "",
+    opts.pinNumber ? on(`On pin ${opts.pinNumber}`) : opts.quote ? on(`On “${escapeHtml(opts.quote.replace(/\n/g, " … "))}”`) : "",
     `<blockquote style="margin:12px 0;padding:10px 14px;border-left:3px solid #d0dce8">${escapeHtml(opts.comment.trim()).replace(/\n/g, "<br>")}</blockquote>`,
     draftLinkAsButton(draftLinkHtml(button), button),
   ].join("");

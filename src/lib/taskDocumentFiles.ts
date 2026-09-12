@@ -6,11 +6,16 @@
 // Everyone uploads straight to storage through a one time upload link (a Vercel
 // request body stops near 4.5MB and files may be 25MB), then asks for the file to
 // be recorded, which is when its real size and type are checked.
+//
+// An image review keeps its uploaded images here too, marked purpose "image"
+// (supabase/task-image-reviews.sql). They are not in the Files list, and the
+// client can open one only once it was sent.
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "./supabaseAdmin";
 import { TASK_FILES_BUCKET } from "./db";
+import { cleanPin, sentImages, type ImagePin } from "./imagePins";
 import {
-  MAX_SHARED_FILE_BYTES, cleanFileName, extOf, isActiveContentType, isShareableFileName,
+  MAX_SHARED_FILE_BYTES, cleanFileName, extOf, isActiveContentType, isPreviewableImage, isShareableFileName,
   sharedFileKind, storageSafeName, type SharedFileKind,
 } from "./uploadTypes";
 
@@ -23,6 +28,9 @@ const fail = (status: number, error: string): Fail => ({ ok: false, status, erro
 
 /** Who added or removed a file, or saved a draft. A null id is the client. */
 export type DocActor = { id: string | null; label: string };
+/** "image": an uploaded version of an image review's image. "file": everything else. */
+export type FilePurpose = "file" | "image";
+const IMAGE_ONLY = "Upload a JPG, PNG, WebP or GIF image.";
 
 export const docFileFolder = (documentId: string) => `doc/${documentId}/`;
 
@@ -70,9 +78,10 @@ export function checkFileSize(raw: unknown): Fail | null {
 }
 
 /** A one time upload link for a new file in the document's folder. */
-export async function startDocUpload(documentId: string, rawName: unknown, rawSize: unknown): Promise<{ ok: true; path: string; uploadUrl: string } | Fail> {
+export async function startDocUpload(documentId: string, rawName: unknown, rawSize: unknown, purpose: FilePurpose = "file"): Promise<{ ok: true; path: string; uploadUrl: string } | Fail> {
   const named = checkFileName(rawName);
   if (!named.ok) return named;
+  if (purpose === "image" && !isPreviewableImage(named.name)) return fail(400, IMAGE_ONLY);
   const sized = checkFileSize(rawSize);
   if (sized) return sized;
   const { count } = await supabaseAdmin.from("task_document_files")
@@ -89,11 +98,16 @@ export async function startDocUpload(documentId: string, rawName: unknown, rawSi
  *  folder, exist, be under the cap and not carry a type a browser would run;
  *  otherwise it is deleted and nothing is recorded. The client sees it at once,
  *  whoever added it (Derek, 2026-09-11: the client link "is not showing the files
- *  that have already been attached"). */
-export async function finishDocUpload(documentId: string, rawPath: unknown, rawName: unknown, actor: DocActor): Promise<{ ok: true; fileId: string; name: string } | Fail> {
+ *  that have already been attached"), except an image review's image, which waits
+ *  until it is sent. */
+export async function finishDocUpload(documentId: string, rawPath: unknown, rawName: unknown, actor: DocActor, purpose: FilePurpose = "file"): Promise<{ ok: true; fileId: string; name: string } | Fail> {
   const named = checkFileName(rawName);
   if (!named.ok) return named;
   if (!isDocFilePath(documentId, rawPath) || extOf(rawPath) !== extOf(named.name)) return fail(400, "Invalid file.");
+  if (purpose === "image" && !isPreviewableImage(named.name)) {
+    await supabaseAdmin.storage.from(TASK_FILES_BUCKET).remove([rawPath]);
+    return fail(400, IMAGE_ONLY);
+  }
 
   const stored = await checkStoredFile(rawPath);
   if (!stored.ok) return stored;
@@ -103,7 +117,7 @@ export async function finishDocUpload(documentId: string, rawPath: unknown, rawN
   const fileId = "tdf_" + randomUUID();
   const { error: insertError } = await supabaseAdmin.from("task_document_files").insert({
     id: fileId, document_id: documentId, path: rawPath, name: named.name, size_bytes: size,
-    kind: sharedFileKind(named.name), added_by: actor.id, added_by_label: actor.label,
+    kind: sharedFileKind(named.name), purpose, added_by: actor.id, added_by_label: actor.label,
     created_at: now, shared_at: now,
   });
   if (insertError) return fail(409, "That file is already on the document.");
@@ -112,12 +126,13 @@ export async function finishDocUpload(documentId: string, rawPath: unknown, rawN
 
 /** Take a file off the document and delete it from storage. The row stays, so
  *  the history can still say who removed it. A client may only remove files a
- *  client added. */
+ *  client added, and nobody removes an image review's image: its pins are on it. */
 export async function removeDocFile(documentId: string, fileId: unknown, actor: DocActor, clientFilesOnly: boolean): Promise<{ ok: true; name: string } | Fail> {
   if (typeof fileId !== "string") return fail(400, "Invalid request.");
   const { data: f } = await supabaseAdmin.from("task_document_files")
-    .select("id, path, name, added_by, removed_at").eq("id", fileId).eq("document_id", documentId).maybeSingle();
+    .select("id, path, name, added_by, removed_at, purpose").eq("id", fileId).eq("document_id", documentId).maybeSingle();
   if (!f || f.removed_at) return fail(404, "That file is already gone.");
+  if (f.purpose === "image") return fail(400, "An image version stays with its pins. Upload a new version instead.");
   if (clientFilesOnly && f.added_by !== null) return fail(403, "You can remove the files you added.");
   await supabaseAdmin.from("task_document_files")
     .update({ removed_at: new Date().toISOString(), removed_by: actor.id, removed_by_label: actor.label }).eq("id", f.id as string);
@@ -141,7 +156,7 @@ export type SharedDocFile = { id: string; name: string; size: number; kind: Shar
 export async function sharedDocFiles(documentId: string): Promise<SharedDocFile[]> {
   const { data } = await supabaseAdmin.from("task_document_files")
     .select("id, name, size_bytes, kind, added_by, added_by_label, created_at")
-    .eq("document_id", documentId).is("removed_at", null)
+    .eq("document_id", documentId).eq("purpose", "file").is("removed_at", null)
     .order("created_at", { ascending: true });
   return (data ?? []).map((r) => ({
     id: r.id as string, name: r.name as string, size: Number(r.size_bytes ?? 0), kind: r.kind as SharedFileKind,
@@ -149,28 +164,67 @@ export async function sharedDocFiles(documentId: string): Promise<SharedDocFile[
   }));
 }
 
-/** A short lived link to one shared file, saved rather than shown when asked. */
+/** Whether this image was ever sent to the client. */
+async function wasSent(documentId: string, fileId: string): Promise<boolean> {
+  const { data } = await supabaseAdmin.from("task_document_versions")
+    .select("id").eq("document_id", documentId).eq("kind", "sent").eq("body", fileId).limit(1).maybeSingle();
+  return !!data;
+}
+
+/** A short lived link to one shared file, saved rather than shown when asked.
+ *  An image review's image opens only once it was sent: an upload the team has
+ *  not sent yet stays theirs. */
 export async function sharedDocFileUrl(documentId: string, fileId: string, download: boolean): Promise<string | null> {
   const { data: f } = await supabaseAdmin.from("task_document_files")
-    .select("path, name").eq("id", fileId).eq("document_id", documentId)
+    .select("path, name, purpose").eq("id", fileId).eq("document_id", documentId)
     .is("removed_at", null).maybeSingle();
-  if (!f) return null;
+  if (!f || (f.purpose === "image" && !(await wasSent(documentId, fileId)))) return null;
   const { data } = await supabaseAdmin.storage.from(TASK_FILES_BUCKET)
     .createSignedUrl(f.path as string, 300, download ? { download: f.name as string } : undefined);
   return data?.signedUrl ?? null;
+}
+
+/** One of this image review's uploaded images, or null. sentOnly is the client's
+ *  side, which may only use images that were sent to them. */
+export async function docImageFile(documentId: string, fileId: unknown, sentOnly: boolean): Promise<{ id: string; name: string } | null> {
+  if (typeof fileId !== "string") return null;
+  const { data: f } = await supabaseAdmin.from("task_document_files")
+    .select("id, name").eq("id", fileId).eq("document_id", documentId).eq("purpose", "image")
+    .is("removed_at", null).maybeSingle();
+  if (!f || (sentOnly && !(await wasSent(documentId, fileId)))) return null;
+  return { id: f.id as string, name: f.name as string };
+}
+
+export type SharedDocImage = { fileId: string; name: string };
+
+/** The images the client was sent, oldest first: Version 1, Version 2 and so on. */
+export async function sharedDocImages(documentId: string): Promise<SharedDocImage[]> {
+  const { data: versions } = await supabaseAdmin.from("task_document_versions")
+    .select("version, kind, body").eq("document_id", documentId);
+  const ids = sentImages((versions ?? []) as { version: number; kind: string; body: string }[]);
+  if (!ids.length) return [];
+  const { data: files } = await supabaseAdmin.from("task_document_files").select("id, name").in("id", ids);
+  const names = new Map((files ?? []).map((f) => [f.id as string, f.name as string]));
+  return ids.map((fileId) => ({ fileId, name: names.get(fileId) ?? "Image" }));
 }
 
 // ---------------------------------------------------------------------------
 // Comments: one thread the team and the client both see.
 
 export const MAX_COMMENT_CHARS = 4000;
+/** A numbered pin on one of an image review's images. */
+export type DocPin = ImagePin & { number: number };
 export type DocComment = {
   id: string; body: string; authorLabel: string; fromClient: boolean; createdAt: string;
   editedAt: string | null; completedAt: string | null; completedBy: string | null;
   /** The words in the document this comment is about, or null for the whole document. */
   quote: string | null;
+  /** The spot on an image this comment is about. */
+  pin: DocPin | null;
+  /** A file added with the comment; it is in the Files list too. */
+  attachmentFileId: string | null;
 };
-const COMMENT_COLUMNS = "id, body, author_id, author_label, created_at, edited_at, completed_at, completed_by_label, quote";
+const COMMENT_COLUMNS = "id, body, author_id, author_label, created_at, edited_at, completed_at, completed_by_label, quote, pin_file_id, pin_x, pin_y, pin_number, attachment_file_id";
 
 const MAX_QUOTE_CHARS = 500;
 /** The words a comment is about, as selected in the document: plain text, one
@@ -199,24 +253,67 @@ const toComment = (r: Record<string, unknown>): DocComment => ({
   completedAt: (r.completed_at as string | null) ?? null,
   completedBy: (r.completed_by_label as string | null) ?? null,
   quote: (r.quote as string | null) ?? null,
+  pin: r.pin_file_id && r.pin_number
+    ? { fileId: r.pin_file_id as string, x: Number(r.pin_x), y: Number(r.pin_y), number: Number(r.pin_number) }
+    : null,
+  attachmentFileId: (r.attachment_file_id as string | null) ?? null,
 });
 
-/** rawQuote: the words selected in the document, when the comment is about them. */
-export async function postDocComment(documentId: string, rawBody: unknown, actor: DocActor, rawQuote?: unknown): Promise<{ ok: true; comment: DocComment } | Fail> {
+/** A file on the document that a comment may carry. */
+async function attachableFile(documentId: string, fileId: unknown): Promise<string | null> {
+  if (typeof fileId !== "string") return null;
+  const { data } = await supabaseAdmin.from("task_document_files")
+    .select("id").eq("id", fileId).eq("document_id", documentId).eq("purpose", "file").is("removed_at", null).maybeSingle();
+  return (data?.id as string | undefined) ?? null;
+}
+
+/** The next number on an image: one past the highest pin still on it. */
+async function nextPinNumber(documentId: string, fileId: string): Promise<number> {
+  const { data } = await supabaseAdmin.from("task_document_comments")
+    .select("pin_number").eq("document_id", documentId).eq("pin_file_id", fileId)
+    .order("pin_number", { ascending: false }).limit(1).maybeSingle();
+  return Number(data?.pin_number ?? 0) + 1;
+}
+
+export type CommentExtras = {
+  /** The words selected in the document, when the comment is about them. */
+  quote?: unknown;
+  /** A spot on an image review's image: { fileId, x, y }. */
+  pin?: unknown;
+  /** A file already added to the document, carried by this comment. */
+  attachmentFileId?: unknown;
+  /** The client's side: a pin only on an image they were sent. */
+  clientSide?: boolean;
+};
+
+/** A comment needs words, or a file when it carries one (Derek, 2026-09-12: "add a
+ *  comment or upload a file"). A pin gets the next number on its image. */
+export async function postDocComment(documentId: string, rawBody: unknown, actor: DocActor, extras: CommentExtras = {}): Promise<{ ok: true; comment: DocComment } | Fail> {
+  if (typeof rawBody === "string" && rawBody.trim().length > MAX_COMMENT_CHARS) return fail(413, "A comment can be up to 4,000 characters.");
   const body = cleanCommentBody(rawBody);
-  if (!body) {
-    return typeof rawBody === "string" && rawBody.trim().length > MAX_COMMENT_CHARS
-      ? fail(413, "A comment can be up to 4,000 characters.")
-      : fail(400, "Write a comment first.");
+  const attachment = extras.attachmentFileId == null ? null : await attachableFile(documentId, extras.attachmentFileId);
+  if (extras.attachmentFileId != null && !attachment) return fail(400, "That file is no longer on the document.");
+  if (!body && !attachment) return fail(400, "Write a comment first.");
+
+  let pin: ImagePin | null = null;
+  if (extras.pin != null) {
+    pin = cleanPin(extras.pin);
+    if (!pin || !(await docImageFile(documentId, pin.fileId, !!extras.clientSide))) return fail(400, "That image is no longer on the review.");
   }
-  const row = {
-    id: "tdm_" + randomUUID(), document_id: documentId, body,
-    author_id: actor.id, author_label: actor.label, created_at: new Date().toISOString(),
-    quote: cleanQuote(rawQuote),
+
+  const base = {
+    document_id: documentId, body: body ?? "", author_id: actor.id, author_label: actor.label,
+    quote: pin ? null : cleanQuote(extras.quote), attachment_file_id: attachment,
+    pin_file_id: pin?.fileId ?? null, pin_x: pin?.x ?? null, pin_y: pin?.y ?? null,
   };
-  const { error } = await supabaseAdmin.from("task_document_comments").insert(row);
-  if (error) return fail(500, "Could not post the comment. Please try again.");
-  return { ok: true, comment: toComment(row) };
+  for (let attempt = 1; ; attempt++) {
+    const row = { ...base, id: "tdm_" + randomUUID(), created_at: new Date().toISOString(), pin_number: pin ? await nextPinNumber(documentId, pin.fileId) : null };
+    const { error } = await supabaseAdmin.from("task_document_comments").insert(row);
+    if (!error) return { ok: true, comment: toComment(row) };
+    // 23505: someone dropped a pin on this image at the same moment and took the
+    // number (supabase/task-image-reviews.sql), so take the next one.
+    if (!pin || error.code !== "23505" || attempt === 5) return fail(500, "Could not post the comment. Please try again.");
+  }
 }
 
 /** The thread, oldest first. */
