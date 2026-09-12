@@ -22,7 +22,7 @@ import { hashToken, mintToken, decryptToken } from "./tokenCrypto";
 import { PERSONAL_CLIENT_ID, clientAnswerPatch, htmlToText, type TaskStatus } from "./data";
 import { resolveNotifyRecipient, notifyTeamOfClientActivity } from "./waitingNotify";
 import { sanitizeDocHtml, DOC_MAX_RAW_CHARS, DOC_MAX_HTML_CHARS } from "./docHtml";
-import { docImageFile } from "./taskDocumentFiles";
+import { docImageFile, sharedDocImages } from "./taskDocumentFiles";
 import type { TaskDocumentKind } from "./db";
 
 /** A document link token: `doc_` plus 32 random bytes in base64url. Checked
@@ -219,10 +219,11 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
   if (scope.taskStatus === "done" || scope.documentStatus === "completed") return { ok: false, status: 400, error: "This document is closed." };
   let body: string;
   if (image) {
-    // A newer image sent in the meantime is still refused below: its version moved on.
-    const latest = await latestPublished(scope.documentId, "image");
-    if (!latest) return { ok: false, status: 404, error: "Not found" };
-    body = latest.body;
+    // The image under review: the newest one sent and not removed. A newer image
+    // sent in the meantime is still refused below: its version moved on.
+    const shown = (await sharedDocImages(scope.documentId)).at(-1);
+    if (!shown) return { ok: false, status: 400, error: "There is no image to review right now." };
+    body = shown.fileId;
   } else {
     body = sanitizeDocHtml(rawHtml as string);
     if (body.length > DOC_MAX_HTML_CHARS) return { ok: false, status: 413, error: "This document is too long to send." };

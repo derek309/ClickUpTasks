@@ -29,7 +29,7 @@ type DocData = {
   kind: "doc" | "image"; title: string; clientName: string; body: string; version: number; status: DocStatus; approvedAt: string | null;
   closed: boolean; files: DocFile[]; comments: ThreadComment[];
   /** An image review's images the client was sent, oldest first. body is the newest. */
-  images: { fileId: string; name: string }[];
+  images: { fileId: string; name: string; number: number }[];
 };
 type Notice = { tone: "good" | "info" | "warn"; text: string } | null;
 
@@ -306,7 +306,8 @@ export default function DocReviewView({ token }: { token: string }) {
 
   // The image review's versions, and the one shown: the newest unless another was picked.
   const images = data?.images ?? [];
-  const imageOptions = images.map((img, i) => ({ fileId: img.fileId, label: i === images.length - 1 ? `Version ${i + 1}, newest` : `Version ${i + 1}` }));
+  // Numbered as sent, so a removed version leaves a gap and nothing renumbers.
+  const imageOptions = images.map((img, i) => ({ fileId: img.fileId, label: i === images.length - 1 ? `Version ${img.number}, newest` : `Version ${img.number}` }));
   const shownImage = image && data ? (viewingImage && images.some((i) => i.fileId === viewingImage) ? viewingImage : data.body) : null;
   const onNewest = !!data && shownImage === data.body;
   // Asking for changes needs something to change: a note from the client still open
@@ -345,7 +346,7 @@ export default function DocReviewView({ token }: { token: string }) {
         {state === "ready" && data && (
           <>
             <h1 className="text-[30px] font-bold leading-tight">{data.title}</h1>
-            {!locked && (
+            {!locked && !(image && !data.body) && (
               <p className="mt-2 text-[18px] text-muted">
                 {image
                   ? "Click any spot on the image to add a numbered comment or a file. Then ask for changes, or approve it as is."
@@ -391,6 +392,9 @@ export default function DocReviewView({ token }: { token: string }) {
                     </div>
                   )}
                   {!onNewest && <p className="mb-3 text-[17px] text-muted">This is an earlier version. Its pins are from that round.</p>}
+                  {!shownImage && (
+                    <p className="py-12 text-center text-[18px] text-muted">There is no image to review right now. We&apos;ll let you know when there is a new one.</p>
+                  )}
                   {shownImage && (
                     <ImagePinBoard src={fileHref(shownImage)} alt={images.find((i) => i.fileId === shownImage)?.name ?? data.title}
                       comments={data.comments ?? []} fileId={shownImage} pending={pinDraft} activeId={focusedComment} color={NAVY}
@@ -412,7 +416,8 @@ export default function DocReviewView({ token }: { token: string }) {
                   bar sticky"). Send my changes and Approve sit at its top, above
                   Files, in place of a bar fixed to the bottom of the screen. */}
               <aside className="space-y-4 lg:sticky lg:top-6 lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto">
-                {!locked && (
+                {/* Nothing to approve or change while no image is up for review. */}
+                {!locked && !(image && !data.body) && (
                   <div className="rounded-2xl border bg-surface p-4 shadow-sm">
                     <div className="flex gap-3">
                       <button onClick={() => void publish("submit")} disabled={(image ? openNotes === 0 : !dirty) || busy !== null}
@@ -433,7 +438,8 @@ export default function DocReviewView({ token }: { token: string }) {
                   </div>
                 )}
 
-                {(data.files.length > 0 || !locked) && (
+                {/* No Files box on an image review: files ride on comments (Derek, 2026-09-12). */}
+                {!image && (data.files.length > 0 || !locked) && (
                   <FileDropLine label="Files" count={data.files.length} busy={adding} disabled={locked} onFiles={(list) => void addFiles(list)}>
                     {previewImages.length > 0 && <ImageThumbGrid images={previewImages} onOpen={setLightbox} />}
                     {data.files.length > 0 && (

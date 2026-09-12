@@ -186,26 +186,46 @@ export async function sharedDocFileUrl(documentId: string, fileId: string, downl
 
 /** One of this image review's uploaded images, or null. sentOnly is the client's
  *  side, which may only use images that were sent to them. */
-export async function docImageFile(documentId: string, fileId: unknown, sentOnly: boolean): Promise<{ id: string; name: string } | null> {
+export async function docImageFile(documentId: string, fileId: unknown, sentOnly: boolean): Promise<{ id: string; name: string; path: string } | null> {
   if (typeof fileId !== "string") return null;
   const { data: f } = await supabaseAdmin.from("task_document_files")
-    .select("id, name").eq("id", fileId).eq("document_id", documentId).eq("purpose", "image")
+    .select("id, name, path").eq("id", fileId).eq("document_id", documentId).eq("purpose", "image")
     .is("removed_at", null).maybeSingle();
   if (!f || (sentOnly && !(await wasSent(documentId, fileId)))) return null;
-  return { id: f.id as string, name: f.name as string };
+  return { id: f.id as string, name: f.name as string, path: f.path as string };
 }
 
-export type SharedDocImage = { fileId: string; name: string };
+/** An image the client was sent and can still see. number is its version, counted
+ *  over every image ever sent, so a removed version leaves a gap and nothing renumbers. */
+export type SharedDocImage = { fileId: string; name: string; number: number };
 
-/** The images the client was sent, oldest first: Version 1, Version 2 and so on. */
+/** The images the client can see, oldest first. The last one is the image under review. */
 export async function sharedDocImages(documentId: string): Promise<SharedDocImage[]> {
   const { data: versions } = await supabaseAdmin.from("task_document_versions")
     .select("version, kind, body").eq("document_id", documentId);
   const ids = sentImages((versions ?? []) as { version: number; kind: string; body: string }[]);
   if (!ids.length) return [];
-  const { data: files } = await supabaseAdmin.from("task_document_files").select("id, name").in("id", ids);
-  const names = new Map((files ?? []).map((f) => [f.id as string, f.name as string]));
-  return ids.map((fileId) => ({ fileId, name: names.get(fileId) ?? "Image" }));
+  const { data: files } = await supabaseAdmin.from("task_document_files").select("id, name, removed_at").in("id", ids);
+  const live = new Map((files ?? []).filter((f) => !f.removed_at).map((f) => [f.id as string, f.name as string]));
+  return ids.flatMap((fileId, i) => {
+    const name = live.get(fileId);
+    return name ? [{ fileId, name, number: i + 1 }] : [];
+  });
+}
+
+/** Take a wrong image off an image review (Derek, 2026-09-12: "a way to delete the
+ *  image in case it was the wrong one"). Its pins go with it; the file row stays,
+ *  marked removed, so the history still says who removed it. The caller moves the
+ *  review off it when it was the image under review. */
+export async function removeDocImage(documentId: string, fileId: unknown, actor: DocActor): Promise<{ ok: true; id: string; name: string } | Fail> {
+  const file = await docImageFile(documentId, fileId, false);
+  if (!file) return fail(404, "That image is already gone.");
+  const { error } = await supabaseAdmin.from("task_document_comments").delete().eq("document_id", documentId).eq("pin_file_id", file.id);
+  if (error) return fail(500, "Could not remove the image. Please try again.");
+  await supabaseAdmin.from("task_document_files")
+    .update({ removed_at: new Date().toISOString(), removed_by: actor.id, removed_by_label: actor.label }).eq("id", file.id);
+  await supabaseAdmin.storage.from(TASK_FILES_BUCKET).remove([file.path]);
+  return { ok: true, id: file.id, name: file.name };
 }
 
 // ---------------------------------------------------------------------------

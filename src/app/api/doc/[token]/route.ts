@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { rateLimit } from "@/lib/rateLimit";
 import { DOC_TOKEN_PATTERN, NO_STORE, docNotFound, resolveDocToken, latestPublished } from "@/lib/taskDocumentServer";
-import { sharedDocFiles, sharedDocImages, docComments } from "@/lib/taskDocumentFiles";
+import { sharedDocFiles, sharedDocImages, docComments, type SharedDocImage } from "@/lib/taskDocumentFiles";
 
 // Public, no login: what the client review page shows. It reads and never
 // writes. Mail security scanners (Outlook Safe Links and others) open links
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     supabaseAdmin.from("task_documents").select("status, approved_at, title").eq("id", scope.documentId).maybeSingle(),
     sharedDocFiles(scope.documentId),
     docComments(scope.documentId),
-    scope.kind === "image" ? sharedDocImages(scope.documentId) : Promise.resolve([]),
+    scope.kind === "image" ? sharedDocImages(scope.documentId) : Promise.resolve<SharedDocImage[]>([]),
   ]);
   if (!latest || !doc) return docNotFound();
 
@@ -33,7 +33,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     // The document's own name when the team gave it one, else the task's title.
     title: ((doc.title as string | null) ?? "").trim() || scope.taskTitle,
     clientName: scope.clientName,
-    body: latest.body,
+    // An image review shows the newest image not removed; "" when none is left.
+    body: scope.kind === "image" ? (images.at(-1)?.fileId ?? "") : latest.body,
     version: latest.version,
     status: doc.status,
     approvedAt: (doc.approved_at as string | null) ?? null,

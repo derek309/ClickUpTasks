@@ -310,6 +310,27 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     pushToast(doc.version > 0 ? "New version uploaded. Send it when you're ready." : "Image added. Send it for review when you're ready.");
   };
 
+  // Take a wrong image off (Derek, 2026-09-12: "a way to delete the image in case
+  // it was the wrong one"). A sent one takes its pins with it, after a confirm.
+  const removeImage = async (fileId: string, message: string) => {
+    if (!doc || !window.confirm(message)) return;
+    setBusy("remove");
+    const res = await api("", { method: "PATCH", body: JSON.stringify({ removeImage: fileId }) });
+    const j = await readJson(res);
+    if (!res.ok) { setBusy(null); pushToast((j.error as string) ?? "Could not remove the image."); return; }
+    // The versions list and pins change here and now, so a quick second click
+    // never works from the list as it was before this removal.
+    const at = new Date().toISOString();
+    setFiles((fs) => fs.map((f) => (f.id === fileId ? { ...f, removedAt: at } : f)));
+    setComments((cs) => cs.filter((c) => c.pin?.fileId !== fileId));
+    setDoc(rowToTaskDocument(j.document));
+    setViewingImage(null);
+    setPinDraft(null);
+    await load();
+    setBusy(null);
+    pushToast("Image removed.");
+  };
+
   const send = async () => {
     if (!doc) return;
     commit.flush();
@@ -548,14 +569,30 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
 
   // The image review's versions: every image sent, then one uploaded since, if any.
   const sent = image ? sentImages(versions) : [];
+  // Only images still on the review are listed; one that was removed keeps its
+  // number out of use, so Version 2 stays Version 2.
+  const liveImageIds = new Set(files.filter((f) => f.purpose === "image" && !f.removedAt).map((f) => f.id));
   const imageOptions = image ? [
-    ...sent.map((fileId, i) => ({ fileId, label: `Version ${i + 1}` })),
+    ...sent.map((fileId, i) => ({ fileId, label: `Version ${i + 1}` })).filter((o) => liveImageIds.has(o.fileId)),
     ...(doc.body && !sent.includes(doc.body) ? [{ fileId: doc.body, label: "New, not sent" }] : []),
   ] : [];
   const shownImage = viewingImage && imageOptions.some((o) => o.fileId === viewingImage) ? viewingImage : (doc.body || null);
   const shownFile = files.find((f) => f.id === shownImage);
   const shownUrl = shownFile ? thumbs[shownFile.path] : undefined;
   const openPins = comments.filter((c) => c.pin && !c.completedAt).length;
+  // What removing the image shown will do, said before it happens.
+  const removeMessage = (() => {
+    if (!shownImage) return "";
+    if (!sent.includes(shownImage)) return "Remove this image? It hasn't been sent, so the client never saw it.";
+    const sentShown = imageOptions.filter((o) => sent.includes(o.fileId));
+    const others = sentShown.filter((o) => o.fileId !== shownImage);
+    const label = sentShown.find((o) => o.fileId === shownImage)?.label ?? "this version";
+    const pins = comments.filter((c) => c.pin?.fileId === shownImage).length;
+    const after = sentShown.at(-1)?.fileId !== shownImage
+      ? "They keep seeing the newest version."
+      : others.length ? `They'll see ${others[others.length - 1].label} instead.` : "They'll have no image to review until you send one.";
+    return `Remove ${label}? The client stops seeing it${pins ? `, and its ${pins === 1 ? "pin is" : `${pins} pins are`} deleted` : ""}. ${after}`;
+  })();
 
   const copyLinkButton = link?.live && link.copyable
     ? <button onClick={() => void copyLink()} disabled={busy !== null} className={quiet}>Copy link</button>
@@ -625,6 +662,12 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
             <div className="min-w-0 flex-1">
               <ImageVersionPicker options={imageOptions} value={shownImage} onChange={(id) => { setViewingImage(id); setPinDraft(null); }} />
             </div>
+            {!locked && shownImage && (
+              <button onClick={() => void removeImage(shownImage, removeMessage)} disabled={adding || busy !== null}
+                className={`${quiet} hover:text-danger`}>
+                {busy === "remove" ? "Removing…" : "Remove this version"}
+              </button>
+            )}
             {!locked && (
               <button onClick={() => imageInput.current?.click()} disabled={adding} className={quiet}>
                 {adding ? "Uploading…" : "Upload new version"}
@@ -750,20 +793,25 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
       </div>
       {/* Files and Comments stay beside the writing as it scrolls (Derek, 2026-09-11). */}
       <div className="space-y-3 lg:sticky lg:top-0 lg:max-h-[calc(100dvh-9rem)] lg:overflow-y-auto">
-        <FileDropLine label="Files" count={activeFiles.length} busy={adding} disabled={locked} onFiles={(list) => void addFiles(list)}>
-          {previewImages.length > 0 && <ImageThumbGrid images={previewImages} onOpen={setLightbox} />}
-          {activeFiles.length > 0 && (
-            <ul className="mt-1.5 divide-y">
-              {activeFiles.map((f) => (
-                <li key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-[16px]">
-                  <button onClick={() => openFileOrPreview(f)} className="min-w-0 break-words text-left font-medium text-accent hover:underline">{f.name}</button>
-                  <span className="text-muted">{formatFileSize(f.sizeBytes)} · {f.addedByLabel ?? "Someone"}</span>
-                  {!locked && <button onClick={() => void removeFile(f)} className="ml-auto text-muted hover:text-danger hover:underline">Remove</button>}
-                </li>
-              ))}
-            </ul>
-          )}
-        </FileDropLine>
+        {/* An image review has no Files box: the image uploads on the left and a
+            file rides on a comment (Derek, 2026-09-12: "we don't need upload files
+            here since we can do it on the left"). */}
+        {!image && (
+          <FileDropLine label="Files" count={activeFiles.length} busy={adding} disabled={locked} onFiles={(list) => void addFiles(list)}>
+            {previewImages.length > 0 && <ImageThumbGrid images={previewImages} onOpen={setLightbox} />}
+            {activeFiles.length > 0 && (
+              <ul className="mt-1.5 divide-y">
+                {activeFiles.map((f) => (
+                  <li key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-[16px]">
+                    <button onClick={() => openFileOrPreview(f)} className="min-w-0 break-words text-left font-medium text-accent hover:underline">{f.name}</button>
+                    <span className="text-muted">{formatFileSize(f.sizeBytes)} · {f.addedByLabel ?? "Someone"}</span>
+                    {!locked && <button onClick={() => void removeFile(f)} className="ml-auto text-muted hover:text-danger hover:underline">Remove</button>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </FileDropLine>
+        )}
         <CommentThread comments={image ? commentsFor(comments, shownImage) : comments} onPost={postComment} when={timeAgo} viewer="team"
           isMine={(c) => !!meId && comments.find((x) => x.id === c.id)?.authorId === meId}
           canDelete={() => true}

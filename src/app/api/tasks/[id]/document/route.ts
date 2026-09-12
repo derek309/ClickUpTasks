@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { teamDocAccess, memberLabel, kindOf, liveDocument, noDocumentYet, NO_STORE } from "@/lib/taskDocumentServer";
-import { recordCheckpoint, docImageFile } from "@/lib/taskDocumentFiles";
+import { recordCheckpoint, docImageFile, removeDocImage, sharedDocImages } from "@/lib/taskDocumentFiles";
 import { sanitizeDocHtml, DOC_MAX_RAW_CHARS, DOC_MAX_HTML_CHARS } from "@/lib/docHtml";
 
 // The team's side of a task's client review document: create it, save the
@@ -47,7 +47,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const text = await req.text();
   if (text.length > DOC_MAX_RAW_CHARS) return json({ error: "This document is too long." }, 413);
-  let payload: { body?: unknown; image?: unknown; reopen?: unknown; restoreVersion?: unknown; restoreCheckpoint?: unknown; checkpoint?: unknown; title?: unknown; status?: unknown };
+  let payload: { body?: unknown; image?: unknown; removeImage?: unknown; reopen?: unknown; restoreVersion?: unknown; restoreCheckpoint?: unknown; checkpoint?: unknown; title?: unknown; status?: unknown };
   try { payload = JSON.parse(text); } catch { return json({ error: "Invalid request." }, 400); }
 
   const doc = await liveDocument(id, kind, "id, approved_at, body, updated_by, created_at");
@@ -81,6 +81,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return error ? json({ error: error.message }, 400) : json({ document: data });
   }
   if (doc.approved_at) return json({ error: `This ${what} is approved. Reopen it to make changes.` }, 409);
+
+  // Take a wrong image off (Derek, 2026-09-12). When it was the image under
+  // review, the review goes back to the newest image the client can still see,
+  // or to no image at all, with nothing left to send.
+  if (kind === "image" && payload?.removeImage !== undefined) {
+    const user = access.user;
+    const removed = await removeDocImage(doc.id, payload.removeImage, { id: user.memberId ?? user.id, label: await memberLabel(user) });
+    if (!removed.ok) return json({ error: removed.error }, removed.status);
+    const newest = (await sharedDocImages(doc.id)).at(-1)?.fileId ?? "";
+    const moveOff = doc.body === removed.id ? { body: newest, draft_dirty: false } : {};
+    const { data, error } = await supabaseAdmin.from("task_documents")
+      .update({ ...moveOff, ...stamp }).eq("id", doc.id).select("*").single();
+    return error ? json({ error: error.message }, 400) : json({ document: data });
+  }
 
   // An image review's working copy is the image to send next, one the team
   // uploaded to it (Derek, 2026-09-12: a revised image is a new version).
