@@ -3,6 +3,7 @@ import { tokenForLocation } from "@/lib/ghlTokens";
 import { requireUser } from "@/lib/serverAuth";
 import { appendSignatureHtml } from "@/lib/emailSignature";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { ghlReplyFields } from "@/lib/ghlReply";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -32,7 +33,8 @@ export async function POST(req: NextRequest) {
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const b = await req.json().catch(() => ({} as any));
-  const { clientId, locationId, ghlContactId, channel, subject, body, isHtml, attachments, cc, bcc } = b as {
+  const { clientId, locationId, ghlContactId, channel, subject, body, isHtml, attachments, cc, bcc, replyToMessageId } = b as {
+    replyToMessageId?: string | null; // messages.id this answers, so it goes out as a reply in the same thread
     clientId?: string;
     locationId?: string;
     ghlContactId?: string;
@@ -108,6 +110,8 @@ export async function POST(req: NextRequest) {
   // Signature is appended after that conversion so it is escaped exactly once,
   // whichever branch the body came from. Email only — never SMS.
   const emailHtml = appendSignatureHtml(isHtml ? body : escapeHtml(body).replace(/\r\n|\r|\n/g, "<br>"), signature);
+  // A reply goes out in the thread it answers (ghlReply.ts); null sends a new email.
+  const reply = channel === "email" ? await ghlReplyFields({ token, clientId, ghlContactId, locationId, replyToMessageId }) : null;
   const payload = channel === "sms"
     ? { type: "SMS", contactId: ghlContactId, message: body, ...(attachmentUrls ? { attachments: attachmentUrls } : {}) }
     : { type: "Email", contactId: ghlContactId, subject: (subject || "").slice(0, 200), html: emailHtml,
@@ -124,7 +128,7 @@ export async function POST(req: NextRequest) {
         ...(bccList?.length ? { emailBcc: bccList } : {}) };
 
   try {
-    const res = await fetch(`${GHL}/conversations/messages`, {
+    const post = (p: object) => fetch(`${GHL}/conversations/messages`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -132,8 +136,12 @@ export async function POST(req: NextRequest) {
         Accept: "application/json",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(p),
     });
+    // The reply fields aren't confirmed against a live send: if GHL refuses them,
+    // the email still goes out, as a new one.
+    let res = await post(reply ? { ...payload, ...reply } : payload);
+    if (!res.ok && reply) res = await post(payload);
     if (!res.ok) return await ghlError(res);
     const json = await res.json().catch(() => ({}));
     const ghlMessageId: string | null =

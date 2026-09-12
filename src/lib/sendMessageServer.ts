@@ -12,6 +12,7 @@ import { sendGmailAs, googleConfigured, readReplyHeaders, type ReplyHeaders } fr
 import { tokenForLocation } from "./ghlTokens";
 import { TASK_FILES_BUCKET } from "./db";
 import { appendSignatureHtml } from "./emailSignature";
+import { ghlReplyFields } from "./ghlReply";
 
 const GHL = "https://services.leadconnectorhq.com";
 const SEND_DOMAIN = "clickuplocal.com";
@@ -146,6 +147,9 @@ export async function sendScheduledMessageNow(input: ScheduledSendInput): Promis
   }
   // An email body is the email window's HTML already; escaping it again showed the tags.
   const emailHtml = appendSignatureHtml(input.body, signature);
+  const reply = input.channel === "email"
+    ? await ghlReplyFields({ token, clientId: input.clientId, ghlContactId: contact.ghlContactId, locationId, replyToMessageId: input.replyToMessageId })
+    : null;
   const payload = input.channel === "sms"
     ? { type: "SMS", contactId: contact.ghlContactId, message: input.body, ...(attachmentUrls.length ? { attachments: attachmentUrls } : {}) }
     : { type: "Email", contactId: contact.ghlContactId, subject: (input.subject || "").slice(0, 200), html: emailHtml,
@@ -153,11 +157,14 @@ export async function sendScheduledMessageNow(input: ScheduledSendInput): Promis
         ...(attachmentUrls.length ? { attachments: attachmentUrls } : {}) };
 
   try {
-    const res = await fetch(`${GHL}/conversations/messages`, {
+    const post = (p: object) => fetch(`${GHL}/conversations/messages`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, Version: "2021-04-15", Accept: "application/json", "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(p),
     });
+    // Same as ghl/message: if GHL refuses the reply fields, send it as a new email.
+    let res = await post(reply ? { ...payload, ...reply } : payload);
+    if (!res.ok && reply) res = await post(payload);
     if (!res.ok) { const text = await res.text().catch(() => ""); return { ok: false, error: `GoHighLevel API ${res.status}: ${text.slice(0, 240)}` }; }
     const json = await res.json().catch(() => ({}));
     const ghlMessageId: string | null = json?.messageId ?? json?.message?.id ?? json?.conversationId ?? json?.id ?? null;
