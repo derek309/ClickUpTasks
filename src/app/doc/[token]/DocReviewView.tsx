@@ -110,6 +110,23 @@ export default function DocReviewView({ token }: { token: string }) {
     return () => window.clearInterval(id);
   }, [load]);
 
+  // "Viewed 2h ago" for the team (Derek, 2026-09-11). Sent once, after the page
+  // has been open and on screen for a few seconds, never by the link's GET: mail
+  // scanners open links before the client does. A hidden tab tries again on the
+  // next poll, which hands this a fresh `data`.
+  const viewedRef = useRef(false);
+  useEffect(() => {
+    if (state !== "ready" || viewedRef.current) return;
+    const id = window.setTimeout(() => {
+      if (viewedRef.current || document.visibilityState !== "visible") return;
+      viewedRef.current = true;
+      void fetch(`/api/doc/${encodeURIComponent(token)}/viewed`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: "{}", keepalive: true,
+      }).catch(() => {});
+    }, 4000);
+    return () => window.clearTimeout(id);
+  }, [state, token, data]);
+
   // Keep unsent edits on this device as the client types.
   useEffect(() => {
     if (state !== "ready" || locked) return;

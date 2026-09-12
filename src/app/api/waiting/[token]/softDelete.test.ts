@@ -73,15 +73,8 @@ describe("task write routes refuse a trashed task", () => {
     { name: "respond", call: (id: string) => respond(post("/respond", { taskId: id, body: "Here you go" }), ctx) },
     { name: "status", call: (id: string) => status(post("/status", { taskId: id, status: "review" }), ctx) },
     { name: "messages", call: (id: string) => message(post("/messages", { taskId: id, body: "Hello" }), ctx) },
-    {
-      name: "upload",
-      call: (id: string) => {
-        const form = new FormData();
-        form.append("task_id", id);
-        form.append("file", new File(["png"], "shot.png", { type: "image/png" }));
-        return upload(new NextRequest(`${base}/upload`, { method: "POST", body: form }), ctx);
-      },
-    },
+    // Asking for an upload link: files go straight to storage, so this is where the task is checked.
+    { name: "upload", call: (id: string) => upload(post("/upload", { action: "start", task_id: id, name: "shot.png", size: 3 }), ctx) },
   ];
 
   it.each(routes)("$name 404s on a trashed task and writes nothing", async ({ call }) => {

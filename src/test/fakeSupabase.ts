@@ -56,6 +56,7 @@ export const fakeSupabaseAdmin = {
     from: () => ({
       createSignedUrl: async () => ({ data: { signedUrl: "https://signed.example/file" } }),
       upload: async () => ({ error: null }),
+      createSignedUploadUrl: async (path: string) => ({ data: { signedUrl: `https://signed.example/upload/${path}`, path, token: "t" }, error: null }),
     }),
   },
 };

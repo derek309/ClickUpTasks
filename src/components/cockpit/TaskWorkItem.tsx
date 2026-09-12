@@ -161,7 +161,7 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
   return (
     <section className="rounded-xl border bg-surface px-4 py-3">
       <h3 className="text-[16px] font-semibold">Comments{comments.length ? ` · ${comments.length}` : ""}</h3>
-      <p className="text-[16px] text-muted">{viewer === "team" ? "The client sees these on their review page." : "Your ClickUpLocal team sees these."}</p>
+      {viewer === "team" && <p className="text-[16px] text-muted">The client sees these on their review page.</p>}
       <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={2} maxLength={4000}
         onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void post(); } }}
         placeholder="Write a comment…" aria-label="Write a comment"

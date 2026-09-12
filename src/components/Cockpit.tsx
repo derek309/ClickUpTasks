@@ -85,7 +85,8 @@ import { PlanView } from "./cockpit/PlanView";
 
 import { I, Avatar, SideItem, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFromName, LIST_COLUMNS, SearchableSelect, type FilterState, type SortBy, type ViewPrefs, type Toast } from "./cockpit/ui";
 import { MindDumpModal, type ParsedRow } from "./cockpit/MindDumpModal";
-import { RemindClientModal } from "./cockpit/RemindClientModal";
+import { ClientEmail, type ClientEmailStart } from "./cockpit/ClientEmail";
+import { draftLinkHtml, escapeHtml } from "@/lib/draftLink";
 import { ConfirmModal, PromptModal, LinkFormModal, MergeTaskModal, MergeClientModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
 import { CommandK } from "./cockpit/CommandK";
 import { GroupedList } from "./cockpit/GroupedList";
@@ -613,31 +614,30 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // "Add tasks from a list" — paste notes, AI splits them, you review, then
   // they're created (Derek, 2026-08-26). Parsing and creating are separate
   // steps by design: nothing reaches the database until it's been seen.
-  // "We're still waiting on these" nudge, raised from the Review controls.
-  // The portal link is resolved when the modal is OPENED, not during render:
-  // getClientShareUrl mints and persists a share token the first time it's
-  // called for a client, so calling it from JSX would write to the database
-  // on every re-render.
-  const [remindClientId, setRemindClientId] = useState<string | null>(null);
-  const [remindLink, setRemindLink] = useState<string | null>(null);
+  // The email window for a client outside any task: the Journal's Email and
+  // Reply, and Remind client (ClientEmail.tsx). Sending goes through the ordinary
+  // send path: same can-message gating, same journal entry, same thread.
+  const [clientEmail, setClientEmail] = useState<ClientEmailStart | null>(null);
+  const openClientEmail = (clientId: string, start: Omit<ClientEmailStart, "clientId" | "nonce"> = {}) =>
+    setClientEmail((c) => ({ ...start, clientId, nonce: (c?.nonce ?? 0) + 1 }));
+  // "We're still waiting on these" nudge, raised from the Review controls: the
+  // reminder is written for them and opens for review before it goes. The portal
+  // link is resolved on the click, not during render: getClientShareUrl mints and
+  // persists a share token the first time it's called for a client.
   const openRemindClient = (clientId: string) => {
-    setRemindLink(getClientShareUrl(clientId));
-    setRemindClientId(clientId);
-  };
-  const closeRemindClient = () => { setRemindClientId(null); setRemindLink(null); };
-  const [remindSending, setRemindSending] = useState(false);
-  const sendClientReminder = async (clientId: string, subject: string, body: string) => {
-    setRemindSending(true);
-    try {
-      // Goes through the ordinary send path on purpose: same can-message
-      // gating, same journal entry, same thread the client already replies
-      // into. A reminder that doesn't appear in the client's own history is
-      // a reminder nobody can later prove was sent.
-      await sendMessage(clientId, "email", subject, plainTextToHtml(body));
-      closeRemindClient();
-    } finally {
-      setRemindSending(false);
-    }
+    const name = clientById(clientId)?.name ?? "";
+    const firstName = name.trim().split(/\s+/)[0] || "there";
+    const waiting = waitingTasksFor(clientId);
+    const url = getClientShareUrl(clientId);
+    if (!url) pushToast("No portal link could be made for this client, so the reminder has no link. An admin needs to create the share link first.");
+    const link = url ? { url, label: "Reply or upload everything here" } : null;
+    openClientEmail(clientId, {
+      subject: `Quick check on a few things for ${name || "you"}`,
+      body: `<p>Hi ${escapeHtml(firstName)},</p><p>We are still waiting on a few things from you before we can move forward:</p>`
+        + `<ul>${waiting.map((t) => `<li><p>${escapeHtml(t.title)}</p></li>`).join("")}</ul>${draftLinkHtml(link)}<p>Thanks!</p>`,
+      link,
+      aiContext: `A friendly reminder that we are still waiting on these items from the client before we can move forward:\n${waiting.map((t) => `• ${t.title}`).join("\n")}`,
+    });
   };
   // The mind-dump composer. Null when closed; otherwise the group its plus
   // was clicked on (null key = the toolbar button, which belongs to no group).
@@ -2891,7 +2891,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // "outbound" half of the Chat tab's Messages view; the webhook (see
   // src/app/api/ghl/webhook/route.ts) covers inbound replies, so together
   // the two capture a full two-way conversation with no gap and no polling.
-  const sendMessage = async (clientId: string, channel: MessageChannel, subject: string, body: string, attachments: Attachment[] = [], cc: string[] = [], bcc: string[] = [], taskId: string | null = null, fromEmail?: string) => {
+  const sendMessage = async (clientId: string, channel: MessageChannel, subject: string, body: string, attachments: Attachment[] = [], cc: string[] = [], bcc: string[] = [], taskId: string | null = null, fromEmail?: string, replyToMessageId?: string | null) => {
     if (!body.trim()) return;
     const contact = contactForClient(clientId);
     if (!contact) { pushToast("This client isn't linked to a GHL contact yet."); return; }
@@ -2939,7 +2939,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       if (channel === "email" && !!contact.email) {
         const gres = await authedFetch("/api/google/send", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ clientId, toEmail: contact.email, subject, body, isHtml: channel === "email", cc: emailCc, bcc: emailBcc, fromEmail, attachments: attachments.filter((a) => a.path).map((a) => ({ path: a.path, name: a.name })) }),
+          body: JSON.stringify({ clientId, toEmail: contact.email, subject, body, isHtml: channel === "email", cc: emailCc, bcc: emailBcc, fromEmail, replyToMessageId, attachments: attachments.filter((a) => a.path).map((a) => ({ path: a.path, name: a.name })) }),
         });
         if (gres.status !== 501) {
           const gj = await gres.json().catch(() => ({}));
@@ -2953,7 +2953,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           const gm: Message = {
             id: newId("msg_"), contactId: contact.id, clientId, taskId, channel, direction: "outbound",
             subject: subject.trim() ? subject.trim() : null, body,
-            ghlMessageId: null, gmailMessageId: gj.gmailMessageId ?? null, gmailThreadId: gj.gmailThreadId ?? null, createdBy: me.id, at: new Date().toISOString(), read: true,
+            ghlMessageId: null, gmailMessageId: gj.gmailMessageId ?? null, gmailThreadId: gj.gmailThreadId ?? null, rfc822MessageId: gj.rfc822MessageId ?? null, createdBy: me.id, at: new Date().toISOString(), read: true,
             attachments, cc: emailCc, bcc: emailBcc,
           };
           setMessages((ms) => [...ms, gm]);
@@ -3032,12 +3032,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       setScheduledMessages((m) => ({ ...m, [clientId]: (j.scheduled ?? []).map(rowToScheduledMessage).filter((s: ScheduledMessage) => s.status === "pending") }));
     } catch { /* best-effort; the composer just shows nothing pending */ }
   };
-  const scheduleMessage = async (clientId: string, channel: MessageChannel, subject: string, body: string, scheduledAt: string, attachments: Attachment[] = [], cc: string[] = [], bcc: string[] = [], taskId: string | null = null, fromEmail?: string) => {
+  const scheduleMessage = async (clientId: string, channel: MessageChannel, subject: string, body: string, scheduledAt: string, attachments: Attachment[] = [], cc: string[] = [], bcc: string[] = [], taskId: string | null = null, fromEmail?: string, replyToMessageId?: string | null) => {
     if (!body.trim()) return;
     try {
       const res = await authedFetch("/api/messages/schedule", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, taskId, channel, subject, body, cc, bcc, fromEmail, scheduledAt, attachments: attachments.filter((a) => a.path).map((a) => ({ path: a.path, name: a.name })) }),
+        body: JSON.stringify({ clientId, taskId, channel, subject, body, cc, bcc, fromEmail, replyToMessageId, scheduledAt, attachments: attachments.filter((a) => a.path).map((a) => ({ path: a.path, name: a.name })) }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) { pushToast(j.error || "Failed to schedule message."); return; }
@@ -4507,13 +4507,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onDelete={deleteNote}
             onOpenTask={(id) => { setClientTab("tasks"); setOpenTaskId(id); }}
             onOpenMessages={() => { const ct = contactForClient(activeClient); if (ct) { setMessages((ms) => ms.map((m) => (m.contactId === ct.id ? { ...m, read: true } : m))); markMessagesReadDb(ct.id); } }}
-            onSendMessage={activeProject || !canMessageClient(activeClient) ? undefined : (channel, subject, body, cc, bcc) => sendMessage(activeClient, channel, subject, body, undefined, cc, bcc)}
-            onScheduleMessage={activeProject || !canMessageClient(activeClient) ? undefined : (channel, subject, body, scheduledAt, cc, bcc) => scheduleMessage(activeClient, channel, subject, body, scheduledAt, undefined, cc, bcc)}
+            onSendMessage={activeProject || !canMessageClient(activeClient) ? undefined : (channel, subject, body) => sendMessage(activeClient, channel, subject, body)}
+            onScheduleMessage={activeProject || !canMessageClient(activeClient) ? undefined : (channel, subject, body, scheduledAt) => scheduleMessage(activeClient, channel, subject, body, scheduledAt)}
+            onComposeEmail={activeProject || !canMessageClient(activeClient) ? undefined : (reply) => openClientEmail(activeClient, reply ?? {})}
             scheduled={scheduledMessages[activeClient] ?? []}
             onLoadScheduled={() => loadScheduledMessages(activeClient)}
             onCancelScheduled={(id) => cancelScheduledMessage(id, activeClient)}
             toContact={activeProject ? null : contactForClient(activeClient)}
-            ccContacts={contacts}
             composeIntent={composeIntent}
             sendingMessage={sendingMessage}
             onUploadImage={(file) => uploadOneImage("notes", file)}
@@ -4608,16 +4608,23 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         </div>
       )}
 
-      {remindClientId && (
-        <RemindClientModal
-          clientName={clientById(remindClientId)?.name ?? "this client"}
-          tasks={waitingTasksFor(remindClientId)}
-          link={remindLink}
-          sending={remindSending}
-          onSend={(subject, body) => sendClientReminder(remindClientId, subject, body)}
-          onCancel={closeRemindClient}
-        />
-      )}
+      {clientEmail && (() => {
+        const cid = clientEmail.clientId;
+        const contact = contactForClient(cid);
+        const allowed = canMessageClient(cid);
+        return (
+          <ClientEmail key={clientEmail.nonce} start={clientEmail} clientName={clientById(cid)?.name ?? "this client"} meId={me.id}
+            toEmail={contact?.email || null} messages={contact ? messages.filter((m) => m.contactId === contact.id) : null}
+            onClose={() => setClientEmail(null)}
+            onSend={allowed ? (email) => sendMessage(cid, "email", email.subject, email.body, email.attachments, email.cc, email.bcc, null, undefined, email.replyTo) : undefined}
+            onSchedule={allowed ? (email, whenIso) => scheduleMessage(cid, "email", email.subject, email.body, whenIso, email.attachments, email.cc, email.bcc, null, undefined, email.replyTo) : undefined}
+            ccContacts={contacts} onUpload={(file) => uploadOneImage(`messages/${cid}`, file)}
+            onAiDraft={(instruction, context) => draftMessage(cid, "email", instruction || undefined, null, context)}
+            scheduled={(scheduledMessages[cid] ?? []).filter((s) => s.channel === "email")}
+            onLoadScheduled={() => loadScheduledMessages(cid)} onCancelScheduled={(id) => cancelScheduledMessage(id, cid)}
+            pushToast={pushToast} />
+        );
+      })()}
       {dumpGroup && (
         <MindDumpModal
           // Keyed on the group so reopening on a different bar starts clean
@@ -4648,7 +4655,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={navTaskIds.length} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(body, attachments) => addComment(openTask.id, body, attachments)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onDownloadAll={downloadAllAsZip} zippingIds={zippingIds} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, assignee: null })} onDuplicate={(target) => duplicateTask(openTask.id, target)} projectsFor={projectsForClient} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => openClientList(openTask.clientId, openTask.projectId)} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} onMarkChannelRead={(channel) => markTaskChannelRead(openTask.id, channel)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage(`messages/${openTask.clientId}`, file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id) : undefined} onScheduleTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, scheduledAt, attachments, cc, bcc) => scheduleMessage(openTask.clientId, channel, subject, body, scheduledAt, attachments, cc, bcc, openTask.id) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt, context) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId, context)} draftingMessage={draftingMessage} onGetTaskLink={() => getClientShareUrl(openTask.clientId, { projectId: openTask.projectId, taskId: openTask.id })} canAdmin={canAdmin} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onCopyClientLink={() => copyClientShareLink(openTask.clientId, openTask.projectId)} onDeleteComment={(cid) => deleteComment(openTask.id, cid)} onDraftDescription={draftDescription} draftingDescription={draftingDescription} pushToast={pushToast} meId={me.id}
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onDownloadAll={downloadAllAsZip} zippingIds={zippingIds} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, assignee: null })} onDuplicate={(target) => duplicateTask(openTask.id, target)} projectsFor={projectsForClient} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => openClientList(openTask.clientId, openTask.projectId)} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} onMarkChannelRead={(channel) => markTaskChannelRead(openTask.id, channel)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage(`messages/${openTask.clientId}`, file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc, replyToMessageId) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id, undefined, replyToMessageId) : undefined} onScheduleTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, scheduledAt, attachments, cc, bcc, replyToMessageId) => scheduleMessage(openTask.clientId, channel, subject, body, scheduledAt, attachments, cc, bcc, openTask.id, undefined, replyToMessageId) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt, context) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId, context)} draftingMessage={draftingMessage} canAdmin={canAdmin} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onCopyClientLink={() => copyClientShareLink(openTask.clientId, openTask.projectId)} onDeleteComment={(cid) => deleteComment(openTask.id, cid)} onDraftDescription={draftDescription} draftingDescription={draftingDescription} pushToast={pushToast} meId={me.id}
           onSendDm={(userId, body) => sendDmMessage(userId, body)}
           onDelegate={(spec) => delegateTask(openTask.id, spec)}
           clientLinks={clientLinks.filter((l) => l.clientId === openTask.clientId)}

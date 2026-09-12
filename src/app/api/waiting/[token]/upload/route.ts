@@ -4,50 +4,70 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { TASK_FILES_BUCKET } from "@/lib/db";
 import { rateLimit } from "@/lib/rateLimit";
 import { resolveWaitingToken } from "@/lib/waitingToken";
-// The extension allowlist is shared with the client review document's files, and
-// deliberately excludes anything that executes when a signed URL is opened
-// directly (html, svg, xml, js): this is a public, unauthenticated upload.
-import { MAX_SHARED_FILE_BYTES as MAX_BYTES, isShareableFileName } from "@/lib/uploadTypes";
+import { UPLOAD_OBJECT_NAME, checkFileName, checkFileSize, checkStoredFile } from "@/lib/taskDocumentFiles";
+import { extOf, storageSafeName } from "@/lib/uploadTypes";
 
-// Public, token-gated file upload for the client-response form on
-// /waiting/[token] — mirrors src/app/api/extension/upload/route.ts's
-// storage mechanics (supabaseAdmin, private task-files bucket, return the
-// object path not a public URL) but validates against clients.share_token
-// instead of requireApiToken, since the caller has no account at all.
+// Public, token-gated file upload for /waiting/[token]: a reply's attachments, or
+// a new request's. Two calls per file, the same as the client review document's
+// files (taskDocumentFiles.ts): "start" checks the name and size and returns a one
+// time upload link, the browser sends the file straight to storage, and "confirm"
+// checks what actually landed (real size, and no type a browser would run).
+//
+// Files used to be posted through this route, and a Vercel request body stops
+// near 4.5MB, so anything bigger failed while the page promised 25MB and said
+// nothing (Derek, 2026-09-11). The allowlist is shared (uploadTypes.ts) and
+// excludes anything that executes when a signed URL is opened directly.
+
+const fail = (status: number, error: string) => NextResponse.json({ error }, { status });
+
 export async function POST(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
-  if (!adminConfigured) return NextResponse.json({ error: "Not configured" }, { status: 501 });
+  if (!adminConfigured) return fail(501, "Not configured");
   const { token } = await params;
-  if (!token || token.length < 16) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!token || token.length < 16) return fail(404, "Not found");
   const limited = await rateLimit(req, token, "upload");
   if (limited) return limited;
 
   const scope = await resolveWaitingToken(token);
-  if (!scope) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!scope) return fail(404, "Not found");
 
-  const form = await req.formData().catch(() => null);
-  const taskId = form?.get("task_id"); // optional — omitted when attaching to a brand-new request (see ../request/route.ts), which has no task yet
-  const file = form?.get("file");
-  if (!(file instanceof File)) return NextResponse.json({ error: "Missing file." }, { status: 400 });
-  if (file.size > MAX_BYTES) return NextResponse.json({ error: "File must be under 25MB." }, { status: 400 });
-  if (!isShareableFileName(file.name)) return NextResponse.json({ error: "That file type isn't supported. Attach an image, PDF, document, or video." }, { status: 400 });
+  const b = (await req.json().catch(() => null)) as { action?: unknown; name?: unknown; size?: unknown; path?: unknown; task_id?: unknown } | null;
+  if (!b) return fail(400, "Invalid request.");
+  // Omitted when attaching to a brand new request (see ../request/route.ts), which has no task yet.
+  const taskId = typeof b.task_id === "string" && b.task_id ? b.task_id : null;
 
-  // Confirm the task actually belongs to this token's own client (and
-  // project, if scoped) before writing anywhere — same boundary the respond
-  // route enforces.
-  if (typeof taskId === "string" && taskId) {
+  // Confirm the task belongs to this token's own client (and project, if scoped)
+  // before handing out an upload link, the same boundary the respond route enforces.
+  if (taskId) {
     const { data: task } = await supabaseAdmin.from("tasks").select("id, client_id, project_id").eq("id", taskId).eq("is_private", false).is("deleted_at", null).maybeSingle();
-    if (!task || task.client_id !== scope.clientId || (scope.projectId && task.project_id !== scope.projectId)) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (!task || task.client_id !== scope.clientId || (scope.projectId && task.project_id !== scope.projectId)) return fail(404, "Not found");
   } else if (scope.projectId) {
-    // No taskId means this is for the "request a new task" composer's
-    // attachment — never available on a project-scoped token (see
-    // ../request/route.ts's own refusal), so there's no legitimate reason
-    // to be here without one either.
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    // A new request is never available on a project-scoped token (see
+    // ../request/route.ts's own refusal), so there's no reason to be here without a task.
+    return fail(404, "Not found");
   }
 
-  const safe = file.name.replace(/[^\w.\-]+/g, "_");
-  const path = `waiting/${scope.clientId}/${typeof taskId === "string" && taskId ? taskId : "new"}/${randomUUID()}-${safe}`;
-  const { error } = await supabaseAdmin.storage.from(TASK_FILES_BUCKET).upload(path, file, { upsert: false, contentType: file.type || undefined });
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  return NextResponse.json({ path });
+  const folder = `waiting/${scope.clientId}/${taskId ?? "new"}/`;
+  const named = checkFileName(b.name);
+  if (!named.ok) return fail(named.status, named.error);
+
+  if (b.action === "start") {
+    const sized = checkFileSize(b.size);
+    if (sized) return fail(sized.status, sized.error);
+    const path = `${folder}${randomUUID()}-${storageSafeName(named.name)}`;
+    const { data, error } = await supabaseAdmin.storage.from(TASK_FILES_BUCKET).createSignedUploadUrl(path);
+    if (error || !data) return fail(500, "Could not start the upload. Please try again.");
+    return NextResponse.json({ path, uploadUrl: data.signedUrl });
+  }
+
+  if (b.action === "confirm") {
+    const path = b.path;
+    if (typeof path !== "string" || !path.startsWith(folder) || !UPLOAD_OBJECT_NAME.test(path.slice(folder.length)) || extOf(path) !== extOf(named.name)) {
+      return fail(400, "Invalid file.");
+    }
+    const stored = await checkStoredFile(path);
+    if (!stored.ok) return fail(stored.status, stored.error);
+    return NextResponse.json({ path, size: stored.size });
+  }
+
+  return fail(400, "Invalid request.");
 }

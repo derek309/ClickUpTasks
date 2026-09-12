@@ -40,9 +40,10 @@ export function draftLinkAsButton(body: string, link: DraftLink | null | undefin
   const block = new RegExp(`<(h[23]|p)>((?:(?!</\\1>)[\\s\\S])*?href="${escapeRegExp(href)}"(?:(?!</\\1>)[\\s\\S])*?)</\\1>`);
   return body.replace(block, (_whole, _tag, inner: string) => {
     const label = inner.replace(/<[^>]+>/g, "").replace(/\s*→\s*$/, "").trim() || escapeHtml(link.label);
-    return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0"><tr>`
-      + `<td style="background:#1f3350;border-radius:10px">`
-      + `<a href="${href}" style="display:inline-block;padding:16px 32px;font-family:Arial,Helvetica,sans-serif;font-size:18px;font-weight:bold;line-height:1.2;color:#ffffff;text-decoration:none;border-radius:10px">${label}</a>`
+    // Sized like a normal email button (Derek, 2026-09-11: "button is HUGE").
+    return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:16px 0"><tr>`
+      + `<td style="background:#1f3350;border-radius:6px">`
+      + `<a href="${href}" style="display:inline-block;padding:9px 18px;font-family:Arial,Helvetica,sans-serif;font-size:16px;font-weight:600;line-height:1.3;color:#ffffff;text-decoration:none;border-radius:6px">${label}</a>`
       + `</td></tr></table>`;
   });
 }

@@ -66,14 +66,14 @@ export async function POST(req: NextRequest) {
   // With no backfill there is still one row to write, because the row IS the
   // binding: without it nothing links thread to task.
   const rows = (emails.length ? emails : [{
-    gmailId: thread.messageId, threadId: thread.threadId, fromEmail: fromEmail ?? "",
+    gmailId: thread.messageId, threadId: thread.threadId, fromEmail: fromEmail ?? "", rfc822: "",
     fromName: "", subject: thread.subject, body: "", internalDate: new Date().toISOString(),
     outbound: false, toEmails: [] as string[], auto: false,
   }]).map((e) => ({
     id: "m_" + randomUUID(), contact_id: contactId, client_id: task.client_id, task_id: taskId,
     channel: "email", direction: e.outbound ? "outbound" : "inbound",
     subject: e.subject || thread.subject, body: e.body,
-    ghl_message_id: null, gmail_message_id: e.gmailId, gmail_thread_id: thread.threadId,
+    ghl_message_id: null, gmail_message_id: e.gmailId, gmail_thread_id: thread.threadId, rfc822_message_id: e.rfc822 || null,
     // The member id, matching every other message row — created_by is read
     // back through userById, which keys on member ids, not profile ids.
     created_by: e.outbound ? (caller.memberId ?? caller.id) : null,

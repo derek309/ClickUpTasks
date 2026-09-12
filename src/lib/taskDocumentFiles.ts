@@ -26,12 +26,32 @@ export type DocActor = { id: string | null; label: string };
 
 export const docFileFolder = (documentId: string) => `doc/${documentId}/`;
 
+/** How an upload is named inside its folder: a random id, then the safe file name. */
+export const UPLOAD_OBJECT_NAME = /^[0-9a-f-]{36}-[\w.-]+$/;
+
 /** A path this document may use: a file directly inside its own folder, named
  *  the way startDocUpload names it. */
 export function isDocFilePath(documentId: string, path: unknown): path is string {
   if (typeof path !== "string") return false;
   const folder = docFileFolder(documentId);
-  return path.startsWith(folder) && /^[0-9a-f-]{36}-[\w.-]+$/.test(path.slice(folder.length));
+  return path.startsWith(folder) && UPLOAD_OBJECT_NAME.test(path.slice(folder.length));
+}
+
+/** What actually landed in storage at `path` after a direct upload: it must exist,
+ *  be under the cap and not carry a type a browser would run. Anything else is
+ *  deleted. Shared by the document's files and the client portal's uploads. */
+export async function checkStoredFile(path: string): Promise<{ ok: true; size: number } | Fail> {
+  const storage = supabaseAdmin.storage.from(TASK_FILES_BUCKET);
+  const { data: info, error } = await storage.info(path);
+  if (error || !info) return fail(400, "The upload didn't finish. Please try again.");
+  const meta = ((info as { metadata?: { size?: number; mimetype?: string } }).metadata) ?? {};
+  const size = Number(info.size ?? meta.size ?? 0);
+  const type = String(info.contentType ?? meta.mimetype ?? "");
+  if (!size || size > MAX_SHARED_FILE_BYTES || isActiveContentType(type)) {
+    await storage.remove([path]);
+    return fail(400, "That file can't be added.");
+  }
+  return { ok: true, size };
 }
 
 export function checkFileName(raw: unknown): { ok: true; name: string } | Fail {
@@ -75,16 +95,9 @@ export async function finishDocUpload(documentId: string, rawPath: unknown, rawN
   if (!named.ok) return named;
   if (!isDocFilePath(documentId, rawPath) || extOf(rawPath) !== extOf(named.name)) return fail(400, "Invalid file.");
 
-  const storage = supabaseAdmin.storage.from(TASK_FILES_BUCKET);
-  const { data: info, error } = await storage.info(rawPath);
-  if (error || !info) return fail(400, "The upload didn't finish. Please try again.");
-  const meta = ((info as { metadata?: { size?: number; mimetype?: string } }).metadata) ?? {};
-  const size = Number(info.size ?? meta.size ?? 0);
-  const type = String(info.contentType ?? meta.mimetype ?? "");
-  if (!size || size > MAX_SHARED_FILE_BYTES || isActiveContentType(type)) {
-    await storage.remove([rawPath]);
-    return fail(400, "That file can't be added.");
-  }
+  const stored = await checkStoredFile(rawPath);
+  if (!stored.ok) return stored;
+  const size = stored.size;
 
   const now = new Date().toISOString();
   const fileId = "tdf_" + randomUUID();

@@ -2,6 +2,7 @@
 // domain types, seeds demo data on first run, and exposes upsert/delete helpers.
 
 import { supabase } from "./supabase";
+import type { EmailDraft } from "./data";
 import {
   clientsSeed,
   contactsSeed,
@@ -118,7 +119,7 @@ const rowToTaskTemplate = (r: any): TaskTemplate => ({ id: r.id, name: r.name, c
 
 const messageToRow = (m: Message) => ({
   id: m.id, contact_id: m.contactId, client_id: m.clientId, task_id: m.taskId ?? null, channel: m.channel, direction: m.direction,
-  subject: m.subject, body: m.body, ghl_message_id: m.ghlMessageId, ghl_conversation_id: m.ghlConversationId ?? null, gmail_message_id: m.gmailMessageId ?? null, gmail_thread_id: m.gmailThreadId ?? null, created_by: m.createdBy, read: m.read,
+  subject: m.subject, body: m.body, ghl_message_id: m.ghlMessageId, ghl_conversation_id: m.ghlConversationId ?? null, gmail_message_id: m.gmailMessageId ?? null, gmail_thread_id: m.gmailThreadId ?? null, rfc822_message_id: m.rfc822MessageId ?? null, created_by: m.createdBy, read: m.read,
   attachments: m.attachments, cc: m.cc, bcc: m.bcc,
 });
 const taskActionToRow = (a: TaskAction) => ({
@@ -136,7 +137,7 @@ export const rowToTaskAction = (r: any): TaskAction => ({
 export const rowToMessage = (r: any): Message => ({
   id: r.id, contactId: r.contact_id, clientId: r.client_id, taskId: r.task_id ?? null, channel: (r.channel as MessageChannel) ?? "email",
   direction: r.direction as MessageDirection, subject: r.subject ?? null, body: r.body ?? "",
-  ghlMessageId: r.ghl_message_id ?? null, ghlConversationId: r.ghl_conversation_id ?? null, gmailMessageId: r.gmail_message_id ?? null, gmailThreadId: r.gmail_thread_id ?? null, createdBy: r.created_by ?? null, at: r.created_at,
+  ghlMessageId: r.ghl_message_id ?? null, ghlConversationId: r.ghl_conversation_id ?? null, gmailMessageId: r.gmail_message_id ?? null, gmailThreadId: r.gmail_thread_id ?? null, rfc822MessageId: r.rfc822_message_id ?? null, createdBy: r.created_by ?? null, at: r.created_at,
   read: r.read ?? true, attachments: r.attachments ?? [], cc: r.cc ?? [], bcc: r.bcc ?? [],
 });
 
@@ -506,6 +507,8 @@ export type TaskDocumentStatus = "draft" | "with_client" | "client_submitted" | 
 export type TaskDocument = {
   id: string; taskId: string; title: string; body: string; draftDirty: boolean; version: number;
   status: TaskDocumentStatus; approvedAt: string | null; approvedVersion: number | null; updatedAt: string;
+  /** Last time the client's review page opened in a browser (supabase/task-document-followups.sql). */
+  clientViewedAt: string | null;
 };
 export type TaskDocumentVersion = {
   id: string; version: number; kind: "sent" | "client_submitted" | "client_approved";
@@ -514,7 +517,21 @@ export type TaskDocumentVersion = {
 export const rowToTaskDocument = (r: any): TaskDocument => ({
   id: r.id, taskId: r.task_id, title: r.title ?? "", body: r.body ?? "", draftDirty: !!r.draft_dirty, version: r.version ?? 0,
   status: r.status, approvedAt: r.approved_at ?? null, approvedVersion: r.approved_version ?? null, updatedAt: r.updated_at,
+  clientViewedAt: r.client_viewed_at ?? null,
 });
+// The email a teammate is writing to a client outside any task (the Journal's
+// Email and Reply, Remind client): one per client, kept until it is sent or
+// discarded (supabase/client-email-drafts.sql). A task's email stays on the task.
+export const fetchClientEmailDraft = async (clientId: string): Promise<EmailDraft | null> => {
+  const { data, error } = await supabase.from("client_email_drafts").select("draft").eq("client_id", clientId).maybeSingle();
+  if (error) { logErr({ error }); return null; }
+  return (data?.draft as EmailDraft | undefined) ?? null;
+};
+export const saveClientEmailDraft = (clientId: string, draft: EmailDraft, memberId: string) =>
+  save(() => supabase.from("client_email_drafts").upsert({ client_id: clientId, draft, updated_by: memberId, updated_at: new Date().toISOString() }));
+export const deleteClientEmailDraft = (clientId: string) =>
+  save(() => supabase.from("client_email_drafts").delete().eq("client_id", clientId));
+
 export const fetchTaskDocument = async (taskId: string): Promise<TaskDocument | null> => {
   const { data, error } = await supabase.from("task_documents").select("*").eq("task_id", taskId).is("deleted_at", null).maybeSingle();
   if (error) { logErr({ error }); return null; }

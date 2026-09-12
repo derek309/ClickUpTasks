@@ -32,8 +32,8 @@ export async function POST(req: NextRequest) {
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const b = await req.json().catch(() => ({} as any));
-  const { clientId, taskId, channel, subject, body, cc, bcc, fromEmail, attachments, scheduledAt } = b as {
-    clientId?: string; taskId?: string | null; channel?: string; subject?: string; body?: string;
+  const { clientId, taskId, channel, subject, body, cc, bcc, fromEmail, attachments, scheduledAt, replyToMessageId } = b as {
+    clientId?: string; taskId?: string | null; channel?: string; subject?: string; body?: string; replyToMessageId?: string | null;
     cc?: string[]; bcc?: string[]; fromEmail?: string; attachments?: { path: string; name: string }[]; scheduledAt?: string;
   };
   if (!clientId || !body?.trim() || !scheduledAt) return NextResponse.json({ error: "Missing clientId, body, or scheduledAt." }, { status: 400 });
@@ -52,6 +52,7 @@ export async function POST(req: NextRequest) {
     subject: subject?.trim() || null, body, cc: cc?.filter((e) => e?.trim()) ?? [], bcc: bcc?.filter((e) => e?.trim()) ?? [],
     from_email: fromEmail?.trim() || null, attachments: attachments ?? [], scheduled_at: when.toISOString(),
     status: "pending", created_by: caller.memberId,
+    reply_to_message_id: typeof replyToMessageId === "string" ? replyToMessageId : null,
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ id, ok: true });

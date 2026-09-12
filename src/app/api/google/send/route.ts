@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/serverAuth";
 import { appendSignatureHtml, appendSignatureText } from "@/lib/emailSignature";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { sendGmailAs, googleConfigured } from "@/lib/googleMail";
+import { replyHeadersFor, sentRfc822 } from "@/lib/sendMessageServer";
 import { TASK_FILES_BUCKET } from "@/lib/db";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -49,7 +50,8 @@ export async function POST(req: NextRequest) {
   if (!googleConfigured) return NextResponse.json({ error: "Google Workspace sending is not configured." }, { status: 501 });
 
   const b = await req.json().catch(() => ({} as any));
-  const { clientId, toEmail, subject, body, isHtml, cc, bcc, fromEmail, attachments } = b as {
+  const { clientId, toEmail, subject, body, isHtml, cc, bcc, fromEmail, attachments, replyToMessageId } = b as {
+    replyToMessageId?: string | null; // messages.id this answers, so it threads as a reply
     clientId?: string;
     toEmail?: string;
     subject?: string;
@@ -132,6 +134,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    const replyTo = await replyHeadersFor(sender, clientId, replyToMessageId);
     const { id, threadId } = await sendGmailAs(sender, {
       to: toEmail.trim(),
       cc: ccList?.length ? ccList : undefined,
@@ -141,8 +144,10 @@ export async function POST(req: NextRequest) {
       isHtml,
       fromName,
       attachments: attParts.length ? attParts : undefined,
+      replyTo,
     });
-    return NextResponse.json({ ok: true, gmailMessageId: id, gmailThreadId: threadId, from: sender, skippedAttachments: skipped.length ? skipped : undefined });
+    const rfc822MessageId = await sentRfc822(sender, id);
+    return NextResponse.json({ ok: true, gmailMessageId: id, gmailThreadId: threadId, rfc822MessageId, from: sender, skippedAttachments: skipped.length ? skipped : undefined });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Gmail send failed." }, { status: 502 });
   }

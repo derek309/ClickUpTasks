@@ -8,8 +8,8 @@
 // bold and links carry through to the sent email. Stored as HTML and appended
 // server-side (src/lib/emailSignature.ts) rather than injected into the
 // composer, so it lands on every client email including scheduled and
-// AI-drafted sends. It is deliberately NOT shown inside the composer — the
-// editor here is WYSIWYG, so it doubles as the preview.
+// AI-drafted sends. The email window (EmailWindow.tsx) shows it read only under
+// the email, so what you see there is what goes out (Derek, 2026-09-11).
 import { useEffect, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
 import { htmlToText, looksLikeHtml, plainTextToHtml } from "@/lib/data";

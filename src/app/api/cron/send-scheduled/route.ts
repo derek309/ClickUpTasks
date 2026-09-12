@@ -35,7 +35,7 @@ async function run(req: NextRequest) {
 
   const { data: due, error } = await supabaseAdmin
     .from("scheduled_messages")
-    .select("id, client_id, task_id, channel, subject, body, cc, bcc, from_email, attachments, created_by")
+    .select("id, client_id, task_id, channel, subject, body, cc, bcc, from_email, attachments, created_by, reply_to_message_id")
     .eq("status", "pending")
     .lte("scheduled_at", new Date().toISOString());
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
@@ -46,6 +46,7 @@ async function run(req: NextRequest) {
       id: row.id, clientId: row.client_id, taskId: row.task_id, channel: row.channel,
       subject: row.subject, body: row.body ?? "", cc: row.cc ?? [], bcc: row.bcc ?? [],
       fromEmail: row.from_email, attachments: row.attachments ?? [], createdBy: row.created_by,
+      replyToMessageId: row.reply_to_message_id,
     });
     if (result.ok) {
       sent++;

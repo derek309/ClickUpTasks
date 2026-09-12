@@ -8,7 +8,7 @@
 // client-side sendMessage()/ingestOutboundMessage.
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "./supabaseAdmin";
-import { sendGmailAs, googleConfigured } from "./googleMail";
+import { sendGmailAs, googleConfigured, readReplyHeaders, type ReplyHeaders } from "./googleMail";
 import { tokenForLocation } from "./ghlTokens";
 import { TASK_FILES_BUCKET } from "./db";
 import { appendSignatureHtml } from "./emailSignature";
@@ -31,16 +31,35 @@ const mimeFor = (name: string) => MIME_BY_EXT[(name.split(".").pop() || "").toLo
 // proven at fire time, not trusted from the row.
 async function pathBelongsToClient(path: string, clientId: string): Promise<boolean> {
   if (!path || path.includes("..")) return false;
-  if (path.startsWith(`waiting/${clientId}/`) || path.startsWith(`extension/${clientId}/`)) return true;
+  // messages/<clientId>/ is where the email window uploads; without it a scheduled
+  // email with an attached photo failed this check and fell to the GHL path.
+  if (path.startsWith(`waiting/${clientId}/`) || path.startsWith(`extension/${clientId}/`) || path.startsWith(`messages/${clientId}/`)) return true;
   const taskId = path.split("/")[0];
-  if (!taskId || taskId === "waiting" || taskId === "extension") return false;
+  if (!taskId || taskId === "waiting" || taskId === "extension" || taskId === "messages") return false;
   const { data: task } = await supabaseAdmin.from("tasks").select("client_id").eq("id", taskId).maybeSingle();
   return !!task && task.client_id === clientId;
 }
 
+/** The reply headers for answering the email `replyToMessageId` (messages.id),
+ *  read from the sender's mailbox. Null when it isn't this client's email or
+ *  can't be found, and the email then goes out as a new thread. */
+export async function replyHeadersFor(sender: string, clientId: string, replyToMessageId: string | null | undefined): Promise<ReplyHeaders | null> {
+  if (!replyToMessageId) return null;
+  const { data: row } = await supabaseAdmin.from("messages")
+    .select("client_id, channel, gmail_message_id, rfc822_message_id").eq("id", replyToMessageId).maybeSingle();
+  if (!row || row.client_id !== clientId || row.channel !== "email") return null;
+  return readReplyHeaders(sender, { gmailMessageId: row.gmail_message_id as string | null, rfc822: row.rfc822_message_id as string | null }).catch(() => null);
+}
+
+/** The Message-ID Gmail gave an email just sent, kept so a later reply to it threads. */
+export async function sentRfc822(sender: string, gmailMessageId: string): Promise<string | null> {
+  if (!gmailMessageId) return null;
+  return (await readReplyHeaders(sender, { gmailMessageId }).catch(() => null))?.messageId ?? null;
+}
+
 // Same linked-contact resolution as Cockpit.tsx's contactForClient: an
 // explicit link wins, otherwise fall back to the id-derived contact.
-async function resolveContact(clientId: string): Promise<{ id: string; email: string | null; phone: string | null; ghlContactId: string | null; subAccountClientId: string } | null> {
+export async function resolveContact(clientId: string): Promise<{ id: string; email: string | null; phone: string | null; ghlContactId: string | null; subAccountClientId: string } | null> {
   const { data: client } = await supabaseAdmin.from("clients").select("linked_contact_id").eq("id", clientId).maybeSingle();
   const contactId = (client?.linked_contact_id as string | null) || (clientId.startsWith("cl_") ? clientId.slice(3) : null);
   if (!contactId) return null;
@@ -65,6 +84,8 @@ export type ScheduledSendInput = {
   fromEmail?: string | null;
   attachments: { path?: string; name?: string; id?: string }[];
   createdBy: string; // roster member id — the schedule's author, sent-as identity
+  /** messages.id this email answers, so it goes out as a reply in the same thread. */
+  replyToMessageId?: string | null;
 };
 
 export async function sendScheduledMessageNow(input: ScheduledSendInput): Promise<{ ok: true; messageId: string } | { ok: false; error: string }> {
@@ -94,13 +115,15 @@ export async function sendScheduledMessageNow(input: ScheduledSendInput): Promis
     }
     if (!attachmentFailed) {
       try {
+        const replyTo = await replyHeadersFor(sender, input.clientId, input.replyToMessageId);
         const { id: gmailMessageId, threadId: gmailThreadId } = await sendGmailAs(sender, {
           to: contact.email, cc: input.cc.length ? input.cc : undefined, bcc: input.bcc.length ? input.bcc : undefined,
           subject: (input.subject || "").slice(0, 200), body: appendSignatureHtml(input.body, signature), isHtml: true,
           fromName: (authorProfile?.name as string | null)?.trim() || undefined,
           attachments: attParts.length ? attParts : undefined,
+          replyTo,
         });
-        return insertSentMessage(input, contact.id, null, gmailMessageId, gmailThreadId);
+        return insertSentMessage(input, contact.id, null, gmailMessageId, gmailThreadId, await sentRfc822(sender, gmailMessageId));
       } catch (e) {
         // Fall through to GHL below rather than failing the whole send.
         console.warn("[sendScheduledMessageNow] Gmail send failed, falling back to GHL:", e instanceof Error ? e.message : e);
@@ -121,7 +144,8 @@ export async function sendScheduledMessageNow(input: ScheduledSendInput): Promis
     const { data } = await supabaseAdmin.storage.from(TASK_FILES_BUCKET).createSignedUrl(a.path, 60 * 60);
     if (data?.signedUrl) attachmentUrls.push(data.signedUrl);
   }
-  const emailHtml = appendSignatureHtml(escapeHtml(input.body).replace(/\r\n|\r|\n/g, "<br>"), signature);
+  // An email body is the email window's HTML already; escaping it again showed the tags.
+  const emailHtml = appendSignatureHtml(input.body, signature);
   const payload = input.channel === "sms"
     ? { type: "SMS", contactId: contact.ghlContactId, message: input.body, ...(attachmentUrls.length ? { attachments: attachmentUrls } : {}) }
     : { type: "Email", contactId: contact.ghlContactId, subject: (input.subject || "").slice(0, 200), html: emailHtml,
@@ -143,11 +167,11 @@ export async function sendScheduledMessageNow(input: ScheduledSendInput): Promis
   }
 }
 
-async function insertSentMessage(input: ScheduledSendInput, contactId: string, ghlMessageId: string | null, gmailMessageId: string | null, gmailThreadId: string | null = null): Promise<{ ok: true; messageId: string }> {
+async function insertSentMessage(input: ScheduledSendInput, contactId: string, ghlMessageId: string | null, gmailMessageId: string | null, gmailThreadId: string | null = null, rfc822: string | null = null): Promise<{ ok: true; messageId: string }> {
   const messageId = "msg_" + randomUUID();
   await supabaseAdmin.from("messages").insert({
     id: messageId, contact_id: contactId, client_id: input.clientId, task_id: input.taskId, channel: input.channel, direction: "outbound",
-    subject: input.subject, body: input.body, ghl_message_id: ghlMessageId, gmail_message_id: gmailMessageId, gmail_thread_id: gmailThreadId,
+    subject: input.subject, body: input.body, ghl_message_id: ghlMessageId, gmail_message_id: gmailMessageId, gmail_thread_id: gmailThreadId, rfc822_message_id: rfc822,
     created_by: input.createdBy, read: true, attachments: input.attachments, cc: input.cc, bcc: input.bcc,
   });
   return { ok: true, messageId };

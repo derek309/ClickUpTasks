@@ -243,7 +243,7 @@ export async function sendInboundReplyEmail(opts: {
 // message was ingested.
 export async function ingestInboundMessage(opts: {
   contact: Contact; ghlContactId?: string | null; channel: "email" | "sms";
-  subject?: string | null; body: string; gmailMessageId?: string | null; gmailThreadId?: string | null; at?: string;
+  subject?: string | null; body: string; gmailMessageId?: string | null; gmailThreadId?: string | null; rfc822?: string | null; at?: string;
 }): Promise<boolean> {
   const contact = { ...opts.contact, client_id: await resolveOrPromoteTrackedClient(opts.contact) };
   const { channel, subject, body } = opts;
@@ -254,7 +254,7 @@ export async function ingestInboundMessage(opts: {
   const messageId = "msg_" + crypto.randomUUID();
   const { error } = await supabaseAdmin.from("messages").insert({
     id: messageId, contact_id: contact.id, client_id: contact.client_id, channel, direction: "inbound",
-    subject: subject?.trim() || null, body, gmail_message_id: opts.gmailMessageId ?? null, gmail_thread_id: opts.gmailThreadId ?? null, created_by: null,
+    subject: subject?.trim() || null, body, gmail_message_id: opts.gmailMessageId ?? null, gmail_thread_id: opts.gmailThreadId ?? null, rfc822_message_id: opts.rfc822 || null, created_by: null,
     ...(opts.at ? { created_at: opts.at } : {}),
   });
   if (error) {
@@ -313,7 +313,7 @@ export async function isDuplicateOutboundBody(contactId: string, body: string, d
 // task, never moves one's dates or stage, and fires no notification — the
 // team sending something is not news, unlike an inbound reply.
 export async function ingestOutboundMessage(opts: {
-  contact: Contact; channel: "email"; subject?: string | null; body: string; gmailMessageId: string; gmailThreadId?: string | null; createdBy: string; at?: string;
+  contact: Contact; channel: "email"; subject?: string | null; body: string; gmailMessageId: string; gmailThreadId?: string | null; rfc822?: string | null; createdBy: string; at?: string;
 }): Promise<boolean> {
   const contact = { ...opts.contact, client_id: await resolveOrPromoteTrackedClient(opts.contact) };
   const { data: dupe } = await supabaseAdmin.from("messages").select("id").eq("gmail_message_id", opts.gmailMessageId).limit(1);
@@ -323,7 +323,7 @@ export async function ingestOutboundMessage(opts: {
   const { error } = await supabaseAdmin.from("messages").insert({
     id: "msg_" + crypto.randomUUID(), contact_id: contact.id, client_id: contact.client_id,
     channel: opts.channel, direction: "outbound", task_id: taskId,
-    subject: opts.subject?.trim() || null, body: opts.body, gmail_message_id: opts.gmailMessageId, gmail_thread_id: opts.gmailThreadId ?? null, created_by: opts.createdBy,
+    subject: opts.subject?.trim() || null, body: opts.body, gmail_message_id: opts.gmailMessageId, gmail_thread_id: opts.gmailThreadId ?? null, rfc822_message_id: opts.rfc822 || null, created_by: opts.createdBy,
     ...(opts.at ? { created_at: opts.at } : {}),
   });
   if (error) return false; // unique-index hit (already ingested) — not a real failure

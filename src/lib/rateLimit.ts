@@ -20,7 +20,7 @@ import { hashToken } from "./tokenCrypto";
 // below must stay well under that 1-hour sweep, or a long window's rows get
 // deleted mid-window and the counter silently resets.
 
-export type WaitingAction = "read" | "message" | "respond" | "status" | "request" | "upload" | "doc_read" | "doc_submit" | "doc_approve" | "doc_upload" | "doc_comment";
+export type WaitingAction = "read" | "message" | "respond" | "status" | "request" | "upload" | "doc_read" | "doc_submit" | "doc_approve" | "doc_upload" | "doc_comment" | "doc_view";
 
 type Rule = {
   /** Max requests per window for one token+IP pair. */
@@ -52,10 +52,10 @@ const MINUTE = 60_000;
 //           project) on the team's board. Board pollution is the expensive
 //           part. 10/30min is still more new requests than any real client
 //           raises in a sitting.
-//  upload   Up to 25MB of permanent storage per call, the only route with an
-//           unbounded money cost. 25/30min covers a client dragging in a
-//           batch of screenshots and stays far above the 2-3 files a normal
-//           session sends.
+//  upload   Up to 25MB of permanent storage per file, the only route with an
+//           unbounded money cost. Each file is two calls (an upload link,
+//           then confirming it), so 50/30min is 25 files: a client dragging
+//           in a batch of screenshots, far above the 2-3 a normal session sends.
 //  doc_*    The client review document at /doc/[token]. doc_read covers its
 //           15s poll (40/10min) with room for two tabs. doc_submit and
 //           doc_approve each publish a version and email the task owner, so
@@ -70,7 +70,7 @@ export const RATE_LIMITS: Record<WaitingAction, Rule> = {
   respond: { limit: 20,  windowMs: 10 * MINUTE },
   status:  { limit: 20,  windowMs: 10 * MINUTE },
   request: { limit: 10,  windowMs: 30 * MINUTE, tokenLimit: 30 },
-  upload:  { limit: 25,  windowMs: 30 * MINUTE, tokenLimit: 60 },
+  upload:  { limit: 50,  windowMs: 30 * MINUTE, tokenLimit: 120 },
   doc_read:    { limit: 120, windowMs: 10 * MINUTE },
   doc_submit:  { limit: 10,  windowMs: 10 * MINUTE, tokenLimit: 30 },
   doc_approve: { limit: 5,   windowMs: 10 * MINUTE, tokenLimit: 10 },
@@ -80,6 +80,8 @@ export const RATE_LIMITS: Record<WaitingAction, Rule> = {
   // A comment is a row plus a line on the task, and at most one email to the
   // owner per 15 minutes, so the budget is the chat composers' own.
   doc_comment: { limit: 20,  windowMs: 10 * MINUTE, tokenLimit: 60 },
+  // "Viewed" for the team: one small update per page open, so a few a minute is plenty.
+  doc_view:    { limit: 10,  windowMs: 10 * MINUTE, tokenLimit: 40 },
 };
 
 /** Seconds until the current fixed window rolls over — exact for this

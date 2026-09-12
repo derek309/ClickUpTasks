@@ -18,7 +18,6 @@ import {
 import { I, Avatar, CollapsibleText, LinkedText, newId } from "./ui";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 import { AttachmentTile } from "./AttachmentTile";
-import { RichTextEditor } from "./RichTextEditor";
 import { SchedulePopover } from "./SchedulePopover";
 
 // Status/priority reuse the field's own STATUS_META/PRIORITY_META token (the
@@ -111,49 +110,6 @@ function UrlLinkChip({ url }: { url: string }) {
 
 type Channel = "activity" | "chat" | "email" | "sms";
 
-const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-// A chip-style multi-recipient input for email Cc/Bcc — type to search the
-// synced contact list by name or email, or type a raw address and hit Enter.
-// Stores plain email strings (that's what GHL's emailCc/emailBcc expect).
-export function RecipientField({ label, value, onChange, contacts }: { label: string; value: string[]; onChange: (next: string[]) => void; contacts: Contact[] }) {
-  const [q, setQ] = useState("");
-  const ql = q.trim().toLowerCase();
-  const matches = ql
-    ? contacts.filter((c) => c.email && !value.includes(c.email) && (c.name.toLowerCase().includes(ql) || c.email.toLowerCase().includes(ql))).slice(0, 6)
-    : [];
-  const add = (email: string) => { const e = email.trim(); if (e && !value.includes(e)) onChange([...value, e]); setQ(""); };
-  const remove = (email: string) => onChange(value.filter((x) => x !== email));
-  return (
-    <div className="relative">
-      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border bg-background px-2 py-1.5 focus-within:border-accent">
-        <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">{label}</span>
-        {value.map((e) => (
-          <span key={e} className="inline-flex items-center gap-1 rounded bg-accent-soft px-1.5 py-0.5 text-[13px] text-accent">
-            {e}<button onClick={() => remove(e)} title="Remove" className="hover:text-foreground">×</button>
-          </span>
-        ))}
-        <input value={q} onChange={(e) => setQ(e.target.value)}
-          onKeyDown={(e) => {
-            if ((e.key === "Enter" || e.key === ",") && EMAIL_RE.test(q.trim())) { e.preventDefault(); add(q); }
-            else if (e.key === "Backspace" && !q && value.length) { remove(value[value.length - 1]); }
-          }}
-          placeholder={value.length ? "" : "Search contacts or type an email…"}
-          className="min-w-[150px] flex-1 bg-transparent text-[14px] outline-none placeholder:text-muted" />
-      </div>
-      {matches.length > 0 && (
-        <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-lg border bg-surface shadow-soft-md">
-          {matches.map((c) => (
-            <button key={c.id} onClick={() => add(c.email)} className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left hover:bg-background">
-              <span className="truncate text-[14px] font-medium">{c.name}</span>
-              <span className="shrink-0 truncate text-[13px] text-muted">{c.email}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // Rough SMS segment estimate, matching how carriers actually bill: GSM-7
 // encoding (plain ASCII + a handful of accented/Greek chars) fits 160 chars
 // in one segment or 153 per segment once concatenated across multiple;
@@ -174,7 +130,6 @@ export interface TaskMessagingProps {
   task: Task;
   client: Client;
   comment: string; setComment: (v: string) => void;
-  onPatch: (patch: Partial<Task>) => void;
   onAddComment: (body: string, attachments?: Attachment[]) => void;
   onUploadCommentImage: (file: File) => Promise<Attachment | null>;
   onDownloadFile: (path: string) => void;
@@ -187,14 +142,12 @@ export interface TaskMessagingProps {
   messages?: Message[] | null;
   onMarkChannelRead?: (channel: MessageChannel) => void;
   messageDest?: Contact | null;
-  ccContacts?: Contact[];
   onUploadMessageImage?: (file: File) => Promise<Attachment | null>;
-  onSendTaskMessage?: (channel: MessageChannel, subject: string, body: string, attachments?: Attachment[], cc?: string[], bcc?: string[]) => void;
-  onScheduleTaskMessage?: (channel: MessageChannel, subject: string, body: string, scheduledAt: string, attachments?: Attachment[], cc?: string[], bcc?: string[]) => void;
+  onSendTaskMessage?: (channel: MessageChannel, subject: string, body: string, attachments?: Attachment[], cc?: string[], bcc?: string[], replyToMessageId?: string | null) => void;
+  onScheduleTaskMessage?: (channel: MessageChannel, subject: string, body: string, scheduledAt: string, attachments?: Attachment[], cc?: string[], bcc?: string[], replyToMessageId?: string | null) => void;
   sendingMessage?: boolean;
   onDraftMessage?: (channel: "email" | "sms" | "chat", prompt?: string, context?: string) => Promise<{ subject?: string; body: string } | null>;
   draftingMessage?: boolean;
-  onGetTaskLink?: () => string | null;
   canAdmin?: boolean;
   onDeleteMessage?: (id: string) => void;
   onEditMessage?: (id: string, body: string, subject?: string | null) => void;
@@ -261,11 +214,11 @@ function ActionBody({ text }: { text: string }) {
   );
 }
 
-export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onSetNextStepDone?: (id: string, done: boolean) => void; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel) => void; openDraftInComposer: (draft: { subject: string; body: string; attachments?: Attachment[] }) => void } {
-  const { task, client, comment, setComment, onPatch, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
-    attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, ccContacts, onUploadMessageImage,
-    onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin,
-    onDeleteMessage, onEditMessage, hasMessaging, actions, onSetNextStepDone, onDeleteAction, onEditAction, onLogAction, meId, onSendDm, onDeleteComment, onMessageSent } = p;
+export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onSetNextStepDone?: (id: string, done: boolean) => void; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void; onComposeEmail?: (reply?: { subject?: string; replyTo?: string }) => void }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel) => void } {
+  const { task, client, comment, setComment, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
+    attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, onUploadMessageImage,
+    onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin,
+    onDeleteMessage, onEditMessage, hasMessaging, actions, onSetNextStepDone, onDeleteAction, onEditAction, onLogAction, meId, onSendDm, onDeleteComment, onMessageSent, onComposeEmail } = p;
 
   // C3: was a Set of independently-toggled channels (all four on by default),
   // which is how "the active tab reads Chat while the pane shows an email
@@ -298,13 +251,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   // mutually exclusive (opening one clears the other) rather than each
   // getting its own bundle, which would only matter for the edge case of
   // replying to an old message while also mid-draft on something fresh.
-  const [msgSubject, setMsgSubject] = useState("");
   const [msgBody, setMsgBody] = useState("");
-  const [draftPrompt, setDraftPrompt] = useState("");
-  const [emailFocusNonce, setEmailFocusNonce] = useState(0);
-  const [msgCc, setMsgCc] = useState<string[]>([]);
-  const [msgBcc, setMsgBcc] = useState<string[]>([]);
-  const [showCcBcc, setShowCcBcc] = useState(false);
   const [pendingMsgAtts, setPendingMsgAtts] = useState<Attachment[]>([]);
   const [uploadingMsgAtt, setUploadingMsgAtt] = useState(false);
   // A "Review & send" from a staged draftEmail is a one-off, not the start
@@ -312,33 +259,28 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   // does, instead of leaving an empty box open that needed a manual Cancel
   // (Derek, 2026-08-24: "it sent but didn't close").
 
-  // The nonce bump is what actually clears the EMAIL body on screen:
-  // RichTextEditor takes `value` as boot-time content only and never
-  // re-reads it, so setMsgBody("") alone left the just-sent text sitting in
-  // the editor (Derek: "after sending an email the field to write an email
-  // should clear out but it is not"). Remounting via its `key` is the
-  // documented way to reset it — see RichTextEditor's own comment.
-  const resetComposer = () => {
-    setMsgSubject(""); setMsgBody(""); setPendingMsgAtts([]); setMsgCc([]); setMsgBcc([]); setShowCcBcc(false); setDraftPrompt("");
-    setEmailFocusNonce((n) => n + 1);
-  };
+  const resetComposer = () => { setMsgBody(""); setPendingMsgAtts([]); };
   const closeComposers = () => { setReplyingTo(null); setComposingChannel(null); resetComposer(); };
 
+  // Email, a reply included, is written in the email window (EmailWindow.tsx,
+  // through the task's draft email), so only texts and chats open this small box
+  // (Derek, 2026-09-11: "make this the default look for emailing all around").
   const openReply = (id: string, channel: Channel, subject?: string | null) => {
+    onMarkChannelRead?.(channel === "activity" ? "chat" : channel);
+    if (channel === "email") {
+      const s = (subject ?? "").trim();
+      onComposeEmail?.({ subject: s ? (/^re:/i.test(s) ? s : `Re: ${s}`) : "", replyTo: id });
+      return;
+    }
     setComposingChannel(null);
     resetComposer();
-    if (channel === "email") {
-      setMsgSubject((subject ?? "").trim() ? (/^re:/i.test((subject ?? "").trim()) ? (subject ?? "").trim() : `Re: ${(subject ?? "").trim()}`) : "");
-      setEmailFocusNonce((n) => n + 1);
-    }
-    onMarkChannelRead?.(channel === "activity" ? "chat" : channel);
     setReplyingTo({ id, channel });
   };
   const openCompose = (channel: Channel) => {
+    if (channel !== "activity") onMarkChannelRead?.(channel);
+    if (channel === "email") { onComposeEmail?.(); return; }
     setReplyingTo(null);
     resetComposer();
-    if (channel === "email") setEmailFocusNonce((n) => n + 1);
-    if (channel !== "activity") onMarkChannelRead?.(channel);
     setComposingChannel(channel);
   };
 
@@ -366,7 +308,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   const msgFileRef = useRef<HTMLInputElement>(null);
 
   const activeComposeChannel = replyingTo?.channel ?? composingChannel;
-  const hasComposedMessage = activeComposeChannel === "email" ? !!htmlToText(msgBody).trim() : !!msgBody.trim();
+  const hasComposedMessage = !!msgBody.trim();
 
   // Sending always closes the composer now (Derek: "after the email is sent,
   // close the box for email"). It used to stay open after a fresh compose so
@@ -376,24 +318,18 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   // blank box sitting between you and the feed.
   const submitTaskMessage = () => {
     const channel = activeComposeChannel;
-    if (!channel || channel === "activity" || (!hasComposedMessage && pendingMsgAtts.length === 0) || !onSendTaskMessage) return;
-    const cc = channel === "email" ? msgCc : undefined;
-    const bcc = channel === "email" ? msgBcc : undefined;
-    const subject = channel === "email" ? (msgSubject.trim() || task.title) : msgSubject;
-    onSendTaskMessage(channel, subject, channel === "email" ? msgBody : msgBody.trim(), pendingMsgAtts.length ? pendingMsgAtts : undefined, cc, bcc);
+    if (!channel || channel === "activity" || channel === "email" || (!hasComposedMessage && pendingMsgAtts.length === 0) || !onSendTaskMessage) return;
+    onSendTaskMessage(channel, "", msgBody.trim(), pendingMsgAtts.length ? pendingMsgAtts : undefined);
     // Hands off to the dock, which logs the action and asks what happens
     // next. Sending used to be a dead end: the message went out and nothing
     // scheduled the follow-up, which is exactly how work went quiet.
-    onMessageSent?.(channel, htmlToText(msgBody).trim());
+    onMessageSent?.(channel, msgBody.trim());
     closeComposers();
   };
   const submitScheduledTaskMessage = (whenIso: string) => {
     const channel = activeComposeChannel;
-    if (!channel || channel === "activity" || channel === "chat" || (!hasComposedMessage && pendingMsgAtts.length === 0) || !onScheduleTaskMessage) return;
-    const cc = channel === "email" ? msgCc : undefined;
-    const bcc = channel === "email" ? msgBcc : undefined;
-    const subject = channel === "email" ? (msgSubject.trim() || task.title) : msgSubject;
-    onScheduleTaskMessage(channel, subject, channel === "email" ? msgBody : msgBody.trim(), whenIso, pendingMsgAtts.length ? pendingMsgAtts : undefined, cc, bcc);
+    if (channel !== "sms" || (!hasComposedMessage && pendingMsgAtts.length === 0) || !onScheduleTaskMessage) return;
+    onScheduleTaskMessage(channel, "", msgBody.trim(), whenIso, pendingMsgAtts.length ? pendingMsgAtts : undefined);
     // Scheduling closes too: the message is committed, there is nothing left
     // in the box worth keeping on screen.
     closeComposers();
@@ -420,34 +356,6 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     setEditingMsgId(null);
   };
 
-  // The staged draft email itself is its own line on the task now (DraftEmail.tsx).
-  // Its "Cc, Bcc or schedule" hands the draft to this composer, attachments
-  // included, and leaves the draft on the task until the email really went out.
-  const openDraftInComposer = (draft: { subject: string; body: string; attachments?: Attachment[] }) => {
-    openCompose("email");
-    setMsgSubject(draft.subject);
-    setMsgBody(draft.body);
-    setPendingMsgAtts(draft.attachments ?? []);
-    setEmailFocusNonce((n) => n + 1);
-  };
-
-  // "Prompt Claude" — type an intent, the AI drafter writes the message
-  // (subject+body) from that + client context. Never sends. An email draft
-  // is also persisted onto task.draftEmail the moment it's generated (the
-  // same field the MCP draft_email tool writes to) so it survives a closed
-  // drawer instead of only living in this composer's local state.
-  const runDraft = async (channel: "email" | "sms") => {
-    if (!onDraftMessage || draftingMessage) return;
-    const d = await onDraftMessage(channel, draftPrompt.trim() || undefined);
-    if (!d) return;
-    if (channel === "email") setMsgSubject(d.subject ?? "");
-    setMsgBody(channel === "email" ? plainTextToHtml(d.body) : d.body);
-    if (channel === "email") {
-      setEmailFocusNonce((n) => n + 1);
-      const now = new Date().toISOString();
-      onPatch({ draftEmail: { subject: d.subject ?? "", body: plainTextToHtml(d.body), createdAt: now, updatedAt: now } });
-    }
-  };
   // SMS/Chat's simpler "AI Write" button (Derek, 2026-08-19: type your
   // message, then Send it as-is or hand it to Claude) — no separate prompt
   // field like runDraft's; whatever's already typed in the composer IS the
@@ -459,31 +367,6 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     if (!d) return;
     setMsgBody(d.body);
   };
-  const promptClaudeBlock = (channel: "email" | "sms") => onDraftMessage ? (
-    <div className="mb-2 flex shrink-0 items-start gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
-      <span aria-hidden className="pt-1 pl-1 text-[14px]">✨</span>
-      <textarea value={draftPrompt} rows={1}
-        onChange={(e) => { setDraftPrompt(e.target.value); e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`; }}
-        onKeyDown={(e) => { if (e.key !== "Enter" || e.shiftKey || draftingMessage) return; e.preventDefault(); runDraft(channel); }}
-        placeholder="Tell Claude what to say… (Enter to write, Shift+Enter for a new line)"
-        className="max-h-[200px] min-w-0 flex-1 resize-none self-center overflow-y-auto bg-transparent px-1 py-1 text-[14px] leading-snug outline-none placeholder:text-muted" />
-      <button onClick={() => runDraft(channel)} disabled={draftingMessage}
-        title={draftPrompt.trim() ? "Draft this with Claude" : "Draft a status update from recent activity"}
-        className="mt-0.5 shrink-0 rounded-md border border-accent/40 bg-surface px-2.5 py-1 text-[14px] font-medium text-accent disabled:opacity-40">
-        {draftingMessage ? "Drafting…" : draftPrompt.trim() ? "Write it" : "Status update"}
-      </button>
-    </div>
-  ) : null;
-
-  const fillFromTask = () => {
-    const descText = htmlToText(task.description).trim();
-    const link = onGetTaskLink?.() ?? null;
-    const lines = [descText, link ? `You can view this and reply anytime here: ${link}` : null].filter(Boolean).join("\n\n");
-    if (!msgSubject.trim()) setMsgSubject(task.title);
-    setMsgBody(plainTextToHtml(lines));
-    setEmailFocusNonce((n) => n + 1);
-  };
-
   const msgAttBar = (pendingMsgAtts.length > 0 || uploadingMsgAtt) && (
     <div className="mb-2 flex shrink-0 flex-wrap items-center gap-1.5">
       <AttachmentThumbs items={pendingMsgAtts} onRemove={(id) => setPendingMsgAtts((a) => a.filter((x) => x.id !== id))} />
@@ -500,7 +383,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   // the bottom, opened from the CTA row. Same capabilities either way
   // (attachments, Cc/Bcc, scheduling, AI-assist) — replying never loses
   // features versus composing fresh.
-  const channelComposer = (channel: "chat" | "sms" | "email", onCancel: () => void) => {
+  const channelComposer = (channel: "chat" | "sms", onCancel: () => void) => {
     const color = channelColor[channel];
     if (channel === "sms") return (
       <div className="shrink-0 rounded-xl border-t-2 p-3" style={{ borderTopColor: color, background: color + "0d" }}>
@@ -518,45 +401,6 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
             {onScheduleTaskMessage && <SchedulePopover disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} onSchedule={submitScheduledTaskMessage} />}
             {onDraftMessage && <button onClick={() => aiWriteInto("sms")} disabled={draftingMessage} title="Write it as-typed, or hand what you typed to Claude as instructions" className="rounded-lg border border-accent/40 px-2.5 py-1.5 text-[16px] font-medium text-accent disabled:opacity-40">{draftingMessage ? "Writing…" : "✨ AI Write"}</button>}
             <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40" style={{ background: color }}>{sendingMessage ? "Sending…" : "Send text"}</button>
-          </span>
-        </div>
-      </div>
-    );
-    // No scroll box on the email composer. An email is written top to bottom
-    // and read back the same way, and a nine point list of changes inside a
-    // 60vh window meant scrolling a box inside a scrolling drawer to check
-    // what you had written (Derek: "just have it keep growing naturally").
-    // It grows with the message now and the drawer scrolls, which is the
-    // thing that was always going to scroll anyway.
-    if (channel === "email") return (
-      <div className="shrink-0 rounded-xl border-t-2 p-3" style={{ borderTopColor: color, background: color + "0d" }}>
-        <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
-          <span className="min-w-0 truncate text-[14px] text-muted">To: <span className="font-medium text-foreground">{messageDest?.email || "no email on file"}</span></span>
-          <span className="flex shrink-0 items-center gap-2">
-            <button onClick={fillFromTask} title="Fill in this task's title, description, and a client link to view/respond" className="text-[13px] font-medium text-accent hover:underline">Add task details + link</button>
-            {!showCcBcc && <button onClick={() => setShowCcBcc(true)} className="text-[13px] font-medium text-accent hover:underline">Cc / Bcc</button>}
-          </span>
-        </div>
-        <div className="mb-2">{promptClaudeBlock("email")}</div>
-        {showCcBcc && (
-          <div className="mb-2 flex shrink-0 flex-col gap-1.5">
-            <RecipientField label="Cc" value={msgCc} onChange={setMsgCc} contacts={ccContacts ?? []} />
-            <RecipientField label="Bcc" value={msgBcc} onChange={setMsgBcc} contacts={ccContacts ?? []} />
-          </div>
-        )}
-        <input value={msgSubject} onChange={(e) => setMsgSubject(e.target.value)} placeholder="Subject"
-          className="mb-2 w-full shrink-0 rounded-lg border bg-background px-3 py-2 text-[16px] font-medium outline-none placeholder:text-muted focus:border-accent" />
-        {msgAttBar}
-        <div className="min-h-[160px]" onPaste={handleMsgPaste} onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitTaskMessage(); } }}>
-          <RichTextEditor key={`task-email-${emailFocusNonce}`} value={msgBody} onChange={setMsgBody} placeholder="Write an email… (⌘↵ to send)" autoFocus />
-        </div>
-        <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
-          <span className="text-[14px] text-muted">{wordCount(htmlToText(msgBody))} word{wordCount(htmlToText(msgBody)) === 1 ? "" : "s"}</span>
-          <span className="flex items-center gap-1.5">
-            {msgAttachButton}
-            <button onClick={onCancel} className="rounded-lg px-2.5 py-1.5 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
-            {onScheduleTaskMessage && <SchedulePopover disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} onSchedule={submitScheduledTaskMessage} />}
-            <button onClick={submitTaskMessage} disabled={(!hasComposedMessage && pendingMsgAtts.length === 0) || sendingMessage} className="rounded-lg px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40" style={{ background: color }}>{sendingMessage ? "Sending…" : "Send email"}</button>
           </span>
         </div>
       </div>
@@ -1103,7 +947,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
             )}
           </div>
         </div>
-        {isReplyingHere && <div className="ml-11 mt-2">{channelComposer(replyingTo.channel === "activity" ? "chat" : replyingTo.channel, closeComposers)}</div>}
+        {isReplyingHere && replyingTo.channel !== "email" && <div className="ml-11 mt-2">{channelComposer(replyingTo.channel === "activity" ? "chat" : replyingTo.channel, closeComposers)}</div>}
       </div>
     );
   };
@@ -1242,7 +1086,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   const composerFooter = (
     <>
       {composingChannel
-        ? (composingChannel === "activity" ? teamComposer : channelComposer(composingChannel, closeComposers))
+        ? (composingChannel === "activity" ? teamComposer : composingChannel === "email" ? null : channelComposer(composingChannel, closeComposers))
         : ctaRow}
     </>
   );
@@ -1250,5 +1094,5 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
 
   // openCompose goes out so the dock can drive this composer rather than
   // shipping a second, poorer one of its own.
-  return { feedArea, composerFooter, openCompose, openDraftInComposer };
+  return { feedArea, composerFooter, openCompose };
 }

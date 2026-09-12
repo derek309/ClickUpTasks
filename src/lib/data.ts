@@ -531,6 +531,8 @@ export interface Message {
    * supabase/message-gmail-thread-id.sql and resolveTaskForThread in
    * src/lib/inboundIngest.ts. */
   gmailThreadId?: string | null;
+  /** The email's Message-ID header, the same in every mailbox: what a reply answers (supabase/email-threading.sql). */
+  rfc822MessageId?: string | null;
   /** The GoHighLevel conversation this message belongs to. The GHL equivalent
    *  of gmailThreadId: what lets a reply find the task it belongs to. */
   ghlConversationId?: string | null;
@@ -549,6 +551,9 @@ export interface Message {
  * supabase/scheduled-messages.sql and src/lib/sendMessageServer.ts (the cron
  * that fires these). On success it becomes a real Message row; this is only
  * the pending queue up to that point, fetched/created via /api/messages/schedule. */
+/** An email being written to a client: a task's draft_email, or a client's saved draft (client_email_drafts). */
+export type EmailDraft = NonNullable<Task["draftEmail"]>;
+
 export type ScheduledMessageStatus = "pending" | "sent" | "failed" | "canceled";
 export interface ScheduledMessage {
   id: string;
@@ -730,6 +735,11 @@ export interface Task {
     link?: { url: string; label: string } | null;
     /** What the email is about, handed to the AI drafter (a document sent for review). */
     aiContext?: string;
+    /** Copies, kept with the draft. */
+    cc?: string[];
+    bcc?: string[];
+    /** messages.id this email answers, so it goes out as a reply in the same thread. */
+    replyTo?: string | null;
   } | null;
   contactId: string | null;
   due: string | null; // ISO yyyy-mm-dd

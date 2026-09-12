@@ -10,6 +10,7 @@
 // page doesn't pull in the internal component tree.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { timeAgo, type Attachment } from "@/lib/data";
+import { uploadSharedFile } from "@/lib/docFileUpload";
 
 type WaitingAttachment = { id: string; name: string; kind: Attachment["kind"]; size: string; path: string | null; url: string | null };
 type WaitingProject = { id: string; name: string };
@@ -31,8 +32,6 @@ type WaitingTask = {
 // accept either on submit.
 type DraftAttachment = { id: string; name: string; kind: Attachment["kind"]; size: string; path?: string; url?: string };
 type Draft = { body: string; attachments: DraftAttachment[] };
-
-const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 function formatBytes(n: number) {
   if (!n) return "";
@@ -591,24 +590,26 @@ export default function WaitingView({ token }: { token: string }) {
   const updateBody = (taskId: string, body: string) =>
     setDrafts((prev) => ({ ...prev, [taskId]: { ...(prev[taskId] ?? { attachments: [] }), body } }));
 
+  // Files go straight to storage (docFileUpload.ts), so a 25 MB video works, and a
+  // file that can't be added says why instead of quietly not appearing.
+  const uploadApi = (taskId: string | null) => (payload: Record<string, unknown>) =>
+    fetch(`/api/waiting/${token}/upload`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...payload, ...(taskId ? { task_id: taskId } : {}) }),
+    });
+
   const handleFiles = async (taskId: string, files: FileList | null) => {
     if (!files || files.length === 0) return;
     setUploadingIds((s) => new Set(s).add(taskId));
+    setSendErrors((e) => { const n = { ...e }; delete n[taskId]; return n; });
     for (const f of Array.from(files)) {
-      if (f.size > MAX_UPLOAD_BYTES) continue;
-      const form = new FormData();
-      form.append("task_id", taskId);
-      form.append("file", f);
-      try {
-        const res = await fetch(`/api/waiting/${token}/upload`, { method: "POST", body: form });
-        const j = await res.json().catch(() => ({}));
-        if (res.ok && j.path) {
-          setDrafts((prev) => {
-            const d = prev[taskId] ?? { body: "", attachments: [] };
-            return { ...prev, [taskId]: { ...d, attachments: [...d.attachments, { id: localId(), name: f.name, kind: kindFromName(f.name), size: formatBytes(f.size), path: j.path }] } };
-          });
-        }
-      } catch { /* one file failing shouldn't block the rest */ }
+      // One file failing doesn't stop the rest; the last problem is what shows.
+      const r = await uploadSharedFile(f, uploadApi(taskId));
+      if (!r.ok) { setSendErrors((e) => ({ ...e, [taskId]: r.error })); continue; }
+      setDrafts((prev) => {
+        const d = prev[taskId] ?? { body: "", attachments: [] };
+        return { ...prev, [taskId]: { ...d, attachments: [...d.attachments, { id: localId(), name: f.name, kind: kindFromName(f.name), size: formatBytes(f.size), path: r.result.path as string }] } };
+      });
     }
     setUploadingIds((s) => { const n = new Set(s); n.delete(taskId); return n; });
   };
@@ -654,15 +655,11 @@ export default function WaitingView({ token }: { token: string }) {
   const handleNewFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setNewUploading(true);
+    setNewError(null);
     for (const f of Array.from(files)) {
-      if (f.size > MAX_UPLOAD_BYTES) continue;
-      const form = new FormData();
-      form.append("file", f);
-      try {
-        const res = await fetch(`/api/waiting/${token}/upload`, { method: "POST", body: form });
-        const j = await res.json().catch(() => ({}));
-        if (res.ok && j.path) setNewAttachments((prev) => [...prev, { id: localId(), name: f.name, kind: kindFromName(f.name), size: formatBytes(f.size), path: j.path }]);
-      } catch { /* one file failing shouldn't block the rest */ }
+      const r = await uploadSharedFile(f, uploadApi(null));
+      if (!r.ok) { setNewError(r.error); continue; }
+      setNewAttachments((prev) => [...prev, { id: localId(), name: f.name, kind: kindFromName(f.name), size: formatBytes(f.size), path: r.result.path as string }]);
     }
     setNewUploading(false);
   };

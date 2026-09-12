@@ -49,13 +49,18 @@ const formatFrom = (email: string, name?: string) => {
   return `${phrase} <${email}>`;
 };
 
+/** What makes a sent email a reply in every inbox: the Message-ID it answers and
+ *  the References chain before it (the client's mail app threads on these), plus
+ *  the thread id in the sender's own mailbox (Gmail threads the Sent copy on it). */
+export type ReplyHeaders = { messageId: string; references: string; threadId: string | null };
+
 export async function sendGmailAs(
   fromEmail: string,
   // isHtml: the caller already has real HTML (the Journal's rich-text email
   // composer) — send msg.body as-is instead of escaping+linebreak-converting
   // it as plain text. Defaults false: the other callers here (password
   // reset, mention/notification emails) still pass a plain string.
-  msg: { to: string; cc?: string[]; bcc?: string[]; subject?: string; body: string; isHtml?: boolean; fromName?: string; attachments?: { filename: string; mimeType: string; contentBase64: string }[] },
+  msg: { to: string; cc?: string[]; bcc?: string[]; subject?: string; body: string; isHtml?: boolean; fromName?: string; attachments?: { filename: string; mimeType: string; contentBase64: string }[]; replyTo?: ReplyHeaders | null },
 ): Promise<{ id: string; threadId: string }> {
   if (!googleConfigured) throw new Error("Google Workspace sending is not configured.");
 
@@ -69,6 +74,10 @@ export async function sendGmailAs(
     ...(msg.cc?.length ? [`Cc: ${msg.cc.join(", ")}`] : []),
     ...(msg.bcc?.length ? [`Bcc: ${msg.bcc.join(", ")}`] : []),
     `Subject: ${encodeHeader(msg.subject || "")}`,
+    ...(msg.replyTo ? [
+      `In-Reply-To: ${msg.replyTo.messageId}`,
+      `References: ${[msg.replyTo.references, msg.replyTo.messageId].filter(Boolean).join(" ")}`,
+    ] : []),
     "MIME-Version: 1.0",
   ];
 
@@ -104,7 +113,7 @@ export async function sendGmailAs(
   const res = await fetch(GMAIL_SEND, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ raw }),
+    body: JSON.stringify(msg.replyTo?.threadId ? { raw, threadId: msg.replyTo.threadId } : { raw }),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -114,7 +123,43 @@ export async function sendGmailAs(
   return { id: json.id ?? "", threadId: json.threadId ?? "" };
 }
 
-export type InboundEmail = { gmailId: string; threadId: string; fromEmail: string; fromName: string; subject: string; body: string; internalDate: string; auto: boolean };
+// The reply headers for one email, read from `mailbox` (Derek, 2026-09-11:
+// replies should stay in the client's thread). A Gmail message id only exists in
+// the mailbox it was read from, so a teammate replying to an email pulled from
+// someone else's inbox falls back to the Message-ID header, which is the same
+// everywhere: a search finds this mailbox's copy, and when there is none the
+// header alone still threads the reply in the client's inbox.
+export async function readReplyHeaders(mailbox: string, find: { gmailMessageId?: string | null; rfc822?: string | null }): Promise<ReplyHeaders | null> {
+  if (!googleConfigured) return null;
+  const jwt = new JWT({ email: SA_EMAIL, key: SA_KEY, scopes: [GMAIL_READ_SCOPE], subject: mailbox });
+  const { token } = await jwt.getAccessToken();
+  if (!token) return null;
+  const auth = { Authorization: `Bearer ${token}` };
+  const read = async (id: string): Promise<ReplyHeaders | null> => {
+    const res = await fetch(`${GMAIL_LIST}/${encodeURIComponent(id)}?format=metadata&metadataHeaders=Message-ID&metadataHeaders=References`, { headers: auth });
+    if (!res.ok) return null;
+    const m = await res.json().catch(() => null);
+    const headers: any[] = m?.payload?.headers ?? [];
+    const h = (name: string) => headers.find((x) => x.name?.toLowerCase() === name)?.value ?? "";
+    const messageId = h("message-id").trim();
+    return messageId ? { messageId, references: h("references").trim(), threadId: m?.threadId ?? null } : null;
+  };
+  if (find.gmailMessageId) {
+    const hit = await read(find.gmailMessageId);
+    if (hit) return hit;
+  }
+  if (find.rfc822) {
+    const bare = find.rfc822.trim().replace(/^<|>$/g, "");
+    const res = await fetch(`${GMAIL_LIST}?q=${encodeURIComponent(`rfc822msgid:${bare}`)}&maxResults=1`, { headers: auth });
+    const j = res.ok ? await res.json().catch(() => ({})) : {};
+    const id: string | undefined = j.messages?.[0]?.id;
+    const hit = id ? await read(id) : null;
+    return hit ?? { messageId: `<${bare}>`, references: "", threadId: null };
+  }
+  return null;
+}
+
+export type InboundEmail = { gmailId: string; threadId: string; fromEmail: string; fromName: string; subject: string; body: string; internalDate: string; auto: boolean; rfc822: string };
 
 // Walk a Gmail message payload for the best text body — prefer text/plain,
 // fall back to the first text/html (stripped), then the snippet.
@@ -227,6 +272,7 @@ export async function readGmailThread(userEmail: string, threadId: string, max =
       subject: h("subject"), body: extractBody(m.payload, m.snippet ?? ""),
       internalDate: new Date(Number(m.internalDate ?? Date.now())).toISOString(),
       auto: false,
+      rfc822: h("message-id"),
       toEmails,
       // Sent by the teammate whose mailbox we are reading, so it renders as
       // outbound rather than as the client writing to themselves.
@@ -279,12 +325,13 @@ export async function readInboundGmail(userEmail: string, query: string, max = 2
       subject: h("subject"), body: extractBody(m.payload, m.snippet ?? ""),
       internalDate: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : new Date().toISOString(),
       auto,
+      rfc822: h("message-id"),
     });
   }
   return out;
 }
 
-export type SentEmail = { gmailId: string; threadId: string; toEmails: string[]; subject: string; body: string; internalDate: string };
+export type SentEmail = { gmailId: string; threadId: string; toEmails: string[]; subject: string; body: string; internalDate: string; rfc822: string };
 
 // Read recent SENT email for a teammate (same DWD impersonation/scope as
 // readInboundGmail) — a reply they sent directly from their own Gmail
@@ -324,6 +371,7 @@ export async function readSentGmail(userEmail: string, query: string, max = 25):
       gmailId: m.id, threadId: m.threadId ?? "", toEmails,
       subject: h("subject"), body: extractBody(m.payload, m.snippet ?? ""),
       internalDate: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : new Date().toISOString(),
+      rfc822: h("message-id"),
     });
   }
   return out;

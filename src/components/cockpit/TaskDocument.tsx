@@ -392,6 +392,7 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
     const j = await readJson(res);
     if (!res.ok) { pushToast((j.error as string) ?? "Could not post the comment."); return false; }
     setComments((c) => [...c, { ...(j.comment as TaskDocumentComment), authorId: meId ?? null }]);
+    if (j.emailedClient) pushToast("Comment posted. We emailed the client a link to it.");
     return true;
   };
 
@@ -493,6 +494,7 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
   const meta = [
     doc.version ? `Version ${doc.version}` : "Not sent yet",
     doc.version > 0 && link ? `Link ${link.live ? "on" : "off"}` : null,
+    doc.version > 0 ? (doc.clientViewedAt ? `Viewed ${timeAgo(doc.clientViewedAt)}` : "Not viewed yet") : null,
     activeFiles.length ? `${activeFiles.length} ${activeFiles.length === 1 ? "file" : "files"}` : null,
     `Edited ${timeAgo(doc.updatedAt)}`,
   ].filter(Boolean).join(" · ");

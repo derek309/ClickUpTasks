@@ -131,7 +131,7 @@ function DateCol({ tone, label, children }: { tone: typeof DATE_TONES[keyof type
   );
 }
 
-export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onDuplicate, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast, meId, onSendDm, onDelegate, clientLinks, taskLink, onDeleteComment }: {
+export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onDuplicate, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast, meId, onSendDm, onDelegate, clientLinks, taskLink, onDeleteComment }: {
   task: Task;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; onPrev: () => void; onNext: () => void;
@@ -148,20 +148,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   linkedContactInfo?: Contact | null; // authoritative send target (matches what onSendTaskMessage actually resolves) — shown as "Sending to" in the SMS/Email composer
   ccContacts?: Contact[]; // searchable contacts for the email Cc/Bcc pickers
   onUploadMessageImage?: (file: File) => Promise<Attachment | null>;
-  onSendTaskMessage?: (channel: MessageChannel, subject: string, body: string, attachments?: Attachment[], cc?: string[], bcc?: string[]) => void;
-  onScheduleTaskMessage?: (channel: MessageChannel, subject: string, body: string, scheduledAt: string, attachments?: Attachment[], cc?: string[], bcc?: string[]) => void;
+  onSendTaskMessage?: (channel: MessageChannel, subject: string, body: string, attachments?: Attachment[], cc?: string[], bcc?: string[], replyToMessageId?: string | null) => void;
+  onScheduleTaskMessage?: (channel: MessageChannel, subject: string, body: string, scheduledAt: string, attachments?: Attachment[], cc?: string[], bcc?: string[], replyToMessageId?: string | null) => void;
   sendingMessage?: boolean;
   onDraftMessage?: (channel: "email" | "sms" | "chat", prompt?: string, context?: string) => Promise<{ subject?: string; body: string } | null>; // Gemini draft, never sends
   draftingMessage?: boolean;
-  // Mints/reuses this task's client's public /waiting/[token] link, scoped to
-  // this one task (?task=<id>) — used by the email composer's "Add task
-  // link" quick-fill. Null when the client has no share token yet and the
-  // caller isn't an admin (Cockpit's getClientShareUrl already toasts why).
-  onGetTaskLink?: () => string | null;
   canAdmin?: boolean; // gates message edit/delete — a wrongly sent client-facing message is corrected by an admin, not any assignee
   onDeleteMessage?: (id: string) => void;
   onEditMessage?: (id: string, body: string, subject?: string | null) => void;
-  onCopyClientLink?: () => void; // copies this client's public /waiting/[token] link — same link onGetTaskLink mints, just for the person, not one task
+  onCopyClientLink?: () => void; // copies this client's public /waiting/[token] link
   onDraftDescription?: (title: string, description: string, prompt?: string) => Promise<string | null>; // Gemini draft, never saves
   draftingDescription?: boolean;
   pushToast: (text: string, action?: { label: string; run: () => void }, secondaryAction?: { label: string; run: () => void }) => void;
@@ -876,6 +871,18 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const [emailOpenNonce, setEmailOpenNonce] = useState(0);
   // Bumped to have the draft email write itself with AI as it opens.
   const [emailAiNonce, setEmailAiNonce] = useState(0);
+  // Email on this task, from the dock, the "+ Draft email" chip or Reply on a
+  // message, opens the draft email window. A draft already here opens as it is;
+  // a reply replaces it, after a confirm when it has writing in it.
+  const startDraftEmail = (reply?: { subject?: string; replyTo?: string }) => {
+    const current = task.draftEmail;
+    const keepCurrent = !!current && (!reply || (!!htmlToText(current.body).trim() && !window.confirm("Replace the draft email on this task with this reply?")));
+    if (!keepCurrent) {
+      const now = new Date().toISOString();
+      onPatch({ draftEmail: { subject: reply?.subject ?? task.title, body: "", replyTo: reply?.replyTo ?? null, createdAt: now, updatedAt: now } });
+    }
+    setEmailOpenNonce((n) => n + 1);
+  };
   // The hidden file input lives in whichever of the two is actually mounted
   // (never both, since they're mutually exclusive) so fileRef always resolves.
   const hiddenFileInput = (
@@ -946,12 +953,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // happens next. Sending used to end the interaction; the follow-up date
   // never got set, which is how a task goes quiet after real work on it.
   const [pendingNextStep, setPendingNextStep] = useState<{ kind: TaskActionKind; body: string } | null>(null);
-  const { feedArea, composerFooter, openCompose, openDraftInComposer } = useTaskMessaging({
+  const { feedArea, composerFooter, openCompose } = useTaskMessaging({
     actions, onSetNextStepDone: setNextStepDone, onDeleteAction: deleteAction, onEditAction: editAction, onLogAction: logAction, meId, onSendDm, onDeleteComment,
     onMessageSent: (channel, body) => setPendingNextStep({ kind: channel, body }),
-    task, client, comment, setComment, onPatch, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
-    attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, ccContacts, onUploadMessageImage,
-    onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, onGetTaskLink, canAdmin,
+    onComposeEmail: hasMessaging ? startDraftEmail : undefined,
+    task, client, comment, setComment, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
+    attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, onUploadMessageImage,
+    onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin,
     onDeleteMessage, onEditMessage, hasMessaging,
   });
   // Reads like the task row it effectively is: a tick box, their face, what
@@ -1183,11 +1191,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // or the chip below. Sending goes through the same path as the composer.
   const draftEmailBlock = (
     <DraftEmail key={`email-${task.id}`} task={task} onPatch={onPatch} toEmail={messageDest?.email || null} messages={messages}
-      onSend={hasMessaging ? (subject, body, attachments) => {
-        onSendTaskMessage!("email", subject, body, attachments);
-        setPendingNextStep({ kind: "email", body: htmlToText(body).trim() });
+      onSend={hasMessaging ? (email) => {
+        onSendTaskMessage!("email", email.subject, email.body, email.attachments.length ? email.attachments : undefined, email.cc, email.bcc, email.replyTo);
+        setPendingNextStep({ kind: "email", body: htmlToText(email.body).trim() });
       } : undefined}
-      onUpload={onUploadMessageImage} onMoreOptions={hasMessaging ? openDraftInComposer : undefined}
+      onSchedule={hasMessaging && onScheduleTaskMessage ? (email, whenIso) =>
+        onScheduleTaskMessage("email", email.subject, email.body, whenIso, email.attachments.length ? email.attachments : undefined, email.cc, email.bcc, email.replyTo) : undefined}
+      onUpload={onUploadMessageImage} ccContacts={ccContacts}
       openNonce={emailOpenNonce} pushToast={pushToast}
       onAiDraft={onDraftMessage ? (instruction, context) => onDraftMessage("email", instruction || undefined, context) : undefined}
       aiNonce={emailAiNonce} />
@@ -1221,11 +1231,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     setEmailAiNonce((n) => n + 1);
     return true;
   };
-  const startDraftEmail = () => {
-    const now = new Date().toISOString();
-    onPatch({ draftEmail: { subject: task.title, body: "", createdAt: now, updatedAt: now } });
-    setEmailOpenNonce((n) => n + 1);
-  };
   const emptySectionsRow = (showDescription && showChecklist && showAttachments && (showDocument || !canHaveDocument) && (!!task.draftEmail || !hasMessaging)) ? null : (
     <div
       onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setAttFileDragOver(true); } }}
@@ -1235,7 +1240,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     >
       {!showDescription && <button onClick={() => openSection("description")} className={addChip}>+ Description</button>}
       {canHaveDocument && !showDocument && <button onClick={() => setDocStartNonce((n) => n + 1)} className={addChip}>+ Client document</button>}
-      {hasMessaging && !task.draftEmail && <button onClick={startDraftEmail} className={addChip}>+ Draft email</button>}
+      {hasMessaging && !task.draftEmail && <button onClick={() => startDraftEmail()} className={addChip}>+ Draft email</button>}
       {!showChecklist && <button onClick={() => openSection("checklist")} className={addChip}>+ Checklist</button>}
       {!showAttachments && (<>
         {hiddenFileInput}

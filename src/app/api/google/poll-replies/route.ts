@@ -93,7 +93,7 @@ async function run(req: NextRequest) {
             contact: { id: contact.id, name: contact.name, client_id: contact.client_id },
             ghlContactId: contact.ghl_contact_id ?? null,
             channel: "email", subject: em.subject, body: em.body,
-            gmailMessageId: em.gmailId, gmailThreadId: em.threadId, at: em.internalDate,
+            gmailMessageId: em.gmailId, gmailThreadId: em.threadId, rfc822: em.rfc822, at: em.internalDate,
           });
           if (did) ingested++;
         } catch (e) {
@@ -133,7 +133,7 @@ async function run(req: NextRequest) {
           const did = await ingestOutboundMessage({
             contact: { id: contact.id, name: contact.name, client_id: contact.client_id },
             channel: "email", subject: em.subject, body: em.body,
-            gmailMessageId: em.gmailId, gmailThreadId: em.threadId, createdBy, at: em.internalDate,
+            gmailMessageId: em.gmailId, gmailThreadId: em.threadId, rfc822: em.rfc822, createdBy, at: em.internalDate,
           });
           if (did) sentIngested++;
         } catch (e) {
