@@ -71,7 +71,10 @@ const taskToRow = (t: Task, updatedBy?: string | null) => ({
   recurrence_days_of_month: t.recurrenceDaysOfMonth ?? null, follow_up_at: t.followUpAt ?? null, priority_auto: t.priorityAuto ?? false, size: t.size ?? null, size_hours: t.sizeHours ?? null, recurrence_nth: t.recurrenceNth ?? null, recurrence_weekday: t.recurrenceWeekday ?? null,
   ghl_task_id: t.ghlTaskId, label_ids: t.labelIds, subtasks: t.subtasks,
   attachments: t.attachments, comments: t.comments, updated_by: updatedBy ?? null, is_private: t.private,
-  stage_id: t.stageId ?? null, client_response: t.clientResponse ?? null, draft_email: t.draftEmail ?? null, created_by: t.createdBy ?? null,
+  // No draft_email: the server stages drafts too (the doc-reminders cron, Claude's
+  // draft_email tool), and a full-row save from a task opened before that would
+  // write the old value over it. saveTaskDraftEmail writes it on its own.
+  stage_id: t.stageId ?? null, client_response: t.clientResponse ?? null, created_by: t.createdBy ?? null,
   // Derived from checklist-item assignees so RLS can let a delegatee see a
   // task delegated to them even when they don't own it or follow the client.
   delegated_to: [...new Set(t.subtasks.map((s) => s.assigneeId).filter((id): id is string => !!id && id !== t.assigneeId))],
@@ -360,6 +363,10 @@ export async function fetchContacts(): Promise<Contact[]> {
 // --- mutations (fire-and-forget from the UI; errors surface via console) -----
 
 export const upsertTask = (t: Task, updatedBy?: string | null) => save(() => supabase.from("tasks").upsert(taskToRow(t, updatedBy)));
+/** A task's draft email, written alone: the only browser write of draft_email
+ *  (Derek, 2026-09-12: a stale task save could wipe a reminder's draft). */
+export const saveTaskDraftEmail = (taskId: string, draft: Task["draftEmail"], updatedBy?: string | null) =>
+  save(() => supabase.from("tasks").update({ draft_email: draft ?? null, updated_by: updatedBy ?? null }).eq("id", taskId));
 // One request for many new/updated tasks at once
 // (up to 18 rows per client) instead of N separate round trips.
 export const bulkUpsertTasks = (ts: Task[]) => (ts.length ? save(() => supabase.from("tasks").upsert(ts.map((t) => taskToRow(t)))) : Promise.resolve());
