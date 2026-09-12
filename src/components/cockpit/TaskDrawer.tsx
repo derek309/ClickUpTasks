@@ -869,8 +869,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // second click opens it again after it was closed.
   const [docStartNonce, setDocStartNonce] = useState(0);
   const [emailOpenNonce, setEmailOpenNonce] = useState(0);
-  // Bumped to have the draft email write itself with AI as it opens.
-  const [emailAiNonce, setEmailAiNonce] = useState(0);
   // Email on this task, from the dock, the "+ Draft email" chip or Reply on a
   // message, opens the draft email window. A draft already here opens as it is;
   // a reply replaces it, after a confirm when it has writing in it.
@@ -1200,12 +1198,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       onUpload={onUploadMessageImage} ccContacts={ccContacts}
       openNonce={emailOpenNonce} pushToast={pushToast}
       onAiDraft={onDraftMessage ? (instruction, context) => onDraftMessage("email", instruction || undefined, context) : undefined}
-      aiNonce={emailAiNonce} />
+      />
   );
   // The client document was sent for review, or its Email client button was
-  // clicked: a draft email to the client with the review link, which then writes
-  // itself with AI from the document and what changed (Derek, 2026-09-11). It
-  // replaces any draft already here. False when there is nobody to email.
+  // clicked: a draft email to the client with a short intro and the review link,
+  // ready to send. It no longer rewrites itself with AI as it opens (Derek,
+  // 2026-09-12: "not sure that needs to happen"); Write with AI uses what changed
+  // when asked. It replaces any draft already here. False when there is nobody to email.
   const startReviewEmail = (review: { url: string | null; name: string; text: string; changes: string | null }) => {
     if (!hasMessaging) return false;
     const now = new Date().toISOString();
@@ -1228,7 +1227,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       },
     });
     setEmailOpenNonce((n) => n + 1);
-    setEmailAiNonce((n) => n + 1);
     return true;
   };
   const emptySectionsRow = (showDescription && showChecklist && showAttachments && (showDocument || !canHaveDocument) && (!!task.draftEmail || !hasMessaging)) ? null : (

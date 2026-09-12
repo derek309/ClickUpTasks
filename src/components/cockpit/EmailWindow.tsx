@@ -85,7 +85,7 @@ function RecipientField({ label, value, onChange, contacts }: { label: string; v
 
 export function EmailWindow({
   draft, save, onClose, onDiscard, onSend, onSchedule, toEmail, heading, subheading, subjectFallback,
-  ccContacts, onUpload, onAiDraft, writeOnOpen, taskItems, scheduled, onCancelScheduled, pushToast,
+  ccContacts, onUpload, onAiDraft, taskItems, scheduled, onCancelScheduled, pushToast,
 }: {
   draft: EmailDraft;
   /** Keeps the draft: a task's draft_email, or the client's saved draft. */
@@ -104,8 +104,6 @@ export function EmailWindow({
   ccContacts?: Contact[];
   onUpload?: (file: File) => Promise<Attachment | null>;
   onAiDraft?: (instruction: string, context?: string) => Promise<{ subject?: string; body: string } | null>;
-  /** Writes the email with AI as soon as it opens (a document just sent for review). */
-  writeOnOpen?: boolean;
   /** Files and links already on the task, added with one click. */
   taskItems?: Attachment[];
   scheduled?: ScheduledMessage[];
@@ -187,8 +185,6 @@ export function EmailWindow({
     setEditorNonce((n) => n + 1);
     setSaveState("saved");
   };
-  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
-  useEffect(() => { if (writeOnOpen) void writeWithAi(""); }, []);
 
   const imagePaths = attachments.filter((a) => a.path && isPreviewableImage(a.name)).map((a) => a.path!).join("|");
   useEffect(() => {

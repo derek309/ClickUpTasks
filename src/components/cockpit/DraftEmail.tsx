@@ -13,7 +13,7 @@ import { STATUS_META, timeAgo, type Attachment, type Contact, type Message, type
 import { WorkItemBadge, WorkItemRow } from "./TaskWorkItem";
 import { EmailWindow, sentEmailFor, type OutgoingEmail } from "./EmailWindow";
 
-export function DraftEmail({ task, onPatch, toEmail, onSend, onSchedule, onUpload, ccContacts, messages, openNonce, pushToast, onAiDraft, aiNonce }: {
+export function DraftEmail({ task, onPatch, toEmail, onSend, onSchedule, onUpload, ccContacts, messages, openNonce, pushToast, onAiDraft }: {
   task: Task;
   onPatch: (patch: Partial<Task>) => void;
   /** The linked contact's address, or null when there is nobody to send to yet. */
@@ -29,13 +29,10 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onSchedule, onUploa
   pushToast: (text: string) => void;
   /** Writes the email with AI from an instruction and the draft's own context. */
   onAiDraft?: (instruction: string, context?: string) => Promise<{ subject?: string; body: string } | null>;
-  /** Bumped to write the email with AI as soon as it opens (a document just sent for review). */
-  aiNonce?: number;
 }) {
   const draft = task.draftEmail ?? null;
   const [full, setFull] = useState(false);
   const [seenNonce, setSeenNonce] = useState(openNonce);
-  const [seenAiNonce, setSeenAiNonce] = useState(aiNonce);
 
   const sentAlready = draft ? sentEmailFor(draft, messages) : null;
   useEffect(() => {
@@ -46,7 +43,7 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onSchedule, onUploa
 
   if (!draft) return null;
   const open = full || openNonce !== seenNonce;
-  const close = () => { setSeenNonce(openNonce); setSeenAiNonce(aiNonce); setFull(false); };
+  const close = () => { setSeenNonce(openNonce); setFull(false); };
 
   const count = draft.attachments?.length ?? 0;
   const badge = <WorkItemBadge label="Not sent" chip={STATUS_META.todo.chip} dot={STATUS_META.todo.dot} />;
@@ -64,7 +61,7 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onSchedule, onUploa
         <EmailWindow key={draft.createdAt} draft={draft} heading="Draft email" subheading={task.title} subjectFallback={task.title}
           save={(next) => onPatch({ draftEmail: next })} onDiscard={() => onPatch({ draftEmail: null })} onClose={close}
           onSend={onSend} onSchedule={onSchedule} toEmail={toEmail} ccContacts={ccContacts} onUpload={onUpload}
-          onAiDraft={onAiDraft} writeOnOpen={aiNonce !== seenAiNonce} taskItems={task.attachments} pushToast={pushToast} />
+          onAiDraft={onAiDraft} taskItems={task.attachments} pushToast={pushToast} />
       )}
     </>
   );
