@@ -315,7 +315,7 @@ export default function DocReviewView({ token }: { token: string }) {
                   <div className="rounded-2xl border bg-surface p-4 shadow-sm">
                     <div className="flex gap-3">
                       <button onClick={() => void publish("submit")} disabled={!dirty || busy !== null}
-                        className="min-h-[52px] flex-1 rounded-xl border-2 px-4 text-[17px] font-semibold transition disabled:opacity-40"
+                        className="min-h-[52px] flex-[1.3] whitespace-nowrap rounded-xl border-2 px-2 text-[17px] font-semibold transition disabled:opacity-40"
                         style={{ borderColor: NAVY, color: NAVY }}>
                         {busy === "send" ? "Sending…" : "Send my changes"}
                       </button>
