@@ -167,8 +167,22 @@ export const MAX_COMMENT_CHARS = 4000;
 export type DocComment = {
   id: string; body: string; authorLabel: string; fromClient: boolean; createdAt: string;
   editedAt: string | null; completedAt: string | null; completedBy: string | null;
+  /** The words in the document this comment is about, or null for the whole document. */
+  quote: string | null;
 };
-const COMMENT_COLUMNS = "id, body, author_id, author_label, created_at, edited_at, completed_at, completed_by_label";
+const COMMENT_COLUMNS = "id, body, author_id, author_label, created_at, edited_at, completed_at, completed_by_label, quote";
+
+const MAX_QUOTE_CHARS = 500;
+/** The words a comment is about, as selected in the document: plain text, one
+ *  space between words, line breaks kept between paragraphs. Null for none. */
+export function cleanQuote(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const quote = raw.replace(/\r\n?/g, "\n").split("\n")
+    // Whitespace (tabs included) becomes one space first, then any other control characters go.
+    .map((line) => line.replace(/\s+/g, " ").replace(/[\x00-\x1f\x7f]/g, "").trim())
+    .filter(Boolean).join("\n");
+  return quote ? quote.slice(0, MAX_QUOTE_CHARS) : null;
+}
 
 /** Plain text only: line breaks stay, other control characters go, and long
  *  runs of blank lines fold to one. Null when empty or too long. */
@@ -184,9 +198,11 @@ const toComment = (r: Record<string, unknown>): DocComment => ({
   editedAt: (r.edited_at as string | null) ?? null,
   completedAt: (r.completed_at as string | null) ?? null,
   completedBy: (r.completed_by_label as string | null) ?? null,
+  quote: (r.quote as string | null) ?? null,
 });
 
-export async function postDocComment(documentId: string, rawBody: unknown, actor: DocActor): Promise<{ ok: true; comment: DocComment } | Fail> {
+/** rawQuote: the words selected in the document, when the comment is about them. */
+export async function postDocComment(documentId: string, rawBody: unknown, actor: DocActor, rawQuote?: unknown): Promise<{ ok: true; comment: DocComment } | Fail> {
   const body = cleanCommentBody(rawBody);
   if (!body) {
     return typeof rawBody === "string" && rawBody.trim().length > MAX_COMMENT_CHARS
@@ -196,6 +212,7 @@ export async function postDocComment(documentId: string, rawBody: unknown, actor
   const row = {
     id: "tdm_" + randomUUID(), document_id: documentId, body,
     author_id: actor.id, author_label: actor.label, created_at: new Date().toISOString(),
+    quote: cleanQuote(rawQuote),
   };
   const { error } = await supabaseAdmin.from("task_document_comments").insert(row);
   if (error) return fail(500, "Could not post the comment. Please try again.");

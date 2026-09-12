@@ -11,8 +11,9 @@
 // controls so an iPhone never zooms into the toolbar, a sticky toolbar without
 // the checklist and code block buttons), and `editable={false}` is the locked
 // view of an approved or closed document.
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
+import { CommentHighlights, commentHighlightsKey, type CommentHighlight } from "./commentHighlights";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import TaskList from "@tiptap/extension-task-list";
@@ -30,11 +31,18 @@ function ToolbarButton({ onClick, active, title, children, large }: { onClick: (
   );
 }
 
-export function RichTextEditor({ value, onChange, placeholder, autoFocus, editable = true, variant = "task" }: {
+export function RichTextEditor({ value, onChange, placeholder, autoFocus, editable = true, variant = "task", highlights, activeHighlightId, onHighlightClick, onSelectionComment }: {
   value: string; onChange: (html: string) => void; placeholder?: string; autoFocus?: boolean;
   editable?: boolean; variant?: "task" | "doc";
+  /** Document only: the words comments are about, highlighted; clicking one calls onHighlightClick. */
+  highlights?: CommentHighlight[]; activeHighlightId?: string | null; onHighlightClick?: (id: string) => void;
+  /** Document only: selecting words shows a Comment button that hands them over. */
+  onSelectionComment?: (quote: string) => void;
 }) {
   const doc = variant === "doc";
+  // handleClick is set when the editor is made, so it reads the latest callback here.
+  const highlightClickRef = useRef(onHighlightClick);
+  useEffect(() => { highlightClickRef.current = onHighlightClick; });
   const editor = useEditor({
     immediatelyRender: false,
     editable,
@@ -45,6 +53,7 @@ export function RichTextEditor({ value, onChange, placeholder, autoFocus, editab
       TaskItem.configure({ nested: true }),
       Link.configure({ openOnClick: false, autolink: true, HTMLAttributes: { title: "⌘-click to open" } }),
       Placeholder.configure({ placeholder: placeholder ?? "Add a description…" }),
+      ...(doc ? [CommentHighlights] : []),
     ],
     content: value,
     // Boot-time only — a caller that wants to refocus an already-mounted
@@ -71,6 +80,9 @@ export function RichTextEditor({ value, onChange, placeholder, autoFocus, editab
       // editors. In a read-only view a plain click opens it, since there is
       // no cursor to place.
       handleClick: (view, _pos, event) => {
+        // A highlighted comment quote opens its comment; the cursor still lands.
+        const mark = (event.target as HTMLElement).closest?.("[data-comment-id]") as HTMLElement | null;
+        if (mark?.dataset.commentId) highlightClickRef.current?.(mark.dataset.commentId);
         if (view.editable && !(event.metaKey || event.ctrlKey)) return false;
         const link = (event.target as HTMLElement).closest("a");
         if (!link?.href) return false;
@@ -85,6 +97,44 @@ export function RichTextEditor({ value, onChange, placeholder, autoFocus, editab
   useEffect(() => {
     if (editor && editor.isEditable !== editable) editor.setEditable(editable);
   }, [editor, editable]);
+
+  // Comment highlights reach the editor as a transaction that changes nothing in
+  // the document, so it saves nothing and never counts as an edit. A picked
+  // comment's words scroll into view.
+  const highlightsKey = doc ? `${JSON.stringify(highlights ?? [])}|${activeHighlightId ?? ""}` : "";
+  useEffect(() => {
+    if (!doc || !editor || editor.isDestroyed) return;
+    editor.view.dispatch(editor.state.tr
+      .setMeta(commentHighlightsKey, { highlights: highlights ?? [], activeId: activeHighlightId ?? null })
+      .setMeta("addToHistory", false));
+    if (!activeHighlightId) return;
+    requestAnimationFrame(() => {
+      editor.view.dom.querySelector(`[data-comment-id="${CSS.escape(activeHighlightId)}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  }, [editor, highlightsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Selecting words in a document shows a Comment button just above them. Read
+  // from the page's own selection, so it works in a locked (read only) document too.
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [pick, setPick] = useState<{ quote: string; top: number; left: number } | null>(null);
+  const readSelection = () => {
+    const wrap = wrapRef.current;
+    const sel = typeof window !== "undefined" ? window.getSelection() : null;
+    if (!wrap || !onSelectionComment || !sel || sel.isCollapsed || !sel.rangeCount) { setPick(null); return; }
+    const range = sel.getRangeAt(0);
+    const quote = sel.toString().trim();
+    if (!quote || !wrap.contains(range.commonAncestorContainer)) { setPick(null); return; }
+    const r = range.getBoundingClientRect();
+    const w = wrap.getBoundingClientRect();
+    const above = r.top - w.top - 52;
+    setPick({ quote, top: above >= 0 ? above : r.bottom - w.top + 8, left: Math.max(0, Math.min(r.left - w.left + r.width / 2 - 64, w.width - 128)) });
+  };
+  useEffect(() => {
+    if (!doc || !onSelectionComment) return;
+    const onChange = () => { if (window.getSelection()?.isCollapsed) setPick(null); };
+    document.addEventListener("selectionchange", onChange);
+    return () => document.removeEventListener("selectionchange", onChange);
+  }, [doc, onSelectionComment]);
 
   if (!editor) return null;
 
@@ -130,9 +180,17 @@ export function RichTextEditor({ value, onChange, placeholder, autoFocus, editab
 
   if (doc) {
     return (
-      <div>
+      <div ref={wrapRef} className="relative" onMouseUp={readSelection} onKeyUp={readSelection} onTouchEnd={() => window.setTimeout(readSelection, 0)}>
         {toolbar}
         <EditorContent editor={editor} />
+        {pick && (
+          <button type="button" onMouseDown={(e) => e.preventDefault()}
+            onClick={() => { onSelectionComment?.(pick.quote); setPick(null); window.getSelection()?.removeAllRanges(); }}
+            style={{ top: pick.top, left: pick.left }}
+            className="absolute z-20 min-h-[44px] rounded-lg bg-accent px-5 text-[16px] font-semibold text-white shadow-lg">
+            Comment
+          </button>
+        )}
       </div>
     );
   }

@@ -18,7 +18,7 @@ async function open(req: NextRequest, params: Promise<{ id: string }>) {
   if (!access.ok) return access;
   const { data: doc } = await supabaseAdmin.from("task_documents").select("id").eq("task_id", id).is("deleted_at", null).maybeSingle();
   if (!doc) return { ok: false as const, res: json({ error: "This task has no client document yet." }, 404) };
-  const payload = (await req.json().catch(() => null) ?? {}) as { body?: unknown; commentId?: unknown; done?: unknown };
+  const payload = (await req.json().catch(() => null) ?? {}) as { body?: unknown; commentId?: unknown; done?: unknown; quote?: unknown };
   const user = access.user;
   return { ok: true as const, documentId: doc.id as string, payload, user, task: access.task, actor: { id: user.memberId ?? user.id, label: await memberLabel(user) } };
 }
@@ -27,10 +27,10 @@ async function open(req: NextRequest, params: Promise<{ id: string }>) {
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const o = await open(req, params);
   if (!o.ok) return o.res;
-  const r = await postDocComment(o.documentId, o.payload.body, o.actor);
+  const r = await postDocComment(o.documentId, o.payload.body, o.actor, o.payload.quote);
   if (!r.ok) return json({ error: r.error }, r.status);
   const emailedClient = await emailClientAboutComment({
-    user: o.user, task: o.task, documentId: o.documentId, comment: typeof o.payload.body === "string" ? o.payload.body : "", origin: req.nextUrl.origin,
+    user: o.user, task: o.task, documentId: o.documentId, comment: r.comment.body, quote: r.comment.quote, origin: req.nextUrl.origin,
   }).catch(() => false);
   return json({ comment: r.comment, emailedClient });
 }

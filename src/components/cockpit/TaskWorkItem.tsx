@@ -100,6 +100,8 @@ export function WorkItemWindow({ icon, title, badge, status, actions, onClose, c
 export type ThreadComment = {
   id: string; body: string; authorLabel: string; fromClient: boolean; createdAt: string;
   editedAt?: string | null; completedAt?: string | null; completedBy?: string | null;
+  /** The words in the document this comment is about. */
+  quote?: string | null;
 };
 /** How many of the newest comments show before the rest fold away. */
 const LATEST_COMMENTS = 3;
@@ -109,10 +111,18 @@ const LATEST_COMMENTS = 3;
  *  the document and to the client on their review page. Each comment has a tick
  *  box like a task, and its author can edit it ("edit, delete and mark a comment
  *  complete like a task"). */
-export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isMine, canDelete, onEdit, onDelete, onToggleDone }: {
+export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isMine, canDelete, onEdit, onDelete, onToggleDone, quote, onClearQuote, focusedId, onQuoteClick }: {
   comments: ThreadComment[];
-  /** Resolves true once the comment is in, which clears the box. */
-  onPost: (body: string) => Promise<boolean>;
+  /** Resolves true once the comment is in, which clears the box. quote: the words it is about. */
+  onPost: (body: string, quote?: string | null) => Promise<boolean>;
+  /** Words selected in the document for the next comment, shown above the box
+   *  (Derek, 2026-09-12: comments on a specific sentence). */
+  quote?: string | null;
+  onClearQuote?: () => void;
+  /** A comment picked from its highlight in the document: shown and scrolled to. */
+  focusedId?: string | null;
+  /** Clicking a comment's quote shows those words in the document. */
+  onQuoteClick?: (id: string) => void;
   when: (iso: string) => string;
   /** Which side is reading, to say who else sees the thread. */
   viewer: "team" | "client";
@@ -140,11 +150,15 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
     if (!editing || !editing.text.trim()) return;
     if (await act(editing.id, () => onEdit(editing.id, editing.text.trim()))) setEditing(null);
   };
+  const boxRef = useRef<HTMLTextAreaElement>(null);
+  const itemRefs = useRef(new Map<string, HTMLLIElement>());
+  // Picking words in the document puts the cursor in the box, ready to write.
+  useEffect(() => { if (quote) boxRef.current?.focus(); }, [quote]);
   const post = async () => {
     const body = draft.trim();
     if (!body || posting) return;
     setPosting(true);
-    const ok = await onPost(body);
+    const ok = await onPost(body, quote ?? null);
     setPosting(false);
     if (ok) setDraft("");
   };
@@ -158,13 +172,32 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
   const doneOnes = newestFirst.filter((c) => !!c.completedAt);
   const older = Math.max(0, openOnes.length - LATEST_COMMENTS);
   const shown = [...(showOlder ? openOnes : openOnes.slice(0, LATEST_COMMENTS)), ...(showDone ? doneOnes : [])];
+  // A highlight clicked in the document opens its comment wherever it is folded away.
+  useEffect(() => {
+    if (!focusedId) return;
+    const target = comments.find((c) => c.id === focusedId);
+    if (!target) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (target.completedAt) setShowDone(true);
+    else if (openOnes.findIndex((c) => c.id === focusedId) >= LATEST_COMMENTS) setShowOlder(true);
+    requestAnimationFrame(() => itemRefs.current.get(focusedId)?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+  }, [focusedId]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <section className="rounded-xl border bg-surface px-4 py-3">
       <h3 className="text-[16px] font-semibold">Comments{comments.length ? ` · ${comments.length}` : ""}</h3>
       {viewer === "team" && <p className="text-[16px] text-muted">The client sees these on their review page.</p>}
-      <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={2} maxLength={4000}
+      {quote && (
+        <div className="mt-2 flex items-start gap-2 rounded-lg border-l-4 border-highlight bg-highlight-soft/60 px-3 py-2 text-[16px]">
+          <span className="min-w-0 flex-1 break-words"><span className="text-muted">On </span>“{quote.replace(/\n/g, " … ")}”</span>
+          {onClearQuote && (
+            <button onClick={onClearQuote} title="Comment on the whole document instead" aria-label="Comment on the whole document instead"
+              className="shrink-0 px-1 text-[18px] leading-none text-muted hover:text-foreground">×</button>
+          )}
+        </div>
+      )}
+      <textarea ref={boxRef} value={draft} onChange={(e) => setDraft(e.target.value)} rows={2} maxLength={4000}
         onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void post(); } }}
-        placeholder="Write a comment…" aria-label="Write a comment"
+        placeholder={quote ? "Write a comment on these words…" : "Write a comment, or select words in the document to comment on them…"} aria-label="Write a comment"
         className="mt-2 w-full resize-y rounded-lg border bg-background px-3 py-2 text-[16px] outline-none focus:border-accent" />
       <div className="mt-2 flex items-center justify-end gap-3">
         <span className="hidden text-[16px] text-muted sm:inline">⌘ Enter posts it</span>
@@ -181,7 +214,8 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
             const busy = busyId === c.id;
             const isEditing = editing?.id === c.id;
             return (
-              <li key={c.id} className={`flex gap-3 rounded-lg px-3 py-2 ${mine ? "bg-accent-soft/40" : "bg-background"}`}>
+              <li key={c.id} ref={(el) => { if (el) itemRefs.current.set(c.id, el); else itemRefs.current.delete(c.id); }}
+                className={`flex gap-3 rounded-lg px-3 py-2 ${mine ? "bg-accent-soft/40" : "bg-background"} ${focusedId === c.id ? "ring-2 ring-highlight" : ""}`}>
                 <button role="checkbox" aria-checked={done} aria-label={done ? "Mark not done" : "Mark done"} title={done ? "Mark not done" : "Mark done"}
                   onClick={() => void act(c.id, () => onToggleDone(c.id, !done))} disabled={busy}
                   className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded border text-[16px] leading-none disabled:opacity-50 ${done ? "border-accent bg-accent text-white" : "bg-surface hover:border-accent"}`}>
@@ -192,6 +226,12 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
                     <span className="font-semibold">{c.authorLabel || (c.fromClient ? "Client" : "Team")}</span>
                     <span className="text-muted">{when(c.createdAt)}{c.editedAt ? " · edited" : ""}</span>
                   </div>
+                  {c.quote && (
+                    <button onClick={() => onQuoteClick?.(c.id)} disabled={!onQuoteClick} title="Show these words in the document"
+                      className="mt-1 block w-full rounded border-l-4 border-highlight bg-highlight-soft/50 px-2 py-1 text-left text-[16px] text-muted hover:text-foreground disabled:hover:text-muted">
+                      “{c.quote.replace(/\n/g, " … ")}”
+                    </button>
+                  )}
                   {isEditing ? (
                     <>
                       <textarea value={editing.text} onChange={(e) => setEditing({ id: c.id, text: e.target.value })} rows={3} maxLength={4000} autoFocus

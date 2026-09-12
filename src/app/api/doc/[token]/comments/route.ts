@@ -36,7 +36,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   const o = await open(req, params);
   if (!o.ok) return o.res;
   const { scope } = o;
-  const r = await postDocComment(scope.documentId, o.payload.body, clientActor(scope));
+  const r = await postDocComment(scope.documentId, o.payload.body, clientActor(scope), o.payload.quote);
   if (!r.ok) return json({ error: r.error }, r.status);
 
   const snippet = r.comment.body.length > 140 ? `${r.comment.body.slice(0, 140)}…` : r.comment.body;

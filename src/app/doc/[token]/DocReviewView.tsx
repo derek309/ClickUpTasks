@@ -199,17 +199,23 @@ export default function DocReviewView({ token }: { token: string }) {
     else setNotice({ tone: "good", text: "Added. Your team can see it now." });
   };
 
+  // Words picked in the document for the next comment, and the comment whose words
+  // are shown (Derek, 2026-09-12: comments on a specific sentence).
+  const [quoteDraft, setQuoteDraft] = useState<string | null>(null);
+  const [focusedComment, setFocusedComment] = useState<string | null>(null);
+
   // A comment shows at once; the 15 second refresh brings the team's replies.
-  const postComment = async (body: string) => {
+  const postComment = async (body: string, quote?: string | null) => {
     try {
       const res = await fetch(`/api/doc/${encodeURIComponent(token)}/comments`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ body }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ body, quote: quote ?? null }),
       });
       const j = await res.json().catch(() => ({}));
       if (res.status === 404) { setState("gone"); return false; }
       if (res.status === 429) { setNotice({ tone: "warn", text: "Too many tries. Please wait a moment and try again." }); return false; }
       if (!res.ok) { setNotice({ tone: "warn", text: j.error ?? "We couldn't post that. Please try again." }); return false; }
       setData((d) => d ? { ...d, comments: [...(d.comments ?? []), j.comment as ThreadComment] } : d);
+      setQuoteDraft(null);
       return true;
     } catch {
       setNotice({ tone: "warn", text: "We couldn't reach the server. Check your connection and try again." });
@@ -321,7 +327,10 @@ export default function DocReviewView({ token }: { token: string }) {
             <div className="mt-6 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
               <article className="min-w-0 rounded-2xl border bg-surface p-5 shadow-sm sm:p-8">
                 <RichTextEditor key={editorKey} value={html} onChange={setHtml} variant="doc" editable={!locked}
-                  placeholder="This document is empty." />
+                  placeholder="This document is empty."
+                  highlights={(data.comments ?? []).filter((c) => c.quote && !c.completedAt).map((c) => ({ id: c.id, quote: c.quote as string }))}
+                  activeHighlightId={focusedComment} onHighlightClick={setFocusedComment}
+                  onSelectionComment={data.closed ? undefined : setQuoteDraft} />
               </article>
 
               {/* Stays beside the document as it scrolls (Derek, 2026-09-11: "make side
@@ -380,7 +389,9 @@ export default function DocReviewView({ token }: { token: string }) {
                   isMine={(c) => c.fromClient} canDelete={(c) => c.fromClient}
                   onEdit={(id, body) => changeComment(id, { body })}
                   onToggleDone={(id, done) => changeComment(id, { done })}
-                  onDelete={removeComment} />
+                  onDelete={removeComment}
+                  quote={quoteDraft} onClearQuote={() => setQuoteDraft(null)}
+                  focusedId={focusedComment} onQuoteClick={setFocusedComment} />
               </aside>
             </div>
           </>

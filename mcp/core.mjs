@@ -422,7 +422,7 @@ export function createServer(opts = {}) {
         sb(`task_document_versions?select=version,kind,body,author_label,created_at&document_id=eq.${enc(doc.id)}&order=version.desc&limit=5`),
         sb(`task_document_links?select=token_hash,revoked_at&document_id=eq.${enc(doc.id)}`),
         sb(`task_document_files?select=name,size_bytes,added_by_label,shared_at&document_id=eq.${enc(doc.id)}&removed_at=is.null&order=created_at.asc`).catch(() => []),
-        sb(`task_document_comments?select=body,author_id,author_label,created_at&document_id=eq.${enc(doc.id)}&order=created_at.asc&limit=50`).catch(() => []),
+        sb(`task_document_comments?select=body,author_id,author_label,created_at,quote&document_id=eq.${enc(doc.id)}&order=created_at.asc&limit=50`).catch(() => []),
       ]);
       const live = !!links[0]?.token_hash && !links[0]?.revoked_at;
       const latest = versions[0];
@@ -433,7 +433,7 @@ export function createServer(opts = {}) {
         latest && latest.kind !== "sent" ? `\nLatest from the client (version ${latest.version}, ${DOC_KIND[latest.kind]}${latest.author_label ? ` by ${latest.author_label}` : ""}):\n${docHtmlToText(latest.body)}` : "",
         versions.length ? `\nVersions:\n${versions.map((v) => `  - v${v.version} ${DOC_KIND[v.kind]}${v.author_label ? ` by ${v.author_label}` : ""} (${v.created_at})`).join("\n")}` : "",
         files.length ? `\nFiles:\n${files.map((f) => `  - ${f.name} (${Math.max(1, Math.round(f.size_bytes / 1024))} KB, added by ${f.added_by_label || "someone"})`).join("\n")}` : "",
-        comments.length ? `\nComments (the client sees these too):\n${comments.map((c) => `  - ${c.author_label || (c.author_id ? "Team" : "Client")}${c.author_id ? "" : " (client)"}, ${c.created_at}: ${c.body}`).join("\n")}` : "",
+        comments.length ? `\nComments (the client sees these too):\n${comments.map((c) => `  - ${c.author_label || (c.author_id ? "Team" : "Client")}${c.author_id ? "" : " (client)"}, ${c.created_at}${c.quote ? ` on "${String(c.quote).replace(/\n/g, " … ")}"` : ""}: ${c.body}`).join("\n")}` : "",
       ].filter(Boolean).join("\n");
       return reply(text);
     });

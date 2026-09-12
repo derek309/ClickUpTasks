@@ -78,6 +78,10 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
   const [checkpoints, setCheckpoints] = useState<TaskDocumentCheckpoint[]>([]);
   // The thread shared with the client (Derek, 2026-09-11: "a chat box for comments").
   const [comments, setComments] = useState<TaskDocumentComment[]>([]);
+  // Words picked in the document for the next comment, and the comment whose words
+  // are shown (Derek, 2026-09-12: comments on a specific sentence).
+  const [quoteDraft, setQuoteDraft] = useState<string | null>(null);
+  const [focusedComment, setFocusedComment] = useState<string | null>(null);
   // Documents deleted from this task that can still be restored (30 days).
   const [deletedDocs, setDeletedDocs] = useState<DeletedTaskDocument[]>([]);
   const [full, setFull] = useState(false);
@@ -387,11 +391,12 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
     pushToast("Document restored.");
   };
 
-  const postComment = async (body: string) => {
-    const res = await docApi(task.id, "/comments", { method: "POST", body: JSON.stringify({ body }) });
+  const postComment = async (body: string, quote?: string | null) => {
+    const res = await docApi(task.id, "/comments", { method: "POST", body: JSON.stringify({ body, quote: quote ?? null }) });
     const j = await readJson(res);
     if (!res.ok) { pushToast((j.error as string) ?? "Could not post the comment."); return false; }
     setComments((c) => [...c, { ...(j.comment as TaskDocumentComment), authorId: meId ?? null }]);
+    setQuoteDraft(null);
     if (j.emailedClient) pushToast("Comment posted. We emailed the client a link to it.");
     return true;
   };
@@ -554,6 +559,8 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
       <article className="rounded-2xl border bg-surface p-5 shadow-sm sm:p-8">
         <RichTextEditor key={`doc-${doc.id}-${nonce}`} value={seed ?? doc.body} editable={!locked} variant="doc"
           placeholder="Write the content for your client…"
+          highlights={comments.filter((c) => c.quote && !c.completedAt).map((c) => ({ id: c.id, quote: c.quote as string }))}
+          activeHighlightId={focusedComment} onHighlightClick={setFocusedComment} onSelectionComment={setQuoteDraft}
           onChange={(html) => { latestHtml.current = html; setSaveState("unsaved"); commit.schedule(() => { void save(html); }); }} />
       </article>
 
@@ -647,7 +654,9 @@ export function TaskDocument({ task, onPatch, pushToast, startNonce, onPresence,
           canDelete={() => true}
           onEdit={(id, body) => changeComment(id, { body })}
           onToggleDone={(id, done) => changeComment(id, { done })}
-          onDelete={removeComment} />
+          onDelete={removeComment}
+          quote={quoteDraft} onClearQuote={() => setQuoteDraft(null)}
+          focusedId={focusedComment} onQuoteClick={setFocusedComment} />
       </div>
     </div>
   );

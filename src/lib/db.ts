@@ -581,6 +581,8 @@ export const fetchTaskDocumentCheckpoints = async (documentId: string): Promise<
 export type TaskDocumentComment = {
   id: string; body: string; authorId: string | null; authorLabel: string; fromClient: boolean; createdAt: string;
   editedAt: string | null; completedAt: string | null; completedBy: string | null;
+  /** The words this comment is about (supabase/task-document-comment-quotes.sql). */
+  quote: string | null;
 };
 export const fetchTaskDocumentComments = async (documentId: string): Promise<TaskDocumentComment[]> => {
   const { data, error } = await supabase.from("task_document_comments").select("*").eq("document_id", documentId)
@@ -588,7 +590,7 @@ export const fetchTaskDocumentComments = async (documentId: string): Promise<Tas
   if (error) { logErr({ error }); return []; }
   return (data ?? []).map((r: any) => ({
     id: r.id, body: r.body ?? "", authorId: r.author_id ?? null, authorLabel: r.author_label ?? "", fromClient: r.author_id === null,
-    createdAt: r.created_at, editedAt: r.edited_at ?? null, completedAt: r.completed_at ?? null, completedBy: r.completed_by_label ?? null,
+    createdAt: r.created_at, editedAt: r.edited_at ?? null, completedAt: r.completed_at ?? null, completedBy: r.completed_by_label ?? null, quote: r.quote ?? null,
   }));
 };
 export const fetchTaskDocumentVersions = async (documentId: string): Promise<TaskDocumentVersion[]> => {
