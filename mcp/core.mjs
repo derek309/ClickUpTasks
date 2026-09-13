@@ -406,7 +406,7 @@ export function createServer(opts = {}) {
     const [t] = await sb(`tasks?select=id,title,client_id,is_private,deleted_at&id=eq.${enc(taskId)}`);
     if (!t || t.deleted_at) return { error: `No task ${taskId}.` };
     if (t.is_private || t.client_id === PERSONAL_CLIENT_ID) return { error: "Private and Personal tasks can't have a client document." };
-    // The text document only; an image review (kind "image") is worked in the app.
+    // The text document only; image and web page reviews (kind "image", "page") are worked in the app.
     const [doc] = await sb(`task_documents?select=*&task_id=eq.${enc(taskId)}&kind=eq.doc&deleted_at=is.null`);
     return { task: t, doc: doc || null };
   }

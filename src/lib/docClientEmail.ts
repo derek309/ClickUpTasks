@@ -15,6 +15,7 @@ import { resolveContact, sentRfc822 } from "./sendMessageServer";
 import { appendSignatureHtml } from "./emailSignature";
 import { draftLinkAsButton, draftLinkHtml, escapeHtml } from "./draftLink";
 import { linkState, type TeamTask } from "./taskDocumentServer";
+import { kindWhat, parseKind } from "./reviewKinds";
 
 const SEND_DOMAIN = "clickuplocal.com";
 const COOLDOWN_MS = 15 * 60_000;
@@ -44,7 +45,7 @@ export async function emailClientAboutComment(opts: { user: AuthedUser; task: Te
   const { data: prof } = await supabaseAdmin.from("profiles").select("name, email_signature").ilike("email", sender).maybeSingle();
   const fromName = ((prof?.name as string | null) ?? "").trim();
   const name = ((doc.title as string | null) ?? "").trim() || task.title;
-  const button = { url: link.url, label: `Open the ${doc.kind === "image" ? "image" : "document"} to reply` };
+  const button = { url: link.url, label: `Open the ${kindWhat(parseKind(doc.kind))} to reply` };
   const subject = `New comment on "${name}"`.slice(0, 200);
   const on = (text: string) => `<p style="margin:12px 0 4px;color:#6b7280">${text}</p>`;
   const body = [

@@ -20,7 +20,7 @@ import { hashToken } from "./tokenCrypto";
 // below must stay well under that 1-hour sweep, or a long window's rows get
 // deleted mid-window and the counter silently resets.
 
-export type WaitingAction = "read" | "message" | "respond" | "status" | "request" | "upload" | "doc_read" | "doc_submit" | "doc_approve" | "doc_upload" | "doc_comment" | "doc_view";
+export type WaitingAction = "read" | "message" | "respond" | "status" | "request" | "upload" | "doc_read" | "doc_submit" | "doc_approve" | "doc_upload" | "doc_comment" | "doc_view" | "page_frame";
 
 type Rule = {
   /** Max requests per window for one token+IP pair. */
@@ -82,6 +82,9 @@ export const RATE_LIMITS: Record<WaitingAction, Rule> = {
   doc_comment: { limit: 20,  windowMs: 10 * MINUTE, tokenLimit: 60 },
   // "Viewed" for the team: one small update per page open, so a few a minute is plenty.
   doc_view:    { limit: 10,  windowMs: 10 * MINUTE, tokenLimit: 40 },
+  // A web page review's sandboxed frame (/page-frame/[ticket]): one load per
+  // open, width switch or reload, keyed by the short lived ticket.
+  page_frame:  { limit: 240, windowMs: 10 * MINUTE },
 };
 
 /** Seconds until the current fixed window rolls over — exact for this

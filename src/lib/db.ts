@@ -3,6 +3,7 @@
 
 import { supabase } from "./supabase";
 import type { EmailDraft } from "./data";
+import { parseKind, type FileKind, type ReviewKind } from "./reviewKinds";
 import {
   clientsSeed,
   contactsSeed,
@@ -511,9 +512,9 @@ export const fetchTaskActions = async (taskId: string): Promise<TaskAction[]> =>
 // are never part of Task, so the full-row task upsert can never overwrite them;
 // every write goes through /api/tasks/[id]/document.
 export type TaskDocumentStatus = "draft" | "with_client" | "client_submitted" | "approved" | "completed";
-/** A task's two kinds of client document: the text document, and an image review
- *  whose body is the uploaded image to send next (supabase/task-image-reviews.sql). */
-export type TaskDocumentKind = "doc" | "image";
+/** A task's kinds of client document: the text document, an image review and a web
+ *  page review (src/lib/reviewKinds.ts). */
+export type TaskDocumentKind = ReviewKind;
 export type TaskDocument = {
   id: string; taskId: string; kind: TaskDocumentKind; title: string; body: string; draftDirty: boolean; version: number;
   status: TaskDocumentStatus; approvedAt: string | null; approvedVersion: number | null; updatedAt: string;
@@ -525,7 +526,7 @@ export type TaskDocumentVersion = {
   body: string; authorId: string | null; authorLabel: string | null; createdAt: string;
 };
 export const rowToTaskDocument = (r: any): TaskDocument => ({
-  id: r.id, taskId: r.task_id, kind: r.kind === "image" ? "image" : "doc", title: r.title ?? "", body: r.body ?? "", draftDirty: !!r.draft_dirty, version: r.version ?? 0,
+  id: r.id, taskId: r.task_id, kind: parseKind(r.kind), title: r.title ?? "", body: r.body ?? "", draftDirty: !!r.draft_dirty, version: r.version ?? 0,
   status: r.status, approvedAt: r.approved_at ?? null, approvedVersion: r.approved_version ?? null, updatedAt: r.updated_at,
   clientViewedAt: r.client_viewed_at ?? null,
 });
@@ -561,8 +562,8 @@ export const fetchDeletedTaskDocuments = async (taskId: string, kind: TaskDocume
 // supabase/task-document-files.sql). Read the same way, written by the server.
 export type TaskDocumentFile = {
   id: string; name: string; path: string; sizeBytes: number; kind: string;
-  /** "image": an uploaded version of an image review's image, kept out of the Files list. */
-  purpose: "file" | "image";
+  /** image and page: a review's version files, kept out of the Files list. */
+  purpose: "file" | FileKind;
   addedBy: string | null; addedByLabel: string | null; createdAt: string;
   sharedAt: string | null; removedAt: string | null; removedByLabel: string | null;
 };
@@ -571,7 +572,7 @@ export const fetchTaskDocumentFiles = async (documentId: string): Promise<TaskDo
   const { data, error } = await supabase.from("task_document_files").select("*").eq("document_id", documentId).order("created_at", { ascending: true });
   if (error) { logErr({ error }); return []; }
   return (data ?? []).map((r: any) => ({
-    id: r.id, name: r.name, path: r.path, sizeBytes: Number(r.size_bytes ?? 0), kind: r.kind, purpose: r.purpose === "image" ? "image" : "file",
+    id: r.id, name: r.name, path: r.path, sizeBytes: Number(r.size_bytes ?? 0), kind: r.kind, purpose: r.purpose === "image" || r.purpose === "page" ? r.purpose : "file",
     addedBy: r.added_by ?? null, addedByLabel: r.added_by_label ?? null, createdAt: r.created_at,
     sharedAt: r.shared_at ?? null, removedAt: r.removed_at ?? null, removedByLabel: r.removed_by_label ?? null,
   }));
@@ -588,8 +589,9 @@ export type TaskDocumentComment = {
   editedAt: string | null; completedAt: string | null; completedBy: string | null;
   /** The words this comment is about (supabase/task-document-comment-quotes.sql). */
   quote: string | null;
-  /** The numbered pin on an image review's image (supabase/task-image-reviews.sql). */
-  pin: { fileId: string; x: number; y: number; number: number } | null;
+  /** The numbered pin on an image or page version (supabase/task-image-reviews.sql);
+   *  on a page, the element it sits on (supabase/task-page-reviews.sql). */
+  pin: { fileId: string; x: number; y: number; number: number; anchor: { node: number; nx: number; ny: number; width: number } | null } | null;
   /** A file added with the comment. */
   attachmentFileId: string | null;
 };
@@ -600,7 +602,10 @@ export const fetchTaskDocumentComments = async (documentId: string): Promise<Tas
   return (data ?? []).map((r: any) => ({
     id: r.id, body: r.body ?? "", authorId: r.author_id ?? null, authorLabel: r.author_label ?? "", fromClient: r.author_id === null,
     createdAt: r.created_at, editedAt: r.edited_at ?? null, completedAt: r.completed_at ?? null, completedBy: r.completed_by_label ?? null, quote: r.quote ?? null,
-    pin: r.pin_file_id && r.pin_number ? { fileId: r.pin_file_id, x: Number(r.pin_x), y: Number(r.pin_y), number: Number(r.pin_number) } : null,
+    pin: r.pin_file_id && r.pin_number ? {
+      fileId: r.pin_file_id, x: Number(r.pin_x), y: Number(r.pin_y), number: Number(r.pin_number),
+      anchor: r.pin_node != null ? { node: Number(r.pin_node), nx: Number(r.pin_node_x), ny: Number(r.pin_node_y), width: Number(r.pin_width) } : null,
+    } : null,
     attachmentFileId: r.attachment_file_id ?? null,
   }));
 };

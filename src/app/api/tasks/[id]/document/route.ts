@@ -1,16 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
-import { teamDocAccess, memberLabel, kindOf, liveDocument, noDocumentYet, NO_STORE } from "@/lib/taskDocumentServer";
-import { recordCheckpoint, docImageFile, removeDocImage, sharedDocImages } from "@/lib/taskDocumentFiles";
+import { teamDocAccess, memberLabel, kindOf, liveDocument, setWorkingFile, NO_STORE } from "@/lib/taskDocumentServer";
+import { recordCheckpoint, docVersionFile, removeVersionFile, sharedVersionFiles } from "@/lib/taskDocumentFiles";
 import { sanitizeDocHtml, DOC_MAX_RAW_CHARS, DOC_MAX_HTML_CHARS } from "@/lib/docHtml";
+import { filePurpose, isFileKind, kindWhat, noDocumentYet } from "@/lib/reviewKinds";
 
 // The team's side of a task's client review document: create it, save the
 // working copy, reopen it after the client approved, or bring back an earlier
-// version. ?kind=image does the same for the task's image review, whose working
-// copy is the uploaded image to send next. Reads happen in the browser through
-// row level security (db.ts fetchTaskDocument); every write comes through here so
-// the HTML is cleaned and an approved document stays locked.
+// version. ?kind=image and ?kind=page do the same for the task's image and web
+// page reviews, whose working copy is the version file to send next. Reads happen
+// in the browser through row level security (db.ts fetchTaskDocument); every write
+// comes through here so the HTML is cleaned and an approved document stays locked.
 
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: NO_STORE });
 const DOC_STAGES: unknown[] = ["draft", "with_client", "client_submitted", "approved", "completed"];
@@ -47,13 +48,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const text = await req.text();
   if (text.length > DOC_MAX_RAW_CHARS) return json({ error: "This document is too long." }, 413);
-  let payload: { body?: unknown; image?: unknown; removeImage?: unknown; reopen?: unknown; restoreVersion?: unknown; restoreCheckpoint?: unknown; checkpoint?: unknown; title?: unknown; status?: unknown };
+  let payload: { body?: unknown; file?: unknown; removeVersion?: unknown; reopen?: unknown; restoreVersion?: unknown; restoreCheckpoint?: unknown; checkpoint?: unknown; title?: unknown; status?: unknown };
   try { payload = JSON.parse(text); } catch { return json({ error: "Invalid request." }, 400); }
 
   const doc = await liveDocument(id, kind, "id, approved_at, body, updated_by, created_at");
   if (!doc) return json({ error: noDocumentYet(kind) }, 404);
   const stamp = { updated_by: access.user.memberId, updated_at: new Date().toISOString() };
-  const what = kind === "image" ? "image" : "document";
+  const what = kindWhat(kind);
 
   // Reopen: the client approved, and the team wants to change it anyway.
   if (payload?.reopen === true) {
@@ -82,30 +83,38 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
   if (doc.approved_at) return json({ error: `This ${what} is approved. Reopen it to make changes.` }, 409);
 
-  // Take a wrong image off (Derek, 2026-09-12). When it was the image under
-  // review, the review goes back to the newest image the client can still see,
-  // or to no image at all, with nothing left to send.
-  if (kind === "image" && payload?.removeImage !== undefined) {
-    const user = access.user;
-    const removed = await removeDocImage(doc.id, payload.removeImage, { id: user.memberId ?? user.id, label: await memberLabel(user) });
-    if (!removed.ok) return json({ error: removed.error }, removed.status);
-    const newest = (await sharedDocImages(doc.id)).at(-1)?.fileId ?? "";
-    const moveOff = doc.body === removed.id ? { body: newest, draft_dirty: false } : {};
-    const { data, error } = await supabaseAdmin.from("task_documents")
-      .update({ ...moveOff, ...stamp }).eq("id", doc.id).select("*").single();
-    return error ? json({ error: error.message }, 400) : json({ document: data });
-  }
-
-  // An image review's working copy is the image to send next, one the team
-  // uploaded to it (Derek, 2026-09-12: a revised image is a new version).
-  if (kind === "image") {
-    const file = await docImageFile(doc.id, payload?.image, false);
-    if (!file) return json({ error: "Upload the image first." }, 400);
-    const { data, error } = await supabaseAdmin.from("task_documents")
-      .update({ body: file.id, ...(file.id !== doc.body ? { draft_dirty: true } : {}), ...stamp })
-      .eq("id", doc.id).is("approved_at", null).select("*").maybeSingle();
-    if (error) return json({ error: error.message }, 400);
-    return data ? json({ document: data }) : json({ error: "This image is approved. Reopen it to make changes." }, 409);
+  // An image or web page review's working copy is the version file to send next.
+  if (isFileKind(kind)) {
+    const purpose = filePurpose(kind);
+    // Take a wrong version off (Derek, 2026-09-12). When it was the version under
+    // review, the review goes back to the newest one the client can still see, or
+    // to none at all, with nothing left to send.
+    if (payload?.removeVersion !== undefined) {
+      const user = access.user;
+      const removed = await removeVersionFile(doc.id, payload.removeVersion, purpose, { id: user.memberId ?? user.id, label: await memberLabel(user) });
+      if (!removed.ok) return json({ error: removed.error }, removed.status);
+      const newest = (await sharedVersionFiles(doc.id)).at(-1)?.fileId ?? "";
+      const moveOff = doc.body === removed.id ? { body: newest, draft_dirty: false } : {};
+      const { data, error } = await supabaseAdmin.from("task_documents")
+        .update({ ...moveOff, ...stamp }).eq("id", doc.id).select("*").single();
+      return error ? json({ error: error.message }, 400) : json({ document: data });
+    }
+    // An uploaded file, or "Use this version" in the history (a client's page included).
+    let fileId: unknown = payload?.file;
+    if (typeof payload?.restoreVersion === "number") {
+      const { data: v } = await supabaseAdmin.from("task_document_versions")
+        .select("body").eq("document_id", doc.id).eq("version", payload.restoreVersion).maybeSingle();
+      if (!v) return json({ error: "That version no longer exists." }, 404);
+      fileId = v.body;
+    }
+    const file = await docVersionFile(doc.id, fileId, purpose, false);
+    if (!file) return json({ error: kind === "image" ? "Upload the image first." : "That version is no longer on the review." }, 400);
+    try {
+      const data = await setWorkingFile(doc.id, file.id, (doc.body as string) ?? "", stamp);
+      return data ? json({ document: data }) : json({ error: `This ${what} is approved. Reopen it to make changes.` }, 409);
+    } catch (e) {
+      return json({ error: e instanceof Error ? e.message : "Could not save." }, 400);
+    }
   }
 
   let body: string;

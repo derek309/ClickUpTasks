@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { adminConfigured } from "@/lib/supabaseAdmin";
 import { teamDocument, memberLabel, NO_STORE } from "@/lib/taskDocumentServer";
 import { startDocUpload, finishDocUpload, removeDocFile } from "@/lib/taskDocumentFiles";
+import { kindWhat } from "@/lib/reviewKinds";
 
 // The team adds and removes files on a task's client document. The client sees a
 // new file on their review page straight away; removing one takes it away too.
@@ -15,7 +16,7 @@ async function open(req: NextRequest, params: Promise<{ id: string }>) {
   const { id } = await params;
   const found = await teamDocument(req, id, "id, approved_at");
   if (!found.ok) return found;
-  if (found.doc.approved_at) return { ok: false as const, res: json({ error: `This ${found.kind === "image" ? "image" : "document"} is approved. Reopen it to change its files.` }, 409) };
+  if (found.doc.approved_at) return { ok: false as const, res: json({ error: `This ${kindWhat(found.kind)} is approved. Reopen it to change its files.` }, 409) };
   const payload = await req.json().catch(() => null) as Record<string, unknown> | null;
   if (!payload || typeof payload !== "object") return { ok: false as const, res: json({ error: "Invalid request." }, 400) };
   const user = found.user;

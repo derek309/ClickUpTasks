@@ -6,7 +6,8 @@ import { DOC_TOKEN_PATTERN, NO_STORE, docNotFound, resolveDocToken, readPublicJs
 // Shared by the client's two writes, submit and approve, so the checks they must
 // both make can never drift apart. In order: token format, rate limit (before
 // any lookup), a JSON body from this site within the size cap, the link still
-// resolving, then the publish itself.
+// resolving, then the publish itself. A web page review also sends the page file
+// the client looked at and their rewording.
 export async function publishFromClient(
   req: NextRequest,
   { params }: { params: Promise<{ token: string }> },
@@ -23,7 +24,8 @@ export async function publishFromClient(
   const scope = await resolveDocToken(token);
   if (!scope) return docNotFound();
 
-  const outcome = await clientPublish(scope, kind, read.body.html, read.body.baseVersion);
+  const { html, baseVersion, fileId, edits } = read.body;
+  const outcome = await clientPublish(scope, kind, html, baseVersion, { fileId, edits });
   if (!outcome.ok) {
     return NextResponse.json({ error: outcome.error, current: outcome.current ?? null }, { status: outcome.status, headers: NO_STORE });
   }

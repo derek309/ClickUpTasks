@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { rateLimit } from "@/lib/rateLimit";
 import {
-  DOC_TOKEN_PATTERN, NO_STORE, docNotFound, resolveDocToken, readPublicJson, logClientDocEvent, kindNoun,
+  DOC_TOKEN_PATTERN, NO_STORE, docNotFound, resolveDocToken, readPublicJson, logClientDocEvent,
 } from "@/lib/taskDocumentServer";
+import { kindNoun } from "@/lib/reviewKinds";
 import { startDocUpload, finishDocUpload, removeDocFile } from "@/lib/taskDocumentFiles";
 
 // Public, no login: the client adds a file to the document or removes one they

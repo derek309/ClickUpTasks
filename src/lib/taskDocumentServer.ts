@@ -2,10 +2,11 @@
 // private link that opens only it, and the version history behind both. See
 // supabase/task-documents.sql for the tables and publish_task_document_version.
 //
-// A task can also have an image review, the same document with kind "image"
-// (supabase/task-image-reviews.sql): its body is the id of the uploaded image to
-// send next, the client pins comments on it, and they approve it or ask for
-// changes without editing it.
+// A task can also have an image review and a web page review, the same document
+// with kind "image" or "page" (src/lib/reviewKinds.ts): their body is the id of the
+// version file to send next, the client pins comments to it, and they approve it
+// or ask for changes. On a page the client can also reword text; their rewording
+// becomes a new page file built on the server from the file they saw.
 //
 // Two audiences, two doors:
 //   the team   signed in, checked against the task's own read policy
@@ -22,8 +23,9 @@ import { hashToken, mintToken, decryptToken } from "./tokenCrypto";
 import { PERSONAL_CLIENT_ID, clientAnswerPatch, htmlToText, type TaskStatus } from "./data";
 import { resolveNotifyRecipient, notifyTeamOfClientActivity } from "./waitingNotify";
 import { sanitizeDocHtml, DOC_MAX_RAW_CHARS, DOC_MAX_HTML_CHARS } from "./docHtml";
-import { docImageFile, sharedDocImages } from "./taskDocumentFiles";
-import type { TaskDocumentKind } from "./db";
+import { applyTextEdits, cleanEdits, pageTooBig, PAGE_TOO_BIG } from "./pageHtml";
+import { discardVersionFile, docVersionFile, readPageFile, sharedVersionFiles, storePageFile } from "./taskDocumentFiles";
+import { filePurpose, isFileKind, kindNoun, kindWhat, noDocumentYet, parseKind, type ReviewKind } from "./reviewKinds";
 
 /** A document link token: `doc_` plus 32 random bytes in base64url. Checked
  *  before anything touches the database, so garbage never costs a query. */
@@ -31,11 +33,8 @@ export const DOC_TOKEN_PATTERN = /^doc_[A-Za-z0-9_-]{43}$/;
 export const NO_STORE = { "Cache-Control": "private, no-store" };
 export type DocKind = "sent" | "client_submitted" | "client_approved";
 
-/** The kind of document a team route acts on: ?kind=image, else the text document. */
-export const kindOf = (req: NextRequest): TaskDocumentKind => (req.nextUrl.searchParams.get("kind") === "image" ? "image" : "doc");
-/** What activity lines and notifications call it. */
-export const kindNoun = (kind: TaskDocumentKind) => (kind === "image" ? "image" : "client document");
-export const noDocumentYet = (kind: TaskDocumentKind) => (kind === "image" ? "This task has no image review yet." : "This task has no client document yet.");
+/** The kind of document a team route acts on: ?kind=image or ?kind=page, else the text document. */
+export const kindOf = (req: NextRequest): ReviewKind => parseKind(req.nextUrl.searchParams.get("kind"));
 
 // Sending changes emails the owner at most this often per document; approval
 // always emails, since it happens once and someone has to act on it.
@@ -50,8 +49,7 @@ export const docNotFound = () => json({ error: "Not found" }, 404);
 
 export type DocScope = {
   documentId: string;
-  /** "image" for an image review. */
-  kind: TaskDocumentKind;
+  kind: ReviewKind;
   taskId: string;
   taskTitle: string;
   taskStatus: string;
@@ -97,7 +95,7 @@ export async function resolveDocToken(token: string): Promise<DocScope | null> {
 
   return {
     documentId: doc.id as string,
-    kind: doc.kind === "image" ? "image" : "doc",
+    kind: parseKind(doc.kind),
     taskId: task.id as string,
     taskTitle: task.title as string,
     taskStatus: task.status as string,
@@ -113,13 +111,13 @@ export async function resolveDocToken(token: string): Promise<DocScope | null> {
 
 /** The last version the team sent or the client submitted, cleaned again on the
  *  way out. The client always sees this, never the team's unsent working copy.
- *  An image review's body is an image file id, not HTML, so it is left as it is. */
-export async function latestPublished(documentId: string, kind: TaskDocumentKind = "doc"): Promise<{ version: number; body: string } | null> {
+ *  An image or page review's body is a file id, not HTML, so it is left as it is. */
+export async function latestPublished(documentId: string, kind: ReviewKind = "doc"): Promise<{ version: number; body: string } | null> {
   const { data } = await supabaseAdmin.from("task_document_versions")
     .select("version, body").eq("document_id", documentId)
     .order("version", { ascending: false }).limit(1).maybeSingle();
   if (!data) return null;
-  return { version: data.version as number, body: kind === "image" ? data.body as string : sanitizeDocHtml(data.body as string) };
+  return { version: data.version as number, body: isFileKind(kind) ? data.body as string : sanitizeDocHtml(data.body as string) };
 }
 
 /** A public POST body, refused unless it is JSON from this site and not huge.
@@ -201,29 +199,52 @@ export type PublishOutcome =
   | { ok: true; version: number }
   | { ok: false; status: number; error: string; current?: { version: number; body: string } | null };
 
-/** A client sends changes or approves. In order: refuse a closed task, clean the
- *  HTML, publish against the version they started from, log it on the task,
- *  update the task, then tell the owner. On an image review the client never
- *  changes the image, so both publish the image they were looking at.
+/** On a web page review, what the client looked at (fileId) and their rewording (edits). */
+export type PagePublishInput = { fileId?: unknown; edits?: unknown };
+
+/** A client sends changes or approves. In order: refuse a closed task, work out
+ *  the body (clean HTML for a document; for an image or page the version under
+ *  review, and on a page with rewording a new file built from it), publish against
+ *  the version they started from, log it on the task, update the task, then tell
+ *  the owner.
  *
  *  The comment goes in BEFORE the task update, and the update sets updated_by to
  *  null. append_comment stamps updated_by with the comment's author (keeping the
  *  last teammate's id when there is none), and the team's app ignores a realtime
  *  event whose updated_by is the viewer, so writing the task last is what makes
  *  the change show up live for whoever last touched it. */
-export async function clientPublish(scope: DocScope, kind: "client_submitted" | "client_approved", rawHtml: unknown, baseVersion: unknown): Promise<PublishOutcome> {
-  const image = scope.kind === "image";
-  if ((!image && typeof rawHtml !== "string") || typeof baseVersion !== "number" || !Number.isInteger(baseVersion)) {
+export async function clientPublish(scope: DocScope, kind: "client_submitted" | "client_approved", rawHtml: unknown, baseVersion: unknown, page: PagePublishInput = {}): Promise<PublishOutcome> {
+  const fileKind = isFileKind(scope.kind);
+  if ((!fileKind && typeof rawHtml !== "string") || typeof baseVersion !== "number" || !Number.isInteger(baseVersion)) {
     return { ok: false, status: 400, error: "Invalid request." };
   }
   if (scope.taskStatus === "done" || scope.documentStatus === "completed") return { ok: false, status: 400, error: "This document is closed." };
+
   let body: string;
-  if (image) {
-    // The image under review: the newest one sent and not removed. A newer image
-    // sent in the meantime is still refused below: its version moved on.
-    const shown = (await sharedDocImages(scope.documentId)).at(-1);
-    if (!shown) return { ok: false, status: 400, error: "There is no image to review right now." };
+  let created: string | null = null;
+  if (fileKind) {
+    // The version under review: the newest one published and not removed. A newer
+    // one sent in the meantime is still refused below: its version moved on.
+    const shown = (await sharedVersionFiles(scope.documentId)).at(-1);
+    if (!shown) return { ok: false, status: 400, error: `There is no ${kindWhat(scope.kind)} to review right now.` };
     body = shown.fileId;
+    if (scope.kind === "page") {
+      if (page.fileId !== undefined && page.fileId !== shown.fileId) {
+        return { ok: false, status: 409, error: "The team posted a newer version while you were looking.", current: await latestPublished(scope.documentId, scope.kind) };
+      }
+      const edits = page.edits === undefined ? [] : cleanEdits(page.edits);
+      if (!edits) return { ok: false, status: 400, error: "Invalid request." };
+      if (edits.length) {
+        const source = await readPageFile(scope.documentId, shown.fileId, true);
+        if (source === null) return { ok: false, status: 404, error: "Not found" };
+        const applied = applyTextEdits(source, edits);
+        if (!applied.ok) return { ok: false, status: 409, error: applied.error, current: await latestPublished(scope.documentId, scope.kind) };
+        if (pageTooBig(applied.html)) return { ok: false, status: 413, error: PAGE_TOO_BIG };
+        const stored = await storePageFile(scope.documentId, applied.html, shown.name, { id: null, label: scope.clientName });
+        if (!stored.ok) return { ok: false, status: stored.status, error: stored.error };
+        body = created = stored.fileId;
+      }
+    }
   } else {
     body = sanitizeDocHtml(rawHtml as string);
     if (body.length > DOC_MAX_HTML_CHARS) return { ok: false, status: 413, error: "This document is too long to send." };
@@ -234,12 +255,14 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
   try {
     version = await publishVersion(scope.documentId, baseVersion, kind, body, null, scope.clientName);
   } catch {
+    if (created) await discardVersionFile(scope.documentId, created);
     return { ok: false, status: 500, error: "Could not save. Please try again." };
   }
+  if (version < 0 && created) await discardVersionFile(scope.documentId, created);
   if (version === -1 || version === -2) {
     return {
       ok: false, status: 409,
-      error: version === -2 ? `This ${image ? "image" : "document"} is already approved.` : "The team posted a newer version while you were looking.",
+      error: version === -2 ? `This ${kindWhat(scope.kind)} is already approved.` : "The team posted a newer version while you were looking.",
       current: await latestPublished(scope.documentId, scope.kind),
     };
   }
@@ -247,7 +270,10 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
 
   const approved = kind === "client_approved";
   const noun = kindNoun(scope.kind);
-  const changed = image ? `asked for changes on the ${noun}` : `sent changes to the ${noun}`;
+  // A document or a reworded page carries the client's changes; an image or an
+  // unchanged page carries only their request for changes.
+  const sentChanges = scope.kind === "doc" || created !== null;
+  const changed = sentChanges ? `sent changes to the ${noun}` : `asked for changes on the ${noun}`;
   await appendClientEvent(scope.taskId, approved
     ? `${scope.clientName} approved the ${noun} (version ${version})`
     : `${scope.clientName} ${changed} (version ${version})`);
@@ -267,7 +293,7 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
       : `${scope.clientName} ${changed} on "${scope.taskTitle}".`,
     subject: approved
       ? `${scope.clientName} approved "${scope.taskTitle}"`
-      : `${scope.clientName} ${image ? "asked for changes" : "sent changes"} on "${scope.taskTitle}"`,
+      : `${scope.clientName} ${sentChanges ? "sent changes" : "asked for changes"} on "${scope.taskTitle}"`,
   }, recipient);
   return { ok: true, version };
 }
@@ -296,7 +322,7 @@ export async function teamDocAccess(req: NextRequest, taskId: string): Promise<{
 export type LiveDocument = { id: string } & Record<string, unknown>;
 
 /** The task's live (not deleted) document of a kind, with the columns asked for (id always). */
-export async function liveDocument(taskId: string, kind: TaskDocumentKind, columns = "id"): Promise<LiveDocument | null> {
+export async function liveDocument(taskId: string, kind: ReviewKind, columns = "id"): Promise<LiveDocument | null> {
   const { data } = await supabaseAdmin.from("task_documents")
     .select(columns).eq("task_id", taskId).eq("kind", kind).is("deleted_at", null).maybeSingle();
   return (data as unknown as LiveDocument | null) ?? null;
@@ -304,7 +330,7 @@ export async function liveDocument(taskId: string, kind: TaskDocumentKind, colum
 
 /** teamDocAccess, then the live document of the kind the request names. */
 export async function teamDocument(req: NextRequest, taskId: string, columns = "id"): Promise<
-  { ok: true; user: AuthedUser; task: TeamTask; kind: TaskDocumentKind; doc: LiveDocument } | { ok: false; res: NextResponse }
+  { ok: true; user: AuthedUser; task: TeamTask; kind: ReviewKind; doc: LiveDocument } | { ok: false; res: NextResponse }
 > {
   const access = await teamDocAccess(req, taskId);
   if (!access.ok) return access;
@@ -312,6 +338,17 @@ export async function teamDocument(req: NextRequest, taskId: string, columns = "
   const doc = await liveDocument(taskId, kind, columns);
   if (!doc) return { ok: false, res: json({ error: noDocumentYet(kind) }, 404) };
   return { ...access, kind, doc };
+}
+
+/** Make a version file the one to send next on an image or page review. Unchanged
+ *  leaves "something to send" alone. Null when the client approved in the meantime
+ *  (approved_at in the filter closes that gap). */
+export async function setWorkingFile(documentId: string, fileId: string, currentBody: string, stamp: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+  const { data, error } = await supabaseAdmin.from("task_documents")
+    .update({ body: fileId, ...(fileId !== currentBody ? { draft_dirty: true } : {}), ...stamp })
+    .eq("id", documentId).is("approved_at", null).select("*").maybeSingle();
+  if (error) throw new Error(error.message);
+  return data;
 }
 
 /** The teammate's name for the version history, falling back to their email. */
@@ -355,17 +392,19 @@ export async function revokeDocLink(documentId: string): Promise<void> {
 }
 
 /** The team sends the current working copy as a new version: the text, or on an
- *  image review the image uploaded last. */
+ *  image or page review the version file chosen last. */
 export async function teamSend(documentId: string, baseVersion: number, user: AuthedUser): Promise<PublishOutcome> {
   const { data: doc } = await supabaseAdmin.from("task_documents").select("body, status, kind").eq("id", documentId).maybeSingle();
   if (!doc) return { ok: false, status: 404, error: "Not found" };
-  const kind: TaskDocumentKind = doc.kind === "image" ? "image" : "doc";
-  const what = kind === "image" ? "image" : "document";
+  const kind = parseKind(doc.kind);
+  const what = kindWhat(kind);
   if (doc.status === "completed") return { ok: false, status: 409, error: `This ${what} is completed. Reopen it to send changes.` };
   let body: string;
-  if (kind === "image") {
+  if (isFileKind(kind)) {
     body = doc.body as string;
-    if (!(await docImageFile(documentId, body, false))) return { ok: false, status: 400, error: "Upload the image before sending it." };
+    if (!(await docVersionFile(documentId, body, filePurpose(kind), false))) {
+      return { ok: false, status: 400, error: kind === "image" ? "Upload the image before sending it." : "Add the page before sending it." };
+    }
   } else {
     body = sanitizeDocHtml(doc.body as string);
     if (!htmlToText(body).trim()) return { ok: false, status: 400, error: "Write the document before sending it." };
@@ -379,7 +418,7 @@ export async function teamSend(documentId: string, baseVersion: number, user: Au
   if (version === -1) {
     return {
       ok: false, status: 409, current: await latestPublished(documentId, kind),
-      error: kind === "image" ? "The client answered in the meantime. Look at their answer before sending again." : "The client sent a newer version. Review it before sending again.",
+      error: isFileKind(kind) ? "The client answered in the meantime. Look at their answer before sending again." : "The client sent a newer version. Review it before sending again.",
     };
   }
   if (version === -2) return { ok: false, status: 409, error: `This ${what} is approved. Reopen it to send changes.` };

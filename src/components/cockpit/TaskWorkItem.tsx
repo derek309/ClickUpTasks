@@ -20,6 +20,8 @@ export function WorkItemBadge({ label, chip, dot }: { label: string; chip: strin
 const ROW_TONE = {
   doc: { box: "border-highlight/40 border-l-highlight bg-highlight-soft/60", tile: "bg-highlight-soft" },
   image: { box: "border-success/30 border-l-success bg-success-soft/60", tile: "bg-success-soft" },
+  // Every soft color pair is taken, so the web page line is a neutral dark stripe.
+  page: { box: "border-foreground/20 border-l-foreground bg-surface", tile: "bg-background" },
   email: { box: "border-accent/30 border-l-accent bg-accent-soft/60", tile: "bg-accent-soft" },
 } as const;
 
@@ -103,8 +105,9 @@ export type ThreadComment = {
   editedAt?: string | null; completedAt?: string | null; completedBy?: string | null;
   /** The words in the document this comment is about. */
   quote?: string | null;
-  /** The numbered pin on an image review's image this comment is about. */
-  pin?: { fileId: string; x: number; y: number; number: number } | null;
+  /** The numbered pin on an image or page version this comment is about; on a page,
+   *  the element it sits on. */
+  pin?: { fileId: string; x: number; y: number; number: number; anchor?: { node: number; nx: number; ny: number; width: number } | null } | null;
   /** A file added with the comment. */
   attachmentFileId?: string | null;
 };

@@ -16,11 +16,16 @@ export type DiffPart = { type: "same" | "added" | "removed"; text: string };
 export function diffDocText(beforeHtml: string, afterHtml: string): { parts: DiffPart[]; formattingOnly: boolean } {
   const before = htmlToText(beforeHtml);
   const after = htmlToText(afterHtml);
-  const parts: DiffPart[] = diffWords(before, after).map((c) => ({
+  return { parts: diffText(before, after), formattingOnly: before === after && beforeHtml.trim() !== afterHtml.trim() };
+}
+
+/** Word by word, between two plain texts: a document's (above) or a web page's,
+ *  whose text the server reads out of the page (pageHtml.ts pageText). */
+export function diffText(before: string, after: string): DiffPart[] {
+  return diffWords(before, after).map((c) => ({
     type: c.added ? "added" : c.removed ? "removed" : "same",
     text: c.value,
   }));
-  return { parts, formattingOnly: before === after && beforeHtml.trim() !== afterHtml.trim() };
 }
 
 /** What changed between two versions, in a few plain lines for an email drafter:

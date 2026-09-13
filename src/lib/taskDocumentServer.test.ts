@@ -54,7 +54,10 @@ vi.mock("./waitingNotify", () => ({
   notifyTeamOfClientActivity: (...args: unknown[]) => notify(...args),
 }));
 vi.mock("./serverAuth", () => ({ requireUser: async () => null, callerCanSeeTask: async () => false }));
-vi.mock("./taskDocumentFiles", () => ({ docImageFile: async () => null, sharedDocImages: async () => [] }));
+vi.mock("./taskDocumentFiles", () => ({
+  docVersionFile: async () => null, sharedVersionFiles: async () => [], readPageFile: async () => null,
+  storePageFile: async () => ({ ok: false, status: 500, error: "not in this test" }), discardVersionFile: async () => {},
+}));
 
 const { resolveDocToken, clientPublish } = await import("./taskDocumentServer");
 const { mintToken, hashToken } = await import("./tokenCrypto");

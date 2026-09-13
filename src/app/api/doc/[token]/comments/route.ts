@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { adminConfigured } from "@/lib/supabaseAdmin";
 import { rateLimit } from "@/lib/rateLimit";
 import {
-  DOC_TOKEN_PATTERN, NO_STORE, docNotFound, resolveDocToken, readPublicJson, logClientDocEvent, notifyOwnerOfClientDoc, kindNoun,
+  DOC_TOKEN_PATTERN, NO_STORE, docNotFound, resolveDocToken, readPublicJson, logClientDocEvent, notifyOwnerOfClientDoc,
   type DocScope,
 } from "@/lib/taskDocumentServer";
+import { kindNoun } from "@/lib/reviewKinds";
 import { postDocComment, editDocComment, deleteDocComment } from "@/lib/taskDocumentFiles";
 
 // Public, no login: the client's side of the comment thread. They post, edit and
