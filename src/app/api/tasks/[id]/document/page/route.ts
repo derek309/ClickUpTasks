@@ -4,6 +4,7 @@ import { teamDocument, memberLabel, setWorkingFile, NO_STORE } from "@/lib/taskD
 import { discardVersionFile, docVersionFile, readPageFile, storePageFile } from "@/lib/taskDocumentFiles";
 import { applyTextEdits, cleanEdits, pageText, pageTooBig, PAGE_MAX_BYTES, PAGE_TOO_BIG } from "@/lib/pageHtml";
 import { mintFrameTicket } from "@/lib/pageFrameTicket";
+import { nameReviewIfDefault } from "@/lib/reviewAutoName";
 
 // The team's side of a web page review's page (?kind=page, supabase/task-page-reviews.sql).
 //   POST text/plain         pasted code or an uploaded .html file's text (X-File-Name
@@ -57,7 +58,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!stored.ok) return json({ error: stored.error }, stored.status);
   try {
     const data = await setWorkingFile(doc.id, stored.fileId, (doc.body as string) ?? "", { updated_by: user.memberId, updated_at: new Date().toISOString() });
-    if (data) return json({ document: data, fileId: stored.fileId });
+    if (data) {
+      // Its first page gives a review still called "New HTML review" a name (reviewAutoName.ts).
+      const file = await docVersionFile(doc.id, stored.fileId, "page", false);
+      const named = file ? await nameReviewIfDefault(data, { kind: "page", path: file.path, fileName: file.name }) : null;
+      return json({ document: named ?? data, fileId: stored.fileId });
+    }
   } catch { /* falls through to undo the file */ }
   await discardVersionFile(doc.id, stored.fileId);
   return json({ error: "This page is approved. Reopen it to make changes." }, 409);

@@ -303,8 +303,8 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
               <li key={c.id} ref={(el) => { if (el) itemRefs.current.set(c.id, el); else itemRefs.current.delete(c.id); }}
                 className={`flex gap-3 py-3 ${focusedId === c.id ? "-mx-2 rounded-lg px-2 ring-2 ring-highlight" : ""}`}>
                 {c.pin ? (
-                  <button onClick={() => onQuoteClick?.(c.id)} disabled={!onQuoteClick} title={`Show pin ${c.pin.number} on the image`}
-                    aria-label={`Show pin ${c.pin.number} on the image`} className={`h-8 shrink-0 ${done ? "opacity-50" : ""}`}>
+                  <button onClick={() => onQuoteClick?.(c.id)} disabled={!onQuoteClick} title={`Show pin ${c.pin.number}`}
+                    aria-label={`Show pin ${c.pin.number}`} className={`h-8 shrink-0 ${done ? "opacity-50" : ""}`}>
                     <PinNumber number={c.pin.number} color={pinColor} />
                   </button>
                 ) : (

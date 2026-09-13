@@ -32,7 +32,16 @@ export function diffText(before: string, after: string): DiffPart[] {
  *  the wording added and the wording removed. Null when the text is the same
  *  (Derek, 2026-09-11: an email that says "we made changes, here's what changed"). */
 export function summarizeDocChanges(beforeHtml: string, afterHtml: string, maxChars = 1500): string | null {
-  const { parts } = diffDocText(beforeHtml, afterHtml);
+  return summarizeParts(diffDocText(beforeHtml, afterHtml).parts, maxChars);
+}
+
+/** The same summary between two plain texts: the words read out of two versions of
+ *  an HTML review (pageHtml.ts pageText), so its review email says what changed too. */
+export function summarizeTextChanges(before: string, after: string, maxChars = 1500): string | null {
+  return summarizeParts(diffText(before, after), maxChars);
+}
+
+function summarizeParts(parts: DiffPart[], maxChars: number): string | null {
   const pick = (type: DiffPart["type"]) => parts
     .filter((p) => p.type === type)
     .map((p) => p.text.replace(/\s+/g, " ").trim())

@@ -45,9 +45,11 @@ const SPURT_MS = 1500;
 const CONTENT_MARGIN = 24;
 const sameSpan = (a: ContentSpan | null, b: ContentSpan | null) => a === b || (!!a && !!b && a.left === b.left && a.right === b.right);
 
-export function PageReviewFrame({ frameUrl, onReload, mode, onMode, device, onDevice, canEdit, canComment, pins, pending, focus, edits, onPlace, onPinClick, onEdit, actions }: {
+export function PageReviewFrame({ frameUrl, onReload, mode, onMode, device, onDevice, canEdit, canComment, pins, pending, focus, edits, onPlace, onPinClick, onEdit, actions, color }: {
   /** Buttons at the right end of the toolbar (the team's New version and More menus). */
   actions?: ReactNode;
+  /** The chosen toolbar buttons' colour (the client page's navy); the app's own look without it. */
+  color?: string;
   /** The frame's address, or null while it is being fetched. */
   frameUrl: string | null;
   /** Fetch a fresh frame address (the old one expired or the page navigated away). */
@@ -184,20 +186,21 @@ export function PageReviewFrame({ frameUrl, onReload, mode, onMode, device, onDe
   const modes = MODES.filter((m) => (m.mode === "edit" ? canEdit : m.mode === "comment" ? canComment : true));
   const current = modes.find((m) => m.mode === mode) ?? modes[modes.length - 1];
   const segment = (active: boolean) =>
-    `rounded-full px-3 py-1 text-[16px] font-medium transition ${active ? "bg-foreground text-background" : "text-muted hover:text-foreground"}`;
+    `rounded-full px-3 py-1 text-[16px] font-medium transition ${active ? (color ? "text-white" : "bg-foreground text-background") : "text-muted hover:text-foreground"}`;
+  const segmentStyle = (active: boolean) => (active && color ? { background: color } : undefined);
 
   return (
     <div ref={box} className="w-full">
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div role="radiogroup" aria-label="What a click does" className="flex flex-wrap gap-1 rounded-full border bg-surface p-1">
           {modes.map((m) => (
-            <button key={m.mode} role="radio" aria-checked={current.mode === m.mode} onClick={() => onMode(m.mode)} className={segment(current.mode === m.mode)}>{m.label}</button>
+            <button key={m.mode} role="radio" aria-checked={current.mode === m.mode} onClick={() => onMode(m.mode)} className={segment(current.mode === m.mode)} style={segmentStyle(current.mode === m.mode)}>{m.label}</button>
           ))}
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <div role="radiogroup" aria-label="Page width" className="flex gap-1 rounded-full border bg-surface p-1">
             {(Object.keys(PAGE_DEVICES) as PageDevice[]).map((d) => (
-              <button key={d} role="radio" aria-checked={device === d} onClick={() => onDevice(d)} className={segment(device === d)}>{PAGE_DEVICES[d].label}</button>
+              <button key={d} role="radio" aria-checked={device === d} onClick={() => onDevice(d)} className={segment(device === d)} style={segmentStyle(device === d)}>{PAGE_DEVICES[d].label}</button>
             ))}
           </div>
           {actions}

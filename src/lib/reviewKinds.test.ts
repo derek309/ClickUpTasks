@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isFileKind, kindNoun, kindQuery, kindTitle, kindWhat, noDocumentYet, parseKind } from "./reviewKinds";
+import { commentHint, isFileKind, kindNoun, kindQuery, kindTitle, kindWhat, noDocumentYet, parseKind } from "./reviewKinds";
 
 describe("reviewKinds", () => {
   it("reads a kind from anything, and anything unknown is the text document", () => {
@@ -19,8 +19,10 @@ describe("reviewKinds", () => {
 
   it("names each kind the way the app and the emails already do", () => {
     expect(kindNoun("doc")).toBe("client document");
-    expect(kindNoun("image")).toBe("image");
-    expect(kindNoun("page")).toBe("web page");
+    expect(kindNoun("image")).toBe("image review");
+    expect(kindNoun("page")).toBe("HTML review");
+    expect(commentHint("doc")).toBe("Write a comment, or select words in the document to comment on them…");
+    expect(commentHint("page")).toBe("Write a comment, or click a spot on the page to comment on it…");
     expect(kindWhat("page")).toBe("page");
     expect(kindTitle("page")).toBe("HTML review");
     expect(noDocumentYet("doc")).toBe("This task has no client document yet.");

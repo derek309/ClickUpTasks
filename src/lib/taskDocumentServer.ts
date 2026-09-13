@@ -52,6 +52,8 @@ export type DocScope = {
   kind: ReviewKind;
   taskId: string;
   taskTitle: string;
+  /** What the review is called: its own name, else the task's title. */
+  reviewName: string;
   taskStatus: string;
   waitingOnClient: boolean;
   assigneeId: string | null;
@@ -86,7 +88,7 @@ export async function resolveDocToken(token: string): Promise<DocScope | null> {
     task.project_id
       ? supabaseAdmin.from("projects").select("id, deleted_at").eq("id", task.project_id as string).maybeSingle()
       : Promise.resolve({ data: null }),
-    supabaseAdmin.from("task_documents").select("id, task_id, status, deleted_at, kind").eq("id", link.document_id as string).maybeSingle(),
+    supabaseAdmin.from("task_documents").select("id, task_id, status, deleted_at, kind, title").eq("id", link.document_id as string).maybeSingle(),
   ]);
   if (!client || client.deleted_at) return null;
   if (project?.deleted_at) return null;
@@ -98,6 +100,7 @@ export async function resolveDocToken(token: string): Promise<DocScope | null> {
     kind: parseKind(doc.kind),
     taskId: task.id as string,
     taskTitle: task.title as string,
+    reviewName: ((doc.title as string | null) ?? "").trim() || (task.title as string),
     taskStatus: task.status as string,
     waitingOnClient: task.waiting_on_client === true,
     assigneeId: (task.assignee_id as string | null) ?? null,
@@ -195,6 +198,13 @@ export async function notifyOwnerOfClientDoc(
   });
 }
 
+/** Why a client can't change a closed review. */
+export const docClosed = (kind: ReviewKind) => `This ${kindWhat(kind)} is closed.`;
+
+/** " "Spring menu" on "Task"", or just " on "Task"" while the review goes by the task's title. */
+export const reviewOnTask = (scope: Pick<DocScope, "reviewName" | "taskTitle">) =>
+  scope.reviewName === scope.taskTitle ? ` on "${scope.taskTitle}"` : ` "${scope.reviewName}" on "${scope.taskTitle}"`;
+
 export type PublishOutcome =
   | { ok: true; version: number }
   | { ok: false; status: number; error: string; current?: { version: number; body: string } | null };
@@ -218,7 +228,7 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
   if ((!fileKind && typeof rawHtml !== "string") || typeof baseVersion !== "number" || !Number.isInteger(baseVersion)) {
     return { ok: false, status: 400, error: "Invalid request." };
   }
-  if (scope.taskStatus === "done" || scope.documentStatus === "completed") return { ok: false, status: 400, error: "This document is closed." };
+  if (scope.taskStatus === "done" || scope.documentStatus === "completed") return { ok: false, status: 400, error: docClosed(scope.kind) };
 
   let body: string;
   let created: string | null = null;
@@ -250,6 +260,10 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
     if (body.length > DOC_MAX_HTML_CHARS) return { ok: false, status: 413, error: "This document is too long to send." };
     if (!htmlToText(body).trim()) return { ok: false, status: 400, error: "The document is empty." };
   }
+  // Whether this carries the client's own changes, or only asks for them with
+  // comments: new text on a document, a reworded page. An image never does.
+  const previous = scope.kind === "doc" ? await latestPublished(scope.documentId, scope.kind) : null;
+  const sentChanges = scope.kind === "doc" ? previous?.body.trim() !== body.trim() : created !== null;
 
   let version: number;
   try {
@@ -270,13 +284,12 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
 
   const approved = kind === "client_approved";
   const noun = kindNoun(scope.kind);
-  // A document or a reworded page carries the client's changes; an image or an
-  // unchanged page carries only their request for changes.
-  const sentChanges = scope.kind === "doc" || created !== null;
   const changed = sentChanges ? `sent changes to the ${noun}` : `asked for changes on the ${noun}`;
+  // An image or page review's versions are numbered by file, as the team and the client see them.
+  const number = fileKind ? (await sharedVersionFiles(scope.documentId)).find((f) => f.fileId === body)?.number ?? version : version;
   await appendClientEvent(scope.taskId, approved
-    ? `${scope.clientName} approved the ${noun} (version ${version})`
-    : `${scope.clientName} ${changed} (version ${version})`);
+    ? `${scope.clientName} approved the ${noun} (version ${number})`
+    : `${scope.clientName} ${changed} (version ${number})`);
 
   const recipient = scope.assigneeId ?? await resolveNotifyRecipient(scope.assignedTo);
   const patch = clientAnswerPatch(
@@ -286,14 +299,13 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
   );
   await supabaseAdmin.from("tasks").update({ ...patch, updated_by: null }).eq("id", scope.taskId);
 
+  // Named by the review, so a task's document, image review and HTML review tell apart in an inbox.
   await notifyOwnerOfClientDoc(scope, {
     always: approved,
-    text: approved
-      ? `${scope.clientName} approved the ${noun} on "${scope.taskTitle}".`
-      : `${scope.clientName} ${changed} on "${scope.taskTitle}".`,
+    text: `${scope.clientName} ${approved ? `approved the ${noun}` : changed}${reviewOnTask(scope)}.`,
     subject: approved
-      ? `${scope.clientName} approved "${scope.taskTitle}"`
-      : `${scope.clientName} ${sentChanges ? "sent changes" : "asked for changes"} on "${scope.taskTitle}"`,
+      ? `${scope.clientName} approved "${scope.reviewName}"`
+      : `${scope.clientName} ${sentChanges ? "sent changes" : "asked for changes"} on "${scope.reviewName}"`,
   }, recipient);
   return { ok: true, version };
 }

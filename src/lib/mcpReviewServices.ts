@@ -25,7 +25,7 @@ import { MAX_SHARED_FILE_BYTES } from "./uploadTypes";
 import { PAGE_TOO_BIG, pageText, pageTooBig } from "./pageHtml";
 import { buildReviewEmail } from "./reviewEmail";
 import { placeDraftLink } from "./draftLink";
-import { summarizeDocChanges } from "./docDiff";
+import { summarizeDocChanges, summarizeTextChanges } from "./docDiff";
 import { htmlToText } from "./data";
 import { TASK_FILES_BUCKET } from "./db";
 import { kindInSentence, kindTitle, kindWhat, type FileKind, type ReviewKind } from "./reviewKinds";
@@ -285,8 +285,10 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
       const sent = await sendReview(task, kind, actor, Number(doc.version ?? 0), origin);
       if (!sent.ok) return sent.error;
       const label = await actor.label();
+      // An image or HTML review's versions are numbered by file, as get_review lists them.
+      const number = kind === "doc" ? sent.version : (await sharedVersionFiles(doc.id)).at(-1)?.number ?? sent.version;
       // The same step the drawer takes after a send: the task waits on the client.
-      await event(task.id, `${label} sent version ${sent.version} of the ${what(kind)} for review`);
+      await event(task.id, `${label} sent version ${number} of the ${what(kind)} for review`);
       if (task.status !== "waiting") await supabaseAdmin.from("tasks").update({ status: "waiting", waiting_on_client: true, updated_by: null }).eq("id", task.id);
 
       let emailNote = "No email was drafted.";
@@ -299,8 +301,16 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
           const [latest, before] = (versions ?? []) as { body: string }[];
           text = latest ? htmlToText(latest.body).slice(0, 3000) : "";
           changes = latest && before ? summarizeDocChanges(before.body, latest.body) : null;
-        } else if ((await sharedVersionFiles(doc.id)).length > 1) {
-          changes = `A new version of the ${kindWhat(kind)}.`;
+        } else {
+          const [before, latest] = (await sharedVersionFiles(doc.id)).slice(-2);
+          if (before && latest) {
+            // An HTML review says which words changed, like a document; an image can't.
+            const texts = kind === "page"
+              ? await Promise.all([readPageFile(doc.id, before.fileId, true), readPageFile(doc.id, latest.fileId, true)])
+              : null;
+            changes = (texts?.[0] != null && texts[1] != null ? summarizeTextChanges(pageText(texts[0]), pageText(texts[1])) : null)
+              ?? `A new version of the ${kindWhat(kind)}.`;
+          }
         }
         const built = buildReviewEmail({ kind, url: sent.url, name: ((doc.title as string) ?? "").trim() || task.title, text, changes });
         const now = new Date().toISOString();
@@ -315,7 +325,7 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
           : "The task already has a draft email, so it was left alone (draft_email with replace swaps it).";
       }
       return [
-        `Sent version ${sent.version} of the ${what(kind)} on "${task.title}" for review.`,
+        `Sent version ${number} of the ${what(kind)} on "${task.title}" for review.`,
         `Review link: ${sent.url ?? "on, but it can't be shown again (a teammate can make a new link in the app)"}`,
         task.status === "waiting" ? "The task was already Waiting." : "The task is now Waiting.",
         emailNote,

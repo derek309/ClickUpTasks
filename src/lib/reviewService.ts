@@ -9,6 +9,7 @@ import { liveDocument, linkState, mintDocLink, setWorkingFile, teamSend, type Re
 import { docVersionFile, recordCheckpoint, removeVersionFile, sharedVersionFiles } from "./taskDocumentFiles";
 import { sanitizeDocHtml, DOC_MAX_HTML_CHARS } from "./docHtml";
 import { filePurpose, kindWhat, noDocumentYet, type FileKind, type ReviewKind } from "./reviewKinds";
+import { nameReviewIfDefault } from "./reviewAutoName";
 
 type Row = Record<string, unknown>;
 export type ReviewOutcome<T> = ({ ok: true } & T) | { ok: false; status: number; error: string; current?: unknown };
@@ -108,7 +109,9 @@ export async function writeDocBody(
     body,
     input.checkpoint === true || typeof input.restoreVersion === "number" || typeof input.restoreCheckpoint === "string",
   ).catch(() => { /* the save itself landed; a missed history entry must not fail it */ });
-  return { ok: true, document: data as Row };
+  // Its first real words give a document still called "New document" a name.
+  const named = await nameReviewIfDefault(data as Row, { kind: "doc", html: body });
+  return { ok: true, document: named ?? (data as Row) };
 }
 
 /** An image or HTML review's working copy is the version file to send next: an
@@ -130,7 +133,10 @@ export async function pickReviewVersion(
   if (!file) return fail(400, kind === "image" ? "Upload the image first." : "That version is no longer on the review.");
   try {
     const data = await setWorkingFile(doc.id, file.id, (doc.body as string) ?? "", stampOf(actor));
-    return data ? { ok: true, document: data } : fail(409, locked(kind));
+    if (!data) return fail(409, locked(kind));
+    // Its first image or page gives a review still called "New image review" a name.
+    const named = await nameReviewIfDefault(data, { kind, path: file.path, fileName: file.name });
+    return { ok: true, document: named ?? data };
   } catch (e) {
     return fail(400, e instanceof Error ? e.message : "Could not save.");
   }

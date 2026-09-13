@@ -7,6 +7,7 @@ import { resolveNotifyRecipient } from "@/lib/waitingNotify";
 import { draftLinkHtml, escapeHtml } from "@/lib/draftLink";
 import type { EmailDraft } from "@/lib/data";
 import { APP_URL } from "@/lib/appUrl";
+import { kindWhat, parseKind } from "@/lib/reviewKinds";
 
 // Daily: a client document sent for review with no answer after three days gets
 // a "just checking in" draft email staged on its task, and the task owner a bell
@@ -41,7 +42,7 @@ async function run(req: NextRequest) {
   // Waiting on the client: with_client and not approved. A stage picked by hand
   // is checked against the versions below, so only a real send counts.
   const { data: docs, error } = await supabaseAdmin.from("task_documents")
-    .select("id, task_id, title, reminder_drafted_at")
+    .select("id, task_id, title, kind, reminder_drafted_at")
     .is("deleted_at", null).is("approved_at", null).eq("status", "with_client")
     .limit(300);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
@@ -68,9 +69,9 @@ async function run(req: NextRequest) {
     const at = new Date(now).toISOString();
     const draft: EmailDraft = {
       subject: `Checking in: ${name}`,
-      body: `<p>Hi,</p><p>Just checking in on "${escapeHtml(name)}". When you have a moment, take a look and approve it, or send any changes you would like.</p>${draftLinkHtml(button)}<p>Thanks!</p>`,
+      body: `<p>Hi,</p><p>Just checking in on "${escapeHtml(name)}". When you have a moment, take a look, send any changes you would like or approve it.</p>${draftLinkHtml(button)}<p>Thanks!</p>`,
       link: button,
-      aiContext: `A friendly check in. We sent the client the document "${name}" to review ${days} days ago and have not heard back. Ask them to review it and approve it, or send any changes.`,
+      aiContext: `A friendly check in. We sent the client the ${kindWhat(parseKind(doc.kind))} "${name}" to review ${days} days ago and have not heard back. Ask them to take a look, send any changes or approve it.`,
       createdAt: at, updatedAt: at,
     };
     // Only onto a task with no draft email, checked again in the write itself.

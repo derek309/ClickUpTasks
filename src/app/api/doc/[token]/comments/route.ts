@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { adminConfigured } from "@/lib/supabaseAdmin";
 import { rateLimit } from "@/lib/rateLimit";
 import {
-  DOC_TOKEN_PATTERN, NO_STORE, docNotFound, resolveDocToken, readPublicJson, logClientDocEvent, notifyOwnerOfClientDoc,
+  DOC_TOKEN_PATTERN, NO_STORE, docClosed, docNotFound, resolveDocToken, readPublicJson, logClientDocEvent, notifyOwnerOfClientDoc, reviewOnTask,
   type DocScope,
 } from "@/lib/taskDocumentServer";
 import { kindNoun } from "@/lib/reviewKinds";
@@ -28,7 +28,7 @@ async function open(req: NextRequest, params: Promise<{ token: string }>): Promi
   if (!read.ok) return read;
   const scope = await resolveDocToken(token);
   if (!scope) return { ok: false, res: docNotFound() };
-  if (scope.taskStatus === "done" || scope.documentStatus === "completed") return { ok: false, res: json({ error: "This document is closed." }, 409) };
+  if (scope.taskStatus === "done" || scope.documentStatus === "completed") return { ok: false, res: json({ error: docClosed(scope.kind) }, 409) };
   return { ok: true, scope, payload: read.body };
 }
 
@@ -49,8 +49,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   await logClientDocEvent(scope.taskId, `${scope.clientName} commented on the ${noun}${pin ? ` on pin ${pin.number}` : ""}: ${body ? `"${snippet}"` : "added a file"}`);
   await notifyOwnerOfClientDoc(scope, {
     always: false,
-    text: `${scope.clientName} commented on the ${noun} on "${scope.taskTitle}".`,
-    subject: `${scope.clientName} commented on "${scope.taskTitle}"`,
+    text: `${scope.clientName} commented on the ${noun}${reviewOnTask(scope)}.`,
+    subject: `${scope.clientName} commented on "${scope.reviewName}"`,
   });
   return json({ comment: r.comment });
 }

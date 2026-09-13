@@ -17,29 +17,27 @@ export type ReviewEmailInput = {
 };
 export type ReviewEmail = { subject: string; body: string; link: DraftLink | null; aiContext: string };
 
-// What the client can do from the link, per kind (Derek, 2026-09-12: web page review).
-const INVITE: Record<ReviewKind, string> = {
-  doc: "You can read it, make changes, leave comments or approve it here:",
-  image: "Click any spot on the image to leave a comment, or approve it here:",
-  page: "Click any spot on the page to leave a comment, change the wording right on the page, or approve it here:",
-};
-const CAN: Record<ReviewKind, string> = {
-  doc: "read it, edit it, comment and approve it",
-  image: "click any spot on it to leave a numbered comment or a file, ask for changes, or approve it",
-  page: "click any spot on it to leave a numbered comment or a file, change the wording right on the page, or approve it",
+// What the client can do from the link: one sentence for every kind, with only the
+// way they comment or change it told apart (Derek, 2026-09-13: image and HTML
+// reviews "need to be the same as doc").
+const HOW: Record<ReviewKind, string> = {
+  doc: ", edit it",
+  image: " on any spot",
+  page: " on any spot, change the wording",
 };
 
 export function buildReviewEmail(review: ReviewEmailInput): ReviewEmail {
   const what = kindWhat(review.kind);
   const link = review.url ? { url: review.url, label: `Open "${review.name}" to review` } : null;
   const name = escapeHtml(review.name);
+  const can = `look it over, leave comments${HOW[review.kind]}, send changes or approve it`;
   const intro = review.changes
-    ? `<p>Hi,</p><p>We made ${review.kind === "doc" ? "some updates to" : "a new version of"} "${name}". Take a look and approve it when it looks right:</p>`
-    : `<p>Hi,</p><p>"${name}" is ready for your review. ${INVITE[review.kind]}</p>`;
+    ? `<p>Hi,</p><p>We made some updates to "${name}". Take a look and approve it when it looks right:</p>`
+    : `<p>Hi,</p><p>"${name}" is ready for your review. You can ${can} here:</p>`;
   const aiContext = [
     review.changes
       ? `We updated the ${what} "${review.name}" and are asking the client to review the changes and approve it.`
-      : `We are asking the client to review the ${what} "${review.name}". From the link they can ${CAN[review.kind]}.`,
+      : `We are asking the client to review the ${what} "${review.name}". From the link they can ${can}.`,
     review.changes ? `What changed since the version they saw before:\n${review.changes}` : null,
     review.text ? `The ${what}'s text:\n${review.text}` : null,
   ].filter(Boolean).join("\n\n");

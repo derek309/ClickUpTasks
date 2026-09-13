@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { rateLimit } from "@/lib/rateLimit";
 import {
-  DOC_TOKEN_PATTERN, NO_STORE, docNotFound, resolveDocToken, readPublicJson, logClientDocEvent,
+  DOC_TOKEN_PATTERN, NO_STORE, docClosed, docNotFound, resolveDocToken, readPublicJson, logClientDocEvent,
 } from "@/lib/taskDocumentServer";
 import { kindNoun } from "@/lib/reviewKinds";
 import { startDocUpload, finishDocUpload, removeDocFile } from "@/lib/taskDocumentFiles";
@@ -25,7 +25,7 @@ async function open(req: NextRequest, params: Promise<{ token: string }>) {
   if (!scope) return { ok: false as const, res: docNotFound() };
   const { data: doc } = await supabaseAdmin.from("task_documents").select("approved_at").eq("id", scope.documentId).maybeSingle();
   if (!doc) return { ok: false as const, res: docNotFound() };
-  if (doc.approved_at || scope.taskStatus === "done" || scope.documentStatus === "completed") return { ok: false as const, res: json({ error: "This document is closed." }, 409) };
+  if (doc.approved_at || scope.taskStatus === "done" || scope.documentStatus === "completed") return { ok: false as const, res: json({ error: docClosed(scope.kind) }, 409) };
   return { ok: true as const, scope, payload: read.body, actor: { id: null, label: scope.clientName } };
 }
 
@@ -50,6 +50,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ t
   if (!o.ok) return o.res;
   const r = await removeDocFile(o.scope.documentId, o.payload.fileId, o.actor, true);
   if (!r.ok) return json({ error: r.error }, r.status);
-  await logClientDocEvent(o.scope.taskId, `${o.scope.clientName} removed ${r.name} from the client document`);
+  await logClientDocEvent(o.scope.taskId, `${o.scope.clientName} removed ${r.name} from the ${kindNoun(o.scope.kind)}`);
   return json({ ok: true });
 }

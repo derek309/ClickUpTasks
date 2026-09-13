@@ -28,10 +28,10 @@ import {
   type TaskDocument as Doc, type TaskDocumentKind, type TaskDocumentStatus, type TaskDocumentVersion,
   type TaskDocumentFile, type TaskDocumentCheckpoint, type TaskDocumentComment,
 } from "@/lib/db";
-import { diffDocText, diffText, summarizeDocChanges } from "@/lib/docDiff";
+import { diffDocText, diffText, summarizeDocChanges, summarizeTextChanges } from "@/lib/docDiff";
 import { addDocFiles, uploadSharedFile } from "@/lib/docFileUpload";
 import { publishedFiles, type PinAnchor } from "@/lib/reviewPins";
-import { isFileKind, kindInSentence, kindNewName, kindQuery, kindTitle, kindWhat } from "@/lib/reviewKinds";
+import { commentHint, isFileKind, kindInSentence, kindNewName, kindQuery, kindTitle, kindWhat } from "@/lib/reviewKinds";
 import { mergeEdits, PAGE_MAX_BYTES, PAGE_TOO_BIG, type FrameMode, type PageEdit } from "@/lib/pageFrameProtocol";
 import { formatFileSize, isPreviewableImage } from "@/lib/uploadTypes";
 import { RichTextEditor } from "./RichTextEditor";
@@ -54,11 +54,11 @@ const STATUS_VIEW: Record<TaskDocumentStatus, { label: string; tone: TaskStatus 
   completed: { label: "Completed", tone: "done" },
 };
 const STAGES = Object.keys(STATUS_VIEW) as TaskDocumentStatus[];
-const KIND_LABEL: Record<TaskDocumentKind, Record<TaskDocumentVersion["kind"], string>> = {
-  doc: { sent: "Sent to client", client_submitted: "Client sent changes", client_approved: "Client approved" },
-  image: { sent: "Sent to client", client_submitted: "Client asked for changes", client_approved: "Client approved" },
-  page: { sent: "Sent to client", client_submitted: "Client sent changes", client_approved: "Client approved" },
-};
+// One set of history labels for every kind. A client answer "sent changes" when it
+// carries their own (new text, a reworded page) and "asked for changes" when it only
+// points at their comments, the same words as the task's activity line.
+const VERSION_LABEL: Record<TaskDocumentVersion["kind"], string> = { sent: "Sent to client", client_submitted: "Client sent changes", client_approved: "Client approved" };
+const ASKED_LABEL = "Client asked for changes";
 const KIND_ICON: Record<TaskDocumentKind, string> = { doc: "📄", image: "🖼️", page: "🌐" };
 const HISTORY_PREVIEW = 5;
 const IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
@@ -168,6 +168,8 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     void fetchDeletedTaskDocuments(task.id, kind).then(setDeletedDocs);
     if (!fresh) return;
     void fetchTaskDocumentFiles(fresh.id).then(setFiles);
+    // An image or page review numbers its versions by file, so the line needs them to say "Version N".
+    if (isFileKind(kind)) void fetchTaskDocumentVersions(fresh.id).then(setVersions);
     // A client's comment logs an event on the task too, so it arrives here the same way.
     void fetchTaskDocumentComments(fresh.id).then(setComments);
     if (kind !== "image" && previous !== null && fresh.version > previous) {
@@ -191,6 +193,11 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   // event comment), so either changing is the cue to look again.
   // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
   useEffect(() => { if (loaded) void load(); }, [task.status, task.comments.length]);
+
+  // A name the AI gave the review on its first content shows in the name box,
+  // unless someone has typed one there (reviewAutoName.ts).
+  // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
+  useEffect(() => { if (doc?.title && !titleDraft.trim()) setTitleDraft(doc.title); }, [doc?.title]);
 
   const exists = !!doc;
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -460,12 +467,22 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     pushToast("Version removed.");
   };
 
-  const reviewEmail = (latestBody: string | undefined, beforeBody: string | undefined, count: number) => ({
-    text: versioned ? "" : htmlToText(latestBody ?? "").slice(0, 3000),
-    changes: versioned
-      ? (count ? `A new version of the ${what}.` : null)
-      : latestBody && beforeBody ? summarizeDocChanges(beforeBody, latestBody) : null,
-  });
+  // What the review email says changed: the words, on a document or an HTML review
+  // (read out of both page versions); an image only has a new version.
+  const reviewEmail = async (latestBody: string | undefined, beforeBody: string | undefined, count: number) => {
+    if (!versioned) {
+      return { text: htmlToText(latestBody ?? "").slice(0, 3000), changes: latestBody && beforeBody ? summarizeDocChanges(beforeBody, latestBody) : null };
+    }
+    if (!count) return { text: "", changes: null };
+    const generic = `A new version of the ${what}.`;
+    if (!page || !latestBody || !beforeBody || latestBody === beforeBody) return { text: "", changes: generic };
+    const textOf = async (fileId: string) => {
+      const res = await pageApi(`&fileId=${encodeURIComponent(fileId)}&as=text`);
+      return res.ok ? ((await readJson(res)).text as string) : null;
+    };
+    const [before, after] = await Promise.all([textOf(beforeBody), textOf(latestBody)]);
+    return { text: "", changes: (before !== null && after !== null ? summarizeTextChanges(before, after) : null) ?? generic };
+  };
 
   const send = async () => {
     if (!doc) return;
@@ -487,7 +504,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     // Straight into an email to the client, written with AI (Derek, 2026-09-11:
     // "when we send for review can it pop up a box to draft an email to the
     // client"). The document window closes so the email is the one on screen.
-    const emailing = onEmailClient?.({ kind, url, name: doc.title.trim() || task.title, ...reviewEmail(sentBody, previousBody, earlier) }) ?? false;
+    const emailing = onEmailClient?.({ kind, url, name: doc.title.trim() || task.title, ...await reviewEmail(sentBody, previousBody, earlier) }) ?? false;
     if (emailing) switchView({ full: false });
     if (copied) pushToast(emailing ? "Sent for review. Link copied and added to the email." : "Sent for review. Link copied, paste it to your client.");
     else if (url) pushToast(`Sent for review. Share this link: ${url}`);
@@ -519,10 +536,12 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     setBusy("email");
     const url = link?.live && link.copyable ? await fetchLink() : null;
     setBusy(null);
-    const [latest, before] = versions;
+    // The last two versions the client saw: texts on a document, distinct files on an image or page review.
+    const shown = publishedFiles(versions);
+    const [latest, before] = versioned ? [shown.at(-1), shown.at(-2)] : [versions[0]?.body, versions[1]?.body];
     const opened = onEmailClient({
       kind, url, name: doc.title.trim() || task.title,
-      ...reviewEmail(latest?.body ?? doc.body, before?.body, publishedFiles(versions).length > 1 ? 1 : 0),
+      ...await reviewEmail(latest ?? doc.body, before, shown.length > 1 ? 1 : 0),
     });
     if (opened) switchView({ full: false });
     else pushToast("Link a contact to this client to email them from here.");
@@ -661,7 +680,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
 
   const deletedLine = deletedDocs.length > 0 ? (
     <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-dashed px-4 py-2 text-[16px] text-muted">
-      <span>{kind === "doc" ? "Deleted:" : `Deleted ${titleInSentence}:`}</span>
+      <span>Deleted {titleInSentence}:</span>
       {deletedDocs.map((d) => (
         <span key={d.id} className="flex flex-wrap items-center gap-x-2">
           <span className="text-foreground">{d.title.trim() || task.title}</span>
@@ -707,7 +726,11 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
 
   const shownFile = files.find((f) => f.id === shownFileId);
   const shownUrl = image && shownFile ? thumbs[shownFile.path] : undefined;
-  const openPins = comments.filter((c) => c.pin && !c.completedAt).length;
+  const openComments = comments.filter((c) => !c.completedAt).length;
+  // An image or page review's version numbers go by file, published order (reviewPins.ts).
+  const fileVersion = (fileId: string) => sent.indexOf(fileId) + 1;
+  const approvedFile = versioned ? versions.find((v) => v.version === doc.approvedVersion)?.body : undefined;
+  const approvedNumber = versioned ? (approvedFile ? fileVersion(approvedFile) : 0) : doc.approvedVersion ?? 0;
   // What removing the version shown will do, said before it happens.
   const removeMessage = (() => {
     if (!shownFileId) return "";
@@ -735,10 +758,10 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   );
 
   const meta = [
-    doc.version ? (versioned ? "Sent" : `Version ${doc.version}`) : versioned && !doc.body ? `No ${what} yet` : "Not sent yet",
+    doc.version ? (!versioned ? `Version ${doc.version}` : sent.length ? `Version ${sent.length}` : "Sent") : versioned && !doc.body ? `No ${what} yet` : "Not sent yet",
     doc.version > 0 && link ? `Link ${link.live ? "on" : "off"}` : null,
     doc.version > 0 ? (doc.clientViewedAt ? `Viewed ${timeAgo(doc.clientViewedAt)}` : "Not viewed yet") : null,
-    openPins ? `${openPins} open ${openPins === 1 ? "pin" : "pins"}` : null,
+    openComments ? `${openComments} open ${openComments === 1 ? "comment" : "comments"}` : null,
     activeFiles.length ? `${activeFiles.length} ${activeFiles.length === 1 ? "file" : "files"}` : null,
     `Edited ${timeAgo(doc.updatedAt)}`,
   ].filter(Boolean).join(" · ");
@@ -758,12 +781,21 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   // on a page it compares the words read out of each version (fetched when opened).
   // An image has no text to compare, so its entries only say what happened.
   type Entry = { key: string; at: string; title: string; who: string | null; body?: string; pageFile?: string; restore?: Record<string, unknown>; restored?: string };
+  const oldestFirst = [...versions].sort((a, b) => a.version - b.version);
+  const versionLabel = (v: TaskDocumentVersion) => {
+    if (v.kind !== "client_submitted") return VERSION_LABEL[v.kind];
+    const earlier = oldestFirst.filter((x) => x.version < v.version);
+    // Changes of their own: new text on a document, a file first seen here on a page.
+    const own = versioned ? !earlier.some((x) => x.body === v.body) : earlier.at(-1)?.body.trim() !== v.body.trim();
+    return own ? VERSION_LABEL.client_submitted : ASKED_LABEL;
+  };
   const timeline: Entry[] = [
     ...versions.map((v): Entry => {
-      if (!versioned) return { key: v.id, at: v.createdAt, title: `Version ${v.version}: ${KIND_LABEL.doc[v.kind]}`, who: v.authorLabel, body: v.body, restore: { restoreVersion: v.version }, restored: `Version ${v.version} is back.` };
-      const number = sent.indexOf(v.body) + 1;
-      const entry: Entry = { key: v.id, at: v.createdAt, title: `Version ${number}: ${KIND_LABEL[kind][v.kind]}`, who: v.authorLabel };
-      return page && liveVersionIds.has(v.body) ? { ...entry, pageFile: v.body, restore: { restoreVersion: v.version }, restored: `Version ${number} is back.` } : entry;
+      if (!versioned) return { key: v.id, at: v.createdAt, title: `Version ${v.version}: ${versionLabel(v)}`, who: v.authorLabel, body: v.body, restore: { restoreVersion: v.version }, restored: `Version ${v.version} is back.` };
+      const number = fileVersion(v.body);
+      const entry: Entry = { key: v.id, at: v.createdAt, title: `Version ${number}: ${versionLabel(v)}`, who: v.authorLabel };
+      if (!liveVersionIds.has(v.body)) return entry;
+      return { ...entry, ...(page ? { pageFile: v.body } : {}), restore: { restoreVersion: v.version }, restored: `Version ${number} is back.` };
     }),
     ...(versioned ? [] : checkpoints.map((c): Entry => ({ key: c.id, at: c.createdAt, title: "Saved draft", who: c.authorLabel, body: c.body, restore: { restoreCheckpoint: c.id }, restored: "That draft is back." }))),
     ...files.map((f): Entry => ({ key: `${f.id}:added`, at: f.createdAt, title: `${f.purpose === "file" ? "Added" : "Uploaded"} ${f.name}`, who: f.addedByLabel })),
@@ -771,6 +803,8 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   ].sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   const shownTimeline = allHistory ? timeline : timeline.slice(0, HISTORY_PREVIEW);
   const comparable = (e: Entry) => e.body !== undefined || e.pageFile !== undefined;
+  // An image version has no words to compare, but opens to bring it back.
+  const openable = (e: Entry) => comparable(e) || !!e.restore;
   const openHistoryEntry = (entry: Entry, previous: Entry | undefined, open: boolean) => {
     setOpenEntry(open ? null : entry.key);
     if (open || !entry.pageFile) return;
@@ -842,7 +876,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   );
 
   const versionArticle = (
-    <article className="rounded-2xl border bg-surface p-4 shadow-sm sm:p-6">
+    <article className="rounded-2xl border bg-surface p-5 shadow-sm sm:p-8">
       <input ref={versionInput} type="file" accept={page ? PAGE_ACCEPT : IMAGE_ACCEPT} className="hidden"
         onChange={(e) => { if (e.target.files) void (page ? uploadPage : uploadImage)(e.target.files); e.target.value = ""; }} />
       {!doc.body ? (
@@ -904,9 +938,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
           <span className="min-w-0 flex-1">
             {completed
               ? `This ${what} is completed. Reopen it to make changes.`
-              : versioned
-                ? `The client approved this ${what}. Reopen it to make changes.`
-                : <>The client approved {doc.approvedVersion ? `version ${doc.approvedVersion}` : "this document"}. Reopen it to make changes.</>}
+              : `The client approved ${approvedNumber ? `version ${approvedNumber}` : `this ${what}`}. Reopen it to make changes.`}
           </span>
           <button onClick={() => void patchDoc({ reopen: true }, "Reopened. Send your changes when they're ready.")} className={quiet}>Reopen for changes</button>
         </div>
@@ -926,7 +958,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
         {needsSend && (
           <button onClick={send} disabled={busy !== null}
             className="rounded-lg bg-accent px-6 py-2.5 text-[16px] font-semibold text-white disabled:opacity-50">
-            {busy === "send" ? "Sending…" : doc.version === 0 ? "Send for review" : versioned ? "Send new version" : "Send changes"}
+            {busy === "send" ? "Sending…" : doc.version === 0 ? "Send for review" : "Send changes"}
           </button>
         )}
         {!versioned && !locked && <button onClick={() => void saveDraft()} disabled={busy !== null || saveState === "saving"} className={quiet}>Save draft</button>}
@@ -940,7 +972,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
 
       {historyOpen && (
         <section className="mt-3 rounded-xl border bg-surface px-4 py-2.5">
-          {timeline.length === 0 && <p className="text-[16px] text-muted">{versioned ? "Uploads, sends, client answers and files" : "Saves, sends, client changes and files"} show up here with who did them.</p>}
+          {timeline.length === 0 && <p className="text-[16px] text-muted">Sends, client answers, new versions and files show up here with who did them.</p>}
           <div className="mt-1.5 space-y-1.5">
             {shownTimeline.map((entry) => {
               const i = timeline.indexOf(entry);
@@ -955,15 +987,15 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
               const waiting = open && !!entry.pageFile && !!previous && !pageParts;
               return (
                 <div key={entry.key} className="rounded-lg border px-3 py-2">
-                  <button onClick={() => comparable(entry) && openHistoryEntry(entry, previous, open)}
-                    className={`flex w-full flex-wrap items-center gap-x-2 text-left text-[16px] ${comparable(entry) ? "" : "cursor-default"}`}>
+                  <button onClick={() => openable(entry) && openHistoryEntry(entry, previous, open)}
+                    className={`flex w-full flex-wrap items-center gap-x-2 text-left text-[16px] ${openable(entry) ? "" : "cursor-default"}`}>
                     <span className="font-semibold">{entry.title}</span>
                     {entry.who && <span className="text-muted">by {entry.who}</span>}
                     <span className="text-muted">{timeAgo(entry.at)}</span>
                   </button>
                   {open && (
                     <div className="mt-2">
-                      {!previous ? (
+                      {!comparable(entry) ? null : !previous ? (
                         <p className="text-[16px] text-muted">The first {entry.pageFile ? "version" : "saved text"}, so there is nothing to compare yet.</p>
                       ) : waiting ? (
                         <p className="text-[16px] text-muted">Reading both versions…</p>
@@ -1028,7 +1060,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
           onDelete={removeComment}
           quote={versioned ? null : quoteDraft} pinDraft={versioned ? pinDraft?.number ?? null : null}
           onClearQuote={() => { setQuoteDraft(null); setPinDraft(null); }}
-          placeholder={versioned ? `Write a comment, or click the ${what} to drop a numbered pin…` : undefined}
+          placeholder={commentHint(kind)}
           onAttach={locked ? undefined : attachFile} renderAttachment={renderAttachment}
           focusedId={focusedComment} onQuoteClick={focusComment} />
       </div>

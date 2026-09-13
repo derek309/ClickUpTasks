@@ -134,7 +134,7 @@ describe("resolveDocToken", () => {
 });
 
 const scope = {
-  documentId: "tdoc_1", kind: "doc" as const, taskId: "t_1", taskTitle: "Hoodie email", taskStatus: "waiting", waitingOnClient: true,
+  documentId: "tdoc_1", kind: "doc" as const, taskId: "t_1", taskTitle: "Hoodie email", reviewName: "Hoodie email", taskStatus: "waiting", waitingOnClient: true,
   assigneeId: "u_owner" as string | null, projectId: "p_1", clientId: "cl_1", clientName: "Brian Goodell", assignedTo: ["u_follower"], documentStatus: "with_client",
 };
 

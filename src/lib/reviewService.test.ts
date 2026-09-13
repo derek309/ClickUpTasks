@@ -34,6 +34,8 @@ const server = vi.hoisted(() => ({ liveDocument: vi.fn(), linkState: vi.fn(), mi
 vi.mock("./taskDocumentServer", () => server);
 const files = vi.hoisted(() => ({ docVersionFile: vi.fn(), recordCheckpoint: vi.fn(), removeVersionFile: vi.fn(), sharedVersionFiles: vi.fn() }));
 vi.mock("./taskDocumentFiles", () => files);
+const autoName = vi.hoisted(() => ({ nameReviewIfDefault: vi.fn() }));
+vi.mock("./reviewAutoName", () => autoName);
 
 const svc = await import("./reviewService");
 
@@ -44,7 +46,8 @@ const saved = () => ({ data: { id: "tdoc_1" }, error: null });
 beforeEach(() => {
   calls.length = 0;
   result = () => ({ data: null, error: null });
-  for (const f of [...Object.values(server), ...Object.values(files)]) f.mockReset();
+  for (const f of [...Object.values(server), ...Object.values(files), ...Object.values(autoName)]) f.mockReset();
+  autoName.nameReviewIfDefault.mockResolvedValue(null);
   files.recordCheckpoint.mockResolvedValue(undefined);
   files.sharedVersionFiles.mockResolvedValue([]);
 });
@@ -93,6 +96,24 @@ describe("writeDocBody", () => {
     expect(calls[0].payload.draft_dirty).toBe(true);
     expect(calls[0].payload.body).not.toContain("script");
     expect(files.recordCheckpoint).toHaveBeenCalledTimes(2);
+  });
+
+  it("hands back the name the AI gave a document on its first words", async () => {
+    server.liveDocument.mockResolvedValue({ id: "tdoc_1", approved_at: null, body: "", updated_by: null, created_at: "2026-09-01T00:00:00Z" });
+    result = () => ({ data: { id: "tdoc_1", title: "", ai_named_at: null }, error: null });
+    autoName.nameReviewIfDefault.mockResolvedValue({ id: "tdoc_1", title: "Fall Open House Flyer" });
+    expect(await svc.writeDocBody("t_1", actor(), { body: "<p>Words</p>" })).toEqual({ ok: true, document: { id: "tdoc_1", title: "Fall Open House Flyer" } });
+    expect(autoName.nameReviewIfDefault).toHaveBeenCalledWith({ id: "tdoc_1", title: "", ai_named_at: null }, { kind: "doc", html: "<p>Words</p>" });
+  });
+});
+
+describe("pickReviewVersion", () => {
+  it("names an image review from the image it was given", async () => {
+    server.liveDocument.mockResolvedValue({ id: "tdoc_1", approved_at: null, body: "" });
+    files.docVersionFile.mockResolvedValue({ id: "tdf_a", name: "flyer.png", path: "docs/tdoc_1/a-flyer.png", purpose: "image" });
+    server.setWorkingFile.mockResolvedValue({ id: "tdoc_1", body: "tdf_a", title: "" });
+    await svc.pickReviewVersion("t_1", "image", actor(), { file: "tdf_a" });
+    expect(autoName.nameReviewIfDefault).toHaveBeenCalledWith({ id: "tdoc_1", body: "tdf_a", title: "" }, { kind: "image", path: "docs/tdoc_1/a-flyer.png", fileName: "flyer.png" });
   });
 });
 

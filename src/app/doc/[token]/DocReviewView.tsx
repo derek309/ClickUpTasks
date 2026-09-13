@@ -22,7 +22,7 @@ import { RichTextEditor } from "@/components/cockpit/RichTextEditor";
 import { PageReviewFrame, deviceForWidth, type PageDevice } from "@/components/cockpit/PageReviewFrame";
 import { addDocFiles, uploadSharedFile } from "@/lib/docFileUpload";
 import { formatFileSize, isPreviewableImage } from "@/lib/uploadTypes";
-import { isFileKind, kindWhat, type ReviewKind } from "@/lib/reviewKinds";
+import { commentHint, isFileKind, kindWhat, type ReviewKind } from "@/lib/reviewKinds";
 import { cleanEdit, mergeEdits, type FrameMode, type PageEdit } from "@/lib/pageFrameProtocol";
 import type { PinAnchor } from "@/lib/reviewPins";
 import {
@@ -225,12 +225,7 @@ export default function DocReviewView({ token }: { token: string }) {
       } : d);
       // A reworded page is a new version: fetch it so the frame shows it.
       if (page && sentEdits) void load(false);
-      setNotice(kind === "approve" ? null : {
-        tone: "good",
-        text: versioned && !sentEdits
-          ? "Thanks! We sent your notes to the team. You can add more anytime."
-          : "Thanks! We got your changes. You can keep editing and send again anytime.",
-      });
+      setNotice(kind === "approve" ? null : { tone: "good", text: "Thanks! We sent your changes to the team. You can keep going and send again anytime." });
     } catch {
       setNotice({ tone: "warn", text: "We couldn't reach the server. Check your connection and try again." });
     } finally {
@@ -353,8 +348,9 @@ export default function DocReviewView({ token }: { token: string }) {
   const shownFileId = versioned && data ? (viewingImage && versionFiles.some((v) => v.fileId === viewingImage) ? viewingImage : data.body) : null;
   const onNewest = !!data && shownFileId === data.body;
   const noVersion = versioned && !!data && !data.body;
-  // Asking for changes needs something to change: a note from the client still open
-  // on the newest version (pins left on an earlier one do not count), or rewording.
+  // Sending needs something to send, the same on every kind: the client's own edits,
+  // or a comment of theirs still open (on an image or page, on the newest version;
+  // pins left on an earlier one do not count).
   const openNotes = commentsFor(data?.comments ?? [], data?.body ?? null).filter((c) => c.fromClient && !c.completedAt).length;
   const what = data ? kindWhat(data.kind) : "document";
 
@@ -383,13 +379,14 @@ export default function DocReviewView({ token }: { token: string }) {
     setPageFocus((f) => ({ id, n: (f?.n ?? 0) + 1 }));
   };
 
-  const intro = page
-    ? "Click any spot on the page to add a numbered comment or a file, or choose Edit text to change the wording. Then send your changes, or approve it as is."
-    : image
-      ? "Click any spot on the image to add a numbered comment or a file. Then ask for changes, or approve it as is."
-      : "Edit anything you like and send your changes, or approve it as is.";
-  const sendLabel = page ? (newestEdits.length ? "Send my changes" : "Ask for changes") : image ? "Ask for changes" : "Send my changes";
-  const canSend = page ? newestEdits.length > 0 || openNotes > 0 : image ? openNotes > 0 : dirty;
+  // One action card for every kind (Derek, 2026-09-13: image and HTML reviews "need
+  // to be the same as doc"); only how the client comments or changes it differs.
+  const how = page
+    ? "leave comments on any spot you click, change the wording with Edit text"
+    : image ? "leave comments on any spot you click" : "leave comments on any words you select, edit anything you like";
+  const intro = `Look it over, ${how}, then send your changes or approve it as is.`;
+  const canSend = dirty || openNotes > 0;
+  const sendHint = image ? "Leave a comment on the image first, then send it to us." : "Leave a comment or make a change first, then send it to us.";
 
   return (
     <div className="min-h-[100dvh] bg-background text-foreground">
@@ -455,7 +452,7 @@ export default function DocReviewView({ token }: { token: string }) {
                 2026-09-11). On a phone the sidebar stacks under the document. */}
             <div className="mt-6 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
               {versioned ? (
-                <article className="min-w-0 rounded-2xl border bg-surface p-4 shadow-sm sm:p-6">
+                <article className="min-w-0 rounded-2xl border bg-surface p-5 shadow-sm sm:p-8">
                   {versionOptions.length > 1 && (
                     <div className="mb-3">
                       <ImageVersionPicker options={versionOptions} value={shownFileId} onChange={(id) => { setViewingImage(id); setPinDraft(null); }} />
@@ -469,14 +466,14 @@ export default function DocReviewView({ token }: { token: string }) {
                     <ImagePinBoard src={fileHref(shownFileId)} alt={versionFiles.find((v) => v.fileId === shownFileId)?.name ?? data.title}
                       comments={data.comments ?? []} fileId={shownFileId} pending={pinDraft} activeId={focusedComment} color={NAVY}
                       onPinClick={setFocusedComment}
-                      onPlace={locked || !onNewest ? undefined : (spot) => setPinDraft({ fileId: shownFileId, ...spot, anchor: null, number: nextPin(data.comments ?? [], shownFileId) })} />
+                      onPlace={data.closed || !onNewest ? undefined : (spot) => setPinDraft({ fileId: shownFileId, ...spot, anchor: null, number: nextPin(data.comments ?? [], shownFileId) })} />
                   )}
                   {shownFileId && page && (
                     <PageReviewFrame
                       frameUrl={pageFrame?.fileId === shownFileId ? pageFrame.url : null}
                       onReload={() => setFrameNonce((n) => n + 1)}
                       mode={pageMode} onMode={setPageMode} device={pageDevice} onDevice={setPageDevice}
-                      canEdit={!locked && onNewest} canComment={!locked && onNewest}
+                      canEdit={!locked && onNewest} canComment={!data.closed && onNewest} color={NAVY}
                       pins={(data.comments ?? []).filter((c) => c.pin && c.pin.fileId === shownFileId).map((c) => ({
                         id: c.id, number: c.pin!.number, x: c.pin!.x, y: c.pin!.y, anchor: c.pin!.anchor ?? null, done: !!c.completedAt, active: c.id === focusedComment,
                       }))}
@@ -508,7 +505,7 @@ export default function DocReviewView({ token }: { token: string }) {
                       <button onClick={() => void publish("submit")} disabled={!canSend || busy !== null}
                         className="min-h-[52px] flex-[1.3] whitespace-nowrap rounded-xl border-2 px-2 text-[17px] font-semibold transition disabled:opacity-40"
                         style={{ borderColor: NAVY, color: NAVY }}>
-                        {busy === "send" ? "Sending…" : sendLabel}
+                        {busy === "send" ? "Sending…" : "Send my changes"}
                       </button>
                       <button onClick={approve} disabled={busy !== null}
                         className="min-h-[52px] flex-1 rounded-xl px-4 text-[17px] font-bold text-white transition disabled:opacity-60"
@@ -522,9 +519,7 @@ export default function DocReviewView({ token }: { token: string }) {
                     {page && newestEdits.length > 0 && (
                       <p className="mt-1 text-[16px] text-muted">{newestEdits.length === 1 ? "1 text change" : `${newestEdits.length} text changes`} not sent yet.</p>
                     )}
-                    {versioned && !canSend && (
-                      <p className="mt-2 text-[16px] text-muted">{page ? "Leave a note or change some text first." : "Leave a note on the image first, then ask for changes."}</p>
-                    )}
+                    {!canSend && <p className="mt-2 text-[16px] text-muted">{sendHint}</p>}
                   </div>
                 )}
 
@@ -564,7 +559,7 @@ export default function DocReviewView({ token }: { token: string }) {
                   onDelete={removeComment}
                   quote={versioned ? null : quoteDraft} pinDraft={versioned ? pinDraft?.number ?? null : null}
                   onClearQuote={() => { setQuoteDraft(null); setPinDraft(null); }}
-                  placeholder={versioned ? `Write a comment, or click the ${what} to drop a numbered pin…` : undefined}
+                  placeholder={commentHint(data.kind)}
                   onAttach={locked ? undefined : attachFile} renderAttachment={renderAttachment}
                   focusedId={focusedComment} onQuoteClick={focusComment} />
               </aside>
