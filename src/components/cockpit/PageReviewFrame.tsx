@@ -8,15 +8,17 @@
 // Everything the frame sends is checked by readFrameMessage before it is used.
 // What goes in is only ids, numbers, spots and text the page already holds. The
 // toolbar picks the mode (Comment, Edit text, Try the page) and the width the page
-// is laid out at (Desktop 1280px, Mobile 390px); the page is scaled to fit and
-// scrolls inside the frame. The other side is public/page-bridge.js.
+// is laid out at (Desktop 1280px, Mobile 390px); the frame opens up to the page's
+// height and zooms to its content. The other side is public/page-bridge.js.
 import { useEffect, useRef, useState } from "react";
-import { readFrameMessage, type FrameMode, type FramePin, type PageEdit } from "@/lib/pageFrameProtocol";
+import { readFrameMessage, type ContentSpan, type FrameMode, type FramePin, type PageEdit } from "@/lib/pageFrameProtocol";
 import type { PinAnchor } from "@/lib/reviewPins";
 
+// maxZoom: how far a page with narrow content (an email) is zoomed in to fill the
+// box. A phone view stays at its own size.
 export const PAGE_DEVICES = {
-  desktop: { label: "Desktop", width: 1280, height: 860 },
-  mobile: { label: "Mobile", width: 390, height: 844 },
+  desktop: { label: "Desktop", width: 1280, height: 860, maxZoom: 1.5 },
+  mobile: { label: "Mobile", width: 390, height: 844, maxZoom: 1 },
 } as const;
 export type PageDevice = keyof typeof PAGE_DEVICES;
 /** The device a pin was dropped at, to show the page at that width before focusing it. */
@@ -39,6 +41,9 @@ const MIN_FRAME_HEIGHT = 480;
 const MAX_FRAME_HEIGHT = 20_000;
 const GROWTH_SPURTS = 6;
 const SPURT_MS = 1500;
+// The page's own background kept beside its content when zoomed in on it.
+const CONTENT_MARGIN = 24;
+const sameSpan = (a: ContentSpan | null, b: ContentSpan | null) => a === b || (!!a && !!b && a.left === b.left && a.right === b.right);
 
 export function PageReviewFrame({ frameUrl, onReload, mode, onMode, device, onDevice, canEdit, canComment, pins, pending, focus, edits, onPlace, onPinClick, onEdit }: {
   /** The frame's address, or null while it is being fetched. */
@@ -70,7 +75,7 @@ export function PageReviewFrame({ frameUrl, onReload, mode, onMode, device, onDe
   const loads = useRef<{ url: string | null; n: number }>({ url: null, n: 0 });
   const noticeTimer = useRef<number | null>(null);
   // The page's own height as the frame last reported it, and how fast it has been growing.
-  const [measured, setMeasured] = useState<{ url: string | null; height: number } | null>(null);
+  const [measured, setMeasured] = useState<{ url: string | null; height: number; span: ContentSpan | null } | null>(null);
   const growth = useRef({ url: null as string | null, height: 0, spurts: 0, at: 0, frozen: false });
   // A spot marked in the scaled frame for scrolling a pin into view, and the scale to place it with.
   const pinMark = useRef<HTMLDivElement>(null);
@@ -108,14 +113,14 @@ export function PageReviewFrame({ frameUrl, onReload, mode, onMode, device, onDe
       } else if (message.type === "size") {
         const now = Date.now();
         const g = growth.current.url === l.frameUrl ? growth.current : (growth.current = { url: l.frameUrl, height: 0, spurts: 0, at: 0, frozen: false });
-        if (g.frozen) return;
-        if (message.height > g.height) {
+        if (!g.frozen && message.height > g.height) {
           g.spurts = g.height && now - g.at < SPURT_MS ? g.spurts + 1 : 1;
           g.at = now;
-          if (g.spurts > GROWTH_SPURTS) { g.frozen = true; return; }
+          if (g.spurts > GROWTH_SPURTS) g.frozen = true;
         }
-        g.height = message.height;
-        setMeasured({ url: l.frameUrl, height: message.height });
+        if (!g.frozen) g.height = message.height;
+        const next = { url: l.frameUrl, height: g.height, span: message.span };
+        setMeasured((m) => (m && m.url === next.url && m.height === next.height && sameSpan(m.span, next.span) ? m : next));
       } else if (message.type === "focus-at") {
         const mark = pinMark.current;
         if (!mark) return;
@@ -155,9 +160,24 @@ export function PageReviewFrame({ frameUrl, onReload, mode, onMode, device, onDe
   };
 
   const size = PAGE_DEVICES[device];
-  const scale = available ? Math.min(1, available / size.width) : 1;
+  const report = measured && measured.url === frameUrl ? measured : null;
+  // The whole page scaled to fit, or, when its content is narrower (an email in a
+  // wide page), zoomed in on the content and centred on it.
+  const fit = available ? Math.min(1, available / size.width) : 1;
+  let scale = fit;
+  let shift = 0;
+  if (report?.span && available) {
+    const left = Math.max(0, report.span.left - CONTENT_MARGIN);
+    const right = Math.min(size.width, report.span.right + CONTENT_MARGIN);
+    const zoom = right > left ? Math.min(size.maxZoom, available / (right - left)) : fit;
+    if (zoom > fit * 1.05) {
+      scale = zoom;
+      const shown = Math.min(available, size.width * scale);
+      shift = Math.min(0, Math.max(shown - size.width * scale, (shown - (left + right) * scale) / 2));
+    }
+  }
   useEffect(() => { scaleRef.current = scale; }, [scale]);
-  const pageHeight = measured && measured.url === frameUrl ? measured.height : size.height;
+  const pageHeight = report ? report.height : size.height;
   const frameHeight = Math.min(MAX_FRAME_HEIGHT, Math.max(MIN_FRAME_HEIGHT, pageHeight));
   const modes = MODES.filter((m) => (m.mode === "edit" ? canEdit : m.mode === "comment" ? canComment : true));
   const current = modes.find((m) => m.mode === mode) ?? modes[modes.length - 1];
@@ -179,11 +199,11 @@ export function PageReviewFrame({ frameUrl, onReload, mode, onMode, device, onDe
         </div>
       </div>
       <p className="mb-2 text-[16px] text-muted" aria-live="polite">{notice ?? current.hint}</p>
-      <div className="relative mx-auto overflow-hidden rounded-lg border bg-white shadow-sm" style={{ width: size.width * scale, height: frameHeight * scale }}>
+      <div className="relative mx-auto overflow-hidden rounded-lg border bg-white shadow-sm" style={{ width: Math.min(available || Infinity, size.width * scale), height: frameHeight * scale }}>
         <div ref={pinMark} aria-hidden className="pointer-events-none absolute left-0 h-px w-px" style={{ top: 0 }} />
         {frameUrl ? (
           <iframe key={frameUrl} ref={frame} src={frameUrl} title="The page under review" sandbox="allow-scripts" referrerPolicy="no-referrer" onLoad={onLoad}
-            style={{ width: size.width, height: frameHeight, border: 0, transform: `scale(${scale})`, transformOrigin: "0 0", display: "block" }} />
+            style={{ width: size.width, height: frameHeight, border: 0, transform: `translateX(${shift}px) scale(${scale})`, transformOrigin: "0 0", display: "block" }} />
         ) : (
           <p className="p-6 text-[16px] text-muted">Loading the page…</p>
         )}

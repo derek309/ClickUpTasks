@@ -123,6 +123,15 @@ describe("page bridge", () => {
     expect(document.querySelector("button")!.textContent).toBe("Buy");
   });
 
+  it("reports the page's height and where its content sits across it", async () => {
+    for (const el of document.body.querySelectorAll("*")) box(el, { left: 340, top: 0, width: 600, height: 20 });
+    box(document.querySelector("h1")!, { left: 300, top: 0, width: 680, height: 40 });
+    Object.defineProperty(document.body, "scrollHeight", { value: 1200, configurable: true });
+    window.dispatchEvent(new Event("resize"));
+    await new Promise((r) => setTimeout(r, 450));
+    expect(last("size")).toEqual({ cul: 1, type: "size", height: 1200, left: 300, right: 980 });
+  });
+
   it("does nothing at all when opened on its own, outside a frame", () => {
     const spy = vi.fn();
     const script = readFileSync(join(process.cwd(), "public/page-bridge.js"), "utf8");

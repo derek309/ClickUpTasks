@@ -12,7 +12,8 @@ describe("readFrameMessage", () => {
     expect(from({ cul: 1, type: "place", x: 0.2, y: 0.9 })).toEqual({ type: "place", x: 0.2, y: 0.9, anchor: null });
     expect(from({ cul: 1, type: "pin-click", id: "tdm_0f8fad5b-d9cb-469f-a165-70867728950e" })).toMatchObject({ type: "pin-click" });
     expect(from({ cul: 1, type: "edit", edit: { node: 3, i: 0, before: "Hello", after: "Hi" } })).toMatchObject({ type: "edit" });
-    expect(from({ cul: 1, type: "size", height: 4210.4 })).toEqual({ type: "size", height: 4211 });
+    expect(from({ cul: 1, type: "size", height: 4210.4 })).toEqual({ type: "size", height: 4211, span: null });
+    expect(from({ cul: 1, type: "size", height: 900, left: 340, right: 940 })).toEqual({ type: "size", height: 900, span: { left: 340, right: 940 } });
     expect(from({ cul: 1, type: "focus-at", y: 1800 })).toEqual({ type: "focus-at", y: 1800 });
   });
 
@@ -22,6 +23,9 @@ describe("readFrameMessage", () => {
     ["a height too tall to be a page", { cul: 1, type: "size", height: 100_001 }],
     ["a height that is not a number", { cul: 1, type: "size", height: "900" }],
     ["a spot above the page", { cul: 1, type: "focus-at", y: -1 }],
+    ["content that ends before it starts", { cul: 1, type: "size", height: 900, left: 940, right: 340 }],
+    ["content with only one edge", { cul: 1, type: "size", height: 900, left: 340 }],
+    ["content left of the page", { cul: 1, type: "size", height: 900, left: -20, right: 600 }],
   ])("refuses %s", (_label, data) => {
     expect(from(data)).toBeNull();
   });

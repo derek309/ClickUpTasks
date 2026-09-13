@@ -69,25 +69,67 @@
     return layer;
   };
 
+  // Where the page's content sits across it: the boxes of elements holding text,
+  // images or controls, kept inside the page. A 600px email inside a 1280px page
+  // is then zoomed to fill the frame's box (Derek, 2026-09-12: "the html needs to
+  // use up all the space that's there in the box").
+  const CONTENT = "img,svg,video,canvas,picture,iframe,input,button,select,textarea";
+  const holdsContent = (el) => {
+    if (el.matches(CONTENT)) return true;
+    for (let c = el.firstChild; c; c = c.nextSibling) if (c.nodeType === Node.TEXT_NODE && !blank(c.nodeValue)) return true;
+    return false;
+  };
+  // A card or band narrower than the page (the email's white box) counts by its
+  // own edge, so zooming never cuts it off; a page wide background does not.
+  const painted = (el) => {
+    const s = styleOf(el);
+    return s.backgroundImage !== "none" || parseFloat(s.borderLeftWidth) > 0
+      || (!!s.backgroundColor && s.backgroundColor !== "transparent" && !/,\s*0\)$/.test(s.backgroundColor));
+  };
+  const contentSpan = (b) => {
+    const width = Math.max(pageSize().w, window.innerWidth);
+    let left = Infinity;
+    let right = -Infinity;
+    for (const el of b.querySelectorAll("*")) {
+      const r = el.getBoundingClientRect();
+      if (!holdsContent(el) && !(r.width < width * 0.9 && painted(el))) continue;
+      const l = Math.max(0, r.left + window.scrollX);
+      const rr = Math.min(width, r.right + window.scrollX);
+      if (r.width <= 0 || r.height <= 0 || rr <= l) continue;
+      left = Math.min(left, l);
+      right = Math.max(right, rr);
+    }
+    return right - left >= 1 ? { left: Math.floor(left), right: Math.ceil(right) } : null;
+  };
+
   // The page's full height, measured from the body so it can shrink as well as
   // grow, so the frame opens up to show all of it (Derek, 2026-09-12: "a long
-  // email with too much scroll").
-  let lastHeight = 0;
+  // email with too much scroll"), and where its content sits across it.
+  let lastSize = "";
   const reportSize = () => {
     const b = document.body;
     if (!b) return;
     const style = styleOf(b);
     const height = Math.ceil(Math.max(b.scrollHeight, b.offsetHeight + (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0)));
-    if (height > 0 && Math.abs(height - lastHeight) > 1) {
-      lastHeight = height;
-      post({ type: "size", height });
+    const span = contentSpan(b);
+    const key = `${height} ${span ? `${span.left} ${span.right}` : ""}`;
+    if (height > 0 && key !== lastSize) {
+      lastSize = key;
+      post({ type: "size", height, ...span });
     }
+  };
+  // Measuring reads every element, so it runs at most every 400ms, and not for scrolling.
+  const later = window.setTimeout.bind(window);
+  let sizeTimer = 0;
+  let measuredAt = 0;
+  const measureSoon = () => {
+    if (sizeTimer) return;
+    sizeTimer = later(() => { sizeTimer = 0; measuredAt = Date.now(); reportSize(); }, Math.max(0, measuredAt + 400 - Date.now()));
   };
 
   let scheduled = false;
   const draw = () => {
     scheduled = false;
-    reportSize();
     const l = ensureLayer();
     l.replaceChildren();
     for (const pin of pins) {
@@ -107,7 +149,8 @@
       l.appendChild(m);
     }
   };
-  const redraw = () => {
+  const redraw = (measure) => {
+    if (measure !== false) measureSoon();
     if (scheduled) return;
     scheduled = true;
     nextFrame(draw);
@@ -294,7 +337,7 @@
   };
   window.addEventListener("resize", redraw);
   window.addEventListener("load", redraw);
-  window.addEventListener("scroll", redraw, true);
+  window.addEventListener("scroll", () => redraw(false), true);
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", observe);
   else observe();
 })();
