@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { requireApiToken } from "@/lib/serverAuth";
+import { INBOX_NOTIFICATIONS } from "@/lib/extensionInbox";
 
-// Marks the caller's own message notifications read from the Inboxes Mac app,
-// the same flag opening a task sets in the web app (markTaskNotifsRead in
-// Cockpit.tsx). { task_id } covers every message notification on that task,
+// Marks the caller's own inbox notifications (messages, and what a client did)
+// read from the Inboxes Mac app, the same flag opening a task sets in the web
+// app (markTaskNotifsRead in Cockpit.tsx). { task_id } covers every one on that task,
 // { id } one notification (a Journal mention has no task). read: false puts
 // them back, for Inboxes' undo. Only rows addressed to the caller change.
 export async function POST(req: NextRequest) {
@@ -20,7 +21,7 @@ export async function POST(req: NextRequest) {
   const read = body.read !== false;
 
   const scope = supabaseAdmin.from("notifications").update({ read })
-    .eq("recipient_id", caller.memberId).eq("kind", "message");
+    .eq("recipient_id", caller.memberId).or(INBOX_NOTIFICATIONS);
   const { error } = await (id ? scope.eq("id", id) : scope.eq("task_id", taskId!));
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ ok: true });

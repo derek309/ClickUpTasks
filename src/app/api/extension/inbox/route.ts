@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { requireApiToken } from "@/lib/serverAuth";
-import { inboxKind, latestCommentBy } from "@/lib/extensionInbox";
+import { INBOX_NOTIFICATIONS, inboxKind, latestCommentBy } from "@/lib/extensionInbox";
 
 // The Inboxes Mac app's ClickUpTasks inbox: the caller's own unread mentions,
-// comments on their tasks, and client portal chat messages, newest first, each
-// with enough to show a row (task, client, who, and the words themselves).
-// notifications rows are addressed to one recipient, so filtering on the
-// caller's member id is the whole visibility check. See extensionInbox.ts for
-// why inbound email and SMS notifications are left out.
+// comments on their tasks, client portal chat messages and client reviews,
+// newest first, each with enough to show a row (task, client, who, and the words
+// themselves). notifications rows are addressed to one recipient, so filtering
+// on the caller's member id is the whole visibility check. See extensionInbox.ts
+// for why inbound email and SMS notifications are left out.
 export async function GET(req: NextRequest) {
   if (!adminConfigured) return NextResponse.json({ error: "Service role key not configured." }, { status: 501 });
   const caller = await requireApiToken(req);
@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
   const { data: rows, error } = await supabaseAdmin
     .from("notifications")
     .select("id, text, task_id, client_id, project_id, actor_id, at, created_at")
-    .eq("recipient_id", caller.memberId).eq("read", false).eq("kind", "message")
+    .eq("recipient_id", caller.memberId).eq("read", false).or(INBOX_NOTIFICATIONS)
     .order("created_at", { ascending: false }).limit(150);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
@@ -52,9 +52,13 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     items: wanted.map(({ n, kind }) => {
       const task = n.task_id ? taskById.get(n.task_id) : undefined;
+      // A client's review notes are event lines under the author "client"
+      // (appendClientEvent in taskDocumentServer.ts).
       const excerpt = kind === "client_chat"
         ? (n.task_id ? latestChat.get(n.task_id) ?? null : null)
-        : latestCommentBy(task?.comments, n.actor_id);
+        : kind === "client_review"
+          ? latestCommentBy(task?.comments, "client", true)
+          : latestCommentBy(task?.comments, n.actor_id);
       return {
         id: n.id, kind, text: n.text, taskId: n.task_id, clientId: n.client_id, projectId: n.project_id,
         at: n.at ?? n.created_at, taskTitle: task?.title ?? null,

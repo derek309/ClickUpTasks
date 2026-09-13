@@ -106,6 +106,7 @@ import { sortTasks as sortTasksBy } from "@/lib/taskSort";
 import { URGENCY_TIER, tierForDate, urgencyDateOf, urgencyKeyFrom } from "@/lib/urgency";
 import { clientContactIds, findDuplicateTrackedClient as findDuplicateClient } from "@/lib/clientDedup";
 import { type NavState, buildSearch, parseSearch, NAV_KEY_VIEWS, LONG_TITLE_THRESHOLD, TEAM_CHAT_LINK } from "@/lib/navState";
+import { isInboxNotification } from "@/lib/extensionInbox";
 
 // A dumped task's description: what the AI summarised, then the client's own
 // wording underneath as a blockquote so it stays visibly theirs. The verbatim
@@ -1566,9 +1567,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Notifications otherwise only get marked read via the bell dropdown —
   // since the whole point of the "Needs your reply" boost is that
   // notifications aren't reliably checked, actually opening the task itself
-  // should clear it too.
+  // should clear it too. A client's review or status change on the task counts,
+  // the same set the Inboxes Mac app shows and clears.
   const markTaskNotifsRead = (taskId: string) => {
-    const ids = notifications.filter((n) => n.taskId === taskId && n.recipientId === me.id && n.kind === "message" && !n.read).map((n) => n.id);
+    const ids = notifications.filter((n) => n.taskId === taskId && n.recipientId === me.id && isInboxNotification(n) && !n.read).map((n) => n.id);
     if (!ids.length) return;
     setNotifications((ns) => ns.map((n) => (ids.includes(n.id) ? { ...n, read: true } : n)));
     ids.forEach((id) => markNotifReadDb(id));
