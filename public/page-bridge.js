@@ -16,6 +16,7 @@
   const parentWindow = window.parent;
   // Taken now, before the page's own scripts run, so a page that replaces it cannot stop pins drawing.
   const nextFrame = window.requestAnimationFrame.bind(window);
+  const styleOf = window.getComputedStyle.bind(window);
   const post = (message) => parentWindow.postMessage({ cul: 1, ...message }, "*");
   const share = (v) => Math.round(Math.min(1, Math.max(0, v)) * 10000) / 10000;
   const blank = (s) => !s || !s.replace(/\s+/g, "");
@@ -68,9 +69,25 @@
     return layer;
   };
 
+  // The page's full height, measured from the body so it can shrink as well as
+  // grow, so the frame opens up to show all of it (Derek, 2026-09-12: "a long
+  // email with too much scroll").
+  let lastHeight = 0;
+  const reportSize = () => {
+    const b = document.body;
+    if (!b) return;
+    const style = styleOf(b);
+    const height = Math.ceil(Math.max(b.scrollHeight, b.offsetHeight + (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0)));
+    if (height > 0 && Math.abs(height - lastHeight) > 1) {
+      lastHeight = height;
+      post({ type: "size", height });
+    }
+  };
+
   let scheduled = false;
   const draw = () => {
     scheduled = false;
+    reportSize();
     const l = ensureLayer();
     l.replaceChildren();
     for (const pin of pins) {
@@ -257,6 +274,9 @@
       if (!pin) return;
       activeId = pin.id;
       const s = spot(pin);
+      // The frame is usually opened up to the page's full height, so the window
+      // around scrolls to the pin; inside, the page scrolls too when it is taller.
+      post({ type: "focus-at", y: Math.max(0, s.y) });
       window.scrollTo({ left: Math.max(0, s.x - window.innerWidth / 2), top: Math.max(0, s.y - window.innerHeight / 2), behavior: "smooth" });
       redraw();
     } else if (d.type === "edits" && Array.isArray(d.edits)) replay(d.edits);

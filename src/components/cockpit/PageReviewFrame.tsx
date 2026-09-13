@@ -30,6 +30,16 @@ const MODES: { mode: FrameMode; label: string; hint: string }[] = [
 
 export type PagePlace = { x: number; y: number; anchor: PinAnchor | null };
 
+// The frame opens up to the page's full height instead of scrolling inside a
+// fixed box (Derek, 2026-09-12: "a long email with too much scroll can we make it
+// frame open up"), between these heights. A page whose height follows the frame's
+// own (a section set to the full screen height) would grow for ever, so after a
+// run of quick growth spurts the frame stops following it and scrolls inside.
+const MIN_FRAME_HEIGHT = 480;
+const MAX_FRAME_HEIGHT = 20_000;
+const GROWTH_SPURTS = 6;
+const SPURT_MS = 1500;
+
 export function PageReviewFrame({ frameUrl, onReload, mode, onMode, device, onDevice, canEdit, canComment, pins, pending, focus, edits, onPlace, onPinClick, onEdit }: {
   /** The frame's address, or null while it is being fetched. */
   frameUrl: string | null;
@@ -59,6 +69,12 @@ export function PageReviewFrame({ frameUrl, onReload, mode, onMode, device, onDe
   const ready = !!frameUrl && readyUrl === frameUrl;
   const loads = useRef<{ url: string | null; n: number }>({ url: null, n: 0 });
   const noticeTimer = useRef<number | null>(null);
+  // The page's own height as the frame last reported it, and how fast it has been growing.
+  const [measured, setMeasured] = useState<{ url: string | null; height: number } | null>(null);
+  const growth = useRef({ url: null as string | null, height: 0, spurts: 0, at: 0, frozen: false });
+  // A spot marked in the scaled frame for scrolling a pin into view, and the scale to place it with.
+  const pinMark = useRef<HTMLDivElement>(null);
+  const scaleRef = useRef(1);
 
   const say = (text: string) => {
     setNotice(text);
@@ -89,6 +105,22 @@ export function PageReviewFrame({ frameUrl, onReload, mode, onMode, device, onDe
         if (l.canEdit) l.onEdit(message.edit);
       } else if (message.type === "not-editable") {
         say("This text comes from the page code. Leave a comment on it instead.");
+      } else if (message.type === "size") {
+        const now = Date.now();
+        const g = growth.current.url === l.frameUrl ? growth.current : (growth.current = { url: l.frameUrl, height: 0, spurts: 0, at: 0, frozen: false });
+        if (g.frozen) return;
+        if (message.height > g.height) {
+          g.spurts = g.height && now - g.at < SPURT_MS ? g.spurts + 1 : 1;
+          g.at = now;
+          if (g.spurts > GROWTH_SPURTS) { g.frozen = true; return; }
+        }
+        g.height = message.height;
+        setMeasured({ url: l.frameUrl, height: message.height });
+      } else if (message.type === "focus-at") {
+        const mark = pinMark.current;
+        if (!mark) return;
+        mark.style.top = `${message.y * scaleRef.current}px`;
+        mark.scrollIntoView({ block: "center", behavior: "smooth" });
       }
     };
     window.addEventListener("message", onMessage);
@@ -124,6 +156,9 @@ export function PageReviewFrame({ frameUrl, onReload, mode, onMode, device, onDe
 
   const size = PAGE_DEVICES[device];
   const scale = available ? Math.min(1, available / size.width) : 1;
+  useEffect(() => { scaleRef.current = scale; }, [scale]);
+  const pageHeight = measured && measured.url === frameUrl ? measured.height : size.height;
+  const frameHeight = Math.min(MAX_FRAME_HEIGHT, Math.max(MIN_FRAME_HEIGHT, pageHeight));
   const modes = MODES.filter((m) => (m.mode === "edit" ? canEdit : m.mode === "comment" ? canComment : true));
   const current = modes.find((m) => m.mode === mode) ?? modes[modes.length - 1];
   const segment = (active: boolean) =>
@@ -144,10 +179,11 @@ export function PageReviewFrame({ frameUrl, onReload, mode, onMode, device, onDe
         </div>
       </div>
       <p className="mb-2 text-[16px] text-muted" aria-live="polite">{notice ?? current.hint}</p>
-      <div className="mx-auto overflow-hidden rounded-lg border bg-white shadow-sm" style={{ width: size.width * scale, height: size.height * scale }}>
+      <div className="relative mx-auto overflow-hidden rounded-lg border bg-white shadow-sm" style={{ width: size.width * scale, height: frameHeight * scale }}>
+        <div ref={pinMark} aria-hidden className="pointer-events-none absolute left-0 h-px w-px" style={{ top: 0 }} />
         {frameUrl ? (
           <iframe key={frameUrl} ref={frame} src={frameUrl} title="The page under review" sandbox="allow-scripts" referrerPolicy="no-referrer" onLoad={onLoad}
-            style={{ width: size.width, height: size.height, border: 0, transform: `scale(${scale})`, transformOrigin: "0 0", display: "block" }} />
+            style={{ width: size.width, height: frameHeight, border: 0, transform: `scale(${scale})`, transformOrigin: "0 0", display: "block" }} />
         ) : (
           <p className="p-6 text-[16px] text-muted">Loading the page…</p>
         )}

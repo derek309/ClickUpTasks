@@ -15,7 +15,14 @@ export type FrameMessage =
   | { type: "place"; x: number; y: number; anchor: PinAnchor | null }
   | { type: "pin-click"; id: string }
   | { type: "edit"; edit: PageEdit }
-  | { type: "not-editable" };
+  | { type: "not-editable" }
+  /** The page's full height, so the frame opens up to show all of it. */
+  | { type: "size"; height: number }
+  /** Where a pin asked for with "focus" sits, down the page, so the window around scrolls to it. */
+  | { type: "focus-at"; y: number };
+
+/** The tallest page height the frame listens to. */
+export const MAX_REPORTED_HEIGHT = 100_000;
 
 export type FrameMode = "comment" | "edit" | "browse";
 export type FramePin = { id: string; number: number; x: number; y: number; anchor: PinAnchor | null; done: boolean; active: boolean };
@@ -68,6 +75,11 @@ export function readFrameMessage(event: { source: unknown; data: unknown }, fram
       const edit = cleanEdit(d.edit);
       return edit ? { type: "edit", edit } : null;
     }
+    case "size":
+      return typeof d.height === "number" && Number.isFinite(d.height) && d.height >= 1 && d.height <= MAX_REPORTED_HEIGHT
+        ? { type: "size", height: Math.ceil(d.height) } : null;
+    case "focus-at":
+      return typeof d.y === "number" && Number.isFinite(d.y) && d.y >= 0 && d.y <= MAX_REPORTED_HEIGHT ? { type: "focus-at", y: d.y } : null;
     default:
       return null;
   }
