@@ -37,6 +37,7 @@ import { formatFileSize, isPreviewableImage } from "@/lib/uploadTypes";
 import { RichTextEditor } from "./RichTextEditor";
 import { useDebouncedCommit } from "./useDebouncedCommit";
 import { PageReviewFrame, deviceForWidth, type PageDevice } from "./PageReviewFrame";
+import { ActionMenu } from "./ActionMenu";
 import {
   CommentThread, FileDropLine, ImageLightbox, ImagePinBoard, ImageThumbGrid, ImageVersionPicker, WorkItemBadge, WorkItemRow, WorkItemWindow,
   commentsFor, nextPin, quietButton as quiet, type PreviewImage,
@@ -794,13 +795,37 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
         <button onClick={() => void pastePage()} disabled={adding || !pasteDraft.trim()}
           className="rounded-lg bg-accent px-4 py-1.5 text-[16px] font-semibold text-white disabled:opacity-50">{adding ? "Adding…" : "Use this code"}</button>
         <button onClick={() => versionInput.current?.click()} disabled={adding} className={quiet}>Upload an .html file</button>
+        {doc.body && <button onClick={() => { setPasteOpen(false); setPasteDraft(""); }} className={quiet}>Cancel</button>}
         <span className="text-[16px] text-muted">Up to 2 MB. Link images by web address.</span>
       </div>
     </div>
   );
 
+  // One toolbar instead of a row of five buttons (Derek, 2026-09-13: "a little
+  // messy"): New version and a More menu sit beside Desktop and Mobile, with
+  // Remove this version one click in.
+  const moreActions = shownFileId && (
+    <ActionMenu label="⋯" title="More actions" items={[
+      page && { label: "Copy code", onClick: () => void copyCode() },
+      page && { label: "Download", onClick: () => void downloadCode() },
+      !locked && { label: busy === "remove" ? "Removing…" : "Remove this version", danger: true, disabled: adding || busy !== null, onClick: () => void removeVersion(shownFileId, removeMessage) },
+    ]} />
+  );
+  const pageActions = (
+    <>
+      {!locked && (
+        <ActionMenu label={adding ? "Uploading…" : "New version ▾"} title="Add a new version of the page" items={[
+          { label: "Paste code", onClick: () => setPasteOpen(true) },
+          { label: "Upload an .html file", disabled: adding, onClick: () => versionInput.current?.click() },
+        ]} />
+      )}
+      {moreActions}
+    </>
+  );
+
   const pageFrameView = shownFileId && (
     <PageReviewFrame
+      actions={pageActions}
       frameUrl={pageFrame?.fileId === shownFileId ? pageFrame.url : null}
       onReload={() => setFrameNonce((n) => n + 1)}
       mode={pageMode} onMode={setPageMode} device={pageDevice} onDevice={setPageDevice}
@@ -827,31 +852,19 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
         )
       ) : (
         <>
-          <div className="mb-3 flex flex-wrap items-center gap-3">
-            <div className="min-w-0 flex-1">
-              <ImageVersionPicker options={versionOptions} value={shownFileId} onChange={(id) => { setViewingVersion(id); setPinDraft(null); }} />
+          {(!page || versionOptions.length > 1) && (
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+              <div className="min-w-0 flex-1">
+                <ImageVersionPicker options={versionOptions} value={shownFileId} onChange={(id) => { setViewingVersion(id); setPinDraft(null); }} />
+              </div>
+              {!page && !locked && (
+                <button onClick={() => versionInput.current?.click()} disabled={adding} className={quiet}>
+                  {adding ? "Uploading…" : "Upload new version"}
+                </button>
+              )}
+              {!page && moreActions}
             </div>
-            {page && shownFileId && (
-              <>
-                <button onClick={() => void copyCode()} className={quiet}>Copy code</button>
-                <button onClick={() => void downloadCode()} className={quiet}>Download</button>
-              </>
-            )}
-            {!locked && shownFileId && (
-              <button onClick={() => void removeVersion(shownFileId, removeMessage)} disabled={adding || busy !== null}
-                className={`${quiet} hover:text-danger`}>
-                {busy === "remove" ? "Removing…" : "Remove this version"}
-              </button>
-            )}
-            {!locked && page && (
-              <button onClick={() => setPasteOpen((o) => !o)} aria-expanded={pasteOpen} className={quiet}>Paste new version</button>
-            )}
-            {!locked && (
-              <button onClick={() => versionInput.current?.click()} disabled={adding} className={quiet}>
-                {adding ? "Uploading…" : "Upload new version"}
-              </button>
-            )}
-          </div>
+          )}
           {page && pasteOpen && !locked && pasteBox}
           {page ? pageFrameView : shownUrl ? (
             <ImagePinBoard src={shownUrl} alt={shownFile?.name ?? name} comments={comments} fileId={shownFileId}

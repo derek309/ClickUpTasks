@@ -10,7 +10,7 @@
 // toolbar picks the mode (Comment, Edit text, Try the page) and the width the page
 // is laid out at (Desktop 1280px, Mobile 390px); the frame opens up to the page's
 // height and zooms to its content. The other side is public/page-bridge.js.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { readFrameMessage, type ContentSpan, type FrameMode, type FramePin, type PageEdit } from "@/lib/pageFrameProtocol";
 import type { PinAnchor } from "@/lib/reviewPins";
 
@@ -45,7 +45,9 @@ const SPURT_MS = 1500;
 const CONTENT_MARGIN = 24;
 const sameSpan = (a: ContentSpan | null, b: ContentSpan | null) => a === b || (!!a && !!b && a.left === b.left && a.right === b.right);
 
-export function PageReviewFrame({ frameUrl, onReload, mode, onMode, device, onDevice, canEdit, canComment, pins, pending, focus, edits, onPlace, onPinClick, onEdit }: {
+export function PageReviewFrame({ frameUrl, onReload, mode, onMode, device, onDevice, canEdit, canComment, pins, pending, focus, edits, onPlace, onPinClick, onEdit, actions }: {
+  /** Buttons at the right end of the toolbar (the team's New version and More menus). */
+  actions?: ReactNode;
   /** The frame's address, or null while it is being fetched. */
   frameUrl: string | null;
   /** Fetch a fresh frame address (the old one expired or the page navigated away). */
@@ -192,10 +194,13 @@ export function PageReviewFrame({ frameUrl, onReload, mode, onMode, device, onDe
             <button key={m.mode} role="radio" aria-checked={current.mode === m.mode} onClick={() => onMode(m.mode)} className={segment(current.mode === m.mode)}>{m.label}</button>
           ))}
         </div>
-        <div role="radiogroup" aria-label="Page width" className="ml-auto flex gap-1 rounded-full border bg-surface p-1">
-          {(Object.keys(PAGE_DEVICES) as PageDevice[]).map((d) => (
-            <button key={d} role="radio" aria-checked={device === d} onClick={() => onDevice(d)} className={segment(device === d)}>{PAGE_DEVICES[d].label}</button>
-          ))}
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <div role="radiogroup" aria-label="Page width" className="flex gap-1 rounded-full border bg-surface p-1">
+            {(Object.keys(PAGE_DEVICES) as PageDevice[]).map((d) => (
+              <button key={d} role="radio" aria-checked={device === d} onClick={() => onDevice(d)} className={segment(device === d)}>{PAGE_DEVICES[d].label}</button>
+            ))}
+          </div>
+          {actions}
         </div>
       </div>
       <p className="mb-2 text-[16px] text-muted" aria-live="polite">{notice ?? current.hint}</p>
