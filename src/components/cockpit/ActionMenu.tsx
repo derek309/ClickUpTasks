@@ -9,10 +9,12 @@ import { quietButton } from "./TaskWorkItem";
 
 export type ActionMenuItem = { label: string; onClick: () => void; danger?: boolean; disabled?: boolean };
 
-export function ActionMenu({ label, title, items }: {
+export function ActionMenu({ label, title, items, triggerClassName = quietButton }: {
   label: ReactNode;
   /** Said by screen readers and shown on hover. */
   title: string;
+  /** The button's look: a bordered quiet button unless given (a comment's ⋯ is a plain icon). */
+  triggerClassName?: string;
   /** Leave an item out with false or null. */
   items: (ActionMenuItem | false | null | undefined)[];
 }) {
@@ -29,7 +31,7 @@ export function ActionMenu({ label, title, items }: {
   if (!shown.length) return null;
   return (
     <div className="relative">
-      <button onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open} aria-label={title} title={title} className={quietButton}>
+      <button onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open} aria-label={title} title={title} className={triggerClassName}>
         {label}
       </button>
       {open && (

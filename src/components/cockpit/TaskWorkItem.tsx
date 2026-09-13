@@ -7,6 +7,8 @@
 // open we only need one screen").
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { I } from "./ui";
+import { ActionMenu } from "./ActionMenu";
 
 export const quietButton = "rounded-lg border bg-surface px-3 py-1.5 text-[16px] font-medium text-muted transition hover:bg-background hover:text-foreground disabled:opacity-50";
 
@@ -190,8 +192,16 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
     setPosting(true);
     const ok = await onPost(body, quote ?? null, attached?.id ?? null);
     setPosting(false);
-    if (ok) { setDraft(""); setAttached(null); }
+    if (ok) {
+      setDraft("");
+      setAttached(null);
+      if (boxRef.current) boxRef.current.style.height = "auto";
+    }
   };
+  // The box is one line until the comment needs more.
+  const fit = (el: HTMLTextAreaElement) => { el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; };
+  const initials = (c: ThreadComment) => (c.authorLabel || (c.fromClient ? "Client" : "Team"))
+    .split(/\s+/).filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
   const attach = async (file: File | undefined) => {
     if (!file || !onAttach) return;
     setAttaching(true);
@@ -220,9 +230,24 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
     requestAnimationFrame(() => itemRefs.current.get(focusedId)?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
   }, [focusedId]); // eslint-disable-line react-hooks/exhaustive-deps
   const pinColor = buttonStyle?.background as string | undefined;
+  const canPost = !posting && !attaching && (!!draft.trim() || !!attached);
+  // A quiet list, one line per comment's who and when, with its check and a ⋯ menu
+  // at the end of that line (Derek, 2026-09-13: "make the clean and more
+  // professional looking"). Done ones fold away behind the header's toggle.
   return (
     <section className="rounded-xl border bg-surface px-4 py-3">
-      <h3 className="text-[16px] font-semibold">Comments{comments.length ? ` · ${comments.length}` : ""}</h3>
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="text-[16px] font-semibold">Comments</h3>
+        {comments.length > 0 && (
+          <span className="rounded-full bg-background px-2.5 py-0.5 text-[16px] text-muted">{openOnes.length ? `${openOnes.length} open` : "All done"}</span>
+        )}
+        {doneOnes.length > 0 && (
+          <button onClick={() => setShowDone((s) => !s)} aria-expanded={showDone}
+            className="ml-auto text-[16px] font-medium text-muted hover:text-foreground hover:underline">
+            {showDone ? "Hide done" : `Show done · ${doneOnes.length}`}
+          </button>
+        )}
+      </div>
       {viewer === "team" && <p className="text-[16px] text-muted">The client sees these on their review page.</p>}
       {(quote || pinDraft) && (
         <div className="mt-2 flex items-center gap-2 rounded-lg border-l-4 border-highlight bg-highlight-soft/60 px-3 py-2 text-[16px]">
@@ -238,11 +263,28 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
           )}
         </div>
       )}
-      <textarea ref={boxRef} value={draft} onChange={(e) => setDraft(e.target.value)} rows={2} maxLength={4000}
-        onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void post(); } }}
-        placeholder={pinDraft ? "Write a comment on this spot…" : quote ? "Write a comment on these words…" : placeholder ?? "Write a comment, or select words in the document to comment on them…"}
-        aria-label="Write a comment"
-        className="mt-2 w-full resize-y rounded-lg border bg-background px-3 py-2 text-[16px] outline-none focus:border-accent" />
+      <div className="mt-2 flex items-end gap-1 rounded-lg border bg-background py-1 pl-3 pr-1 focus-within:border-accent">
+        <textarea ref={boxRef} value={draft} rows={2} maxLength={4000}
+          onChange={(e) => { setDraft(e.target.value); fit(e.currentTarget); }}
+          onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void post(); } }}
+          placeholder={pinDraft ? "Write a comment on this spot…" : quote ? "Write a comment on these words…" : placeholder ?? "Write a comment, or select words in the document to comment on them…"}
+          aria-label="Write a comment"
+          className="max-h-60 min-w-0 flex-1 resize-none overflow-hidden bg-transparent py-1.5 text-[16px] leading-snug outline-none" />
+        {onAttach && (
+          <>
+            <input ref={fileInput} type="file" className="hidden" onChange={(e) => { void attach(e.target.files?.[0]); e.target.value = ""; }} />
+            <button onClick={() => fileInput.current?.click()} disabled={attaching || posting} title={attaching ? "Adding the file…" : "Attach a file"} aria-label="Attach a file"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted hover:bg-surface hover:text-foreground disabled:opacity-50">
+              {attaching ? <span className="text-[16px]">…</span> : <I.clip />}
+            </button>
+          </>
+        )}
+        <button onClick={() => void post()} disabled={!canPost} title="Post comment (⌘ Enter)" aria-label="Post comment"
+          style={canPost ? buttonStyle : undefined}
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-[18px] font-semibold transition ${canPost ? "bg-accent text-white" : "bg-surface text-muted"}`}>
+          {posting ? "…" : "↑"}
+        </button>
+      </div>
       {attached && (
         <div className="mt-1 flex items-center gap-2 text-[16px]">
           <span className="min-w-0 flex-1 truncate">📎 {attached.name}</span>
@@ -250,24 +292,8 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
             className="shrink-0 px-1 text-[18px] leading-none text-muted hover:text-foreground">×</button>
         </div>
       )}
-      <div className="mt-2 flex flex-wrap items-center justify-end gap-3">
-        {onAttach && (
-          <>
-            <input ref={fileInput} type="file" className="hidden" onChange={(e) => { void attach(e.target.files?.[0]); e.target.value = ""; }} />
-            <button onClick={() => fileInput.current?.click()} disabled={attaching || posting}
-              className="mr-auto text-[16px] font-medium text-muted hover:text-foreground hover:underline disabled:opacity-50">
-              {attaching ? "Adding the file…" : "📎 Attach a file"}
-            </button>
-          </>
-        )}
-        <span className="hidden text-[16px] text-muted sm:inline">⌘ Enter posts it</span>
-        <button onClick={() => void post()} disabled={posting || attaching || (!draft.trim() && !attached)} style={buttonStyle}
-          className="rounded-lg bg-accent px-4 py-1.5 text-[16px] font-semibold text-white disabled:opacity-50">
-          {posting ? "Posting…" : "Post comment"}
-        </button>
-      </div>
       {shown.length > 0 && (
-        <ul className="mt-3 space-y-2">
+        <ul className="mt-3 divide-y border-t">
           {shown.map((c) => {
             const mine = isMine(c);
             const done = !!c.completedAt;
@@ -275,22 +301,34 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
             const isEditing = editing?.id === c.id;
             return (
               <li key={c.id} ref={(el) => { if (el) itemRefs.current.set(c.id, el); else itemRefs.current.delete(c.id); }}
-                className={`flex gap-3 rounded-lg px-3 py-2 ${mine ? "bg-accent-soft/40" : "bg-background"} ${focusedId === c.id ? "ring-2 ring-highlight" : ""}`}>
-                <button role="checkbox" aria-checked={done} aria-label={done ? "Mark not done" : "Mark done"} title={done ? "Mark not done" : "Mark done"}
-                  onClick={() => void act(c.id, () => onToggleDone(c.id, !done))} disabled={busy}
-                  className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded border text-[16px] leading-none disabled:opacity-50 ${done ? "border-accent bg-accent text-white" : "bg-surface hover:border-accent"}`}>
-                  {done ? "✓" : ""}
-                </button>
+                className={`flex gap-3 py-3 ${focusedId === c.id ? "-mx-2 rounded-lg px-2 ring-2 ring-highlight" : ""}`}>
+                {c.pin ? (
+                  <button onClick={() => onQuoteClick?.(c.id)} disabled={!onQuoteClick} title={`Show pin ${c.pin.number} on the image`}
+                    aria-label={`Show pin ${c.pin.number} on the image`} className={`h-8 shrink-0 ${done ? "opacity-50" : ""}`}>
+                    <PinNumber number={c.pin.number} color={pinColor} />
+                  </button>
+                ) : (
+                  <span aria-hidden className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-background text-[16px] font-semibold text-muted">{initials(c)}</span>
+                )}
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-x-2 text-[16px]">
-                    {c.pin && (
-                      <button onClick={() => onQuoteClick?.(c.id)} disabled={!onQuoteClick} title={`Show pin ${c.pin.number} on the image`}
-                        aria-label={`Show pin ${c.pin.number} on the image`} className={done ? "opacity-50" : ""}>
-                        <PinNumber number={c.pin.number} color={pinColor} />
+                  <div className="flex items-center gap-2 text-[16px]">
+                    <span className="min-w-0 truncate font-semibold">{c.authorLabel || (c.fromClient ? "Client" : "Team")}</span>
+                    <span className="shrink-0 text-muted">{when(c.createdAt)}{c.editedAt ? " · edited" : ""}</span>
+                    <span className="ml-auto flex shrink-0 items-center gap-1">
+                      <button role="checkbox" aria-checked={done} aria-label={done ? "Mark not done" : "Mark done"} title={done ? "Mark not done" : "Mark done"}
+                        onClick={() => void act(c.id, () => onToggleDone(c.id, !done))} disabled={busy} style={done ? buttonStyle : undefined}
+                        className={`flex h-8 w-8 items-center justify-center rounded-full transition disabled:opacity-50 ${done ? "bg-accent text-white" : "text-muted hover:bg-background hover:text-accent"}`}>
+                        <I.check />
                       </button>
-                    )}
-                    <span className="font-semibold">{c.authorLabel || (c.fromClient ? "Client" : "Team")}</span>
-                    <span className="text-muted">{when(c.createdAt)}{c.editedAt ? " · edited" : ""}</span>
+                      {!isEditing && (mine || canDelete(c)) && (
+                        <ActionMenu label={<I.dots />} title="More actions"
+                          triggerClassName="flex h-8 w-8 items-center justify-center rounded-full text-muted hover:bg-background hover:text-foreground"
+                          items={[
+                            mine && { label: "Edit", onClick: () => setEditing({ id: c.id, text: c.body }) },
+                            canDelete(c) && { label: busy ? "Deleting…" : "Delete", danger: true, disabled: busy, onClick: () => void act(c.id, () => onDelete(c.id)) },
+                          ]} />
+                      )}
+                    </span>
                   </div>
                   {c.quote && (
                     <button onClick={() => onQuoteClick?.(c.id)} disabled={!onQuoteClick} title="Show these words in the document"
@@ -317,33 +355,17 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
                   )}
                   {c.attachmentFileId && renderAttachment && <div className="mt-1 text-[16px]">{renderAttachment(c.attachmentFileId)}</div>}
                   {done && c.completedBy && <p className="text-[16px] text-muted">Done by {c.completedBy}</p>}
-                  {!isEditing && (mine || canDelete(c)) && (
-                    <div className="mt-1 flex gap-4 text-[16px]">
-                      {mine && <button onClick={() => setEditing({ id: c.id, text: c.body })} className="text-muted hover:text-foreground hover:underline">Edit</button>}
-                      {canDelete(c) && <button onClick={() => void act(c.id, () => onDelete(c.id))} disabled={busy} className="text-muted hover:text-danger hover:underline disabled:opacity-50">Delete</button>}
-                    </div>
-                  )}
                 </div>
               </li>
             );
           })}
         </ul>
       )}
-      {(older > 0 || doneOnes.length > 0) && (
-        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-          {older > 0 && (
-            <button onClick={() => setShowOlder((s) => !s)} aria-expanded={showOlder}
-              className="text-[16px] font-medium text-accent hover:underline">
-              {showOlder ? "Hide older comments" : `Show ${older} older ${older === 1 ? "comment" : "comments"}`}
-            </button>
-          )}
-          {doneOnes.length > 0 && (
-            <button onClick={() => setShowDone((s) => !s)} aria-expanded={showDone}
-              className="text-[16px] font-medium text-accent hover:underline">
-              {showDone ? "Hide done" : `Show ${doneOnes.length} done`}
-            </button>
-          )}
-        </div>
+      {older > 0 && (
+        <button onClick={() => setShowOlder((s) => !s)} aria-expanded={showOlder}
+          className="mt-1 text-[16px] font-medium text-muted hover:text-foreground hover:underline">
+          {showOlder ? "Hide older comments" : `Show ${older} older ${older === 1 ? "comment" : "comments"}`}
+        </button>
       )}
     </section>
   );
