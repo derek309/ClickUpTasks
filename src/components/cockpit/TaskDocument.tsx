@@ -31,7 +31,7 @@ import {
 import { diffDocText, diffText, summarizeDocChanges } from "@/lib/docDiff";
 import { addDocFiles, uploadSharedFile } from "@/lib/docFileUpload";
 import { publishedFiles, type PinAnchor } from "@/lib/reviewPins";
-import { isFileKind, kindQuery, kindTitle, kindWhat } from "@/lib/reviewKinds";
+import { isFileKind, kindNewName, kindQuery, kindTitle, kindWhat } from "@/lib/reviewKinds";
 import { mergeEdits, PAGE_MAX_BYTES, PAGE_TOO_BIG, type FrameMode, type PageEdit } from "@/lib/pageFrameProtocol";
 import { formatFileSize, isPreviewableImage } from "@/lib/uploadTypes";
 import { RichTextEditor } from "./RichTextEditor";
@@ -744,7 +744,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
 
   const icon = KIND_ICON[kind];
   const row = (
-    <WorkItemRow tone={kind} icon={icon} title={name} badge={badge} meta={meta} actions={copyLinkButton}
+    <WorkItemRow tone={kind} icon={icon} title={doc.title.trim() || kindNewName(kind)} badge={badge} meta={meta} actions={copyLinkButton}
       onOpen={() => switchView({ full: true })} />
   );
   if (!visible) return <>{row}{deletedLine}</>;
@@ -782,7 +782,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
       onChange={(e) => { const value = e.target.value; setTitleDraft(value); titleCommit.schedule(() => { void saveTitle(value); }); }}
       onBlur={() => titleCommit.flush()}
       onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-      placeholder={task.title} aria-label={`${title} name`} maxLength={200}
+      placeholder={kindNewName(kind)} aria-label={`${title} name`} maxLength={200}
       className="w-full rounded-md bg-transparent px-1 py-0.5 text-[22px] font-bold outline-none placeholder:text-foreground hover:bg-background focus:bg-background" />
   );
 

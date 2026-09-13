@@ -55,7 +55,9 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onSchedule, onUploa
 
   return (
     <>
-      <WorkItemRow tone="email" icon="✉️" title={draft.subject.trim() || "Draft email"} badge={badge} meta={meta}
+      {/* A new draft's subject starts as the task's title; the row says what it is
+          until the subject says more (Derek, 2026-09-13). */}
+      <WorkItemRow tone="email" icon="✉️" title={draft.subject.trim() && draft.subject.trim() !== task.title.trim() ? draft.subject.trim() : "Draft email"} badge={badge} meta={meta}
         onOpen={() => setFull(true)} />
       {open && (
         <EmailWindow key={draft.createdAt} draft={draft} heading="Draft email" subheading={task.title} subjectFallback={task.title}
