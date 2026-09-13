@@ -136,6 +136,20 @@ export function RichTextEditor({ value, onChange, placeholder, autoFocus, editab
     return () => document.removeEventListener("selectionchange", onChange);
   }, [doc, onSelectionComment]);
 
+  // The document's sticky toolbar sits flush against the top of whatever scrolls it.
+  // Sticky stops below a scroller's top padding, so writing scrolled through that gap
+  // above the bar (Derek, 2026-09-13: "fix it"); a negative top the size of the
+  // padding closes it, in the full window and the drawer alike.
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const bar = toolbarRef.current;
+    if (!doc || !bar) return;
+    let scroller = bar.parentElement;
+    while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+    const padding = scroller ? parseFloat(getComputedStyle(scroller).paddingTop) || 0 : 0;
+    bar.style.top = `${-padding}px`;
+  }, [doc, editable, editor]);
+
   if (!editor) return null;
 
   const blockValue = editor.isActive("heading", { level: 2 }) ? "h2" : editor.isActive("heading", { level: 3 }) ? "h3" : "p";
@@ -154,7 +168,7 @@ export function RichTextEditor({ value, onChange, placeholder, autoFocus, editab
   };
 
   const toolbar = !editable ? null : (
-    <div className={doc
+    <div ref={toolbarRef} className={doc
       ? "sticky top-0 z-10 mb-3 flex items-center gap-1 overflow-x-auto border-b bg-surface pb-2 pt-1"
       : "mb-1 flex flex-wrap items-center gap-0.5 border-b pb-1.5"}>
       <select value={blockValue} onChange={(e) => setBlock(e.target.value)}
