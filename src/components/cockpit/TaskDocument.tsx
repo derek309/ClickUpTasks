@@ -31,7 +31,7 @@ import {
 import { diffDocText, diffText, summarizeDocChanges } from "@/lib/docDiff";
 import { addDocFiles, uploadSharedFile } from "@/lib/docFileUpload";
 import { publishedFiles, type PinAnchor } from "@/lib/reviewPins";
-import { isFileKind, kindNewName, kindQuery, kindTitle, kindWhat } from "@/lib/reviewKinds";
+import { isFileKind, kindInSentence, kindNewName, kindQuery, kindTitle, kindWhat } from "@/lib/reviewKinds";
 import { mergeEdits, PAGE_MAX_BYTES, PAGE_TOO_BIG, type FrameMode, type PageEdit } from "@/lib/pageFrameProtocol";
 import { formatFileSize, isPreviewableImage } from "@/lib/uploadTypes";
 import { RichTextEditor } from "./RichTextEditor";
@@ -96,6 +96,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   const versioned = isFileKind(kind);
   const what = kindWhat(kind);
   const title = kind === "doc" ? "Document" : kindTitle(kind);
+  const titleInSentence = kind === "doc" ? "document" : kindInSentence(kind);
   const api = (path: string, init?: RequestInit) => docApi(task.id, kind, path, init);
   const pageApi = (query: string, init?: RequestInit) =>
     authedFetch(`/api/tasks/${encodeURIComponent(task.id)}/document/page${kindQuery("page")}${query}`, init);
@@ -273,7 +274,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     const res = await api("", { method: "POST", body: "{}" });
     const j = await readJson(res);
     setBusy(null);
-    if (!res.ok) { pushToast((j.error as string) ?? `Could not start the ${title.toLowerCase()}.`); return null; }
+    if (!res.ok) { pushToast((j.error as string) ?? `Could not start the ${titleInSentence}.`); return null; }
     const created = rowToTaskDocument(j.document);
     versionRef.current = created.version;
     setDoc(created);
@@ -553,7 +554,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   };
 
   const deleteDocument = async () => {
-    if (!doc || !window.confirm(`Delete this ${title.toLowerCase()}? You can restore it from this task for 30 days, with its versions, files and comments. The client's link stops working until then.`)) return;
+    if (!doc || !window.confirm(`Delete this ${titleInSentence}? You can restore it from this task for 30 days, with its versions, files and comments. The client's link stops working until then.`)) return;
     commit.flush();
     titleCommit.flush();
     await saving.current;
@@ -561,7 +562,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     const res = await api("", { method: "DELETE" });
     const j = await readJson(res);
     setBusy(null);
-    if (!res.ok) { pushToast((j.error as string) ?? `Could not delete the ${title.toLowerCase()}.`); return; }
+    if (!res.ok) { pushToast((j.error as string) ?? `Could not delete the ${titleInSentence}.`); return; }
     setFull(false);
     versionRef.current = null;
     setDoc(null);
@@ -577,7 +578,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     const res = await api("/restore", { method: "POST", body: JSON.stringify({ documentId }) });
     const j = await readJson(res);
     setBusy(null);
-    if (!res.ok) { pushToast((j.error as string) ?? `Could not restore the ${title.toLowerCase()}.`); return; }
+    if (!res.ok) { pushToast((j.error as string) ?? `Could not restore the ${titleInSentence}.`); return; }
     versionRef.current = null;
     await load();
     pushToast(`${title} restored.`);
@@ -660,7 +661,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
 
   const deletedLine = deletedDocs.length > 0 ? (
     <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-dashed px-4 py-2 text-[16px] text-muted">
-      <span>{kind === "doc" ? "Deleted:" : `Deleted ${title.toLowerCase()}:`}</span>
+      <span>{kind === "doc" ? "Deleted:" : `Deleted ${titleInSentence}:`}</span>
       {deletedDocs.map((d) => (
         <span key={d.id} className="flex flex-wrap items-center gap-x-2">
           <span className="text-foreground">{d.title.trim() || task.title}</span>
@@ -1044,7 +1045,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
           {/* Deleting lives only here, small and at the very end (Derek, 2026-09-11). */}
           <div className="mt-12 flex justify-end border-t pt-4">
             <button onClick={() => void deleteDocument()} disabled={busy !== null} className="text-[16px] text-muted hover:text-danger hover:underline disabled:opacity-50">
-              {busy === "delete" ? "Deleting…" : `Delete ${title.toLowerCase()}`}
+              {busy === "delete" ? "Deleting…" : `Delete ${titleInSentence}`}
             </button>
           </div>
         </WorkItemWindow>

@@ -255,7 +255,7 @@ function pageFileName(raw: unknown): string {
 export async function storePageFile(documentId: string, html: string, rawName: unknown, actor: DocActor): Promise<{ ok: true; fileId: string } | Fail> {
   const { count } = await supabaseAdmin.from("task_document_files")
     .select("id", { count: "exact", head: true }).eq("document_id", documentId).eq("purpose", "page");
-  if ((count ?? 0) >= MAX_PAGE_FILES) return fail(400, `A web page review can hold ${MAX_PAGE_FILES} versions. Start a new review to add more.`);
+  if ((count ?? 0) >= MAX_PAGE_FILES) return fail(400, `An HTML review can hold ${MAX_PAGE_FILES} versions. Start a new review to add more.`);
 
   const path = `${docFileFolder(documentId)}${randomUUID()}-page.txt`;
   const bytes = Buffer.from(html, "utf8");

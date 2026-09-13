@@ -21,7 +21,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const documentId = typeof payload?.documentId === "string" ? payload.documentId : null;
   if (!documentId) return json({ error: "Invalid request." }, 400);
 
-  const what = { doc: "a document", image: "an image review", page: "a web page review" }[kind];
+  const what = { doc: "a document", image: "an image review", page: "an HTML review" }[kind];
   const taken = `This task already has ${what}. Delete that one first, then restore this one.`;
   if (await liveDocument(id, kind)) return json({ error: taken }, 409);
 

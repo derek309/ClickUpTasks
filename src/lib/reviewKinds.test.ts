@@ -22,10 +22,10 @@ describe("reviewKinds", () => {
     expect(kindNoun("image")).toBe("image");
     expect(kindNoun("page")).toBe("web page");
     expect(kindWhat("page")).toBe("page");
-    expect(kindTitle("page")).toBe("Web page review");
+    expect(kindTitle("page")).toBe("HTML review");
     expect(noDocumentYet("doc")).toBe("This task has no client document yet.");
     expect(noDocumentYet("image")).toBe("This task has no image review yet.");
-    expect(noDocumentYet("page")).toBe("This task has no web page review yet.");
+    expect(noDocumentYet("page")).toBe("This task has no HTML review yet.");
   });
 
   it("builds the team route's query string", () => {

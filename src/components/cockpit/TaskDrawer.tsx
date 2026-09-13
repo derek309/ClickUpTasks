@@ -26,7 +26,7 @@ import { kindWhat, type FileKind, type ReviewKind } from "@/lib/reviewKinds";
 // The review lines a task can add beside its client document, in order.
 const REVIEW_LINES: { kind: FileKind; chip: string }[] = [
   { kind: "image", chip: "+ Image review" },
-  { kind: "page", chip: "+ Web page review" },
+  { kind: "page", chip: "+ HTML review" },
 ];
 
 const ATT_KIND_ORDER: Record<Attachment["kind"], number> = { image: 0, pdf: 1, doc: 2, sheet: 3, link: 4 };
