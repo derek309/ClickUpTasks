@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminConfigured } from "@/lib/supabaseAdmin";
-import { teamDocument, linkState, mintDocLink, revokeDocLink, NO_STORE } from "@/lib/taskDocumentServer";
+import { teamDocument, teamActor, linkState, mintDocLink, revokeDocLink, NO_STORE } from "@/lib/taskDocumentServer";
 
 // The client's private link to a task's review document (or, with ?kind=image,
 // its image review).
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // to the task's client as it is now, which is also how a task moved to
     // another client gets a working link again.
     if (found.user.role !== "admin") return json({ error: "Only an admin can make a new link." }, 403);
-    const url = await mintDocLink(found.doc.id, found.task, found.user, origin);
+    const url = await mintDocLink(found.doc.id, found.task, teamActor(found.user), origin);
     return json({ url });
   }
   return json({ error: "Invalid request." }, 400);

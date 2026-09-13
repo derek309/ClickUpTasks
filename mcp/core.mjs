@@ -98,9 +98,11 @@ export function docHtmlToText(html) {
 }
 
 /**
- * @param {{ url?: string, key?: string, memberId?: string }} [opts]
+ * @param {{ url?: string, key?: string, memberId?: string, services?: object }} [opts]
  *   Falls back to CLICKUPTASKS_URL/CLICKUPTASKS_KEY/CLICKUPTASKS_MEMBER_ID
- *   env vars when omitted (the stdio server's original behavior).
+ *   env vars when omitted (the stdio server's original behavior). services: the
+ *   app's review code (src/lib/mcpReviewServices.ts); the review tools exist only
+ *   when it is given, which the hosted server does.
  */
 export function createServer(opts = {}) {
   const URL = opts.url || process.env.CLICKUPTASKS_URL;
@@ -387,102 +389,148 @@ export function createServer(opts = {}) {
     });
 
   server.tool("draft_email",
-    "Prepare an email on a task for a human to review and send — never sends anything itself. The draft appears in the task's own review panel in the app (subject + body, editable), where a teammate edits if needed and hits Send. Calling this again on the same task replaces the pending draft rather than adding a second one. Body should be plain text (paragraphs separated by a blank line) — it's converted to formatted HTML for the review panel.",
-    { id: z.string(), subject: z.string(), body: z.string() },
-    async ({ id, subject, body }) => {
+    "Prepare an email on a task for a human to review and send — never sends anything itself. The draft appears in the task's own review panel in the app (subject + body, editable), where a teammate edits if needed and hits Send. A task holds one draft: this won't replace a draft already waiting unless replace is true. Body should be plain text (paragraphs separated by a blank line) — it's converted to formatted HTML for the review panel.",
+    { id: z.string(), subject: z.string(), body: z.string(), replace: z.boolean().optional().describe("replace a draft already waiting on the task") },
+    async ({ id, subject, body, replace }) => {
       const [t] = await sb(`tasks?select=id&id=eq.${enc(id)}`);
       if (!t) return { content: [{ type: "text", text: `No task ${id}.` }] };
-      const draft_email = { subject, body: draftPlainTextToHtml(body), createdAt: nowIso() };
-      await sb(`tasks?id=eq.${enc(id)}`, "PATCH", { draft_email });
+      const now = nowIso();
+      const draft_email = { subject, body: draftPlainTextToHtml(body), createdAt: now, updatedAt: now };
+      // updated_by null makes a task open in the app pick the draft up live.
+      const saved = await sb(`tasks?id=eq.${enc(id)}${replace ? "" : "&draft_email=is.null"}`, "PATCH", { draft_email, updated_by: null });
+      if (!saved.length) return { content: [{ type: "text", text: `${id} already has a draft email waiting. Pass replace: true to swap it.` }] };
       return { content: [{ type: "text", text: `Draft email saved on ${id} — waiting for review in the app.` }] };
     });
 
-  // The client review document (supabase/task-documents.sql). Claude reads it
-  // and writes the team's working copy. Sending it to the client, and the private
-  // link, stay with a person in the app: the same rule as draft_email.
+  // Client reviews on a task: the client document (kind "doc"), the image review
+  // ("image") and the HTML review ("page"). The work runs in the app's own review
+  // code (src/lib/mcpReviewServices.ts), which the hosted server passes in as
+  // opts.services, so these tools only exist there; the local stdio server has none.
+  // Claude may send a review, which turns its link on, but the email to the client
+  // is only ever a draft a person sends, and Claude's comments never email the client.
   const reply = (text) => ({ content: [{ type: "text", text }] });
-  const DOC_KIND = { sent: "sent to the client", client_submitted: "changes from the client", client_approved: "approved by the client" };
-  async function documentFor(taskId) {
-    const [t] = await sb(`tasks?select=id,title,client_id,is_private,deleted_at&id=eq.${enc(taskId)}`);
-    if (!t || t.deleted_at) return { error: `No task ${taskId}.` };
-    if (t.is_private || t.client_id === PERSONAL_CLIENT_ID) return { error: "Private and Personal tasks can't have a client document." };
-    // The text document only; image and web page reviews (kind "image", "page") are worked in the app.
-    const [doc] = await sb(`task_documents?select=*&task_id=eq.${enc(taskId)}&kind=eq.doc&deleted_at=is.null`);
-    return { task: t, doc: doc || null };
-  }
+  const services = opts.services;
+  if (services) {
+    const KIND = z.enum(["doc", "image", "page"]).describe('"doc" the client document, "image" the image review, "page" the HTML review');
+    const FILE_KIND = z.enum(["image", "page"]).describe('"image" the image review, "page" the HTML review');
+    const VERSION = z.union([z.number().int().positive(), z.literal("next")]).describe('a version number from get_review, or "next" for the working copy that has not been sent');
+    const DOC_TEXT = "Plain text with simple markdown: \"## \" heading, \"### \" subheading, \"- \" bullets, \"1. \" numbered, \"> \" quote, **bold**, *italic*, [label](https://url); a blank line starts a new paragraph. Merge fields like {{contact.first_name}} are kept as typed.";
 
-  server.tool("get_client_document",
-    "Read the client review document on a task: its status (draft, with_client, client_submitted, approved), version, whether the client's private link is on, the team's working copy as editable text, the client's latest changes if they sent any, recent versions, and files. The text uses the same simple markdown write_client_document takes, so read it, change it, and write it back.",
-    { task_id: z.string() },
-    async ({ task_id }) => {
-      const found = await documentFor(task_id);
-      if (found.error) return reply(found.error);
-      const { task, doc } = found;
-      if (!doc) return reply(`"${task.title}" has no client document yet. write_client_document creates one.`);
-      const [versions, links, files, comments] = await Promise.all([
-        sb(`task_document_versions?select=version,kind,body,author_label,created_at&document_id=eq.${enc(doc.id)}&order=version.desc&limit=5`),
-        sb(`task_document_links?select=token_hash,revoked_at&document_id=eq.${enc(doc.id)}`),
-        sb(`task_document_files?select=name,size_bytes,added_by_label,shared_at&document_id=eq.${enc(doc.id)}&removed_at=is.null&order=created_at.asc`).catch(() => []),
-        sb(`task_document_comments?select=body,author_id,author_label,created_at,quote&document_id=eq.${enc(doc.id)}&order=created_at.asc&limit=50`).catch(() => []),
-      ]);
-      const live = !!links[0]?.token_hash && !links[0]?.revoked_at;
-      const latest = versions[0];
-      const text = [
-        `Client document "${doc.title || task.title}" on [${task.id}] ${task.title}`,
-        `status: ${doc.status} · version ${doc.version}${doc.version ? "" : " (never sent)"} · link ${live ? "on" : "off"}${doc.draft_dirty ? " · has unsent team edits" : ""}${doc.approved_at ? " · locked until reopened in the app" : ""}`,
-        `\nWorking copy (the team's draft; the client only sees what was last sent):\n${docHtmlToText(doc.body) || "(empty)"}`,
-        latest && latest.kind !== "sent" ? `\nLatest from the client (version ${latest.version}, ${DOC_KIND[latest.kind]}${latest.author_label ? ` by ${latest.author_label}` : ""}):\n${docHtmlToText(latest.body)}` : "",
-        versions.length ? `\nVersions:\n${versions.map((v) => `  - v${v.version} ${DOC_KIND[v.kind]}${v.author_label ? ` by ${v.author_label}` : ""} (${v.created_at})`).join("\n")}` : "",
-        files.length ? `\nFiles:\n${files.map((f) => `  - ${f.name} (${Math.max(1, Math.round(f.size_bytes / 1024))} KB, added by ${f.added_by_label || "someone"})`).join("\n")}` : "",
-        comments.length ? `\nComments (the client sees these too):\n${comments.map((c) => `  - ${c.author_label || (c.author_id ? "Team" : "Client")}${c.author_id ? "" : " (client)"}, ${c.created_at}${c.quote ? ` on "${String(c.quote).replace(/\n/g, " … ")}"` : ""}: ${c.body}`).join("\n")}` : "",
-      ].filter(Boolean).join("\n");
-      return reply(text);
-    });
+    server.tool("list_reviews",
+      "What reviews a task has: its client document, image review and HTML review, each with its stage, version, whether the client's link is on and how many comments are open, plus whether a draft email is waiting.",
+      { task_id: z.string() },
+      async ({ task_id }) => reply(await services.listReviews(task_id)));
 
-  server.tool("write_client_document",
-    "Create the client review document on a task, or replace its draft, for a teammate to review and send. Never sends anything to the client and never touches the client's link: the draft shows in the task in the app, where a person reads it and clicks Send for review. Pass the WHOLE document every time (read it with get_client_document first when editing). Plain text with simple markdown: \"## \" heading, \"### \" subheading, \"- \" bullets, \"1. \" numbered, \"> \" quote, **bold**, *italic*, [label](https://url); a blank line starts a new paragraph. Merge fields like {{contact.first_name}} are kept as typed. Refused on private or Personal tasks, and once the client has approved (a person reopens it in the app first).",
-    {
-      task_id: z.string(),
-      body: z.string().min(1).describe("the whole document, in the simple markdown described above"),
-      title: z.string().optional().describe("the document's name, shown on the task and as the client's heading; omit to keep it (a new document uses the task's title)"),
-    },
-    async ({ task_id, body, title }) => {
-      const found = await documentFor(task_id);
-      if (found.error) return reply(found.error);
-      if (found.doc?.approved_at) return reply("The client already approved this document. A teammate reopens it in the app before it can change.");
-      if (found.doc?.status === "completed") return reply("This document is completed. A teammate reopens it in the app before it can change.");
+    const getReview = async ({ task_id, kind = "doc", include_code }) => reply(await services.getReview(task_id, kind, !!include_code));
+    server.tool("get_review",
+      `Read one review on a task: stage, version, the client's link, versions (numbered, and "next" for an unsent working copy), the working copy (a document's text in the markdown write_document takes, a page's text or code, a link to see the image), and every comment with its id, pin and done state.`,
+      { task_id: z.string(), kind: KIND, include_code: z.boolean().optional().describe("on an HTML review, show the working page's HTML instead of its text") },
+      getReview);
+    server.tool("get_client_document", "Read a task's client document. The same as get_review with kind \"doc\".", { task_id: z.string() }, getReview);
+
+    server.tool("create_review",
+      "Start a review on a task (one of each kind per task). Refused on private and Personal tasks. A new review is named after the task unless title is given.",
+      { task_id: z.string(), kind: KIND, title: z.string().optional() },
+      async ({ task_id, kind, title }) => reply(await services.createReview(task_id, kind, title)));
+
+    server.tool("update_review",
+      "Rename a review, pick its stage by hand, or reopen one the client approved so it can change again. Completed locks it; any stage but approved clears a client approval.",
+      {
+        task_id: z.string(), kind: KIND,
+        title: z.string().optional().describe("the review's name on the task and the client's page; empty uses the task's title"),
+        stage: z.enum(["draft", "with_client", "client_submitted", "approved", "completed"]).optional(),
+        reopen: z.boolean().optional(),
+      },
+      async ({ task_id, kind, ...change }) => reply(await services.updateReview(task_id, kind, change)));
+
+    const writeDocument = async ({ task_id, body, title }) => {
       const html = docTextToHtml(body);
       if (!docHtmlToText(html)) return reply("The document is empty.");
-      if (html.length > 200_000) return reply("That document is too long to save.");
+      return reply(await services.writeDocument(task_id, html, title));
+    };
+    const writeSchema = {
+      task_id: z.string(),
+      body: z.string().min(1).describe("the whole document, in the simple markdown described above"),
+      title: z.string().optional().describe("the document's name; omit to keep it"),
+    };
+    const writeWhat = `Create a task's client document, or replace its working copy, as a draft. Pass the WHOLE document every time (read it with get_review first when editing). The client sees it only after send_for_review. ${DOC_TEXT} Refused once the client approved (update_review with reopen first).`;
+    server.tool("write_document", writeWhat, writeSchema, writeDocument);
+    server.tool("write_client_document", writeWhat, writeSchema, writeDocument);
 
-      const now = nowIso();
-      const named = title === undefined ? {} : { title: title.replace(/[\x00-\x1f\x7f]/g, "").trim().slice(0, 200) };
-      let doc;
-      if (!found.doc) {
-        [doc] = await sb("task_documents", "POST", {
-          id: `tdoc_${globalThis.crypto.randomUUID()}`, task_id, body: html, draft_dirty: true, ...named,
-          created_by: ME, updated_by: ME, created_at: now, updated_at: now,
-        });
-      } else {
-        // approved_at in the filter: a client approving in the meantime makes this match nothing.
-        [doc] = await sb(`task_documents?id=eq.${enc(found.doc.id)}&approved_at=is.null`, "PATCH", { body: html, draft_dirty: true, ...named, updated_by: ME, updated_at: now });
-        if (!doc) return reply("The client approved this document a moment ago. A teammate reopens it in the app before it can change.");
-      }
+    server.tool("start_image_upload",
+      "For an image file on this computer: a one time upload link. PUT the file's bytes to it (curl works), then call add_review_version with the upload_id it gives. For an image already online, use add_review_version with image_url instead.",
+      { task_id: z.string(), file_name: z.string().describe("the image's file name, ending .png, .jpg, .gif or .webp"), size: z.number().int().positive().describe("the file's size in bytes (25 MB at most)") },
+      async ({ task_id, file_name, size }) => reply(await services.startImageUpload(task_id, file_name, size)));
 
-      await members();
-      const label = memberNames[ME] || "Claude";
-      // The history entry and the activity line are best effort: the draft itself is saved.
-      await sb("task_document_checkpoints", "POST", {
-        id: `tdc_${globalThis.crypto.randomUUID()}`, document_id: doc.id, body: html, author_id: ME, author_label: label, created_at: now,
-      }).catch(() => {});
-      // An event on the task is what makes an open task in the app reload the document.
-      await sb("rpc/append_comment", "POST", {
-        task_id, comment: { id: rid("cm_"), authorId: ME, kind: "event", at: now, body: `${label} ${found.doc ? "updated" : "wrote"} the client document draft` },
-      }).catch(() => {});
+    server.tool("add_review_version",
+      "Add a new version to an image or HTML review (starting the review if there is none). It becomes the working copy, not sent yet. An image comes from image_url (a public https link to a PNG, JPEG, GIF or WebP) or upload_id (from start_image_upload). A page comes from html: the WHOLE page, up to 2 MB, images linked by web address (read the current code with get_review include_code).",
+      {
+        task_id: z.string(), kind: FILE_KIND,
+        image_url: z.string().url().optional(), upload_id: z.string().optional(),
+        html: z.string().optional(), name: z.string().optional().describe("the version's file name"),
+      },
+      async ({ task_id, kind, image_url, upload_id, html, name }) => reply(await services.addVersion(task_id, kind, { imageUrl: image_url, uploadId: upload_id, html, name })));
 
-      const seen = doc.version ? `The client still sees version ${doc.version} until a teammate sends this.` : "It hasn't been sent to the client.";
-      return reply(`${found.doc ? "Updated" : "Created"} the client document on "${found.task.title}" as a draft. ${seen} A teammate reviews it in the app and clicks Send for review.`);
-    });
+    server.tool("use_version",
+      "Make an earlier version the working copy again (on the client document, bring back an earlier version's text). send_for_review sends it.",
+      { task_id: z.string(), kind: KIND, version: VERSION },
+      async ({ task_id, kind, version }) => reply(await services.useVersion(task_id, kind, version)));
+
+    server.tool("remove_version",
+      "Take a wrong version off an image or HTML review. Its pins go with it; if the client was looking at it, they see the newest version left.",
+      { task_id: z.string(), kind: FILE_KIND, version: VERSION },
+      async ({ task_id, kind, version }) => reply(await services.removeVersion(task_id, kind, version)));
+
+    server.tool("send_for_review",
+      "Send a review's working copy to the client as the next version. The first send turns on the client's private link. The task moves to Waiting, and the review email is saved as the task's draft email for a person to read and send; nothing is emailed. Give email_subject and email_body (plain text, blank line between paragraphs, [[LINK]] where the review link goes) to write it yourself, or leave them out for the standard wording. A draft already on the task is left alone.",
+      {
+        task_id: z.string(), kind: KIND,
+        draft_email: z.boolean().optional().describe("false to skip drafting the email"),
+        email_subject: z.string().optional(), email_body: z.string().optional(),
+      },
+      async ({ task_id, kind, draft_email, email_subject, email_body }) => reply(await services.sendForReview(task_id, kind, {
+        draftEmail: draft_email !== false, subject: email_subject, bodyHtml: email_body ? draftPlainTextToHtml(email_body) : undefined,
+      })));
+
+    server.tool("get_review_link",
+      "The client's private link to a review, when it is on. Treat it as a secret: send it only to that task's client.",
+      { task_id: z.string(), kind: KIND },
+      async ({ task_id, kind }) => reply(await services.getReviewLink(task_id, kind)));
+
+    server.tool("revoke_review_link",
+      "Turn a review's link off for good. The client can't open it any more; the next send makes a new link.",
+      { task_id: z.string(), kind: KIND },
+      async ({ task_id, kind }) => reply(await services.revokeReviewLink(task_id, kind)));
+
+    server.tool("add_review_comment",
+      "Post a comment on a review as Claude, in the thread the client sees (for example, to answer a client's comment). It never emails the client. On an image or HTML review, pin puts a numbered pin on a version at x and y (0 to 1 across and down). On the client document, quote ties it to words in the text.",
+      {
+        task_id: z.string(), kind: KIND, text: z.string().min(1),
+        quote: z.string().optional(),
+        pin: z.object({ version: VERSION, x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).optional(),
+      },
+      async ({ task_id, kind, text, quote, pin }) => reply(await services.addComment(task_id, kind, text, { quote, pin })));
+
+    server.tool("update_review_comment",
+      "Mark a review comment done (or open again), or change the words of a comment Claude wrote. Comment ids come from get_review.",
+      { comment_id: z.string(), text: z.string().optional(), done: z.boolean().optional() },
+      async ({ comment_id, text, done }) => reply(await services.updateComment(comment_id, { text, done })));
+
+    server.tool("delete_review_comment",
+      "Delete a comment from a review's thread. Comment ids come from get_review.",
+      { comment_id: z.string() },
+      async ({ comment_id }) => reply(await services.deleteComment(comment_id)));
+
+    server.tool("delete_review",
+      "Delete a review from a task. Its link stops working; restore_review brings it back, with everything, within 30 days.",
+      { task_id: z.string(), kind: KIND },
+      async ({ task_id, kind }) => reply(await services.deleteReview(task_id, kind)));
+
+    server.tool("restore_review",
+      "Bring back the review of this kind deleted most recently (within 30 days). The task can't have a live one of that kind.",
+      { task_id: z.string(), kind: KIND },
+      async ({ task_id, kind }) => reply(await services.restoreReview(task_id, kind)));
+  }
 
   server.tool("check_item",
     "Tick (or untick) a checklist item on a task by matching its title text.",

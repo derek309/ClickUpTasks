@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/serverAuth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { sendGmailAs, googleConfigured } from "@/lib/googleMail";
+import { APP_URL } from "@/lib/appUrl";
 
 // Generic best-effort email companion to ANY in-app notification (see
 // Cockpit.tsx's notify()) — the in-app bell already fired before this is
@@ -12,7 +13,6 @@ import { sendGmailAs, googleConfigured } from "@/lib/googleMail";
 // email from mention-email/route.ts.
 
 const SEND_DOMAIN = "clickuplocal.com";
-const APP_URL = "https://clickuptasks.vercel.app";
 
 export async function POST(req: NextRequest) {
   const caller = await requireUser(req);

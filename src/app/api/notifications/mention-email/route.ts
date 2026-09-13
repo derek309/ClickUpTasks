@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/serverAuth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { sendGmailAs, googleConfigured } from "@/lib/googleMail";
+import { APP_URL } from "@/lib/appUrl";
 
 // Best-effort email companion to the in-app @mention notification (see
 // Cockpit.tsx's addComment): the in-app bell already fired before this is
@@ -11,7 +12,6 @@ import { sendGmailAs, googleConfigured } from "@/lib/googleMail";
 // domain-wide-delegation path ../google/send uses for client email.
 
 const SEND_DOMAIN = "clickuplocal.com";
-const APP_URL = "https://clickuptasks.vercel.app";
 
 export async function POST(req: NextRequest) {
   const caller = await requireUser(req);

@@ -9,6 +9,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { titleCase } from "@/lib/data";
 import { SAFE_CONTACT_ID } from "@/lib/ghlConversationTask";
 import { sendGmailAs, googleConfigured } from "@/lib/googleMail";
+import { APP_URL } from "@/lib/appUrl";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -136,7 +137,6 @@ async function notifyInbound(contact: Contact, taskId: string | null, text: stri
   return recipients;
 }
 
-const APP_URL = "https://clickuptasks.vercel.app";
 const SEND_DOMAIN = "clickuplocal.com";
 // One inbound-reply email per CLIENT per window, however many messages they
 // fire off inside it — a client sending four texts in a row is one

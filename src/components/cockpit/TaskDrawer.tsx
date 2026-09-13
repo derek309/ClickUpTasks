@@ -20,8 +20,8 @@ import { useTaskMessaging } from "./TaskMessaging";
 import { useDebouncedCommit } from "./useDebouncedCommit";
 import { TaskDocument } from "./TaskDocument";
 import { DraftEmail } from "./DraftEmail";
-import { draftLinkHtml, escapeHtml } from "@/lib/draftLink";
-import { kindWhat, type FileKind, type ReviewKind } from "@/lib/reviewKinds";
+import { buildReviewEmail, type ReviewEmailInput } from "@/lib/reviewEmail";
+import { type FileKind } from "@/lib/reviewKinds";
 
 // The review lines a task can add beside its client document, in order.
 const REVIEW_LINES: { kind: FileKind; chip: string }[] = [
@@ -1217,40 +1217,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // ready to send. It no longer rewrites itself with AI as it opens (Derek,
   // 2026-09-12: "not sure that needs to happen"); Write with AI uses what changed
   // when asked. It replaces any draft already here. False when there is nobody to email.
-  // An image review's email says how to leave a note on the image, and has no text to quote.
-  const startReviewEmail = (review: { kind: ReviewKind; url: string | null; name: string; text: string; changes: string | null }) => {
+  // The wording per kind lives in src/lib/reviewEmail.ts, shared with Claude over MCP.
+  const startReviewEmail = (review: ReviewEmailInput) => {
     if (!hasMessaging) return false;
-    const what = kindWhat(review.kind);
     const now = new Date().toISOString();
-    const link = review.url ? { url: review.url, label: `Open "${review.name}" to review` } : null;
-    const name = escapeHtml(review.name);
-    // What the client can do from the link, per kind (Derek, 2026-09-12: web page review).
-    const invite = {
-      doc: "You can read it, make changes, leave comments or approve it here:",
-      image: "Click any spot on the image to leave a comment, or approve it here:",
-      page: "Click any spot on the page to leave a comment, change the wording right on the page, or approve it here:",
-    }[review.kind];
-    const can = {
-      doc: "read it, edit it, comment and approve it",
-      image: "click any spot on it to leave a numbered comment or a file, ask for changes, or approve it",
-      page: "click any spot on it to leave a numbered comment or a file, change the wording right on the page, or approve it",
-    }[review.kind];
-    const intro = review.changes
-      ? `<p>Hi,</p><p>We made ${review.kind === "doc" ? "some updates to" : "a new version of"} "${name}". Take a look and approve it when it looks right:</p>`
-      : `<p>Hi,</p><p>"${name}" is ready for your review. ${invite}</p>`;
-    const aiContext = [
-      review.changes
-        ? `We updated the ${what} "${review.name}" and are asking the client to review the changes and approve it.`
-        : `We are asking the client to review the ${what} "${review.name}". From the link they can ${can}.`,
-      review.changes ? `What changed since the version they saw before:\n${review.changes}` : null,
-      review.text ? `The ${what}'s text:\n${review.text}` : null,
-    ].filter(Boolean).join("\n\n");
-    onPatch({
-      draftEmail: {
-        subject: review.changes ? `Updated for your review: ${review.name}` : `Please review: ${review.name}`,
-        body: intro + draftLinkHtml(link), createdAt: now, updatedAt: now, link, aiContext,
-      },
-    });
+    onPatch({ draftEmail: { ...buildReviewEmail(review), createdAt: now, updatedAt: now } });
     setEmailOpenNonce((n) => n + 1);
     return true;
   };

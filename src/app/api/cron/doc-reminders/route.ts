@@ -6,6 +6,7 @@ import { linkState } from "@/lib/taskDocumentServer";
 import { resolveNotifyRecipient } from "@/lib/waitingNotify";
 import { draftLinkHtml, escapeHtml } from "@/lib/draftLink";
 import type { EmailDraft } from "@/lib/data";
+import { APP_URL } from "@/lib/appUrl";
 
 // Daily: a client document sent for review with no answer after three days gets
 // a "just checking in" draft email staged on its task, and the task owner a bell
@@ -17,7 +18,6 @@ import type { EmailDraft } from "@/lib/data";
 
 export const maxDuration = 60;
 
-const APP_URL = "https://clickuptasks.vercel.app";
 const WAIT_MS = 3 * 86_400_000;
 
 export async function GET(req: NextRequest) {

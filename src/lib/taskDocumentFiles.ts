@@ -17,6 +17,7 @@ import { supabaseAdmin } from "./supabaseAdmin";
 import { TASK_FILES_BUCKET } from "./db";
 import { cleanPin, publishedFiles, type ReviewPin } from "./reviewPins";
 import type { FileKind } from "./reviewKinds";
+import type { ImageType } from "./safeFetch";
 import {
   MAX_SHARED_FILE_BYTES, cleanFileName, extOf, isActiveContentType, isPreviewableImage, isShareableFileName,
   sharedFileKind, storageSafeName, type SharedFileKind,
@@ -274,6 +275,38 @@ export async function storePageFile(documentId: string, html: string, rawName: u
     return fail(500, "Could not save the page. Please try again.");
   }
   return { ok: true, fileId };
+}
+
+/** Keep an image fetched on the server (Claude adding an image review version from a
+ *  link) as a new version file, with a browser upload's rules: a real image type,
+ *  already read from its first bytes (safeFetch.ts), under the cap, and the
+ *  document's file limit. The caller makes it the working copy. */
+export async function storeImageFile(
+  documentId: string, bytes: Buffer, rawName: unknown, image: { contentType: ImageType; extension: string }, actor: DocActor,
+): Promise<{ ok: true; fileId: string; name: string } | Fail> {
+  if (!bytes.length || bytes.length > MAX_SHARED_FILE_BYTES) return fail(413, "Each file must be under 25 MB.");
+  const { count } = await supabaseAdmin.from("task_document_files")
+    .select("id", { count: "exact", head: true }).eq("document_id", documentId).is("removed_at", null);
+  if ((count ?? 0) >= MAX_DOC_FILES) return fail(400, `A document can hold ${MAX_DOC_FILES} files. Remove one to add another.`);
+
+  const base = typeof rawName === "string" ? cleanFileName(rawName).replace(/\.[^.]*$/, "").trim() : "";
+  const name = `${base || "Image"}.${image.extension}`;
+  const path = `${docFileFolder(documentId)}${randomUUID()}-${storageSafeName(name)}`;
+  const storage = supabaseAdmin.storage.from(TASK_FILES_BUCKET);
+  const { error: uploadError } = await storage.upload(path, bytes, { contentType: image.contentType, upsert: false });
+  if (uploadError) return fail(500, "Could not save the image. Please try again.");
+
+  const now = new Date().toISOString();
+  const fileId = "tdf_" + randomUUID();
+  const { error } = await supabaseAdmin.from("task_document_files").insert({
+    id: fileId, document_id: documentId, path, name, size_bytes: bytes.length,
+    kind: sharedFileKind(name), purpose: "image", added_by: actor.id, added_by_label: actor.label, created_at: now, shared_at: now,
+  });
+  if (error) {
+    await storage.remove([path]);
+    return fail(500, "Could not save the image. Please try again.");
+  }
+  return { ok: true, fileId, name };
 }
 
 /** A web page review's HTML, or null when the file is not a live page version (or,

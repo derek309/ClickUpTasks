@@ -310,13 +310,30 @@ export async function teamDocAccess(req: NextRequest, taskId: string): Promise<{
   const user = await requireUser(req);
   if (!user) return { ok: false, res: json({ error: "Unauthorized" }, 401) };
   if (!(await callerCanSeeTask(req, taskId))) return { ok: false, res: json({ error: "Not found" }, 404) };
+  const found = await reviewTask(taskId);
+  if (!found.ok) return { ok: false, res: json({ error: found.error }, found.status) };
+  return { ok: true, user, task: found.task };
+}
+
+/** The task, when it can have review documents: not in the trash, not private and
+ *  not the Personal client. Claude over MCP checks this without a session; the
+ *  team routes check it after the teammate's own row level security read. */
+export async function reviewTask(taskId: string): Promise<{ ok: true; task: TeamTask } | { ok: false; status: number; error: string }> {
   const { data: task } = await supabaseAdmin.from("tasks")
     .select("id, title, client_id, project_id, status, is_private, deleted_at").eq("id", taskId).maybeSingle();
-  if (!task || task.deleted_at) return { ok: false, res: json({ error: "Not found" }, 404) };
-  if (task.is_private || task.client_id === PERSONAL_CLIENT_ID) {
-    return { ok: false, res: json({ error: "A private task can't have a client document." }, 400) };
-  }
-  return { ok: true, user, task: task as TeamTask };
+  if (!task || task.deleted_at) return { ok: false, status: 404, error: "Not found" };
+  if (task.is_private || task.client_id === PERSONAL_CLIENT_ID) return { ok: false, status: 400, error: "A private task can't have a client document." };
+  return { ok: true, task: task as TeamTask };
+}
+
+/** Who does something to a review: a signed in teammate, or Claude over MCP.
+ *  id is what files and comments record, memberId stamps the document (null for a
+ *  teammate without a roster id), label is looked up once, when first needed. */
+export type ReviewActor = { id: string; memberId: string | null; label: () => Promise<string>; admin: boolean };
+
+export function teamActor(user: AuthedUser): ReviewActor {
+  let label: Promise<string> | null = null;
+  return { id: user.memberId ?? user.id, memberId: user.memberId, admin: user.role === "admin", label: () => (label ??= memberLabel(user)) };
 }
 
 export type LiveDocument = { id: string } & Record<string, unknown>;
@@ -372,12 +389,12 @@ export async function linkState(documentId: string, origin: string): Promise<{ l
 
 /** A brand new link for the document, replacing any old one, bound to the task's
  *  client as it is right now. Returns the URL, shown to the teammate once. */
-export async function mintDocLink(documentId: string, task: TeamTask, user: AuthedUser, origin: string): Promise<string> {
+export async function mintDocLink(documentId: string, task: TeamTask, actor: Pick<ReviewActor, "memberId">, origin: string): Promise<string> {
   const { raw, hash, enc } = mintToken("doc_");
   const { error } = await supabaseAdmin.from("task_document_links").upsert({
     document_id: documentId, token_hash: hash, token_enc: enc,
     bound_task_id: task.id, bound_client_id: task.client_id,
-    created_by: user.memberId, created_at: new Date().toISOString(), revoked_at: null, expires_at: null,
+    created_by: actor.memberId, created_at: new Date().toISOString(), revoked_at: null, expires_at: null,
   }, { onConflict: "document_id" });
   if (error) throw new Error(error.message);
   return docUrl(origin, raw);
@@ -393,7 +410,7 @@ export async function revokeDocLink(documentId: string): Promise<void> {
 
 /** The team sends the current working copy as a new version: the text, or on an
  *  image or page review the version file chosen last. */
-export async function teamSend(documentId: string, baseVersion: number, user: AuthedUser): Promise<PublishOutcome> {
+export async function teamSend(documentId: string, baseVersion: number, actor: Pick<ReviewActor, "memberId" | "label">): Promise<PublishOutcome> {
   const { data: doc } = await supabaseAdmin.from("task_documents").select("body, status, kind").eq("id", documentId).maybeSingle();
   if (!doc) return { ok: false, status: 404, error: "Not found" };
   const kind = parseKind(doc.kind);
@@ -411,7 +428,7 @@ export async function teamSend(documentId: string, baseVersion: number, user: Au
   }
   let version: number;
   try {
-    version = await publishVersion(documentId, baseVersion, "sent", body, user.memberId, await memberLabel(user));
+    version = await publishVersion(documentId, baseVersion, "sent", body, actor.memberId, await actor.label());
   } catch (e) {
     return { ok: false, status: 500, error: e instanceof Error ? e.message : "Could not send." };
   }

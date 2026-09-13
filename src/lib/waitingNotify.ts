@@ -9,8 +9,8 @@
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "./supabaseAdmin";
 import { sendGmailAs, googleConfigured } from "./googleMail";
+import { APP_URL } from "./appUrl";
 
-const APP_URL = "https://clickuptasks.vercel.app";
 const SEND_DOMAIN = "clickuplocal.com";
 const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 

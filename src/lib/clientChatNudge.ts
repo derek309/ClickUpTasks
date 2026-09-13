@@ -6,8 +6,8 @@ import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "./supabaseAdmin";
 import { sendGmailAs } from "./googleMail";
 import type { AuthedUser } from "./serverAuth";
+import { APP_URL } from "./appUrl";
 
-const APP_URL = "https://clickuptasks.vercel.app";
 const SEND_DOMAIN = "clickuplocal.com";
 // One notification per client per window, no matter how many of their tasks
 // got a reply in that time — see supabase/client-chat-notify-cooldown.sql

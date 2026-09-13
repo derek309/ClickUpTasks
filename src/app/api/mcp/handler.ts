@@ -24,6 +24,7 @@
 import { NextRequest } from "next/server";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createServer } from "../../../../mcp/core.mjs";
+import { createReviewServices } from "@/lib/mcpReviewServices";
 
 function json(body: unknown, status: number) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -39,10 +40,13 @@ export async function handleMcp(req: NextRequest, pathToken?: string): Promise<R
   const ok = authHeader === `Bearer ${secret}` || queryToken === secret || pathToken === secret;
   if (!ok) return json({ error: "Unauthorized" }, 401);
 
+  const memberId = process.env.CLICKUPTASKS_MEMBER_ID || "u_claude";
   const server = createServer({
     url: process.env.NEXT_PUBLIC_SUPABASE_URL,
     key: process.env.SUPABASE_SERVICE_ROLE_KEY,
-    memberId: process.env.CLICKUPTASKS_MEMBER_ID || "u_claude",
+    memberId,
+    // The review tools run the app's own review code, so only this server has them.
+    services: createReviewServices({ memberId }),
   });
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   await server.connect(transport);
