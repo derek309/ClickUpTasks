@@ -10,6 +10,7 @@ import { docVersionFile, recordCheckpoint, removeVersionFile, sharedVersionFiles
 import { sanitizeDocHtml, DOC_MAX_HTML_CHARS } from "./docHtml";
 import { filePurpose, kindWhat, noDocumentYet, type FileKind, type ReviewKind } from "./reviewKinds";
 import { nameReviewIfDefault } from "./reviewAutoName";
+import { cleanImageSet, formatImageSet, parseImageSet, setFiles } from "./imageSet";
 
 type Row = Record<string, unknown>;
 export type ReviewOutcome<T> = ({ ok: true } & T) | { ok: false; status: number; error: string; current?: unknown };
@@ -114,45 +115,71 @@ export async function writeDocBody(
   return { ok: true, document: named ?? (data as Row) };
 }
 
-/** An image or HTML review's working copy is the version file to send next: an
- *  uploaded file, or "Use this version" (a client's page included). */
+/** An image or HTML review's working copy is the version to send next: an uploaded
+ *  file, "Use this version" (a client's page included), or on an image review a set
+ *  of up to 10 images with their labels (imageSet.ts, Derek 2026-09-14: a postcard's
+ *  front and back in one version). */
 export async function pickReviewVersion(
-  taskId: string, kind: FileKind, actor: ReviewActor, input: { file?: unknown; restoreVersion?: unknown },
+  taskId: string, kind: FileKind, actor: ReviewActor, input: { file?: unknown; images?: unknown; restoreVersion?: unknown },
 ): Promise<ReviewOutcome<{ document: Row }>> {
   const doc = await liveDocument(taskId, kind, COLUMNS);
   if (!doc) return fail(404, noDocumentYet(kind));
   if (doc.approved_at) return fail(409, locked(kind));
-  let fileId = input.file;
+  let body: string;
   if (typeof input.restoreVersion === "number") {
     const { data: v } = await supabaseAdmin.from("task_document_versions")
       .select("body").eq("document_id", doc.id).eq("version", input.restoreVersion).maybeSingle();
     if (!v) return fail(404, "That version no longer exists.");
-    fileId = v.body;
+    body = v.body as string;
+  } else if (kind === "image" && input.images !== undefined) {
+    const items = cleanImageSet(input.images);
+    if (!items) return fail(400, "A version holds 1 to 10 different images.");
+    body = formatImageSet(items);
+  } else {
+    // One file, or a set passed back as its body ("Use this version" over MCP), cleaned like a new one.
+    const items = typeof input.file === "string" ? cleanImageSet(parseImageSet(input.file)) : null;
+    body = items ? formatImageSet(items) : "";
   }
-  const file = await docVersionFile(doc.id, fileId, filePurpose(kind), false);
-  if (!file) return fail(400, kind === "image" ? "Upload the image first." : "That version is no longer on the review.");
+  const ids = setFiles(body);
+  const files = await Promise.all(ids.map((id) => docVersionFile(doc.id, id, filePurpose(kind), false)));
+  const first = files[0];
+  if (!first || files.some((f) => !f) || (kind === "page" && ids.length > 1)) {
+    return fail(400, kind === "image" ? "Upload the image first." : "That version is no longer on the review.");
+  }
   try {
-    const data = await setWorkingFile(doc.id, file.id, (doc.body as string) ?? "", stampOf(actor));
+    const data = await setWorkingFile(doc.id, body, (doc.body as string) ?? "", stampOf(actor));
     if (!data) return fail(409, locked(kind));
     // Its first image or page gives a review still called "New image review" a name.
-    const named = await nameReviewIfDefault(data, { kind, path: file.path, fileName: file.name });
+    const named = await nameReviewIfDefault(data, { kind, path: first.path, fileName: first.name });
     return { ok: true, document: named ?? data };
   } catch (e) {
     return fail(400, e instanceof Error ? e.message : "Could not save.");
   }
 }
 
-/** Take a wrong version off (Derek, 2026-09-12). When it was the version under
- *  review, the review goes back to the newest one the client can still see, or to
- *  none at all, with nothing left to send. */
-export async function removeReviewVersion(taskId: string, kind: FileKind, actor: ReviewActor, fileId: unknown): Promise<ReviewOutcome<{ document: Row }>> {
+/** Take a wrong version off (Derek, 2026-09-12). target is the version's body: a
+ *  file id, or a set of images. Only the images no other version (or the working
+ *  copy) uses go, with their pins, so a front carried into later versions stays.
+ *  When the working copy lost an image, the review goes back to the newest version
+ *  the client can still see, or to none at all, with nothing left to send. */
+export async function removeReviewVersion(taskId: string, kind: FileKind, actor: ReviewActor, target: unknown): Promise<ReviewOutcome<{ document: Row }>> {
   const doc = await liveDocument(taskId, kind, COLUMNS);
   if (!doc) return fail(404, noDocumentYet(kind));
   if (doc.approved_at) return fail(409, locked(kind));
-  const removed = await removeVersionFile(doc.id, fileId, filePurpose(kind), { id: actor.id, label: await actor.label() });
-  if (!removed.ok) return fail(removed.status, removed.error);
-  const newest = (await sharedVersionFiles(doc.id)).at(-1)?.fileId ?? "";
-  const moveOff = doc.body === removed.id ? { body: newest, draft_dirty: false } : {};
+  const targetFiles = setFiles(target);
+  if (!targetFiles.length) return fail(404, "That version is already gone.");
+  const { data: versions } = await supabaseAdmin.from("task_document_versions").select("body").eq("document_id", doc.id);
+  const others = new Set([...(versions ?? []).map((v) => v.body as string), (doc.body as string) ?? ""]
+    .filter((body) => body && body !== target).flatMap(setFiles));
+  const going = targetFiles.filter((id) => !others.has(id));
+  if (!going.length) return fail(400, "This version only reuses images from other versions, so there is nothing to take off.");
+  const who = { id: actor.id, label: await actor.label() };
+  for (const id of going) {
+    const removed = await removeVersionFile(doc.id, id, filePurpose(kind), who);
+    if (!removed.ok) return fail(removed.status, removed.error);
+  }
+  const newest = (await sharedVersionFiles(doc.id)).at(-1)?.body ?? "";
+  const moveOff = setFiles(doc.body).some((id) => going.includes(id)) ? { body: newest, draft_dirty: false } : {};
   return update(doc.id, { ...moveOff, ...stampOf(actor) });
 }
 

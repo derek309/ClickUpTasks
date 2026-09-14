@@ -29,9 +29,13 @@ import { summarizeDocChanges, summarizeTextChanges } from "./docDiff";
 import { htmlToText } from "./data";
 import { TASK_FILES_BUCKET } from "./db";
 import { kindInSentence, kindTitle, kindWhat, type FileKind, type ReviewKind } from "./reviewKinds";
+import { MAX_SET_IMAGES, cleanImageLabel, imageLabel, parseImageSet, type ImageSetItem } from "./imageSet";
 import { docHtmlToText } from "../../mcp/core.mjs";
 
 export type ReviewVersion = number | "next";
+/** One image for an image review version: from a link or an upload, where it goes
+ *  (1 based) and what it is called. */
+export type VersionImage = { imageUrl?: string; uploadId?: string; name?: string; label?: string; position?: number };
 export type ReviewStage = "draft" | "with_client" | "client_submitted" | "approved" | "completed";
 const KINDS: ReviewKind[] = ["doc", "image", "page"];
 
@@ -73,13 +77,70 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
     const comment = { id: "cm_" + randomUUID().slice(0, 8), authorId: memberId, kind: "event", at: new Date().toISOString(), body };
     try { await supabaseAdmin.rpc("append_comment", { task_id: taskId, comment }); } catch { /* the change itself landed */ }
   }
-  /** The file behind a version number from get_review, or "next": the working copy not sent yet. */
+  /** The body behind a version number from get_review (a file id, or an image set),
+   *  or "next": the working copy not sent yet. */
   async function versionFile(doc: LiveDocument, version: ReviewVersion): Promise<string | null> {
     const shown = await sharedVersionFiles(doc.id);
-    if (version !== "next") return shown.find((v) => v.number === version)?.fileId ?? null;
+    if (version !== "next") return shown.find((v) => v.number === version)?.body ?? null;
     const body = typeof doc.body === "string" ? doc.body : "";
-    return body && !shown.some((v) => v.fileId === body) ? body : null;
+    return body && !shown.some((v) => v.body === body) ? body : null;
   }
+  /** Keep one image for an image review: fetched from a public link, or an upload
+   *  from start_image_upload. */
+  async function storeImage(documentId: string, input: { imageUrl?: string; uploadId?: string; name?: string }, who: DocActor): Promise<{ ok: true; fileId: string } | { ok: false; error: string }> {
+    if (input.imageUrl) {
+      const image = await fetchImage(input.imageUrl, MAX_SHARED_FILE_BYTES);
+      if (!image.ok) return { ok: false, error: image.error };
+      const fromUrl = decodeURIComponent(new URL(input.imageUrl).pathname.split("/").pop() ?? "");
+      const stored = await storeImageFile(documentId, image.bytes, input.name ?? fromUrl, image, who);
+      return stored.ok ? { ok: true, fileId: stored.fileId } : { ok: false, error: stored.error };
+    }
+    if (input.uploadId) {
+      const fileName = input.name ?? input.uploadId.split("/").pop()?.replace(/^[0-9a-f-]{36}-/, "") ?? "";
+      const finished = await finishDocUpload(documentId, input.uploadId, fileName, who, "image");
+      return finished.ok ? { ok: true, fileId: finished.fileId } : { ok: false, error: finished.error };
+    }
+    return { ok: false, error: "Pass image_url (a public https link to the image) or upload_id (from start_image_upload)." };
+  }
+
+  /** Several images as one image review version, like a postcard's front and back
+   *  (Derek, 2026-09-14). Without keepOthers the list is the whole version, in order;
+   *  with it, each image replaces the one at its position in the working copy (or is
+   *  added at the end), and the rest carry over. */
+  async function addImages(taskId: string, images: VersionImage[], keepOthers: boolean): Promise<string> {
+    const task = await taskFor(taskId);
+    if (typeof task === "string") return task;
+    if (images.length > MAX_SET_IMAGES) return `A version holds up to ${MAX_SET_IMAGES} images.`;
+    const made = await createReview(task, "image", actor);
+    if (!made.ok) return made.error;
+    const doc = made.document;
+    if (doc.approved_at) return "This image review is approved. update_review with reopen first.";
+    const documentId = doc.id as string;
+    const who = await fileActor();
+    const items: ImageSetItem[] = keepOthers ? parseImageSet(doc.body) : [];
+    const stored: string[] = [];
+    const undo = async () => { for (const id of stored) await discardVersionFile(documentId, id); };
+    for (const img of images) {
+      const one = await storeImage(documentId, img, who);
+      if (!one.ok) { await undo(); return one.error; }
+      stored.push(one.fileId);
+      const at = keepOthers && img.position ? img.position - 1 : -1;
+      if (at >= 0 && at < items.length) items[at] = { file: one.fileId, label: img.label === undefined ? items[at].label : cleanImageLabel(img.label) };
+      else items.push({ file: one.fileId, label: cleanImageLabel(img.label) });
+    }
+    if (items.length > MAX_SET_IMAGES) { await undo(); return `A version holds up to ${MAX_SET_IMAGES} images; this would make ${items.length}.`; }
+    const picked = await pickReviewVersion(task.id, "image", actor, { images: items });
+    if (!picked.ok) { await undo(); return picked.error; }
+    await event(task.id, `${await actor.label()} added a new version of the image review`);
+    const names = items.map((_, i) => `"${imageLabel(items, i)}"`).join(", ");
+    return `Added a new version of the image review on "${task.title}" with ${items.length} ${items.length === 1 ? "image" : `images: ${names}`}. It's the working copy (version "next"), not sent yet: send_for_review sends it.`;
+  }
+
+  /** "Back" for a set's second of two images, "" for a version of one. */
+  const placeOf = (items: ImageSetItem[], fileId: string) => {
+    const i = items.findIndex((item) => item.file === fileId);
+    return i >= 0 && items.length > 1 ? imageLabel(items, i) : "";
+  };
 
   return {
     async listReviews(taskId: string): Promise<string> {
@@ -118,15 +179,22 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
       } else {
         const shown = await sharedVersionFiles(doc.id);
         const working = doc.body as string;
-        for (const v of shown) numbers.set(v.fileId, v.number);
+        for (const v of shown) for (const img of v.images) numbers.set(img.fileId, v.number);
+        const listImages = (images: { name: string; label: string }[]) => (images.length > 1 ? images.map((img, i) => `${i + 1}. ${img.label} (${img.name})`).join(", ") : images[0]?.name ?? "");
         out.push(`\nVersions the client can see (the last one is under review):\n${shown.length
-          ? shown.map((v) => `  - version ${v.number}: ${v.name}${v.fromClient ? " (made by the client)" : ""}${v.fileId === working ? " · working copy" : ""}`).join("\n")
+          ? shown.map((v) => `  - version ${v.number}: ${listImages(v.images)}${v.fromClient ? " (made by the client)" : ""}${v.body === working ? " · working copy" : ""}`).join("\n")
           : "  (none sent yet)"}`);
-        const file = working ? await docVersionFile(doc.id, working, kind, false) : null;
-        if (file && !numbers.has(file.id)) out.push(`  - version "next": ${file.name} · working copy, not sent yet`);
-        if (file && kind === "image") {
-          const { data } = await supabaseAdmin.storage.from(TASK_FILES_BUCKET).createSignedUrl(file.path, 3600);
-          if (data?.signedUrl) out.push(`\nWorking image (this link works for an hour): ${data.signedUrl}`);
+        const items = parseImageSet(working);
+        const files = (await Promise.all(items.map((item) => docVersionFile(doc.id, item.file, kind, false)))).filter((f) => !!f);
+        const file = files[0] ?? null;
+        if (files.length && !shown.some((v) => v.body === working)) {
+          out.push(`  - version "next": ${listImages(files.map((f, i) => ({ name: f.name, label: imageLabel(items, i) })))} · working copy, not sent yet`);
+        }
+        if (kind === "image") {
+          for (const [i, f] of files.entries()) {
+            const { data } = await supabaseAdmin.storage.from(TASK_FILES_BUCKET).createSignedUrl(f.path, 3600);
+            if (data?.signedUrl) out.push(`${i === 0 ? "\n" : ""}Working image ${files.length > 1 ? `${i + 1} "${imageLabel(items, i)}" ` : ""}(this link works for an hour): ${data.signedUrl}`);
+          }
         }
         if (file && kind === "page") {
           const html = await readPageFile(doc.id, file.id, false);
@@ -134,9 +202,15 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
         }
       }
       const comments = await docComments(doc.id);
+      // Which image of its version a pin is on, when the version holds several.
+      const setsNewestFirst = kind === "image" ? [(doc.body as string) ?? "", ...(await sharedVersionFiles(doc.id)).map((v) => v.body).reverse()] : [];
+      const pinPlace = (fileId: string) => {
+        const holder = setsNewestFirst.map(parseImageSet).find((items) => items.some((item) => item.file === fileId));
+        return holder ? placeOf(holder, fileId) : "";
+      };
       if (comments.length) {
         out.push(`\nComments (the client sees these too):\n${comments.map((c) => `  - [${c.id}] ${c.authorLabel}${c.fromClient ? " (client)" : ""}, ${c.createdAt}`
-          + `${c.completedAt ? " · done" : ""}${c.pin ? ` · pin ${c.pin.number} on version ${numbers.get(c.pin.fileId) ?? "next"} at x ${c.pin.x}, y ${c.pin.y}` : ""}`
+          + `${c.completedAt ? " · done" : ""}${c.pin ? ` · pin ${c.pin.number} on version ${numbers.get(c.pin.fileId) ?? "next"}${pinPlace(c.pin.fileId) ? ` (${pinPlace(c.pin.fileId)})` : ""} at x ${c.pin.x}, y ${c.pin.y}` : ""}`
           + `${c.quote ? ` · on "${c.quote.replace(/\n/g, " … ")}"` : ""}${c.attachmentFileId ? " · has a file" : ""}: ${c.body}`).join("\n")}`);
       }
       return out.join("\n");
@@ -157,8 +231,8 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
       return `Created the ${what(kind)} on "${task.title}". ${next}, then send_for_review sends it.`;
     },
 
-    async updateReview(taskId: string, kind: ReviewKind, change: { title?: string; stage?: ReviewStage; reopen?: boolean }): Promise<string> {
-      const found = await reviewFor(taskId, kind, "id");
+    async updateReview(taskId: string, kind: ReviewKind, change: { title?: string; stage?: ReviewStage; reopen?: boolean; imageLabels?: string[] }): Promise<string> {
+      const found = await reviewFor(taskId, kind, "id, body");
       if (typeof found === "string") return found;
       const done: string[] = [];
       if (change.reopen) {
@@ -176,7 +250,16 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
         if (!r.ok) return r.error;
         done.push(change.title.trim() ? `renamed it "${change.title.trim()}"` : "cleared its name");
       }
-      if (!done.length) return "Nothing to change: pass title, stage or reopen.";
+      if (change.imageLabels) {
+        if (kind !== "image") return "image_labels is for an image review.";
+        const items = parseImageSet(found.doc.body);
+        if (!items.length) return "The image review has no images yet. add_review_version adds them.";
+        const relabelled = items.map((item, i) => ({ file: item.file, label: cleanImageLabel(change.imageLabels![i] ?? item.label) }));
+        const r = await pickReviewVersion(found.task.id, "image", actor, { images: relabelled });
+        if (!r.ok) return r.error;
+        done.push(`labelled its images ${relabelled.map((_, i) => `"${imageLabel(relabelled, i)}"`).join(", ")} (send_for_review shows the client)`);
+      }
+      if (!done.length) return "Nothing to change: pass title, stage, reopen or image_labels.";
       await event(found.task.id, `${await actor.label()} ${done.join(" and ")} on the ${what(kind)}`);
       return `On the ${what(kind)}: ${done.join(", ")}.`;
     },
@@ -210,7 +293,8 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
         + `Then call add_review_version with kind "image" and upload_id "${r.path}".`;
     },
 
-    async addVersion(taskId: string, kind: FileKind, input: { imageUrl?: string; uploadId?: string; html?: string; name?: string }): Promise<string> {
+    async addVersion(taskId: string, kind: FileKind, input: { imageUrl?: string; uploadId?: string; html?: string; name?: string; images?: VersionImage[]; keepOthers?: boolean }): Promise<string> {
+      if (kind === "image" && input.images?.length) return addImages(taskId, input.images, !!input.keepOthers);
       const task = await taskFor(taskId);
       if (typeof task === "string") return task;
       const made = await createReview(task, kind, actor);
@@ -226,20 +310,10 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
         const stored = await storePageFile(documentId, input.html, input.name ?? "", who);
         if (!stored.ok) return stored.error;
         fileId = stored.fileId;
-      } else if (input.imageUrl) {
-        const image = await fetchImage(input.imageUrl, MAX_SHARED_FILE_BYTES);
-        if (!image.ok) return image.error;
-        const fromUrl = decodeURIComponent(new URL(input.imageUrl).pathname.split("/").pop() ?? "");
-        const stored = await storeImageFile(documentId, image.bytes, input.name ?? fromUrl, image, who);
-        if (!stored.ok) return stored.error;
-        fileId = stored.fileId;
-      } else if (input.uploadId) {
-        const fileName = input.name ?? input.uploadId.split("/").pop()?.replace(/^[0-9a-f-]{36}-/, "") ?? "";
-        const finished = await finishDocUpload(documentId, input.uploadId, fileName, who, "image");
-        if (!finished.ok) return finished.error;
-        fileId = finished.fileId;
       } else {
-        return "Pass image_url (a public https link to the image) or upload_id (from start_image_upload).";
+        const one = await storeImage(documentId, input, who);
+        if (!one.ok) return one.error;
+        fileId = one.fileId;
       }
       const picked = await pickReviewVersion(task.id, kind, actor, { file: fileId });
       if (!picked.ok) {
@@ -268,6 +342,7 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
     },
 
     async removeVersion(taskId: string, kind: FileKind, version: ReviewVersion): Promise<string> {
+      // A set's images carried into other versions stay; the rest go with their pins.
       const found = await reviewFor(taskId, kind, "id, body");
       if (typeof found === "string") return found;
       const fileId = await versionFile(found.doc, version);
@@ -350,15 +425,22 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
       return `The ${what(kind)}'s link is off for good. The next send_for_review makes a new one.`;
     },
 
-    async addComment(taskId: string, kind: ReviewKind, text: string, extras: { quote?: string; pin?: { version: ReviewVersion; x: number; y: number } }): Promise<string> {
+    async addComment(taskId: string, kind: ReviewKind, text: string, extras: { quote?: string; pin?: { version: ReviewVersion; x: number; y: number; image?: string | number } }): Promise<string> {
       const found = await reviewFor(taskId, kind, "id, body");
       if (typeof found === "string") return found;
       let pin: { fileId: string; x: number; y: number } | undefined;
       if (extras.pin) {
         if (kind === "doc") return "Pins are for image and HTML reviews. On the client document, pass quote with the words the comment is about.";
-        const fileId = await versionFile(found.doc, extras.pin.version);
-        if (!fileId) return `There is no version ${extras.pin.version} on the ${what(kind)}. get_review lists them.`;
-        pin = { fileId, x: extras.pin.x, y: extras.pin.y };
+        const body = await versionFile(found.doc, extras.pin.version);
+        if (!body) return `There is no version ${extras.pin.version} on the ${what(kind)}. get_review lists them.`;
+        // Which image: a 1 based position or a label, else the first.
+        const items = parseImageSet(body);
+        const wanted = extras.pin.image;
+        const index = wanted === undefined ? 0 : typeof wanted === "number"
+          ? wanted - 1
+          : items.findIndex((_, i) => imageLabel(items, i).toLowerCase() === String(wanted).trim().toLowerCase());
+        if (index < 0 || index >= items.length) return `Version ${extras.pin.version} has no image ${JSON.stringify(wanted)}. Its images: ${items.map((_, i) => `${i + 1} "${imageLabel(items, i)}"`).join(", ")}.`;
+        pin = { fileId: items[index].file, x: extras.pin.x, y: extras.pin.y };
       }
       const r = await postDocComment(found.doc.id, text, await fileActor(), { quote: kind === "doc" ? extras.quote : undefined, pin });
       if (!r.ok) return r.error;

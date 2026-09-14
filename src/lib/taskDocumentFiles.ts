@@ -17,6 +17,7 @@ import { supabaseAdmin } from "./supabaseAdmin";
 import { TASK_FILES_BUCKET } from "./db";
 import { cleanPin, publishedFiles, type ReviewPin } from "./reviewPins";
 import type { FileKind } from "./reviewKinds";
+import { imageLabel, parseImageSet, pinImageLabel, setFiles } from "./imageSet";
 import type { ImageType } from "./safeFetch";
 import {
   MAX_SHARED_FILE_BYTES, cleanFileName, extOf, isActiveContentType, isPreviewableImage, isShareableFileName,
@@ -26,6 +27,18 @@ import {
 export const MAX_DOC_FILES = 50;
 /** Versions a web page review can hold; each paste or edit is one. */
 export const MAX_PAGE_FILES = 100;
+/** Images an image review can hold across its versions (a version can hold 10). */
+export const MAX_IMAGE_FILES = 100;
+
+/** Whether the document has room for one more file of this purpose: Files and an
+ *  image review's images each have their own cap, so a postcard's versions never
+ *  crowd out the files. */
+async function roomFor(documentId: string, purpose: UploadPurpose): Promise<Fail | null> {
+  const { count } = await supabaseAdmin.from("task_document_files")
+    .select("id", { count: "exact", head: true }).eq("document_id", documentId).eq("purpose", purpose).is("removed_at", null);
+  if (purpose === "image") return (count ?? 0) >= MAX_IMAGE_FILES ? fail(400, `An image review can hold ${MAX_IMAGE_FILES} images. Remove an old version to add more.`) : null;
+  return (count ?? 0) >= MAX_DOC_FILES ? fail(400, `A document can hold ${MAX_DOC_FILES} files. Remove one to add another.`) : null;
+}
 /** While someone keeps typing, their draft is kept in the history this often. */
 export const CHECKPOINT_EVERY_MS = 10 * 60_000;
 
@@ -93,9 +106,8 @@ export async function startDocUpload(documentId: string, rawName: unknown, rawSi
   if (purpose === "image" && !isPreviewableImage(named.name)) return fail(400, IMAGE_ONLY);
   const sized = checkFileSize(rawSize);
   if (sized) return sized;
-  const { count } = await supabaseAdmin.from("task_document_files")
-    .select("id", { count: "exact", head: true }).eq("document_id", documentId).is("removed_at", null);
-  if ((count ?? 0) >= MAX_DOC_FILES) return fail(400, `A document can hold ${MAX_DOC_FILES} files. Remove one to add another.`);
+  const full = await roomFor(documentId, purpose);
+  if (full) return full;
 
   const path = `${docFileFolder(documentId)}${randomUUID()}-${storageSafeName(named.name)}`;
   const { data, error } = await supabaseAdmin.storage.from(TASK_FILES_BUCKET).createSignedUploadUrl(path);
@@ -175,11 +187,22 @@ export async function sharedDocFiles(documentId: string): Promise<SharedDocFile[
   }));
 }
 
-/** Whether this file was ever published to the client, by the team or by them. */
-async function wasPublished(documentId: string, fileId: string): Promise<boolean> {
+/** The bodies the client has been shown, newest first. */
+async function publishedBodies(documentId: string): Promise<string[]> {
   const { data } = await supabaseAdmin.from("task_document_versions")
-    .select("id").eq("document_id", documentId).eq("body", fileId).limit(1).maybeSingle();
-  return !!data;
+    .select("version, body").eq("document_id", documentId).order("version", { ascending: false });
+  return (data ?? []).map((v) => v.body as string);
+}
+
+/** Whether this file was ever published to the client, by the team or by them, on
+ *  its own or as one of a version's images (imageSet.ts). */
+async function wasPublished(documentId: string, fileId: string): Promise<boolean> {
+  return (await publishedBodies(documentId)).some((body) => setFiles(body).includes(fileId));
+}
+
+/** What tells a pin's image apart ("Back"), when its version holds more than one image. */
+export async function pinImageName(documentId: string, fileId: string): Promise<string | null> {
+  return pinImageLabel(await publishedBodies(documentId), fileId);
 }
 
 /** A short lived link to one shared file, saved rather than shown when asked.
@@ -209,22 +232,34 @@ export async function docVersionFile(documentId: string, fileId: unknown, purpos
   return { id: f.id as string, name: f.name as string, path: f.path as string, purpose: f.purpose as FileKind };
 }
 
-/** A version file the client was shown and can still see. number is its version,
- *  counted over every file ever published, so a removed version leaves a gap and
- *  nothing renumbers. fromClient: the client made it (a page they reworded). */
-export type SharedVersionFile = { fileId: string; name: string; number: number; fromClient: boolean };
+/** A version the client was shown and can still see. number is its version, counted
+ *  over every body ever published, so a removed version leaves a gap and nothing
+ *  renumbers. body names it; images are what it holds, in order, labelled (one for a
+ *  page), and fileId and name are its first image's. fromClient: the client made it
+ *  (a page they reworded). */
+export type SharedVersionFile = {
+  body: string; fileId: string; name: string; number: number; fromClient: boolean;
+  images: { fileId: string; name: string; label: string }[];
+};
 
-/** The version files the client can see, oldest first. The last one is under review. */
+/** The versions the client can see, oldest first. The last one is under review. A
+ *  version with any image taken off is gone from the list. */
 export async function sharedVersionFiles(documentId: string): Promise<SharedVersionFile[]> {
   const { data: versions } = await supabaseAdmin.from("task_document_versions")
     .select("version, body").eq("document_id", documentId);
-  const ids = publishedFiles((versions ?? []) as { version: number; body: string }[]);
+  const bodies = publishedFiles((versions ?? []) as { version: number; body: string }[]);
+  const ids = [...new Set(bodies.flatMap(setFiles))];
   if (!ids.length) return [];
   const { data: files } = await supabaseAdmin.from("task_document_files").select("id, name, removed_at, added_by").in("id", ids);
   const live = new Map((files ?? []).filter((f) => !f.removed_at).map((f) => [f.id as string, f]));
-  return ids.flatMap((fileId, i) => {
-    const f = live.get(fileId);
-    return f ? [{ fileId, name: f.name as string, number: i + 1, fromClient: f.added_by === null }] : [];
+  return bodies.flatMap((body, i) => {
+    const items = parseImageSet(body);
+    if (!items.length || items.some((item) => !live.has(item.file))) return [];
+    const images = items.map((item, n) => ({ fileId: item.file, name: live.get(item.file)!.name as string, label: imageLabel(items, n) }));
+    return [{
+      body, fileId: images[0].fileId, name: images[0].name, number: i + 1, images,
+      fromClient: items.some((item) => live.get(item.file)!.added_by === null),
+    }];
   });
 }
 
@@ -285,9 +320,8 @@ export async function storeImageFile(
   documentId: string, bytes: Buffer, rawName: unknown, image: { contentType: ImageType; extension: string }, actor: DocActor,
 ): Promise<{ ok: true; fileId: string; name: string } | Fail> {
   if (!bytes.length || bytes.length > MAX_SHARED_FILE_BYTES) return fail(413, "Each file must be under 25 MB.");
-  const { count } = await supabaseAdmin.from("task_document_files")
-    .select("id", { count: "exact", head: true }).eq("document_id", documentId).is("removed_at", null);
-  if ((count ?? 0) >= MAX_DOC_FILES) return fail(400, `A document can hold ${MAX_DOC_FILES} files. Remove one to add another.`);
+  const full = await roomFor(documentId, "image");
+  if (full) return full;
 
   const base = typeof rawName === "string" ? cleanFileName(rawName).replace(/\.[^.]*$/, "").trim() : "";
   const name = `${base || "Image"}.${image.extension}`;

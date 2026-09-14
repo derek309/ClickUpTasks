@@ -434,14 +434,15 @@ export function createServer(opts = {}) {
       async ({ task_id, kind, title }) => reply(await services.createReview(task_id, kind, title)));
 
     server.tool("update_review",
-      "Rename a review, pick its stage by hand, or reopen one the client approved so it can change again. Completed locks it; any stage but approved clears a client approval.",
+      "Rename a review, pick its stage by hand, reopen one the client approved so it can change again, or relabel an image review's images. Completed locks it; any stage but approved clears a client approval.",
       {
         task_id: z.string(), kind: KIND,
         title: z.string().optional().describe("the review's name on the task and the client's page; empty uses the task's title"),
         stage: z.enum(["draft", "with_client", "client_submitted", "approved", "completed"]).optional(),
         reopen: z.boolean().optional(),
+        image_labels: z.array(z.string()).max(10).optional().describe('image review only: labels for the working copy\'s images in order, like ["Front", "Back"]; "" goes back to the default. The client sees them after the next send'),
       },
-      async ({ task_id, kind, ...change }) => reply(await services.updateReview(task_id, kind, change)));
+      async ({ task_id, kind, image_labels, ...change }) => reply(await services.updateReview(task_id, kind, { ...change, imageLabels: image_labels })));
 
     const writeDocument = async ({ task_id, body, title }) => {
       const html = docTextToHtml(body);
@@ -463,13 +464,21 @@ export function createServer(opts = {}) {
       async ({ task_id, file_name, size }) => reply(await services.startImageUpload(task_id, file_name, size)));
 
     server.tool("add_review_version",
-      "Add a new version to an image or HTML review (starting the review if there is none). It becomes the working copy, not sent yet. An image comes from image_url (a public https link to a PNG, JPEG, GIF or WebP) or upload_id (from start_image_upload). A page comes from html: the WHOLE page, up to 2 MB, images linked by web address (read the current code with get_review include_code).",
+      "Add a new version to an image or HTML review (starting the review if there is none). It becomes the working copy, not sent yet. An image comes from image_url (a public https link to a PNG, JPEG, GIF or WebP) or upload_id (from start_image_upload). One image review version can hold up to 10 images shown stacked, like a postcard's front and back: pass images instead, each with image_url or upload_id and an optional label (two default to Front and Back, more to Image 1, 2, 3). With keep_others, each image replaces the one at its position in the working copy (or is added at the end) and the rest carry over with their pins. A page comes from html: the WHOLE page, up to 2 MB, images linked by web address (read the current code with get_review include_code).",
       {
         task_id: z.string(), kind: FILE_KIND,
         image_url: z.string().url().optional(), upload_id: z.string().optional(),
+        images: z.array(z.object({
+          image_url: z.string().url().optional(), upload_id: z.string().optional(), name: z.string().optional(),
+          label: z.string().optional(), position: z.number().int().min(1).max(10).optional().describe("with keep_others, the image (1 based) this one replaces"),
+        })).min(1).max(10).optional(),
+        keep_others: z.boolean().optional().describe("keep the working copy's other images and replace or add only these"),
         html: z.string().optional(), name: z.string().optional().describe("the version's file name"),
       },
-      async ({ task_id, kind, image_url, upload_id, html, name }) => reply(await services.addVersion(task_id, kind, { imageUrl: image_url, uploadId: upload_id, html, name })));
+      async ({ task_id, kind, image_url, upload_id, images, keep_others, html, name }) => reply(await services.addVersion(task_id, kind, {
+        imageUrl: image_url, uploadId: upload_id, html, name,
+        ...(images ? { images: images.map((i) => ({ imageUrl: i.image_url, uploadId: i.upload_id, name: i.name, label: i.label, position: i.position })), keepOthers: !!keep_others } : {}),
+      })));
 
     server.tool("use_version",
       "Make an earlier version the working copy again (on the client document, bring back an earlier version's text). send_for_review sends it.",
@@ -477,7 +486,7 @@ export function createServer(opts = {}) {
       async ({ task_id, kind, version }) => reply(await services.useVersion(task_id, kind, version)));
 
     server.tool("remove_version",
-      "Take a wrong version off an image or HTML review. Its pins go with it; if the client was looking at it, they see the newest version left.",
+      "Take a wrong version off an image or HTML review. Its pins go with it; if the client was looking at it, they see the newest version left. On an image review, images this version shares with other versions stay.",
       { task_id: z.string(), kind: FILE_KIND, version: VERSION },
       async ({ task_id, kind, version }) => reply(await services.removeVersion(task_id, kind, version)));
 
@@ -507,7 +516,10 @@ export function createServer(opts = {}) {
       {
         task_id: z.string(), kind: KIND, text: z.string().min(1),
         quote: z.string().optional(),
-        pin: z.object({ version: VERSION, x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).optional(),
+        pin: z.object({
+          version: VERSION, x: z.number().min(0).max(1), y: z.number().min(0).max(1),
+          image: z.union([z.number().int().min(1).max(10), z.string()]).optional().describe("on an image review version with several images, which one: its position (1 based) or label; the first when left out"),
+        }).optional(),
       },
       async ({ task_id, kind, text, quote, pin }) => reply(await services.addComment(task_id, kind, text, { quote, pin })));
 

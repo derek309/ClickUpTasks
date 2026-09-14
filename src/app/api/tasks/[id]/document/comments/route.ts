@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminConfigured } from "@/lib/supabaseAdmin";
 import { teamDocument, memberLabel, NO_STORE } from "@/lib/taskDocumentServer";
-import { postDocComment, editDocComment, deleteDocComment } from "@/lib/taskDocumentFiles";
+import { postDocComment, editDocComment, deleteDocComment, pinImageName } from "@/lib/taskDocumentFiles";
 import { emailClientAboutComment } from "@/lib/docClientEmail";
 
 // The team's side of the comment thread on a task's client document: post, edit
@@ -31,6 +31,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const emailedClient = await emailClientAboutComment({
     user: o.user, task: o.task, documentId: o.documentId, comment: r.comment.body || "Added a file.",
     quote: r.comment.quote, pinNumber: r.comment.pin?.number ?? null, origin: req.nextUrl.origin,
+    pinLabel: r.comment.pin ? await pinImageName(o.documentId, r.comment.pin.fileId) : null,
   }).catch(() => false);
   return json({ comment: r.comment, emailedClient });
 }

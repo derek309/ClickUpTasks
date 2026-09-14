@@ -8,8 +8,9 @@ import { isFileKind } from "@/lib/reviewKinds";
 // Public, no login: what the client review page shows. It reads and never
 // writes. Mail security scanners (Outlook Safe Links and others) open links
 // before the client does, so opening the link must change nothing.
-// For an image or web page review, body is the version file under review and
-// versionFiles lists every one the client can still see, oldest first.
+// For an image or web page review, body is the version under review (a file id, or
+// an image set, imageSet.ts) and versionFiles lists every version the client can
+// still see, oldest first, with its images.
 export async function GET(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   if (!adminConfigured) return NextResponse.json({ error: "Not configured" }, { status: 501, headers: NO_STORE });
   const { token } = await params;
@@ -35,7 +36,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     title: ((doc.title as string | null) ?? "").trim() || scope.taskTitle,
     clientName: scope.clientName,
     // An image or page review shows the newest version file not removed; "" when none is left.
-    body: isFileKind(scope.kind) ? (versionFiles.at(-1)?.fileId ?? "") : latest.body,
+    body: isFileKind(scope.kind) ? (versionFiles.at(-1)?.body ?? "") : latest.body,
     version: latest.version,
     status: doc.status,
     approvedAt: (doc.approved_at as string | null) ?? null,

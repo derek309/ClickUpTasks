@@ -108,24 +108,69 @@ describe("writeDocBody", () => {
 });
 
 describe("pickReviewVersion", () => {
+  const A = "tdf_00000001-0000-0000-0000-000000000000";
+  const B = "tdf_00000002-0000-0000-0000-000000000000";
+  const file = (id: string, name: string) => ({ id, name, path: `doc/tdoc_1/${name}`, purpose: "image" });
+
   it("names an image review from the image it was given", async () => {
     server.liveDocument.mockResolvedValue({ id: "tdoc_1", approved_at: null, body: "" });
-    files.docVersionFile.mockResolvedValue({ id: "tdf_a", name: "flyer.png", path: "docs/tdoc_1/a-flyer.png", purpose: "image" });
-    server.setWorkingFile.mockResolvedValue({ id: "tdoc_1", body: "tdf_a", title: "" });
-    await svc.pickReviewVersion("t_1", "image", actor(), { file: "tdf_a" });
-    expect(autoName.nameReviewIfDefault).toHaveBeenCalledWith({ id: "tdoc_1", body: "tdf_a", title: "" }, { kind: "image", path: "docs/tdoc_1/a-flyer.png", fileName: "flyer.png" });
+    files.docVersionFile.mockResolvedValue(file(A, "flyer.png"));
+    server.setWorkingFile.mockResolvedValue({ id: "tdoc_1", body: A, title: "" });
+    await svc.pickReviewVersion("t_1", "image", actor(), { file: A });
+    expect(server.setWorkingFile).toHaveBeenCalledWith("tdoc_1", A, "", expect.any(Object));
+    expect(autoName.nameReviewIfDefault).toHaveBeenCalledWith({ id: "tdoc_1", body: A, title: "" }, { kind: "image", path: "doc/tdoc_1/flyer.png", fileName: "flyer.png" });
+  });
+
+  it("keeps a postcard's front and back as one version, labels and order included", async () => {
+    server.liveDocument.mockResolvedValue({ id: "tdoc_1", approved_at: null, body: "" });
+    files.docVersionFile.mockImplementation(async (_doc: string, id: string) => file(id, id === A ? "front.png" : "back.png"));
+    server.setWorkingFile.mockResolvedValue({ id: "tdoc_1" });
+    expect((await svc.pickReviewVersion("t_1", "image", actor(), { images: [{ file: A, label: "" }, { file: B, label: "Inside" }] })).ok).toBe(true);
+    expect(server.setWorkingFile).toHaveBeenCalledWith("tdoc_1", `[{"file":"${A}","label":""},{"file":"${B}","label":"Inside"}]`, "", expect.any(Object));
+  });
+
+  it("refuses a set with an image that isn't on the review, or too many", async () => {
+    server.liveDocument.mockResolvedValue({ id: "tdoc_1", approved_at: null, body: "" });
+    files.docVersionFile.mockImplementation(async (_doc: string, id: string) => (id === A ? file(A, "front.png") : null));
+    expect(await svc.pickReviewVersion("t_1", "image", actor(), { images: [{ file: A }, { file: B }] })).toMatchObject({ ok: false, status: 400 });
+    const eleven = Array.from({ length: 11 }, (_, i) => ({ file: `tdf_${String(i).padStart(8, "0")}-0000-0000-0000-000000000000` }));
+    expect(await svc.pickReviewVersion("t_1", "image", actor(), { images: eleven })).toMatchObject({ ok: false, status: 400 });
+    expect(server.setWorkingFile).not.toHaveBeenCalled();
   });
 });
 
 describe("removeReviewVersion", () => {
+  const A = "tdf_00000001-0000-0000-0000-000000000000";
+  const B = "tdf_00000002-0000-0000-0000-000000000000";
+  const C = "tdf_00000003-0000-0000-0000-000000000000";
+  const set = (...ids: string[]) => JSON.stringify(ids.map((file) => ({ file, label: "" })));
+
   it("moves the review back to the newest version the client can still see", async () => {
-    server.liveDocument.mockResolvedValue({ id: "tdoc_1", approved_at: null, body: "tdf_b" });
-    files.removeVersionFile.mockResolvedValue({ ok: true, id: "tdf_b", name: "b.png" });
-    files.sharedVersionFiles.mockResolvedValue([{ fileId: "tdf_a", name: "a.png", number: 1, fromClient: false }]);
-    result = saved;
-    expect((await svc.removeReviewVersion("t_1", "image", actor(), "tdf_b")).ok).toBe(true);
-    expect(files.removeVersionFile).toHaveBeenCalledWith("tdoc_1", "tdf_b", "image", { id: "u_claude", label: "Claude" });
-    expect(calls[0].payload).toMatchObject({ body: "tdf_a", draft_dirty: false });
+    server.liveDocument.mockResolvedValue({ id: "tdoc_1", approved_at: null, body: B });
+    files.removeVersionFile.mockResolvedValue({ ok: true, id: B, name: "b.png" });
+    files.sharedVersionFiles.mockResolvedValue([{ body: A, fileId: A, name: "a.png", number: 1, fromClient: false, images: [] }]);
+    result = (c) => (c.table === "task_document_versions" ? { data: [{ body: A }, { body: B }], error: null } : saved());
+    expect((await svc.removeReviewVersion("t_1", "image", actor(), B)).ok).toBe(true);
+    expect(files.removeVersionFile).toHaveBeenCalledWith("tdoc_1", B, "image", { id: "u_claude", label: "Claude" });
+    expect(calls.find((c) => c.op === "update")!.payload).toMatchObject({ body: A, draft_dirty: false });
+  });
+
+  it("keeps a front carried into another version and takes off only the new back", async () => {
+    server.liveDocument.mockResolvedValue({ id: "tdoc_1", approved_at: null, body: set(A, C) });
+    files.removeVersionFile.mockResolvedValue({ ok: true, id: C, name: "c.png" });
+    files.sharedVersionFiles.mockResolvedValue([{ body: set(A, B), fileId: A, name: "a.png", number: 1, fromClient: false, images: [] }]);
+    result = (c) => (c.table === "task_document_versions" ? { data: [{ body: set(A, B) }, { body: set(A, C) }], error: null } : saved());
+    expect((await svc.removeReviewVersion("t_1", "image", actor(), set(A, C))).ok).toBe(true);
+    expect(files.removeVersionFile).toHaveBeenCalledTimes(1);
+    expect(files.removeVersionFile).toHaveBeenCalledWith("tdoc_1", C, "image", expect.any(Object));
+    expect(calls.find((c) => c.op === "update")!.payload).toMatchObject({ body: set(A, B), draft_dirty: false });
+  });
+
+  it("refuses a version made only of images other versions use", async () => {
+    server.liveDocument.mockResolvedValue({ id: "tdoc_1", approved_at: null, body: set(A, B) });
+    result = (c) => (c.table === "task_document_versions" ? { data: [{ body: set(A, B) }, { body: set(B, A) }], error: null } : saved());
+    expect(await svc.removeReviewVersion("t_1", "image", actor(), set(B, A))).toMatchObject({ ok: false, status: 400 });
+    expect(files.removeVersionFile).not.toHaveBeenCalled();
   });
 });
 

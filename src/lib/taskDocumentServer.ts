@@ -26,6 +26,7 @@ import { sanitizeDocHtml, DOC_MAX_RAW_CHARS, DOC_MAX_HTML_CHARS } from "./docHtm
 import { applyTextEdits, cleanEdits, pageTooBig, PAGE_TOO_BIG } from "./pageHtml";
 import { discardVersionFile, docVersionFile, readPageFile, sharedVersionFiles, storePageFile } from "./taskDocumentFiles";
 import { filePurpose, isFileKind, kindNoun, kindWhat, noDocumentYet, parseKind, type ReviewKind } from "./reviewKinds";
+import { setFiles } from "./imageSet";
 
 /** A document link token: `doc_` plus 32 random bytes in base64url. Checked
  *  before anything touches the database, so garbage never costs a query. */
@@ -237,7 +238,7 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
     // one sent in the meantime is still refused below: its version moved on.
     const shown = (await sharedVersionFiles(scope.documentId)).at(-1);
     if (!shown) return { ok: false, status: 400, error: `There is no ${kindWhat(scope.kind)} to review right now.` };
-    body = shown.fileId;
+    body = shown.body;
     if (scope.kind === "page") {
       if (page.fileId !== undefined && page.fileId !== shown.fileId) {
         return { ok: false, status: 409, error: "The team posted a newer version while you were looking.", current: await latestPublished(scope.documentId, scope.kind) };
@@ -286,7 +287,7 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
   const noun = kindNoun(scope.kind);
   const changed = sentChanges ? `sent changes to the ${noun}` : `asked for changes on the ${noun}`;
   // An image or page review's versions are numbered by file, as the team and the client see them.
-  const number = fileKind ? (await sharedVersionFiles(scope.documentId)).find((f) => f.fileId === body)?.number ?? version : version;
+  const number = fileKind ? (await sharedVersionFiles(scope.documentId)).find((f) => f.body === body)?.number ?? version : version;
   await appendClientEvent(scope.taskId, approved
     ? `${scope.clientName} approved the ${noun} (version ${number})`
     : `${scope.clientName} ${changed} (version ${number})`);
@@ -369,12 +370,12 @@ export async function teamDocument(req: NextRequest, taskId: string, columns = "
   return { ...access, kind, doc };
 }
 
-/** Make a version file the one to send next on an image or page review. Unchanged
- *  leaves "something to send" alone. Null when the client approved in the meantime
- *  (approved_at in the filter closes that gap). */
-export async function setWorkingFile(documentId: string, fileId: string, currentBody: string, stamp: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+/** Make a version the one to send next on an image or page review: a file id, or an
+ *  image set's body (imageSet.ts). Unchanged leaves "something to send" alone. Null
+ *  when the client approved in the meantime (approved_at in the filter closes that gap). */
+export async function setWorkingFile(documentId: string, body: string, currentBody: string, stamp: Record<string, unknown>): Promise<Record<string, unknown> | null> {
   const { data, error } = await supabaseAdmin.from("task_documents")
-    .update({ body: fileId, ...(fileId !== currentBody ? { draft_dirty: true } : {}), ...stamp })
+    .update({ body, ...(body !== currentBody ? { draft_dirty: true } : {}), ...stamp })
     .eq("id", documentId).is("approved_at", null).select("*").maybeSingle();
   if (error) throw new Error(error.message);
   return data;
@@ -431,7 +432,9 @@ export async function teamSend(documentId: string, baseVersion: number, actor: P
   let body: string;
   if (isFileKind(kind)) {
     body = doc.body as string;
-    if (!(await docVersionFile(documentId, body, filePurpose(kind), false))) {
+    const ids = setFiles(body);
+    const live = await Promise.all(ids.map((id) => docVersionFile(documentId, id, filePurpose(kind), false)));
+    if (!ids.length || live.some((f) => !f)) {
       return { ok: false, status: 400, error: kind === "image" ? "Upload the image before sending it." : "Add the page before sending it." };
     }
   } else {

@@ -6,7 +6,7 @@ import {
   type DocScope,
 } from "@/lib/taskDocumentServer";
 import { kindNoun } from "@/lib/reviewKinds";
-import { postDocComment, editDocComment, deleteDocComment } from "@/lib/taskDocumentFiles";
+import { postDocComment, editDocComment, deleteDocComment, pinImageName } from "@/lib/taskDocumentFiles";
 
 // Public, no login: the client's side of the comment thread. They post, edit and
 // delete their own comments, and tick any comment done. A new comment is logged on
@@ -46,7 +46,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   const noun = kindNoun(scope.kind);
   const { body, pin } = r.comment;
   const snippet = body.length > 140 ? `${body.slice(0, 140)}…` : body;
-  await logClientDocEvent(scope.taskId, `${scope.clientName} commented on the ${noun}${pin ? ` on pin ${pin.number}` : ""}: ${body ? `"${snippet}"` : "added a file"}`);
+  // "on Back, pin 2" when the version holds several images.
+  const place = pin ? await pinImageName(scope.documentId, pin.fileId) : null;
+  await logClientDocEvent(scope.taskId, `${scope.clientName} commented on the ${noun}${pin ? ` on ${place ? `${place}, ` : ""}pin ${pin.number}` : ""}: ${body ? `"${snippet}"` : "added a file"}`);
   await notifyOwnerOfClientDoc(scope, {
     always: false,
     text: `${scope.clientName} commented on the ${noun}${reviewOnTask(scope)}.`,

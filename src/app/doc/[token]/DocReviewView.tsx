@@ -35,8 +35,9 @@ type DocFile = { id: string; name: string; size: number; kind: string; addedBy: 
 type DocData = {
   kind: ReviewKind; title: string; clientName: string; body: string; version: number; status: DocStatus; approvedAt: string | null;
   closed: boolean; files: DocFile[]; comments: ThreadComment[];
-  /** An image or page review's version files the client can see, oldest first. body is the newest. */
-  versionFiles: { fileId: string; name: string; number: number; fromClient: boolean }[];
+  /** An image or page review's versions the client can see, oldest first. body is the
+   *  newest. An image review version can hold several images, shown stacked. */
+  versionFiles: { body: string; fileId: string; name: string; number: number; fromClient: boolean; images: { fileId: string; name: string; label: string }[] }[];
 };
 type Notice = { tone: "good" | "info" | "warn"; text: string } | null;
 type PinDraft = { fileId: string; x: number; y: number; anchor: PinAnchor | null; number: number };
@@ -344,14 +345,19 @@ export default function DocReviewView({ token }: { token: string }) {
   // The versions of an image or page review, and the one shown: the newest unless another was picked.
   const versionFiles = data?.versionFiles ?? [];
   // Numbered as published, so a removed version leaves a gap and nothing renumbers.
-  const versionOptions = versionFiles.map((v, i) => ({ fileId: v.fileId, label: i === versionFiles.length - 1 ? `Version ${v.number}, newest` : `Version ${v.number}` }));
-  const shownFileId = versioned && data ? (viewingImage && versionFiles.some((v) => v.fileId === viewingImage) ? viewingImage : data.body) : null;
+  const versionOptions = versionFiles.map((v, i) => ({ fileId: v.body, label: i === versionFiles.length - 1 ? `Version ${v.number}, newest` : `Version ${v.number}` }));
+  const shownFileId = versioned && data ? (viewingImage && versionFiles.some((v) => v.body === viewingImage) ? viewingImage : data.body) : null;
+  // The images of the version shown (one for a page), and the label that tells a pin's image apart.
+  const shownImages = versionFiles.find((v) => v.body === shownFileId)?.images ?? [];
+  const shownIds = shownImages.map((img) => img.fileId);
+  const imagePlace = (fileId: string) => (shownImages.length > 1 ? shownImages.find((img) => img.fileId === fileId)?.label ?? null : null);
   const onNewest = !!data && shownFileId === data.body;
   const noVersion = versioned && !!data && !data.body;
   // Sending needs something to send, the same on every kind: the client's own edits,
   // or a comment of theirs still open (on an image or page, on the newest version;
   // pins left on an earlier one do not count).
-  const openNotes = commentsFor(data?.comments ?? [], data?.body ?? null).filter((c) => c.fromClient && !c.completedAt).length;
+  const newestIds = versioned ? (versionFiles.at(-1)?.images ?? []).map((img) => img.fileId) : [];
+  const openNotes = commentsFor(data?.comments ?? [], newestIds).filter((c) => c.fromClient && !c.completedAt).length;
   const what = data ? kindWhat(data.kind) : "document";
 
   // The frame for the page version shown, fetched again when it expires or the page navigates.
@@ -463,10 +469,18 @@ export default function DocReviewView({ token }: { token: string }) {
                     <p className="py-12 text-center text-[18px] text-muted">There is no {what} to review right now. We&apos;ll let you know when there is a new one.</p>
                   )}
                   {shownFileId && image && (
-                    <ImagePinBoard src={fileHref(shownFileId)} alt={versionFiles.find((v) => v.fileId === shownFileId)?.name ?? data.title}
-                      comments={data.comments ?? []} fileId={shownFileId} pending={pinDraft} activeId={focusedComment} color={NAVY}
-                      onPinClick={setFocusedComment}
-                      onPlace={data.closed || !onNewest ? undefined : (spot) => setPinDraft({ fileId: shownFileId, ...spot, anchor: null, number: nextPin(data.comments ?? [], shownFileId) })} />
+                    // A version can hold several images, like a postcard's front and back, stacked with their names (Derek, 2026-09-14).
+                    <div className="space-y-6">
+                      {shownImages.map((img) => (
+                        <section key={`${shownFileId}:${img.fileId}`} aria-label={img.label}>
+                          {shownImages.length > 1 && <h2 className="mb-2 text-[18px] font-semibold">{img.label}</h2>}
+                          <ImagePinBoard src={fileHref(img.fileId)} alt={shownImages.length > 1 ? img.label : img.name}
+                            comments={data.comments ?? []} fileId={img.fileId} pending={pinDraft} activeId={focusedComment} color={NAVY}
+                            onPinClick={setFocusedComment}
+                            onPlace={data.closed || !onNewest ? undefined : (spot) => setPinDraft({ fileId: img.fileId, ...spot, anchor: null, number: nextPin(data.comments ?? [], img.fileId) })} />
+                        </section>
+                      ))}
+                    </div>
                   )}
                   {shownFileId && page && (
                     <PageReviewFrame
@@ -552,7 +566,8 @@ export default function DocReviewView({ token }: { token: string }) {
                     )}
                   </FileDropLine>
                 )}
-                <CommentThread comments={versioned ? commentsFor(data.comments ?? [], shownFileId) : data.comments ?? []} onPost={postComment} when={commentTime} viewer="client" buttonStyle={{ background: NAVY }}
+                <CommentThread comments={versioned ? commentsFor(data.comments ?? [], shownIds) : data.comments ?? []}
+                  pinLabel={image ? imagePlace : undefined} pinDraftLabel={image && pinDraft ? imagePlace(pinDraft.fileId) : null} onPost={postComment} when={commentTime} viewer="client" buttonStyle={{ background: NAVY }}
                   isMine={(c) => c.fromClient} canDelete={(c) => c.fromClient}
                   onEdit={(id, body) => changeComment(id, { body })}
                   onToggleDone={(id, done) => changeComment(id, { done })}

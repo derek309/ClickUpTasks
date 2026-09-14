@@ -37,7 +37,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const text = await req.text();
   if (text.length > DOC_MAX_RAW_CHARS) return json({ error: "This document is too long." }, 413);
-  let payload: { body?: unknown; file?: unknown; removeVersion?: unknown; reopen?: unknown; restoreVersion?: unknown; restoreCheckpoint?: unknown; checkpoint?: unknown; title?: unknown; status?: unknown };
+  let payload: { body?: unknown; file?: unknown; images?: unknown; removeVersion?: unknown; reopen?: unknown; restoreVersion?: unknown; restoreCheckpoint?: unknown; checkpoint?: unknown; title?: unknown; status?: unknown };
   try { payload = JSON.parse(text) ?? {}; } catch { return json({ error: "Invalid request." }, 400); }
 
   if (payload.reopen === true) return answer(await reopenReview(id, kind, actor));

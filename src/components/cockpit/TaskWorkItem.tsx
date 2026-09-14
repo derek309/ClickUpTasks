@@ -130,7 +130,7 @@ function PinNumber({ number, color }: { number: number; color?: string }) {
  *  box like a task, and its author can edit it ("edit, delete and mark a comment
  *  complete like a task"). A comment can carry a file, and on an image review it
  *  can sit on a numbered pin (Derek, 2026-09-12). */
-export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isMine, canDelete, onEdit, onDelete, onToggleDone, quote, onClearQuote, focusedId, onQuoteClick, pinDraft, placeholder, onAttach, renderAttachment }: {
+export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isMine, canDelete, onEdit, onDelete, onToggleDone, quote, onClearQuote, focusedId, onQuoteClick, pinDraft, pinDraftLabel, pinLabel, placeholder, onAttach, renderAttachment }: {
   comments: ThreadComment[];
   /** Resolves true once the comment is in, which clears the box. quote: the words
    *  it is about; attachmentFileId: a file added with it. */
@@ -140,6 +140,10 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
   quote?: string | null;
   /** The number of a pin just dropped on the image for the next comment. */
   pinDraft?: number | null;
+  /** Which image that pin is on ("Back"), when the version shows several. */
+  pinDraftLabel?: string | null;
+  /** Which image a pin is on, when the version shows several (imageSet.ts); null for one. */
+  pinLabel?: (fileId: string) => string | null;
   /** Takes the words or the pin off the next comment. */
   onClearQuote?: () => void;
   /** A comment picked from its highlight or pin: shown and scrolled to. */
@@ -253,7 +257,7 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
         <div className="mt-2 flex items-center gap-2 rounded-lg border-l-4 border-highlight bg-highlight-soft/60 px-3 py-2 text-[16px]">
           <span className="flex min-w-0 flex-1 items-center gap-2 break-words">
             {pinDraft
-              ? <><PinNumber number={pinDraft} color={pinColor} /><span className="text-muted">On this spot</span></>
+              ? <><PinNumber number={pinDraft} color={pinColor} /><span className="text-muted">On this spot{pinDraftLabel ? `, ${pinDraftLabel}` : ""}</span></>
               : <span><span className="text-muted">On </span>“{(quote ?? "").replace(/\n/g, " … ")}”</span>}
           </span>
           {onClearQuote && (
@@ -299,12 +303,13 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
             const done = !!c.completedAt;
             const busy = busyId === c.id;
             const isEditing = editing?.id === c.id;
+            const place = c.pin && pinLabel ? pinLabel(c.pin.fileId) : null;
             return (
               <li key={c.id} ref={(el) => { if (el) itemRefs.current.set(c.id, el); else itemRefs.current.delete(c.id); }}
                 className={`flex gap-3 py-3 ${focusedId === c.id ? "-mx-2 rounded-lg px-2 ring-2 ring-highlight" : ""}`}>
                 {c.pin ? (
-                  <button onClick={() => onQuoteClick?.(c.id)} disabled={!onQuoteClick} title={`Show pin ${c.pin.number}`}
-                    aria-label={`Show pin ${c.pin.number}`} className={`h-8 shrink-0 ${done ? "opacity-50" : ""}`}>
+                  <button onClick={() => onQuoteClick?.(c.id)} disabled={!onQuoteClick} title={`Show pin ${c.pin.number}${place ? ` on ${place}` : ""}`}
+                    aria-label={`Show pin ${c.pin.number}${place ? ` on ${place}` : ""}`} className={`h-8 shrink-0 ${done ? "opacity-50" : ""}`}>
                     <PinNumber number={c.pin.number} color={pinColor} />
                   </button>
                 ) : (
@@ -314,6 +319,7 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
                   <div className="flex items-center gap-2 text-[16px]">
                     <span className="min-w-0 truncate font-semibold">{c.authorLabel || (c.fromClient ? "Client" : "Team")}</span>
                     <span className="shrink-0 text-muted">{when(c.createdAt)}{c.editedAt ? " · edited" : ""}</span>
+                    {place && <span className="shrink-0 rounded-full bg-background px-2 text-[16px] text-muted">{place}</span>}
                     <span className="ml-auto flex shrink-0 items-center gap-1">
                       <button role="checkbox" aria-checked={done} aria-label={done ? "Mark not done" : "Mark done"} title={done ? "Mark not done" : "Mark done"}
                         onClick={() => void act(c.id, () => onToggleDone(c.id, !done))} disabled={busy} style={done ? buttonStyle : undefined}
@@ -375,9 +381,12 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
 // Image review (Derek, 2026-09-12: "click on a spot ... to add a number then add
 // a comment or upload a file"). Shared by the team's window and the client's page.
 
-/** The comments to list beside an image: the general ones, and the pins on the image shown. */
-export const commentsFor = <C extends ThreadComment>(comments: C[], fileId: string | null): C[] =>
-  comments.filter((c) => !c.pin || c.pin.fileId === fileId);
+/** The comments to list beside an image: the general ones, and the pins on the image
+ *  or images shown (a version can hold several, imageSet.ts). */
+export const commentsFor = <C extends ThreadComment>(comments: C[], fileIds: string | string[] | null): C[] => {
+  const ids = Array.isArray(fileIds) ? fileIds : fileIds ? [fileIds] : [];
+  return comments.filter((c) => !c.pin || ids.includes(c.pin.fileId));
+};
 
 /** The number the next pin on this image gets, as the server will give it. */
 export const nextPin = (comments: ThreadComment[], fileId: string | null): number =>

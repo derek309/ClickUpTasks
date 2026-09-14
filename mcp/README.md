@@ -29,7 +29,10 @@ Reviews (hosted only), for a task's client document (kind `doc`), image review
 `update_review_comment`, `delete_review_comment`, `delete_review`,
 `restore_review`. `get_client_document` and `write_client_document` still work
 as the older names for the document. See each tool's own description in
-`core.mjs` for its exact arguments.
+`core.mjs` for its exact arguments. An image review version can hold up to 10
+images shown stacked, like a postcard's front and back (Derek, 2026-09-14):
+`add_review_version` takes `images` (with `keep_others` to replace just one),
+`update_review` takes `image_labels`, and a comment's `pin` takes `image`.
 
 What Claude may and may not do (Derek, 2026-09-13):
 

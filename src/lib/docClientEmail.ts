@@ -20,7 +20,7 @@ import { kindWhat, parseKind } from "./reviewKinds";
 const SEND_DOMAIN = "clickuplocal.com";
 const COOLDOWN_MS = 15 * 60_000;
 
-export async function emailClientAboutComment(opts: { user: AuthedUser; task: TeamTask; documentId: string; comment: string; quote?: string | null; pinNumber?: number | null; origin: string }): Promise<boolean> {
+export async function emailClientAboutComment(opts: { user: AuthedUser; task: TeamTask; documentId: string; comment: string; quote?: string | null; pinNumber?: number | null; pinLabel?: string | null; origin: string }): Promise<boolean> {
   const { user, task, documentId } = opts;
   const sender = user.email ?? "";
   if (!googleConfigured || !sender.toLowerCase().endsWith(`@${SEND_DOMAIN}`) || task.status === "done") return false;
@@ -51,7 +51,7 @@ export async function emailClientAboutComment(opts: { user: AuthedUser; task: Te
   const body = [
     `<p>Hi,</p>`,
     `<p>${escapeHtml(fromName || "We")} left a comment on "${escapeHtml(name)}":</p>`,
-    opts.pinNumber ? on(`On pin ${opts.pinNumber}`) : opts.quote ? on(`On “${escapeHtml(opts.quote.replace(/\n/g, " … "))}”`) : "",
+    opts.pinNumber ? on(`On ${opts.pinLabel ? `${escapeHtml(opts.pinLabel)}, ` : ""}pin ${opts.pinNumber}`) : opts.quote ? on(`On “${escapeHtml(opts.quote.replace(/\n/g, " … "))}”`) : "",
     `<blockquote style="margin:12px 0;padding:10px 14px;border-left:3px solid #d0dce8">${escapeHtml(opts.comment.trim()).replace(/\n/g, "<br>")}</blockquote>`,
     draftLinkAsButton(draftLinkHtml(button), button),
   ].join("");
