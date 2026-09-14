@@ -406,6 +406,20 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     const saved = await saveImages(current.map((item, i) => (i === index ? { ...item, label } : item)));
     if (saved) setDoc(rowToTaskDocument(saved));
   };
+  // Swap an image with the one above or below (Derek, 2026-09-14: "reorder"). Default
+  // names follow the place, so the top of two is always Front; typed names and pins
+  // move with their image.
+  const moveImage = async (index: number, by: -1 | 1) => {
+    const current = doc ? parseImageSet(doc.body) : [];
+    const to = index + by;
+    if (!current[index] || !current[to] || adding || busy !== null) return;
+    const next = [...current];
+    [next[index], next[to]] = [next[to], next[index]];
+    setBusy("move");
+    const saved = await saveImages(next);
+    setBusy(null);
+    if (saved) setDoc(rowToTaskDocument(saved));
+  };
   const takeOutImage = async (index: number) => {
     const current = doc ? parseImageSet(doc.body) : [];
     if (current.length < 2 || !window.confirm(`Take ${imageLabel(current, index)} out of this version? Earlier versions keep it, with its pins.`)) return;
@@ -973,6 +987,14 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
                         )}
                         {editingSet && (
                           <>
+                            {shownItems.length > 1 && (
+                              <>
+                                <button onClick={() => void moveImage(i, -1)} disabled={i === 0 || adding || busy !== null}
+                                  title={`Move ${label} up`} aria-label={`Move ${label} up`} className={quiet}>↑</button>
+                                <button onClick={() => void moveImage(i, 1)} disabled={i === shownItems.length - 1 || adding || busy !== null}
+                                  title={`Move ${label} down`} aria-label={`Move ${label} down`} className={quiet}>↓</button>
+                              </>
+                            )}
                             <button onClick={() => { slotRef.current = i; versionInput.current?.click(); }} disabled={adding} className={quiet}>Replace</button>
                             {shownItems.length > 1 && <button onClick={() => void takeOutImage(i)} disabled={adding} className={quiet}>Take out</button>}
                           </>
