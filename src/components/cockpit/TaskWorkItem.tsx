@@ -223,8 +223,11 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
   // 2026-09-11: "hide done comments?"); the latest few rule counts open ones.
   const openOnes = newestFirst.filter((c) => !c.completedAt);
   const doneOnes = newestFirst.filter((c) => !!c.completedAt);
-  const older = Math.max(0, openOnes.length - LATEST_COMMENTS);
-  const shown = [...(showOlder ? openOnes : openOnes.slice(0, LATEST_COMMENTS)), ...(showDone ? doneOnes : [])];
+  // Grouped by image, every open comment shows in its image's box: folding the
+  // older ones across boxes hid pin 1 on the Front (Derek, 2026-09-14).
+  const grouping = !!pinGroups && pinGroups.length > 1;
+  const older = grouping ? 0 : Math.max(0, openOnes.length - LATEST_COMMENTS);
+  const shown = [...(showOlder || grouping ? openOnes : openOnes.slice(0, LATEST_COMMENTS)), ...(showDone ? doneOnes : [])];
   // A highlight or pin clicked opens its comment wherever it is folded away.
   useEffect(() => {
     if (!focusedId) return;
@@ -236,12 +239,14 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
     requestAnimationFrame(() => itemRefs.current.get(focusedId)?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
   }, [focusedId]); // eslint-disable-line react-hooks/exhaustive-deps
   const pinColor = buttonStyle?.background as string | undefined;
-  // On a version with several images, the comments sit under each image's name,
-  // in the images' order, then the ones on the whole version (Derek, 2026-09-14:
-  // "group the changes by image").
+  // On a version with several images, each image's comments sit in their own box
+  // titled with its name, in the images' order and by pin number, then a box for
+  // the ones on the whole version (Derek, 2026-09-14: "group the changes by image",
+  // then "separate groups ... so it's clean and clear").
   const groupOf = (c: ThreadComment) => (c.pin && pinLabel ? pinLabel(c.pin.fileId) : null);
-  const groups = pinGroups && pinGroups.length > 1
-    ? [...pinGroups.map((label) => ({ label, items: shown.filter((c) => groupOf(c) === label) })), { label: "Whole version", items: shown.filter((c) => !groupOf(c)) }]
+  const byPin = (a: ThreadComment, b: ThreadComment) => Number(!!a.completedAt) - Number(!!b.completedAt) || (a.pin?.number ?? 0) - (b.pin?.number ?? 0);
+  const groups = grouping
+    ? [...pinGroups!.map((label) => ({ label, items: shown.filter((c) => groupOf(c) === label).sort(byPin) })), { label: "Whole version", items: shown.filter((c) => !groupOf(c)) }]
       .filter((g) => g.items.length)
     : null;
 
@@ -378,12 +383,18 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
             className="shrink-0 px-1 text-[18px] leading-none text-muted hover:text-foreground">×</button>
         </div>
       )}
-      {shown.length > 0 && (groups ? groups.map((g) => (
-        <div key={g.label} className="mt-3">
-          <h4 className="text-[16px] font-semibold text-muted">{g.label}</h4>
-          <ul className="mt-1 divide-y border-t">{g.items.map((c) => item(c, true))}</ul>
-        </div>
-      )) : (
+      {shown.length > 0 && (groups ? groups.map((g) => {
+        const open = g.items.filter((c) => !c.completedAt).length;
+        return (
+          <div key={g.label} className="mt-3 rounded-lg border px-3">
+            <div className="flex items-center gap-2 border-b py-2">
+              <h4 className="min-w-0 break-words text-[16px] font-semibold">{g.label}</h4>
+              <span className="ml-auto shrink-0 text-[16px] text-muted">{open ? `${open} open` : "All done"}</span>
+            </div>
+            <ul className="divide-y">{g.items.map((c) => item(c, true))}</ul>
+          </div>
+        );
+      }) : (
         <ul className="mt-3 divide-y border-t">{shown.map((c) => item(c, false))}</ul>
       ))}
       {older > 0 && (
