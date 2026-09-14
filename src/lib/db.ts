@@ -497,6 +497,12 @@ export const deleteTaskActionDb = (id: string) => save(() => supabase.from("task
 // able to edit a note").
 export const editTaskActionDb = (id: string, body: string) =>
   save(() => supabase.from("task_actions").update({ body }).eq("id", id));
+// The open next step's wording or date, edited on the task's Next step card.
+export const patchNextStepDb = (id: string, patch: { nextStep?: string; nextStepDue?: string | null }) =>
+  save(() => supabase.from("task_actions").update({
+    ...(patch.nextStep !== undefined ? { next_step: patch.nextStep } : {}),
+    ...(patch.nextStepDue !== undefined ? { next_step_due: patch.nextStepDue } : {}),
+  }).eq("id", id));
 // Loaded per task rather than all at once. Unlike tasks or clients this grows
 // without bound and only one task's worth is ever on screen, so pulling the
 // whole table into the client at boot would cost more every week.

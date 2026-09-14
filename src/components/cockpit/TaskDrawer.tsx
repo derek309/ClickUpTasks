@@ -4,14 +4,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, clientStatusMeta, PERSONAL_CLIENT_ID,
-  TaskAction, TaskActionKind, prettyLinkName, effectiveStatus,
-  STATUS_META, pickableStatuses, type DelegateSpec, type ClientLink, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, startSignal, isSnoozed, daysUntilDue, formatDue, dueCountdown,
+  TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
+  STATUS_META, pickableStatuses, type DelegateSpec, type ClientLink, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
-import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
+import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon, DateChip } from "./ui";
 import { authedFetch } from "@/lib/supabase";
 import { ActionDock } from "./ActionDock";
-import { fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskActionDb, editTaskActionDb } from "@/lib/db";
+import { ActionMenu } from "./ActionMenu";
+import { fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskActionDb, editTaskActionDb, patchNextStepDb } from "@/lib/db";
 import { AttachmentTile } from "./AttachmentTile";
 import { SizePicker } from "./SizePicker";
 import { InlineAssignee, InlineDate, InlineDue } from "./GroupedList";
@@ -24,119 +25,12 @@ import { buildReviewEmail, type ReviewEmailInput } from "@/lib/reviewEmail";
 import { type FileKind } from "@/lib/reviewKinds";
 
 // The review lines a task can add beside its client document, in order.
-const REVIEW_LINES: { kind: FileKind; chip: string }[] = [
-  { kind: "image", chip: "+ Image review" },
-  { kind: "page", chip: "+ HTML review" },
+const REVIEW_LINES: { kind: FileKind; label: string }[] = [
+  { kind: "image", label: "Image review" },
+  { kind: "page", label: "HTML review" },
 ];
 
 const ATT_KIND_ORDER: Record<Attachment["kind"], number> = { image: 0, pdf: 1, doc: 2, sheet: 3, link: 4 };
-
-// Each date gets an identity colour: follow-up amber, due red, created
-// green (Derek's call). The colour marks WHICH date you're looking at, not
-// how urgent it is — a soft tint and a coloured rule, never the value
-// itself. The due value still turns red only when it's actually overdue,
-// so painting the whole column red would have destroyed the one signal
-// that column carries.
-const DATE_TONES = {
-  followUp: { rule: "#f59e0b", key: "text-amber-700", tint: "rgba(245,158,11,0.055)" },
-  due: { rule: "var(--danger)", key: "text-danger", tint: "rgba(239,68,68,0.05)" },
-  created: { rule: "var(--success)", key: "text-[#15803d]", tint: "rgba(22,163,74,0.05)" },
-  } as const;
-const DATE_CELL = "relative min-w-0 flex-1 overflow-hidden rounded-lg px-3 pb-2.5 pt-2.5";
-const DATE_KEY = "mb-1 block text-[12px] font-semibold uppercase tracking-wide";
-// Hoisted out of TaskDrawer deliberately. Declared inside the component body
-// this was a fresh component type on every render, so React remounted all
-// three columns each time — which would have slammed the date picker shut the
-// moment anything else in the drawer changed.
-// Counts a number up to `to` over ~700ms, easing out, and skips the whole
-// thing when the OS asks for reduced motion. Used so the days-used figure
-// arrives with the bar rather than being pinned at its final value while the
-// bar is still growing underneath it.
-function useCountUp(to: number, run: boolean) {
-  const [n, setN] = useState(0);
-  useEffect(() => {
-    if (!run) return;
-    let raf = 0;
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
-      // Still deferred a frame rather than set synchronously: a setState in
-      // the effect body triggers a cascading render.
-      raf = requestAnimationFrame(() => setN(to));
-      return () => cancelAnimationFrame(raf);
-    }
-    let start = 0;
-    const step = (t: number) => {
-      if (!start) start = t;
-      const p = Math.min(1, (t - start) / 700);
-      setN(Math.round(to * (1 - Math.pow(1 - p, 3))));
-      if (p < 1) raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
-  }, [to, run]);
-  return n;
-}
-
-// The runway from created to due, drawn under the three date columns so it
-// reads left to right in the same order they do.
-//
-// The gradient lives on a full-width inner span inside a clipped outer span,
-// rather than on the fill itself. That way the colour at the fill's head is
-// genuinely the ramp's colour at that percentage — green early, amber in the
-// middle, red at the end. Putting the gradient on the fill would rescale it,
-// so a 10% fill would run the entire green-to-red ramp inside those 10px and
-// a barely-started task would show red.
-function RunwayBar({ createdDay, end, endIsDue, followUpAt, level, label }: {
-  createdDay: string; end: string; endIsDue: boolean; followUpAt?: string | null;
-  level: "none" | "start" | "wrap" | "late"; label: string;
-}) {
-  const [grown, setGrown] = useState(false);
-  useEffect(() => { const r = requestAnimationFrame(() => setGrown(true)); return () => cancelAnimationFrame(r); }, []);
-  const total = Math.max(1, daysUntilDue(end, createdDay) ?? 1);
-  const left = daysUntilDue(end) ?? 0;
-  const used = Math.min(total, Math.max(0, total - left));
-  const pct = Math.min(100, Math.max(2, Math.round((used / total) * 100)));
-  const shown = useCountUp(used, grown);
-  // Clamped, because a follow-up deliberately set past the due date is a real
-  // and interesting case — you promised Friday and parked it to Monday — and
-  // it should sit visibly at the end of the track, not vanish off it.
-  const followUpOffset = followUpAt ? daysUntilDue(followUpAt, createdDay) : null;
-  const pinPct = followUpOffset !== null && endIsDue
-    ? Math.min(100, Math.max(0, (followUpOffset / total) * 100))
-    : null;
-  return (
-    <div className="mt-1.5 px-3 pb-1 pt-2.5" style={{ borderTop: "1px solid var(--border)" }}>
-      <div className="relative h-2 w-full overflow-hidden rounded-full bg-border shadow-[inset_0_1px_2px_rgba(20,24,40,.14)]">
-        <div className="h-full overflow-hidden rounded-full transition-[width] duration-[900ms] ease-out motion-reduce:transition-none"
-          style={{ width: grown ? `${pct}%` : "0%" }}>
-          {/* Full track width, clipped by the parent. See the note above. */}
-          <div className="h-full rounded-full" style={{ width: `${(100 / pct) * 100}%`, background: "linear-gradient(90deg,#16a34a 0%,#84cc16 35%,#f59e0b 70%,#ef4444 100%)" }} />
-        </div>
-        {pinPct !== null && (
-          <span title={`Follow up ${formatDue(followUpAt!)}`} className="absolute inset-y-0 w-[3px] -translate-x-1/2 rounded-full bg-foreground/70 shadow-[0_0_0_1.5px_var(--surface)]"
-            style={{ left: `${pinPct}%` }} />
-        )}
-      </div>
-      <div className="mt-1.5 flex items-center gap-2 text-[13px]">
-        <span className="text-muted">{shown} of {total} day{total === 1 ? "" : "s"} used{endIsDue ? "" : " until follow up"}</span>
-        {level !== "none" && (
-          <span className={`ml-auto rounded px-1.5 py-0.5 text-[12px] font-semibold ${level === "late" ? "bg-danger/10 text-danger" : "bg-amber-500/15 text-amber-700"}`}>{label}</span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function DateCol({ tone, label, children }: { tone: typeof DATE_TONES[keyof typeof DATE_TONES]; label: string; children: React.ReactNode }) {
-  return (
-    <div className={DATE_CELL} style={{ background: tone.tint }}>
-      {/* The colour lands as a rule down the left edge rather than on the
-          text, so it identifies the column without competing with the value. */}
-      <span className="absolute inset-y-1.5 left-0 w-[3px] rounded-full" style={{ background: tone.rule }} />
-      <span className={`${DATE_KEY} ${tone.key}`}>{label}</span>
-      {children}
-    </div>
-  );
-}
 
 export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onDuplicate, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast, meId, onSendDm, onDelegate, clientLinks, taskLink, onDeleteComment }: {
   task: Task;
@@ -271,17 +165,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (!current.some((a) => a.id === id)) return;
     onPatch({ attachments: current.map((a) => (a.id === id ? { ...a, name: clean } : a)) });
   };
-  // Both default closed. The rail is reference you glance at; a live editor
-  // and a client/project form are things you touch rarely and they were
-  // costing the column its whole reason to exist.
+  // Reads as text until you click Edit: a live editor on every task put a
+  // formatting toolbar in front of what the description actually says.
   const [descEditing, setDescEditing] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const [dupOpen, setDupOpen] = useState(false);
   const [dupClient, setDupClient] = useState(task.clientId);
   const [renamingAttId, setRenamingAttId] = useState<string | null>(null);
   const [labelOpen, setLabelOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [descDraftPrompt, setDescDraftPrompt] = useState("");
   // RichTextEditor only takes `value` as its boot-time content and never
   // re-syncs from props after mount (see its own comment) — a caller that
@@ -426,30 +317,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   }, [attImagePaths]);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Resizable Activity column (full-page mode): drag its left edge; width
-  // persists per browser. Default bumped 400 -> 480 and the floor raised
-  // 280 -> 340 (Derek: the messaging panel "feels small") — stored under a
-  // new key (cut_activityW2, not cut_activityW) so browsers that already
-  // persisted the old 400px default actually pick up the wider one instead
-  // of silently keeping their "unchanged" value forever.
-  const [activityW, setActivityW] = useState(480);
-  useEffect(() => { try { const w = parseInt(localStorage.getItem("cut_activityW2") ?? "", 10); if (w >= 340 && w <= 760) setActivityW(w); } catch {} }, []);
-  const startResize = (e: React.MouseEvent) => {
-    e.preventDefault();
-    const onMove = (ev: MouseEvent) => {
-      const w = Math.min(760, Math.max(340, window.innerWidth - ev.clientX));
-      setActivityW(w);
-    };
-    const onUp = (ev: MouseEvent) => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      const w = Math.min(760, Math.max(340, window.innerWidth - ev.clientX));
-      try { localStorage.setItem("cut_activityW2", String(w)); } catch {}
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  };
-
   // Packages the task as a ready-to-paste brief for a Claude Code session.
   const copyForClaude = async () => {
     const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId);
@@ -473,9 +340,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     ].filter(Boolean).join("\n");
     try {
       await navigator.clipboard.writeText(brief);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch { /* clipboard unavailable */ }
+      pushToast("Copied for Claude");
+    } catch { pushToast("Couldn't copy to the clipboard."); }
   };
   // Pasting a FILE anywhere in the drawer (title, description, a comment
   // draft — doesn't matter which field has focus) attaches it to the task,
@@ -559,11 +425,32 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     setLoaded((p2) => ({ ...p2, rows: p2.rows.map((a) => (a.id === id ? { ...a, body } : a)) }));
     editTaskActionDb(id, body);
   };
+  // The one open commitment, and the three ways to change it from its card.
+  // The follow up date IS the open step's date, so each of these keeps the
+  // two together: they used to be edited in different places and a real task
+  // showed Sep 15 and Sep 17 for the same thing (2026-09-14 redesign).
+  const openStep = openNextStep(actions);
+  const updateActionRow = (id: string, patch: Partial<TaskAction>) =>
+    setLoaded((p) => ({ ...p, rows: p.rows.map((a) => (a.id === id ? { ...a, ...patch } : a)) }));
   const setNextStepDone = (id: string, done: boolean) => {
     const at = done ? new Date().toISOString() : null;
-    setLoaded((p) => ({ ...p, rows: p.rows.map((a) => (a.id === id ? { ...a, nextStepDoneAt: at } : a)) }));
+    updateActionRow(id, { nextStepDoneAt: at });
     setNextStepDoneDb(id, at);
+    // Ticking off the open step moves the follow up to the step still open,
+    // or clears it, so the task never keeps waiting on finished work.
+    if (done && openStep?.id === id) {
+      const next = followUpAfterStepDone(actions, id);
+      if (next !== (task.followUpAt ?? null)) onPatch({ followUpAt: next });
+    }
   };
+  const moveFollowUp = (date: string | null) => {
+    onPatch({ followUpAt: date });
+    if (openStep) { updateActionRow(openStep.id, { nextStepDue: date }); patchNextStepDb(openStep.id, { nextStepDue: date }); }
+  };
+  const renameNextStep = (id: string, text: string) => { updateActionRow(id, { nextStep: text }); patchNextStepDb(id, { nextStep: text }); };
+  // Keyed by task like the other drafts here, since this drawer is not
+  // remounted when the task changes.
+  const [stepDraft, setStepDraft] = useState<{ taskId: string; text: string } | null>(null);
 
   // One name for "may this person contact this client", used by the dock, the
   // Open in GHL link and the Call link. Cockpit only passes onSendTaskMessage
@@ -589,7 +476,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     <textarea value={titleDraft}
       onChange={(e) => { const v = e.target.value; setTitleDraft(v); titleCommit.schedule(() => onPatch({ title: v })); }}
       onBlur={titleCommit.flush}
-      rows={1} className={`-mx-1 w-full resize-none rounded-md bg-transparent px-1 font-semibold leading-snug outline-none [field-sizing:content] transition focus:bg-background ${full ? "text-[28px]" : "text-[18px]"} `} />
+      rows={1} className={`-mx-1 w-full resize-none rounded-md bg-transparent px-1 font-bold leading-tight tracking-[-0.01em] outline-none [field-sizing:content] transition focus:bg-surface ${full ? "text-[30px]" : "text-[26px]"} `} />
   );
   // Completion checkbox to the title's left (item 4) — the fastest way to
   // close out a task without hunting for the Status chip.
@@ -612,117 +499,100 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       <div className="min-w-0 flex-1">{titleBlock}</div>
     </div>
   );
-  // The three dates used to live in three unrelated places: created as grey
-  // subtitle text, due as an unlabelled calendar icon, follow-up as a wide
-  // chip. One idea presented three ways, and the most important of the three
-  // was the one you couldn't identify. They're now one band.
-  //
-  // Order is Follow up, Due, Created, which is not chronological on purpose.
-  // Created never changes and due rarely does; the follow-up date is the one
-  // Derek re-dates every week, so it gets the leading position.
-  // All three date values share one class, so they can't drift apart.
-  const dateVal = "block truncate text-[21px] font-semibold leading-8 text-foreground";
-  const dateSub = "mt-0.5 block truncate text-[13px] text-muted";
-  // Quiet, not loud. As an underlined accent link, "Set a due date" was the
-  // brightest thing in the band — the empty state outshouting the real dates
-  // beside it.
-  const dateSet = "text-[19px] font-medium text-muted decoration-dotted underline-offset-[4px] hover:text-foreground hover:underline";
+  // One quiet line under the title: who made it and when, then its labels.
+  // Created used to be the first of three tinted date cards with a runway bar
+  // under them, about 170px of the drawer for three dates (2026-09-14
+  // redesign). Due lives in the chips below; the follow up is the Next step
+  // card's date.
   const createdDay = task.createdAt.slice(0, 10);
-  const ageDays = -(daysUntilDue(createdDay) ?? 0);
-  const snoozeDays = task.followUpAt ? daysUntilDue(task.followUpAt) : null;
-  // Recessed, not raised: an inset shadow against a tinted ground reads as a
-  // well carved into the white drawer, which is what a reference panel should
-  // look like. A raised white card would have been invisible on a white pane
-  // anyway (Derek: "add some visual depth").
-  const metaLine = (
-    <div className="mb-1 rounded-xl border bg-background p-1.5 shadow-[inset_0_2px_5px_rgba(20,24,40,0.07),inset_0_0_0_1px_rgba(255,255,255,0.5)]">
-      {/* Chronological now — Created, Follow up, Due — so the runway bar
-          underneath reads left to right in the same order as the columns it
-          sits below (Derek: "so it in order and then the progress bar follows
-          that"). That supersedes the earlier edit-frequency ordering: a bar
-          that runs the opposite way to the labels above it is worse than a
-          follow-up date one column further right. */}
-      <div className="flex items-stretch gap-1.5">
-        <DateCol tone={DATE_TONES.created} label="Created">
-          <span className={dateVal}>{formatDue(createdDay)}</span>
-          {/* Who and when, in the column already labelled Created. The
-              full byline, including the last-activity time, is the hover
-              title so the one line stays short enough not to truncate. */}
-          <span className={dateSub} title={`${creatorName ? `Added by ${creatorName} · ` : ""}Updated ${timeAgo(lastActivityAt)}`}>
-            {creatorName ? `${creatorName} · ` : ""}{ageDays <= 0 ? "today" : `${ageDays}d ago`}
-          </span>
-        </DateCol>
-        <DateCol tone={DATE_TONES.followUp} label="Follow up">
-          <InlineDate value={task.followUpAt ?? null} onChange={(d) => onPatch({ followUpAt: d })} onClear={() => onPatch({ followUpAt: null })}
-            className={`${dateVal} -ml-1`} formatValue={formatDue} emptyLabel={<span className={dateSet}>Set a follow up</span>} />
-          <span className={`${dateSub} ${isSnoozed(task) ? "font-medium text-amber-700" : ""}`}>{snoozeDays !== null && snoozeDays > 0 ? `quiet for ${snoozeDays} more day${snoozeDays === 1 ? "" : "s"}` : task.followUpAt ? "back on your plate" : "not parked"}</span>
-        </DateCol>
-        <DateCol tone={DATE_TONES.due} label="Due">
-          <span className={`${dateVal} -ml-1 flex`}>
-            <InlineDue value={task.due} overdue={isOverdue(task.due) && task.status !== "done"} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} recurrenceNth={task.recurrenceNth} recurrenceWeekday={task.recurrenceWeekday} showRecurrenceLabel={task.recurrence !== "custom"} showCountdown={false} formatValue={formatDue} textClass="text-[21px] font-semibold leading-8" toneClass="text-foreground" onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} emptyLabel={<span className={dateSet}>Set a due date</span>} />
-          </span>
-          {/* The urgency colour lives here now that the date itself is
-              plain, so overdue still shouts without the date being red. */}
-          <span className={`${dateSub} ${task.due && isOverdue(task.due) && task.status !== "done" ? "font-semibold text-danger" : ""}`}>{task.due ? dueCountdown(task.due) : "nothing promised"}</span>
-        </DateCol>
+  const subMeta = (
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[16px] text-muted">
+      <span title={`Updated ${timeAgo(lastActivityAt)}`}>Created {formatDue(createdDay)}{creatorName ? ` by ${creatorName}` : ""}</span>
+      {task.labelIds.map((id) => {
+        const l = labelById(id);
+        return l ? (
+          <button key={id} onClick={() => onToggleLabel(id)} title="Remove this label"
+            className="group inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[16px] font-medium" style={{ background: l.color + "1a", color: l.color }}>
+            {l.name} <span className="opacity-50 group-hover:opacity-100">×</span>
+          </button>
+        ) : null;
+      })}
+      <div className="relative">
+        <button onClick={() => setLabelOpen((o) => !o)} className="rounded-md px-1.5 py-0.5 hover:bg-surface hover:text-foreground">+ Label</button>
+        {labelOpen && (<>
+          <div className="fixed inset-0 z-30" onClick={() => setLabelOpen(false)} />
+          <div className="absolute left-0 z-40 mt-1 w-56 rounded-lg border bg-surface p-1.5 shadow-lg">
+            {labels.map((l) => {
+              const on = task.labelIds.includes(l.id);
+              return (
+                <button key={l.id} onClick={() => onToggleLabel(l.id)} className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[16px] text-foreground hover:bg-background">
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: l.color }} /> {l.name}{on && <I.check className="ml-auto text-accent" />}
+                </button>
+              );
+            })}
+          </div>
+        </>)}
       </div>
-      {/* Falls back to the follow-up date as the endpoint when nothing is
-          promised, so a parked task with no due date still gets a runway
-          instead of an empty band. */}
-      {(() => {
-        const end = task.due ?? task.followUpAt ?? null;
-        if (!end) return null;
-        const sig = startSignal(task);
-        return <RunwayBar key={`${task.id}:${createdDay}:${end}`} createdDay={createdDay} end={end} endIsDue={!!task.due} followUpAt={task.followUpAt} level={sig.level} label={sig.label} />;
-      })()}
     </div>
   );
-  // Used to be its own 6-button grid, wrapping to two cramped, hard-to-read
-  // rows in the drawer's narrow (non-full) width — the exact thing that
-  // looked broken. Folded into the same Task Details list as Priority,
-  // Assignee, and everything else below now, same dropdown treatment (a
-  // colored label, no chrome until you touch it), so Status stops being the
-  // one field styled like a different app.
-  // The old "Task Details" card (nine stacked form-field rows) is now one
-  // row of inline editable chips (item 4) — status, due date, assignee,
-  // type (reuses the priority field/scale — see the brief's own open
-  // question about splitting a real `type` field out of priority someday;
-  // no schema change here), and labels. Client/Project/Contact/GoHighLevel
-  // stay editable too, just folded into a smaller secondary "Details"
-  // block below instead of sharing top billing with the fields someone
-  // actually touches on every task.
-  // Chip base: a real bordered pill against bg-surface so it reads as a
-  // discrete control against the page's bg-background — plain bg-background
-  // chips over a bg-background page were invisible, reading as bare native
-  // selects in a row instead of chips (Derek: "seems clunky").
-  // Phase 1 tokens: "radius … pill 5" — pills are 5px, not fully rounded.
-  const chip = "inline-flex items-center rounded-[5px] border bg-surface shadow-sm px-1 py-0.5";
+
+  // Five fields with one look. Status, owner, priority, due and time were five
+  // different kinds of control with their own borders and colours, and the
+  // status and priority text was painted in its own colour on top of that.
+  const chip = "inline-flex min-h-10 items-center gap-2 rounded-lg border bg-surface px-3 text-[16px]";
+  const chipSelect = "min-w-0 cursor-pointer bg-transparent py-1 outline-none";
+  const dueDays = task.due && task.status !== "done" ? daysUntilDue(task.due) : null;
+  // Colour only when it means something: amber inside three days, red once late.
+  const dueTone = dueDays === null ? "" : dueDays < 0 ? "late" : dueDays <= 3 ? "soon" : "";
+  const recurrenceInput = "rounded-md border bg-background px-2 py-0.5 text-[16px] outline-none focus:border-accent";
   const chipRow = (
-    <div className="mt-4 flex flex-wrap items-center gap-1.5">
-      <span className={chip} style={{ borderColor: STATUS_META[effectiveStatus(task)].dot + "55" }}>
-        <span className="ml-2 h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: STATUS_META[effectiveStatus(task)].dot }} />
-        <select value={effectiveStatus(task)} onChange={(e) => onPatch({ status: e.target.value as TaskStatus })} className="rounded-[5px] bg-transparent py-0.5 pl-1.5 pr-1 text-[13px] font-medium outline-none" style={{ color: STATUS_META[effectiveStatus(task)].dot }}>
+    <div className="mt-5 flex flex-wrap items-center gap-2">
+      <label className={chip}>
+        <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: STATUS_META[effectiveStatus(task)].dot }} />
+        <select value={effectiveStatus(task)} onChange={(e) => onPatch({ status: e.target.value as TaskStatus })} aria-label="Status" className={`${chipSelect} font-medium`}>
           {pickableStatuses(effectiveStatus(task)).map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
         </select>
+      </label>
+      {/* Waiting on the client is not an owner option. It is a stage, set from
+          the status chip, and it keeps the owner (Derek, 2026-09-10). */}
+      <label className={`${chip} max-w-[280px]`}>
+        <span className="shrink-0 text-muted">Owner</span>
+        <select value={task.assigneeId ?? ""} onChange={(e) => onPatch({ assigneeId: e.target.value || null })} aria-label="Owner" className={`${chipSelect} w-full`}>
+          <option value="">Unassigned</option>
+          {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+        </select>
+      </label>
+      <label className={chip}>
+        <span className="text-muted">Priority</span>
+        <select value={task.priority} onChange={(e) => onPatch({ priority: e.target.value as Priority })} aria-label="Priority" className={chipSelect}>
+          {manualPriorityOptions(task.priority).map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}
+        </select>
+      </label>
+      <span className={`${chip} ${dueTone === "late" ? "border-danger/40 bg-danger-soft" : dueTone === "soon" ? "border-amber-500/40 bg-amber-500/10" : ""}`}>
+        <span className="text-muted">Due</span>
+        <InlineDue value={task.due} overdue={false} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} recurrenceNth={task.recurrenceNth} recurrenceWeekday={task.recurrenceWeekday}
+          showRecurrenceLabel={task.recurrence !== "custom"} showCountdown={false} showSnooze={false} formatValue={formatDue}
+          textClass="-mx-1 text-[16px] font-medium" toneClass="text-foreground"
+          onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} emptyLabel="Not set" />
+        {task.due && task.status !== "done" && (
+          <span className={dueTone === "late" ? "font-medium text-danger" : dueTone === "soon" ? "font-medium text-amber-700" : "text-muted"}>{dueCountdown(task.due)}</span>
+        )}
       </span>
-      {/* Follow up and Due used to be chips here. They live in the dates
-          band above now, next to Created, because splitting three dates
-          across two different treatments is what made this row unreadable. */}
+      {/* Sizing sits with the other chips: it is one decision, made once. */}
+      <SizePicker size={task.size} sizeHours={task.sizeHours} onChange={onPatch} chipClass={chip} />
       {task.recurrence === "custom" && (
-        <span className={`${chip} gap-1.5 px-2 py-1 text-[13px] text-muted`}>
+        <span className={`${chip} flex-wrap py-1 text-muted`}>
           {task.recurrenceUnit === "nth-weekday" ? (
             <>
               On the
-              <select value={task.recurrenceNth ?? 1} onChange={(e) => onPatch({ recurrenceNth: parseInt(e.target.value, 10) })}
-                className="rounded-md border bg-background px-1.5 py-0.5 text-[13px] outline-none focus:border-accent">
+              <select value={task.recurrenceNth ?? 1} onChange={(e) => onPatch({ recurrenceNth: parseInt(e.target.value, 10) })} className={recurrenceInput}>
                 <option value={1}>1st</option>
                 <option value={2}>2nd</option>
                 <option value={3}>3rd</option>
                 <option value={4}>4th</option>
                 <option value={-1}>last</option>
               </select>
-              <select value={task.recurrenceWeekday ?? 1} onChange={(e) => onPatch({ recurrenceWeekday: parseInt(e.target.value, 10) })}
-                className="rounded-md border bg-background px-1.5 py-0.5 text-[13px] outline-none focus:border-accent">
+              <select value={task.recurrenceWeekday ?? 1} onChange={(e) => onPatch({ recurrenceWeekday: parseInt(e.target.value, 10) })} className={recurrenceInput}>
                 {WEEKDAY_LABEL.map((d, i) => <option key={d} value={i}>{d}</option>)}
               </select>
               of the month
@@ -732,16 +602,16 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               On day(s)
               <input type="text" placeholder="1, 15" defaultValue={(task.recurrenceDaysOfMonth ?? []).join(", ")}
                 onBlur={(e) => onPatch({ recurrenceDaysOfMonth: parseDaysOfMonth(e.target.value) })}
-                className="w-16 rounded-md border bg-background px-1.5 py-0.5 text-center text-[13px] outline-none focus:border-accent" />
+                className={`${recurrenceInput} w-20 text-center`} />
               of month
             </>
           ) : (
             <>
               Every
-              <input type="number" min={1} value={task.recurrenceInterval ?? 1} onChange={(e) => onPatch({ recurrenceInterval: Math.max(1, parseInt(e.target.value, 10) || 1) })} className="w-12 rounded-md border bg-background px-1.5 py-0.5 text-center text-[13px] outline-none focus:border-accent" />
+              <input type="number" min={1} value={task.recurrenceInterval ?? 1} onChange={(e) => onPatch({ recurrenceInterval: Math.max(1, parseInt(e.target.value, 10) || 1) })} className={`${recurrenceInput} w-16 text-center`} />
             </>
           )}
-          <select value={task.recurrenceUnit ?? "week"} onChange={(e) => onPatch({ recurrenceUnit: e.target.value as RecurrenceUnit })} className="rounded-md border bg-background px-1.5 py-0.5 text-[13px] outline-none focus:border-accent">
+          <select value={task.recurrenceUnit ?? "week"} onChange={(e) => onPatch({ recurrenceUnit: e.target.value as RecurrenceUnit })} className={recurrenceInput}>
             <option value="day">day(s)</option>
             <option value="week">week(s)</option>
             <option value="month">month(s)</option>
@@ -752,51 +622,70 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           </select>
         </span>
       )}
-      {/* w-full/min-w-0: a native <select> sizes itself to its WIDEST option;
-          filling the cell keeps the layout stable (Derek, 2026-08-11).
-          Waiting on the client is no longer an option here. It is a stage, set
-          from the stage chip, and it keeps the owner: as an assignee option it
-          replaced whoever was following up on the task (Derek, 2026-09-10). */}
-      <span className={`${chip} max-w-[220px] gap-1`}>
-        <I.user className="ml-1.5 shrink-0 text-muted" />
-        <select value={task.assigneeId ?? ""} onChange={(e) => onPatch({ assigneeId: e.target.value || null })} className="w-full min-w-0 rounded-[5px] bg-transparent py-0.5 pl-0.5 pr-1 text-[13px] outline-none"><option value="">Unassigned</option>{users.map((u) => (<option key={u.id} value={u.id}>{u.name} {u.role === "va" ? "(VA)" : "(Admin)"}</option>))}</select>
-      </span>
-      <span className={chip} style={{ borderColor: PRIORITY_META[task.priority].color + "55" }}>
-        <span className="ml-1.5 shrink-0" style={{ color: PRIORITY_META[task.priority].color }}><I.flag /></span>
-        <select value={task.priority} onChange={(e) => onPatch({ priority: e.target.value as Priority })} className="rounded-[5px] bg-transparent py-0.5 pl-1 pr-1 text-[13px] outline-none" style={{ color: PRIORITY_META[task.priority].color }}>{manualPriorityOptions(task.priority).map((p) => (<option key={p} value={p}>{PRIORITY_META[p].label}</option>))}</select>
-      </span>
-      {task.labelIds.map((id) => { const l = labelById(id); return l ? (<button key={id} onClick={() => onToggleLabel(id)} className="group inline-flex items-center gap-1 rounded-[5px] border px-2 py-1 text-[13px] font-medium" style={{ background: l.color + "1a", color: l.color, borderColor: l.color + "40" }}>{l.name} <span className="opacity-50 group-hover:opacity-100">×</span></button>) : null; })}
-      {/* Sizing sits with the other chips, not in a panel of its own: it is
-          one decision, made once, and it belongs beside the stage and the
-          assignee rather than somewhere you have to go looking for. */}
-      <SizePicker size={task.size} sizeHours={task.sizeHours} onChange={onPatch} chipClass={chip} />
-      <div className="relative">
-        <button onClick={() => setLabelOpen((o) => !o)} className="inline-flex items-center gap-0.5 rounded-[5px] border border-dashed px-2 py-1 text-[13px] text-muted hover:bg-surface"><I.plus /> Label</button>
-        {labelOpen && (<div className="absolute z-30 mt-1 w-40 rounded-lg border bg-surface p-1 shadow-lg">{labels.map((l) => { const on = task.labelIds.includes(l.id); return (<button key={l.id} onClick={() => onToggleLabel(l.id)} className="flex w-full items-center gap-2 rounded px-2 py-1 text-[13px] hover:bg-background"><span className="h-2.5 w-2.5 rounded-full" style={{ background: l.color }} /> {l.name}{on && <I.check className="ml-auto text-accent" />}</button>); })}</div>)}
+    </div>
+  );
+
+  // The one commitment on this task, shown once. Its date is the follow up.
+  // The task's own follow up wins when the two disagree, because the task
+  // list edits it without the steps loaded.
+  const followUp = task.followUpAt ?? openStep?.nextStepDue ?? null;
+  const followUpDays = followUp ? daysUntilDue(followUp) : null;
+  const followUpWhen = !followUp ? "" : `${formatDue(followUp)}${followUpDays === 0 ? " (today)" : followUpDays === 1 ? " (tomorrow)" : followUpDays !== null && followUpDays < 0 ? ` (${-followUpDays}d late)` : ""}`;
+  const editingStep = !!openStep && stepDraft?.taskId === task.id;
+  const saveStepDraft = () => {
+    if (openStep && stepDraft && stepDraft.text.trim() && stepDraft.text.trim() !== openStep.nextStep) renameNextStep(openStep.id, stepDraft.text.trim());
+    setStepDraft(null);
+  };
+  const cardButton = "inline-flex h-10 items-center rounded-lg border bg-surface px-4 text-[16px] font-medium hover:bg-background";
+  const nextStepCard = task.status === "done" && !openStep ? null : (
+    <div className={`mt-6 flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl px-4 py-3.5 ${openStep || followUp ? "bg-accent-soft" : "border border-dashed"}`}>
+      <span aria-hidden className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-surface text-[18px] text-accent">→</span>
+      <div className="min-w-0 flex-1 basis-60">
+        <div className={`text-[16px] font-semibold ${followUpDays !== null && followUpDays < 0 ? "text-danger" : "text-accent"}`}>
+          {openStep ? "Next step" : followUp ? "Follow up" : "No next step"}{followUp ? ` · ${followUpWhen}` : ""}
+        </div>
+        {editingStep ? (
+          <input autoFocus value={stepDraft.text} onChange={(e) => setStepDraft({ taskId: task.id, text: e.target.value })}
+            onKeyDown={(e) => { if (e.key === "Enter") saveStepDraft(); if (e.key === "Escape") { e.stopPropagation(); setStepDraft(null); } }}
+            onBlur={saveStepDraft} aria-label="Next step"
+            className="mt-1 w-full rounded-lg border bg-surface px-2.5 py-1.5 text-[18px] font-semibold outline-none focus:border-accent" />
+        ) : (
+          <div className={`text-[18px] leading-snug ${openStep ? "font-semibold" : "text-muted"}`}>
+            {openStep?.nextStep ?? (followUp ? "Check back on this task" : "Log what you did below and say what happens next")}
+          </div>
+        )}
+      </div>
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        {openStep && (
+          <button onClick={() => setNextStepDone(openStep.id, true)} className="inline-flex h-10 items-center rounded-lg bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Mark done</button>
+        )}
+        <DateChip value={followUp} onChange={moveFollowUp} label={followUp ? "Change date" : "Set a date"} className={cardButton} />
+        {openStep && !editingStep && (
+          <button onClick={() => setStepDraft({ taskId: task.id, text: openStep.nextStep ?? "" })} className={cardButton}>Edit</button>
+        )}
       </div>
     </div>
   );
-  const detailsBlock = !detailsOpen ? (
-    <button onClick={() => setDetailsOpen(true)} className="mt-3 w-full rounded-xl border border-dashed bg-surface/50 px-3.5 py-2 text-left text-[13px] text-muted hover:bg-surface">
-      Client, project and contact
-    </button>
-  ) : (
-    <div className="mt-3 rounded-xl border bg-surface p-4">
-    <div className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-muted">Details</div>
-    <dl className={full ? "grid grid-cols-1 gap-x-12 gap-y-1.5 lg:grid-cols-2" : "space-y-2"}>
-          {/* Type-to-filter rather than a plain select: this list is every
-              client on the account, which is far past the point where
-              scrolling a native dropdown is the fast way to find one. */}
-          <Row label="Client" icon={<I.folder />}><div className="w-[200px]"><SearchableSelect value={task.clientId} onChange={onMoveClient} options={clientSelectOptions} searchPlaceholder="Search clients…" className="rounded-md border border-transparent px-2 py-1 text-[14px] transition hover:border-border hover:bg-background" /></div></Row>
-          <Row label="Project" icon={<I.list />}><select value={task.projectId} onChange={(e) => { if (e.target.value === "__new") onNewProject(); else onSetProject(e.target.value); }} className="max-w-[200px] rounded-md border border-transparent px-2 py-1 text-[14px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background">{clientProjects.map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}{clientProjects.every((p) => p.id !== task.projectId) && <option value={task.projectId}>{project?.name ?? "—"}</option>}<option value="__new">+ New project…</option></select></Row>
-      <Row label="Contact">{(() => { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return ct ? (<span className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[14px] text-muted"><I.user /> {ct.name}</span>) : <span className="text-[14px] text-muted">—</span>; })()}</Row>
-      {/* The "Push to GHL" row is gone. Reaching a client's GoHighLevel
-          account is only ever about emailing, texting or calling them, and
-          the header's "Open in GHL" link goes straight to the contact where
-          all three live. Creating a mirror task there just made a second
-          record that nobody worked in and that drifted out of date. */}
+
+  // Where the task lives, always open in the rail. It was a dashed button
+  // that hid three facts behind a click (2026-09-14 redesign).
+  const detailsBlock = (
+    <dl className="space-y-3">
+      {/* Type-to-filter rather than a plain select: this list is every client
+          on the account, far past where scrolling a native dropdown is fast. */}
+      <Row label="Client" icon={<I.folder />}><SearchableSelect value={task.clientId} onChange={onMoveClient} options={clientSelectOptions} searchPlaceholder="Search clients…" className="w-full rounded-md border border-transparent px-2 py-1 text-[16px] transition hover:border-border hover:bg-background" /></Row>
+      <Row label="Project" icon={<I.list />}>
+        <select value={task.projectId} onChange={(e) => { if (e.target.value === "__new") onNewProject(); else onSetProject(e.target.value); }}
+          className="w-full rounded-md border border-transparent px-2 py-1 text-[16px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background">
+          {clientProjects.map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}
+          {clientProjects.every((p) => p.id !== task.projectId) && <option value={task.projectId}>{project?.name ?? "List"}</option>}
+          <option value="__new">+ New project…</option>
+        </select>
+      </Row>
+      <Row label="Contact" icon={<I.user />}>
+        {(() => { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return <span className={`block truncate px-2 py-1 text-[16px] ${ct ? "" : "text-muted"}`}>{ct ? ct.name : "None"}</span>; })()}
+      </Row>
     </dl>
-    </div>
   );
   // The client's own reply, submitted through the public /waiting/[token]
   // page — surfaced prominently (its own bordered card, above Description)
@@ -806,8 +695,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
 
   const clientResponseBlock = task.clientResponse && (task.clientResponse.body || task.clientResponse.attachments.length > 0) ? (
     <div className="mt-4 rounded-xl border border-accent/30 bg-surface p-4">
-      <div className="mb-2 flex items-center gap-1.5 text-[15px] font-semibold text-accent"><I.user className="h-4 w-4" /> Client response</div>
-      {task.clientResponse.body && <CollapsibleText text={task.clientResponse.body} className="text-[14px]" />}
+      <div className="mb-2 flex items-center gap-1.5 text-[16px] font-semibold text-accent"><I.user className="h-4 w-4" /> Client response</div>
+      {task.clientResponse.body && <CollapsibleText text={task.clientResponse.body} className="text-[16px]" />}
       {task.clientResponse.attachments.length > 0 && (
         <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
           {task.clientResponse.attachments.map((a) => {
@@ -826,13 +715,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                     </>
                   ) : undefined}
                 />
-                <div className="truncate text-center text-[11px]" title={a.name}>{a.name}</div>
+                <div className="truncate text-center text-[16px]" title={a.name}>{a.name}</div>
               </div>
             );
           })}
         </div>
       )}
-      <div className="mt-1.5 text-[12px] text-muted">Submitted {timeAgo(task.clientResponse.submittedAt)}</div>
+      <div className="mt-1.5 text-[16px] text-muted">Submitted {timeAgo(task.clientResponse.submittedAt)}</div>
     </div>
   ) : null;
   // "Prompt Claude" for the description — same intent-in, Gemini-drafts-it
@@ -910,8 +799,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       onPresence={(exists) => setDocPresence((p) => (p.taskId === task.id && p.exists === exists ? p : { taskId: task.id, exists }))} />
   );
   const descriptionBlock = !showDescription ? null : (
-    <div className="mt-3 rounded-xl border bg-surface p-3.5">
-      <div className="mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-muted">Description</div>
+    <div>
       {/* Reads as text until you click it. A permanently-live editor put a
           formatting toolbar and an AI prompt box in the rail on every task,
           which is most of why this column looked twice the weight of the
@@ -920,17 +808,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         <RichTextEditor key={`task-desc-${task.id}-${descFocusNonce}`} value={task.description} onChange={(html) => descriptionCommit.schedule(() => onPatch({ description: html }))} placeholder="Add a description…" />
       ) : (
         <button onClick={() => setDescEditing(true)} title="Click to edit"
-          className="-mx-1 block w-full rounded px-1 text-left text-[14px] leading-relaxed hover:bg-background">
-          <CollapsibleText text={htmlToText(task.description)} maxLines={8} />
+          className="-mx-2 block w-full max-w-[72ch] rounded-lg px-2 py-1 text-left text-[16px] leading-relaxed hover:bg-surface">
+          <CollapsibleText text={htmlToText(task.description)} maxLines={5} />
         </button>
       )}
       {descEditing && (
         <button onClick={() => { descriptionCommit.flush(); setDescEditing(false); }}
-          className="mt-1.5 text-[13px] text-accent underline underline-offset-[3px]">Done editing</button>
+          className="mt-1.5 text-[16px] text-accent underline underline-offset-[3px]">Done editing</button>
       )}
       {descEditing && onDraftDescription && (
         <div className="mt-2 flex shrink-0 items-start gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
-          <span aria-hidden className="pt-1 pl-1 text-[13px]">✨</span>
+          <span aria-hidden className="pt-1 pl-1 text-[16px]">✨</span>
           {/* A textarea that grows with the text rather than an input that
               scrolls it sideways — a real instruction runs past one line, and
               you can't check what you asked for if you can't see it. Enter
@@ -939,10 +827,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             onChange={(e) => { setDescDraftPrompt(e.target.value); e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`; }}
             onKeyDown={(e) => { if (e.key !== "Enter" || e.shiftKey || draftingDescription) return; e.preventDefault(); runDraftDescription(); }}
             placeholder="Tell Claude what to write… (Enter to write, Shift+Enter for a new line)"
-            className="max-h-[200px] min-w-0 flex-1 resize-none self-center overflow-y-auto bg-transparent px-1 py-1 text-[13px] leading-snug outline-none placeholder:text-muted" />
+            className="max-h-[200px] min-w-0 flex-1 resize-none self-center overflow-y-auto bg-transparent px-1 py-1 text-[16px] leading-snug outline-none placeholder:text-muted" />
           <button onClick={runDraftDescription} disabled={draftingDescription}
             title={descDraftPrompt.trim() ? "Draft this with Claude" : "Draft a description from the task title"}
-            className="mt-0.5 shrink-0 rounded-md border border-accent/40 bg-surface px-2.5 py-1 text-[13px] font-medium text-accent disabled:opacity-40">
+            className="mt-0.5 shrink-0 rounded-md border border-accent/40 bg-surface px-2.5 py-1 text-[16px] font-medium text-accent disabled:opacity-40">
             {draftingDescription ? "Drafting…" : descDraftPrompt.trim() ? "Write it" : "Draft it"}
           </button>
         </div>
@@ -964,7 +852,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // never got set, which is how a task goes quiet after real work on it.
   const [pendingNextStep, setPendingNextStep] = useState<{ kind: TaskActionKind; body: string } | null>(null);
   const { feedArea, composerFooter, openCompose } = useTaskMessaging({
-    actions, onSetNextStepDone: setNextStepDone, onDeleteAction: deleteAction, onEditAction: editAction, onLogAction: logAction, meId, onSendDm, onDeleteComment,
+    actions, onDeleteAction: deleteAction, onEditAction: editAction, onLogAction: logAction, meId, onSendDm, onDeleteComment,
     onMessageSent: (channel, body) => setPendingNextStep({ kind: channel, body }),
     onComposeEmail: hasMessaging ? startDraftEmail : undefined,
     task, client, comment, setComment, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
@@ -999,8 +887,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   title"). */}
               <textarea value={s.title} onChange={(e) => onPatchSub(s.id, { title: e.target.value })} rows={1}
                 onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
-                className={`-mx-1 w-full resize-none rounded bg-transparent px-1 text-[15px] font-medium leading-snug outline-none [field-sizing:content] focus:bg-surface ${s.done ? "text-muted line-through" : ""}`} />
-              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] text-muted">
+                className={`-mx-1 w-full resize-none rounded bg-transparent px-1 text-[16px] font-medium leading-snug outline-none [field-sizing:content] focus:bg-surface ${s.done ? "text-muted line-through" : ""}`} />
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[16px] text-muted">
                 <span className="font-semibold uppercase tracking-wide text-accent">Delegated</span>
                 <span aria-hidden>·</span>
                 <span>{userById(s.assigneeId!)?.name ?? "a teammate"}</span>
@@ -1009,7 +897,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               </div>
             </div>
             <InlineDate value={s.due ?? null} onChange={(d) => onPatchSub(s.id, { due: d })} onClear={() => onPatchSub(s.id, { due: null })}
-              className="shrink-0 text-[13px] text-muted" formatValue={formatDue} emptyLabel={<span className="text-[13px] text-muted">Set a date</span>} />
+              className="shrink-0 text-[16px] text-muted" formatValue={formatDue} emptyLabel={<span className="text-[16px] text-muted">Set a date</span>} />
             {/* Taking it back. Confirmed in Cockpit's deleteSub, which names
                 the person and says they lose access, because this is the one
                 thing giving them the task at all. */}
@@ -1021,25 +909,25 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           {/* The brief, editable in place. It is what they actually read. */}
           <textarea value={s.note ?? ""} onChange={(e) => onPatchSub(s.id, { note: e.target.value })} rows={2}
             placeholder="What do you need done? (instructions)"
-            className="mt-1.5 max-h-[11rem] w-full resize-none overflow-y-auto rounded-lg border bg-surface px-2.5 py-1.5 text-[14px] leading-snug outline-none [field-sizing:content] focus:border-accent" />
+            className="mt-1.5 max-h-[11rem] w-full resize-none overflow-y-auto rounded-lg border bg-surface px-2.5 py-1.5 text-[16px] leading-snug outline-none [field-sizing:content] focus:border-accent" />
         </div>
       ))}
     </div>
   );
   const subtasksBlock = !showChecklist ? null : (
-    <div className="mt-3 rounded-xl border bg-surface p-3.5">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Checklist {plainSubs.length > 0 && <span className="text-muted">· {doneSubs}/{plainSubs.length} · {Math.round((doneSubs / task.subtasks.length) * 100)}%</span>}</span>
+    <div className="rounded-xl border bg-surface p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <span className="text-[18px] font-semibold">Checklist {plainSubs.length > 0 && <span className="text-[16px] font-normal text-muted">· {doneSubs}/{plainSubs.length} · {Math.round((doneSubs / task.subtasks.length) * 100)}%</span>}</span>
         {templates.length > 0 && (
           <div className="relative">
-            <button onClick={() => setTemplateOpen((o) => !o)} className="inline-flex items-center gap-1 text-[13px] font-medium text-accent"><I.clipboard /> From template</button>
+            <button onClick={() => setTemplateOpen((o) => !o)} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent"><I.clipboard /> From template</button>
             {templateOpen && (<>
               <div className="fixed inset-0 z-30" onClick={() => setTemplateOpen(false)} />
               <div className="absolute right-0 z-40 mt-1 w-56 rounded-lg border bg-surface p-1 shadow-lg">
                 {templates.map((t) => (
                   <button key={t.id} onClick={() => { onApplyTemplate(t.id); setTemplateOpen(false); }} className="flex w-full flex-col items-start rounded px-2 py-1.5 text-left hover:bg-background">
-                    <span className="truncate text-[14px] font-medium">{t.name}</span>
-                    <span className="text-[12px] text-muted">{t.checklistItems.length} item{t.checklistItems.length === 1 ? "" : "s"}</span>
+                    <span className="truncate text-[16px] font-medium">{t.name}</span>
+                    <span className="text-[16px] text-muted">{t.checklistItems.length} item{t.checklistItems.length === 1 ? "" : "s"}</span>
                   </button>
                 ))}
               </div>
@@ -1050,16 +938,16 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {plainSubs.length > 0 && (<div className="mb-2 h-2 overflow-hidden rounded-full bg-background"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${(doneSubs / task.subtasks.length) * 100}%` }} /></div>)}
       <div className="space-y-1">{plainSubs.map((s) => (
         <div key={s.id}>
-          <div className="group/sub flex items-start gap-2 rounded-md px-1 py-1 hover:bg-background"><button onClick={() => onToggleSub(s.id)} className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${s.done ? "border-accent bg-accent text-white" : "border-border"}`}>{s.done && <I.check />}</button><textarea value={s.title} onChange={(e) => onRenameSub(s.id, e.target.value)} rows={1} className={`-mx-1 mt-0.5 flex-1 resize-none rounded bg-transparent px-1 text-[15px] leading-snug outline-none [field-sizing:content] transition focus:bg-background ${s.done ? "text-muted line-through" : ""}`} /><InlineDue value={s.due ?? null} overdue={isOverdue(s.due ?? null) && !s.done} onChange={(d) => onPatchSub(s.id, { due: d })} /><InlineAssignee value={s.assigneeId ?? null} onChange={(a) => onPatchSub(s.id, { assigneeId: a })} size={20} /><button onClick={() => onDeleteSub(s.id)} title="Delete checklist item" className="mt-0.5 shrink-0 text-muted opacity-0 hover:text-red-500 group-hover/sub:opacity-100"><I.trash /></button></div>
+          <div className="group/sub flex items-start gap-2 rounded-md px-1 py-1 hover:bg-background"><button onClick={() => onToggleSub(s.id)} className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${s.done ? "border-accent bg-accent text-white" : "border-border"}`}>{s.done && <I.check />}</button><textarea value={s.title} onChange={(e) => onRenameSub(s.id, e.target.value)} rows={1} className={`-mx-1 mt-0.5 flex-1 resize-none rounded bg-transparent px-1 text-[16px] leading-snug outline-none [field-sizing:content] transition focus:bg-background ${s.done ? "text-muted line-through" : ""}`} /><InlineDue value={s.due ?? null} overdue={isOverdue(s.due ?? null) && !s.done} onChange={(d) => onPatchSub(s.id, { due: d })} textClass="text-[16px]" emptyLabel="Set date" /><InlineAssignee value={s.assigneeId ?? null} onChange={(a) => onPatchSub(s.id, { assigneeId: a })} size={20} /><button onClick={() => onDeleteSub(s.id)} title="Delete checklist item" className="mt-0.5 shrink-0 text-muted opacity-0 hover:text-red-500 group-hover/sub:opacity-100"><I.trash /></button></div>
           {s.assigneeId && (
             <div className="mb-1 ml-7 flex items-center gap-1.5">
-              <span className="rounded bg-accent-soft px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-accent">Delegated</span>
-              <input value={s.note ?? ""} onChange={(e) => onPatchSub(s.id, { note: e.target.value })} placeholder="What do you need done? (instructions)" className="flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-[13px] outline-none transition placeholder:text-muted hover:bg-background focus:border-accent focus:bg-background" />
+              <span className="rounded bg-accent-soft px-1.5 py-0.5 text-[16px] font-medium uppercase tracking-wide text-accent">Delegated</span>
+              <input value={s.note ?? ""} onChange={(e) => onPatchSub(s.id, { note: e.target.value })} placeholder="What do you need done? (instructions)" className="flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-[16px] outline-none transition placeholder:text-muted hover:bg-background focus:border-accent focus:bg-background" />
             </div>
           )}
         </div>
       ))}</div>
-      <div className="mt-1.5"><input value={subDraft} onChange={(e) => setSubDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { onAddSub(subDraft); setSubDraft(""); } }} placeholder="+ Add a checklist item…" className="w-full rounded-md border border-transparent px-2 py-1 text-[15px] outline-none transition placeholder:text-muted hover:bg-background focus:border-accent focus:bg-background" /></div>
+      <div className="mt-1.5"><input value={subDraft} onChange={(e) => setSubDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { onAddSub(subDraft); setSubDraft(""); } }} placeholder="+ Add a checklist item…" className="w-full rounded-md border border-transparent px-2 py-1 text-[16px] outline-none transition placeholder:text-muted hover:bg-background focus:border-accent focus:bg-background" /></div>
     </div>
   );
   const sortedAttachments = useMemo(() => [...task.attachments].sort((a, b) => {
@@ -1068,31 +956,31 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     return 0; // "added" — keep stored order (oldest first, matches how they were attached)
   }), [task.attachments, attSort]);
   const attachmentsBlock = !showAttachments ? null : (
-    <div className="mt-3 rounded-xl border bg-surface p-3.5">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Attachments {task.attachments.length > 0 && <span className="text-muted">· {task.attachments.length}</span>}</span>
+    <div className="mt-4 rounded-xl border bg-surface p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[16px] font-semibold">Links and files {task.attachments.length > 0 && <span className="font-normal text-muted">· {task.attachments.length}</span>}</span>
         <span className="flex items-center gap-3">
-          {task.attachments.length > 1 && (
-            <select value={attSort} onChange={(e) => setAttSort(e.target.value as typeof attSort)} className="rounded-md border bg-background px-1.5 py-1 text-[13px] outline-none" title="Sort attachments">
+          {/* Sorting two things is not a job. It earns its place at five. */}
+          {task.attachments.length >= 5 && (
+            <select value={attSort} onChange={(e) => setAttSort(e.target.value as typeof attSort)} className="rounded-md border bg-background px-1.5 py-1 text-[16px] outline-none" title="Sort attachments">
               <option value="added">Sort: Added</option>
               <option value="name">Sort: Name</option>
               <option value="type">Sort: Type</option>
             </select>
           )}
-          <button onClick={() => { setLinkOpen((o) => !o); }} className="inline-flex items-center gap-1 text-[15px] font-medium text-accent"><I.link /> Link</button>
-          <button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1 text-[15px] font-medium text-accent"><I.plus /> Attach</button>
+          <button onClick={() => { setLinkOpen((o) => !o); }} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent"><I.link /> Link</button>
+          <button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent"><I.plus /> Attach</button>
         </span>
       </div>
-      {hiddenFileInput}
       {linkOpen && (
         <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border bg-background p-2">
-          <input autoFocus value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLink(); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
-          <input value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLink(); }} placeholder="Label (optional)" className="w-40 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
-          <button onClick={addLink} disabled={!linkUrl.trim()} className="rounded-md bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">Add</button>
+          <input autoFocus value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLink(); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
+          <input value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLink(); }} placeholder="Label (optional)" className="w-40 rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
+          <button onClick={addLink} disabled={!linkUrl.trim()} className="rounded-md bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">Add</button>
         </div>
       )}
       {uploadProgress && (
-        <div className="mb-2 flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-[13px] text-muted">
+        <div className="mb-2 flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-[16px] text-muted">
           <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-accent border-t-transparent" />
           Uploading {uploadProgress.done + 1} of {uploadProgress.total}…
         </div>
@@ -1103,7 +991,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); setAttFileDragOver(false); onAddFiles(e.dataTransfer.files); } }}
         className={`grid grid-cols-3 gap-2 rounded-lg transition sm:grid-cols-4 md:grid-cols-5 ${attFileDragOver ? "outline-2 outline-dashed outline-accent bg-accent-soft/30" : ""}`}
       >
-        {task.attachments.length === 0 && !uploadProgress && (<div className="col-span-full rounded-lg border border-dashed px-3 py-2 text-[13px] text-muted">Drop, paste, or click Attach · max 25MB each</div>)}
+        {task.attachments.length === 0 && !uploadProgress && (<div className="col-span-full rounded-lg border border-dashed px-3 py-2 text-[16px] text-muted">Drop, paste, or click Attach · max 25MB each</div>)}
         {sortedAttachments.filter((a) => a.kind === "image").map((a) => (
           <div key={a.id} className="flex flex-col gap-1">
             <AttachmentTile
@@ -1123,8 +1011,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 </>
               }
             />
-            <div className="truncate text-center text-[12px]" title={a.name}>{a.name}</div>
-            <div className="text-center text-[11px] text-muted">{a.size}</div>
+            <div className="truncate text-center text-[16px]" title={a.name}>{a.name}</div>
+            <div className="text-center text-[16px] text-muted">{a.size}</div>
           </div>
         ))}
       </div>
@@ -1141,7 +1029,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             const isLink = !!a.url;
             const editing = renamingAttId === a.id;
             return (
-              <span key={a.id} className="group flex min-w-0 items-center gap-1.5 rounded-[5px] border bg-background py-1 pl-2.5 pr-1 text-[13px]">
+              <span key={a.id} className="group flex min-w-0 items-center gap-1.5 rounded-[5px] border bg-background py-1 pl-2.5 pr-1 text-[16px]">
                 {editing ? (
                   <input autoFocus defaultValue={a.name}
                     onBlur={(e) => { renameAttachment(a.id, e.target.value); setRenamingAttId(null); }}
@@ -1149,7 +1037,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                       if (e.key === "Enter") { renameAttachment(a.id, e.currentTarget.value); setRenamingAttId(null); }
                       if (e.key === "Escape") setRenamingAttId(null);
                     }}
-                    className="min-w-0 flex-1 rounded border bg-surface px-1.5 py-0.5 text-[13px] outline-none focus:border-accent" />
+                    className="min-w-0 flex-1 rounded border bg-surface px-1.5 py-0.5 text-[16px] outline-none focus:border-accent" />
                 ) : (
                 <a href={isLink ? a.url! : undefined} onClick={!isLink && a.path ? () => onDownloadFile(a.path!) : undefined} target={isLink ? "_blank" : undefined} rel={isLink ? "noreferrer" : undefined}
                   title={isLink ? a.url! : a.name}
@@ -1183,20 +1071,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             )}
             <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
               {previewAtt.path && (
-                <button onClick={() => onDownloadFileAs(previewAtt.path!, previewAtt.name)} className="flex items-center gap-1.5 rounded-md bg-white/10 px-3 py-1.5 text-[14px] font-medium text-white hover:bg-white/20"><I.download />Download</button>
+                <button onClick={() => onDownloadFileAs(previewAtt.path!, previewAtt.name)} className="flex items-center gap-1.5 rounded-md bg-white/10 px-3 py-1.5 text-[16px] font-medium text-white hover:bg-white/20"><I.download />Download</button>
               )}
-              <button onClick={() => setPreviewAtt(null)} className="rounded-md bg-white/10 px-3 py-1.5 text-[14px] font-medium text-white hover:bg-white/20">Close</button>
+              <button onClick={() => setPreviewAtt(null)} className="rounded-md bg-white/10 px-3 py-1.5 text-[16px] font-medium text-white hover:bg-white/20">Close</button>
             </div>
           </div>
         </>
       )}
     </div>
   );
-  // Stands in for whichever of the three sections above are still empty —
-  // one ~40px row instead of up to ~430px of empty cards. Also a drop
-  // target, so dragging a file in still works when Attachments is collapsed
-  // (the expanded block has its own dropzone).
-  const addChip = "rounded-lg border border-dashed px-3 py-1.5 text-[13px] font-medium text-muted transition hover:bg-background hover:text-foreground";
   // The draft email line: shown whenever a draft exists, from Claude, the drafter
   // or the chip below. Sending goes through the same path as the composer.
   const draftEmailBlock = (
@@ -1238,26 +1121,20 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         return { taskId: task.id, kinds: exists ? [...kinds, kind] : kinds.filter((k) => k !== kind) };
       })} />
   ));
-  const emptySectionsRow = (showDescription && showChecklist && showAttachments && ((showDocument && REVIEW_LINES.every((l) => hasReview(l.kind))) || !canHaveDocument) && (!!task.draftEmail || !hasMessaging)) ? null : (
-    <div
-      onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setAttFileDragOver(true); } }}
-      onDragLeave={(e) => { if (e.currentTarget === e.target) setAttFileDragOver(false); }}
-      onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); setAttFileDragOver(false); openSection("attachments"); onAddFiles(e.dataTransfer.files); } }}
-      className={`mt-4 flex flex-wrap items-center gap-2 rounded-xl p-1 transition ${attFileDragOver ? "outline-2 outline-dashed outline-accent bg-accent-soft/30" : ""}`}
-    >
-      {!showDescription && <button onClick={() => openSection("description")} className={addChip}>+ Description</button>}
-      {canHaveDocument && !showDocument && <button onClick={() => setDocStartNonce((n) => n + 1)} className={addChip}>+ Client document</button>}
-      {canHaveDocument && REVIEW_LINES.filter((l) => !hasReview(l.kind)).map((l) => (
-        <button key={l.kind} onClick={() => setReviewStartNonce((s) => ({ ...s, [l.kind]: s[l.kind] + 1 }))} className={addChip}>{l.chip}</button>
-      ))}
-      {hasMessaging && !task.draftEmail && <button onClick={() => startDraftEmail()} className={addChip}>+ Draft email</button>}
-      {!showChecklist && <button onClick={() => openSection("checklist")} className={addChip}>+ Checklist</button>}
-      {!showAttachments && (<>
-        {hiddenFileInput}
-        <button onClick={() => { openSection("attachments"); fileRef.current?.click(); }} className={addChip}>+ Attach</button>
-      </>)}
-    </div>
+  // Everything a task can gain, in one menu beside Deliverables. It was a row
+  // of up to seven dashed buttons, wrapping two by two in the rail.
+  const addMenu = (
+    <ActionMenu label={<span className="inline-flex items-center gap-1.5"><I.plus /> Add</span>} title="Add to this task" items={[
+      !showDescription && { label: "Description", onClick: () => openSection("description") },
+      canHaveDocument && !showDocument && { label: "Client document", onClick: () => setDocStartNonce((n) => n + 1) },
+      ...(canHaveDocument ? REVIEW_LINES.filter((l) => !hasReview(l.kind)).map((l) => ({ label: l.label, onClick: () => setReviewStartNonce((s) => ({ ...s, [l.kind]: s[l.kind] + 1 })) })) : []),
+      hasMessaging && !task.draftEmail && { label: "Draft email", onClick: () => startDraftEmail() },
+      !showChecklist && { label: "Checklist", onClick: () => openSection("checklist") },
+      { label: "Link", onClick: () => { openSection("attachments"); setLinkOpen(true); } },
+      { label: "File", onClick: () => fileRef.current?.click() },
+    ]} />
   );
+  const hasDeliverables = showDocument || REVIEW_LINES.some((l) => hasReview(l.kind)) || !!task.draftEmail || showAttachments;
   // The embedded sibling-task list used to live here — deleted (item 4):
   // the "N of M" pager (onPrev/onNext below) already does the same job of
   // moving between tasks in this list, without duplicating a whole list
@@ -1269,258 +1146,52 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // comment, it's no longer "light" and gets the full two-column layout.
   const isLightTask = !hasMessaging && task.comments.length === 0;
 
-  return (
+  const section = (title: string, children: React.ReactNode, right?: React.ReactNode) => (
+    <section className="mt-10">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h2 className="text-[18px] font-semibold">{title}</h2>
+        {right}
+      </div>
+      {children}
+    </section>
+  );
+
+  // The task in reading order: what it is, what happens next, what it says,
+  // what has been made for it, then everything said and done about it
+  // (2026-09-14 redesign). The description used to sit in the side rail cut
+  // off after a few lines, though it is what explains the task.
+  const mainColumn = (
     <>
-      <div className={`fixed inset-0 bg-black/20 ${full ? "z-40" : "z-10"}`} onClick={onClose} />
-      {/* Docked mode is no longer a narrow rail (Derek, 2026-08-26): it spans
-          everything from the sidebar's right edge to the window's, so the
-          task gets the same two-column document/activity layout full mode
-          has instead of a 460px column that squeezed both. --drawer-left is
-          set by Cockpit and follows the sidebar (16rem, or 0 when hidden);
-          below md the sidebar is an overlay, so the drawer is full width.
-          left + right define the box there, hence md:w-auto over w-full. */}
-      {/* --dock-right keeps the floating dock inside the document column
-          instead of running under the reference rail, so it centres on the
-          column it belongs to. Zero below 1100px, where the rail stacks
-          underneath and there is no column to stay clear of. */}
-      <aside onPaste={handlePaste} {...drawerDropProps}
-        style={{ "--rail-w": `${activityW}px` } as React.CSSProperties}
-        className={`[--dock-right:0px] ${isLightTask ? "" : "min-[1100px]:[--dock-right:var(--rail-w)]"} ${full ? "fixed inset-0 z-50 flex flex-col bg-surface" : "fixed inset-y-0 right-0 z-20 flex w-full flex-col border-l bg-surface shadow-xl md:left-[var(--drawer-left,16rem)] md:w-auto"}`}>
-        <div className="flex flex-wrap items-center gap-2 border-b px-5 py-3 text-[13px] text-muted">
-          <span className="flex min-w-0 items-center gap-2">
-            <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: client.color }} />
-            <button onClick={onOpenClientList} title={`Back to ${client.name}'s list`} className="truncate rounded px-1 -mx-1 hover:bg-background hover:text-foreground hover:underline">{client.name}</button>
-            <span className="shrink-0">/</span>
-            <button onClick={onRenameProject} title="Rename list" className="truncate rounded px-1 -mx-1 hover:bg-background hover:text-foreground hover:underline">{project.name}</button>
-          </span>
-          <div className="ml-auto flex flex-wrap items-center justify-end gap-1">
-            {navTotal > 1 && (
-              <div className="mr-1 flex items-center gap-0.5">
-                <button onClick={onPrev} disabled={navIndex <= 0} title="Previous task (k)" className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground disabled:opacity-30"><I.chevron className="rotate-90" /></button>
-                <span className="min-w-[54px] text-center text-[13px] tabular-nums text-muted">{navIndex + 1} of {navTotal}</span>
-                <button onClick={onNext} disabled={navIndex < 0 || navIndex >= navTotal - 1} title="Next task (j)" className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground disabled:opacity-30"><I.chevron className="-rotate-90" /></button>
-              </div>
-            )}
-            <button onClick={copyForClaude} title="Copy this task as a brief to paste into Claude Code" className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
-              <span aria-hidden>{copied ? "✓" : "✳"}</span><span className="hidden sm:inline">{copied ? "Copied" : "Copy for Claude"}</span>
-            </button>
-            {ghlContactUrl && mayContactClient && (
-              <a href={ghlContactUrl} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="inline-flex items-center gap-1 rounded-md border border-accent px-2 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft">
-                <I.bolt /> <span className="hidden sm:inline">Open in GHL</span>
-              </a>
-            )}
-            <button onClick={onCopyLink} title="Copy a shareable link to this task" className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground"><I.link /></button>
-            {/* Duplicating in place is the common case, so it is one click.
-                Duplicating INTO another list is the same button held open:
-                a second control for it would sit unused most of the time. */}
-            <div className="relative">
-              <button onClick={() => { setDupClient(task.clientId); setDupOpen((o) => !o); }} title="Duplicate this task" className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground"><I.copy /></button>
-              {dupOpen && (
-                <>
-                  <div className="fixed inset-0 z-30" onClick={() => setDupOpen(false)} />
-                  <div className="absolute right-0 z-40 mt-1 w-72 rounded-lg border bg-surface p-2 text-left shadow-lg">
-                    <button onClick={() => { setDupOpen(false); onDuplicate(); }}
-                      className="w-full rounded-md px-2 py-1.5 text-left text-[14px] font-medium hover:bg-background">Duplicate here</button>
-                    <div className="mt-1.5 border-t pt-1.5">
-                      <div className="px-2 pb-1 text-[12px] font-semibold uppercase tracking-wide text-muted">Duplicate into</div>
-                      <select value={dupClient} onChange={(e) => setDupClient(e.target.value)}
-                        className="mb-1 w-full rounded-md border bg-background px-2 py-1.5 text-[14px] outline-none focus:border-accent">
-                        {allClients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                      </select>
-                      <div className="max-h-52 overflow-y-auto">
-                        {projectsFor(dupClient).length === 0 && <div className="px-2 py-2 text-[13px] text-muted">No lists in this client yet.</div>}
-                        {projectsFor(dupClient).map((p) => (
-                          <button key={p.id} onClick={() => { setDupOpen(false); onDuplicate({ clientId: dupClient, projectId: p.id }); }}
-                            disabled={p.id === task.projectId && dupClient === task.clientId}
-                            className="block w-full truncate rounded-md px-2 py-1.5 text-left text-[14px] hover:bg-background disabled:opacity-40">
-                            {p.name}{p.id === task.projectId && dupClient === task.clientId ? " · current" : ""}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-            {task.priority === "conversation" && (
-              <button onClick={onOpenMerge} title="Merge this conversation into an existing task" className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">
-                <I.repeat /> <span className="hidden sm:inline">Merge</span>
-              </button>
-            )}
-            <button onClick={onToggleFull} title={full ? "Collapse to sidebar" : "Expand to full page"} className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground">{full ? <I.minimize /> : <I.expand />}</button>
-            {(
-              <button onClick={onDelete} title="Delete task" className="rounded-md p-1 text-muted hover:bg-background hover:text-danger"><I.trash /></button>
-            )}
-            <button onClick={onClose} className="rounded-md p-1 text-muted hover:bg-background"><I.close /></button>
-          </div>
-        </div>
-
-        {isLightTask ? (
-            // No linked contact and no comments yet — nothing the messaging
-            // feed could show, so fold it into the document instead of
-            // reserving a wide empty column for it (see isLightTask above).
-            <div className="flex-1 overflow-y-auto bg-background px-8 pb-32 pt-6 lg:px-12">
-              <div className="mx-auto w-full max-w-4xl">
-                {titleRow}
-                {metaLine}
-                {chipRow}
-                {delegationRow}
-                {detailsBlock}
-                <div className="my-4 border-t" />
-                {clientResponseBlock}
-                {documentBlock}
-                {reviewBlocks}
-                {draftEmailBlock}
-                {descriptionBlock}
-                {subtasksBlock}
-                {attachmentsBlock}
-                {emptySectionsRow}
-
-                <div className="mt-5 border-t pt-4">
-                  {feedArea}
-                  <div className="mt-3">{composerFooter}</div>
-                </div>
-              </div>
-            </div>
-          ) : (
-          // ClickUp-style split: task content (document) on the left, the
-          // merged communications feed in its own column on the right with
-          // an active composer (if any) pinned to the bottom.
-          // Splits at 1100px, not md (768px). The activity rail is a fixed
-          // 480px, so on an iPad at 1024 the document column was left about
-          // 330px: the title wrapped to two lines, the DETAILS fields were
-          // squeezed and "Push to GHL" broke across three. Below 1100 the two
-          // stack instead, which reads far better on a tablet.
-          // One scroll container, not two. Giving the rail its own overflow-y
-          // put a second scrollbar beside the document's whenever the
-          // reference was long enough to need it. Sticky inside a shared
-          // scroller keeps it on screen with a single bar, which is what the
-          // mockup did.
-          <div className="flex flex-1 flex-col overflow-y-auto bg-background min-[1100px]:flex-row min-[1100px]:items-start">
-            <div className="min-w-0 flex-1 px-4 pb-32 pt-6 sm:px-8 lg:px-12">
-              <div className="mx-auto w-full max-w-4xl">
-                {/* The columns are swapped from what this used to be. The
-                    conversation was in the side rail and the description had
-                    the main column, which is backwards: the feed is what you
-                    come back to, the description is what you consult. */}
-                {titleRow}
-                {metaLine}
-                {chipRow}
-                {delegationRow}
-                {clientResponseBlock}
-                {/* The client document is work you write and send, not
-                    reference you consult, so it takes the wide column. In the
-                    rail it was a 400px box (Derek, 2026-09-11: "way to small"). */}
-                {documentBlock}
-                {reviewBlocks}
-                {draftEmailBlock}
-                {/* Composer above the feed, because the feed is newest-first:
-                    what you write next belongs at the end you are reading
-                    from. Below it, opening a composer from the dock scrolled
-                    nothing into view and read as a click that did nothing. */}
-                <div className="mt-5 border-t pt-4">{composerFooter}</div>
-                <div className="mt-3">{feedArea}</div>
-              </div>
-            </div>
-            {/* Stacks below the document on mobile (each pane its own scroll);
-                fixed, resizable side column at md+. Width rides a CSS var so a
-                responsive class can override the inline value below md. */}
-            <div className="relative flex w-full flex-col self-stretch border-t-4 bg-[color-mix(in_srgb,var(--background)_50%,transparent)] min-[1100px]:sticky min-[1100px]:top-0 min-[1100px]:max-h-screen min-[1100px]:w-[var(--activity-w)] min-[1100px]:flex-none min-[1100px]:self-start min-[1100px]:border-l-4 min-[1100px]:border-t-0"
-              style={{ "--activity-w": `${activityW}px` } as React.CSSProperties}>
-              <div onMouseDown={startResize} title="Drag to resize"
-                className="absolute inset-y-0 -left-1 z-10 hidden w-2 cursor-col-resize hover:bg-accent/30 active:bg-accent/40 min-[1100px]:block" />
-              {hasMessaging && (
-                <div className="border-b bg-surface px-3 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: clientStatusMeta(client.status).dot }} />
-                    <span className="min-w-0 flex-1 truncate text-[14px] font-semibold">{client.name}</span>
-                  </div>
-                  <div className="mt-0.5 flex items-center justify-between gap-2 text-[12px] text-muted">
-                    <span>{clientStatusMeta(client.status).label}</span>
-                    <span className="flex shrink-0 items-center gap-2">
-                      {messageDest?.phone && mayContactClient ? (
-                        <a href={`tel:${messageDest.phone}`} className="font-medium text-accent hover:underline">Call</a>
-                      ) : (
-                        <span title="No phone on file" className="cursor-not-allowed opacity-40">Call</span>
-                      )}
-                      {onCopyClientLink && <button onClick={onCopyClientLink} className="font-medium text-accent hover:underline">Copy client link</button>}
-                    </span>
-                  </div>
-                  {/* The client's SaaS URL, living in GoHighLevel as the
-                      contact's "SaaS" custom field. Shown here because it is
-                      a per-client fact you want while working a task, and
-                      editable here because otherwise adding one means leaving
-                      for GHL and coming back. */}
-                  {linkedContactInfo?.ghlContactId && (
-                    <div className="mt-1.5 flex items-center gap-2 text-[12px]">
-                      <span className="shrink-0 font-semibold uppercase tracking-wide text-muted">SaaS</span>
-                      {saasEditing ? (
-                        <input autoFocus defaultValue={saasUrl} disabled={saasSaving}
-                          onBlur={(e) => saveSaas(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") { e.preventDefault(); saveSaas(e.currentTarget.value); }
-                            if (e.key === "Escape") setSaasEditing(false);
-                          }}
-                          placeholder="app.example.com"
-                          className="min-w-0 flex-1 rounded border bg-surface px-1.5 py-0.5 text-[12px] outline-none focus:border-accent disabled:opacity-60" />
-                      ) : saasUrl ? (
-                        <>
-                          <a href={saasUrl} target="_blank" rel="noopener noreferrer" title={saasUrl}
-                            className="min-w-0 flex-1 truncate font-medium text-accent hover:underline">{prettyLinkName(saasUrl)}</a>
-                          <button onClick={() => { navigator.clipboard?.writeText(saasUrl).then(() => pushToast("🔗 SaaS link copied"), () => {}); }}
-                            title="Copy the SaaS link" className="shrink-0 rounded p-0.5 text-muted hover:text-foreground"><I.copy className="h-3 w-3" /></button>
-                          {saasEditable && <button onClick={() => setSaasEditing(true)} title="Edit" className="shrink-0 rounded p-0.5 text-muted hover:text-foreground"><I.pencil className="h-3 w-3" /></button>}
-                        </>
-                      ) : saasEditable ? (
-                        <button onClick={() => setSaasEditing(true)} className="text-[12px] text-accent underline underline-offset-[3px]">Add a SaaS link</button>
-                      ) : (
-                        <span className="text-muted" title="This sub-account has no SaaS field in GoHighLevel yet.">not available here</span>
-                      )}
-                      {saasSaving && <span className="shrink-0 text-muted">saving…</span>}
-                    </div>
-                  )}
-                </div>
-              )}
-              {/* Top-anchored (Derek, 2026-08-19: the bottom-anchored
-                  chat-app convention this used to have — mt-auto pinning a
-                  short thread near the composer — left a client/task with
-                  little activity looking broken, a wall of empty space
-                  above one lonely event). The filter bar and feed now sit
-                  right under the header where they belong; composerFooter
-                  stays pinned below, outside this scroll area. */}
-              {/* Sticky reference: description, checklist and attachments
-                  stay on screen while the feed scrolls beside them, which is
-                  the one thing a single column genuinely loses. */}
-              {/* The rail is max-h-screen and sticky at 1100px+, so anything
-                  taller than the viewport was simply unreachable — a long
-                  description ran off the bottom with no way to scroll to it.
-                  Only scrolls at that breakpoint; below it the rail stacks
-                  under the document and the page scroll is the right one. */}
-              <div className="flex min-h-0 flex-1 flex-col px-4 py-4 min-[1100px]:overflow-y-auto">
-                {descriptionBlock}
-                {subtasksBlock}
-                {attachmentsBlock}
-                {emptySectionsRow}
-                {detailsBlock}
-              </div>
-            </div>
-          </div>
-        )}
-        {/* Shown over the whole drawer while a file is being dragged in, so
-            the target is obvious and it is clear the drop will land here
-            rather than navigating the browser away to the file. */}
-        {fileOverDrawer && (
-          <div className="pointer-events-none absolute inset-3 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-accent bg-accent-soft/70 backdrop-blur-[1px]">
-            <span className="rounded-lg bg-surface px-4 py-2 text-[16px] font-semibold shadow-lg">Drop to attach</span>
-          </div>
-        )}
-        {/* Fixed to the bottom of the drawer, so you can log from anywhere in
-            the scroll. Sitting after the feed, the action you take most often
-            was the furthest thing from you on a task with real history. */}
+      {titleRow}
+      {subMeta}
+      {chipRow}
+      {delegationRow}
+      {nextStepCard}
+      {clientResponseBlock}
+      {showDescription && section("Description", descriptionBlock,
+        !descEditing && htmlToText(task.description).trim()
+          ? <button onClick={() => setDescEditing(true)} className="rounded-lg px-3 py-1.5 text-[16px] font-medium text-accent hover:bg-accent-soft">Edit</button>
+          : undefined)}
+      {section("Deliverables", (
+        <>
+          {documentBlock}
+          {reviewBlocks}
+          {draftEmailBlock}
+          {attachmentsBlock}
+          {!hasDeliverables && (
+            <p className="rounded-xl border border-dashed px-4 py-3 text-[16px] text-muted">Client reviews, draft emails, links and files show here. Drop a file anywhere on the task to attach it.</p>
+          )}
+        </>
+      ), addMenu)}
+      {subtasksBlock && <div className="mt-10">{subtasksBlock}</div>}
+      <section className="mt-10">
+        {/* Log what you did at the top of the conversation, because the feed
+            is newest first (Derek, 2026-09-14: "composer top"). The composer
+            the dock opens for a text, chat or note sits right under it. */}
         <ActionDock
           task={task} client={client} contact={linkedContactInfo ?? null} actions={actions} messages={messages ?? undefined}
           me={userById(meId) ?? null} users={users}
-          onLog={logAction} onSetNextStepDone={setNextStepDone} onPatch={onPatch} onAddComment={onAddComment}
+          onLog={logAction} onPatch={onPatch} onAddComment={onAddComment}
           onOpenCompose={openCompose}
           // Same gate the composer already uses: onSendTaskMessage is only
           // passed when this person may message this client.
@@ -1530,6 +1201,174 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           onAskNextStepHandled={() => setPendingNextStep(null)}
           pushToast={pushToast}
         />
+        <div className="mt-3">{composerFooter}</div>
+        <div className="mt-6">{feedArea}</div>
+      </section>
+    </>
+  );
+
+  // The client's SaaS URL, living in GoHighLevel as the contact's "SaaS"
+  // custom field. Editable here because otherwise adding one means leaving
+  // for GHL and coming back. Folded under Account details: it is a lookup,
+  // not something to read on every task.
+  const saasRow = (
+    <div className="flex items-center gap-2 text-[16px]">
+      <span className="shrink-0 text-muted">SaaS link</span>
+      {saasEditing ? (
+        <input autoFocus defaultValue={saasUrl} disabled={saasSaving}
+          onBlur={(e) => saveSaas(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); saveSaas(e.currentTarget.value); }
+            if (e.key === "Escape") { e.stopPropagation(); setSaasEditing(false); }
+          }}
+          placeholder="app.example.com"
+          className="min-w-0 flex-1 rounded-md border bg-surface px-2 py-1 text-[16px] outline-none focus:border-accent disabled:opacity-60" />
+      ) : saasUrl ? (
+        <>
+          <a href={saasUrl} target="_blank" rel="noopener noreferrer" title={saasUrl}
+            className="min-w-0 flex-1 truncate font-medium text-accent hover:underline">{prettyLinkName(saasUrl)}</a>
+          <button onClick={() => { navigator.clipboard?.writeText(saasUrl).then(() => pushToast("🔗 SaaS link copied"), () => {}); }}
+            title="Copy the SaaS link" className="shrink-0 rounded p-1 text-muted hover:text-foreground"><I.copy className="h-4 w-4" /></button>
+          {saasEditable && <button onClick={() => setSaasEditing(true)} title="Edit" className="shrink-0 rounded p-1 text-muted hover:text-foreground"><I.pencil className="h-4 w-4" /></button>}
+        </>
+      ) : saasEditable ? (
+        <button onClick={() => setSaasEditing(true)} className="text-accent underline underline-offset-[3px]">Add one</button>
+      ) : (
+        <span className="text-muted" title="This sub-account has no SaaS field in GoHighLevel yet.">not available here</span>
+      )}
+      {saasSaving && <span className="shrink-0 text-muted">saving…</span>}
+    </div>
+  );
+
+  // Client context only: who this is for, the three ways to reach them, and
+  // where the task lives (2026-09-14 redesign).
+  const railButton = "flex flex-col items-center gap-1 rounded-lg border bg-surface px-1 py-2.5 text-[16px] transition hover:bg-background disabled:cursor-not-allowed disabled:opacity-40";
+  const clientRail = (
+    <aside aria-label="Client" className="w-full border-t bg-surface px-5 py-6 min-[1100px]:sticky min-[1100px]:top-0 min-[1100px]:max-h-screen min-[1100px]:w-[340px] min-[1100px]:flex-none min-[1100px]:self-start min-[1100px]:overflow-y-auto min-[1100px]:border-l min-[1100px]:border-t-0">
+      <div className="flex items-center gap-3">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[16px] font-bold text-white" style={{ background: client.color }}>{initialsOf(client.name)}</span>
+        <div className="min-w-0">
+          <div className="truncate text-[18px] font-semibold">{client.name}</div>
+          <div className="flex items-center gap-1.5 text-[16px] text-muted">
+            <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: clientStatusMeta(client.status).dot }} />{clientStatusMeta(client.status).label}
+          </div>
+        </div>
+      </div>
+      {hasMessaging && (
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          {messageDest?.phone && mayContactClient ? (
+            <a href={`tel:${messageDest.phone}`} className={railButton}><I.phone className="text-accent" />Call</a>
+          ) : (
+            <button disabled title="No phone on file" className={railButton}><I.phone />Call</button>
+          )}
+          <button onClick={() => startDraftEmail()} disabled={!messageDest?.email} title={messageDest?.email ? `Email ${messageDest.email}` : "No email on file"} className={railButton}><I.mail className="text-accent" />Email</button>
+          <button onClick={onCopyClientLink} disabled={!onCopyClientLink} title="Copy this client's link" className={railButton}><I.link className="text-accent" />Client link</button>
+        </div>
+      )}
+      <div className="mt-6">{detailsBlock}</div>
+      {linkedContactInfo?.ghlContactId && (
+        <details className="group mt-6">
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-[16px] text-muted hover:text-foreground [&::-webkit-details-marker]:hidden">
+            <I.chevron className="h-3 w-3 rotate-180 transition-transform group-open:-rotate-90" /> Account details
+          </summary>
+          <div className="mt-3">{saasRow}</div>
+        </details>
+      )}
+    </aside>
+  );
+
+  const iconButton = "rounded-lg p-2 text-muted transition hover:bg-background hover:text-foreground disabled:opacity-30";
+  return (
+    <>
+      <div className={`fixed inset-0 bg-black/20 ${full ? "z-40" : "z-10"}`} onClick={onClose} />
+      {/* Docked mode spans everything from the sidebar's right edge to the
+          window's (Derek, 2026-08-26). --drawer-left is set by Cockpit and
+          follows the sidebar; below md the sidebar is an overlay, so the
+          drawer is full width. */}
+      <aside onPaste={handlePaste} {...drawerDropProps}
+        className={full ? "fixed inset-0 z-50 flex flex-col bg-surface" : "fixed inset-y-0 right-0 z-20 flex w-full flex-col border-l bg-surface shadow-xl md:left-[var(--drawer-left,16rem)] md:w-auto"}>
+        {hiddenFileInput}
+        <div className="flex flex-wrap items-center gap-2 border-b px-5 py-2.5 text-[16px] text-muted">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: client.color }} />
+            <button onClick={onOpenClientList} title={`Back to ${client.name}'s list`} className="-mx-1 truncate rounded px-1 font-medium text-foreground hover:bg-background hover:underline">{client.name}</button>
+            <span className="shrink-0">/</span>
+            <button onClick={onRenameProject} title="Rename list" className="-mx-1 truncate rounded px-1 hover:bg-background hover:text-foreground hover:underline">{project.name}</button>
+          </span>
+          <div className="ml-auto flex items-center gap-1">
+            {navTotal > 1 && (
+              <div className="mr-1 flex items-center">
+                <button onClick={onPrev} disabled={navIndex <= 0} title="Previous task (k)" aria-label="Previous task" className={iconButton}><I.chevron className="rotate-90" /></button>
+                <span className="min-w-[64px] text-center tabular-nums">{navIndex + 1} of {navTotal}</span>
+                <button onClick={onNext} disabled={navIndex < 0 || navIndex >= navTotal - 1} title="Next task (j)" aria-label="Next task" className={iconButton}><I.chevron className="-rotate-90" /></button>
+              </div>
+            )}
+            {ghlContactUrl && mayContactClient && (
+              <a href={ghlContactUrl} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel"
+                className="mr-1 inline-flex h-10 items-center gap-1.5 rounded-lg border px-3 font-medium text-foreground transition hover:bg-background">
+                <I.bolt /> <span className="hidden sm:inline">Open in GHL</span>
+              </a>
+            )}
+            {/* The rarer actions, one click in. Five bare icons sat here with
+                Delete right beside Close. */}
+            <div className="relative">
+              <ActionMenu label={<I.dots />} title="More actions" triggerClassName={iconButton} items={[
+                { label: "Copy link to task", onClick: onCopyLink },
+                { label: "Copy for Claude", onClick: copyForClaude },
+                { label: "Duplicate here", onClick: () => onDuplicate() },
+                { label: "Duplicate into another list", onClick: () => { setDupClient(task.clientId); setDupOpen(true); } },
+                task.priority === "conversation" && { label: "Merge into a task", onClick: onOpenMerge },
+                { label: full ? "Back to the side panel" : "Open full page", onClick: onToggleFull },
+                { label: "Delete task", onClick: onDelete, danger: true },
+              ]} />
+              {dupOpen && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setDupOpen(false)} />
+                  <div className="absolute right-0 top-full z-40 mt-1 w-80 rounded-lg border bg-surface p-2 text-left text-foreground shadow-lg">
+                    <div className="px-2 pb-1.5 text-[16px] font-semibold">Duplicate into</div>
+                    <select value={dupClient} onChange={(e) => setDupClient(e.target.value)}
+                      className="mb-1 w-full rounded-md border bg-background px-2 py-1.5 text-[16px] outline-none focus:border-accent">
+                      {allClients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                    <div className="max-h-52 overflow-y-auto">
+                      {projectsFor(dupClient).length === 0 && <div className="px-2 py-2 text-[16px] text-muted">No lists in this client yet.</div>}
+                      {projectsFor(dupClient).map((p) => (
+                        <button key={p.id} onClick={() => { setDupOpen(false); onDuplicate({ clientId: dupClient, projectId: p.id }); }}
+                          disabled={p.id === task.projectId && dupClient === task.clientId}
+                          className="block w-full truncate rounded-md px-2 py-1.5 text-left text-[16px] hover:bg-background disabled:opacity-40">
+                          {p.name}{p.id === task.projectId && dupClient === task.clientId ? " · current" : ""}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+            <button onClick={onClose} title="Close" aria-label="Close" className={iconButton}><I.close /></button>
+          </div>
+        </div>
+
+        {/* One scroll container. The client rail is sticky inside it at
+            1100px and up, and stacks under the task below that. A task with
+            no contact and no comments has no client context worth a rail, so
+            where it lives goes at the end of the page instead. */}
+        <div className="flex flex-1 flex-col overflow-y-auto bg-background min-[1100px]:flex-row min-[1100px]:items-start">
+          <div className="min-w-0 flex-1 px-4 pb-16 pt-6 sm:px-8 lg:px-12">
+            <div className="mx-auto w-full max-w-4xl">
+              {mainColumn}
+              {isLightTask && section("Client and list", detailsBlock)}
+            </div>
+          </div>
+          {!isLightTask && clientRail}
+        </div>
+        {/* Shown over the whole drawer while a file is being dragged in, so
+            the target is obvious and it is clear the drop will land here
+            rather than navigating the browser away to the file. */}
+        {fileOverDrawer && (
+          <div className="pointer-events-none absolute inset-3 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-accent bg-accent-soft/70 backdrop-blur-[1px]">
+            <span className="rounded-lg bg-surface px-4 py-2 text-[16px] font-semibold shadow-lg">Drop to attach</span>
+          </div>
+        )}
       </aside>
     </>
   );

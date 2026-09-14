@@ -4,23 +4,22 @@ import { useEffect, useRef, useState } from "react";
 import {
   Attachment, Contact, Message, Task, TaskAction, TaskActionKind, TaskStatus, htmlToText,
   TASK_ACTION_META, TASK_ACTION_ORDER, CLIENT_FACING_ACTIONS, STATUS_META, pickableStatuses, linkSpans, prettyLinkName,
-  User, TODAY, dateQuickPicks, formatDue, daysUntilDue, TaskSize, SIZE_META, SIZE_ORDER, sizeLabel, userById,
+  User, TODAY, dateQuickPicks, formatDue, TaskSize, SIZE_META, SIZE_ORDER, sizeLabel, userById,
   Priority, PRIORITY_META, manualPriorityOptions, delegationTitle, type DelegateSpec, type ClientLink,
 } from "@/lib/data";
 import { I, newId, DateChip } from "./ui";
 // Plain fetch reaches this route without a session and gets a 401 back.
 import { authedFetch } from "@/lib/supabase";
 
-// The floating action dock.
+// The action dock, at the top of a task's conversation.
 //
 // Everything you can DO to a task from one bar, and every action records
 // itself and then asks what happens next. That second half is the whole
 // point: the old activity feed logged what the app did to a task, so a task
 // could be worked on for a week and still end up with nothing scheduled.
 //
-// Collapsed it is one line: the commitment you already made, and a button.
-// Eleven chips permanently on screen made the bar the loudest thing in the
-// drawer for something you do a few times a day.
+// Collapsed it is one line: a quick note box and Log action. The open next
+// step is not repeated here; the drawer's Next step card shows it once.
 
 // One string, because the group's label is also how the code recognises it.
 const GET_HELP = "Get help";
@@ -42,7 +41,7 @@ function whenOptions(due: string | null): { label: string; date: string }[] {
 }
 
 export function ActionDock({
-  task, client, contact, actions, messages, me, users, onLog, onSetNextStepDone, onPatch, onAddComment, onOpenCompose, canMessageClient = true, onSendDm, onDelegate, clientLinks = [], taskLink, askNextStepFor, onAskNextStepHandled, pushToast,
+  task, client, contact, actions, messages, me, users, onLog, onPatch, onAddComment, onOpenCompose, canMessageClient = true, onSendDm, onDelegate, clientLinks = [], taskLink, askNextStepFor, onAskNextStepHandled, pushToast,
 }: {
   task: Task;
   client: { name: string } | null;
@@ -53,7 +52,6 @@ export function ActionDock({
   me: User | null;
   users: User[];
   onLog: (a: TaskAction) => void;
-  onSetNextStepDone: (id: string, done: boolean) => void;
   onPatch: (patch: Partial<Task>) => void;
   onAddComment: (body: string, attachments?: Attachment[]) => void;
   // Opens the drawer's real composer, the one with attachments, cc/bcc,
@@ -293,7 +291,7 @@ export function ActionDock({
       if (!res.ok) { pushToast(j?.error ?? "Couldn't read that transcript."); return; }
       setBody(j.summary);
       if (j.nextStep) { setNextStep(j.nextStep); setNextDue(j.nextStepDue ?? null); setWantNext(true); }
-      pushToast("Summarised — edit anything before you log it");
+      pushToast("Summarised. Edit anything before you log it");
     } catch { pushToast("Couldn't reach the AI."); }
     finally { setSummarising(false); }
   };
@@ -459,7 +457,7 @@ export function ActionDock({
 
   const fieldRow = (label: string, children: React.ReactNode) => (
     <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-      <span className="w-[76px] shrink-0 text-[12px] font-semibold uppercase tracking-wide text-muted">{label}</span>
+      <span className="w-[76px] shrink-0 text-[16px] font-semibold uppercase tracking-wide text-muted">{label}</span>
       {children}
     </div>
   );
@@ -469,7 +467,7 @@ export function ActionDock({
   // every label to two lines and left nothing to read down.
   const block = (label: React.ReactNode, children: React.ReactNode, spacing = "mb-2.5") => (
     <div className={spacing}>
-      <div className="mb-1 text-[11px] font-bold uppercase tracking-wider text-muted">{label}</div>
+      <div className="mb-1 text-[16px] font-bold uppercase tracking-wider text-muted">{label}</div>
       {children}
     </div>
   );
@@ -484,10 +482,10 @@ export function ActionDock({
       <div className="flex flex-wrap gap-1.5">
         {opts.map((o) => (
           <button key={o.label} onClick={() => set(o.date)} title={formatDue(o.date)}
-            className={`rounded-md border px-2 py-1.5 text-[13px] ${value === o.date ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{o.label}</button>
+            className={`rounded-md border px-2 py-1.5 text-[16px] ${value === o.date ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{o.label}</button>
         ))}
         <DateChip value={value} onChange={set} label={custom ? formatDue(value!) : "Pick"}
-          className={`rounded-md border px-2 py-1.5 text-[13px] ${custom ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`} />
+          className={`rounded-md border px-2 py-1.5 text-[16px] ${custom ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`} />
       </div>
     );
   };
@@ -495,10 +493,10 @@ export function ActionDock({
   const nextStepPanel = (kind: TaskActionKind) => (
     <div className="mt-2.5 rounded-[10px] border bg-background p-3 shadow-[inset_0_2px_5px_rgba(20,24,40,.06)]">
       <div className="mb-2 flex items-center gap-2">
-        <span className="text-[14px] font-bold">What&apos;s next?</span>
-        {aiBusy && <span className="inline-flex items-center gap-1 text-[13px] text-accent"><I.bolt /> Claude is reading the task…</span>}
+        <span className="text-[16px] font-bold">What&apos;s next?</span>
+        {aiBusy && <span className="inline-flex items-center gap-1 text-[16px] text-accent"><I.bolt /> Claude is reading the task…</span>}
         {!aiBusy && !editingNext && (
-          <button onClick={() => suggest(kind)} className="ml-auto inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[13px] text-muted hover:bg-surface hover:text-foreground">
+          <button onClick={() => suggest(kind)} className="ml-auto inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[16px] text-muted hover:bg-surface hover:text-foreground">
             <I.bolt /> Suggest again
           </button>
         )}
@@ -507,8 +505,8 @@ export function ActionDock({
       {/* The suggestion, whole. One thing to agree with. */}
       {!editingNext ? (
         <div className="rounded-[9px] border border-accent bg-surface p-3">
-          <div className="text-[15px] font-medium leading-snug">{nextStep || (aiBusy ? "…" : "Say what you do next")}</div>
-          <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[13px] text-muted">
+          <div className="text-[16px] font-medium leading-snug">{nextStep || (aiBusy ? "…" : "Say what you do next")}</div>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[16px] text-muted">
             <span>Follow up <b className="font-semibold text-foreground">{nextDue ? formatDue(nextDue) : "not set"}</b></span>
             <span aria-hidden>·</span>
             <span>Stage <b className="font-semibold text-foreground">{STATUS_META[stage ?? task.status].label}</b></span>
@@ -516,48 +514,48 @@ export function ActionDock({
             <span>Assigned to <b className="font-semibold text-foreground">{assigneeName}</b></span>
             {shownSize && (<><span aria-hidden>·</span><span>Takes <b className="font-semibold text-foreground">{sizeLabel({ size: shownSize })}</b></span></>)}
           </div>
-          {aiReason && <div className="mt-1.5 text-[13px] text-muted">{aiReason}</div>}
+          {aiReason && <div className="mt-1.5 text-[16px] text-muted">{aiReason}</div>}
           {/* Asked, not assumed. A task nobody has sized is counted at four
               hours in the plan, which is a number the plan invents rather
               than one anyone stands behind. */}
           {!sizeIsSet && !aiBusy && (
-            <div className="mt-2 rounded-md border border-dashed px-2 py-1.5 text-[13px] text-muted">
+            <div className="mt-2 rounded-md border border-dashed px-2 py-1.5 text-[16px] text-muted">
               Nobody has said how long this takes. Pick one and the plan can place it.
             </div>
           )}
-          <button onClick={() => setEditingNext(true)} className="mt-2 text-[13px] font-medium text-accent underline underline-offset-[3px]">Change it</button>
+          <button onClick={() => setEditingNext(true)} className="mt-2 text-[16px] font-medium text-accent underline underline-offset-[3px]">Change it</button>
         </div>
       ) : (
         <>
           <input value={nextStep} onChange={(e) => setNextStep(e.target.value)} placeholder="What do you do next?"
-            className="w-full rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
-          {aiReason && <div className="mt-1.5 text-[13px] text-muted">{aiReason}</div>}
+            className="w-full rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
+          {aiReason && <div className="mt-1.5 text-[16px] text-muted">{aiReason}</div>}
           {fieldRow("Follow up", (
             <>
               {whenOptions(task.due).map((o) => (
                 <button key={o.label} onClick={() => setNextDue(o.date)}
-                  className={`rounded-md border px-2 py-1 text-[13px] ${nextDue === o.date ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}
+                  className={`rounded-md border px-2 py-1 text-[16px] ${nextDue === o.date ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}
                   title={formatDue(o.date)}>{o.label}</button>
               ))}
               <DateChip value={nextDue} onChange={setNextDue}
                 label={nextDue && !whenOptions(task.due).some((o) => o.date === nextDue) ? formatDue(nextDue) : "Pick a date"}
-                className={`rounded-md border px-2 py-1 text-[13px] ${nextDue && !whenOptions(task.due).some((o) => o.date === nextDue) ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`} />
+                className={`rounded-md border px-2 py-1 text-[16px] ${nextDue && !whenOptions(task.due).some((o) => o.date === nextDue) ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`} />
             </>
           ))}
           {fieldRow("Stage", pickableStatuses(task.status).filter((st) => st !== "done").map((st) => (
             <button key={st} onClick={() => setStage(st)}
-              className={`rounded-md border px-2 py-1 text-[13px] ${(stage ?? task.status) === st ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{STATUS_META[st].label}</button>
+              className={`rounded-md border px-2 py-1 text-[16px] ${(stage ?? task.status) === st ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{STATUS_META[st].label}</button>
           )))}
           {fieldRow("Owner", (
             <select value={assignee ?? ""} onChange={(e) => setAssignee(e.target.value || null)}
-              className="rounded-md border bg-surface px-2 py-1 text-[13px] outline-none focus:border-accent">
+              className="rounded-md border bg-surface px-2 py-1 text-[16px] outline-none focus:border-accent">
               <option value="">Unassigned</option>
               {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
             </select>
           ))}
           {fieldRow("Takes", SIZE_ORDER.map((sz) => (
             <button key={sz} onClick={() => setSize(sz)} title={`${SIZE_META[sz].label} · ${SIZE_META[sz].hint}`}
-              className={`rounded-md border px-2 py-1 text-[13px] ${shownSize === sz ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{SIZE_META[sz].label}</button>
+              className={`rounded-md border px-2 py-1 text-[16px] ${shownSize === sz ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{SIZE_META[sz].label}</button>
           )))}
         </>
       )}
@@ -566,7 +564,7 @@ export function ActionDock({
 
   const header = (kind: TaskActionKind) => (
     <div className="mb-2.5 flex items-center justify-between">
-      <span className="flex items-center gap-1.5 text-[15px] font-semibold">
+      <span className="flex items-center gap-1.5 text-[16px] font-semibold">
         <button onClick={() => openPanel("menu")} title="Back" className="rounded px-1 text-[19px] leading-none text-muted hover:text-foreground">‹</button>
         <span aria-hidden>{ICON[kind]}</span> {actionLabel(kind)}
       </span>
@@ -576,7 +574,7 @@ export function ActionDock({
 
   const bodyBox = (placeholder: string) => (
     <textarea ref={bodyRef} rows={2} value={body} onChange={(e) => setBody(e.target.value)} placeholder={placeholder}
-      className="w-full resize-none rounded-[9px] border bg-surface px-3 py-2 text-[15px] outline-none focus:border-accent" />
+      className="w-full resize-none rounded-[9px] border bg-surface px-3 py-2 text-[16px] outline-none focus:border-accent" />
   );
 
   // "Nothing to do next" is gone. The only way to leave a task with nothing
@@ -584,10 +582,10 @@ export function ActionDock({
   // gets its own button rather than hiding behind a dismissive link.
   const commitRow = (kind: TaskActionKind, label: string) => (
     <div className="mt-2.5 flex flex-wrap items-center gap-3">
-      <button onClick={() => commit(kind)} className="rounded-lg bg-accent px-4 py-2 text-[15px] font-semibold text-white hover:opacity-90">{label}</button>
+      <button onClick={() => commit(kind)} className="rounded-lg bg-accent px-4 py-2 text-[16px] font-semibold text-white hover:opacity-90">{label}</button>
       {(wantNext || nextDue) && (
         <button onClick={() => commit(kind, true)} title="Nothing follows this, the task is finished"
-          className="rounded-lg border px-3 py-2 text-[14px] font-medium text-muted hover:bg-background hover:text-foreground">This finishes it</button>
+          className="rounded-lg border px-3 py-2 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">This finishes it</button>
       )}
     </div>
   );
@@ -669,52 +667,28 @@ export function ActionDock({
   // on every render.
   useEffect(() => { menuOrderRef.current = menuOrder; });
 
-  const openStep = actions.find((a) => a.nextStep && !a.nextStepDoneAt) ?? null;
-  const stepLate = openStep?.nextStepDue ? (daysUntilDue(openStep.nextStepDue) ?? 0) < 0 : false;
-
-  // Absolute, not fixed: fixed positions against the viewport, so left-0 put
-  // the dock's left edge under the app's own sidebar and clipped it. The
-  // drawer is itself position:fixed, which makes it the containing block, so
-  // absolute here means "the drawer's bottom-left".
-  //
-  // The right inset lives on this container rather than as a margin on the
-  // inner box. As a margin it fought mx-auto and shoved the dock left instead
-  // of centring it in the narrower space.
+  // In the page at the top of the conversation, not floating over the bottom
+  // of the drawer: the feed is newest first, so what you log next belongs at
+  // the end you read from (Derek, 2026-09-14: "composer top").
   return (
-    <div className="pointer-events-none absolute bottom-0 left-0 z-30 px-4 pb-4 sm:px-8 lg:px-12"
-      style={{ right: "var(--dock-right, 0px)" }}>
-      <div className="pointer-events-auto mx-auto w-full max-w-4xl rounded-[14px] border bg-surface/95 p-3 shadow-[0_12px_32px_rgba(20,24,40,.14),0_2px_6px_rgba(20,24,40,.08)] backdrop-blur-md">
+    <div>
+      <div className="w-full rounded-xl border bg-surface p-3 shadow-soft">
 
         {view === "closed" && (
           <div className="flex flex-wrap items-center gap-3">
-            {openStep ? (
-              <>
-                <span className="flex min-w-0 flex-col leading-tight">
-                  <span className={`text-[11px] font-bold uppercase tracking-wide ${stepLate ? "text-danger" : "text-amber-700"}`}>
-                    Next step{openStep.nextStepDue ? ` · ${stepLate ? `${Math.abs(daysUntilDue(openStep.nextStepDue) ?? 0)} days late` : formatDue(openStep.nextStepDue)}` : ""}
-                  </span>
-                  <span className="truncate text-[15px] font-semibold">{openStep.nextStep}</span>
-                </span>
-                <button onClick={() => onSetNextStepDone(openStep.id, true)}
-                  className="rounded-md border px-3 py-1.5 text-[13px] font-medium hover:bg-background">Mark done</button>
-              </>
-            ) : (
-              // Was dead text saying nothing was scheduled, which is a fact
-              // you can already see and can't act on. A note is the cheapest
-              // useful thing to do to a task, so the empty state offers it
-              // rather than reporting emptiness.
-              <input value={quickNote} onChange={(e) => setQuickNote(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); postQuickNote(); } }}
-                placeholder="Jot a quick note…"
-                className="min-w-0 flex-1 rounded-lg border border-transparent bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted hover:border-border focus:border-accent focus:bg-surface" />
-            )}
+            {/* The open next step is not repeated here. It is shown once, on
+                the Next step card at the top of the task. */}
+            <input value={quickNote} onChange={(e) => setQuickNote(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); postQuickNote(); } }}
+              placeholder="Write a quick note, or log what you did"
+              className="min-w-0 flex-1 rounded-lg border border-transparent bg-background px-3 py-2 text-[16px] outline-none placeholder:text-muted hover:border-border focus:border-accent focus:bg-surface" />
             {/* One button, two jobs. Start typing a note and it becomes the
                 way to post it, because a second button that only matters
                 while you are typing would sit dead the rest of the time
                 (Derek: "keep log action but if you type in then changes to
                 quick note"). */}
             <button onClick={() => (quickNote.trim() ? postQuickNote() : openPanel("menu"))}
-              className="ml-auto shrink-0 rounded-lg bg-accent px-4 py-2 text-[15px] font-semibold text-white hover:opacity-90">
+              className="ml-auto shrink-0 rounded-lg bg-accent px-4 py-2 text-[16px] font-semibold text-white hover:opacity-90">
               {quickNote.trim() ? "Add note" : "＋ Log action"}
             </button>
           </div>
@@ -723,7 +697,7 @@ export function ActionDock({
         {view === "menu" && (
           <div>
             <div className="mb-2 flex items-center gap-2">
-              <span className="shrink-0 text-[15px] font-semibold">What are you doing?</span>
+              <span className="shrink-0 text-[16px] font-semibold">What are you doing?</span>
               {/* Filter, not search: it narrows the same menu in place rather
                   than replacing it with a list of results, so the grouping
                   and the number keys survive typing. */}
@@ -742,35 +716,35 @@ export function ActionDock({
                   }
                 }}
                 placeholder="or type to filter…"
-                className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-[14px] outline-none focus:border-accent" />
+                className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-[16px] outline-none focus:border-accent" />
               <button onClick={() => openPanel("closed")} className="shrink-0 rounded px-1 text-muted hover:text-foreground">✕</button>
             </div>
             {shownGroups.map((g) => (
               <div key={g.label} className="mb-2.5">
-                <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-muted">{g.label}</div>
+                <div className="mb-1.5 text-[16px] font-bold uppercase tracking-wider text-muted">{g.label}</div>
                 <div className="flex flex-wrap gap-1.5">
                   {/* Not the one pale item in the row: dashed grey read as
                       unavailable rather than as the AI one. */}
                   {g.label === GET_HELP && askShown && (
                     <button onClick={() => openPanel("askTask")} onMouseEnter={() => setMenuIdx(menuHits.indexOf("ask"))}
-                      className={`inline-flex items-center gap-1.5 rounded-[7px] border border-accent px-3 py-1.5 text-[15px] font-semibold hover:bg-accent hover:text-white ${menuHits[menuIdx] === "ask" ? "bg-accent text-white" : "text-accent"}`}>
+                      className={`inline-flex items-center gap-1.5 rounded-[7px] border border-accent px-3 py-1.5 text-[16px] font-semibold hover:bg-accent hover:text-white ${menuHits[menuIdx] === "ask" ? "bg-accent text-white" : "text-accent"}`}>
                       <span aria-hidden className="w-[17px] text-center">✦</span> Ask AI
                     </button>
                   )}
                   {g.kinds.map((k) => (
                     <button key={k} onClick={() => openPanel(k)} onMouseEnter={() => setMenuIdx(menuHits.indexOf(k))}
-                      className={`inline-flex items-center gap-1.5 rounded-[7px] border px-3 py-1.5 text-[15px] hover:border-accent hover:bg-accent-soft ${menuHits[menuIdx] === k ? "border-accent bg-accent-soft" : "bg-surface"}`}>
+                      className={`inline-flex items-center gap-1.5 rounded-[7px] border px-3 py-1.5 text-[16px] hover:border-accent hover:bg-accent-soft ${menuHits[menuIdx] === k ? "border-accent bg-accent-soft" : "bg-surface"}`}>
                       <span aria-hidden className="w-[17px] text-center opacity-80">{ICON[k]}</span> {menuLabel(k)}
                       {/* The digit is only true while the box is empty, so it
                           stops claiming to be a shortcut once it is not. */}
-                      {!menuQ && <span aria-hidden className="rounded border px-1 text-[11px] leading-4 text-muted">{menuOrder.indexOf(k) + 1}</span>}
+                      {!menuQ && <span aria-hidden className="rounded border px-1 text-[16px] leading-4 text-muted">{menuOrder.indexOf(k) + 1}</span>}
                     </button>
                   ))}
                 </div>
               </div>
             ))}
             {menuHits.length === 0 && (
-              <div className="text-[14px] text-muted">Nothing matches “{menuQ.trim()}”.</div>
+              <div className="text-[16px] text-muted">Nothing matches “{menuQ.trim()}”.</div>
             )}
           </div>
         )}
@@ -778,10 +752,10 @@ export function ActionDock({
         {view === "note" && (
           <div>
             {header("note")}
-            <div className="mb-1.5 text-[13px] text-muted">Internal. The client never sees this.</div>
+            <div className="mb-1.5 text-[16px] text-muted">Internal. The client never sees this.</div>
             {bodyBox("Note for the team…")}
             {wantNext ? nextStepPanel("note") : (
-              <button onClick={() => setWantNext(true)} className="mt-2 text-[13px] text-accent underline underline-offset-[3px]">Add a next step</button>
+              <button onClick={() => setWantNext(true)} className="mt-2 text-[16px] text-accent underline underline-offset-[3px]">Add a next step</button>
             )}
             {commitRow("note", "Post note")}
           </div>
@@ -790,19 +764,19 @@ export function ActionDock({
         {view === "team" && (
           <div>
             {header("team")}
-            <div className="mb-1.5 text-[13px] text-muted">Goes to their chat with a link back to this task.</div>
-            <div className="mb-1 text-[12px] font-semibold uppercase tracking-wide text-muted">
+            <div className="mb-1.5 text-[16px] text-muted">Goes to their chat with a link back to this task.</div>
+            <div className="mb-1 text-[16px] font-semibold uppercase tracking-wide text-muted">
               To{!teammate && <span className="ml-1 font-medium normal-case tracking-normal text-danger">pick someone</span>}
             </div>
             <div className="mb-2 flex flex-wrap gap-1.5">
               {users.filter((u) => u.id !== me?.id).map((u) => (
                 <button key={u.id} onClick={() => setTeammate(u.id)}
-                  className={`rounded-[5px] border px-2.5 py-1 text-[13px] ${teammate === u.id ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{u.name}</button>
+                  className={`rounded-[5px] border px-2.5 py-1 text-[16px] ${teammate === u.id ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{u.name}</button>
               ))}
             </div>
             {bodyBox("What do you need from them?")}
             {wantNext ? nextStepPanel("team") : (
-              <button onClick={() => setWantNext(true)} className="mt-2 text-[13px] text-accent underline underline-offset-[3px]">Add a next step</button>
+              <button onClick={() => setWantNext(true)} className="mt-2 text-[16px] text-accent underline underline-offset-[3px]">Add a next step</button>
             )}
             {commitRow("team", "Send")}
           </div>
@@ -811,8 +785,8 @@ export function ActionDock({
         {(view === "chat" || view === "email" || view === "sms") && (
           <div>
             {header(view)}
-            <div className="mb-1.5 text-[13px] text-muted">Sent{contact ? ` to ${contact.name}` : ""}. It is in the feed above.</div>
-            {body && <div className="mb-2 max-h-16 overflow-hidden rounded-[9px] border bg-background px-3 py-2 text-[13px] leading-snug text-muted">{body.split("\n").slice(0, 2).join(" ").slice(0, 160)}…</div>}
+            <div className="mb-1.5 text-[16px] text-muted">Sent{contact ? ` to ${contact.name}` : ""}. It is in the feed above.</div>
+            {body && <div className="mb-2 max-h-16 overflow-hidden rounded-[9px] border bg-background px-3 py-2 text-[16px] leading-snug text-muted">{body.split("\n").slice(0, 2).join(" ").slice(0, 160)}…</div>}
             {nextStepPanel(view)}
             {commitRow(view, "Save next step")}
           </div>
@@ -823,10 +797,10 @@ export function ActionDock({
             {header("call")}
             <div className="flex flex-wrap items-center gap-3">
               {contact?.phone ? (
-                <a href={`tel:${contact.phone}`} className="inline-flex items-center gap-2 rounded-[9px] bg-success px-4 py-2 text-[15px] font-semibold text-white hover:opacity-90">
+                <a href={`tel:${contact.phone}`} className="inline-flex items-center gap-2 rounded-[9px] bg-success px-4 py-2 text-[16px] font-semibold text-white hover:opacity-90">
                   ☎ Call {contact.name} · {contact.phone}
                 </a>
-              ) : <span className="text-[14px] text-muted">No phone number on this contact.</span>}
+              ) : <span className="text-[16px] text-muted">No phone number on this contact.</span>}
             </div>
             <div className="mt-2.5">{bodyBox("How did it go?")}</div>
             {nextStepPanel("call")}
@@ -837,7 +811,7 @@ export function ActionDock({
         {view === "delegate" && (
           <div>
             {header("delegate")}
-            <div className="mb-2.5 text-[13px] text-muted">They get the task on their list and a message. It stays yours.</div>
+            <div className="mb-2.5 text-[16px] text-muted">They get the task on their list and a message. It stays yours.</div>
 
             {/* Stacked labels, not the dock's inline 76px column: with seven
                 fields the inline labels wrapped to two lines each and the
@@ -847,7 +821,7 @@ export function ActionDock({
               <div className="flex flex-wrap gap-1.5">
                 {users.filter((u) => u.id !== me?.id).map((u) => (
                   <button key={u.id} onClick={() => setTeammate(u.id)}
-                    className={`rounded-md border px-2.5 py-1.5 text-[13px] ${teammate === u.id ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{u.name}</button>
+                    className={`rounded-md border px-2.5 py-1.5 text-[16px] ${teammate === u.id ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{u.name}</button>
                 ))}
               </div>
             ))}
@@ -859,7 +833,7 @@ export function ActionDock({
             {block("Call it", (
               <input value={delegateTitle} onChange={(e) => setDelegateTitle(e.target.value)}
                 placeholder={body.trim() ? delegationTitle(body) : "Name this handoff"}
-                className="w-full rounded-[9px] border bg-surface px-3 py-2 text-[15px] outline-none focus:border-accent" />
+                className="w-full rounded-[9px] border bg-surface px-3 py-2 text-[16px] outline-none focus:border-accent" />
             ))}
 
             {block("What they need to do", bodyBox("Everything they need to know to do it."))}
@@ -869,7 +843,7 @@ export function ActionDock({
                 <div className="flex flex-wrap items-center gap-1.5">
                   {links.map((l) => (
                     <button key={l} onClick={() => setLinks((ls) => ls.filter((x) => x !== l))} title={l}
-                      className="inline-flex max-w-[220px] items-center gap-1.5 rounded-md border bg-surface px-2 py-1 text-[13px] font-medium text-accent">
+                      className="inline-flex max-w-[220px] items-center gap-1.5 rounded-md border bg-surface px-2 py-1 text-[16px] font-medium text-accent">
                       <span className="truncate">🔗 {prettyLinkName(l)}</span> <span aria-hidden className="text-muted">×</span>
                     </button>
                   ))}
@@ -885,21 +859,21 @@ export function ActionDock({
                         setLinkDraft(""); setAddingLink(false);
                       }}
                       placeholder="Paste a link, then Enter"
-                      className="min-w-[200px] flex-1 rounded-md border bg-surface px-2.5 py-1 text-[13px] outline-none focus:border-accent" />
+                      className="min-w-[200px] flex-1 rounded-md border bg-surface px-2.5 py-1 text-[16px] outline-none focus:border-accent" />
                   ) : (
                     <button onClick={() => setAddingLink(true)}
-                      className="rounded-md border border-dashed px-2 py-1 text-[13px] font-medium text-muted hover:border-accent hover:text-accent">＋ Paste a link</button>
+                      className="rounded-md border border-dashed px-2 py-1 text-[16px] font-medium text-muted hover:border-accent hover:text-accent">＋ Paste a link</button>
                   )}
                 </div>
                 {/* One tap beats retyping a URL that is already saved, which
                     is the reason nobody attaches them. */}
                 {clientLinks.some((l) => !links.includes(l.url)) && (
                   <div className="mt-2 rounded-[10px] border bg-background px-2.5 py-2">
-                    <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-muted">From this client, one tap to add</div>
+                    <div className="mb-1.5 text-[16px] font-bold uppercase tracking-wider text-muted">From this client, one tap to add</div>
                     <div className="flex flex-wrap gap-1.5">
                       {clientLinks.filter((l) => !links.includes(l.url)).map((l) => (
                         <button key={l.url} onClick={() => setLinks((ls) => [...ls, l.url])} title={l.url}
-                          className="max-w-[220px] truncate rounded-md border bg-surface px-2 py-1 text-[13px] font-medium text-accent hover:border-accent hover:bg-accent-soft">🔗 {l.label}</button>
+                          className="max-w-[220px] truncate rounded-md border bg-surface px-2 py-1 text-[16px] font-medium text-accent hover:border-accent hover:bg-accent-soft">🔗 {l.label}</button>
                       ))}
                     </div>
                   </div>
@@ -920,7 +894,7 @@ export function ActionDock({
                 <div className="flex flex-wrap gap-1.5">
                   {SIZE_ORDER.map((sz) => (
                     <button key={sz} onClick={() => setSize(sz)} title={`${SIZE_META[sz].label} · ${SIZE_META[sz].hint}`}
-                      className={`rounded-md border px-2 py-1.5 text-[13px] ${shownSize === sz ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{SIZE_META[sz].label}</button>
+                      className={`rounded-md border px-2 py-1.5 text-[16px] ${shownSize === sz ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{SIZE_META[sz].label}</button>
                   ))}
                 </div>
               ), "mb-0")}
@@ -928,15 +902,15 @@ export function ActionDock({
                 <div className="flex flex-wrap gap-1.5">
                   {manualPriorityOptions(delegatePriority ?? task.priority).map((pr) => (
                     <button key={pr} onClick={() => setDelegatePriority(pr)}
-                      className={`rounded-md border px-2 py-1.5 text-[13px] ${(delegatePriority ?? task.priority) === pr ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{PRIORITY_META[pr].label}</button>
+                      className={`rounded-md border px-2 py-1.5 text-[16px] ${(delegatePriority ?? task.priority) === pr ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{PRIORITY_META[pr].label}</button>
                   ))}
                 </div>
               ), "mb-0")}
             </div>
 
             <div className="mt-3.5 flex flex-wrap items-center gap-3 border-t pt-3">
-              <button onClick={() => commit("delegate")} className="rounded-lg bg-accent px-4 py-2 text-[15px] font-semibold text-white hover:opacity-90">Delegate</button>
-              <span className="text-[13px] text-muted">Moves the task to the Delegated stage.</span>
+              <button onClick={() => commit("delegate")} className="rounded-lg bg-accent px-4 py-2 text-[16px] font-semibold text-white hover:opacity-90">Delegate</button>
+              <span className="text-[16px] text-muted">Moves the task to the Delegated stage.</span>
             </div>
           </div>
         )}
@@ -944,7 +918,7 @@ export function ActionDock({
         {view === "askTask" && (
           <div>
             <div className="mb-2.5 flex items-center justify-between">
-              <span className="flex items-center gap-1.5 text-[15px] font-semibold">
+              <span className="flex items-center gap-1.5 text-[16px] font-semibold">
                 <button onClick={() => openPanel("menu")} title="Back" className="rounded px-1 text-[19px] leading-none text-muted hover:text-foreground">‹</button>
                 <span aria-hidden>💡</span> Ask about this task
               </span>
@@ -954,15 +928,15 @@ export function ActionDock({
               <div className="mb-2 flex flex-wrap gap-1.5">
                 {["What is this for?", "What are the specs?", "What did we agree?", "What is outstanding?"].map((q) => (
                   <button key={q} onClick={() => askTask(q)} disabled={asking}
-                    className="rounded-[5px] border border-dashed px-2.5 py-1 text-[13px] text-muted hover:bg-background hover:text-foreground disabled:opacity-50">{q}</button>
+                    className="rounded-[5px] border border-dashed px-2.5 py-1 text-[16px] text-muted hover:bg-background hover:text-foreground disabled:opacity-50">{q}</button>
                 ))}
               </div>
             ) : (
               <div className="mb-2 max-h-64 space-y-2.5 overflow-y-auto pr-1">
                 {thread.map((t, i) => (
                   <div key={i}>
-                    <div className="text-[14px] font-semibold">{t.q}</div>
-                    <div className="mt-0.5 whitespace-pre-wrap text-[15px]">{t.a}</div>
+                    <div className="text-[16px] font-semibold">{t.q}</div>
+                    <div className="mt-0.5 whitespace-pre-wrap text-[16px]">{t.a}</div>
                   </div>
                 ))}
               </div>
@@ -971,30 +945,30 @@ export function ActionDock({
               <input value={ask} onChange={(e) => setAsk(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); askTask(ask); } }}
                 placeholder={asking ? "Reading the task…" : "Ask anything about this task…"} disabled={asking}
-                className="min-w-0 flex-1 rounded-[9px] border bg-surface px-3 py-2 text-[15px] outline-none focus:border-accent disabled:opacity-60" />
+                className="min-w-0 flex-1 rounded-[9px] border bg-surface px-3 py-2 text-[16px] outline-none focus:border-accent disabled:opacity-60" />
               <button onClick={() => askTask(ask)} disabled={asking || !ask.trim()}
-                className="shrink-0 rounded-lg bg-accent px-4 py-2 text-[15px] font-semibold text-white hover:opacity-90 disabled:opacity-40">{asking ? "…" : "Ask"}</button>
+                className="shrink-0 rounded-lg bg-accent px-4 py-2 text-[16px] font-semibold text-white hover:opacity-90 disabled:opacity-40">{asking ? "…" : "Ask"}</button>
             </div>
             {/* Nothing here is logged. A question you asked yourself is not a
                 thing that happened to the task, and putting it in the feed
                 would bury the things that did. */}
-            <div className="mt-1.5 text-[13px] text-muted">Answers come from this task only, and aren&apos;t saved to it.</div>
+            <div className="mt-1.5 text-[16px] text-muted">Answers come from this task only, and aren&apos;t saved to it.</div>
           </div>
         )}
 
         {view === "met" && (
           <div>
             {header("met")}
-            <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[13px] text-muted">
+            <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[16px] text-muted">
               <span>Paste the transcript or your notes. Only the record is kept.</span>
               <button onClick={summariseMeeting} disabled={summarising}
-                className="ml-auto inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[13px] hover:bg-background hover:text-foreground disabled:opacity-50">
+                className="ml-auto inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[16px] hover:bg-background hover:text-foreground disabled:opacity-50">
                 <I.bolt /> {summarising ? "Reading…" : "Summarise"}
               </button>
             </div>
             <textarea ref={bodyRef} rows={6} value={body} onChange={(e) => setBody(e.target.value)}
               placeholder={"Paste a meeting transcript, or write what was decided…"}
-              className="w-full resize-y rounded-[9px] border bg-surface px-3 py-2 text-[15px] outline-none focus:border-accent" />
+              className="w-full resize-y rounded-[9px] border bg-surface px-3 py-2 text-[16px] outline-none focus:border-accent" />
             {nextStepPanel("met")}
             {commitRow("met", "Log the meeting")}
           </div>
@@ -1003,7 +977,7 @@ export function ActionDock({
         {view === "meeting" && (
           <div>
             {header("meeting")}
-            <div className="mb-1.5 text-[13px] text-muted">Records the meeting and what it commits you to.</div>
+            <div className="mb-1.5 text-[16px] text-muted">Records the meeting and what it commits you to.</div>
             {bodyBox("When is it, and what is it for?")}
             {nextStepPanel("meeting")}
             {commitRow("meeting", "Log the meeting")}

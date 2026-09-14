@@ -41,18 +41,18 @@ export function SizePicker({ size, sizeHours, onChange, chipClass }: {
   if (label && !open) {
     return (
       <button onClick={() => setOpen(true)} title="Change how long this will take"
-        className={`${chipClass ?? ""} gap-1 px-2 py-1 text-[13px] font-medium`}>
-        <I.clock className="h-3 w-3 opacity-60" /> {label}
+        className={`${chipClass ?? ""} font-medium`}>
+        <I.clock className="h-4 w-4 text-muted" /> {label}
       </button>
     );
   }
 
   return (
-    <span className={`${chipClass ?? ""} flex-wrap gap-0.5 px-1 py-0.5`} title="Rough size, used to fill a day. Not time tracking.">
+    <span className={`${chipClass ?? ""} flex-wrap gap-1 py-1`} title="Rough size, used to fill a day. Not time tracking.">
       {SIZE_ORDER.map((sz) => (
         <button key={sz} onClick={() => { onChange({ size: sz, sizeHours: null }); setOpen(false); }}
           title={`${SIZE_META[sz].label} · ${SIZE_META[sz].hint}`}
-          className={`rounded-[4px] px-1.5 py-0.5 text-[13px] ${size === sz && !sizeHours ? "bg-accent font-semibold text-white" : "text-muted hover:bg-background hover:text-foreground"}`}>
+          className={`rounded-md px-2 py-0.5 text-[16px] ${size === sz && !sizeHours ? "bg-accent font-semibold text-white" : "text-muted hover:bg-background hover:text-foreground"}`}>
           {SIZE_META[sz].label}
         </button>
       ))}
@@ -60,10 +60,10 @@ export function SizePicker({ size, sizeHours, onChange, chipClass }: {
         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitCustom(); } if (e.key === "Escape") setOpen(false); }}
         onBlur={commitCustom} inputMode="decimal" placeholder="hrs"
         title="Type your own estimate in hours"
-        className="w-12 rounded-[4px] border bg-background px-1.5 py-0.5 text-[13px] outline-none focus:border-accent" />
+        className="w-16 rounded-md border bg-background px-2 py-0.5 text-[16px] outline-none focus:border-accent" />
       {label && (
         <button onClick={() => { onChange({ size: null, sizeHours: null }); setOpen(false); }}
-          title="Clear the estimate" className="rounded-[4px] px-1.5 py-0.5 text-[13px] text-muted hover:text-danger">×</button>
+          title="Clear the estimate" className="rounded-md px-2 py-0.5 text-[16px] text-muted hover:text-danger">×</button>
       )}
     </span>
   );

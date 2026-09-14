@@ -931,6 +931,52 @@ export function isCompletionEvent(body: string): boolean {
   return d?.field === "status" && d.to === STATUS_META.done.label;
 }
 
+/** What an activity event is about, so a run of them can fold into one line
+ *  that names its topics ("3 changes · status, follow up"). */
+export function eventTopic(body: string): string {
+  const diff = parseEventDiff(body);
+  if (diff) return diff.field;
+  if (/follow up/.test(body)) return "follow up";
+  if (/^(added a link|added the link|removed the link)\b/.test(body)) return "links";
+  if (/^(attached|removed the file)\b/.test(body)) return "files";
+  if (/description/.test(body)) return "description";
+  return "details";
+}
+
+/** An event as a plain sentence with its new value pulled out to show bold.
+ *  Events written before 2026-09-14 used a dash before the link name and the
+ *  description text (Derek's rule: no dashes in copy), so those read the same
+ *  as the new wording. */
+export function describeEvent(body: string): { text: string; value: string | null } {
+  const diff = parseEventDiff(body);
+  if (diff) {
+    if (diff.field === "assignee") return diff.to === "Unassigned" ? { text: "unassigned the task", value: null } : { text: "assigned it to", value: diff.to };
+    if (diff.to === "No date") return { text: `cleared the ${diff.field}`, value: null };
+    return { text: `set ${diff.field} to`, value: diff.to };
+  }
+  let m: RegExpExecArray | null;
+  if ((m = /^(?:moved follow up from .+ to|set follow up to) (.+)$/.exec(body))) return { text: "set the follow up to", value: m[1] };
+  if ((m = /^added (?:a link —|the link) (.+)$/.exec(body))) return { text: "added the link", value: m[1] };
+  if ((m = /^updated the description — ([\s\S]+)$/.exec(body))) return { text: `updated the description: ${m[1]}`, value: null };
+  return { text: body, value: null };
+}
+
+/** Consecutive items the test marks as changes, gathered into runs so a feed
+ *  can show each run as one line. A change standing alone stays as it is, and
+ *  the order never moves. */
+export function foldRuns<T>(items: T[], isChange: (item: T) => boolean): (T | { run: T[] })[] {
+  const out: (T | { run: T[] })[] = [];
+  let run: T[] = [];
+  const flush = () => { if (run.length === 1) out.push(run[0]); else if (run.length) out.push({ run }); run = []; };
+  for (const item of items) {
+    if (isChange(item)) { run.push(item); continue; }
+    flush();
+    out.push(item);
+  }
+  flush();
+  return out;
+}
+
 // The "conversation" value (label shown as "Interaction" — a message, call,
 // or meeting, not just a text thread) is auto-created only (an open GHL
 // inbound message/call, or an upcoming synced appointment) — it's excluded
@@ -1728,6 +1774,13 @@ export function openNextStep(actions: TaskAction[]): TaskAction | null {
     if (!best || a.at > best.at) best = a;
   }
   return best;
+}
+
+/** The follow up date once the step `doneId` is ticked off: the date of the
+ *  step still open after it, or none. The follow up and the open next step
+ *  are one date shown once, so closing the step has to move or clear it. */
+export function followUpAfterStepDone(actions: TaskAction[], doneId: string): string | null {
+  return openNextStep(actions.filter((a) => a.id !== doneId))?.nextStepDue ?? null;
 }
 
 // The fields a new occurrence of a recurring task must NOT inherit.

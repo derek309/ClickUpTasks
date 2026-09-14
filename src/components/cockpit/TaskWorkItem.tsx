@@ -19,12 +19,15 @@ export function WorkItemBadge({ label, chip, dot }: { label: string; chip: strin
 /** The line in the task. Clicking the name opens it too. */
 // Each kind of line item has its own color so they read apart at a glance
 // (Derek, 2026-09-11: "can we make them different colors").
+// The colour is the stripe and the icon tile; the line itself stays white, so a
+// task with three of them reads as a list rather than a stack of coloured
+// cards (2026-09-14 drawer redesign).
 const ROW_TONE = {
-  doc: { box: "border-highlight/40 border-l-highlight bg-highlight-soft/60", tile: "bg-highlight-soft" },
-  image: { box: "border-success/30 border-l-success bg-success-soft/60", tile: "bg-success-soft" },
+  doc: { box: "border-l-highlight", tile: "bg-highlight-soft" },
+  image: { box: "border-l-success", tile: "bg-success-soft" },
   // Every soft color pair is taken, so the web page line is a neutral dark stripe.
-  page: { box: "border-foreground/20 border-l-foreground bg-surface", tile: "bg-background" },
-  email: { box: "border-accent/30 border-l-accent bg-accent-soft/60", tile: "bg-accent-soft" },
+  page: { box: "border-l-foreground", tile: "bg-background" },
+  email: { box: "border-l-accent", tile: "bg-accent-soft" },
 } as const;
 
 export function WorkItemRow({ icon, title, badge, meta, actions, onOpen, tone }: {
@@ -39,7 +42,7 @@ export function WorkItemRow({ icon, title, badge, meta, actions, onOpen, tone }:
 }) {
   const colors = ROW_TONE[tone];
   return (
-    <div className={`mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-l-[6px] px-4 py-3 ${colors.box}`}>
+    <div className={`mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-l-4 bg-surface px-4 py-3 ${colors.box}`}>
       <button onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-3 text-left">
         <span aria-hidden className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-[22px] ${colors.tile}`}>{icon}</span>
         <span className="min-w-0">
@@ -52,7 +55,8 @@ export function WorkItemRow({ icon, title, badge, meta, actions, onOpen, tone }:
       </button>
       <span className="flex shrink-0 flex-wrap items-center gap-2">
         {actions}
-        <button onClick={onOpen} className="rounded-lg bg-accent px-5 py-1.5 text-[16px] font-semibold text-white">Open</button>
+        {/* Quiet like its neighbours: the task's one filled button is Mark done on its next step. */}
+        <button onClick={onOpen} className="rounded-lg border bg-surface px-5 py-1.5 text-[16px] font-semibold text-foreground transition hover:bg-background">Open</button>
       </span>
     </div>
   );

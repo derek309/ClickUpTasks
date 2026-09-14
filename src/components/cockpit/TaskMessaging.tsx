@@ -10,39 +10,22 @@
 // the two pieces itself rather than this module dictating layout.
 import { useRef, useState } from "react";
 import {
-  users, userById, timeAgo, htmlToText, looksLikeHtml, plainTextToHtml, parseEventDiff, STATUS_META, PRIORITY_META,
+  users, userById, timeAgo, htmlToText, looksLikeHtml, plainTextToHtml, describeEvent, eventTopic, foldRuns,
   mentionCandidates, applyMention,
   type Task, type Client, type Contact, type Attachment, type MessageChannel, type Message, type Comment,
-  TaskAction, TaskActionKind, TASK_ACTION_META, daysUntilDue, formatDue, splitQuotedEmail, tidyEmailText,
+  TaskAction, TaskActionKind, TASK_ACTION_META, splitQuotedEmail, tidyEmailText,
 } from "@/lib/data";
 import { I, Avatar, CollapsibleText, LinkedText, newId } from "./ui";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 import { AttachmentTile } from "./AttachmentTile";
 import { SchedulePopover } from "./SchedulePopover";
 
-// Status/priority reuse the field's own STATUS_META/PRIORITY_META token (the
-// diff's "to" value is already the rendered label, so match it back against
-// the meta table rather than re-deriving from the raw enum) — a status
-// change to Done reads green, to Change Requests reads red, same colors
-// those values already carry everywhere else in the app. Assignee/due date
-// have no natural per-value color, so they get one fixed neutral accent
-// each, just enough to tell field types apart at a glance.
-function eventAccentColor(diff: { field: string; to: string }): string {
-  if (diff.field === "status") return Object.values(STATUS_META).find((m) => m.label === diff.to)?.dot ?? "#94a3b8";
-  if (diff.field === "priority") return Object.values(PRIORITY_META).find((m) => m.label === diff.to)?.color ?? "#94a3b8";
-  if (diff.field === "assignee") return "#14b8a6";
-  if (diff.field === "due date") return "#f59e0b";
-  return "#94a3b8";
-}
-// One inline pill for the new value — folded straight into the event
-// line ("Derek updated due date to [Aug 18] · 1d ago") instead of a
-// separate two-line boxed card underneath it (Derek: "the due date label
-// is not good... make the timestamps cleaner").
-function EventValuePill({ diff }: { diff: { field: string; to: string } }) {
-  const color = eventAccentColor(diff);
-  return (
-    <span className="inline-flex items-center rounded-[5px] px-2 py-0.5 text-[15px] font-medium" style={{ background: color + "1a", color }}>{diff.to}</span>
-  );
+// A field change as a plain sentence with the new value in bold. Coloured
+// value pills made a run of status changes louder than the client's own
+// email beside them (2026-09-14 drawer redesign).
+function EventText({ body }: { body: string }) {
+  const { text, value } = describeEvent(body);
+  return <><LinkedText text={text} />{value && <> <b className="font-semibold text-foreground">{value}</b></>}</>;
 }
 
 // GHL message bodies routinely embed a raw media URL inline in the text
@@ -94,7 +77,7 @@ function UrlImageCard({ url }: { url: string }) {
     <a href={url} target="_blank" rel="noreferrer" className="group relative block h-16 w-16 overflow-hidden rounded-lg border bg-background" title={urlFilename(url)}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={url} alt={urlFilename(url)} className="h-full w-full object-cover" />
-      <span className="absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 py-0.5 text-[10px] text-white opacity-0 group-hover:opacity-100">{urlFilename(url)}</span>
+      <span className="absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 py-0.5 text-[16px] text-white opacity-0 group-hover:opacity-100">{urlFilename(url)}</span>
     </a>
   );
 }
@@ -102,7 +85,7 @@ function UrlImageCard({ url }: { url: string }) {
 // never the raw link text (acceptance: no raw URL over 40 chars visible).
 function UrlLinkChip({ url }: { url: string }) {
   return (
-    <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-[5px] border bg-background px-2 py-0.5 text-[13px] font-medium text-accent hover:underline">
+    <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-[5px] border bg-background px-2 py-0.5 text-[16px] font-medium text-accent hover:underline">
       <I.link className="h-3 w-3" /> {urlDomain(url)}
     </a>
   );
@@ -204,9 +187,9 @@ function ActionBody({ text }: { text: string }) {
           message not taking the full width of box space"). 88 fills the card
           at any normal width and still stops a paragraph running the length
           of an ultrawide monitor. */}
-      <div className={`max-w-[88ch] whitespace-pre-wrap text-[15px] leading-relaxed ${!open && long ? "line-clamp-6" : ""}`}><LinkedText text={tidy} chip /></div>
+      <div className={`max-w-[88ch] whitespace-pre-wrap text-[16px] leading-relaxed ${!open && long ? "line-clamp-6" : ""}`}><LinkedText text={tidy} chip /></div>
       {long && (
-        <button onClick={() => setOpen((o) => !o)} className="mt-0.5 text-[13px] font-medium text-accent hover:underline">
+        <button onClick={() => setOpen((o) => !o)} className="mt-0.5 text-[16px] font-medium text-accent hover:underline">
           {open ? "Show less" : "Show more"}
         </button>
       )}
@@ -214,19 +197,19 @@ function ActionBody({ text }: { text: string }) {
   );
 }
 
-export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onSetNextStepDone?: (id: string, done: boolean) => void; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void; onComposeEmail?: (reply?: { subject?: string; replyTo?: string }) => void }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel) => void } {
+export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void; onComposeEmail?: (reply?: { subject?: string; replyTo?: string }) => void }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel) => void } {
   const { task, client, comment, setComment, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin,
-    onDeleteMessage, onEditMessage, hasMessaging, actions, onSetNextStepDone, onDeleteAction, onEditAction, onLogAction, meId, onSendDm, onDeleteComment, onMessageSent, onComposeEmail } = p;
+    onDeleteMessage, onEditMessage, hasMessaging, actions, onDeleteAction, onEditAction, onLogAction, meId, onSendDm, onDeleteComment, onMessageSent, onComposeEmail } = p;
 
-  // C3: was a Set of independently-toggled channels (all four on by default),
-  // which is how "the active tab reads Chat while the pane shows an email
-  // and field changes" happened — with everything simultaneously "active,"
-  // there was no single answer to "which tab is on." One exclusive filter
-  // has exactly one right answer at all times.
-  const [activeFilter, setActiveFilter] = useState<Channel | "all">("all");
+  // Conversation first: what was said and done. The app's own record of field
+  // changes is one tab over, and folded to single lines under Everything.
+  // Channel tabs are gone: on a real task "Activity 14" filtered out almost
+  // nothing, and search finds a message faster than a channel does.
+  const [view, setView] = useState<"conversation" | "changes" | "all">("conversation");
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const [replyingTo, setReplyingTo] = useState<{ id: string; channel: Channel } | null>(null);
   // Which action entry has its reply box open, and what is typed in it. A
   // reply is a team action of its own, so the whole thread lives in the same
@@ -387,14 +370,14 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     const color = channelColor[channel];
     if (channel === "sms") return (
       <div className="shrink-0 rounded-xl border-t-2 p-3" style={{ borderTopColor: color, background: color + "0d" }}>
-        <div className="mb-2 shrink-0 text-[14px] text-muted">Texting: <span className="font-medium text-foreground">{messageDest?.phone || "no phone on file"}</span></div>
+        <div className="mb-2 shrink-0 text-[16px] text-muted">Texting: <span className="font-medium text-foreground">{messageDest?.phone || "no phone on file"}</span></div>
         {msgAttBar}
         <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)} onPaste={handleMsgPaste} autoFocus
           onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitTaskMessage(); } }}
           placeholder="Write a message… (⌘↵ to send, paste to attach an image)"
           className="min-h-[100px] w-full resize-none [field-sizing:content] rounded-xl border bg-background px-3 py-2 text-[16px] outline-none placeholder:text-muted focus:border-accent" />
         <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
-          <span className="text-[14px] text-muted">{wordCount(msgBody)} word{wordCount(msgBody) === 1 ? "" : "s"} · {smsSegments(msgBody).count} segment{smsSegments(msgBody).count === 1 ? "" : "s"}{smsSegments(msgBody).count > 0 ? ` (${smsSegments(msgBody).encoding})` : ""}</span>
+          <span className="text-[16px] text-muted">{wordCount(msgBody)} word{wordCount(msgBody) === 1 ? "" : "s"} · {smsSegments(msgBody).count} segment{smsSegments(msgBody).count === 1 ? "" : "s"}{smsSegments(msgBody).count > 0 ? ` (${smsSegments(msgBody).encoding})` : ""}</span>
           <span className="flex items-center gap-1.5">
             {msgAttachButton}
             <button onClick={onCancel} className="rounded-lg px-2.5 py-1.5 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
@@ -408,14 +391,14 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     // chat
     return (
       <div className="shrink-0 rounded-xl border-t-2 p-3" style={{ borderTopColor: color, background: color + "0d" }}>
-        <div className="mb-2 shrink-0 text-[14px] text-muted">Client chat — shows up on {client.name}&apos;s waiting page, no email or text goes out.</div>
+        <div className="mb-2 shrink-0 text-[16px] text-muted">Client chat. Shows up on {client.name}&apos;s waiting page, no email or text goes out.</div>
         {msgAttBar}
         <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)} onPaste={handleMsgPaste} autoFocus
           onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitTaskMessage(); } }}
           placeholder="Type a message… (⌘↵ to send, paste to attach an image)"
           className="min-h-[100px] w-full resize-none [field-sizing:content] rounded-xl border bg-background px-3 py-2 text-[16px] outline-none placeholder:text-muted focus:border-accent" />
         <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
-          <span className="text-[14px] text-muted">{wordCount(msgBody)} word{wordCount(msgBody) === 1 ? "" : "s"}</span>
+          <span className="text-[16px] text-muted">{wordCount(msgBody)} word{wordCount(msgBody) === 1 ? "" : "s"}</span>
           <span className="flex items-center gap-1.5">
             {msgAttachButton}
             <button onClick={onCancel} className="rounded-lg px-2.5 py-1.5 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
@@ -466,13 +449,13 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
         <div className="absolute bottom-full left-3 z-20 mb-1 w-56 overflow-hidden rounded-lg border bg-surface shadow-lg">
           {mentionCands.map((u) => (
             <button key={u.id} onClick={() => pickMention(u.name)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-background">
-              <Avatar id={u.id} size={22} /> <span className="min-w-0 flex-1 truncate">{u.name}</span>{u.role === "va" && <span className="shrink-0 text-[14px] text-muted">VA</span>}
+              <Avatar id={u.id} size={22} /> <span className="min-w-0 flex-1 truncate">{u.name}</span>{u.role === "va" && <span className="shrink-0 text-[16px] text-muted">VA</span>}
             </button>
           ))}
         </div>
       )}
     <div className="rounded-xl border-t-2 p-3" style={{ borderTopColor: channelColor.activity, background: "color-mix(in srgb, var(--accent) 5%, transparent)" }}>
-      <div className="mb-2 shrink-0 text-[14px] text-muted">Note — internal only, nobody outside the team sees this.</div>
+      <div className="mb-2 shrink-0 text-[16px] text-muted">Note, internal only: nobody outside the team sees this.</div>
       {(pendingCommentAtts.length > 0 || uploadingCommentAtt) && (
         <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
           <AttachmentThumbs items={pendingCommentAtts} onRemove={(id) => setPendingCommentAtts((a) => a.filter((x) => x.id !== id))} />
@@ -489,7 +472,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
         placeholder="Write a team message… (type @ to mention a teammate, ⌘↵ to send, paste to attach an image)"
         className="min-h-[100px] w-full resize-none [field-sizing:content] rounded-xl border bg-background px-3 py-2 text-[16px] outline-none placeholder:text-muted focus:border-accent" />
       <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
-        <span className="text-[14px] text-muted">{wordCount(comment)} word{wordCount(comment) === 1 ? "" : "s"}</span>
+        <span className="text-[16px] text-muted">{wordCount(comment)} word{wordCount(comment) === 1 ? "" : "s"}</span>
         <span className="flex items-center gap-1.5">
           <button onClick={closeComposers} className="rounded-lg px-2.5 py-1.5 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
           <button onClick={submitComment} disabled={!comment.trim() && pendingCommentAtts.length === 0} className="rounded-lg bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">Send</button>
@@ -508,32 +491,6 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     // in order. Keeping them in two lists forced you to read both and
     // interleave them yourself.
     | { at: string; kind: "action"; channel: "activity"; action: TaskAction };
-
-  // C2: a display-only row shape layered on top of FeedItem — consecutive
-  // same-field audit events (three due-date changes in a row) collapse into
-  // one summarized row with a disclosure, instead of each occupying the same
-  // visual weight as a real client email.
-  type DisplayRow = FeedItem | { kind: "event-group"; key: string; field: string; events: Comment[] };
-  function groupConsecutiveEvents(items: FeedItem[]): DisplayRow[] {
-    const rows: DisplayRow[] = [];
-    for (const item of items) {
-      if (item.kind === "event") {
-        const field = parseEventDiff(item.comment.body)?.field ?? item.comment.body;
-        const last = rows[rows.length - 1];
-        if (last && last.kind === "event-group" && last.field === field) { last.events.push(item.comment); continue; }
-        if (last && "kind" in last && last.kind === "event" && (parseEventDiff(last.comment.body)?.field ?? last.comment.body) === field) {
-          rows[rows.length - 1] = { kind: "event-group", key: `eg_${last.comment.id}`, field, events: [last.comment, item.comment] };
-          continue;
-        }
-      }
-      rows.push(item);
-    }
-    return rows;
-  }
-  // Natural phrasing per field — "Due date moved 3×" reads better than
-  // "updated due date to 3×". Falls back to a generic verb for any field
-  // that isn't one of the common ones.
-  const FIELD_VERB: Record<string, string> = { status: "Status changed", priority: "Priority changed", assignee: "Assignee changed", "due date": "Due date moved" };
 
   // Two byte-identical sends (a genuine GHL double-send, not just a display
   // quirk — see the item-2 write-up) shouldn't read as two separate
@@ -560,16 +517,14 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   }
 
   const q = searchQuery.trim().toLowerCase();
-  const mergedFeedItems: FeedItem[] = collapseDuplicateMessages([
-    ...(activeFilter === "all" || activeFilter === "activity" ? task.comments.map((c) => ({ at: c.at, kind: (c.kind === "event" ? "event" : "comment") as "event" | "comment", channel: "activity" as const, comment: c })) : []),
+  const allFeedItems: FeedItem[] = collapseDuplicateMessages([
+    ...task.comments.map((c) => ({ at: c.at, kind: (c.kind === "event" ? "event" : "comment") as "event" | "comment", channel: "activity" as const, comment: c })),
     ...(messages ?? [])
-      .filter((m): m is Message & { channel: "chat" | "email" | "sms" } => m.channel !== "call" && (activeFilter === "all" || activeFilter === m.channel))
+      .filter((m): m is Message & { channel: "chat" | "email" | "sms" } => m.channel !== "call")
       .map((m) => ({ at: m.at, kind: "message" as const, channel: m.channel, message: m })),
-    ...(activeFilter === "all" || activeFilter === "activity"
-      // Replies are actions too, but they belong under the entry they answer,
-      // not loose in the feed at their own timestamp.
-      ? (actions ?? []).filter((a) => !a.parentId).map((a) => ({ at: a.at, kind: "action" as const, channel: "activity" as const, action: a }))
-      : []),
+    // Replies are actions too, but they belong under the entry they answer,
+    // not loose in the feed at their own timestamp.
+    ...(actions ?? []).filter((a) => !a.parentId).map((a) => ({ at: a.at, kind: "action" as const, channel: "activity" as const, action: a })),
   ]
     .filter((item) => {
       if (!q) return true;
@@ -583,57 +538,45 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     // the bottom and you read downward into it; here the feed sits in the
     // document column and the newest thing is what you opened the task for.
     .sort((a, b) => b.at.localeCompare(a.at)));
-  const displayRows: DisplayRow[] = groupConsecutiveEvents(mergedFeedItems);
+  const isChange = (item: FeedItem) => item.kind === "event";
+  const conversationCount = allFeedItems.filter((item) => !isChange(item)).length;
+  const changesCount = allFeedItems.length - conversationCount;
+  const mergedFeedItems = view === "all" ? allFeedItems : allFeedItems.filter((item) => isChange(item) === (view === "changes"));
+  // Under Everything a run of changes between two real entries is one line.
+  // The Changes tab lists every one, since reading them is why you went there.
+  const displayRows = view === "all" ? foldRuns(mergedFeedItems, isChange) : mergedFeedItems;
 
-  // C3: "activity" bundles both team notes AND field-change audit events (see
-  // mergedFeedItems above) — its filter count has to reflect everything that
-  // filter actually reveals, not just the notes, or picking it would show
-  // more rows than its own count promised.
-  const activityCount = task.comments.length;
-  const chatMsgCount = (messages ?? []).filter((m) => m.channel === "chat").length;
-  const emailMsgCount = (messages ?? []).filter((m) => m.channel === "email").length;
-  const smsMsgCount = (messages ?? []).filter((m) => m.channel === "sms").length;
-  const chatUnread = (messages ?? []).some((m) => m.channel === "chat" && m.direction === "inbound" && !m.read);
-  const emailUnread = (messages ?? []).some((m) => m.channel === "email" && m.direction === "inbound" && !m.read);
-  const smsUnread = (messages ?? []).some((m) => m.channel === "sms" && m.direction === "inbound" && !m.read);
-  const totalCount = activityCount + chatMsgCount + emailMsgCount + smsMsgCount;
-
-  const channelMeta: Record<Channel, { label: string; count: number; unread: boolean; icon: React.ReactNode }> = {
-    activity: { label: "Activity", count: activityCount, unread: false, icon: <I.comment /> },
-    chat: { label: "Chat", count: chatMsgCount, unread: chatUnread, icon: <I.chatBubbles /> },
-    email: { label: "Email", count: emailMsgCount, unread: emailUnread, icon: <I.mail /> },
-    sms: { label: "SMS", count: smsMsgCount, unread: smsUnread, icon: <I.phone /> },
+  const unreadChannels = hasMessaging
+    ? (["chat", "email", "sms"] as const).filter((ch) => (messages ?? []).some((m) => m.channel === ch && m.direction === "inbound" && !m.read))
+    : [];
+  // Choosing a tab that shows messages is reading them, so it clears their dots.
+  const selectView = (v: typeof view) => {
+    setView(v);
+    if (v !== "changes") unreadChannels.forEach((ch) => onMarkChannelRead?.(ch));
   };
-  const selectFilter = (f: Channel | "all") => {
-    setActiveFilter(f);
-    if (f !== "activity" && f !== "all") onMarkChannelRead?.(f); // selecting a channel clears its unread dot
-  };
-
-  // C3: one exclusive filter — "All" plus only the channels that actually
-  // have content, so nothing reads as a tab advertising its own emptiness.
+  const tab = (v: typeof view, label: string, count: number, unread = false) => (
+    <button role="tab" aria-selected={view === v} onClick={() => selectView(v)}
+      className={`-mb-px inline-flex shrink-0 items-center gap-1.5 border-b-2 px-2 pb-2.5 pt-1 text-[16px] font-medium sm:px-3 ${view === v ? "border-accent text-foreground" : "border-transparent text-muted hover:text-foreground"}`}>
+      {label}<span className="font-normal text-muted">{count}</span>
+      {unread && <span className="h-2 w-2 shrink-0 rounded-full bg-accent" title="New messages" />}
+    </button>
+  );
+  const closeSearch = () => { setSearchOpen(false); setSearchQuery(""); };
   const filterBar = (
-    <div className="mb-3 flex flex-wrap items-center gap-1.5">
-      <button onClick={() => selectFilter("all")}
-        className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[14px] font-medium ${activeFilter === "all" ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"}`}>
-        All · {totalCount}
-      </button>
-      {(["activity", "chat", "email", "sms"] as Channel[]).filter((ch) => (ch === "activity" || hasMessaging) && channelMeta[ch].count > 0).map((ch) => {
-        const active = activeFilter === ch;
-        const color = channelColor[ch];
-        return (
-          <button key={ch} onClick={() => selectFilter(ch)}
-            className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[14px] font-medium ${active ? "" : "text-muted hover:text-foreground"}`}
-            style={active ? { background: color + "1a", color } : undefined}>
-            {channelMeta[ch].icon} {channelMeta[ch].label} · {channelMeta[ch].count}
-            {channelMeta[ch].unread && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color }} />}
-          </button>
-        );
-      })}
-      <div className="relative w-full sm:ml-auto sm:w-auto sm:flex-1 sm:min-w-[140px]">
-        <I.search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted" />
-        <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search messages…"
-          className="w-full rounded-md border bg-background py-1.5 pl-7 pr-2 text-[14px] outline-none focus:border-accent" />
+    <div className="mb-4">
+      <div role="tablist" className="no-scrollbar flex items-center gap-1 overflow-x-auto border-b">
+        {tab("conversation", "Conversation", conversationCount, unreadChannels.length > 0)}
+        {tab("changes", "Changes", changesCount)}
+        {tab("all", "Everything", allFeedItems.length)}
+        <button onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))} title="Search this task's history" aria-label="Search this task's history"
+          className={`mb-1.5 ml-auto shrink-0 rounded-lg p-2 ${searchOpen ? "bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}><I.search /></button>
       </div>
+      {searchOpen && (
+        <input autoFocus value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); closeSearch(); } }}
+          placeholder="Search messages and notes"
+          className="mt-3 w-full rounded-lg border bg-surface px-3 py-2 text-[16px] outline-none focus:border-accent" />
+      )}
     </div>
   );
 
@@ -671,21 +614,20 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     const meta = TASK_ACTION_META[a.kind];
     const who = a.authorId ? (userById(a.authorId)?.name ?? "Someone") : "Someone";
     const toName = a.toId ? (userById(a.toId)?.name ?? null) : null;
-    const late = a.nextStepDue && !a.nextStepDoneAt && (daysUntilDue(a.nextStepDue) ?? 0) < 0;
     const replies = (actions ?? []).filter((r) => r.parentId === a.id).sort((x, y) => x.at.localeCompare(y.at));
     const replyOpen = replyingAction === a.id;
     return (
       <div key={a.id} className={`group flex gap-3 ${gap}`}>
-        <span className="z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-[14px]" aria-hidden>{ACTION_ICON[a.kind]}</span>
+        <span className="z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-[16px]" aria-hidden>{ACTION_ICON[a.kind]}</span>
         {/* Every entry is a white card on the feed's tinted ground (Derek:
             "add a white box around messages so it stands out" — "all of
             them"), so one entry never runs into the next. */}
         <div className="min-w-0 flex-1 rounded-xl border bg-surface px-3 py-2 shadow-soft">
-          <span className="text-[15px] font-semibold">{meta.verb}</span>
+          <span className="text-[16px] font-semibold">{meta.verb}</span>
           {/* Who wrote it and who it was addressed to. "Messaged · Derek Fox"
               recorded that a teammate was messaged and lost which one, which
               is the only part of the entry anyone needs to act on. */}
-          <span className="text-[13px] text-muted"> · {who}{toName ? ` → ${toName}` : ""} · {timeAgo(a.at)}</span>
+          <span className="text-[16px] text-muted"> · {who}{toName ? ` → ${toName}` : ""} · {timeAgo(a.at)}</span>
           {onEditAction && a.body && (
             <button onClick={() => { setEditingAction(a.id); setActionEdit(a.body); }} title="Edit this entry"
               className="ml-1.5 rounded p-0.5 align-middle text-muted opacity-0 transition hover:text-foreground group-hover:opacity-100">
@@ -710,24 +652,19 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
                   if (e.key !== "Enter" || e.shiftKey) return;
                   e.preventDefault(); saveActionEdit(a.id);
                 }}
-                className="max-h-[200px] min-w-0 flex-1 resize-none overflow-y-auto rounded-lg border bg-surface px-2 py-1.5 text-[14px] leading-snug outline-none focus:border-accent" />
+                className="max-h-[200px] min-w-0 flex-1 resize-none overflow-y-auto rounded-lg border bg-surface px-2 py-1.5 text-[16px] leading-snug outline-none focus:border-accent" />
               <button onClick={() => saveActionEdit(a.id)} disabled={!actionEdit.trim()}
-                className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[14px] font-medium text-white disabled:opacity-40">Save</button>
+                className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">Save</button>
             </div>
           ) : a.body ? <ActionBody text={a.body} /> : null}
           {a.nextStep && (
-            <div className="mt-2 flex flex-wrap items-center gap-2 rounded-r-lg border-l-[3px] bg-background px-2.5 py-1.5 text-[14px]">
-              <span>↳ <b className="font-semibold">{a.nextStep}</b></span>
-              {a.nextStepDue && <span className="text-muted">{formatDue(a.nextStepDue)}</span>}
-              {a.nextStepDoneAt ? (
-                <button onClick={() => onSetNextStepDone?.(a.id, false)} title="Reopen this next step"
-                  className="rounded bg-success-soft px-1.5 py-0.5 text-[11px] font-bold text-success">done</button>
-              ) : (
-                <>
-                  {late && <span className="rounded bg-danger/10 px-1.5 py-0.5 text-[11px] font-bold text-danger">{Math.abs(daysUntilDue(a.nextStepDue!) ?? 0)}d late</span>}
-                  <button onClick={() => onSetNextStepDone?.(a.id, true)} className="ml-auto rounded border bg-surface px-2 py-0.5 text-[13px] hover:bg-background">Mark done</button>
-                </>
-              )}
+            // What this entry committed to, said quietly. The open step is
+            // shown once, on the Next step card at the top of the task; a
+            // second copy here, with its own date and Mark done, is how the
+            // two drifted apart (2026-09-14 redesign).
+            <div className="mt-1.5 flex items-start gap-2 text-[16px] text-muted">
+              <span aria-hidden>{a.nextStepDoneAt ? "✓" : "→"}</span>
+              <span className={a.nextStepDoneAt ? "line-through" : ""}>Next step: {a.nextStep}</span>
             </div>
           )}
           {/* The thread. Every entry can be replied to, not just team
@@ -741,8 +678,8 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
             <div className="mt-2.5 space-y-2 border-l-2 pl-3">
               {replies.map((r) => (
                 <div key={r.id} className="group/reply rounded-lg bg-background px-2.5 py-2">
-                  <span className="text-[13px] font-semibold">{r.authorId ? (userById(r.authorId)?.name ?? "Someone") : "Someone"}</span>
-                  <span className="text-[13px] text-muted"> · {timeAgo(r.at)}</span>
+                  <span className="text-[16px] font-semibold">{r.authorId ? (userById(r.authorId)?.name ?? "Someone") : "Someone"}</span>
+                  <span className="text-[16px] text-muted"> · {timeAgo(r.at)}</span>
                   {/* Editable, like the entry above it. A reply is typed in a
                       hurry into a small box and read for months (Derek: "make
                       it so we can edit our messages"). */}
@@ -767,9 +704,9 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
                           if (e.key !== "Enter" || e.shiftKey) return;
                           e.preventDefault(); saveActionEdit(r.id);
                         }}
-                        className="max-h-[200px] min-w-0 flex-1 resize-none overflow-y-auto rounded-lg border bg-surface px-2 py-1.5 text-[14px] leading-snug outline-none focus:border-accent" />
+                        className="max-h-[200px] min-w-0 flex-1 resize-none overflow-y-auto rounded-lg border bg-surface px-2 py-1.5 text-[16px] leading-snug outline-none focus:border-accent" />
                       <button onClick={() => saveActionEdit(r.id)} disabled={!actionEdit.trim()}
-                        className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[14px] font-medium text-white disabled:opacity-40">Save</button>
+                        className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">Save</button>
                     </div>
                   ) : <ActionBody text={r.body} />}
                 </div>
@@ -786,13 +723,13 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
                   e.preventDefault(); sendActionReply(a);
                 }}
                 placeholder="Reply… (Enter to send, Shift+Enter for a new line)"
-                className="max-h-[160px] min-w-0 flex-1 resize-none overflow-y-auto rounded-lg border bg-surface px-2 py-1.5 text-[14px] leading-snug outline-none focus:border-accent" />
+                className="max-h-[160px] min-w-0 flex-1 resize-none overflow-y-auto rounded-lg border bg-surface px-2 py-1.5 text-[16px] leading-snug outline-none focus:border-accent" />
               <button onClick={() => sendActionReply(a)} disabled={!actionReply.trim()}
-                className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[14px] font-medium text-white disabled:opacity-40">Reply</button>
+                className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">Reply</button>
             </div>
           ) : (
             <button onClick={() => { setReplyingAction(a.id); setActionReply(""); }}
-              className="mt-1 text-[13px] font-medium text-accent hover:underline">Reply</button>
+              className="mt-1 text-[16px] font-medium text-accent hover:underline">Reply</button>
           ))}
         </div>
       </div>
@@ -800,7 +737,6 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   };
 
   const renderMessageItem = (m: Message, gap: string, dupeCount?: number) => {
-    const dotColor = m.channel === "email" ? "#3b82f6" : m.channel === "chat" ? "#e87722" : "#22c55e";
     const channelLabel = m.channel === "email" ? "Email" : m.channel === "chat" ? "Chat" : "SMS";
     const isReplyingHere = replyingTo?.id === m.id;
     const rawBodyText = m.body?.trim() ? (looksLikeHtml(m.body) ? htmlToText(m.body) : m.body) : "";
@@ -813,20 +749,21 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     return (
       <div key={m.id} className={`relative ${gap}`}>
         <div className="relative flex gap-3">
-          <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface" style={{ background: dotColor }} /></div>
-          <div className={`min-w-0 flex-1 rounded-xl border border-l-4 p-3 ${m.direction === "inbound" ? "bg-highlight-soft" : "bg-surface"}`} style={{ borderLeftColor: m.direction === "inbound" ? "var(--highlight)" : "var(--accent)" }}>
-            <div className="flex items-center gap-2 text-[14px] text-muted">
-              <span className="inline-flex items-center gap-1 rounded px-1.5 py-0 font-medium" style={{ background: dotColor + "1a", color: dotColor }}>{channelLabel}</span>
-              <span className="font-medium" style={{ color: m.direction === "inbound" ? "var(--highlight)" : "var(--accent)" }}>{m.direction === "inbound" ? "Received" : "Sent"}</span>
+          <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface bg-muted/50" /></div>
+          {/* The client's words keep a warm ground so they stand apart from
+              ours; the coloured stripes and channel pills are gone. */}
+          <div className={`min-w-0 flex-1 rounded-xl border p-3 ${m.direction === "inbound" ? "bg-highlight-soft/60" : "bg-surface"}`}>
+            <div className="flex items-center gap-2 text-[16px] text-muted">
+              <span className="font-semibold text-foreground">{channelLabel} {m.direction === "inbound" ? "received" : "sent"}</span>
               {m.direction === "outbound" && m.createdBy && (
                 <span className="inline-flex min-w-0 shrink items-center gap-1 truncate"><Avatar id={m.createdBy} size={14} /> <span className="truncate">{userById(m.createdBy)?.name ?? "Unknown"}</span></span>
               )}
               <span>· {timeAgo(m.at)}</span>
               {dupeCount && dupeCount > 1 && (
-                <span className="inline-flex items-center rounded-[5px] bg-background px-1.5 py-0 text-[12px] font-semibold text-muted" title={`Collapsed ${dupeCount} identical sends within 10 minutes`}>sent {dupeCount}×</span>
+                <span className="inline-flex items-center rounded-[5px] bg-background px-1.5 py-0 text-[16px] font-semibold text-muted" title={`Collapsed ${dupeCount} identical sends within 10 minutes`}>sent {dupeCount}×</span>
               )}
               {!m.read && (
-                <span className="inline-flex items-center gap-1 rounded-[5px] bg-accent-soft px-1.5 py-0 text-[12px] font-semibold text-accent">
+                <span className="inline-flex items-center gap-1 rounded-[5px] bg-accent-soft px-1.5 py-0 text-[16px] font-semibold text-accent">
                   <span className="h-1.5 w-1.5 rounded-full bg-accent" /> New
                 </span>
               )}
@@ -837,15 +774,15 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
                     <div className="fixed inset-0 z-30" onClick={() => setOpenMsgMenuId(null)} />
                     <div className="absolute right-0 top-full z-40 mt-1 w-40 overflow-hidden rounded-lg border bg-surface py-1 shadow-lg">
                       {replyableChannel(m.channel) && onSendTaskMessage && (
-                        <button onClick={() => { setOpenMsgMenuId(null); openReply(m.id, replyableChannel(m.channel)!, m.subject); }} className="block w-full px-3 py-1.5 text-left text-[13px] font-medium text-accent hover:bg-background">Reply</button>
+                        <button onClick={() => { setOpenMsgMenuId(null); openReply(m.id, replyableChannel(m.channel)!, m.subject); }} className="block w-full px-3 py-1.5 text-left text-[16px] font-medium text-accent hover:bg-background">Reply</button>
                       )}
                       {canAdmin && onEditMessage && (
-                        <button onClick={() => { setOpenMsgMenuId(null); startEditMessage(m); }} title="This doesn't unsend anything already delivered" className="block w-full px-3 py-1.5 text-left text-[13px] font-medium text-muted hover:bg-background hover:text-foreground">Edit</button>
+                        <button onClick={() => { setOpenMsgMenuId(null); startEditMessage(m); }} title="This doesn't unsend anything already delivered" className="block w-full px-3 py-1.5 text-left text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">Edit</button>
                       )}
                       {canAdmin && onDeleteMessage && (
                         <button
                           onClick={() => { setOpenMsgMenuId(null); if (window.confirm("Delete this message? This only removes it from ClickUpTasks and the client's waiting page — it does not unsend a real email or text already delivered.")) onDeleteMessage(m.id); }}
-                          className="block w-full px-3 py-1.5 text-left text-[13px] font-medium text-muted hover:bg-red-50 hover:text-red-600">Delete</button>
+                          className="block w-full px-3 py-1.5 text-left text-[16px] font-medium text-muted hover:bg-red-50 hover:text-red-600">Delete</button>
                       )}
                     </div>
                   </>)}
@@ -854,7 +791,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
             </div>
             {m.subject && <div className="mt-1 text-[16px] font-medium">{m.subject}</div>}
             {((m.cc && m.cc.length > 0) || (m.bcc && m.bcc.length > 0)) && (
-              <div className="mt-0.5 text-[13px] text-muted">
+              <div className="mt-0.5 text-[16px] text-muted">
                 {m.cc && m.cc.length > 0 && <span>Cc: {m.cc.join(", ")}</span>}
                 {m.cc && m.cc.length > 0 && m.bcc && m.bcc.length > 0 && <span> · </span>}
                 {m.bcc && m.bcc.length > 0 && <span>Bcc: {m.bcc.join(", ")}</span>}
@@ -863,10 +800,10 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
             {editingMsgId === m.id ? (
               <div className="mt-1.5 space-y-1.5">
                 <textarea value={editDraft} onChange={(e) => setEditDraft(e.target.value)} rows={3} autoFocus
-                  className="w-full rounded-lg border bg-background px-2.5 py-2 text-[15px] outline-none focus:border-accent" />
+                  className="w-full rounded-lg border bg-background px-2.5 py-2 text-[16px] outline-none focus:border-accent" />
                 <div className="flex justify-end gap-2">
-                  <button onClick={() => setEditingMsgId(null)} className="rounded-md px-2.5 py-1 text-[14px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
-                  <button onClick={() => saveEditMessage(m)} disabled={!editDraft.trim()} className="rounded-md bg-accent px-2.5 py-1 text-[14px] font-medium text-white disabled:opacity-40">Save</button>
+                  <button onClick={() => setEditingMsgId(null)} className="rounded-md px-2.5 py-1 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>
+                  <button onClick={() => saveEditMessage(m)} disabled={!editDraft.trim()} className="rounded-md bg-accent px-2.5 py-1 text-[16px] font-medium text-white disabled:opacity-40">Save</button>
                 </div>
               </div>
             ) : !m.body?.trim() ? (
@@ -876,7 +813,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
               // rendering an empty card that reads like the app lost the
               // message (Derek, 2026-08-11). Our own sends are never empty, so
               // this only ever labels a genuine gap in what GHL handed back.
-              <div className="mt-1 text-[15px] italic text-muted">No content synced from GoHighLevel for this message.</div>
+              <div className="mt-1 text-[16px] italic text-muted">No content synced from GoHighLevel for this message.</div>
             ) : (
               <>
                 {/* Inbound gets a longer leash than outbound — it's the
@@ -897,13 +834,13 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
                 {quoted && (
                   <>
                     <button onClick={() => toggleQuote(m.id)}
-                      className="mt-1 rounded border px-1.5 py-0 text-[13px] leading-5 text-muted hover:bg-background hover:text-foreground"
+                      className="mt-1 rounded border px-1.5 py-0 text-[16px] leading-5 text-muted hover:bg-background hover:text-foreground"
                       title={quotedOpen ? "Hide the earlier thread" : "Show the earlier thread"}>···</button>
                     {/* A forwarded email's substance lives here, so it gets the same
                         link treatment as the text above: "label<tracking url>" shows
                         just the label as the link, and overflow-wrap keeps any long
                         leftover string inside the card instead of off its edge. */}
-                    {quotedOpen && <div className="mt-1 whitespace-pre-wrap border-l-2 pl-2 text-[14px] text-muted [overflow-wrap:anywhere]"><LinkedText text={quoted} angleLabels /></div>}
+                    {quotedOpen && <div className="mt-1 whitespace-pre-wrap border-l-2 pl-2 text-[16px] text-muted [overflow-wrap:anywhere]"><LinkedText text={quoted} angleLabels /></div>}
                   </>
                 )}
                 {imageUrls.length > 0 && (
@@ -926,7 +863,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
                 {m.attachments.filter((a) => a.path).length > 1 && (
                   <button onClick={(e) => { e.stopPropagation(); onDownloadAll(m.attachments, `${task.title || "attachments"} — ${timeAgo(m.at)}`, m.id); }}
                     disabled={zippingIds.has(m.id)}
-                    className="mb-0.5 flex w-full items-center gap-1.5 text-[12.5px] font-medium text-accent hover:underline disabled:opacity-50">
+                    className="mb-0.5 flex w-full items-center gap-1.5 text-[16px] font-medium text-accent hover:underline disabled:opacity-50">
                     <I.download className="h-3 w-3" /> {zippingIds.has(m.id) ? "Zipping…" : `Download all ${m.attachments.filter((a) => a.path).length}`}
                   </button>
                 )}
@@ -953,14 +890,12 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   };
 
   const renderEventRow = (c: Comment, gap: string) => {
-    const u = userById(c.authorId); const diff = parseEventDiff(c.body);
+    const u = userById(c.authorId);
     return (
       <div key={c.id} className={`group relative flex gap-3 ${gap}`}>
-        <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface" style={{ background: diff ? eventAccentColor(diff) : "var(--muted)" }} /></div>
-        <div className="min-w-0 flex-1 pt-1.5 text-[16px] text-muted">
-          <span className="font-medium text-foreground">{u?.name}</span>{" "}
-          {diff ? <>updated {diff.field} to <EventValuePill diff={diff} /></> : <LinkedText text={c.body} />}
-          {" · "}<span className="text-[15px]">{timeAgo(c.at)}</span>
+        <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface bg-muted/50" /></div>
+        <div className="min-w-0 flex-1 pt-1 text-[16px] text-muted">
+          <span className="font-medium text-foreground">{u?.name}</span>{" "}<EventText body={c.body} />{" · "}{timeAgo(c.at)}
           {onDeleteComment && (
             <button onClick={() => onDeleteComment(c.id)} title="Delete this entry"
               className="ml-1.5 rounded p-0.5 align-middle opacity-0 transition hover:text-danger group-hover:opacity-100">
@@ -977,28 +912,32 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
       {mergedFeedItems.length > 0 && <div className="absolute bottom-2 left-4 top-2 w-px bg-border" />}
       {displayRows.map((item, i) => {
         const gap = i === displayRows.length - 1 ? "" : "pb-3";
-        if (item.kind === "message") return renderMessageItem(item.message, gap, item.dupeCount);
-        if (item.kind === "action") return renderActionItem(item.action, gap);
-        if (item.kind === "event-group") {
-          // C2: three consecutive same-field changes collapse into one quiet
-          // row — grey, no avatar, no timeline dot — with a disclosure that
-          // expands back into the individual changes on demand.
-          const last = item.events[item.events.length - 1];
-          const lastDiff = parseEventDiff(last.body);
-          const open = openEventGroups.has(item.key);
+        if ("run" in item) {
+          // A run of the app's own changes between two real entries, as one
+          // quiet line that opens back into the changes. The feed is newest
+          // first, so the first event is the latest one. The same change
+          // twice in a run (a link added, removed, added) is shown once.
+          const events = item.run.flatMap((r) => (r.kind === "event" ? [r.comment] : []));
+          const unique = events.filter((c, idx) => events.findIndex((x) => x.body === c.body) === idx);
+          if (unique.length === 1) return renderEventRow(unique[0], gap);
+          const key = `eg_${unique[0].id}`;
+          const topics = [...new Set(unique.map((c) => eventTopic(c.body)))].join(", ");
+          const open = openEventGroups.has(key);
           return (
-            <div key={item.key} className={gap}>
+            <div key={key} className={gap}>
               <div className="flex gap-3">
-                <div className="w-8 shrink-0" />
-                <button onClick={() => toggleEventGroup(item.key)} className="flex min-w-0 flex-1 items-center gap-1.5 pt-1 text-left text-[15px] text-muted hover:text-foreground">
-                  <I.chevron className={`h-3 w-3 shrink-0 transition-transform ${open ? "rotate-90" : "rotate-180"}`} />
-                  <span>{FIELD_VERB[item.field] ?? `${item.field} changed`} {item.events.length}×{lastDiff ? <> → <EventValuePill diff={lastDiff} /></> : null} · {timeAgo(last.at)}</span>
+                <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface bg-muted/50" /></div>
+                <button onClick={() => toggleEventGroup(key)} aria-expanded={open} className="flex min-w-0 flex-1 items-center gap-2 pt-1 text-left text-[16px] text-muted hover:text-foreground">
+                  <I.chevron className={`h-3 w-3 shrink-0 transition-transform ${open ? "-rotate-90" : "rotate-180"}`} />
+                  <span>{unique.length} changes · {topics} · {timeAgo(unique[0].at)}</span>
                 </button>
               </div>
-              {open && <div className="mt-1 space-y-1">{item.events.map((c) => renderEventRow(c, ""))}</div>}
+              {open && <div className="mt-2 space-y-1">{unique.map((c) => renderEventRow(c, ""))}</div>}
             </div>
           );
         }
+        if (item.kind === "message") return renderMessageItem(item.message, gap, item.dupeCount);
+        if (item.kind === "action") return renderActionItem(item.action, gap);
         if (item.kind === "event") return renderEventRow(item.comment, gap);
         const c = item.comment;
         const u = userById(c.authorId);
@@ -1006,8 +945,8 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
           <div key={c.id} className={`group relative flex gap-3 ${gap}`}>
             <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><Avatar id={c.authorId} size={28} /></div>
             <div className="min-w-0 flex-1 pt-0.5">
-              <div className="text-[15px]">
-                <span className="font-medium">{u?.name}</span> <span className="text-[13px] text-muted">· {timeAgo(c.at)}</span>
+              <div className="text-[16px]">
+                <span className="font-medium">{u?.name}</span> <span className="text-[16px] text-muted">· {timeAgo(c.at)}</span>
                 {onDeleteComment && (
                   <button onClick={() => onDeleteComment(c.id)} title="Delete this entry"
                     className="ml-1.5 rounded p-0.5 align-middle text-muted opacity-0 transition hover:text-danger group-hover:opacity-100">
@@ -1021,7 +960,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
                   {c.attachments.filter((a) => a.path).length > 1 && (
                     <button onClick={(e) => { e.stopPropagation(); onDownloadAll(c.attachments!, `${task.title || "attachments"} — ${timeAgo(c.at)}`, c.id); }}
                       disabled={zippingIds.has(c.id)}
-                      className="mb-0.5 flex w-full items-center gap-1.5 text-[12.5px] font-medium text-accent hover:underline disabled:opacity-50">
+                      className="mb-0.5 flex w-full items-center gap-1.5 text-[16px] font-medium text-accent hover:underline disabled:opacity-50">
                       <I.download className="h-3 w-3" /> {zippingIds.has(c.id) ? "Zipping…" : `Download all ${c.attachments.filter((a) => a.path).length}`}
                     </button>
                   )}
@@ -1049,13 +988,13 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
           history. Top-anchored on purpose — bottom-anchoring was tried and
           reverted (short threads looked broken); don't reintroduce it. */}
       {mergedFeedItems.length > 0 && (
-        <div className="pt-3 text-center text-[13px] text-muted">Start of your conversation with {client.name}</div>
+        <div className="pt-3 text-center text-[16px] text-muted">Start of your conversation with {client.name}</div>
       )}
       {mergedFeedItems.length === 0 && (
         <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted">
           <I.comment />
-          <span className="text-[16px]">{(activeFilter !== "all" || q) ? "No messages match these filters" : "No activity yet"}</span>
-          <span className="text-[14px]">{(activeFilter !== "all" || q) ? "Try a different filter or search." : "Type @ to mention a teammate, or use a button below to reach out."}</span>
+          <span className="text-[16px]">{q ? "Nothing matches that search" : view === "changes" ? "No changes yet" : "Nothing here yet"}</span>
+          <span className="text-[16px]">{q ? "Try other words." : "Write a note or log what you did in the box above."}</span>
         </div>
       )}
     </div>

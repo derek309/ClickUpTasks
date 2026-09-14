@@ -2491,7 +2491,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // description there ... and then put the link there").
     if (patch.description !== undefined && patch.description !== before.description) {
       const text = htmlToText(patch.description).trim();
-      lines.push(text ? `updated the description — ${text.slice(0, 400)}` : "cleared the description");
+      lines.push(text ? `updated the description: ${text.slice(0, 400)}` : "cleared the description");
     }
     if (patch.attachments !== undefined) {
       const had = new Set(before.attachments.map((a) => a.id));
@@ -2501,7 +2501,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         // Name only. Printing the URL beside it repeated a 90 character
         // string twice in one line, and the attachment list right there
         // already carries the link itself.
-        lines.push(a.url ? `added a link — ${a.name}` : `attached ${a.name}`);
+        lines.push(a.url ? `added the link ${a.name}` : `attached ${a.name}`);
       }
       for (const a of before.attachments) {
         if (!has.has(a.id)) lines.push(`removed ${a.url ? "the link" : "the file"} ${a.name}`);

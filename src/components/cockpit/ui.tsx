@@ -326,7 +326,7 @@ export function LabelChips({ ids }: { ids: string[] }) {
 }
 
 export function Row({ label, icon, children }: { label: string; icon?: React.ReactNode; children: React.ReactNode }) {
-  return (<div className="flex items-center gap-3"><dt className="flex w-28 shrink-0 items-center gap-1.5 text-[13px] font-medium text-muted">{icon}{label}</dt><dd className="min-w-0 flex-1">{children}</dd></div>);
+  return (<div className="flex items-center gap-3"><dt className="flex w-28 shrink-0 items-center gap-1.5 text-[16px] font-medium text-muted">{icon}{label}</dt><dd className="min-w-0 flex-1">{children}</dd></div>);
 }
 
 
@@ -414,7 +414,7 @@ export function CollapsibleText({ text, className, maxChars = LONG_TEXT_CHAR_THR
       {renderRichText(shown)}
       {isLong && (
         <span role="button" tabIndex={0} onClick={toggle} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(e); } }}
-          className="mt-1 block cursor-pointer text-[13px] font-medium text-accent hover:underline">
+          className="mt-1 block cursor-pointer text-[16px] font-medium text-accent hover:underline">
           {expanded ? "Show less" : "Show more"}
         </span>
       )}
