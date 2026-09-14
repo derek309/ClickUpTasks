@@ -973,7 +973,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
                 const url = f ? thumbs[f.path] : undefined;
                 const label = imageLabel(shownItems, i);
                 return (
-                  <section key={`${shownFileId}:${item.file}`} aria-label={label}>
+                  <section key={`${shownFileId}:${item.file}`} aria-label={label} data-image-anchor={item.file}>
                     {(shownItems.length > 1 || editingSet) && (
                       <div className="mb-2 flex flex-wrap items-center gap-2">
                         {editingSet ? (
@@ -1137,7 +1137,9 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
 
       </div>
       {/* Files and Comments stay beside the writing as it scrolls (Derek, 2026-09-11). */}
-      <div className="space-y-3 lg:sticky lg:top-0 lg:max-h-[calc(100dvh-9rem)] lg:overflow-y-auto">
+      {/* Stays beside the writing as it scrolls, except on a version with several
+          images, where each image's comments line up beside that image instead. */}
+      <div className={`space-y-3 ${image && shownItems.length > 1 ? "" : "lg:sticky lg:top-0 lg:max-h-[calc(100dvh-9rem)] lg:overflow-y-auto"}`}>
         {/* Image and page reviews have no Files box: the version uploads on the left
             and a file rides on a comment (Derek, 2026-09-12: "we don't need upload
             files here since we can do it on the left"). */}
@@ -1158,7 +1160,11 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
           </FileDropLine>
         )}
         <CommentThread comments={versioned ? commentsFor(comments, shownIds) : comments} onPost={postComment} when={timeAgo} viewer="team"
-          pinLabel={image ? imagePlace : undefined} pinGroups={image ? shownItems.map((_, i) => imageLabel(shownItems, i)) : undefined} pinDraftLabel={image && pinDraft ? imagePlace(pinDraft.fileId) : null}
+          pinLabel={image ? imagePlace : undefined} pinGroups={image ? shownItems.map((_, i) => imageLabel(shownItems, i)) : undefined}
+          alignGroup={image ? (label) => {
+            const i = shownItems.findIndex((_, n) => imageLabel(shownItems, n) === label);
+            return i < 0 ? null : document.querySelector<HTMLElement>(`[data-image-anchor="${shownItems[i].file}"]`);
+          } : undefined} pinDraftLabel={image && pinDraft ? imagePlace(pinDraft.fileId) : null}
           isMine={(c) => !!meId && comments.find((x) => x.id === c.id)?.authorId === meId}
           canDelete={() => true}
           onEdit={(id, body) => changeComment(id, { body })}

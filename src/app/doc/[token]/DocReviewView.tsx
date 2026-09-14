@@ -472,7 +472,7 @@ export default function DocReviewView({ token }: { token: string }) {
                     // A version can hold several images, like a postcard's front and back, stacked with their names (Derek, 2026-09-14).
                     <div className="space-y-6">
                       {shownImages.map((img) => (
-                        <section key={`${shownFileId}:${img.fileId}`} aria-label={img.label}>
+                        <section key={`${shownFileId}:${img.fileId}`} aria-label={img.label} data-image-anchor={img.fileId}>
                           {shownImages.length > 1 && <h2 className="mb-2 text-[18px] font-semibold">{img.label}</h2>}
                           <ImagePinBoard src={fileHref(img.fileId)} alt={shownImages.length > 1 ? img.label : img.name}
                             comments={data.comments ?? []} fileId={img.fileId} pending={pinDraft} activeId={focusedComment} color={NAVY}
@@ -511,7 +511,7 @@ export default function DocReviewView({ token }: { token: string }) {
               {/* Stays beside the document as it scrolls (Derek, 2026-09-11: "make side
                   bar sticky"). Send my changes and Approve sit at its top, above
                   Files, in place of a bar fixed to the bottom of the screen. */}
-              <aside className="space-y-4 lg:sticky lg:top-6 lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto">
+              <aside className={`space-y-4 ${image && shownImages.length > 1 ? "" : "lg:sticky lg:top-6 lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto"}`}>
                 {/* Nothing to approve or change while no version is up for review. */}
                 {!locked && !noVersion && (
                   <div className="rounded-2xl border bg-surface p-4 shadow-sm">
@@ -567,7 +567,11 @@ export default function DocReviewView({ token }: { token: string }) {
                   </FileDropLine>
                 )}
                 <CommentThread comments={versioned ? commentsFor(data.comments ?? [], shownIds) : data.comments ?? []}
-                  pinLabel={image ? imagePlace : undefined} pinGroups={image ? shownImages.map((img) => img.label) : undefined} pinDraftLabel={image && pinDraft ? imagePlace(pinDraft.fileId) : null} onPost={postComment} when={commentTime} viewer="client" buttonStyle={{ background: NAVY }}
+                  pinLabel={image ? imagePlace : undefined} pinGroups={image ? shownImages.map((img) => img.label) : undefined}
+                  alignGroup={image ? (label) => {
+                    const img = shownImages.find((x) => x.label === label);
+                    return img ? document.querySelector<HTMLElement>(`[data-image-anchor="${img.fileId}"]`) : null;
+                  } : undefined} pinDraftLabel={image && pinDraft ? imagePlace(pinDraft.fileId) : null} onPost={postComment} when={commentTime} viewer="client" buttonStyle={{ background: NAVY }}
                   isMine={(c) => c.fromClient} canDelete={(c) => c.fromClient}
                   onEdit={(id, body) => changeComment(id, { body })}
                   onToggleDone={(id, done) => changeComment(id, { done })}

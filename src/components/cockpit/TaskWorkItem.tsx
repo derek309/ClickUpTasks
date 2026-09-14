@@ -130,7 +130,7 @@ function PinNumber({ number, color }: { number: number; color?: string }) {
  *  box like a task, and its author can edit it ("edit, delete and mark a comment
  *  complete like a task"). A comment can carry a file, and on an image review it
  *  can sit on a numbered pin (Derek, 2026-09-12). */
-export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isMine, canDelete, onEdit, onDelete, onToggleDone, quote, onClearQuote, focusedId, onQuoteClick, pinDraft, pinDraftLabel, pinLabel, pinGroups, placeholder, onAttach, renderAttachment }: {
+export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isMine, canDelete, onEdit, onDelete, onToggleDone, quote, onClearQuote, focusedId, onQuoteClick, pinDraft, pinDraftLabel, pinLabel, pinGroups, alignGroup, placeholder, onAttach, renderAttachment }: {
   comments: ThreadComment[];
   /** Resolves true once the comment is in, which clears the box. quote: the words
    *  it is about; attachmentFileId: a file added with it. */
@@ -146,6 +146,9 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
   pinLabel?: (fileId: string) => string | null;
   /** The images' names in order, to group the comments by image when there are several. */
   pinGroups?: string[];
+  /** Where an image sits on the page, so its comments line up beside it (Derek,
+   *  2026-09-14: "move the back comments down to align with that image"). */
+  alignGroup?: (label: string) => HTMLElement | null;
   /** Takes the words or the pin off the next comment. */
   onClearQuote?: () => void;
   /** A comment picked from its highlight or pin: shown and scrolled to. */
@@ -246,9 +249,42 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
   const groupOf = (c: ThreadComment) => (c.pin && pinLabel ? pinLabel(c.pin.fileId) : null);
   const byPin = (a: ThreadComment, b: ThreadComment) => Number(!!a.completedAt) - Number(!!b.completedAt) || (a.pin?.number ?? 0) - (b.pin?.number ?? 0);
   const groups = grouping
-    ? [...pinGroups!.map((label) => ({ label, items: shown.filter((c) => groupOf(c) === label).sort(byPin) })), { label: "Whole version", items: shown.filter((c) => !groupOf(c)) }]
-      .filter((g) => g.items.length)
+    ? pinGroups!.map((label) => ({ label, items: shown.filter((c) => groupOf(c) === label).sort(byPin) }))
+      .filter((g) => g.items.length || g.label === pinDraftLabel)
     : null;
+  const wholeVersion = grouping ? shown.filter((c) => !groupOf(c)) : [];
+  // The box for writing moves into an image's own box once a pin is dropped on it.
+  const writeIn = grouping && pinDraft && pinDraftLabel ? pinDraftLabel : null;
+
+  // Each image's box starts level with its image when the two sit side by side (on a
+  // phone the comments stack under the images, so nothing moves). Measured after
+  // every render and whenever something on the page changes size, like an image loading.
+  const groupBoxes = useRef(new Map<string, HTMLElement>());
+  useEffect(() => {
+    if (!alignGroup || !groups?.length) return;
+    const run = () => {
+      const pairs = groups.map((g) => ({ box: groupBoxes.current.get(g.label), anchor: alignGroup(g.label) }));
+      for (const { box } of pairs) if (box) box.style.marginTop = "";
+      for (const { box, anchor } of pairs) {
+        if (!box || !anchor) continue;
+        const a = anchor.getBoundingClientRect();
+        const b = box.getBoundingClientRect();
+        if (a.right > b.left + 1) continue;
+        const gap = Math.round(a.top - b.top);
+        // Stacked margins overlap rather than add, so the space already above the box
+        // is the larger of its own top margin and the box before it's bottom margin.
+        const prev = box.previousElementSibling;
+        const above = Math.max(parseFloat(getComputedStyle(box).marginTop) || 0, prev ? parseFloat(getComputedStyle(prev).marginBottom) || 0 : 0);
+        if (gap > 0) box.style.marginTop = `${gap + above}px`;
+      }
+    };
+    run();
+    const watch = new ResizeObserver(run);
+    watch.observe(document.body);
+    for (const g of groups) { const a = alignGroup(g.label); if (a) watch.observe(a); }
+    window.addEventListener("resize", run);
+    return () => { watch.disconnect(); window.removeEventListener("resize", run); };
+  });
 
   const canPost = !posting && !attaching && (!!draft.trim() || !!attached);
   const item = (c: ThreadComment, grouped: boolean) => {
@@ -325,8 +361,8 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
   // A quiet list: each comment's name with its check and a ⋯ menu
   // at the end of that line (Derek, 2026-09-13: "make the clean and more
   // professional looking"). Done ones fold away behind the header's toggle.
-  return (
-    <section className="rounded-xl border bg-surface px-4 py-3">
+  const header = (
+    <>
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-[16px] font-semibold">Comments</h3>
         {comments.length > 0 && (
@@ -340,6 +376,10 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
         )}
       </div>
       {viewer === "team" && <p className="text-[16px] text-muted">The client sees these on their review page.</p>}
+    </>
+  );
+  const composer = (
+    <>
       {(quote || pinDraft) && (
         <div className="mt-2 flex items-center gap-2 rounded-lg border-l-4 border-highlight bg-highlight-soft/60 px-3 py-2 text-[16px]">
           <span className="flex min-w-0 flex-1 items-center gap-2 break-words">
@@ -383,20 +423,44 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
             className="shrink-0 px-1 text-[18px] leading-none text-muted hover:text-foreground">×</button>
         </div>
       )}
-      {shown.length > 0 && (groups ? groups.map((g) => {
-        const open = g.items.filter((c) => !c.completedAt).length;
-        return (
-          <div key={g.label} className="mt-3 rounded-lg border px-3">
-            <div className="flex items-center gap-2 border-b py-2">
-              <h4 className="min-w-0 break-words text-[16px] font-semibold">{g.label}</h4>
-              <span className="ml-auto shrink-0 text-[16px] text-muted">{open ? `${open} open` : "All done"}</span>
+    </>
+  );
+
+  if (groups) {
+    return (
+      <div className="space-y-3">
+        <section className="rounded-xl border bg-surface px-4 py-3">
+          {header}
+          {!writeIn && composer}
+          {wholeVersion.length > 0 && (
+            <div className="mt-3">
+              <h4 className="text-[16px] font-semibold text-muted">Whole version</h4>
+              <ul className="mt-1 divide-y border-t">{wholeVersion.map((c) => item(c, true))}</ul>
             </div>
-            <ul className="divide-y">{g.items.map((c) => item(c, true))}</ul>
-          </div>
-        );
-      }) : (
-        <ul className="mt-3 divide-y border-t">{shown.map((c) => item(c, false))}</ul>
-      ))}
+          )}
+        </section>
+        {groups.map((g) => {
+          const open = g.items.filter((c) => !c.completedAt).length;
+          return (
+            <section key={g.label} aria-label={`Comments on ${g.label}`} className="rounded-xl border bg-surface px-4 py-3"
+              ref={(el) => { if (el) groupBoxes.current.set(g.label, el); else groupBoxes.current.delete(g.label); }}>
+              <div className="flex items-center gap-2 border-b pb-2">
+                <h4 className="min-w-0 break-words text-[16px] font-semibold">{g.label}</h4>
+                <span className="ml-auto shrink-0 text-[16px] text-muted">{open ? `${open} open` : g.items.length ? "All done" : ""}</span>
+              </div>
+              {writeIn === g.label && <div className="pb-2">{composer}</div>}
+              {g.items.length > 0 && <ul className="divide-y">{g.items.map((c) => item(c, true))}</ul>}
+            </section>
+          );
+        })}
+      </div>
+    );
+  }
+  return (
+    <section className="rounded-xl border bg-surface px-4 py-3">
+      {header}
+      {composer}
+      {shown.length > 0 && <ul className="mt-3 divide-y border-t">{shown.map((c) => item(c, false))}</ul>}
       {older > 0 && (
         <button onClick={() => setShowOlder((s) => !s)} aria-expanded={showOlder}
           className="mt-1 text-[16px] font-medium text-muted hover:text-foreground hover:underline">
