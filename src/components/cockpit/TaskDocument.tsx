@@ -32,7 +32,7 @@ import { diffDocText, diffText, summarizeDocChanges, summarizeTextChanges } from
 import { addDocFiles, uploadSharedFile } from "@/lib/docFileUpload";
 import { publishedFiles, type PinAnchor } from "@/lib/reviewPins";
 import { commentHint, isFileKind, kindInSentence, kindNewName, kindQuery, kindTitle, kindWhat } from "@/lib/reviewKinds";
-import { MAX_SET_IMAGES, imageLabel, parseImageSet, setFiles as imagesOf, type ImageSetItem } from "@/lib/imageSet";
+import { MAX_SET_IMAGES, frontFirst, imageLabel, parseImageSet, setFiles as imagesOf, type ImageSetItem } from "@/lib/imageSet";
 import { mergeEdits, PAGE_MAX_BYTES, PAGE_TOO_BIG, type FrameMode, type PageEdit } from "@/lib/pageFrameProtocol";
 import { formatFileSize, isPreviewableImage } from "@/lib/uploadTypes";
 import { RichTextEditor } from "./RichTextEditor";
@@ -378,7 +378,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   const uploadImages = async (list: FileList, slot: number | null) => {
     if (!doc || adding) return;
     const current = parseImageSet(doc.body);
-    const picked = Array.from(list).filter((f) => isPreviewableImage(f.name));
+    const picked = frontFirst(Array.from(list).filter((f) => isPreviewableImage(f.name)));
     if (!picked.length) { pushToast("Upload a JPG, PNG, WebP or GIF image."); return; }
     const room = slot !== null ? 1 : MAX_SET_IMAGES - current.length;
     if (room <= 0) { pushToast(`A version holds up to ${MAX_SET_IMAGES} images.`); return; }
@@ -1136,7 +1136,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
           </FileDropLine>
         )}
         <CommentThread comments={versioned ? commentsFor(comments, shownIds) : comments} onPost={postComment} when={timeAgo} viewer="team"
-          pinLabel={image ? imagePlace : undefined} pinDraftLabel={image && pinDraft ? imagePlace(pinDraft.fileId) : null}
+          pinLabel={image ? imagePlace : undefined} pinGroups={image ? shownItems.map((_, i) => imageLabel(shownItems, i)) : undefined} pinDraftLabel={image && pinDraft ? imagePlace(pinDraft.fileId) : null}
           isMine={(c) => !!meId && comments.find((x) => x.id === c.id)?.authorId === meId}
           canDelete={() => true}
           onEdit={(id, body) => changeComment(id, { body })}

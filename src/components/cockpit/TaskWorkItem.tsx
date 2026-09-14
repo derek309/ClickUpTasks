@@ -130,7 +130,7 @@ function PinNumber({ number, color }: { number: number; color?: string }) {
  *  box like a task, and its author can edit it ("edit, delete and mark a comment
  *  complete like a task"). A comment can carry a file, and on an image review it
  *  can sit on a numbered pin (Derek, 2026-09-12). */
-export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isMine, canDelete, onEdit, onDelete, onToggleDone, quote, onClearQuote, focusedId, onQuoteClick, pinDraft, pinDraftLabel, pinLabel, placeholder, onAttach, renderAttachment }: {
+export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isMine, canDelete, onEdit, onDelete, onToggleDone, quote, onClearQuote, focusedId, onQuoteClick, pinDraft, pinDraftLabel, pinLabel, pinGroups, placeholder, onAttach, renderAttachment }: {
   comments: ThreadComment[];
   /** Resolves true once the comment is in, which clears the box. quote: the words
    *  it is about; attachmentFileId: a file added with it. */
@@ -144,6 +144,8 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
   pinDraftLabel?: string | null;
   /** Which image a pin is on, when the version shows several (imageSet.ts); null for one. */
   pinLabel?: (fileId: string) => string | null;
+  /** The images' names in order, to group the comments by image when there are several. */
+  pinGroups?: string[];
   /** Takes the words or the pin off the next comment. */
   onClearQuote?: () => void;
   /** A comment picked from its highlight or pin: shown and scrolled to. */
@@ -234,8 +236,88 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
     requestAnimationFrame(() => itemRefs.current.get(focusedId)?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
   }, [focusedId]); // eslint-disable-line react-hooks/exhaustive-deps
   const pinColor = buttonStyle?.background as string | undefined;
+  // On a version with several images, the comments sit under each image's name,
+  // in the images' order, then the ones on the whole version (Derek, 2026-09-14:
+  // "group the changes by image").
+  const groupOf = (c: ThreadComment) => (c.pin && pinLabel ? pinLabel(c.pin.fileId) : null);
+  const groups = pinGroups && pinGroups.length > 1
+    ? [...pinGroups.map((label) => ({ label, items: shown.filter((c) => groupOf(c) === label) })), { label: "Whole version", items: shown.filter((c) => !groupOf(c)) }]
+      .filter((g) => g.items.length)
+    : null;
+
   const canPost = !posting && !attaching && (!!draft.trim() || !!attached);
-  // A quiet list, one line per comment's who and when, with its check and a ⋯ menu
+  const item = (c: ThreadComment, grouped: boolean) => {
+    const mine = isMine(c);
+    const done = !!c.completedAt;
+    const busy = busyId === c.id;
+    const isEditing = editing?.id === c.id;
+    const place = c.pin && pinLabel ? pinLabel(c.pin.fileId) : null;
+    const chip = place && !grouped;
+    return (
+      <li key={c.id} ref={(el) => { if (el) itemRefs.current.set(c.id, el); else itemRefs.current.delete(c.id); }}
+        className={`flex gap-3 py-3 ${focusedId === c.id ? "-mx-2 rounded-lg px-2 ring-2 ring-highlight" : ""}`}>
+        {c.pin ? (
+          <button onClick={() => onQuoteClick?.(c.id)} disabled={!onQuoteClick} title={`Show pin ${c.pin.number}${place ? ` on ${place}` : ""}`}
+            aria-label={`Show pin ${c.pin.number}${place ? ` on ${place}` : ""}`} className={`h-8 shrink-0 ${done ? "opacity-50" : ""}`}>
+            <PinNumber number={c.pin.number} color={pinColor} />
+          </button>
+        ) : (
+          <span aria-hidden className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-background text-[16px] font-semibold text-muted">{initials(c)}</span>
+        )}
+        <div className="min-w-0 flex-1">
+          {/* The name in full, then the comment, then a small time stamp (Derek,
+              2026-09-14: the name was cut to "D…" beside the time). */}
+          <div className="flex items-center gap-2 text-[16px]">
+            <span className="min-w-0 break-words font-semibold">{c.authorLabel || (c.fromClient ? "Client" : "Team")}</span>
+            {chip && <span className="shrink-0 rounded-full bg-background px-2 text-[16px] text-muted">{place}</span>}
+            <span className="ml-auto flex shrink-0 items-center gap-1">
+              <button role="checkbox" aria-checked={done} aria-label={done ? "Mark not done" : "Mark done"} title={done ? "Mark not done" : "Mark done"}
+                onClick={() => void act(c.id, () => onToggleDone(c.id, !done))} disabled={busy} style={done ? buttonStyle : undefined}
+                className={`flex h-8 w-8 items-center justify-center rounded-full transition disabled:opacity-50 ${done ? "bg-accent text-white" : "text-muted hover:bg-background hover:text-accent"}`}>
+                <I.check />
+              </button>
+              {!isEditing && (mine || canDelete(c)) && (
+                <ActionMenu label={<I.dots />} title="More actions"
+                  triggerClassName="flex h-8 w-8 items-center justify-center rounded-full text-muted hover:bg-background hover:text-foreground"
+                  items={[
+                    mine && { label: "Edit", onClick: () => setEditing({ id: c.id, text: c.body }) },
+                    canDelete(c) && { label: busy ? "Deleting…" : "Delete", danger: true, disabled: busy, onClick: () => void act(c.id, () => onDelete(c.id)) },
+                  ]} />
+              )}
+            </span>
+          </div>
+          {c.quote && (
+            <button onClick={() => onQuoteClick?.(c.id)} disabled={!onQuoteClick} title="Show these words in the document"
+              className="mt-1 block w-full rounded border-l-4 border-highlight bg-highlight-soft/50 px-2 py-1 text-left text-[16px] text-muted hover:text-foreground disabled:hover:text-muted">
+              “{c.quote.replace(/\n/g, " … ")}”
+            </button>
+          )}
+          {isEditing ? (
+            <>
+              <textarea value={editing.text} onChange={(e) => setEditing({ id: c.id, text: e.target.value })} rows={3} maxLength={4000} autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void saveEdit(); }
+                  if (e.key === "Escape") { e.stopPropagation(); setEditing(null); }
+                }}
+                aria-label="Edit comment"
+                className="mt-1 w-full resize-y rounded-lg border bg-surface px-3 py-2 text-[16px] outline-none focus:border-accent" />
+              <div className="mt-1 flex gap-4 text-[16px]">
+                <button onClick={() => void saveEdit()} disabled={busy || !editing.text.trim()} className="font-semibold text-accent hover:underline disabled:opacity-50">{busy ? "Saving…" : "Save"}</button>
+                <button onClick={() => setEditing(null)} className="text-muted hover:underline">Cancel</button>
+              </div>
+            </>
+          ) : c.body && (
+            <p className={`whitespace-pre-wrap break-words text-[16px] leading-relaxed ${done ? "text-muted line-through" : ""}`}>{c.body}</p>
+          )}
+          {c.attachmentFileId && renderAttachment && <div className="mt-1 text-[16px]">{renderAttachment(c.attachmentFileId)}</div>}
+          {/* Very small on purpose (Derek, 2026-09-14), an exception to the 16px rule. */}
+          <p className="mt-0.5 text-[13px] text-muted">{when(c.createdAt)}{c.editedAt ? " · edited" : ""}</p>
+          {done && c.completedBy && <p className="text-[16px] text-muted">Done by {c.completedBy}</p>}
+        </div>
+      </li>
+    );
+  };
+  // A quiet list: each comment's name with its check and a ⋯ menu
   // at the end of that line (Derek, 2026-09-13: "make the clean and more
   // professional looking"). Done ones fold away behind the header's toggle.
   return (
@@ -296,77 +378,14 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
             className="shrink-0 px-1 text-[18px] leading-none text-muted hover:text-foreground">×</button>
         </div>
       )}
-      {shown.length > 0 && (
-        <ul className="mt-3 divide-y border-t">
-          {shown.map((c) => {
-            const mine = isMine(c);
-            const done = !!c.completedAt;
-            const busy = busyId === c.id;
-            const isEditing = editing?.id === c.id;
-            const place = c.pin && pinLabel ? pinLabel(c.pin.fileId) : null;
-            return (
-              <li key={c.id} ref={(el) => { if (el) itemRefs.current.set(c.id, el); else itemRefs.current.delete(c.id); }}
-                className={`flex gap-3 py-3 ${focusedId === c.id ? "-mx-2 rounded-lg px-2 ring-2 ring-highlight" : ""}`}>
-                {c.pin ? (
-                  <button onClick={() => onQuoteClick?.(c.id)} disabled={!onQuoteClick} title={`Show pin ${c.pin.number}${place ? ` on ${place}` : ""}`}
-                    aria-label={`Show pin ${c.pin.number}${place ? ` on ${place}` : ""}`} className={`h-8 shrink-0 ${done ? "opacity-50" : ""}`}>
-                    <PinNumber number={c.pin.number} color={pinColor} />
-                  </button>
-                ) : (
-                  <span aria-hidden className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-background text-[16px] font-semibold text-muted">{initials(c)}</span>
-                )}
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 text-[16px]">
-                    <span className="min-w-0 truncate font-semibold">{c.authorLabel || (c.fromClient ? "Client" : "Team")}</span>
-                    <span className="shrink-0 text-muted">{when(c.createdAt)}{c.editedAt ? " · edited" : ""}</span>
-                    {place && <span className="shrink-0 rounded-full bg-background px-2 text-[16px] text-muted">{place}</span>}
-                    <span className="ml-auto flex shrink-0 items-center gap-1">
-                      <button role="checkbox" aria-checked={done} aria-label={done ? "Mark not done" : "Mark done"} title={done ? "Mark not done" : "Mark done"}
-                        onClick={() => void act(c.id, () => onToggleDone(c.id, !done))} disabled={busy} style={done ? buttonStyle : undefined}
-                        className={`flex h-8 w-8 items-center justify-center rounded-full transition disabled:opacity-50 ${done ? "bg-accent text-white" : "text-muted hover:bg-background hover:text-accent"}`}>
-                        <I.check />
-                      </button>
-                      {!isEditing && (mine || canDelete(c)) && (
-                        <ActionMenu label={<I.dots />} title="More actions"
-                          triggerClassName="flex h-8 w-8 items-center justify-center rounded-full text-muted hover:bg-background hover:text-foreground"
-                          items={[
-                            mine && { label: "Edit", onClick: () => setEditing({ id: c.id, text: c.body }) },
-                            canDelete(c) && { label: busy ? "Deleting…" : "Delete", danger: true, disabled: busy, onClick: () => void act(c.id, () => onDelete(c.id)) },
-                          ]} />
-                      )}
-                    </span>
-                  </div>
-                  {c.quote && (
-                    <button onClick={() => onQuoteClick?.(c.id)} disabled={!onQuoteClick} title="Show these words in the document"
-                      className="mt-1 block w-full rounded border-l-4 border-highlight bg-highlight-soft/50 px-2 py-1 text-left text-[16px] text-muted hover:text-foreground disabled:hover:text-muted">
-                      “{c.quote.replace(/\n/g, " … ")}”
-                    </button>
-                  )}
-                  {isEditing ? (
-                    <>
-                      <textarea value={editing.text} onChange={(e) => setEditing({ id: c.id, text: e.target.value })} rows={3} maxLength={4000} autoFocus
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void saveEdit(); }
-                          if (e.key === "Escape") { e.stopPropagation(); setEditing(null); }
-                        }}
-                        aria-label="Edit comment"
-                        className="mt-1 w-full resize-y rounded-lg border bg-surface px-3 py-2 text-[16px] outline-none focus:border-accent" />
-                      <div className="mt-1 flex gap-4 text-[16px]">
-                        <button onClick={() => void saveEdit()} disabled={busy || !editing.text.trim()} className="font-semibold text-accent hover:underline disabled:opacity-50">{busy ? "Saving…" : "Save"}</button>
-                        <button onClick={() => setEditing(null)} className="text-muted hover:underline">Cancel</button>
-                      </div>
-                    </>
-                  ) : c.body && (
-                    <p className={`whitespace-pre-wrap break-words text-[16px] leading-relaxed ${done ? "text-muted line-through" : ""}`}>{c.body}</p>
-                  )}
-                  {c.attachmentFileId && renderAttachment && <div className="mt-1 text-[16px]">{renderAttachment(c.attachmentFileId)}</div>}
-                  {done && c.completedBy && <p className="text-[16px] text-muted">Done by {c.completedBy}</p>}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+      {shown.length > 0 && (groups ? groups.map((g) => (
+        <div key={g.label} className="mt-3">
+          <h4 className="text-[16px] font-semibold text-muted">{g.label}</h4>
+          <ul className="mt-1 divide-y border-t">{g.items.map((c) => item(c, true))}</ul>
+        </div>
+      )) : (
+        <ul className="mt-3 divide-y border-t">{shown.map((c) => item(c, false))}</ul>
+      ))}
       {older > 0 && (
         <button onClick={() => setShowOlder((s) => !s)} aria-expanded={showOlder}
           className="mt-1 text-[16px] font-medium text-muted hover:text-foreground hover:underline">

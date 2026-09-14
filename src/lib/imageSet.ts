@@ -74,6 +74,14 @@ export function imageLabel(items: ImageSetItem[], index: number): string {
   return items.length === 1 ? "Image" : `Image ${index + 1}`;
 }
 
+/** Files added together, with one named "front" first and one named "back" after
+ *  the rest, so a postcard's Front and Back land the right way round whatever order
+ *  the picker hands them over in (Derek, 2026-09-14: Back.jpg came first). */
+export function frontFirst<T extends { name: string }>(files: T[]): T[] {
+  const rank = (name: string) => (/front/i.test(name) ? 0 : /back/i.test(name) ? 2 : 1);
+  return files.map((file, i) => ({ file, i })).sort((a, b) => rank(a.file.name) - rank(b.file.name) || a.i - b.i).map((x) => x.file);
+}
+
 /** The label that tells a pin's image apart, from the newest body holding it, or
  *  null when that version has only one image (a pin number alone is clear then). */
 export function pinImageLabel(bodiesNewestFirst: string[], fileId: string): string | null {

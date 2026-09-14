@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { cleanImageLabel, cleanImageSet, formatImageSet, imageLabel, parseImageSet, pinImageLabel, setFiles, MAX_SET_IMAGES } from "./imageSet";
+import { frontFirst, cleanImageLabel, cleanImageSet, formatImageSet, imageLabel, parseImageSet, pinImageLabel, setFiles, MAX_SET_IMAGES } from "./imageSet";
 
 const id = (n: number) => `tdf_${String(n).padStart(8, "0")}-0000-0000-0000-000000000000`;
 const A = id(1);
@@ -39,6 +39,13 @@ describe("image sets", () => {
     expect(cleanImageSet(Array.from({ length: MAX_SET_IMAGES + 1 }, (_, i) => ({ file: id(i + 1) })))).toBeNull();
     expect(cleanImageSet("not a list")).toBeNull();
     expect(cleanImageLabel("x".repeat(60))).toHaveLength(40);
+  });
+
+  it("puts a file named front first and back last, keeping the rest in order", () => {
+    const names = (list: { name: string }[]) => list.map((f) => f.name);
+    expect(names(frontFirst([{ name: "Back.jpg" }, { name: "Front.jpg" }]))).toEqual(["Front.jpg", "Back.jpg"]);
+    expect(names(frontFirst([{ name: "postcard-BACK.png" }, { name: "inside.png" }, { name: "cover.png" }, { name: "POSTCARD-front.png" }])))
+      .toEqual(["POSTCARD-front.png", "inside.png", "cover.png", "postcard-BACK.png"]);
   });
 
   it("tells a pin's image apart only when its version has more than one", () => {

@@ -567,7 +567,7 @@ export default function DocReviewView({ token }: { token: string }) {
                   </FileDropLine>
                 )}
                 <CommentThread comments={versioned ? commentsFor(data.comments ?? [], shownIds) : data.comments ?? []}
-                  pinLabel={image ? imagePlace : undefined} pinDraftLabel={image && pinDraft ? imagePlace(pinDraft.fileId) : null} onPost={postComment} when={commentTime} viewer="client" buttonStyle={{ background: NAVY }}
+                  pinLabel={image ? imagePlace : undefined} pinGroups={image ? shownImages.map((img) => img.label) : undefined} pinDraftLabel={image && pinDraft ? imagePlace(pinDraft.fileId) : null} onPost={postComment} when={commentTime} viewer="client" buttonStyle={{ background: NAVY }}
                   isMine={(c) => c.fromClient} canDelete={(c) => c.fromClient}
                   onEdit={(id, body) => changeComment(id, { body })}
                   onToggleDone={(id, done) => changeComment(id, { done })}
