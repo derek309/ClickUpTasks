@@ -14,7 +14,17 @@ export type ReviewEmailInput = {
   text: string;
   /** What changed since the version the client saw, or null on a first send. */
   changes: string | null;
+  /** The contact's name, for "Hi Brian,". Missing or blank says "Hi,". */
+  greetName?: string | null;
 };
+
+/** The opening line of an email to a client: "Hi Brian," from the contact's
+ *  name, or "Hi," with none (Derek, 2026-09-14: "add the hi CLIENTS NAME").
+ *  First word only, since contacts store the full name. */
+export function greetingHtml(contactName?: string | null): string {
+  const first = (contactName ?? "").trim().split(/\s+/)[0] ?? "";
+  return `<p>Hi${first ? ` ${escapeHtml(first)}` : ""},</p>`;
+}
 export type ReviewEmail = { subject: string; body: string; link: DraftLink | null; aiContext: string };
 
 // What the client can do from the link: one sentence for every kind, with only the
@@ -31,9 +41,9 @@ export function buildReviewEmail(review: ReviewEmailInput): ReviewEmail {
   const link = review.url ? { url: review.url, label: `Open "${review.name}" to review` } : null;
   const name = escapeHtml(review.name);
   const can = `look it over, leave comments${HOW[review.kind]}, send changes or approve it`;
-  const intro = review.changes
-    ? `<p>Hi,</p><p>We made some updates to "${name}". Take a look and approve it when it looks right:</p>`
-    : `<p>Hi,</p><p>"${name}" is ready for your review. You can ${can} here:</p>`;
+  const intro = greetingHtml(review.greetName) + (review.changes
+    ? `<p>We made some updates to "${name}". Take a look and approve it when it looks right:</p>`
+    : `<p>"${name}" is ready for your review. You can ${can} here:</p>`);
   const aiContext = [
     review.changes
       ? `We updated the ${what} "${review.name}" and are asking the client to review the changes and approve it.`

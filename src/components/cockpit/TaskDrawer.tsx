@@ -21,7 +21,7 @@ import { useTaskMessaging } from "./TaskMessaging";
 import { useDebouncedCommit } from "./useDebouncedCommit";
 import { TaskDocument } from "./TaskDocument";
 import { DraftEmail } from "./DraftEmail";
-import { buildReviewEmail, type ReviewEmailInput } from "@/lib/reviewEmail";
+import { buildReviewEmail, greetingHtml, type ReviewEmailInput } from "@/lib/reviewEmail";
 import { type FileKind } from "@/lib/reviewKinds";
 
 // The review lines a task can add beside its client document, in order.
@@ -778,7 +778,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const keepCurrent = !!current && (!reply || (!!htmlToText(current.body).trim() && !window.confirm("Replace the draft email on this task with this reply?")));
     if (!keepCurrent) {
       const now = new Date().toISOString();
-      onPatch({ draftEmail: { subject: reply?.subject ?? task.title, body: "", replyTo: reply?.replyTo ?? null, createdAt: now, updatedAt: now } });
+      onPatch({ draftEmail: { subject: reply?.subject ?? task.title, body: greetingHtml(messageDest?.name), replyTo: reply?.replyTo ?? null, createdAt: now, updatedAt: now } });
     }
     setEmailOpenNonce((n) => n + 1);
   };
@@ -989,7 +989,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setAttFileDragOver(true); } }}
         onDragLeave={(e) => { if (e.currentTarget === e.target) setAttFileDragOver(false); }}
         onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); setAttFileDragOver(false); onAddFiles(e.dataTransfer.files); } }}
-        className={`grid grid-cols-3 gap-2 rounded-lg transition sm:grid-cols-4 md:grid-cols-5 ${attFileDragOver ? "outline-2 outline-dashed outline-accent bg-accent-soft/30" : ""}`}
+        className={`grid grid-cols-3 gap-2 rounded-lg transition ${attFileDragOver ? "outline-2 outline-dashed outline-accent bg-accent-soft/30" : ""}`}
       >
         {task.attachments.length === 0 && !uploadProgress && (<div className="col-span-full rounded-lg border border-dashed px-3 py-2 text-[16px] text-muted">Drop, paste, or click Attach · max 25MB each</div>)}
         {sortedAttachments.filter((a) => a.kind === "image").map((a) => (
@@ -1104,7 +1104,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const startReviewEmail = (review: ReviewEmailInput) => {
     if (!hasMessaging) return false;
     const now = new Date().toISOString();
-    onPatch({ draftEmail: { ...buildReviewEmail(review), createdAt: now, updatedAt: now } });
+    onPatch({ draftEmail: { ...buildReviewEmail({ ...review, greetName: messageDest?.name }), createdAt: now, updatedAt: now } });
     setEmailOpenNonce((n) => n + 1);
     return true;
   };
@@ -1134,7 +1134,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       { label: "File", onClick: () => fileRef.current?.click() },
     ]} />
   );
-  const hasDeliverables = showDocument || REVIEW_LINES.some((l) => hasReview(l.kind)) || !!task.draftEmail || showAttachments;
+  const hasDeliverables = showDocument || REVIEW_LINES.some((l) => hasReview(l.kind)) || !!task.draftEmail;
   // The embedded sibling-task list used to live here — deleted (item 4):
   // the "N of M" pager (onPrev/onNext below) already does the same job of
   // moving between tasks in this list, without duplicating a whole list
@@ -1177,31 +1177,18 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           {documentBlock}
           {reviewBlocks}
           {draftEmailBlock}
-          {attachmentsBlock}
-          {!hasDeliverables && (
-            <p className="rounded-xl border border-dashed px-4 py-3 text-[16px] text-muted">Client reviews, draft emails, links and files show here. Drop a file anywhere on the task to attach it.</p>
+          {/* Links and files live in the client rail, under the contact card
+              (Derek, 2026-09-14). A task with no rail keeps them here. */}
+          {isLightTask && attachmentsBlock}
+          {!hasDeliverables && !(isLightTask && showAttachments) && (
+            <p className="rounded-xl border border-dashed px-4 py-3 text-[16px] text-muted">Client reviews and draft emails show here. Drop a file anywhere on the task to attach it.</p>
           )}
         </>
       ), addMenu)}
       {subtasksBlock && <div className="mt-10">{subtasksBlock}</div>}
       <section className="mt-10">
-        {/* Log what you did at the top of the conversation, because the feed
-            is newest first (Derek, 2026-09-14: "composer top"). The composer
-            the dock opens for a text, chat or note sits right under it. */}
-        <ActionDock
-          task={task} client={client} contact={linkedContactInfo ?? null} actions={actions} messages={messages ?? undefined}
-          me={userById(meId) ?? null} users={users}
-          onLog={logAction} onPatch={onPatch} onAddComment={onAddComment}
-          onOpenCompose={openCompose}
-          // Same gate the composer already uses: onSendTaskMessage is only
-          // passed when this person may message this client.
-          canMessageClient={mayContactClient}
-          onSendDm={onSendDm} onDelegate={onDelegate} clientLinks={clientLinks} taskLink={taskLink}
-          askNextStepFor={pendingNextStep}
-          onAskNextStepHandled={() => setPendingNextStep(null)}
-          pushToast={pushToast}
-        />
-        <div className="mt-3">{composerFooter}</div>
+        {/* The composer the floating dock opens for a text, chat or note. */}
+        {composerFooter}
         <div className="mt-6">{feedArea}</div>
       </section>
     </>
@@ -1209,11 +1196,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
 
   // The client's SaaS URL, living in GoHighLevel as the contact's "SaaS"
   // custom field. Editable here because otherwise adding one means leaving
-  // for GHL and coming back. Folded under Account details: it is a lookup,
-  // not something to read on every task.
+  // for GHL and coming back. Shown open in the rail, beside the contact's own
+  // GoHighLevel link: there is room, and both get used (Derek, 2026-09-14).
   const saasRow = (
     <div className="flex items-center gap-2 text-[16px]">
-      <span className="shrink-0 text-muted">SaaS link</span>
+      <span className="w-28 shrink-0 text-muted">SaaS account</span>
       {saasEditing ? (
         <input autoFocus defaultValue={saasUrl} disabled={saasSaving}
           onBlur={(e) => saveSaas(e.target.value)}
@@ -1265,15 +1252,20 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           <button onClick={onCopyClientLink} disabled={!onCopyClientLink} title="Copy this client's link" className={railButton}><I.link className="text-accent" />Client link</button>
         </div>
       )}
-      <div className="mt-6">{detailsBlock}</div>
-      {linkedContactInfo?.ghlContactId && (
-        <details className="group mt-6">
-          <summary className="flex cursor-pointer list-none items-center gap-2 text-[16px] text-muted hover:text-foreground [&::-webkit-details-marker]:hidden">
-            <I.chevron className="h-3 w-3 rotate-180 transition-transform group-open:-rotate-90" /> Account details
-          </summary>
-          <div className="mt-3">{saasRow}</div>
-        </details>
+      {(ghlContactUrl || linkedContactInfo?.ghlContactId) && (
+        <div className="mt-5 space-y-2.5">
+          {ghlContactUrl && (
+            <div className="flex items-center gap-2 text-[16px]">
+              <span className="w-28 shrink-0 text-muted">GHL contact</span>
+              <a href={ghlContactUrl} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel"
+                className="inline-flex min-w-0 items-center gap-1.5 truncate font-medium text-accent hover:underline"><I.bolt /> Open contact</a>
+            </div>
+          )}
+          {linkedContactInfo?.ghlContactId && saasRow}
+        </div>
       )}
+      {attachmentsBlock}
+      <div className="mt-6">{detailsBlock}</div>
     </aside>
   );
 
@@ -1285,8 +1277,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           window's (Derek, 2026-08-26). --drawer-left is set by Cockpit and
           follows the sidebar; below md the sidebar is an overlay, so the
           drawer is full width. */}
+      {/* --dock-right keeps the floating dock over the task column, clear of
+          the client rail. Zero below 1100px, where the rail stacks under. */}
       <aside onPaste={handlePaste} {...drawerDropProps}
-        className={full ? "fixed inset-0 z-50 flex flex-col bg-surface" : "fixed inset-y-0 right-0 z-20 flex w-full flex-col border-l bg-surface shadow-xl md:left-[var(--drawer-left,16rem)] md:w-auto"}>
+        className={`[--dock-right:0px] ${isLightTask ? "" : "min-[1100px]:[--dock-right:340px]"} ${full ? "fixed inset-0 z-50 flex flex-col bg-surface" : "fixed inset-y-0 right-0 z-20 flex w-full flex-col border-l bg-surface shadow-xl md:left-[var(--drawer-left,16rem)] md:w-auto"}`}>
         {hiddenFileInput}
         <div className="flex flex-wrap items-center gap-2 border-b px-5 py-2.5 text-[16px] text-muted">
           <span className="flex min-w-0 items-center gap-2">
@@ -1353,7 +1347,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             no contact and no comments has no client context worth a rail, so
             where it lives goes at the end of the page instead. */}
         <div className="flex flex-1 flex-col overflow-y-auto bg-background min-[1100px]:flex-row min-[1100px]:items-start">
-          <div className="min-w-0 flex-1 px-4 pb-16 pt-6 sm:px-8 lg:px-12">
+          <div className="min-w-0 flex-1 px-4 pb-32 pt-6 sm:px-8 lg:px-12">
             <div className="mx-auto w-full max-w-4xl">
               {mainColumn}
               {isLightTask && section("Client and list", detailsBlock)}
@@ -1369,6 +1363,21 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             <span className="rounded-lg bg-surface px-4 py-2 text-[16px] font-semibold shadow-lg">Drop to attach</span>
           </div>
         )}
+        {/* Floating at the bottom of the drawer so you can log from anywhere
+            in the scroll (Derek, 2026-09-14: inline "it will get lost"). */}
+        <ActionDock
+          task={task} client={client} contact={linkedContactInfo ?? null} actions={actions} messages={messages ?? undefined}
+          me={userById(meId) ?? null} users={users}
+          onLog={logAction} onPatch={onPatch} onAddComment={onAddComment}
+          onOpenCompose={openCompose}
+          // Same gate the composer already uses: onSendTaskMessage is only
+          // passed when this person may message this client.
+          canMessageClient={mayContactClient}
+          onSendDm={onSendDm} onDelegate={onDelegate} clientLinks={clientLinks} taskLink={taskLink}
+          askNextStepFor={pendingNextStep}
+          onAskNextStepHandled={() => setPendingNextStep(null)}
+          pushToast={pushToast}
+        />
       </aside>
     </>
   );

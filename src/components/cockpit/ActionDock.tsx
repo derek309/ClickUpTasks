@@ -11,7 +11,7 @@ import { I, newId, DateChip } from "./ui";
 // Plain fetch reaches this route without a session and gets a 401 back.
 import { authedFetch } from "@/lib/supabase";
 
-// The action dock, at the top of a task's conversation.
+// The floating action dock, at the bottom of the task drawer.
 //
 // Everything you can DO to a task from one bar, and every action records
 // itself and then asks what happens next. That second half is the whole
@@ -667,12 +667,14 @@ export function ActionDock({
   // on every render.
   useEffect(() => { menuOrderRef.current = menuOrder; });
 
-  // In the page at the top of the conversation, not floating over the bottom
-  // of the drawer: the feed is newest first, so what you log next belongs at
-  // the end you read from (Derek, 2026-09-14: "composer top").
+  // Floating over the bottom of the drawer, in reach from anywhere in a long
+  // task. It went inline at the top of the conversation for a day and got
+  // lost among the cards (Derek, 2026-09-14). Absolute, not fixed: the drawer
+  // is the containing block, and --dock-right keeps it clear of the client rail.
   return (
-    <div>
-      <div className="w-full rounded-xl border bg-surface p-3 shadow-soft">
+    <div className="pointer-events-none absolute bottom-0 left-0 z-30 px-4 pb-4 sm:px-8 lg:px-12"
+      style={{ right: "var(--dock-right, 0px)" }}>
+      <div className="pointer-events-auto mx-auto w-full max-w-4xl rounded-2xl border bg-surface/95 p-3 shadow-[0_12px_32px_rgba(20,24,40,.14),0_2px_6px_rgba(20,24,40,.08)] backdrop-blur-md">
 
         {view === "closed" && (
           <div className="flex flex-wrap items-center gap-3">

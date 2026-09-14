@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildReviewEmail } from "./reviewEmail";
+import { buildReviewEmail, greetingHtml } from "./reviewEmail";
 
 const URL = "https://clickuptasks.vercel.app/doc/doc_abc";
 
@@ -36,5 +36,13 @@ describe("buildReviewEmail", () => {
     expect(email.link).toBeNull();
     expect(email.subject).toBe("Please review: Tom & <Jerry>");
     expect(email.aiContext).toContain("change the wording");
+  });
+
+  it("greets the contact by first name, and says Hi with no name", () => {
+    const email = buildReviewEmail({ kind: "doc", url: null, name: "Flyer", text: "", changes: null, greetName: "Brian Goodell" });
+    expect(email.body.startsWith(`<p>Hi Brian,</p><p>"Flyer" is ready for your review.`)).toBe(true);
+    expect(greetingHtml("  ")).toBe("<p>Hi,</p>");
+    expect(greetingHtml(null)).toBe("<p>Hi,</p>");
+    expect(greetingHtml("<Tom> Jones")).toBe("<p>Hi &lt;Tom&gt;,</p>");
   });
 });

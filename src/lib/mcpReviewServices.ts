@@ -387,7 +387,11 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
               ?? `A new version of the ${kindWhat(kind)}.`;
           }
         }
-        const built = buildReviewEmail({ kind, url: sent.url, name: ((doc.title as string) ?? "").trim() || task.title, text, changes });
+        // "Hi Brian," greets the client's contact, the same one the drawer greets.
+        const { data: client } = await supabaseAdmin.from("clients").select("linked_contact_id").eq("id", task.client_id).maybeSingle();
+        const contactId = (client?.linked_contact_id as string | null) || (task.client_id.startsWith("cl_") ? task.client_id.slice(3) : null);
+        const { data: contact } = contactId ? await supabaseAdmin.from("contacts").select("name").eq("id", contactId).maybeSingle() : { data: null };
+        const built = buildReviewEmail({ kind, url: sent.url, name: ((doc.title as string) ?? "").trim() || task.title, text, changes, greetName: (contact?.name as string | undefined) ?? null });
         const now = new Date().toISOString();
         const draft = {
           ...built,
