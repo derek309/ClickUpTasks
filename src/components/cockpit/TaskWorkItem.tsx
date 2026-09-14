@@ -419,7 +419,7 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
           onChange={(e) => { setDraft(e.target.value); fit(e.currentTarget); }}
           onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void post(); } }}
           placeholder={pinDraft ? "Write a comment on this spot…" : quote ? "Write a comment on these words…" : placeholder ?? "Write a comment, or select words in the document to comment on them…"}
-          aria-label="Write a comment"
+          aria-label="Write a comment" style={{ outline: "none" }}
           className="max-h-60 min-w-0 flex-1 resize-none overflow-hidden bg-transparent py-1.5 text-[16px] leading-snug outline-none" />
         {onAttach && (
           <>
@@ -449,7 +449,7 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
   // The box for a pin just dropped on an image: roomy, with Post and Cancel said in
   // words, and Grammarly kept off it (its button sat on top of the old box).
   const writeBox = (
-    <div className="rounded-xl border border-highlight bg-surface shadow-[0_0_0_4px_var(--highlight-soft)]">
+    <div className="overflow-hidden rounded-xl border border-highlight bg-surface shadow-[0_0_0_4px_var(--highlight-soft)] focus-within:shadow-[0_0_0_4px_var(--highlight-soft),0_0_0_5px_var(--highlight)]">
       <div className="flex items-center gap-2 px-3 pt-2.5 text-[16px] text-muted">
         {pinDraft && <PinNumber number={pinDraft} color={pinColor} />}
         <span className="min-w-0 flex-1">New comment on this spot</span>
@@ -457,8 +457,8 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
       <textarea ref={boxRef} value={draft} rows={3} maxLength={4000} data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false"
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void post(); } }}
-        placeholder="What should change here?" aria-label="Write a comment on this spot"
-        className="block w-full resize-y bg-transparent px-3 py-2 text-[16px] leading-snug outline-none" />
+        placeholder="What should change here?" aria-label="Write a comment on this spot" style={{ outline: "none" }}
+        className="block w-full resize-y bg-transparent px-3 py-2 text-[16px] leading-snug" />
       {attached && (
         <div className="flex items-center gap-2 px-3 pb-1 text-[16px]">
           <span className="min-w-0 flex-1 truncate">📎 {attached.name}</span>
@@ -476,9 +476,9 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
             </button>
           </>
         )}
-        <span className="mr-auto hidden text-[16px] text-muted sm:inline">⌘ Enter posts</span>
-        {onClearQuote && <button onClick={onClearQuote} className="rounded-lg px-3 py-1.5 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>}
-        <button onClick={() => void post()} disabled={!canPost} style={canPost ? buttonStyle : undefined}
+        {/* The ⌘ Enter hint lives in Post's tooltip: as text it wrapped onto two lines in a narrow card. */}
+        {onClearQuote && <button onClick={onClearQuote} className="ml-auto rounded-lg px-3 py-1.5 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>}
+        <button onClick={() => void post()} disabled={!canPost} style={canPost ? buttonStyle : undefined} title="Post (⌘ Enter)"
           className="rounded-lg bg-accent px-4 py-1.5 text-[16px] font-semibold text-white transition disabled:opacity-40">
           {posting ? "Posting…" : "Post"}
         </button>
