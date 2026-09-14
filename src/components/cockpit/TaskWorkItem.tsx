@@ -130,7 +130,7 @@ function PinNumber({ number, color }: { number: number; color?: string }) {
  *  box like a task, and its author can edit it ("edit, delete and mark a comment
  *  complete like a task"). A comment can carry a file, and on an image review it
  *  can sit on a numbered pin (Derek, 2026-09-12). */
-export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isMine, canDelete, onEdit, onDelete, onToggleDone, quote, onClearQuote, focusedId, onQuoteClick, pinDraft, pinDraftLabel, pinLabel, pinGroups, alignGroup, placeholder, onAttach, renderAttachment }: {
+export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isMine, canDelete, onEdit, onDelete, onToggleDone, quote, onClearQuote, focusedId, onQuoteClick, pinDraft, pinDraftLabel, pinLabel, pinGroups, alignGroup, pinTone, hoverId, onHover, placeholder, onAttach, renderAttachment }: {
   comments: ThreadComment[];
   /** Resolves true once the comment is in, which clears the box. quote: the words
    *  it is about; attachmentFileId: a file added with it. */
@@ -149,6 +149,11 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
   /** Where an image sits on the page, so its comments line up beside it (Derek,
    *  2026-09-14: "move the back comments down to align with that image"). */
   alignGroup?: (label: string) => HTMLElement | null;
+  /** The pins' colour when it isn't the button colour (an image review's orange pins). */
+  pinTone?: string;
+  /** The comment whose pin the pointer is over, lit here too; onHover reports this side's. */
+  hoverId?: string | null;
+  onHover?: (id: string | null) => void;
   /** Takes the words or the pin off the next comment. */
   onClearQuote?: () => void;
   /** A comment picked from its highlight or pin: shown and scrolled to. */
@@ -180,6 +185,8 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
   const [showDone, setShowDone] = useState(false);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // A comment on the whole of a version with several images opens from a link.
+  const [wholeOpen, setWholeOpen] = useState(false);
   const act = async (id: string, work: () => Promise<boolean>) => {
     setBusyId(id);
     const ok = await work();
@@ -241,7 +248,7 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
     else if (openOnes.findIndex((c) => c.id === focusedId) >= LATEST_COMMENTS) setShowOlder(true);
     requestAnimationFrame(() => itemRefs.current.get(focusedId)?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
   }, [focusedId]); // eslint-disable-line react-hooks/exhaustive-deps
-  const pinColor = buttonStyle?.background as string | undefined;
+  const pinColor = pinTone ?? (buttonStyle?.background as string | undefined);
   // On a version with several images, each image's comments sit in their own box
   // titled with its name, in the images' order and by pin number, then a box for
   // the ones on the whole version (Derek, 2026-09-14: "group the changes by image",
@@ -250,11 +257,18 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
   const byPin = (a: ThreadComment, b: ThreadComment) => Number(!!a.completedAt) - Number(!!b.completedAt) || (a.pin?.number ?? 0) - (b.pin?.number ?? 0);
   const groups = grouping
     ? pinGroups!.map((label) => ({ label, items: shown.filter((c) => groupOf(c) === label).sort(byPin) }))
-      .filter((g) => g.items.length || g.label === pinDraftLabel)
     : null;
   const wholeVersion = grouping ? shown.filter((c) => !groupOf(c)) : [];
   // The box for writing moves into an image's own box once a pin is dropped on it.
   const writeIn = grouping && pinDraft && pinDraftLabel ? pinDraftLabel : null;
+  // Esc takes a dropped pin off before anything else hears it (the review window
+  // closes on Esc from the document, so this listens on the window, first).
+  useEffect(() => {
+    if (!pinDraft || !onClearQuote) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); onClearQuote(); } };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [pinDraft, onClearQuote]);
 
   // Each image's box starts level with its image when the two sit side by side (on a
   // phone the comments stack under the images, so nothing moves). Measured after
@@ -296,7 +310,8 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
     const chip = place && !grouped;
     return (
       <li key={c.id} ref={(el) => { if (el) itemRefs.current.set(c.id, el); else itemRefs.current.delete(c.id); }}
-        className={`flex gap-3 py-3 ${focusedId === c.id ? "-mx-2 rounded-lg px-2 ring-2 ring-highlight" : ""}`}>
+        onMouseEnter={onHover && c.pin ? () => onHover(c.id) : undefined} onMouseLeave={onHover && c.pin ? () => onHover(null) : undefined}
+        className={`-mx-2 flex gap-3 rounded-lg px-2 py-3 transition-colors ${focusedId === c.id ? "ring-2 ring-highlight" : ""} ${hoverId === c.id ? "bg-highlight-soft/60" : ""}`}>
         {c.pin ? (
           <button onClick={() => onQuoteClick?.(c.id)} disabled={!onQuoteClick} title={`Show pin ${c.pin.number}${place ? ` on ${place}` : ""}`}
             aria-label={`Show pin ${c.pin.number}${place ? ` on ${place}` : ""}`} className={`h-8 shrink-0 ${done ? "opacity-50" : ""}`}>
@@ -312,10 +327,11 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
             <span className="min-w-0 break-words font-semibold">{c.authorLabel || (c.fromClient ? "Client" : "Team")}</span>
             {chip && <span className="shrink-0 rounded-full bg-background px-2 text-[16px] text-muted">{place}</span>}
             <span className="ml-auto flex shrink-0 items-center gap-1">
-              <button role="checkbox" aria-checked={done} aria-label={done ? "Mark not done" : "Mark done"} title={done ? "Mark not done" : "Mark done"}
-                onClick={() => void act(c.id, () => onToggleDone(c.id, !done))} disabled={busy} style={done ? buttonStyle : undefined}
-                className={`flex h-8 w-8 items-center justify-center rounded-full transition disabled:opacity-50 ${done ? "bg-accent text-white" : "text-muted hover:bg-background hover:text-accent"}`}>
-                <I.check />
+              {/* Said in words, so what it does is plain (Derek, 2026-09-14 redesign). */}
+              <button aria-pressed={done} title={done ? "Open it again" : "Mark it resolved"}
+                onClick={() => void act(c.id, () => onToggleDone(c.id, !done))} disabled={busy}
+                className={`whitespace-nowrap rounded-full px-3 py-0.5 text-[16px] transition disabled:opacity-50 ${done ? "bg-success-soft font-semibold text-success" : "border text-muted hover:border-success hover:text-success"}`}>
+                {done ? "Resolved ✓" : "Resolve"}
               </button>
               {!isEditing && (mine || canDelete(c)) && (
                 <ActionMenu label={<I.dots />} title="More actions"
@@ -368,6 +384,11 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
         {comments.length > 0 && (
           <span className="rounded-full bg-background px-2.5 py-0.5 text-[16px] text-muted">{openOnes.length ? `${openOnes.length} open` : "All done"}</span>
         )}
+        {viewer === "team" && (
+          <span title="The client sees these on their review page" aria-label="The client sees these on their review page" className="inline-flex text-muted">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></svg>
+          </span>
+        )}
         {doneOnes.length > 0 && (
           <button onClick={() => setShowDone((s) => !s)} aria-expanded={showDone}
             className="ml-auto text-[16px] font-medium text-muted hover:text-foreground hover:underline">
@@ -375,7 +396,6 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
           </button>
         )}
       </div>
-      {viewer === "team" && <p className="text-[16px] text-muted">The client sees these on their review page.</p>}
     </>
   );
   const composer = (
@@ -395,7 +415,7 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
         </div>
       )}
       <div className="mt-2 flex items-end gap-1 rounded-lg border bg-background py-1 pl-3 pr-1 focus-within:border-accent">
-        <textarea ref={boxRef} value={draft} rows={2} maxLength={4000}
+        <textarea ref={boxRef} value={draft} rows={2} maxLength={4000} data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false"
           onChange={(e) => { setDraft(e.target.value); fit(e.currentTarget); }}
           onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void post(); } }}
           placeholder={pinDraft ? "Write a comment on this spot…" : quote ? "Write a comment on these words…" : placeholder ?? "Write a comment, or select words in the document to comment on them…"}
@@ -426,30 +446,87 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
     </>
   );
 
+  // The box for a pin just dropped on an image: roomy, with Post and Cancel said in
+  // words, and Grammarly kept off it (its button sat on top of the old box).
+  const writeBox = (
+    <div className="rounded-xl border border-highlight bg-surface shadow-[0_0_0_4px_var(--highlight-soft)]">
+      <div className="flex items-center gap-2 px-3 pt-2.5 text-[16px] text-muted">
+        {pinDraft && <PinNumber number={pinDraft} color={pinColor} />}
+        <span className="min-w-0 flex-1">New comment on this spot</span>
+      </div>
+      <textarea ref={boxRef} value={draft} rows={3} maxLength={4000} data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false"
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void post(); } }}
+        placeholder="What should change here?" aria-label="Write a comment on this spot"
+        className="block w-full resize-y bg-transparent px-3 py-2 text-[16px] leading-snug outline-none" />
+      {attached && (
+        <div className="flex items-center gap-2 px-3 pb-1 text-[16px]">
+          <span className="min-w-0 flex-1 truncate">📎 {attached.name}</span>
+          <button onClick={() => setAttached(null)} title="Leave the file off this comment" aria-label="Leave the file off this comment"
+            className="shrink-0 px-1 text-[18px] leading-none text-muted hover:text-foreground">×</button>
+        </div>
+      )}
+      <div className="flex items-center gap-2 border-t px-2 py-2">
+        {onAttach && (
+          <>
+            <input ref={fileInput} type="file" className="hidden" onChange={(e) => { void attach(e.target.files?.[0]); e.target.value = ""; }} />
+            <button onClick={() => fileInput.current?.click()} disabled={attaching || posting} title={attaching ? "Adding the file…" : "Attach a file"} aria-label="Attach a file"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted hover:bg-background hover:text-foreground disabled:opacity-50">
+              {attaching ? <span className="text-[16px]">…</span> : <I.clip />}
+            </button>
+          </>
+        )}
+        <span className="mr-auto hidden text-[16px] text-muted sm:inline">⌘ Enter posts</span>
+        {onClearQuote && <button onClick={onClearQuote} className="rounded-lg px-3 py-1.5 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>}
+        <button onClick={() => void post()} disabled={!canPost} style={canPost ? buttonStyle : undefined}
+          className="rounded-lg bg-accent px-4 py-1.5 text-[16px] font-semibold text-white transition disabled:opacity-40">
+          {posting ? "Posting…" : "Post"}
+        </button>
+      </div>
+    </div>
+  );
+
   if (groups) {
+    // One card per image, level with it when side by side, joined by a rail so the
+    // space between them reads as meant. The first card carries the thread's header
+    // and the comments on the whole version (Derek, 2026-09-14 redesign).
+    const railed = !!alignGroup;
     return (
-      <div className="space-y-3">
-        <section className="rounded-xl border bg-surface px-4 py-3">
-          {header}
-          {!writeIn && composer}
-          {wholeVersion.length > 0 && (
-            <div className="mt-3">
-              <h4 className="text-[16px] font-semibold text-muted">Whole version</h4>
-              <ul className="mt-1 divide-y border-t">{wholeVersion.map((c) => item(c, true))}</ul>
-            </div>
-          )}
-        </section>
-        {groups.map((g) => {
+      <div className={`relative space-y-3 ${railed ? "lg:pl-6" : ""}`}>
+        {railed && <span aria-hidden className="absolute bottom-8 left-[5px] top-8 hidden w-0.5 rounded-full bg-border lg:block" />}
+        {groups.map((g, gi) => {
           const open = g.items.filter((c) => !c.completedAt).length;
           return (
-            <section key={g.label} aria-label={`Comments on ${g.label}`} className="rounded-xl border bg-surface px-4 py-3"
+            <section key={g.label} aria-label={`Comments on ${g.label}`} className="relative rounded-xl border bg-surface shadow-sm"
               ref={(el) => { if (el) groupBoxes.current.set(g.label, el); else groupBoxes.current.delete(g.label); }}>
-              <div className="flex items-center gap-2 border-b pb-2">
+              {railed && <span aria-hidden className="absolute -left-6 top-5 hidden h-3 w-3 rounded-full border-2 border-border bg-background lg:block" />}
+              {gi === 0 && (
+                <div className="border-b px-4 py-3">
+                  {header}
+                  <p className="mt-1 text-[16px] text-muted">Click a spot on an image to comment on it.</p>
+                  {wholeVersion.length > 0 && (
+                    <div className="mt-2">
+                      <h4 className="text-[16px] font-semibold text-muted">On the whole version</h4>
+                      <ul className="divide-y">{wholeVersion.map((c) => item(c, true))}</ul>
+                    </div>
+                  )}
+                  {!writeIn && (wholeOpen
+                    ? composer
+                    : <button onClick={() => setWholeOpen(true)} className="mt-1 text-[16px] font-medium text-accent hover:underline">Comment on the whole version</button>)}
+                </div>
+              )}
+              <div className="flex items-center gap-2 px-4 pb-2 pt-3">
                 <h4 className="min-w-0 break-words text-[16px] font-semibold">{g.label}</h4>
-                <span className="ml-auto shrink-0 text-[16px] text-muted">{open ? `${open} open` : g.items.length ? "All done" : ""}</span>
+                {g.items.length > 0 && (
+                  <span className={`ml-auto shrink-0 rounded-full px-2.5 text-[16px] tabular-nums ${open ? "bg-highlight-soft text-foreground" : "bg-success-soft text-success"}`}>
+                    {open ? `${open} open` : "All resolved"}
+                  </span>
+                )}
               </div>
-              {writeIn === g.label && <div className="pb-2">{composer}</div>}
-              {g.items.length > 0 && <ul className="divide-y">{g.items.map((c) => item(c, true))}</ul>}
+              {writeIn === g.label && <div className="px-4 pb-3">{writeBox}</div>}
+              {g.items.length > 0
+                ? <ul className="divide-y border-t px-4">{g.items.map((c) => item(c, true))}</ul>
+                : writeIn !== g.label && <p className="border-t px-4 py-3 text-[16px] text-muted">No comments yet. Click the image to add one.</p>}
             </section>
           );
         })}
@@ -508,7 +585,7 @@ export function ImageVersionPicker({ options, value, onChange }: {
 /** The image with its numbered pins. Clicking the image drops the next pin there
  *  when onPlace is given; clicking a pin picks its comment. Pins sit at a share of
  *  the image's width and height, so they stay put at any size. */
-export function ImagePinBoard({ src, alt, comments, fileId, pending, activeId, onPlace, onPinClick, color }: {
+export function ImagePinBoard({ src, alt, comments, fileId, pending, activeId, hoverId, onPinHover, onPlace, onPinClick, color = "var(--highlight)" }: {
   src: string;
   alt: string;
   comments: ThreadComment[];
@@ -517,9 +594,12 @@ export function ImagePinBoard({ src, alt, comments, fileId, pending, activeId, o
   /** The pin dropped for the comment being written. */
   pending?: { fileId: string; x: number; y: number; number: number } | null;
   activeId?: string | null;
+  /** The comment the pointer is over in the thread; its pin lights up. */
+  hoverId?: string | null;
+  onPinHover?: (commentId: string | null) => void;
   onPlace?: (spot: { x: number; y: number }) => void;
   onPinClick: (commentId: string) => void;
-  /** The pin color: the client page's navy, else the app's accent. */
+  /** The pin colour: the app's orange, which holds on dark artwork where navy vanished. */
   color?: string;
 }) {
   const place = (e: React.MouseEvent<HTMLImageElement>) => {
@@ -528,23 +608,24 @@ export function ImagePinBoard({ src, alt, comments, fileId, pending, activeId, o
     const clamp = (v: number) => Math.min(1, Math.max(0, v));
     onPlace({ x: clamp((e.clientX - r.left) / r.width), y: clamp((e.clientY - r.top) / r.height) });
   };
-  const marker = "absolute flex h-9 min-w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-white px-1 text-[16px] font-bold leading-none text-white shadow-lg";
+  const marker = "absolute flex h-9 min-w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-[3px] border-white px-1 text-[16px] font-bold leading-none text-white shadow-[0_2px_8px_rgba(0,0,0,0.35)]";
   const pins = comments.filter((c) => c.pin && c.pin.fileId === fileId);
   return (
     <div className="relative mx-auto w-fit max-w-full select-none">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={src} alt={alt} onClick={place} draggable={false}
-        className={`block h-auto max-w-full rounded-lg ${onPlace ? "cursor-crosshair" : ""}`} />
+        className={`block h-auto max-w-full rounded-xl shadow-[0_1px_2px_rgba(20,24,40,0.06),0_10px_28px_rgba(20,24,40,0.14)] ${onPlace ? "cursor-crosshair" : ""}`} />
       {pins.map((c) => (
         <button key={c.id} onClick={() => onPinClick(c.id)} title={`Pin ${c.pin!.number}`} aria-label={`Pin ${c.pin!.number}`}
-          className={`${marker} transition hover:scale-110 ${activeId === c.id ? "z-10 ring-4 ring-highlight" : ""} ${c.completedAt ? "opacity-60" : ""}`}
-          style={{ left: `${c.pin!.x * 100}%`, top: `${c.pin!.y * 100}%`, background: c.completedAt ? "#6b7280" : color ?? "var(--accent)" }}>
+          onMouseEnter={onPinHover ? () => onPinHover(c.id) : undefined} onMouseLeave={onPinHover ? () => onPinHover(null) : undefined}
+          className={`${marker} transition hover:scale-110 ${activeId === c.id || hoverId === c.id ? "z-10 scale-110 ring-4 ring-highlight/50" : ""} ${c.completedAt ? "opacity-60" : ""}`}
+          style={{ left: `${c.pin!.x * 100}%`, top: `${c.pin!.y * 100}%`, background: c.completedAt ? "#6b7280" : color }}>
           {c.pin!.number}
         </button>
       ))}
       {pending && pending.fileId === fileId && (
-        <span aria-hidden className={`${marker} z-10 ring-4 ring-highlight`}
-          style={{ left: `${pending.x * 100}%`, top: `${pending.y * 100}%`, background: color ?? "var(--accent)" }}>
+        <span aria-hidden className={`${marker} z-10 bg-surface ring-4 ring-highlight/40`}
+          style={{ left: `${pending.x * 100}%`, top: `${pending.y * 100}%`, borderColor: color, color }}>
           {pending.number}
         </span>
       )}

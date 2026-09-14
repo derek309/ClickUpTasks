@@ -89,6 +89,8 @@ export default function DocReviewView({ token }: { token: string }) {
   // are shown (Derek, 2026-09-12: comments on a specific sentence).
   const [quoteDraft, setQuoteDraft] = useState<string | null>(null);
   const [focusedComment, setFocusedComment] = useState<string | null>(null);
+  // The comment the pointer is over, in the thread or on its pin, lit on both.
+  const [hoveredComment, setHoveredComment] = useState<string | null>(null);
   // Image and page reviews: the pin dropped for the next comment, and the version
   // looked at (null follows the newest).
   const [pinDraft, setPinDraft] = useState<PinDraft | null>(null);
@@ -458,7 +460,9 @@ export default function DocReviewView({ token }: { token: string }) {
                 2026-09-11). On a phone the sidebar stacks under the document. */}
             <div className="mt-6 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
               {versioned ? (
-                <article className="min-w-0 rounded-2xl border bg-surface p-5 shadow-sm sm:p-8">
+                // An image review's artwork sits on the page itself, no card around it
+                // (Derek, 2026-09-14 redesign); an HTML review keeps its card.
+                <article className={image && shownFileId ? "min-w-0" : "min-w-0 rounded-2xl border bg-surface p-5 shadow-sm sm:p-8"}>
                   {versionOptions.length > 1 && (
                     <div className="mb-3">
                       <ImageVersionPicker options={versionOptions} value={shownFileId} onChange={(id) => { setViewingImage(id); setPinDraft(null); }} />
@@ -470,13 +474,13 @@ export default function DocReviewView({ token }: { token: string }) {
                   )}
                   {shownFileId && image && (
                     // A version can hold several images, like a postcard's front and back, stacked with their names (Derek, 2026-09-14).
-                    <div className="space-y-6">
+                    <div className="space-y-8">
                       {shownImages.map((img) => (
                         <section key={`${shownFileId}:${img.fileId}`} aria-label={img.label} data-image-anchor={img.fileId}>
                           {shownImages.length > 1 && <h2 className="mb-2 text-[18px] font-semibold">{img.label}</h2>}
                           <ImagePinBoard src={fileHref(img.fileId)} alt={shownImages.length > 1 ? img.label : img.name}
-                            comments={data.comments ?? []} fileId={img.fileId} pending={pinDraft} activeId={focusedComment} color={NAVY}
-                            onPinClick={setFocusedComment}
+                            comments={data.comments ?? []} fileId={img.fileId} pending={pinDraft} activeId={focusedComment}
+                            onPinClick={setFocusedComment} hoverId={hoveredComment} onPinHover={setHoveredComment}
                             onPlace={data.closed || !onNewest ? undefined : (spot) => setPinDraft({ fileId: img.fileId, ...spot, anchor: null, number: nextPin(data.comments ?? [], img.fileId) })} />
                         </section>
                       ))}
@@ -571,7 +575,9 @@ export default function DocReviewView({ token }: { token: string }) {
                   alignGroup={image ? (label) => {
                     const img = shownImages.find((x) => x.label === label);
                     return img ? document.querySelector<HTMLElement>(`[data-image-anchor="${img.fileId}"]`) : null;
-                  } : undefined} pinDraftLabel={image && pinDraft ? imagePlace(pinDraft.fileId) : null} onPost={postComment} when={commentTime} viewer="client" buttonStyle={{ background: NAVY }}
+                  } : undefined} pinDraftLabel={image && pinDraft ? imagePlace(pinDraft.fileId) : null}
+                  pinTone={image ? "var(--highlight)" : undefined} hoverId={image ? hoveredComment : undefined} onHover={image ? setHoveredComment : undefined}
+                  onPost={postComment} when={commentTime} viewer="client" buttonStyle={{ background: NAVY }}
                   isMine={(c) => c.fromClient} canDelete={(c) => c.fromClient}
                   onEdit={(id, body) => changeComment(id, { body })}
                   onToggleDone={(id, done) => changeComment(id, { done })}

@@ -113,6 +113,8 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   // are shown (Derek, 2026-09-12: comments on a specific sentence).
   const [quoteDraft, setQuoteDraft] = useState<string | null>(null);
   const [focusedComment, setFocusedComment] = useState<string | null>(null);
+  // The comment the pointer is over, in the thread or on its pin, lit on both.
+  const [hoveredComment, setHoveredComment] = useState<string | null>(null);
   // Image and page reviews: the pin dropped for the next comment, and the version
   // looked at (null follows the newest).
   const [pinDraft, setPinDraft] = useState<PinDraft | null>(null);
@@ -939,7 +941,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   );
 
   const versionArticle = (
-    <article className="rounded-2xl border bg-surface p-5 shadow-sm sm:p-8">
+    <article className={image && doc.body ? "min-w-0" : "rounded-2xl border bg-surface p-5 shadow-sm sm:p-8"}>
       <input ref={versionInput} type="file" accept={page ? PAGE_ACCEPT : IMAGE_ACCEPT} className="hidden" multiple={image}
         onChange={(e) => { if (e.target.files) void (page ? uploadPage(e.target.files) : uploadImages(e.target.files, slotRef.current)); e.target.value = ""; }} />
       {!doc.body ? (
@@ -950,60 +952,49 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
         )
       ) : (
         <>
-          {(!page || versionOptions.length > 1) && (
-            <div className="mb-3 flex flex-wrap items-center gap-3">
-              <div className="min-w-0 flex-1">
-                <ImageVersionPicker options={versionOptions} value={shownFileId} onChange={(id) => { setViewingVersion(id); setPinDraft(null); }} />
-              </div>
-              {editingSet && shownItems.length < MAX_SET_IMAGES && (
-                <button onClick={() => { slotRef.current = null; versionInput.current?.click(); }} disabled={adding} className={quiet}>
-                  {adding ? "Uploading…" : "Add images"}
-                </button>
-              )}
-              {!page && moreActions}
+          {page && versionOptions.length > 1 && (
+            <div className="mb-3">
+              <ImageVersionPicker options={versionOptions} value={shownFileId} onChange={(id) => { setViewingVersion(id); setPinDraft(null); }} />
             </div>
           )}
           {page && pasteOpen && !locked && pasteBox}
           {page ? pageFrameView : (
             // Stacked, each with its own name and pins (Derek, 2026-09-14). The working
             // copy's images can be renamed, replaced or taken out; an older version is read only.
-            <div className="space-y-6">
+            <div className="space-y-8">
               {shownItems.map((item, i) => {
                 const f = files.find((x) => x.id === item.file);
                 const url = f ? thumbs[f.path] : undefined;
                 const label = imageLabel(shownItems, i);
                 return (
-                  <section key={`${shownFileId}:${item.file}`} aria-label={label} data-image-anchor={item.file}>
+                  <section key={`${shownFileId}:${item.file}`} aria-label={label} data-image-anchor={item.file} className="group">
                     {(shownItems.length > 1 || editingSet) && (
-                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                      <div className="mb-2 flex items-center gap-2">
                         {editingSet ? (
-                          <input key={`${doc.body}:${i}`} defaultValue={item.label} maxLength={40} aria-label={`Name of ${label}`}
+                          <input key={`${doc.body}:${i}`} defaultValue={item.label} maxLength={40} aria-label={`Name of ${label}`} title="Rename"
                             placeholder={imageLabel(shownItems.map((x, n) => (n === i ? { ...x, label: "" } : x)), i)}
                             onBlur={(e) => void relabelImage(i, e.currentTarget.value.trim())}
                             onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-                            className="min-w-0 flex-1 rounded-md bg-transparent px-1 py-0.5 text-[16px] font-semibold outline-none placeholder:text-foreground hover:bg-background focus:bg-background" />
+                            className="-ml-2 min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 text-[16px] font-semibold outline-none placeholder:text-foreground hover:bg-surface hover:ring-1 hover:ring-border focus:bg-surface focus:ring-2 focus:ring-accent" />
                         ) : (
                           <h3 className="min-w-0 flex-1 text-[16px] font-semibold">{label}</h3>
                         )}
+                        {/* One quiet menu per image instead of four buttons (Derek, 2026-09-14 redesign). */}
                         {editingSet && (
-                          <>
-                            {shownItems.length > 1 && (
-                              <>
-                                <button onClick={() => void moveImage(i, -1)} disabled={i === 0 || adding || busy !== null}
-                                  title={`Move ${label} up`} aria-label={`Move ${label} up`} className={quiet}>↑</button>
-                                <button onClick={() => void moveImage(i, 1)} disabled={i === shownItems.length - 1 || adding || busy !== null}
-                                  title={`Move ${label} down`} aria-label={`Move ${label} down`} className={quiet}>↓</button>
-                              </>
-                            )}
-                            <button onClick={() => { slotRef.current = i; versionInput.current?.click(); }} disabled={adding} className={quiet}>Replace</button>
-                            {shownItems.length > 1 && <button onClick={() => void takeOutImage(i)} disabled={adding} className={quiet}>Take out</button>}
-                          </>
+                          <ActionMenu label="⋯" title={`${label} actions`}
+                            triggerClassName={`${quiet} opacity-60 transition group-hover:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 [@media(hover:none)]:opacity-100`}
+                            items={[
+                              { label: "Replace image", disabled: adding, onClick: () => { slotRef.current = i; versionInput.current?.click(); } },
+                              shownItems.length > 1 && { label: "Move up", disabled: i === 0 || adding || busy !== null, onClick: () => void moveImage(i, -1) },
+                              shownItems.length > 1 && { label: "Move down", disabled: i === shownItems.length - 1 || adding || busy !== null, onClick: () => void moveImage(i, 1) },
+                              shownItems.length > 1 && { label: "Take out of this version", danger: true, disabled: adding, onClick: () => void takeOutImage(i) },
+                            ]} />
                         )}
                       </div>
                     )}
                     {url ? (
                       <ImagePinBoard src={url} alt={f?.name ?? label} comments={comments} fileId={item.file}
-                        pending={pinDraft} activeId={focusedComment} onPinClick={setFocusedComment}
+                        pending={pinDraft} activeId={focusedComment} onPinClick={setFocusedComment} hoverId={hoveredComment} onPinHover={setHoveredComment}
                         onPlace={locked ? undefined : (spot) => setPinDraft({ fileId: item.file, ...spot, anchor: null, number: nextPin(comments, item.file) })} />
                     ) : (
                       <p className="py-10 text-center text-[16px] text-muted">Loading the image…</p>
@@ -1026,9 +1017,115 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     </article>
   );
 
+  const historyPanel = historyOpen && (
+    <section className="mt-3 rounded-xl border bg-surface px-4 py-2.5">
+      {timeline.length === 0 && <p className="text-[16px] text-muted">Sends, client answers, new versions and files show up here with who did them.</p>}
+      <div className="mt-1.5 space-y-1.5">
+        {shownTimeline.map((entry) => {
+          const i = timeline.indexOf(entry);
+          const previous = comparable(entry) ? timeline.slice(i + 1).find((e) => (entry.pageFile ? e.pageFile !== undefined : e.body !== undefined)) : undefined;
+          const open = openEntry === entry.key;
+          const d = open && previous?.body !== undefined && entry.body !== undefined ? diffDocText(previous.body, entry.body) : null;
+          const pageBefore = previous?.pageFile ? pageTexts[previous.pageFile] : undefined;
+          const pageAfter = entry.pageFile ? pageTexts[entry.pageFile] : undefined;
+          const pageParts = open && pageBefore !== undefined && pageAfter !== undefined ? diffText(pageBefore, pageAfter) : null;
+          const parts = d?.parts ?? pageParts;
+          const changed = !!parts && parts.some((p) => p.type !== "same");
+          const waiting = open && !!entry.pageFile && !!previous && !pageParts;
+          return (
+            <div key={entry.key} className="rounded-lg border px-3 py-2">
+              <button onClick={() => openable(entry) && openHistoryEntry(entry, previous, open)}
+                className={`flex w-full flex-wrap items-center gap-x-2 text-left text-[16px] ${openable(entry) ? "" : "cursor-default"}`}>
+                <span className="font-semibold">{entry.title}</span>
+                {entry.who && <span className="text-muted">by {entry.who}</span>}
+                <span className="text-muted">{timeAgo(entry.at)}</span>
+              </button>
+              {open && (
+                <div className="mt-2">
+                  {!comparable(entry) ? null : !previous ? (
+                    <p className="text-[16px] text-muted">The first {entry.pageFile ? "version" : "saved text"}, so there is nothing to compare yet.</p>
+                  ) : waiting ? (
+                    <p className="text-[16px] text-muted">Reading both versions…</p>
+                  ) : d?.formattingOnly ? (
+                    <p className="text-[16px] text-muted">Only the formatting changed.</p>
+                  ) : !changed ? (
+                    <p className="text-[16px] text-muted">{entry.pageFile ? "Only the code changed." : "No changes to the text."}</p>
+                  ) : (
+                    <div className="whitespace-pre-wrap text-[16px] leading-relaxed">
+                      {parts!.map((p, k) => p.type === "same"
+                        ? <span key={k}>{p.text}</span>
+                        : p.type === "added"
+                          ? <ins key={k} className="rounded bg-success/15 px-0.5 text-success no-underline">{p.text}</ins>
+                          : <del key={k} className="rounded bg-danger/10 px-0.5 text-danger">{p.text}</del>)}
+                    </div>
+                  )}
+                  {!locked && entry.restore && (
+                    <button onClick={() => void patchDoc(entry.restore!, `${entry.restored} Send it when it's ready.`)}
+                      className="mt-2 text-[16px] font-semibold text-accent hover:underline">Use this version</button>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {timeline.length > HISTORY_PREVIEW && (
+        <button onClick={() => setAllHistory((a) => !a)} className="mt-1.5 text-[16px] font-medium text-accent hover:underline">
+          {allHistory ? "Show less" : `Show all ${timeline.length}`}
+        </button>
+      )}
+    </section>
+  );
+
+  // One bar for the whole image review (Derek, 2026-09-14 redesign): which version,
+  // where it stands, and the few actions that belong to all its images.
+  const lastSent = [...versions].filter((v) => v.kind === "sent").sort((a, b) => b.version - a.version)[0];
+  const shortDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const barStatus = needsSend
+    ? (doc.version ? "Changes not sent" : "Not sent yet")
+    : [lastSent ? `Sent ${shortDate(lastSent.createdAt)}` : null, doc.clientViewedAt ? `Viewed ${timeAgo(doc.clientViewedAt)}` : null].filter(Boolean).join(" · ");
+  const reviewBar = image && doc.body ? (
+    <div className="mb-6 flex flex-wrap items-center gap-3 rounded-xl border bg-surface px-4 py-2.5 shadow-sm">
+      {versionOptions.length > 1 ? (
+        <select value={shownFileId ?? ""} onChange={(e) => { setViewingVersion(e.target.value); setPinDraft(null); }} aria-label="Version shown"
+          className="cursor-pointer rounded-lg border bg-surface px-3 py-1.5 text-[16px] font-semibold outline-none focus:border-accent">
+          {versionOptions.map((o) => <option key={o.fileId} value={o.fileId}>{o.label}</option>)}
+        </select>
+      ) : (
+        <span className="rounded-lg border px-3 py-1.5 text-[16px] font-semibold">{versionOptions[0]?.label ?? "Version 1"}</span>
+      )}
+      {barStatus && (
+        <span className="flex items-center gap-2 text-[16px] text-muted">
+          <span aria-hidden className={`h-2 w-2 rounded-full ${needsSend ? "bg-highlight" : "bg-success"}`} />
+          {barStatus}
+        </span>
+      )}
+      <div className="ml-auto flex flex-wrap items-center gap-2">
+        {editingSet && shownItems.length < MAX_SET_IMAGES && (
+          <button onClick={() => { slotRef.current = null; versionInput.current?.click(); }} disabled={adding} className={quiet}>
+            {adding ? "Uploading…" : "Add images"}
+          </button>
+        )}
+        <button onClick={() => setHistoryOpen((o) => !o)} aria-expanded={historyOpen} className={quiet}>
+          {historyOpen ? "Hide history" : `History${timeline.length ? ` · ${timeline.length}` : ""}`}
+        </button>
+        {moreActions}
+        {needsSend && (
+          <button onClick={send} disabled={busy !== null}
+            className="rounded-lg bg-accent px-5 py-1.5 text-[16px] font-semibold text-white disabled:opacity-50">
+            {busy === "send" ? "Sending…" : doc.version === 0 ? "Send for review" : "Send changes"}
+          </button>
+        )}
+      </div>
+    </div>
+  ) : null;
+
   // Full screen puts Files and History in a right column beside the writing
   // (Derek, 2026-09-11); in place they stack under it, since the task column is narrow.
   const content = (
+    <>
+    {reviewBar}
+    {image && historyPanel && <div className="-mt-3 mb-6">{historyPanel}</div>}
     <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
       <div className="min-w-0">
       {!image && clientCrossed && (
@@ -1059,6 +1156,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
         </article>
       )}
 
+      {!reviewBar && (
       <div className="mt-4 flex flex-wrap items-center gap-3">
         {needsSend && (
           <button onClick={send} disabled={busy !== null}
@@ -1074,66 +1172,9 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
           {historyOpen ? "Hide history" : `History${timeline.length ? ` · ${timeline.length}` : ""}`}
         </button>
       </div>
-
-      {historyOpen && (
-        <section className="mt-3 rounded-xl border bg-surface px-4 py-2.5">
-          {timeline.length === 0 && <p className="text-[16px] text-muted">Sends, client answers, new versions and files show up here with who did them.</p>}
-          <div className="mt-1.5 space-y-1.5">
-            {shownTimeline.map((entry) => {
-              const i = timeline.indexOf(entry);
-              const previous = comparable(entry) ? timeline.slice(i + 1).find((e) => (entry.pageFile ? e.pageFile !== undefined : e.body !== undefined)) : undefined;
-              const open = openEntry === entry.key;
-              const d = open && previous?.body !== undefined && entry.body !== undefined ? diffDocText(previous.body, entry.body) : null;
-              const pageBefore = previous?.pageFile ? pageTexts[previous.pageFile] : undefined;
-              const pageAfter = entry.pageFile ? pageTexts[entry.pageFile] : undefined;
-              const pageParts = open && pageBefore !== undefined && pageAfter !== undefined ? diffText(pageBefore, pageAfter) : null;
-              const parts = d?.parts ?? pageParts;
-              const changed = !!parts && parts.some((p) => p.type !== "same");
-              const waiting = open && !!entry.pageFile && !!previous && !pageParts;
-              return (
-                <div key={entry.key} className="rounded-lg border px-3 py-2">
-                  <button onClick={() => openable(entry) && openHistoryEntry(entry, previous, open)}
-                    className={`flex w-full flex-wrap items-center gap-x-2 text-left text-[16px] ${openable(entry) ? "" : "cursor-default"}`}>
-                    <span className="font-semibold">{entry.title}</span>
-                    {entry.who && <span className="text-muted">by {entry.who}</span>}
-                    <span className="text-muted">{timeAgo(entry.at)}</span>
-                  </button>
-                  {open && (
-                    <div className="mt-2">
-                      {!comparable(entry) ? null : !previous ? (
-                        <p className="text-[16px] text-muted">The first {entry.pageFile ? "version" : "saved text"}, so there is nothing to compare yet.</p>
-                      ) : waiting ? (
-                        <p className="text-[16px] text-muted">Reading both versions…</p>
-                      ) : d?.formattingOnly ? (
-                        <p className="text-[16px] text-muted">Only the formatting changed.</p>
-                      ) : !changed ? (
-                        <p className="text-[16px] text-muted">{entry.pageFile ? "Only the code changed." : "No changes to the text."}</p>
-                      ) : (
-                        <div className="whitespace-pre-wrap text-[16px] leading-relaxed">
-                          {parts!.map((p, k) => p.type === "same"
-                            ? <span key={k}>{p.text}</span>
-                            : p.type === "added"
-                              ? <ins key={k} className="rounded bg-success/15 px-0.5 text-success no-underline">{p.text}</ins>
-                              : <del key={k} className="rounded bg-danger/10 px-0.5 text-danger">{p.text}</del>)}
-                        </div>
-                      )}
-                      {!locked && entry.restore && (
-                        <button onClick={() => void patchDoc(entry.restore!, `${entry.restored} Send it when it's ready.`)}
-                          className="mt-2 text-[16px] font-semibold text-accent hover:underline">Use this version</button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          {timeline.length > HISTORY_PREVIEW && (
-            <button onClick={() => setAllHistory((a) => !a)} className="mt-1.5 text-[16px] font-medium text-accent hover:underline">
-              {allHistory ? "Show less" : `Show all ${timeline.length}`}
-            </button>
-          )}
-        </section>
       )}
+
+      {!image && historyPanel}
 
       </div>
       {/* Files and Comments stay beside the writing as it scrolls (Derek, 2026-09-11). */}
@@ -1165,6 +1206,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
             const i = shownItems.findIndex((_, n) => imageLabel(shownItems, n) === label);
             return i < 0 ? null : document.querySelector<HTMLElement>(`[data-image-anchor="${shownItems[i].file}"]`);
           } : undefined} pinDraftLabel={image && pinDraft ? imagePlace(pinDraft.fileId) : null}
+          pinTone={image ? "var(--highlight)" : undefined} hoverId={image ? hoveredComment : undefined} onHover={image ? setHoveredComment : undefined}
           isMine={(c) => !!meId && comments.find((x) => x.id === c.id)?.authorId === meId}
           canDelete={() => true}
           onEdit={(id, body) => changeComment(id, { body })}
@@ -1177,6 +1219,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
           focusedId={focusedComment} onQuoteClick={focusComment} />
       </div>
     </div>
+    </>
   );
 
   return (
