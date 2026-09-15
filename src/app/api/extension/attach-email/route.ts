@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { requireApiToken } from "@/lib/serverAuth";
+import { canActOnTask } from "@/lib/taskAccess";
 import { googleConfigured, resolveGmailThread, readGmailThread } from "@/lib/googleMail";
 
 // Attach an existing email thread to a task, and keep it attached.
@@ -43,8 +44,9 @@ export async function POST(req: NextRequest) {
   // reach this route should not be able to file mail against a task it cannot
   // see, nor point it at someone else's contact.
   const { data: task } = await supabaseAdmin
-    .from("tasks").select("id, client_id, contact_id, title").eq("id", taskId).maybeSingle();
+    .from("tasks").select("id, contact_id, title, client_id, assignee_id, is_private, deleted_at").eq("id", taskId).maybeSingle();
   if (!task) return NextResponse.json({ error: "No such task." }, { status: 404 });
+  if (!(await canActOnTask(caller, task))) return NextResponse.json({ error: "Unknown or inaccessible task." }, { status: 403 });
 
   const thread = await resolveGmailThread(caller.email, { messageId, rfc822, fromEmail, subject });
   if (!thread) return NextResponse.json({ error: "Couldn't find that email in Gmail." }, { status: 404 });
@@ -54,8 +56,10 @@ export async function POST(req: NextRequest) {
   // to hang off and the reply poller could never match it either.
   let contactId: string | null = task.contact_id ?? null;
   if (!contactId && fromEmail) {
+    // ilike for case only: its wildcards are escaped, or a % or _ in the
+    // address would match some other contact.
     const { data: ct } = await supabaseAdmin
-      .from("contacts").select("id").ilike("email", fromEmail).limit(1).maybeSingle();
+      .from("contacts").select("id").ilike("email", fromEmail.replace(/[\\%_]/g, "\\$&")).limit(1).maybeSingle();
     contactId = ct?.id ?? null;
   }
   if (!contactId) return NextResponse.json({ error: "No contact on this task to file the email against." }, { status: 400 });

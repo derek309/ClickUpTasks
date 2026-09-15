@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { authorizeCron } from "@/lib/cronAuth";
 import { sendScheduledMessageNow } from "@/lib/sendMessageServer";
@@ -14,6 +15,12 @@ import { sendScheduledMessageNow } from "@/lib/sendMessageServer";
 
 export const maxDuration = 60;
 
+// A run lasts at most a minute, so a row still at sending an hour after it was
+// due was cut off mid send by an earlier run.
+const STUCK_AFTER_MS = 60 * 60 * 1000;
+
+type AuthorRow = { client_id: string; task_id: string | null; channel: string; created_by: string };
+
 export async function GET(req: NextRequest) {
   return run(req);
 }
@@ -21,10 +28,34 @@ export async function POST(req: NextRequest) {
   return run(req);
 }
 
+// A bell for whoever scheduled the message. A failed send used to change its
+// status and tell nobody, and the composer only lists pending messages.
+async function tellAuthor(row: AuthorRow, what: string): Promise<void> {
+  const { data: client } = await supabaseAdmin.from("clients").select("name").eq("id", row.client_id).maybeSingle();
+  const kind = row.channel === "sms" ? "text" : "email";
+  const { error } = await supabaseAdmin.from("notifications").insert({
+    id: "n_" + randomUUID(), recipient_id: row.created_by,
+    text: `Your scheduled ${kind} to ${client?.name ?? "a client"} ${what}`,
+    task_id: row.task_id, actor_id: null, client_id: row.client_id, project_id: null,
+    at: new Date().toISOString(), read: false, kind: "activity",
+  });
+  if (error) console.error("[send-scheduled] failure bell not saved:", error.message);
+}
+
 async function run(req: NextRequest) {
   if (!adminConfigured) return NextResponse.json({ error: "Server not configured." }, { status: 501 });
 
   if (!(await authorizeCron(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  // Rows an earlier run claimed and never finished. Nobody can tell from here
+  // whether the message went out, so it is marked failed (it no longer looks
+  // queued) and the author is told to check before sending again.
+  const { data: stuck } = await supabaseAdmin
+    .from("scheduled_messages")
+    .update({ status: "failed", error: "Stopped partway through sending. It may or may not have gone out." })
+    .eq("status", "sending").lt("scheduled_at", new Date(Date.now() - STUCK_AFTER_MS).toISOString())
+    .select("client_id, task_id, channel, created_by");
+  for (const row of stuck ?? []) await tellAuthor(row, "stopped partway through sending. Check the client's messages before sending it again.");
 
   const { data: due, error } = await supabaseAdmin
     .from("scheduled_messages")
@@ -55,7 +86,8 @@ async function run(req: NextRequest) {
     } else {
       failed++;
       await supabaseAdmin.from("scheduled_messages").update({ status: "failed", error: result.error }).eq("id", row.id);
+      await tellAuthor(row, `didn't send: ${result.error}`);
     }
   }
-  return NextResponse.json({ ok: true, sent, failed, checked: (due ?? []).length });
+  return NextResponse.json({ ok: true, sent, failed, stuck: stuck?.length ?? 0, checked: (due ?? []).length });
 }

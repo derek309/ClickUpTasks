@@ -382,7 +382,16 @@ export const appendCommentDb = (taskId: string, comment: Comment) => save(() => 
 // the /api/cron/purge-trash sweep (trashCleanupServer.ts), or immediately
 // via hardDeleteTaskDb from the Trash panel's "Delete forever".
 export const deleteTaskDb = (id: string) => save(() => supabase.from("tasks").update({ deleted_at: new Date().toISOString() }).eq("id", id));
-export const restoreTaskDb = (id: string) => save(() => supabase.from("tasks").update({ deleted_at: null }).eq("id", id));
+// Restoring a task also brings back the project and client it sits in when
+// those are in the Trash (just those rows, not their other tasks). A live task
+// under a trashed parent stayed hidden, and the parent's purge 30 days later
+// deleted it along with the parent.
+export const restoreTaskDb = async (id: string) => {
+  const { data: t } = await supabase.from("tasks").select("project_id, client_id").eq("id", id).maybeSingle();
+  if (t?.project_id) await save(() => supabase.from("projects").update({ deleted_at: null }).eq("id", t.project_id).not("deleted_at", "is", null));
+  if (t?.client_id) await save(() => supabase.from("clients").update({ deleted_at: null }).eq("id", t.client_id).not("deleted_at", "is", null));
+  return save(() => supabase.from("tasks").update({ deleted_at: null }).eq("id", id));
+};
 export const hardDeleteTaskDb = (id: string) => save(() => supabase.from("tasks").delete().eq("id", id));
 export const upsertClient = (c: Client) => save(() => supabase.from("clients").upsert(clientToRow(c)));
 // One request for many new clients at once instead of N separate round trips.
@@ -396,8 +405,13 @@ export const deleteProjectDb = async (id: string) => {
   await save(() => supabase.from("tasks").update({ deleted_at: deletedAt }).eq("project_id", id).is("deleted_at", null));
   return save(() => supabase.from("projects").update({ deleted_at: deletedAt }).eq("id", id));
 };
+// Brings back only the tasks trashed together with the project (deleteProjectDb
+// stamps them with the project's own deleted_at), not ones trashed on their own
+// before it. Its client comes back too if it is in the Trash, as for a task.
 export const restoreProjectDb = async (id: string) => {
-  await save(() => supabase.from("tasks").update({ deleted_at: null }).eq("project_id", id));
+  const { data: p } = await supabase.from("projects").select("deleted_at, client_id").eq("id", id).maybeSingle();
+  if (p?.deleted_at) await save(() => supabase.from("tasks").update({ deleted_at: null }).eq("project_id", id).eq("deleted_at", p.deleted_at));
+  if (p?.client_id) await save(() => supabase.from("clients").update({ deleted_at: null }).eq("id", p.client_id).not("deleted_at", "is", null));
   return save(() => supabase.from("projects").update({ deleted_at: null }).eq("id", id));
 };
 export const hardDeleteProjectDb = (id: string) => save(() => supabase.from("projects").delete().eq("id", id));
@@ -409,9 +423,13 @@ export const deleteClientDb = async (id: string) => {
   await save(() => supabase.from("projects").update({ deleted_at: deletedAt }).eq("client_id", id).is("deleted_at", null));
   return save(() => supabase.from("clients").update({ deleted_at: deletedAt }).eq("id", id));
 };
+// Same rule as restoreProjectDb: only what was trashed with the client comes back.
 export const restoreClientDb = async (id: string) => {
-  await save(() => supabase.from("tasks").update({ deleted_at: null }).eq("client_id", id));
-  await save(() => supabase.from("projects").update({ deleted_at: null }).eq("client_id", id));
+  const { data: c } = await supabase.from("clients").select("deleted_at").eq("id", id).maybeSingle();
+  if (c?.deleted_at) {
+    await save(() => supabase.from("tasks").update({ deleted_at: null }).eq("client_id", id).eq("deleted_at", c.deleted_at));
+    await save(() => supabase.from("projects").update({ deleted_at: null }).eq("client_id", id).eq("deleted_at", c.deleted_at));
+  }
   return save(() => supabase.from("clients").update({ deleted_at: null }).eq("id", id));
 };
 export const hardDeleteClientDb = (id: string) => save(() => supabase.from("clients").delete().eq("id", id));

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { tokenForLocation, configuredLocations } from "@/lib/ghlTokens";
 import { requireUser } from "@/lib/serverAuth";
+import { isGhlContactVisible } from "@/lib/extensionApi";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -83,6 +84,17 @@ export async function POST(req: NextRequest) {
   const contactRowId = typeof b.contactId === "string" ? b.contactId.trim() : "";
   const write = typeof b.url === "string";
   if (!ghlContactId) return NextResponse.json({ error: "No contact." }, { status: 400 });
+  // Signing in was the only check, so any teammate could read or overwrite
+  // the SaaS field on any contact in any sub-account.
+  if (!(await isGhlContactVisible(caller, ghlContactId))) {
+    return NextResponse.json({ error: "You don't have access to this client." }, { status: 403 });
+  }
+  // The mirror row must be this GoHighLevel contact's own, or a request could
+  // write a saas_url onto any contacts row.
+  if (contactRowId) {
+    const { data: row } = await supabaseAdmin.from("contacts").select("id").eq("id", contactRowId).eq("ghl_contact_id", ghlContactId).maybeSingle();
+    if (!row) return NextResponse.json({ error: "That contact doesn't match." }, { status: 400 });
+  }
 
   const found = await findContact(ghlContactId);
   if (!found) return NextResponse.json({ error: "Couldn't find that contact in GoHighLevel." }, { status: 404 });

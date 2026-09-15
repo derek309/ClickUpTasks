@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { requireApiToken } from "@/lib/serverAuth";
-import { isClientVisible } from "@/lib/extensionApi";
+import { canActOnTask } from "@/lib/taskAccess";
 
 // "Add to existing task" — posts a comment (with an optional screenshot
 // attachment) instead of creating a new task. Mirrors appendCommentDb's
@@ -22,9 +22,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const screenshotPaths: string[] = Array.isArray(body.screenshot_paths) ? body.screenshot_paths.filter((p: unknown): p is string => typeof p === "string" && p.trim().length > 0) : [];
   if (!text && !screenshotPaths.length) return NextResponse.json({ error: "Nothing to add — no note or screenshot." }, { status: 400 });
 
-  const { data: task } = await supabaseAdmin.from("tasks").select("client_id").eq("id", taskId).maybeSingle();
+  const { data: task } = await supabaseAdmin.from("tasks").select("client_id, assignee_id, is_private, deleted_at").eq("id", taskId).maybeSingle();
   if (!task) return NextResponse.json({ error: "No such task." }, { status: 404 });
-  if (!(await isClientVisible(caller, task.client_id))) return NextResponse.json({ error: "Unknown or inaccessible task." }, { status: 403 });
+  if (!(await canActOnTask(caller, task))) return NextResponse.json({ error: "Unknown or inaccessible task." }, { status: 403 });
+
+  // Screenshots come from /api/extension/upload, which files them under the
+  // client picked in the side panel, the same client whose tasks it lists.
+  // Any other path could hang another client's file on this comment, and the
+  // app signs attachment paths for whoever opens the task.
+  const folder = `extension/${task.client_id}/`;
+  if (screenshotPaths.some((p) => !p.startsWith(folder) || p.includes(".."))) {
+    return NextResponse.json({ error: "Screenshots must be uploaded for this task's client." }, { status: 400 });
+  }
 
   const comment = {
     id: "cm_" + randomUUID(),

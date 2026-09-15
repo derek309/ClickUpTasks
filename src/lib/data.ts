@@ -564,7 +564,8 @@ export interface Message {
 /** An email being written to a client: a task's draft_email, or a client's saved draft (client_email_drafts). */
 export type EmailDraft = NonNullable<Task["draftEmail"]>;
 
-export type ScheduledMessageStatus = "pending" | "sent" | "failed" | "canceled";
+// sending: claimed by a run of the send-scheduled cron and not yet finished.
+export type ScheduledMessageStatus = "pending" | "sending" | "sent" | "failed" | "canceled";
 export interface ScheduledMessage {
   id: string;
   clientId: string;
