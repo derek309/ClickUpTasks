@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { rateLimit } from "@/lib/rateLimit";
-import { DOC_TOKEN_PATTERN, NO_STORE, docNotFound, resolveDocToken, latestPublished } from "@/lib/taskDocumentServer";
+import { DOC_TOKEN_PATTERN, NO_STORE, docNotFound, resolveDocToken, latestPublished, latestSentAt } from "@/lib/taskDocumentServer";
 import { sharedDocFiles, sharedVersionFiles, docComments, type SharedVersionFile } from "@/lib/taskDocumentFiles";
 import { isFileKind } from "@/lib/reviewKinds";
 
@@ -21,12 +21,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
 
   const scope = await resolveDocToken(token);
   if (!scope) return docNotFound();
-  const [latest, { data: doc }, files, comments, versionFiles] = await Promise.all([
+  const [latest, { data: doc }, files, comments, versionFiles, sharedAt] = await Promise.all([
     latestPublished(scope.documentId, scope.kind),
     supabaseAdmin.from("task_documents").select("status, approved_at, title").eq("id", scope.documentId).maybeSingle(),
     sharedDocFiles(scope.documentId),
     docComments(scope.documentId),
     isFileKind(scope.kind) ? sharedVersionFiles(scope.documentId) : Promise.resolve<SharedVersionFile[]>([]),
+    latestSentAt(scope.documentId),
   ]);
   if (!latest || !doc) return docNotFound();
 
@@ -44,5 +45,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     files,
     comments,
     versionFiles,
+    // When the team last sent a version: the client's comments count as changes from here on (reviewChanges.ts).
+    sharedAt,
   }, { headers: NO_STORE });
 }

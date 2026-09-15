@@ -54,9 +54,12 @@ vi.mock("./waitingNotify", () => ({
   notifyTeamOfClientActivity: (...args: unknown[]) => notify(...args),
 }));
 vi.mock("./serverAuth", () => ({ requireUser: async () => null, callerCanSeeTask: async () => false }));
+// The document's comments, as docComments returns them, set per test.
+let docCommentRows: any[] = [];
 vi.mock("./taskDocumentFiles", () => ({
   docVersionFile: async () => null, sharedVersionFiles: async () => [], readPageFile: async () => null,
   storePageFile: async () => ({ ok: false, status: 500, error: "not in this test" }), discardVersionFile: async () => {},
+  docComments: async () => docCommentRows,
 }));
 
 const { resolveDocToken, clientPublish } = await import("./taskDocumentServer");
@@ -74,10 +77,14 @@ const goodWorld = (): World => ({
   doc: { id: "tdoc_1", task_id: "t_1" },
 });
 
+// When the team sent the version under review.
+const SHARED_AT = "2026-09-10T00:00:00.000Z";
+
 function setWorld(w: World) {
   calls.length = 0;
   log.length = 0;
   rpcCalls.length = 0;
+  docCommentRows = [];
   notify.mockClear();
   answer = (c) => {
     if (c.op !== "select") return c.wantsRows ? (w.claim ?? [{ id: "tdoc_1" }]) : null;
@@ -86,6 +93,7 @@ function setWorld(w: World) {
     if (c.table === "clients") return w.client ?? null;
     if (c.table === "projects") return w.project ?? null;
     if (c.table === "task_documents") return w.doc ?? null;
+    if (c.table === "task_document_versions" && c.filters.some(([k, v]) => k === "kind" && v === "sent")) return { created_at: SHARED_AT };
     if (c.table === "task_document_versions") return { version: 3, body: "<p>Latest</p>" };
     return null;
   };
@@ -171,9 +179,36 @@ describe("clientPublish", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
+  it("will not approve over edited text, and publishes nothing", async () => {
+    const r = await clientPublish(scope, "client_approved", "<p>mine</p>", 3);
+    expect(r).toMatchObject({ ok: false, status: 409 });
+    expect(r.ok ? "" : r.error).toMatch(/Submit them as changes/);
+    expect(rpcCalls.find((c) => c.name === "publish_task_document_version")).toBeUndefined();
+  });
+
+  it("will not approve while the client has an open comment on this round", async () => {
+    docCommentRows = [{ id: "c1", fromClient: true, completedAt: null, createdAt: "2026-09-11T00:00:00.000Z", pin: null }];
+    const r = await clientPublish(scope, "client_approved", "<p>Latest</p>", 3);
+    expect(r).toMatchObject({ ok: false, status: 409 });
+    expect(log).toEqual([]);
+  });
+
+  it("approves once the comment is resolved, or when it was left before this version was sent", async () => {
+    docCommentRows = [
+      { id: "c1", fromClient: true, completedAt: "2026-09-12T00:00:00.000Z", createdAt: "2026-09-11T00:00:00.000Z", pin: null },
+      { id: "c2", fromClient: true, completedAt: null, createdAt: "2026-09-09T00:00:00.000Z", pin: null },
+    ];
+    expect(await clientPublish(scope, "client_approved", "<p>Latest</p>", 3)).toEqual({ ok: true, version: 4 });
+  });
+
+  it("still sends changes that carry comments and edits", async () => {
+    docCommentRows = [{ id: "c1", fromClient: true, completedAt: null, createdAt: "2026-09-11T00:00:00.000Z", pin: null }];
+    expect(await clientPublish(scope, "client_submitted", "<p>mine</p>", 3)).toEqual({ ok: true, version: 4 });
+  });
+
   it("returns 409 when the document is already approved", async () => {
     rpcAnswer = () => -2;
-    const r = await clientPublish(scope, "client_approved", "<p>mine</p>", 3);
+    const r = await clientPublish(scope, "client_approved", "<p>Latest</p>", 3);
     expect(r).toMatchObject({ ok: false, status: 409 });
     expect(r.ok ? "" : r.error).toMatch(/approved/i);
   });
@@ -194,7 +229,7 @@ describe("clientPublish", () => {
   it("moves the task to Approved (not Done) and always emails the owner on approval", async () => {
     setWorld({ ...goodWorld(), claim: [] });
     rpcAnswer = (name) => (name === "publish_task_document_version" ? 4 : null);
-    await clientPublish(scope, "client_approved", "<p>ok</p>", 3);
+    await clientPublish(scope, "client_approved", "<p>Latest</p>", 3);
     const taskUpdate = calls.find((c) => c.table === "tasks" && c.op === "update");
     expect((taskUpdate?.payload as any).status).toBe("approved");
     expect(notify).toHaveBeenCalledTimes(1);
@@ -216,7 +251,7 @@ describe("clientPublish", () => {
   });
 
   it("tells the client's follower when the task has no owner", async () => {
-    await clientPublish({ ...scope, assigneeId: null }, "client_approved", "<p>ok</p>", 3);
+    await clientPublish({ ...scope, assigneeId: null }, "client_approved", "<p>Latest</p>", 3);
     expect(notify.mock.calls[0][0]).toMatchObject({ notifyRecipient: "u_follower" });
   });
 });
