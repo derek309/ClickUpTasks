@@ -176,7 +176,11 @@ export function createServer(opts = {}) {
   }
   const brief = (t) => `[${t.id}] ${t.title}\n  status: ${t.status} · priority: ${t.priority} · due: ${t.due || "—"}\n  client: ${clientNames[t.client_id] || t.client_id} · list: ${projectNames[t.project_id] || "—"}`;
 
-  const server = new McpServer({ name: "clickuptasks", version: "1.0.0" });
+  const server = new McpServer({ name: "clickuptasks", version: "1.0.0" }, {
+    // Sent to Claude when it connects (Derek, 2026-09-15): the team writes rules for
+    // lists and tasks, and they only help if Claude reads them before working.
+    instructions: "Before working on any ClickUpTasks task, call get_task and follow its Instructions section: the team's rules for that task's list and for the task itself.",
+  });
 
   server.tool("list_my_tasks",
     "List tasks assigned to you (or delegated to you via a checklist item). Filter by client name, status, priority. Excludes Done unless include_done.",
@@ -222,7 +226,7 @@ export function createServer(opts = {}) {
     });
 
   server.tool("get_task",
-    "Get one task's full detail: description, checklist (title + done state), links, client/list context.",
+    "Get one task's full detail: its Instructions (the team's rules from its list and for the task itself; follow them), description, checklist (title + done state), links, client/list context. Call this before working on a task.",
     { id: z.string() },
     async ({ id }) => {
       await names();
@@ -231,8 +235,17 @@ export function createServer(opts = {}) {
       const checklist = (t.subtasks || []).map((s) => ({ title: s.title, done: !!s.done }));
       const links = (t.attachments || []).filter((a) => a.url).map((a) => `  - ${a.name}: ${a.url}`).join("\n");
       const comments = (t.comments || []).filter((c) => c.kind !== "event").slice(-5).map((c) => `  - ${c.body}`).join("\n");
+      // Instructions come first, the list's then the task's own, so they are read
+      // before anything else about the task (Derek, 2026-09-15).
+      const [list] = t.project_id ? await sb(`projects?select=name,instructions&id=eq.${enc(t.project_id)}`) : [];
+      const listRules = list?.instructions ? docHtmlToText(list.instructions).trim() : "";
+      const taskRules = t.instructions ? docHtmlToText(t.instructions).trim() : "";
+      const instructions = listRules || taskRules
+        ? ["\nInstructions (follow these):", listRules ? `From the ${list.name} list:\n${listRules}` : "", taskRules ? `For this task:\n${taskRules}` : ""].filter(Boolean).join("\n")
+        : "";
       const text = [
         brief(t),
+        instructions,
         t.description ? `\nDescription:\n${stripHtml(t.description)}` : "",
         checklist.length ? `\nChecklist: ${JSON.stringify(checklist)}` : "",
         links ? `\nLinks:\n${links}` : "",
@@ -598,14 +611,15 @@ export function createServer(opts = {}) {
     });
 
   server.tool("list_projects",
-    "List projects (lists) and the id of the client each belongs to, so you can filter list_notes/add_note by project.",
+    "List projects (lists) and the id of the client each belongs to, so you can filter list_notes/add_note by project. Lists with instructions are marked; get_task shows them with each task.",
     { client: z.string().optional().describe("filter by client name (substring, case-insensitive)") },
     async ({ client }) => {
       await names();
-      let rows = await sb("projects?select=id,name,client_id&order=name");
+      let rows = await sb("projects?select=id,name,client_id,instructions&order=name");
       if (client) { const cl = client.toLowerCase(); rows = rows.filter((p) => (clientNames[p.client_id] || "").toLowerCase().includes(cl)); }
       if (!rows.length) return { content: [{ type: "text", text: "No matching projects." }] };
-      return { content: [{ type: "text", text: rows.map((p) => `${p.name}  [${p.id}]  · ${clientNames[p.client_id] || p.client_id}`).join("\n") }] };
+      const hasRules = (p) => !!p.instructions && !!docHtmlToText(p.instructions).trim();
+      return { content: [{ type: "text", text: rows.map((p) => `${p.name}  [${p.id}]  · ${clientNames[p.client_id] || p.client_id}${hasRules(p) ? "  · has instructions" : ""}`).join("\n") }] };
     });
 
   server.tool("list_notes",

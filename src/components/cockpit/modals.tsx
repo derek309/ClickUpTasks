@@ -4,6 +4,34 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LINK_COLORS, randomLinkColor, STATUS_META, clientStatusMeta, type TaskStatus, type Client, type Contact } from "@/lib/data";
 import { useEscapeToClose } from "./useEscapeToClose";
+import { RichTextEditor } from "./RichTextEditor";
+
+// A list's instructions (Derek, 2026-09-15): the rules for every task in it,
+// written once, shown on each task and handed to Claude with it by get_task.
+// Team only: the client portal and review pages never read them.
+export type InstructionsSpec = { listName: string; initial: string; onSave: (html: string) => void };
+export function InstructionsModal({ listName, initial, onSave, onCancel }: InstructionsSpec & { onCancel: () => void }) {
+  const [html, setHtml] = useState(initial);
+  useEscapeToClose(onCancel);
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/30" onClick={onCancel} />
+      <div role="dialog" aria-modal="true" aria-label={`Instructions for ${listName}`}
+        className="fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-[calc(100vw-2rem)] max-w-2xl -translate-x-1/2 -translate-y-1/2 flex-col rounded-2xl border bg-surface p-5 shadow-xl">
+        <h2 className="text-[18px] font-semibold">Instructions for {listName}</h2>
+        <p className="mt-1 text-[16px] text-muted">Every task in this list shows these, and Claude reads them before working on one. Only your team sees them.</p>
+        <div className="mt-3 min-h-[200px] flex-1 overflow-y-auto rounded-lg border bg-background p-3">
+          <RichTextEditor value={initial} onChange={setHtml} autoFocus
+            placeholder="For example: brand colors are navy and gold. Send drafts to Pam. Ask before emailing the client." />
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onCancel} className="rounded-md border px-3 py-1.5 text-[16px] font-medium hover:bg-background">Cancel</button>
+          <button onClick={() => onSave(html)} className="rounded-md bg-accent px-3 py-1.5 text-[16px] font-medium text-white">Save</button>
+        </div>
+      </div>
+    </>
+  );
+}
 
 export type ConfirmSpec = { title: string; message: string; confirmLabel?: string; danger?: boolean; onConfirm: () => void };
 export function ConfirmModal({ title, message, confirmLabel = "Confirm", danger = true, onConfirm, onCancel }: ConfirmSpec & { onCancel: () => void }) {

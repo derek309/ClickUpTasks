@@ -31,6 +31,10 @@ describe("changedTaskColumns", () => {
     expect(changed.delegated_to).toEqual(["u_va"]);
   });
 
+  it("sends only the instructions when they are edited", () => {
+    expect(changedTaskColumns(base, { ...base, instructions: "<p>Use the new logo.</p>" })).toEqual({ instructions: "<p>Use the new logo.</p>" });
+  });
+
   it("maps renamed fields to their columns", () => {
     expect(changedTaskColumns(base, { ...base, assigneeId: "u_va", private: true })).toEqual({ assignee_id: "u_va", is_private: true });
   });

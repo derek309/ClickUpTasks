@@ -55,8 +55,8 @@ export const rowToClient = (r: any): Client => ({ id: r.id, name: titleCase(r.na
 const contactToRow = (c: Contact) => ({ id: c.id, client_id: c.clientId, name: c.name, email: c.email, phone: c.phone ?? null, ghl_contact_id: c.ghlContactId, company_name: c.company ?? null, city: c.city ?? null, state: c.state ?? null, saas_url: c.saasUrl ?? null });
 export const rowToContact = (r: any): Contact => ({ id: r.id, clientId: r.client_id, name: titleCase(r.name), email: r.email ?? "", phone: r.phone ?? "", ghlContactId: r.ghl_contact_id ?? "", company: r.company_name ?? "", city: r.city ?? "", state: r.state ?? "", saasUrl: r.saas_url ?? "" });
 
-const projectToRow = (p: Project) => ({ id: p.id, client_id: p.clientId, name: p.name, description: p.description, assigned_to: p.assignedTo ?? [], reviewed_at: p.reviewedAt ?? null, folder_id: p.folderId ?? null, position: p.position ?? 0, share_token: p.shareToken ?? null });
-const rowToProject = (r: any): Project => ({ id: r.id, clientId: r.client_id, name: r.name, description: r.description ?? "", assignedTo: r.assigned_to ?? [], reviewedAt: r.reviewed_at ?? null, folderId: r.folder_id ?? null, position: r.position ?? 0, shareToken: r.share_token ?? null });
+const projectToRow = (p: Project) => ({ id: p.id, client_id: p.clientId, name: p.name, description: p.description, instructions: p.instructions ?? "", assigned_to: p.assignedTo ?? [], reviewed_at: p.reviewedAt ?? null, folder_id: p.folderId ?? null, position: p.position ?? 0, share_token: p.shareToken ?? null });
+const rowToProject = (r: any): Project => ({ id: r.id, clientId: r.client_id, name: r.name, description: r.description ?? "", instructions: r.instructions ?? "", assignedTo: r.assigned_to ?? [], reviewedAt: r.reviewed_at ?? null, folderId: r.folder_id ?? null, position: r.position ?? 0, shareToken: r.share_token ?? null });
 const folderToRow = (f: Folder) => ({ id: f.id, client_id: f.clientId, name: f.name, position: f.position, created_at: f.createdAt });
 const rowToFolder = (r: any): Folder => ({ id: r.id, clientId: r.client_id, name: r.name, position: r.position ?? 0, createdAt: r.created_at });
 const stageToRow = (s: Stage) => ({ id: s.id, project_id: s.projectId, name: s.name, position: s.position, is_done: s.isDone, created_at: s.createdAt });
@@ -66,7 +66,7 @@ const rowToStage = (r: any): Stage => ({ id: r.id, projectId: r.project_id, name
 // not part of the domain Task type, so it's a separate write-time parameter
 // rather than a Task field. See src/lib/realtime.ts for how it's consumed.
 const taskToRow = (t: Task, updatedBy?: string | null) => ({
-  id: t.id, project_id: t.projectId, client_id: t.clientId, title: t.title, description: t.description,
+  id: t.id, project_id: t.projectId, client_id: t.clientId, title: t.title, description: t.description, instructions: t.instructions ?? "",
   status: t.status, priority: t.priority, assignee_id: t.assigneeId, waiting_on_client: t.waitingOnClient ?? false, contact_id: t.contactId, due: t.due,
   recurrence: t.recurrence, recurrence_interval: t.recurrenceInterval ?? null, recurrence_unit: t.recurrenceUnit ?? null,
   recurrence_days_of_month: t.recurrenceDaysOfMonth ?? null, follow_up_at: t.followUpAt ?? null, priority_auto: t.priorityAuto ?? false, size: t.size ?? null, size_hours: t.sizeHours ?? null, recurrence_nth: t.recurrenceNth ?? null, recurrence_weekday: t.recurrenceWeekday ?? null,
@@ -87,7 +87,7 @@ const taskToRow = (t: Task, updatedBy?: string | null) => ({
 const asPriority = (p: unknown): Priority => (typeof p === "string" && p in PRIORITY_META ? (p as Priority) : "none");
 
 export const rowToTask = (r: any): Task => ({
-  id: r.id, projectId: r.project_id, clientId: r.client_id, title: r.title, description: r.description ?? "",
+  id: r.id, projectId: r.project_id, clientId: r.client_id, title: r.title, description: r.description ?? "", instructions: r.instructions ?? "",
   status: r.status, priority: asPriority(r.priority), assigneeId: r.assignee_id, waitingOnClient: r.waiting_on_client ?? false, contactId: r.contact_id, due: r.due,
   lastActivityAt: r.last_activity_at ?? null,
   recurrence: r.recurrence, recurrenceInterval: r.recurrence_interval ?? undefined, recurrenceUnit: r.recurrence_unit ?? undefined,

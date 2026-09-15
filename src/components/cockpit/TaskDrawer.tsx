@@ -33,7 +33,7 @@ const REVIEW_LINES: { kind: FileKind; label: string }[] = [
 
 const ATT_KIND_ORDER: Record<Attachment["kind"], number> = { image: 0, pdf: 1, doc: 2, sheet: 3, link: 4 };
 
-export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onDuplicate, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast, meId, onSendDm, onDelegate, clientLinks, taskLink, onDeleteComment }: {
+export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onDuplicate, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast, meId, onSendDm, onDelegate, clientLinks, taskLink, onDeleteComment, onEditListInstructions }: {
   task: Task;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; onPrev: () => void; onNext: () => void;
@@ -70,6 +70,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   onDelegate?: (spec: DelegateSpec) => void;
   clientLinks?: ClientLink[];
   taskLink?: () => string;
+  /** Opens the editor for a list's instructions (Derek, 2026-09-15). */
+  onEditListInstructions?: (projectId: string) => void;
 }) {
   // Never asserted. Delegation is exactly the case where these are missing:
   // a delegatee can see a task through tasks.delegated_to while RLS still
@@ -336,6 +338,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       `Client: ${client.name}${ct?.email ? ` (${ct.email})` : ""}`,
       `Project: ${project?.name ?? "—"}`,
       `Status: ${STATUS_META[task.status].label} · Priority: ${PRIORITY_META[task.priority].label}${task.due ? ` · Due: ${task.due}` : ""}`,
+      // The team's rules for this work, first, the same order get_task uses.
+      htmlToText(project?.instructions ?? "").trim() ? `\nInstructions from the ${project?.name} list (follow these):\n${htmlToText(project?.instructions ?? "").trim()}` : "",
+      htmlToText(task.instructions ?? "").trim() ? `\nInstructions for this task (follow these):\n${htmlToText(task.instructions ?? "").trim()}` : "",
       descText ? `\nDescription:\n${descText}` : "",
       task.subtasks.length ? `\nSubtasks:\n${task.subtasks.map((s) => `- [${s.done ? "x" : " "}] ${s.title}`).join("\n")}` : "",
       task.comments.length ? `\nRecent comments:\n${task.comments.slice(-3).map((c) => `- ${userById(c.authorId)?.name ?? "?"}: ${c.body}`).join("\n")}` : "",
@@ -801,6 +806,48 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       startNonce={docStartNonce}
       onPresence={(exists) => setDocPresence((p) => (p.taskId === task.id && p.exists === exists ? p : { taskId: task.id, exists }))} />
   );
+  // Instructions (Derek, 2026-09-15): the rules for doing this task, from its list
+  // and from the task itself. Team and Claude only; get_task hands both to Claude.
+  const instructionsCommit = useDebouncedCommit();
+  const [instrEditing, setInstrEditing] = useState<{ taskId: string; on: boolean }>({ taskId: task.id, on: false });
+  const editingInstructions = instrEditing.taskId === task.id && instrEditing.on;
+  const setEditingInstructions = (on: boolean) => setInstrEditing({ taskId: task.id, on });
+  const listInstructions = htmlToText(project?.instructions ?? "").trim();
+  const taskInstructions = htmlToText(task.instructions ?? "").trim();
+  const showInstructions = !!listInstructions || !!taskInstructions || sectionOpen("instructions");
+  const instructionsBlock = !showInstructions ? null : (
+    <div className="space-y-3">
+      {listInstructions && (
+        <div className="rounded-xl border bg-surface px-4 py-3">
+          <div className="mb-1 flex items-center justify-between gap-3">
+            <span className="text-[16px] font-semibold text-muted">From the {project?.name} list</span>
+            {onEditListInstructions && project && (
+              <button onClick={() => onEditListInstructions(project.id)} className="text-[16px] font-medium text-accent hover:underline">Edit</button>
+            )}
+          </div>
+          <CollapsibleText text={listInstructions} maxLines={6} />
+        </div>
+      )}
+      {editingInstructions || (!taskInstructions && sectionOpen("instructions")) ? (
+        <div>
+          <RichTextEditor key={`task-instr-${task.id}`} value={task.instructions ?? ""} autoFocus={editingInstructions}
+            onChange={(html) => instructionsCommit.schedule(() => onPatch({ instructions: html }))}
+            placeholder="How this task should be done. Your team and Claude follow these." />
+          <button onClick={() => { instructionsCommit.flush(); setEditingInstructions(false); }}
+            className="mt-1.5 text-[16px] text-accent underline underline-offset-[3px]">Done editing</button>
+        </div>
+      ) : taskInstructions ? (
+        <button onClick={() => setEditingInstructions(true)} title="Click to edit"
+          className="-mx-2 block w-full max-w-[72ch] rounded-lg px-2 py-1 text-left text-[16px] leading-relaxed hover:bg-surface">
+          {listInstructions && <span className="mb-1 block text-[16px] font-semibold text-muted">For this task</span>}
+          <CollapsibleText text={taskInstructions} maxLines={6} />
+        </button>
+      ) : (
+        <button onClick={() => { openSection("instructions"); setEditingInstructions(true); }}
+          className="text-[16px] font-medium text-accent hover:underline">Add instructions for this task</button>
+      )}
+    </div>
+  );
   const descriptionBlock = !showDescription ? null : (
     <div>
       {/* Reads as text until you click it. A permanently-live editor put a
@@ -1128,6 +1175,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // of up to seven dashed buttons, wrapping two by two in the rail.
   const addMenu = (
     <ActionMenu label={<span className="inline-flex items-center gap-1.5"><I.plus /> Add</span>} title="Add to this task" items={[
+      !taskInstructions && !editingInstructions && { label: "Instructions", onClick: () => { openSection("instructions"); setEditingInstructions(true); } },
       !showDescription && { label: "Description", onClick: () => openSection("description") },
       canHaveDocument && !showDocument && { label: "Client document", onClick: () => setDocStartNonce((n) => n + 1) },
       ...(canHaveDocument ? REVIEW_LINES.filter((l) => !hasReview(l.kind)).map((l) => ({ label: l.label, onClick: () => setReviewStartNonce((s) => ({ ...s, [l.kind]: s[l.kind] + 1 })) })) : []),
@@ -1171,6 +1219,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {delegationRow}
       {nextStepCard}
       {clientResponseBlock}
+      {showInstructions && section("Instructions", instructionsBlock,
+        taskInstructions && !editingInstructions
+          ? <button onClick={() => setEditingInstructions(true)} className="rounded-lg px-3 py-1.5 text-[16px] font-medium text-accent hover:bg-accent-soft">Edit</button>
+          : undefined)}
       {showDescription && section("Description", descriptionBlock,
         !descEditing && htmlToText(task.description).trim()
           ? <button onClick={() => setDescEditing(true)} className="rounded-lg px-3 py-1.5 text-[16px] font-medium text-accent hover:bg-accent-soft">Edit</button>

@@ -630,6 +630,9 @@ export interface Project {
   clientId: string;
   name: string;
   description: string;
+  /** The rules for every task in this list (HTML), shown on each task and handed
+   *  to Claude by get_task. Team and Claude only. */
+  instructions?: string;
   /** Folder this list belongs to, or null/undefined = standalone list. */
   folderId?: string | null;
   /** Sort position within its folder bucket (or the standalone bucket). */
@@ -714,6 +717,9 @@ export interface Task {
   clientId: string;
   title: string;
   description: string;
+  /** How this task should be done, on top of its list's instructions (HTML).
+   *  Team and Claude only: never on the client portal or a review page. */
+  instructions?: string;
   status: TaskStatus;
   priority: Priority;
   assigneeId: string | null;

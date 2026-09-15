@@ -88,7 +88,7 @@ import { I, Avatar, SideItem, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFrom
 import { MindDumpModal, type ParsedRow } from "./cockpit/MindDumpModal";
 import { ClientEmail, type ClientEmailStart } from "./cockpit/ClientEmail";
 import { draftLinkHtml, escapeHtml } from "@/lib/draftLink";
-import { ConfirmModal, PromptModal, LinkFormModal, MergeTaskModal, MergeClientModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
+import { ConfirmModal, PromptModal, LinkFormModal, MergeTaskModal, MergeClientModal, InstructionsModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
 import { CommandK } from "./cockpit/CommandK";
 import { GroupedList } from "./cockpit/GroupedList";
 import StageBoard from "./cockpit/StageBoard";
@@ -425,6 +425,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
   const [promptDialog, setPromptDialog] = useState<PromptSpec | null>(null);
+  // The list whose instructions are open in the editor (InstructionsModal).
+  const [instructionsListId, setInstructionsListId] = useState<string | null>(null);
   // Id of the Conversation task currently being merged elsewhere — drives
   // the target-task picker modal (see requestMerge/mergeTasks).
   const [mergeSourceId, setMergeSourceId] = useState<string | null>(null);
@@ -2512,6 +2514,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       const text = htmlToText(patch.description).trim();
       lines.push(text ? `updated the description: ${text.slice(0, 400)}` : "cleared the description");
     }
+    // Named, never quoted: instructions can run long, and the feed records that
+    // they changed rather than keeping a second copy of the rules.
+    if (patch.instructions !== undefined && patch.instructions !== before.instructions) {
+      lines.push(htmlToText(patch.instructions).trim() ? "updated the instructions" : "cleared the instructions");
+    }
     if (patch.attachments !== undefined) {
       const had = new Set(before.attachments.map((a) => a.id));
       const has = new Set(patch.attachments.map((a) => a.id));
@@ -4086,6 +4093,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <button onClick={() => { setHeaderMoreOpen(false); openCompose("sms"); }}
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background sm:hidden"><I.comment /> SMS</button>
           )}
+          {activeProject && projectById(activeProject) && (
+            <button onClick={() => { setHeaderMoreOpen(false); setInstructionsListId(activeProject); }} title="The rules for every task in this list, followed by your team and Claude"
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.clipboard /> Instructions</button>
+          )}
           <div className="px-2.5 pb-0.5 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Share</div>
           <button onClick={() => { setHeaderMoreOpen(false); copyLink({ view: null, client: activeClient, project: activeProject, task: null, clientTab, vaultFolder: null, dm: null, assignee: null }); }}
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy link</button>
@@ -4690,12 +4701,27 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           onSendDm={(userId, body) => sendDmMessage(userId, body)}
           onDelegate={(spec) => delegateTask(openTask.id, spec)}
           clientLinks={clientLinks.filter((l) => l.clientId === openTask.clientId)}
-          taskLink={() => linkTo({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, assignee: null })} />
+          taskLink={() => linkTo({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, assignee: null })}
+          onEditListInstructions={setInstructionsListId} />
       )}
 
       {addClientOpen && <AddClientModal subAccounts={subAccounts} contacts={contacts} existingIds={new Set(clients.map((c) => c.id))} onAdd={addClientContact} onAddRemote={addRemoteContact} onClose={() => setAddClientOpen(false)} />}
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
       {promptDialog && <PromptModal {...promptDialog} onCancel={() => setPromptDialog(null)} />}
+      {instructionsListId && (() => {
+        const list = projectById(instructionsListId);
+        if (!list) return null;
+        return (
+          <InstructionsModal listName={list.name} initial={list.instructions ?? ""} onCancel={() => setInstructionsListId(null)}
+            onSave={(html) => {
+              const next = { ...list, instructions: html };
+              setProjects((ps) => ps.map((p) => (p.id === list.id ? next : p)));
+              upsertProject(next);
+              setInstructionsListId(null);
+              pushToast("Instructions saved");
+            }} />
+        );
+      })()}
       {mergeSourceId && (() => {
         const src = tasks.find((t) => t.id === mergeSourceId);
         if (!src) return null;
