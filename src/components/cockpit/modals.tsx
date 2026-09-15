@@ -3,14 +3,11 @@
 // Styled in-app replacements for window.confirm()/prompt().
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LINK_COLORS, randomLinkColor, STATUS_META, clientStatusMeta, type TaskStatus, type Client, type Contact } from "@/lib/data";
+import { useEscapeToClose } from "./useEscapeToClose";
 
 export type ConfirmSpec = { title: string; message: string; confirmLabel?: string; danger?: boolean; onConfirm: () => void };
 export function ConfirmModal({ title, message, confirmLabel = "Confirm", danger = true, onConfirm, onCancel }: ConfirmSpec & { onCancel: () => void }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onCancel(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel]);
+  useEscapeToClose(onCancel);
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/30" onClick={onCancel} />
@@ -58,6 +55,7 @@ export function MergeTaskModal({ sourceTitle, candidates, onSubmit, onCancel }: 
   const [query, setQuery] = useState("");
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => { ref.current?.focus(); }, []);
+  useEscapeToClose(onCancel);
   const q = query.trim().toLowerCase();
   const filtered = q ? candidates.filter((c) => c.title.toLowerCase().includes(q)) : candidates;
   return (
@@ -67,7 +65,6 @@ export function MergeTaskModal({ sourceTitle, candidates, onSubmit, onCancel }: 
         <h2 className="text-[16px] font-semibold">Merge &ldquo;{sourceTitle}&rdquo; into…</h2>
         <p className="mt-1 text-[13px] text-muted">Its messages move onto the task you pick, then this conversation task is removed.</p>
         <input ref={ref} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search tasks…"
-          onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}
           className="mt-3 w-full shrink-0 rounded-md border bg-background px-3 py-1.5 text-[15px] outline-none focus:border-accent" />
         <div className="mt-2 min-h-0 flex-1 overflow-y-auto">
           {filtered.length === 0 && <div className="py-6 text-center text-[13px] text-muted">No matching tasks.</div>}

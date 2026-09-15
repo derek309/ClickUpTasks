@@ -19,6 +19,7 @@ import { InlineAssignee, InlineDate, InlineDue } from "./GroupedList";
 import { RichTextEditor } from "./RichTextEditor";
 import { useTaskMessaging } from "./TaskMessaging";
 import { useDebouncedCommit } from "./useDebouncedCommit";
+import { useEscapeToClose } from "./useEscapeToClose";
 import { TaskDocument } from "./TaskDocument";
 import { DraftEmail } from "./DraftEmail";
 import { buildReviewEmail, greetingHtml, type ReviewEmailInput } from "@/lib/reviewEmail";
@@ -279,6 +280,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   };
   const [previewAtt, setPreviewAtt] = useState<Attachment | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // Escape closes the photo preview, not the drawer behind it.
+  useEscapeToClose(() => setPreviewAtt(null), !!previewAtt);
   const openPreview = async (att: Attachment) => {
     setPreviewAtt(att);
     setPreviewUrl(null);

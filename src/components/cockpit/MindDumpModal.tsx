@@ -33,6 +33,7 @@ import {
   SIZE_META, SIZE_ORDER, type Priority, type TaskSize,
 } from "@/lib/data";
 import { I, DateChip } from "./ui";
+import { useEscapeToClose } from "./useEscapeToClose";
 
 export type ParsedRow = {
   title: string;
@@ -92,11 +93,7 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
   // apart since both routes through the same in-flight flag one level up.
   const [pending, setPending] = useState<"quick" | "split" | null>(null);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onCancel(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel]);
+  useEscapeToClose(onCancel);
 
   // Object URLs are per-file and live as long as the modal does; revoking on
   // unmount rather than per render keeps the thumbnails from going blank

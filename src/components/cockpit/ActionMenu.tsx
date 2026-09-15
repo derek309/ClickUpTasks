@@ -4,8 +4,9 @@
 // away or Escape. Keeps a review's toolbar to a few buttons, with the rarer and
 // riskier actions (Remove this version) one click further in (Derek, 2026-09-13:
 // "how can we clean this up it's a little messy").
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { quietButton } from "./TaskWorkItem";
+import { useEscapeToClose } from "./useEscapeToClose";
 
 export type ActionMenuItem = { label: string; onClick: () => void; danger?: boolean; disabled?: boolean };
 
@@ -19,14 +20,8 @@ export function ActionMenu({ label, title, items, triggerClassName = quietButton
   items: (ActionMenuItem | false | null | undefined)[];
 }) {
   const [open, setOpen] = useState(false);
-  // Escape closes only the menu. The review window listens on the document in the
-  // capture phase, so this listens on the window, which hears the key first.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [open]);
+  // Escape closes only the menu, not the review window or drawer under it.
+  useEscapeToClose(() => setOpen(false), open);
   const shown = items.filter((item): item is ActionMenuItem => !!item);
   if (!shown.length) return null;
   return (

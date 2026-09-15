@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { I } from "./ui";
 import { ActionMenu } from "./ActionMenu";
+import { useEscapeToClose } from "./useEscapeToClose";
 
 export const quietButton = "rounded-lg border bg-surface px-3 py-1.5 text-[16px] font-medium text-muted transition hover:bg-background hover:text-foreground disabled:opacity-50";
 
@@ -267,12 +268,7 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
   const writeIn = grouping && pinDraft && pinDraftLabel ? pinDraftLabel : null;
   // Esc takes a dropped pin off before anything else hears it (the review window
   // closes on Esc from the document, so this listens on the window, first).
-  useEffect(() => {
-    if (!pinDraft || !onClearQuote) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); onClearQuote(); } };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [pinDraft, onClearQuote]);
+  useEscapeToClose(() => onClearQuote?.(), !!pinDraft && !!onClearQuote);
 
   // Each image's box starts level with its image when the two sit side by side (on a
   // phone the comments stack under the images, so nothing moves). Measured after

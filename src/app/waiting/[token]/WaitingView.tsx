@@ -107,7 +107,7 @@ function AttachmentGallery({ items }: { items: WaitingAttachment[] }) {
   return (
     <div className="mt-2 flex flex-wrap gap-2">
       {items.map((a) => {
-        if (!a.url) return <span key={a.id} className="rounded-md border bg-background px-2 py-1 text-[12px] text-muted">{a.name}</span>;
+        if (!a.url) return <span key={a.id} className="rounded-md border bg-background px-2 py-1 text-[16px] text-muted">{a.name}</span>;
         if (a.kind === "image") {
           return (
             <a key={a.id} href={a.url} target="_blank" rel="noopener noreferrer" title={a.name} className="block h-20 w-20 overflow-hidden rounded-lg border">
@@ -122,7 +122,7 @@ function AttachmentGallery({ items }: { items: WaitingAttachment[] }) {
           );
         }
         return (
-          <a key={a.id} href={a.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-[12px] text-accent hover:underline">
+          <a key={a.id} href={a.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-[16px] text-accent hover:underline">
             {a.kind === "link" ? "🔗" : "📄"} {a.name}
           </a>
         );
@@ -216,7 +216,7 @@ function TaskDetailBody({
       {draft.attachments.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {draft.attachments.map((a) => (
-            <span key={a.id} className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-[12px]">
+            <span key={a.id} className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-[16px]">
               {a.name} <span className="text-muted">{a.size}</span>
               <button onClick={() => onRemoveAttachment(a.id)} title="Remove" className="text-muted hover:text-danger">✕</button>
             </span>
@@ -227,26 +227,26 @@ function TaskDetailBody({
         <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border bg-background p-2">
           <input autoFocus value={linkUrl} onChange={(e) => onLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAddLink(); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
           <input value={linkLabel} onChange={(e) => onLinkLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAddLink(); }} placeholder="Label (optional)" className="w-32 rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
-          <button onClick={onAddLink} disabled={!linkUrl.trim()} className="rounded-md bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white disabled:opacity-40">Add</button>
+          <button onClick={onAddLink} disabled={!linkUrl.trim()} className="rounded-md bg-accent px-2.5 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">Add</button>
         </div>
       )}
       <div className="mt-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-3">
-          <label className="inline-flex cursor-pointer items-center gap-1 text-[13px] font-medium text-accent">
+          <label className="inline-flex cursor-pointer items-center gap-1 text-[16px] font-medium text-accent">
             + Attach files
             <input type="file" multiple className="hidden" onChange={(e) => { onFiles(e.target.files); e.target.value = ""; }} />
           </label>
-          <button onClick={onToggleLink} className="text-[13px] font-medium text-accent">+ Add link</button>
+          <button onClick={onToggleLink} className="text-[16px] font-medium text-accent">+ Add link</button>
         </div>
         <button
           onClick={onSend}
           disabled={sending || uploading || (!draft.body.trim() && draft.attachments.length === 0)}
-          className="rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-40"
+          className="rounded-md bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40"
         >
           {sending ? "Sending…" : uploading ? "Uploading…" : "Send"}
         </button>
       </div>
-      {sendError && <div className="mt-1.5 text-[13px] text-danger">{sendError}</div>}
+      {sendError && <div className="mt-1.5 text-[16px] text-danger">{sendError}</div>}
     </>
   );
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -262,13 +262,13 @@ function TaskDetailBody({
       <div ref={(el) => { scrollRef.current = el; threadRef(el); }} onScroll={(e) => checkAtBottom(e.currentTarget)} className="relative min-h-0 flex-1 overflow-y-auto px-6 py-4 md:px-10">
         {(showProjectName && projectName) || isDone ? (
           <div className="mb-2 flex flex-wrap items-center justify-center gap-1.5 text-center">
-            {showProjectName && projectName && <span className="text-[12px] text-muted">{projectName}</span>}
+            {showProjectName && projectName && <span className="text-[16px] text-muted">{projectName}</span>}
             {isDone && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-success-soft px-2 py-0.5 text-[12px] font-medium text-success">✓ Completed</span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-success-soft px-2 py-0.5 text-[16px] font-medium text-success">✓ Completed</span>
             )}
           </div>
         ) : null}
-        {t.description && <p className="max-w-[62ch] whitespace-pre-wrap break-words text-[14px] text-muted">{linkify(t.description)}</p>}
+        {t.description && <p className="max-w-[62ch] whitespace-pre-wrap break-words text-[16px] text-muted">{linkify(t.description)}</p>}
         <AttachmentGallery items={t.attachments} />
 
         {displayThread.length > 0 && (
@@ -281,10 +281,10 @@ function TaskDetailBody({
                     would stretch edge to edge and be unreadable — but the
                     container itself is the full page width now, not a
                     narrow centered column. */}
-                <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[14px] lg:max-w-[640px] ${m.from === "client" ? "rounded-br-sm bg-accent text-white" : "rounded-bl-sm border bg-surface"}`}>
+                <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[16px] lg:max-w-[640px] ${m.from === "client" ? "rounded-br-sm bg-accent text-white" : "rounded-bl-sm border bg-surface"}`}>
                   {m.body && <p className="whitespace-pre-wrap break-words">{linkify(m.body)}</p>}
                   <AttachmentGallery items={m.attachments} />
-                  <div className={`mt-1 text-[11px] ${m.from === "client" ? "text-white/70" : "text-muted"}`}>
+                  <div className={`mt-1 text-[16px] ${m.from === "client" ? "text-white/70" : "text-muted"}`}>
                     {m.from === "client" ? "You" : m.sender?.name ?? "Team"} · {timeAgo(m.at)}
                   </div>
                 </div>
@@ -307,22 +307,22 @@ function TaskDetailBody({
 
       {!isDone && (
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-t bg-background/40 px-6 py-2.5 md:px-10">
-          <span className="text-[13px] font-medium text-muted">What do you think?</span>
+          <span className="text-[16px] font-medium text-muted">What do you think?</span>
           {/* Softest of the three: no specific edit asked for, just "put
               this back in front of someone." Maps to the internal Review
               status, whose amber sits between Changes and Done on the board
               too, so the pressed state borrows the same warm token the
               "Needs your input" chip above already uses. */}
           <button onClick={() => onSetStatus("review")} disabled={statusBusy}
-            className={`rounded-full border px-3 py-1 text-[13px] font-semibold transition disabled:opacity-40 ${t.status === "review" ? "border-highlight bg-highlight-soft text-highlight" : "border-border bg-surface text-muted hover:text-foreground"}`}>
+            className={`rounded-full border px-3 py-1 text-[16px] font-semibold transition disabled:opacity-40 ${t.status === "review" ? "border-highlight bg-highlight-soft text-highlight" : "border-border bg-surface text-muted hover:text-foreground"}`}>
             Needs attention
           </button>
           <button onClick={() => onSetStatus("changes_requested")} disabled={statusBusy}
-            className={`rounded-full border px-3 py-1 text-[13px] font-semibold transition disabled:opacity-40 ${t.status === "changes_requested" ? "border-danger bg-danger-soft text-danger" : "border-border bg-surface text-muted hover:text-foreground"}`}>
+            className={`rounded-full border px-3 py-1 text-[16px] font-semibold transition disabled:opacity-40 ${t.status === "changes_requested" ? "border-danger bg-danger-soft text-danger" : "border-border bg-surface text-muted hover:text-foreground"}`}>
             Needs changes
           </button>
           <button onClick={() => onSetStatus("done")} disabled={statusBusy}
-            className="rounded-full border border-success bg-success-soft px-3 py-1 text-[13px] font-semibold text-success transition hover:opacity-90 disabled:opacity-40">
+            className="rounded-full border border-success bg-success-soft px-3 py-1 text-[16px] font-semibold text-success transition hover:opacity-90 disabled:opacity-40">
             ✓ Approved
           </button>
         </div>
@@ -692,7 +692,7 @@ export default function WaitingView({ token }: { token: string }) {
     <div className="rounded-2xl border border-dashed bg-surface px-6 py-14 text-center">
       <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-success-soft text-[26px] text-success">✓</div>
       <h2 className="text-[18px] font-bold">You&apos;re all caught up</h2>
-      <p className="mt-1 text-[14.5px] text-muted">Nothing needs your input right now. We&apos;ll email you the moment something does.</p>
+      <p className="mt-1 text-[16px] text-muted">Nothing needs your input right now. We&apos;ll email you the moment something does.</p>
     </div>
   );
 
@@ -711,6 +711,13 @@ export default function WaitingView({ token }: { token: string }) {
     const preview = lastMsg
       ? `${lastMsg.from === "client" ? "You" : lastMsg.sender?.name ?? "Team"}: ${lastMsg.body || (lastMsg.attachments.length > 0 ? "Sent an attachment" : "")}`
       : t.description;
+    const status = isDone ? (
+      <span className="text-[16px] text-muted">Completed</span>
+    ) : (
+      <span className={`rounded-full px-2 py-0.5 text-[16px] font-semibold ${t.needsResponse ? "bg-highlight-soft text-highlight" : "bg-accent-soft text-accent"}`}>
+        {t.needsResponse ? "Needs your input" : "In progress"}
+      </span>
+    );
     return (
       <button
         key={t.id}
@@ -719,21 +726,16 @@ export default function WaitingView({ token }: { token: string }) {
       >
         <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: isDone ? "var(--success)" : t.needsResponse ? "var(--highlight)" : "var(--border)" }} />
         <div className="min-w-0 flex-1">
-          <div className={`truncate text-[15.5px] font-semibold ${isDone ? "text-muted line-through decoration-muted/40" : ""}`}>{t.title}</div>
-          {preview && <div className="truncate text-[13px] text-muted">{preview}</div>}
+          {/* On a phone the status sits under the title and the text wraps: at
+              16px, a status beside it cut the title down to "Approve ...". */}
+          <div className={`break-words text-[17px] font-semibold sm:truncate ${isDone ? "text-muted line-through decoration-muted/40" : ""}`}>{t.title}</div>
+          {preview && <div className="line-clamp-2 text-[16px] text-muted sm:line-clamp-none sm:truncate">{preview}</div>}
           {showProject && projects.length > 1 && projectName(t.projectId) && (
-            <div className="text-[12px] text-muted">{projectName(t.projectId)}</div>
+            <div className="text-[16px] text-muted">{projectName(t.projectId)}</div>
           )}
+          <div className="mt-1 sm:hidden">{status}</div>
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          {isDone ? (
-            <span className="text-[12px] text-muted">Completed</span>
-          ) : (
-            <span className={`rounded-full px-2 py-0.5 text-[11.5px] font-semibold ${t.needsResponse ? "bg-highlight-soft text-highlight" : "bg-accent-soft text-accent"}`}>
-              {t.needsResponse ? "Needs your input" : "In progress"}
-            </span>
-          )}
-        </div>
+        <div className="hidden shrink-0 flex-col items-end gap-1 sm:flex">{status}</div>
         <span className="shrink-0 text-muted" aria-hidden>›</span>
       </button>
     );
@@ -750,7 +752,7 @@ export default function WaitingView({ token }: { token: string }) {
       {selectedTask ? (
         <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }} className="relative flex shrink-0 items-center justify-center px-14 py-3 md:px-20">
           <button onClick={closeTask} title="Back to your tasks" className="absolute left-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full text-[22px] text-white hover:bg-white/10">←</button>
-          <div className="max-w-[75%] truncate text-center text-[15px] font-bold text-white">{selectedTask.title}</div>
+          <div className="max-w-[75%] truncate text-center text-[16px] font-bold text-white">{selectedTask.title}</div>
         </div>
       ) : (
         // Everything that used to be the sidebar, compressed into one thin
@@ -758,7 +760,7 @@ export default function WaitingView({ token }: { token: string }) {
         // progress all on a single line, with the privacy note folded in
         // underneath instead of repeated at the bottom of the page.
         <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }} className="px-6 py-3 text-center md:px-10">
-          <div className="flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1 text-[14.5px] font-bold tracking-tight text-white">
+          <div className="flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1 text-[16px] font-bold tracking-tight text-white">
             {clientName && <span>{clientName}</span>}
             <span className="font-normal">Tasks</span>
             {totalCount > 0 && <span className="font-normal text-white/80">{doneCount} of {totalCount} done</span>}
@@ -793,9 +795,9 @@ export default function WaitingView({ token }: { token: string }) {
       ) : (
       <div className="px-6 pb-10 pt-6 md:px-10">
         {error ? (
-          <div className="rounded-lg bg-danger-soft px-3 py-2 text-[15px] text-danger">{error}</div>
+          <div className="rounded-lg bg-danger-soft px-3 py-2 text-[16px] text-danger">{error}</div>
         ) : !tasks ? (
-          <div className="py-8 text-center text-[13px] text-muted">Loading…</div>
+          <div className="py-8 text-center text-[16px] text-muted">Loading…</div>
         ) : (
             <div className="min-w-0">
               {/* Raising a brand-new task is per client and off by default
@@ -808,13 +810,13 @@ export default function WaitingView({ token }: { token: string }) {
                 <div className="mb-5 rounded-xl border bg-surface p-4 shadow-[var(--shadow-sm)]">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <div className="text-[15px] font-bold">Need something else?</div>
-                      <div className="mt-0.5 text-[13px] text-muted">Tell us what you need and we&apos;ll take a look.</div>
+                      <div className="text-[16px] font-bold">Need something else?</div>
+                      <div className="mt-0.5 text-[16px] text-muted">Tell us what you need and we&apos;ll take a look.</div>
                     </div>
                     <div className="flex items-center gap-2">
                       {projects.length > 1 && (
                         <select value={effectiveNewProjectId ?? ""} onChange={(e) => setNewProjectId(e.target.value)} title="Which list this goes on"
-                          className="rounded-md border bg-background px-2 py-1 text-[13px] outline-none focus:border-accent">
+                          className="rounded-md border bg-background px-2 py-1 text-[16px] outline-none focus:border-accent">
                           {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                         </select>
                       )}
@@ -835,7 +837,7 @@ export default function WaitingView({ token }: { token: string }) {
                   {newAttachments.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {newAttachments.map((a) => (
-                        <span key={a.id} className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-[12px]">
+                        <span key={a.id} className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-[16px]">
                           {a.name} <span className="text-muted">{a.size}</span>
                           <button onClick={() => setNewAttachments((prev) => prev.filter((x) => x.id !== a.id))} title="Remove" className="text-muted hover:text-danger">✕</button>
                         </span>
@@ -846,27 +848,27 @@ export default function WaitingView({ token }: { token: string }) {
                     <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border bg-background p-2">
                       <input autoFocus value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLinkAttachment("__new__"); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
                       <input value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLinkAttachment("__new__"); }} placeholder="Label (optional)" className="w-32 rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
-                      <button onClick={() => addLinkAttachment("__new__")} disabled={!linkUrl.trim()} className="rounded-md bg-accent px-2.5 py-1.5 text-[13px] font-medium text-white disabled:opacity-40">Add</button>
+                      <button onClick={() => addLinkAttachment("__new__")} disabled={!linkUrl.trim()} className="rounded-md bg-accent px-2.5 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">Add</button>
                     </div>
                   )}
                   <div className="mt-2 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-3">
-                      <label className="inline-flex cursor-pointer items-center gap-1 text-[13px] font-medium text-accent">
+                      <label className="inline-flex cursor-pointer items-center gap-1 text-[16px] font-medium text-accent">
                         + Attach files
                         <input type="file" multiple className="hidden" onChange={(e) => { handleNewFiles(e.target.files); e.target.value = ""; }} />
                       </label>
-                      <button onClick={() => { setLinkForId((id) => (id === "__new__" ? null : "__new__")); setLinkUrl(""); setLinkLabel(""); }} className="text-[13px] font-medium text-accent">+ Add link</button>
+                      <button onClick={() => { setLinkForId((id) => (id === "__new__" ? null : "__new__")); setLinkUrl(""); setLinkLabel(""); }} className="text-[16px] font-medium text-accent">+ Add link</button>
                     </div>
                     <button
                       onClick={submitNewRequest}
                       disabled={newSaving || newUploading || (!newBody.trim() && newAttachments.length === 0)}
-                      className="rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-40"
+                      className="rounded-md bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40"
                     >
                       {newSaving ? "Sending…" : newUploading ? "Uploading…" : "Send"}
                     </button>
                   </div>
-                  {newError && <div className="mt-1.5 text-[13px] text-danger">{newError}</div>}
-                  {newSent && <div className="mt-1.5 text-[13px] text-success">Sent, we&apos;ll take a look!</div>}
+                  {newError && <div className="mt-1.5 text-[16px] text-danger">{newError}</div>}
+                  {newSent && <div className="mt-1.5 text-[16px] text-success">Sent, we&apos;ll take a look!</div>}
                 </div>
               ) : (
                 <div className="mb-3">
@@ -878,11 +880,11 @@ export default function WaitingView({ token }: { token: string }) {
                       button says exactly what it does, the reminder sits
                       below it. */}
                   <button onClick={() => setAddElseOpen(true)}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed bg-background py-2.5 text-[14px] font-bold text-accent transition hover:bg-surface"
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed bg-background py-2.5 text-[16px] font-bold text-accent transition hover:bg-surface"
                     style={{ borderColor: "color-mix(in srgb, var(--accent) 40%, var(--border))" }}>
                     <span className="flex h-4 w-4 items-center justify-center rounded-full bg-accent text-[11px] font-black leading-none text-white">+</span> Add Something
                   </button>
-                  <p className="mt-1 text-center text-[12px] text-muted">One request per task, please. It&apos;s easier for us to track.</p>
+                  <p className="mt-1 text-center text-[16px] text-muted">One request per task, please. It&apos;s easier for us to track.</p>
                 </div>
               ))}
 
@@ -892,12 +894,12 @@ export default function WaitingView({ token }: { token: string }) {
               {projects.length > 1 && (
                 <div className="mb-5 flex flex-wrap gap-1.5">
                   <button onClick={() => setProjectFilter("")}
-                    className={`rounded-full border px-3 py-1 text-[13px] font-medium transition ${projectFilter === "" ? "border-foreground bg-foreground text-background" : "border-border text-muted hover:text-foreground"}`}>
+                    className={`rounded-full border px-3 py-1 text-[16px] font-medium transition ${projectFilter === "" ? "border-foreground bg-foreground text-background" : "border-border text-muted hover:text-foreground"}`}>
                     Everything
                   </button>
                   {projects.map((p) => (
                     <button key={p.id} onClick={() => setProjectFilter(p.id)}
-                      className={`rounded-full border px-3 py-1 text-[13px] font-medium transition ${projectFilter === p.id ? "border-foreground bg-foreground text-background" : "border-border text-muted hover:text-foreground"}`}>
+                      className={`rounded-full border px-3 py-1 text-[16px] font-medium transition ${projectFilter === p.id ? "border-foreground bg-foreground text-background" : "border-border text-muted hover:text-foreground"}`}>
                       {p.name}
                       {openCountByProject.get(p.id) ? <span className="ml-1.5 opacity-60">{openCountByProject.get(p.id)}</span> : null}
                     </button>
@@ -909,12 +911,12 @@ export default function WaitingView({ token }: { token: string }) {
                 <div className="space-y-7">
                   {needsResponseGroups.length > 0 && (
                     <div>
-                      <div className="mb-2.5 text-[13px] font-bold uppercase tracking-wide text-highlight">What we need from you</div>
+                      <div className="mb-2.5 text-[16px] font-bold uppercase tracking-wide text-highlight">What we need from you</div>
                       <div className="space-y-5">
                         {needsResponseGroups.map((g) => (
                           <div key={g.project?.id ?? "__other__"} ref={g.project ? (el) => { groupRefs.current[`req-${g.project!.id}`] = el; } : undefined}>
                             {projects.length > 1 && (
-                              <div className="mb-2 text-[12.5px] font-semibold uppercase tracking-wide text-muted">{g.project?.name ?? "Other"}</div>
+                              <div className="mb-2 text-[16px] font-semibold uppercase tracking-wide text-muted">{g.project?.name ?? "Other"}</div>
                             )}
                             <div className="space-y-2">{g.tasks.map((t) => renderTaskRow(t))}</div>
                           </div>
@@ -930,7 +932,7 @@ export default function WaitingView({ token }: { token: string }) {
                           is on the header so it's still answering "is anything
                           happening" while shut. */}
                       <button onClick={() => setInProgressOpen((o) => !o)}
-                        className="mb-2.5 flex items-center gap-1.5 text-[13px] font-bold uppercase tracking-wide text-muted transition hover:text-foreground">
+                        className="mb-2.5 flex items-center gap-1.5 text-[16px] font-bold uppercase tracking-wide text-muted transition hover:text-foreground">
                         <span className={`inline-block transition-transform ${inProgressOpen ? "rotate-90" : ""}`} aria-hidden>›</span>
                         What we&apos;re working on · {inProgressGroups.reduce((n, g) => n + g.tasks.length, 0)}
                       </button>
@@ -938,7 +940,7 @@ export default function WaitingView({ token }: { token: string }) {
                         {inProgressGroups.map((g) => (
                           <div key={g.project?.id ?? "__other__"} ref={g.project ? (el) => { groupRefs.current[`wip-${g.project!.id}`] = el; } : undefined}>
                             {projects.length > 1 && (
-                              <div className="mb-2 text-[12.5px] font-semibold uppercase tracking-wide text-muted">{g.project?.name ?? "Other"}</div>
+                              <div className="mb-2 text-[16px] font-semibold uppercase tracking-wide text-muted">{g.project?.name ?? "Other"}</div>
                             )}
                             <div className="space-y-2">{g.tasks.map((t) => renderTaskRow(t))}</div>
                           </div>
@@ -951,7 +953,7 @@ export default function WaitingView({ token }: { token: string }) {
 
               {completedTasks.length > 0 && (
                 <div className={isEmpty ? "" : "mt-5"}>
-                  <button onClick={() => setCompletedOpen((o) => !o)} className="flex items-center gap-1.5 text-[13px] font-medium text-muted hover:text-foreground">
+                  <button onClick={() => setCompletedOpen((o) => !o)} className="flex items-center gap-1.5 text-[16px] font-medium text-muted hover:text-foreground">
                     <span className={`inline-block transition-transform ${completedOpen ? "rotate-90" : ""}`} aria-hidden>›</span>
                     Completed · {completedTasks.length}
                   </button>
@@ -959,7 +961,7 @@ export default function WaitingView({ token }: { token: string }) {
                 </div>
               )}
 
-              <p className="mt-6 text-center text-[12px] text-muted">This is a private link just for you. Please don&apos;t forward it.</p>
+              <p className="mt-6 text-center text-[16px] text-muted">This is a private link just for you. Please don&apos;t forward it.</p>
             </div>
         )}
       </div>
