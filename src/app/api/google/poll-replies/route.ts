@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
-import { requireUser } from "@/lib/serverAuth";
+import { authorizeCron } from "@/lib/cronAuth";
+import { contactsByEmail } from "@/lib/contactsByEmail";
 import { googleConfigured, readInboundGmail, readSentGmail, type SentEmail } from "@/lib/googleMail";
 import { ingestInboundMessage, ingestOutboundMessage } from "@/lib/inboundIngest";
 
@@ -13,9 +14,8 @@ import { ingestInboundMessage, ingestOutboundMessage } from "@/lib/inboundIngest
 // read their recent inbox, match each sender to a known contact by email, and
 // ingest anything new (deduped by Gmail message id).
 //
-// Trigger: a Vercel cron (Authorization: Bearer <CRON_SECRET>), a manual call
-// with ?secret=<GHL_WEBHOOK_SECRET>, or an admin session (the app's "Sync
-// email" action). Requires the DWD service account to also be authorized for
+// Trigger: a Vercel cron or an admin session (the app's "Sync email" action),
+// see cronAuth.ts. Requires the DWD service account to also be authorized for
 // the gmail.readonly scope in the Workspace Admin console.
 
 export const maxDuration = 60;
@@ -29,15 +29,7 @@ export async function POST(req: NextRequest) {
 
 async function run(req: NextRequest) {
   if (!adminConfigured) return NextResponse.json({ error: "Server not configured." }, { status: 501 });
-
-  // Authorize: Vercel cron header, a shared secret, or an admin session.
-  const authHeader = req.headers.get("authorization") ?? "";
-  const cronOk = !!process.env.CRON_SECRET && authHeader === `Bearer ${process.env.CRON_SECRET}`;
-  const secretOk = !!process.env.GHL_WEBHOOK_SECRET && req.nextUrl.searchParams.get("secret") === process.env.GHL_WEBHOOK_SECRET;
-  if (!cronOk && !secretOk) {
-    const caller = await requireUser(req);
-    if (!caller || caller.role !== "admin") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  if (!(await authorizeCron(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   if (!googleConfigured) return NextResponse.json({ error: "Google Workspace is not configured." }, { status: 501 });
 
@@ -55,12 +47,7 @@ async function run(req: NextRequest) {
 
   // Sender-email → contact map. A client email in a teammate's inbox is only
   // ingested when its From address matches a known contact.
-  const { data: contacts } = await supabaseAdmin.from("contacts").select("id, name, client_id, email, ghl_contact_id").not("email", "is", null);
-  const byEmail = new Map<string, any>();
-  for (const c of contacts ?? []) {
-    const e = (c.email ?? "").trim().toLowerCase();
-    if (e && !byEmail.has(e)) byEmail.set(e, c);
-  }
+  const byEmail = await contactsByEmail<any>("id, name, client_id, email, ghl_contact_id");
 
   // Admins triage unknown senders. Deterministic notification ids
   // (n_um_<gmailId>_<recipient>) make the every-10-min re-poll idempotent —

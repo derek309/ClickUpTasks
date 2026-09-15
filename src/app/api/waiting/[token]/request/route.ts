@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
-import { todayIso, type Attachment } from "@/lib/data";
+import { todayPacific, type Attachment } from "@/lib/data";
 import { sanitizeWaitingAttachments } from "@/lib/waitingAttachments";
 import { rateLimit } from "@/lib/rateLimit";
 import { resolveNotifyRecipient, notifyTeamOfClientActivity } from "@/lib/waitingNotify";
@@ -92,7 +92,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     // the client (see resolveNotifyRecipient), so it is never unassigned.
     status: "todo", priority: "client_request", assignee_id: assignee,
     contact_id: contactId,
-    due: todayIso(),
+    due: todayPacific(),
     client_response: { body: text, attachments, submittedAt: nowIso },
     created_by: "client",
   });

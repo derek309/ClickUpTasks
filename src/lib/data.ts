@@ -5,6 +5,16 @@
 // ---------------------------------------------------------------------------
 
 /** Today's date in the user's local timezone (yyyy-mm-dd). */
+/** yyyy-mm-dd in the team's timezone. Server code uses this, never todayIso():
+ *  the server clock is UTC, so after 5 PM Pacific todayIso() already says
+ *  tomorrow and a client's evening reply was dated the next day. */
+export function todayPacific(): string {
+  return toPacificDate(new Date().toISOString());
+}
+/** The Pacific calendar date of an instant, e.g. an appointment's start. */
+export function toPacificDate(iso: string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date(iso));
+}
 export function todayIso(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -906,7 +916,8 @@ export function clientAnswerPatch(
   if (synced.status !== undefined) patch.status = synced.status;
   if (synced.waitingOnClient !== undefined) patch.waiting_on_client = synced.waitingOnClient;
   if (synced.assigneeId !== undefined) patch.assignee_id = synced.assigneeId;
-  if (wasWaiting) patch.due = todayIso();
+  // Runs on the server, whose clock is UTC: see todayPacific.
+  if (wasWaiting) patch.due = todayPacific();
   return patch;
 }
 
@@ -2112,11 +2123,11 @@ export function dayLabel(iso: string): string {
  *  approximation for consumers that can't render markup — the GHL task
  *  sync body and the "Copy for Claude" brief. Browser-only (real DOM text
  *  extraction beats a regex); server-side callers get a best-effort tag
- *  strip instead. Never appended to the document, so this carries no XSS
- *  risk despite using innerHTML — it's read-only text extraction. */
+ *  strip instead. Also reads inbound email bodies, which anyone can write,
+ *  so the markup is parsed into an inert document (see below). */
 export function htmlToText(html: string): string {
   if (!html) return "";
-  if (typeof document === "undefined") {
+  if (typeof DOMParser === "undefined") {
     // No DOM to decode entities for us server-side — a link with a bare "&"
     // (e.g. "...?project=x&task=y") would otherwise come through as
     // literal "&amp;", which is exactly the shape of link this app hands
@@ -2126,10 +2137,13 @@ export function htmlToText(html: string): string {
       .replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">")
       .replace(/&quot;/gi, "\"").replace(/&#0?39;|&apos;/gi, "'").trim();
   }
-  const div = document.createElement("div");
-  div.innerHTML = html;
-  div.querySelectorAll("p, li, h1, h2, h3, blockquote, br").forEach((el) => el.after(document.createTextNode("\n")));
-  return (div.textContent || "").replace(/\n{3,}/g, "\n\n").trim();
+  // DOMParser, never a div's innerHTML: an element made in the live page
+  // fetches images and fires inline handlers even when it is never attached,
+  // so an emailed <img onerror> ran code in the teammate's session. A parsed
+  // document loads nothing and runs nothing.
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  doc.body.querySelectorAll("p, li, h1, h2, h3, blockquote, br").forEach((el) => el.after(doc.createTextNode("\n")));
+  return (doc.body.textContent || "").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 /** A sent email's `messages.body` is plain text for everything composed

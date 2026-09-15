@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
-import { requireUser } from "@/lib/serverAuth";
+import { authorizeCron } from "@/lib/cronAuth";
 import { linkState } from "@/lib/taskDocumentServer";
 import { resolveNotifyRecipient } from "@/lib/waitingNotify";
 import { draftLinkHtml, escapeHtml } from "@/lib/draftLink";
@@ -31,13 +31,7 @@ export async function POST(req: NextRequest) {
 async function run(req: NextRequest) {
   if (!adminConfigured) return NextResponse.json({ error: "Server not configured." }, { status: 501 });
 
-  const authHeader = req.headers.get("authorization") ?? "";
-  const cronOk = !!process.env.CRON_SECRET && authHeader === `Bearer ${process.env.CRON_SECRET}`;
-  const secretOk = !!process.env.GHL_WEBHOOK_SECRET && req.nextUrl.searchParams.get("secret") === process.env.GHL_WEBHOOK_SECRET;
-  if (!cronOk && !secretOk) {
-    const caller = await requireUser(req);
-    if (!caller || caller.role !== "admin") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  if (!(await authorizeCron(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   // Waiting on the client: with_client and not approved. A stage picked by hand
   // is checked against the versions below, so only a real send counts.

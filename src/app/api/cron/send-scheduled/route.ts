@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
-import { requireUser } from "@/lib/serverAuth";
+import { authorizeCron } from "@/lib/cronAuth";
 import { sendScheduledMessageNow } from "@/lib/sendMessageServer";
 
-// Fires due scheduled sends (supabase/scheduled-messages.sql). Same 3-way
-// cron auth as poll-replies/sync-appointments: Vercel cron header, a shared
-// secret, or an admin session.
+// Fires due scheduled sends (supabase/scheduled-messages.sql). Runs for
+// Vercel's cron or an admin session, see cronAuth.ts.
 //
 // Runs once daily (16:00 UTC, see vercel.json) rather than the originally
 // designed every-15-minutes — Vercel's Hobby plan only allows daily cron
@@ -25,13 +24,7 @@ export async function POST(req: NextRequest) {
 async function run(req: NextRequest) {
   if (!adminConfigured) return NextResponse.json({ error: "Server not configured." }, { status: 501 });
 
-  const authHeader = req.headers.get("authorization") ?? "";
-  const cronOk = !!process.env.CRON_SECRET && authHeader === `Bearer ${process.env.CRON_SECRET}`;
-  const secretOk = !!process.env.GHL_WEBHOOK_SECRET && req.nextUrl.searchParams.get("secret") === process.env.GHL_WEBHOOK_SECRET;
-  if (!cronOk && !secretOk) {
-    const caller = await requireUser(req);
-    if (!caller || caller.role !== "admin") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  if (!(await authorizeCron(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { data: due, error } = await supabaseAdmin
     .from("scheduled_messages")
@@ -42,6 +35,14 @@ async function run(req: NextRequest) {
 
   let sent = 0, failed = 0;
   for (const row of due ?? []) {
+    // Claim the row before sending. Only one run can move it from pending to
+    // sending, so an overlapping manual run, or a message canceled after the
+    // read above, is never sent. A run cut off mid send leaves the row at
+    // sending rather than pending, so tomorrow's run does not send it again.
+    const { data: claimed } = await supabaseAdmin
+      .from("scheduled_messages").update({ status: "sending" })
+      .eq("id", row.id).eq("status", "pending").select("id");
+    if (!claimed?.length) continue;
     const result = await sendScheduledMessageNow({
       id: row.id, clientId: row.client_id, taskId: row.task_id, channel: row.channel,
       subject: row.subject, body: row.body ?? "", cc: row.cc ?? [], bcc: row.bcc ?? [],

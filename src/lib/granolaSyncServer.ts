@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "./supabaseAdmin";
 import { granolaGetNote } from "./granolaClient";
 import { resolveOrPromoteTrackedClient } from "./ghlConversationTask";
+import { contactsByEmail } from "./contactsByEmail";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -41,12 +42,7 @@ export async function syncOneGranolaNote(noteId: string): Promise<GranolaSyncRes
   for (const i of note.calendar_event?.invitees ?? []) { const e = i.email?.trim().toLowerCase(); if (e) attendeeEmails.add(e); }
   const externalEmails = [...attendeeEmails].filter((e) => !teamEmails.has(e));
 
-  const { data: contacts } = await supabaseAdmin.from("contacts").select("id, name, client_id, email").not("email", "is", null);
-  const contactByEmail = new Map<string, any>();
-  for (const c of contacts ?? []) {
-    const e = (c.email ?? "").trim().toLowerCase();
-    if (e && !contactByEmail.has(e)) contactByEmail.set(e, c);
-  }
+  const contactByEmail = await contactsByEmail<any>("id, name, client_id, email");
   // No external attendees at all (an internal-only team meeting, or a solo
   // note) — nothing to match or triage. Record it as seen and stop, rather
   // than parking a meeting with no possible client in the triage queue.

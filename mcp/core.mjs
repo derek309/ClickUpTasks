@@ -381,10 +381,15 @@ export function createServer(opts = {}) {
     "Add a progress comment to a task (logged as you).",
     { id: z.string(), text: z.string() },
     async ({ id, text }) => {
-      const [t] = await sb(`tasks?select=comments&id=eq.${enc(id)}`);
+      const [t] = await sb(`tasks?select=id&id=eq.${enc(id)}`);
       if (!t) return { content: [{ type: "text", text: `No task ${id}.` }] };
-      const comments = [...(t.comments || []), { id: rid("cm_"), authorId: ME, body: text, at: nowIso() }];
-      await sb(`tasks?id=eq.${enc(id)}`, "PATCH", { comments });
+      // Atomic append, not a read then write of the whole list, which erased
+      // any client comment or approval that landed in between. append_comment
+      // stamps updated_by with the author and the app skips live updates
+      // stamped with the viewer's own id, so clear it or the comment would not
+      // show live for that teammate (same order as clientPublish).
+      await sb("rpc/append_comment", "POST", { task_id: id, comment: { id: rid("cm_"), authorId: ME, body: text, at: nowIso() } });
+      await sb(`tasks?id=eq.${enc(id)}`, "PATCH", { updated_by: null });
       return { content: [{ type: "text", text: `Comment added to ${id}.` }] };
     });
 
