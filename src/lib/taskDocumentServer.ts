@@ -24,9 +24,14 @@ import { PERSONAL_CLIENT_ID, clientAnswerPatch, htmlToText, type TaskStatus } fr
 import { resolveNotifyRecipient, notifyTeamOfClientActivity } from "./waitingNotify";
 import { sanitizeDocHtml, DOC_MAX_RAW_CHARS, DOC_MAX_HTML_CHARS } from "./docHtml";
 import { applyTextEdits, cleanEdits, pageTooBig, PAGE_TOO_BIG } from "./pageHtml";
-import { discardVersionFile, docVersionFile, readPageFile, sharedVersionFiles, storePageFile } from "./taskDocumentFiles";
+import { discardVersionFile, docComments, docVersionFile, readPageFile, sharedVersionFiles, storePageFile } from "./taskDocumentFiles";
 import { filePurpose, isFileKind, kindNoun, kindWhat, noDocumentYet, parseKind, type ReviewKind } from "./reviewKinds";
 import { setFiles } from "./imageSet";
+import { openClientComments } from "./reviewChanges";
+
+/** Why a client cannot approve: comments or edits of theirs are changes to submit
+ *  (Derek, 2026-09-15: one button, Approve or Submit changes, never both). */
+const APPROVE_WITH_CHANGES = "You left comments or edits. Submit them as changes, or remove them to approve.";
 
 /** A document link token: `doc_` plus 32 random bytes in base64url. Checked
  *  before anything touches the database, so garbage never costs a query. */
@@ -122,6 +127,15 @@ export async function latestPublished(documentId: string, kind: ReviewKind = "do
     .order("version", { ascending: false }).limit(1).maybeSingle();
   if (!data) return null;
   return { version: data.version as number, body: isFileKind(kind) ? data.body as string : sanitizeDocHtml(data.body as string) };
+}
+
+/** When the team last sent a version. That starts a new round of review: the
+ *  client's comments from before it no longer count as changes (reviewChanges.ts). */
+export async function latestSentAt(documentId: string): Promise<string | null> {
+  const { data } = await supabaseAdmin.from("task_document_versions")
+    .select("created_at").eq("document_id", documentId).eq("kind", "sent")
+    .order("version", { ascending: false }).limit(1).maybeSingle();
+  return (data?.created_at as string | undefined) ?? null;
 }
 
 /** A public POST body, refused unless it is JSON from this site and not huge.
@@ -233,18 +247,23 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
 
   let body: string;
   let created: string | null = null;
+  // The files of the version under review, where the client's pins count as changes.
+  let newestIds: string[] = [];
   if (fileKind) {
     // The version under review: the newest one published and not removed. A newer
     // one sent in the meantime is still refused below: its version moved on.
     const shown = (await sharedVersionFiles(scope.documentId)).at(-1);
     if (!shown) return { ok: false, status: 400, error: `There is no ${kindWhat(scope.kind)} to review right now.` };
     body = shown.body;
+    newestIds = shown.images.map((img) => img.fileId);
     if (scope.kind === "page") {
       if (page.fileId !== undefined && page.fileId !== shown.fileId) {
         return { ok: false, status: 409, error: "The team posted a newer version while you were looking.", current: await latestPublished(scope.documentId, scope.kind) };
       }
       const edits = page.edits === undefined ? [] : cleanEdits(page.edits);
       if (!edits) return { ok: false, status: 400, error: "Invalid request." };
+      // Refused before any new page file is stored for the rewording.
+      if (edits.length && kind === "client_approved") return { ok: false, status: 409, error: APPROVE_WITH_CHANGES };
       if (edits.length) {
         const source = await readPageFile(scope.documentId, shown.fileId, true);
         if (source === null) return { ok: false, status: 404, error: "Not found" };
@@ -265,6 +284,16 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
   // comments: new text on a document, a reworded page. An image never does.
   const previous = scope.kind === "doc" ? await latestPublished(scope.documentId, scope.kind) : null;
   const sentChanges = scope.kind === "doc" ? previous?.body.trim() !== body.trim() : created !== null;
+  // Approving means there is nothing to change. Edits, or a comment of the client's
+  // still open on this round, are changes to submit instead (reviewChanges.ts, the
+  // same rule the review page uses to show Approve or Submit changes).
+  if (kind === "client_approved") {
+    const [comments, sharedAt] = await Promise.all([docComments(scope.documentId), latestSentAt(scope.documentId)]);
+    if (sentChanges || openClientComments(comments, newestIds, sharedAt).length) {
+      if (created) await discardVersionFile(scope.documentId, created);
+      return { ok: false, status: 409, error: APPROVE_WITH_CHANGES };
+    }
+  }
 
   let version: number;
   try {

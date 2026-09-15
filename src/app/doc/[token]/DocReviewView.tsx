@@ -23,6 +23,7 @@ import { PageReviewFrame, deviceForWidth, type PageDevice } from "@/components/c
 import { addDocFiles, uploadSharedFile } from "@/lib/docFileUpload";
 import { formatFileSize, isPreviewableImage } from "@/lib/uploadTypes";
 import { commentHint, isFileKind, kindWhat, type ReviewKind } from "@/lib/reviewKinds";
+import { openClientComments } from "@/lib/reviewChanges";
 import { cleanEdit, mergeEdits, type FrameMode, type PageEdit } from "@/lib/pageFrameProtocol";
 import type { PinAnchor } from "@/lib/reviewPins";
 import {
@@ -35,6 +36,8 @@ type DocFile = { id: string; name: string; size: number; kind: string; addedBy: 
 type DocData = {
   kind: ReviewKind; title: string; clientName: string; body: string; version: number; status: DocStatus; approvedAt: string | null;
   closed: boolean; files: DocFile[]; comments: ThreadComment[];
+  /** When the team last sent a version; the client's comments count as changes from then. */
+  sharedAt: string | null;
   /** An image or page review's versions the client can see, oldest first. body is the
    *  newest. An image review version can hold several images, shown stacked. */
   versionFiles: { body: string; fileId: string; name: string; number: number; fromClient: boolean; images: { fileId: string; name: string; label: string }[] }[];
@@ -82,7 +85,6 @@ export default function DocReviewView({ token }: { token: string }) {
   const [notice, setNotice] = useState<Notice>(null);
   const [newer, setNewer] = useState<{ version: number; body: string } | null>(null);
   const [busy, setBusy] = useState<"send" | "approve" | null>(null);
-  const [confirmApprove, setConfirmApprove] = useState(false);
   const [adding, setAdding] = useState(false);
   const [lightbox, setLightbox] = useState<number | null>(null);
   // Words picked in the document for the next comment, and the comment whose words
@@ -196,7 +198,6 @@ export default function DocReviewView({ token }: { token: string }) {
 
   const publish = async (kind: "submit" | "approve") => {
     setBusy(kind === "submit" ? "send" : "approve");
-    setConfirmApprove(false);
     const sentEdits = newestEdits.length > 0;
     try {
       const res = await fetch(`/api/doc/${encodeURIComponent(token)}/${kind}`, {
@@ -236,7 +237,6 @@ export default function DocReviewView({ token }: { token: string }) {
     }
   };
 
-  const approve = () => { if (dirty) setConfirmApprove(true); else void publish("approve"); };
   const loadNewer = () => {
     if (!newer || !data) return;
     if (dirty && !window.confirm("Load the newer version? Your unsent edits will be replaced.")) return;
@@ -355,11 +355,10 @@ export default function DocReviewView({ token }: { token: string }) {
   const imagePlace = (fileId: string) => (shownImages.length > 1 ? shownImages.find((img) => img.fileId === fileId)?.label ?? null : null);
   const onNewest = !!data && shownFileId === data.body;
   const noVersion = versioned && !!data && !data.body;
-  // Sending needs something to send, the same on every kind: the client's own edits,
-  // or a comment of theirs still open (on an image or page, on the newest version;
-  // pins left on an earlier one do not count).
+  // The client has changes, the same rule on every kind and on the server: their own
+  // edits, or a comment of theirs still open on this round (reviewChanges.ts).
   const newestIds = versioned ? (versionFiles.at(-1)?.images ?? []).map((img) => img.fileId) : [];
-  const openNotes = commentsFor(data?.comments ?? [], newestIds).filter((c) => c.fromClient && !c.completedAt).length;
+  const openNotes = openClientComments(data?.comments ?? [], newestIds, data?.sharedAt ?? null).length;
   const what = data ? kindWhat(data.kind) : "document";
 
   // The frame for the page version shown, fetched again when it expires or the page navigates.
@@ -392,9 +391,14 @@ export default function DocReviewView({ token }: { token: string }) {
   const how = page
     ? "leave comments on any spot you click, change the wording with Edit text"
     : image ? "leave comments on any spot you click" : "leave comments on any words you select, edit anything you like";
-  const intro = `Look it over, ${how}, then send your changes or approve it as is.`;
-  const canSend = dirty || openNotes > 0;
-  const sendHint = image ? "Leave a comment on the image first, then send it to us." : "Leave a comment or make a change first, then send it to us.";
+  const intro = `Look it over, ${how}. If it all looks right, approve it. Any comment or edit turns that button into Submit changes.`;
+  // One button at a time (Derek, 2026-09-15): Approve while there is nothing to
+  // change, Submit changes once the client comments or edits.
+  const hasChanges = dirty || openNotes > 0;
+  const approveHint = image
+    ? "Want something changed? Click a spot on the image to leave a comment."
+    : page ? "Want something changed? Click a spot to comment, or use Edit text." : "Want something changed? Select words to comment on them, or edit the text.";
+  const changesHint = image ? "To approve instead, delete your comments." : "To approve instead, delete your comments and undo your edits.";
 
   return (
     <div className="min-h-[100dvh] bg-background text-foreground">
@@ -519,25 +523,28 @@ export default function DocReviewView({ token }: { token: string }) {
                 {/* Nothing to approve or change while no version is up for review. */}
                 {!locked && !noVersion && (
                   <div className="rounded-2xl border bg-surface p-4 shadow-sm">
-                    <div className="flex gap-3">
-                      <button onClick={() => void publish("submit")} disabled={!canSend || busy !== null}
-                        className="min-h-[52px] flex-[1.3] whitespace-nowrap rounded-xl border-2 px-2 text-[17px] font-semibold transition disabled:opacity-40"
-                        style={{ borderColor: NAVY, color: NAVY }}>
-                        {busy === "send" ? "Sending…" : "Send my changes"}
+                    {/* One button at a time: Submit changes once the client has
+                        commented or edited, Approve while there is nothing to change. */}
+                    {hasChanges ? (
+                      <button onClick={() => void publish("submit")} disabled={busy !== null}
+                        className="min-h-[52px] w-full rounded-xl px-4 text-[17px] font-bold text-white transition disabled:opacity-60"
+                        style={{ background: NAVY }}>
+                        {busy === "send" ? "Sending…" : "Submit changes"}
                       </button>
-                      <button onClick={approve} disabled={busy !== null}
-                        className="min-h-[52px] flex-1 rounded-xl px-4 text-[17px] font-bold text-white transition disabled:opacity-60"
+                    ) : (
+                      <button onClick={() => void publish("approve")} disabled={busy !== null}
+                        className="min-h-[52px] w-full rounded-xl px-4 text-[17px] font-bold text-white transition disabled:opacity-60"
                         style={{ background: GREEN }}>
                         {busy === "approve" ? "Approving…" : "Approve"}
                       </button>
-                    </div>
+                    )}
                     {dirty && (
                       <button onClick={undoEdits} className="mt-2 min-h-[44px] text-[16px] font-medium text-muted underline underline-offset-4">Undo my edits</button>
                     )}
                     {page && newestEdits.length > 0 && (
                       <p className="mt-1 text-[16px] text-muted">{newestEdits.length === 1 ? "1 text change" : `${newestEdits.length} text changes`} not sent yet.</p>
                     )}
-                    {!canSend && <p className="mt-2 text-[16px] text-muted">{sendHint}</p>}
+                    <p className="mt-2 text-[16px] text-muted">{hasChanges ? changesHint : approveHint}</p>
                   </div>
                 )}
 
@@ -592,19 +599,6 @@ export default function DocReviewView({ token }: { token: string }) {
           </>
         )}
       </main>
-
-      {confirmApprove && (
-        <div className="fixed inset-0 z-30 flex items-end justify-center bg-black/40 p-4 sm:items-center" onClick={() => setConfirmApprove(false)}>
-          <div role="dialog" aria-modal="true" className="w-full max-w-[460px] rounded-2xl bg-surface p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <p className="text-[22px] font-bold">Approve with your edits?</p>
-            <p className="mt-2 text-[17px] text-muted">Your changes will be saved as the approved version.</p>
-            <div className="mt-5 flex flex-col gap-3 sm:flex-row-reverse">
-              <button onClick={() => void publish("approve")} className="min-h-[52px] flex-1 rounded-xl px-5 text-[17px] font-bold text-white" style={{ background: GREEN }}>Approve with my edits</button>
-              <button onClick={() => setConfirmApprove(false)} className="min-h-[52px] flex-1 rounded-xl border-2 px-5 text-[17px] font-semibold" style={{ borderColor: NAVY, color: NAVY }}>Keep editing</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {lightbox !== null && previewImages[lightbox] && (
         <ImageLightbox images={previewImages} index={lightbox} onIndex={setLightbox} onClose={() => setLightbox(null)} />
