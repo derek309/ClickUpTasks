@@ -1,7 +1,7 @@
 // Shared "one open top-tier task per GHL contact thread" logic — used by the
 // inbound webhook (messages, calls) and the appointment sync poll. Server-only.
 import { supabaseAdmin } from "./supabaseAdmin";
-import { titleCase, conversationSignalRank } from "./data";
+import { titleCase, conversationSignalRank, todayPacific, toPacificDate } from "./data";
 
 // PostgREST PARSES the `.or()` string below — a value carrying its own filter
 // syntax (comma, dot, parens) widens the match to arbitrary rows rather than
@@ -74,21 +74,10 @@ export async function bumpStatusToInterview(clientId: string): Promise<void> {
   }
 }
 
-// "Today" for a Conversation task's due date, in the team's operating
-// timezone (Pacific) rather than the server's UTC clock — due doubles as
-// "last touched" here (see below), and a UTC-computed date can already be
-// tomorrow for a US-based reply that just arrived this evening, which would
-// misrender as "Tomorrow" in the UI's local-time due-date formatting.
-export function todayPacific(): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date());
-}
-
-// Same conversion, for an arbitrary instant (e.g. an appointment's start
-// time) rather than "now" — used so a booked meeting's due date reflects
-// when it actually happens, not when it was synced.
-export function toPacificDate(iso: string): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date(iso));
-}
+// Conversation task due dates are Pacific, not the server's UTC clock. Both
+// helpers now live in data.ts (shared with the client portal routes) and are
+// re-exported here for the routes that already import them from this file.
+export { todayPacific, toPacificDate };
 
 // Priority-system spec (see PRIORITY_META in src/lib/data.ts): every inbound
 // reply/call/appointment keeps exactly one open Conversation-priority task
@@ -169,6 +158,13 @@ export async function upsertConversationTask(
     // link updates here without creating a duplicate task or touching
     // anything else on it.
     const patch: Record<string, unknown> = { due, last_activity_at: new Date().toISOString() };
+    // A trashed thread still counts as the open one: the unique index behind
+    // this lookup (conversation-task-unique.sql) ignores deleted_at, so a
+    // fresh task could not be created beside it. A new message or call brings
+    // it back out of the Trash instead of landing where nobody looks. The
+    // appointment poll (opts.due) re-runs daily for the same booking, so it
+    // leaves a task someone trashed on purpose where it is.
+    if (!opts?.due) patch.deleted_at = null;
     if (opts?.title && conversationSignalRank(opts.title) > conversationSignalRank(openTasks[0].title)) {
       patch.title = opts.title;
     }

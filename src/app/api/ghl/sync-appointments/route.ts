@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
-import { requireUser } from "@/lib/serverAuth";
+import { authorizeCron } from "@/lib/cronAuth";
 import { titleCase } from "@/lib/data";
 import { configuredLocations, tokenForLocation } from "@/lib/ghlTokens";
 import { resolveOrPromoteTrackedClient, upsertConversationTask, toPacificDate, bumpStatusToInterview } from "@/lib/ghlConversationTask";
@@ -45,16 +45,9 @@ export async function POST(req: NextRequest) {
 async function run(req: NextRequest) {
   if (!adminConfigured) return NextResponse.json({ error: "Server not configured." }, { status: 501 });
 
-  // Same three-way auth as ../\.\./google/poll-replies: Vercel cron header,
-  // a shared secret for a manual curl, or an admin session (the app's own
-  // "Sync appointments" action).
-  const authHeader = req.headers.get("authorization") ?? "";
-  const cronOk = !!process.env.CRON_SECRET && authHeader === `Bearer ${process.env.CRON_SECRET}`;
-  const secretOk = !!process.env.GHL_WEBHOOK_SECRET && req.nextUrl.searchParams.get("secret") === process.env.GHL_WEBHOOK_SECRET;
-  if (!cronOk && !secretOk) {
-    const caller = await requireUser(req);
-    if (!caller || caller.role !== "admin") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  // Vercel's cron, or an admin session (the app's own "Sync appointments"
+  // action). See cronAuth.ts.
+  if (!(await authorizeCron(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const startTime = Date.now() - WINDOW_PAST_MS;
   const endTime = Date.now() + WINDOW_FUTURE_DAYS * 86400000;

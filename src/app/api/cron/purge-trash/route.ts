@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminConfigured } from "@/lib/supabaseAdmin";
-import { requireUser } from "@/lib/serverAuth";
+import { authorizeCron } from "@/lib/cronAuth";
 import { purgeExpiredTrash } from "@/lib/trashCleanupServer";
 
 // Daily sweep — permanently deletes clients/projects/tasks past their
-// 30-day Trash window (see supabase/soft-delete.sql). Same 3-way cron auth
-// as the other crons.
+// 30-day Trash window (see supabase/soft-delete.sql). Same cron auth as the
+// other crons (cronAuth.ts).
 
 export const maxDuration = 60;
 
@@ -18,14 +18,7 @@ export async function POST(req: NextRequest) {
 
 async function run(req: NextRequest) {
   if (!adminConfigured) return NextResponse.json({ error: "Server not configured." }, { status: 501 });
-
-  const authHeader = req.headers.get("authorization") ?? "";
-  const cronOk = !!process.env.CRON_SECRET && authHeader === `Bearer ${process.env.CRON_SECRET}`;
-  const secretOk = !!process.env.GHL_WEBHOOK_SECRET && req.nextUrl.searchParams.get("secret") === process.env.GHL_WEBHOOK_SECRET;
-  if (!cronOk && !secretOk) {
-    const caller = await requireUser(req);
-    if (!caller || caller.role !== "admin") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  if (!(await authorizeCron(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const result = await purgeExpiredTrash();
   return NextResponse.json({ ok: true, ...result });

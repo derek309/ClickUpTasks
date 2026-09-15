@@ -459,6 +459,9 @@ export default function WaitingView({ token }: { token: string }) {
       const j = await res.json().catch(() => ({}));
       if (!res.ok) { if (!hasLoadedRef.current) setError(j.error || "This link isn't valid."); return; }
       hasLoadedRef.current = true;
+      // A first load that failed (weak signal, rate limit) left an error on
+      // screen; the 15 second refresh that works must replace it.
+      setError(null);
       setClientName(j.clientName ?? null);
       setCanRequestNewTasks(j.canRequestNewTasks === true);
       setProjects(Array.isArray(j.projects) ? j.projects : []);

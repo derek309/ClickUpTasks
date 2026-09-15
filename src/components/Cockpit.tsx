@@ -17,6 +17,7 @@ import {
   recurrenceResetFields,
   plainTextToHtml,
   TODAY,
+  todayIso,
   addDaysIso,
   daysBetween,
   THIS_MONDAY,
@@ -1480,6 +1481,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     let lastRefetch = 0;
     const refetch = async () => {
       if (document.visibilityState !== "visible") return;
+      // TODAY (and every due bucket, "Mark reviewed" stamp and Today pick built
+      // from it) is fixed when the page loads. A window left open overnight
+      // kept treating yesterday as today, so coming back on a new day reloads.
+      if (todayIso() !== TODAY) { window.location.reload(); return; }
       if (Date.now() - lastRefetch < 20000) return;
       lastRefetch = Date.now();
       try {

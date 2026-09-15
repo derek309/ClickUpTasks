@@ -6,7 +6,7 @@
 // the client's followers + admins. Deliberately a separate copy from the
 // webhook (which stays untouched) — same behavior, different entry point.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { titleCase } from "@/lib/data";
+import { titleCase, todayPacific } from "@/lib/data";
 import { SAFE_CONTACT_ID } from "@/lib/ghlConversationTask";
 import { sendGmailAs, googleConfigured } from "@/lib/googleMail";
 import { APP_URL } from "@/lib/appUrl";
@@ -14,10 +14,6 @@ import { APP_URL } from "@/lib/appUrl";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 type Contact = { id: string; name: string; client_id: string };
-
-function todayPacific(): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date());
-}
 
 // Map a contact to the tracked client that represents it (cl_<contactId>, or
 // a client linked via linked_contact_id) — a contact's own client_id points at
@@ -93,7 +89,9 @@ async function upsertConversationTask(contact: Contact, ghlContactId: string | n
   const today = todayPacific();
   const existing = await findOpenConversationTask(contact.id);
   if (existing) {
-    await supabaseAdmin.from("tasks").update({ due: today, updated_by: null }).eq("id", existing);
+    // deleted_at: null brings a trashed thread back; see the same line in
+    // ghlConversationTask.upsertConversationTask for why it is not skipped.
+    await supabaseAdmin.from("tasks").update({ due: today, updated_by: null, deleted_at: null }).eq("id", existing);
     return existing;
   }
   let projectId: string | undefined = (

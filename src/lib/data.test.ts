@@ -206,11 +206,19 @@ describe("timeAgo", () => {
 });
 
 describe("htmlToText", () => {
-  // This file's vitest environment has no `document`, so every call here
-  // exercises the server-side regex fallback specifically — the same path
-  // hit by the waiting-page API route, where a link like "...?a=1&b=2" was
-  // coming through as literal "&amp;" before entity decoding was added.
-  it("strips tags and decodes common entities without a DOM", () => {
+  // Vitest runs under jsdom (vitest.config.ts), so these take the DOMParser
+  // path the browser uses. A link like "...?a=1&b=2" must not come through as
+  // literal "&amp;".
+  it("never builds elements in the live page, where <img onerror> would run", () => {
+    const spy = vi.spyOn(document, "createElement");
+    expect(htmlToText('<p>Hi</p><img src="x" onerror="window.__ran = 1">')).toBe("Hi");
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+  it("keeps paragraph breaks as new lines", () => {
+    expect(htmlToText("<p>One</p><p>Two</p>")).toBe("One\nTwo");
+  });
+  it("strips tags and decodes common entities", () => {
     expect(htmlToText("<p>Hi &amp; welcome</p>")).toBe("Hi & welcome");
     expect(htmlToText("a=1&amp;b=2")).toBe("a=1&b=2");
     expect(htmlToText("&lt;script&gt;")).toBe("<script>");
