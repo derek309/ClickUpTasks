@@ -364,6 +364,32 @@ export async function fetchContacts(): Promise<Contact[]> {
 // --- mutations (fire-and-forget from the UI; errors surface via console) -----
 
 export const upsertTask = (t: Task, updatedBy?: string | null) => save(() => supabase.from("tasks").upsert(taskToRow(t, updatedBy)));
+
+/** The task columns an edit actually changes, compared as stored. Saving an
+ *  edit used to write the whole row from whatever that window had loaded, so a
+ *  status change in one window erased a comment or checklist tick saved from
+ *  another. updated_by is left to the caller; draft_email is never a column
+ *  here (saveTaskDraftEmail writes it). */
+export function changedTaskColumns(before: Task, after: Task): Record<string, unknown> {
+  const was: Record<string, unknown> = taskToRow(before);
+  const now: Record<string, unknown> = taskToRow(after);
+  const changed: Record<string, unknown> = {};
+  for (const key of Object.keys(now)) {
+    if (key !== "updated_by" && JSON.stringify(was[key]) !== JSON.stringify(now[key])) changed[key] = now[key];
+  }
+  return changed;
+}
+
+/** Saves an edit to an existing task, sending only the changed columns. A task
+ *  whose insert has not landed yet matches no row, so the whole row is written
+ *  instead and a quick edit right after creating it is not lost. */
+export async function saveTaskEdit(before: Task, after: Task, updatedBy?: string | null) {
+  const changed = changedTaskColumns(before, after);
+  if (!Object.keys(changed).length) return null;
+  const res = await save(() => supabase.from("tasks").update({ ...changed, updated_by: updatedBy ?? null }).eq("id", after.id).select("id"));
+  if (res && !res.error && !res.data?.length) return upsertTask(after, updatedBy);
+  return res;
+}
 /** A task's draft email, written alone: the only browser write of draft_email
  *  (Derek, 2026-09-12: a stale task save could wipe a reminder's draft). */
 export const saveTaskDraftEmail = (taskId: string, draft: Task["draftEmail"], updatedBy?: string | null) =>

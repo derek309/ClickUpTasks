@@ -75,7 +75,7 @@ import {
   THIS_MONTH_END,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import DmChat from "./DmChat";
@@ -1382,6 +1382,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           return;
         }
         const row = p.new;
+        // Moving a task to the Trash is an UPDATE, not a DELETE, so without
+        // this it stayed on everyone else's screen until they reloaded.
+        if (row.deleted_at) { setTasks((ts) => ts.filter((t) => t.id !== row.id)); return; }
         // Every server-side write (client portal response, inbound email/SMS,
         // owner-side completion) must send updated_by: null. Without it
         // this stays pinned to whichever rep last touched the row from the
@@ -1410,6 +1413,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           return;
         }
         const row = p.new;
+        // A client moved to the Trash, likewise. Its projects are not in the
+        // realtime publication, so they go with it here; its tasks arrive as
+        // their own trashed rows above.
+        if (row.deleted_at) {
+          setClients((cs) => cs.filter((c) => c.id !== row.id));
+          setProjects((ps) => ps.filter((p2) => p2.clientId !== row.id));
+          setActiveClient((a) => (a === row.id ? "all" : a));
+          return;
+        }
         if (isOwnClientEcho(row.id as string)) return;
         const c = rowToClient(row);
         setClients((cs) => (cs.some((x) => x.id === c.id) ? cs.map((x) => (x.id === c.id ? c : x)) : [...cs, c]));
@@ -2449,7 +2461,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     }
     if (cur && synced.status === "done" && cur.status !== "done") keepDoneVisible(id);
     setTasks((ts) => { let next = ts.map((t) => (t.id === id ? { ...t, ...synced } : t)); if (clone) next = [...next, clone]; return next; });
-    if (cur) { const merged = { ...cur, ...synced }; upsertTask(merged, me.id); if (clone) upsertTask(clone, me.id); }
+    // Only the columns this edit changed (saveTaskEdit), so a checklist tick
+    // from this window can't carry stale comments or fields over newer ones.
+    if (cur) { void saveTaskEdit(cur, { ...cur, ...synced }, me.id); if (clone) upsertTask(clone, me.id); }
     // The draft email is never part of a task save (db.ts taskToRow), only its own write.
     if (cur && "draftEmail" in synced) saveTaskDraftEmail(id, synced.draftEmail ?? null, me.id);
   };
@@ -2468,7 +2482,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!before) return;
     const updated: Task = { ...before, comments: before.comments.filter((c) => c.id !== commentId) };
     setTasks((prev) => prev.map((x) => (x.id === taskId ? updated : x)));
-    upsertTask(updated, me.id);
+    void saveTaskEdit(before, updated, me.id);
   };
 
   const describeFieldChange = (before: Task, patch: Partial<Task>): string[] => {
@@ -2561,7 +2575,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     }
     if (synced.status === "done" && before.status !== "done") keepDoneVisible(id);
     setTasks((prev) => { let next = prev.map((x) => (x.id === id ? updated : x)); if (clone) next = [...next, clone]; return next; });
-    upsertTask(updated, me.id);
+    // Only the fields this edit changed, then each activity line appended on
+    // its own (append_comment). Writing `comments` from `before` erased any
+    // comment saved from another window, or by a teammate, in the meantime.
+    void (async () => {
+      await saveTaskEdit(before, { ...before, ...synced, comments: before.comments }, me.id);
+      for (const e of events) await appendCommentDb(id, e);
+    })();
     if (clone) upsertTask(clone, me.id);
     // The draft email is never part of a task save (db.ts taskToRow), only its own write.
     if ("draftEmail" in synced) saveTaskDraftEmail(id, synced.draftEmail ?? null, me.id);
@@ -3219,7 +3239,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       const pid = projId;
       const orphanIds = new Set(orphanTasks.map((t) => t.id));
       setTasks((ts) => ts.map((t) => (orphanIds.has(t.id) ? { ...t, clientId: id, projectId: pid } : t)));
-      orphanTasks.forEach((t) => upsertTask({ ...t, clientId: id, projectId: pid }, me.id));
+      orphanTasks.forEach((t) => void saveTaskEdit(t, { ...t, clientId: id, projectId: pid }, me.id));
     }
     setActiveClient(id);
     setMyWork(false);
