@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/serverAuth";
 import { isClientVisible } from "@/lib/extensionApi";
 import { isCompletionEvent } from "@/lib/data";
+import { aiRateLimit, geminiEndpoint } from "@/lib/ai";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -13,11 +14,12 @@ import { isCompletionEvent } from "@/lib/data";
 // result is cached on clients.ai_summary and logged as an ai_summary journal
 // note. Server-only: GEMINI_API_KEY never reaches the browser.
 
-const GEMINI_MODEL = "gemini-flash-latest";
 
 export async function POST(req: NextRequest) {
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const limited = await aiRateLimit(caller.id);
+  if (limited) return limited;
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "AI summary isn't configured yet (missing GEMINI_API_KEY)." }, { status: 501 });
@@ -87,7 +89,7 @@ export async function POST(req: NextRequest) {
   ].join("\n");
 
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
+    const res = await fetch(geminiEndpoint(apiKey), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),

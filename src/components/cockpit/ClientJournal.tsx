@@ -25,6 +25,7 @@ import { I, Avatar, CollapsibleText, newId, useStickyBottom, JumpToLatestButton 
 import { ConfirmModal, type ConfirmSpec } from "./modals";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 import { SchedulePopover } from "./SchedulePopover";
+import { useEscapeToClose } from "./useEscapeToClose";
 
 // A2: the old ten equal pills (note kinds, Message, Task Activity, attachment
 // types) mixed three different axes into one row. Split into a primary
@@ -371,9 +372,11 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   // guarded off whenever the event started in a text field, so typing those
   // letters normally never gets hijacked. Esc collapses regardless of focus
   // (typing "half an email" then hitting Esc should collapse, not be eaten).
+  // Escape goes through the shared stack, so an expanded composer collapses
+  // OR a task drawer opened over it closes, never both on one press.
+  useEscapeToClose(() => setComposerCollapsed(true), !composerCollapsed);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !composerCollapsed) { setComposerCollapsed(true); return; }
       if (!composerCollapsed) return;
       const target = e.target as HTMLElement | null;
       const typing = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || !!target?.isContentEditable;

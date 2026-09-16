@@ -469,11 +469,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const delegations = task.subtasks.filter((s) => !!s.assigneeId && s.assigneeId !== task.assigneeId);  const plainSubs = task.subtasks.filter((s) => !delegations.includes(s));
   const doneSubs = plainSubs.filter((s) => s.done).length;
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // Bottom of the Escape stack: anything opened over the drawer closes first.
+  useEscapeToClose(onClose);
 
   const titleBlock = (
     <textarea value={titleDraft}

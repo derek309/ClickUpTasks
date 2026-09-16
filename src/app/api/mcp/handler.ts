@@ -25,6 +25,7 @@ import { NextRequest } from "next/server";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createServer } from "../../../../mcp/core.mjs";
 import { createReviewServices } from "@/lib/mcpReviewServices";
+import { sameSecret } from "@/lib/sameSecret";
 
 function json(body: unknown, status: number) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -37,8 +38,18 @@ export async function handleMcp(req: NextRequest, pathToken?: string): Promise<R
 
   const authHeader = req.headers.get("authorization") ?? "";
   const queryToken = req.nextUrl.searchParams.get("token") ?? "";
-  const ok = authHeader === `Bearer ${secret}` || queryToken === secret || pathToken === secret;
+  const ok = sameSecret(authHeader, `Bearer ${secret}`) || sameSecret(queryToken, secret) || sameSecret(pathToken ?? "", secret);
   if (!ok) return json({ error: "Unauthorized" }, 401);
+
+  // GET is where a client asks to be pushed messages over a long-lived SSE
+  // stream. A stateless server has no session to push anything to, so the
+  // transport just held the connection open until the 60s function limit —
+  // 14,645 "Task timed out" errors in one week, each one a full 60s
+  // invocation, all of it for a stream that was never going to carry
+  // anything. The spec's answer for a server that doesn't offer the stream
+  // is 405, which tells the client to stop asking. POST still carries every
+  // request and its reply.
+  if (req.method === "GET") return new Response(null, { status: 405, headers: { Allow: "POST, DELETE" } });
 
   const memberId = process.env.CLICKUPTASKS_MEMBER_ID || "u_claude";
   const server = createServer({

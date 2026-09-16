@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireApiToken } from "@/lib/serverAuth";
 import { adminConfigured } from "@/lib/supabaseAdmin";
 import { normalizeEnriched, PRIORITIES, ISO_DATE } from "./normalize";
+import { aiRateLimit, geminiEndpoint } from "@/lib/ai";
 
 // Turns a raw scraped email into a task the Clipper can create without you
 // correcting five fields first: a title and description, plus the priority,
@@ -19,13 +20,14 @@ import { normalizeEnriched, PRIORITIES, ISO_DATE } from "./normalize";
 // not typed in — but the cost shape is one call per email opened, not one per
 // button press, which is why the timeout below is shorter than every other
 // route's: nobody is sitting there waiting on this one.
-const GEMINI_MODEL = "gemini-flash-latest";
 const GEMINI_TIMEOUT_MS = 8000;
 
 export async function POST(req: NextRequest) {
   if (!adminConfigured) return NextResponse.json({ error: "Service role key not configured." }, { status: 501 });
   const caller = await requireApiToken(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const limited = await aiRateLimit(caller.id);
+  if (limited) return limited;
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "AI enrichment isn't configured yet (missing GEMINI_API_KEY)." }, { status: 501 });
@@ -72,7 +74,7 @@ export async function POST(req: NextRequest) {
   ].join("\n");
 
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
+    const res = await fetch(geminiEndpoint(apiKey), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

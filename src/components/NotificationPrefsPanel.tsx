@@ -19,6 +19,8 @@ const ROWS: { key: keyof Prefs; label: string; help: string }[] = [
 
 export default function NotificationPrefsPanel() {
   const [prefs, setPrefs] = useState<Prefs | null>(null);
+  // Whether anything this person does can produce an email copy at all.
+  const [canSend, setCanSend] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState<keyof Prefs | null>(null);
@@ -29,6 +31,7 @@ export default function NotificationPrefsPanel() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Failed to load preferences");
       setPrefs({ emailNotifyActivity: json.emailNotifyActivity, emailNotifyMessage: json.emailNotifyMessage, emailNotifyDm: json.emailNotifyDm });
+      setCanSend(json.canSendEmailCopies !== false);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load preferences");
@@ -59,19 +62,26 @@ export default function NotificationPrefsPanel() {
 
   return (
     <div className="px-5 py-4">
-      <div className="mb-1 text-[15px] font-semibold">Email notifications</div>
-      <p className="mb-4 text-[13px] text-muted">
+      <div className="mb-1 text-[17px] font-semibold">Email notifications</div>
+      <p className="mb-4 text-[16px] text-muted">
         Turning one of these off only stops the email copy — you&apos;ll still see it in your Inbox in ClickUpTasks.
       </p>
-      {loading && <div className="py-8 text-center text-[13px] text-muted">Loading…</div>}
-      {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-[15px] text-red-600">{error}</div>}
+      {!loading && !canSend && (
+        <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-[16px] text-amber-900">
+          Email copies are sent from your own ClickUpLocal Google Workspace address, and your account is not one, so
+          nothing you do sends a teammate an email. They still see it in ClickUpTasks. The toggles below change
+          nothing until your account is on that domain.
+        </div>
+      )}
+      {loading && <div className="py-8 text-center text-[16px] text-muted">Loading…</div>}
+      {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-[16px] text-red-600">{error}</div>}
       {!loading && prefs && (
         <div className="divide-y rounded-lg border">
           {ROWS.map((r) => (
             <div key={r.key} className="flex items-center gap-3 px-4 py-3">
               <div className="min-w-0 flex-1">
-                <div className="text-[15px] font-medium">{r.label}</div>
-                <div className="text-[13px] text-muted">{r.help}</div>
+                <div className="text-[16px] font-medium">{r.label}</div>
+                <div className="text-[16px] text-muted">{r.help}</div>
               </div>
               <Toggle on={prefs[r.key]} onClick={() => toggle(r.key)} disabled={saving === r.key} />
             </div>

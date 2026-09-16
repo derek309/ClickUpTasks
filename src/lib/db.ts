@@ -4,6 +4,8 @@
 import { supabase } from "./supabase";
 import type { EmailDraft } from "./data";
 import { parseKind, type FileKind, type ReviewKind } from "./reviewKinds";
+import type { OpenReviewDoc, OpenReviewStatus, ReviewVersionRow } from "./openReviews";
+import type { ClientDraftInput } from "./pendingSends";
 import {
   clientsSeed,
   contactsSeed,
@@ -14,8 +16,6 @@ import {
   type Client,
   type Project,
   type Contact,
-  type UnmatchedEmail,
-  type GranolaUnmatchedMeeting,
   type Notification,
   type ClientLink,
   type ClientNote,
@@ -49,8 +49,8 @@ export { titleCase };
 // deploy, exactly like can_message was. in_trial/trial_ends_at/does_a2p
 // (supabase/client-trial-and-a2p.sql) are on that same normal edit path for
 // the same reason, so that migration is also migrate-before-deploy.
-const clientToRow = (c: Client) => ({ id: c.id, name: c.name, color: c.color, ghl_location_id: c.ghlLocationId, status: c.status ?? "claimed", type: c.type ?? "client", assigned_to: c.assignedTo ?? [], can_message: c.canMessage ?? [], linked_contact_id: c.linkedContactId ?? null, linked_contact_ids: c.linkedContactIds ?? [], reviewed_at: c.reviewedAt ?? null, share_token: c.shareToken ?? null, can_request_new_tasks: c.canRequestNewTasks === true, in_trial: c.inTrial === true, trial_ends_at: c.trialEndsAt ?? null, does_a2p: c.doesA2P === true, show_growth_plan: c.showGrowthPlan === true, portal_shows_all_tasks: c.portalShowsAllTasks === true });
-export const rowToClient = (r: any): Client => ({ id: r.id, name: titleCase(r.name), color: r.color, ghlLocationId: r.ghl_location_id ?? "", status: (r.status as Client["status"]) ?? "claimed", type: (r.type as Client["type"]) ?? "client", assignedTo: r.assigned_to ?? [], canMessage: r.can_message ?? [], linkedContactId: r.linked_contact_id ?? null, linkedContactIds: r.linked_contact_ids ?? [], aiSummary: r.ai_summary ?? null, aiSummaryAt: r.ai_summary_at ?? null, reviewedAt: r.reviewed_at ?? null, shareToken: r.share_token ?? null, canRequestNewTasks: r.can_request_new_tasks === true, inTrial: r.in_trial === true, trialEndsAt: r.trial_ends_at ?? null, doesA2P: r.does_a2p === true, showGrowthPlan: r.show_growth_plan === true, portalShowsAllTasks: r.portal_shows_all_tasks === true });
+const clientToRow = (c: Client) => ({ id: c.id, name: c.name, color: c.color, ghl_location_id: c.ghlLocationId, status: c.status ?? "claimed", type: c.type ?? "client", assigned_to: c.assignedTo ?? [], can_message: c.canMessage ?? [], linked_contact_id: c.linkedContactId ?? null, linked_contact_ids: c.linkedContactIds ?? [], reviewed_at: c.reviewedAt ?? null, share_token: c.shareToken ?? null, can_request_new_tasks: c.canRequestNewTasks === true, in_trial: c.inTrial === true, trial_ends_at: c.trialEndsAt ?? null,  portal_shows_all_tasks: c.portalShowsAllTasks === true });
+export const rowToClient = (r: any): Client => ({ id: r.id, name: titleCase(r.name), color: r.color, ghlLocationId: r.ghl_location_id ?? "", status: (r.status as Client["status"]) ?? "claimed", type: (r.type as Client["type"]) ?? "client", assignedTo: r.assigned_to ?? [], canMessage: r.can_message ?? [], linkedContactId: r.linked_contact_id ?? null, linkedContactIds: r.linked_contact_ids ?? [], aiSummary: r.ai_summary ?? null, aiSummaryAt: r.ai_summary_at ?? null, reviewedAt: r.reviewed_at ?? null, shareToken: r.share_token ?? null, canRequestNewTasks: r.can_request_new_tasks === true, inTrial: r.in_trial === true, trialEndsAt: r.trial_ends_at ?? null,  portalShowsAllTasks: r.portal_shows_all_tasks === true });
 
 const contactToRow = (c: Contact) => ({ id: c.id, client_id: c.clientId, name: c.name, email: c.email, phone: c.phone ?? null, ghl_contact_id: c.ghlContactId, company_name: c.company ?? null, city: c.city ?? null, state: c.state ?? null, saas_url: c.saasUrl ?? null });
 export const rowToContact = (r: any): Contact => ({ id: r.id, clientId: r.client_id, name: titleCase(r.name), email: r.email ?? "", phone: r.phone ?? "", ghlContactId: r.ghl_contact_id ?? "", company: r.company_name ?? "", city: r.city ?? "", state: r.state ?? "", saasUrl: r.saas_url ?? "" });
@@ -225,7 +225,8 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true, 
     if (orderCol) q = q.order(orderCol, { ascending });
     return q.order("id", { ascending: true });
   };
-  // A big table (tasks: 28k+ rows as of Aug 2026) used to mean one 1000-row
+  // A big table (tasks was thought to be 28k+ rows in Aug 2026; it is about
+  // 1,900 live of 3,300 total as of Sep 2026) used to mean one 1000-row
   // request at a time, sequentially — 29+ round trips end to end just to
   // page through it, easily tens of seconds before the app's very first
   // paint, and it only gets worse as the table grows. Ask for an exact count
@@ -274,7 +275,7 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true, 
 }
 
 export async function fetchAll() {
-  const [c, ct, p, t, n, cl, cn, m, tt, vf, fd, um, sg, dm, gu] = await Promise.all([
+  const [c, ct, p, t, n, cl, cn, m, tt, vf, fd, sg, dm] = await Promise.all([
     fetchAllRows("clients", "created_at", true, true),
     fetchAllRows("contacts"),
     fetchAllRows("projects", undefined, true, true),
@@ -289,10 +290,8 @@ export async function fetchAll() {
     fetchAllRows("task_templates", "created_at"),
     fetchAllRows("vault_folders", "created_at"),
     fetchAllRows("folders", "position"),
-    fetchAllRows("inbound_unmatched", "created_at", false),
     fetchAllRows("stages", "position"),
     fetchAllRows("dm_messages", "created_at", false),
-    fetchAllRows("granola_unmatched", "created_at", false),
   ]);
   // NB: `projects` stays in the hard-fail set — its new folder_id/position
   // columns are read via `select *`, which tolerates their absence pre-migration
@@ -305,10 +304,8 @@ export async function fetchAll() {
   if (tt.error) console.warn("[db] task_templates unavailable — run supabase/task-templates.sql", tt.error.message);
   if (vf.error) console.warn("[db] vault_folders unavailable — run supabase/vault-folders.sql", vf.error.message);
   if (fd.error) console.warn("[db] folders unavailable — run supabase/folders.sql", fd.error.message);
-  if (um.error) console.warn("[db] inbound_unmatched unavailable — run supabase/inbound-unmatched.sql", um.error.message);
   if (sg.error) console.warn("[db] stages unavailable — run supabase/stages.sql", sg.error.message);
   if (dm.error) console.warn("[db] dm_messages unavailable — run supabase/dm-chat.sql", dm.error.message);
-  if (gu.error) console.warn("[db] granola_unmatched unavailable — run supabase/granola-sync.sql", gu.error.message);
   return {
     clients: (c.data ?? []).map(rowToClient),
     contacts: (ct.data ?? []).map(rowToContact),
@@ -321,37 +318,17 @@ export async function fetchAll() {
     taskTemplates: tt.error ? [] : (tt.data ?? []).map(rowToTaskTemplate),
     vaultFolders: vf.error ? [] : (vf.data ?? []).map(rowToVaultFolder),
     folders: fd.error ? [] : (fd.data ?? []).map(rowToFolder),
-    unmatchedEmails: um.error ? [] : (um.data ?? []).filter((r: any) => !r.handled).map(rowToUnmatched),
     stages: sg.error ? [] : (sg.data ?? []).map(rowToStage),
     dmMessages: dm.error ? [] : (dm.data ?? []).map(rowToDmMessage),
-    granolaUnmatched: gu.error ? [] : (gu.data ?? []).filter((r: any) => !r.handled).map(rowToGranolaUnmatched),
   };
 }
 
-export const rowToUnmatched = (r: any): UnmatchedEmail => ({ id: r.id, fromEmail: r.from_email ?? "", fromName: r.from_name ?? "", subject: r.subject ?? "", body: r.body ?? "", at: r.at ?? r.created_at ?? "" });
-// Acted-on rows are marked handled, not deleted, so a re-poll within the
-// 2-day Gmail window can't re-surface them.
-export const markUnmatchedHandledDb = (id: string) => save(() => supabase.from("inbound_unmatched").update({ handled: true }).eq("id", id));
-export async function fetchUnmatchedDb(): Promise<UnmatchedEmail[]> {
-  const { data, error } = await supabase.from("inbound_unmatched").select("*").eq("handled", false).order("created_at", { ascending: false });
-  return error ? [] : (data ?? []).map(rowToUnmatched);
-}
-
-// Twin of rowToUnmatched/markUnmatchedHandledDb/fetchUnmatchedDb for Granola
-// meetings whose attendees didn't match a known contact (granola-sync.sql).
-export const rowToGranolaUnmatched = (r: any): GranolaUnmatchedMeeting => ({
-  id: r.id, granolaNoteId: r.granola_note_id, title: r.title ?? null, attendees: r.attendees ?? [],
-  summary: r.summary ?? null, webUrl: r.web_url ?? null, occurredAt: r.occurred_at ?? null, handled: r.handled ?? false,
-});
-export const markGranolaUnmatchedHandledDb = (id: string) => save(() => supabase.from("granola_unmatched").update({ handled: true }).eq("id", id));
-export async function fetchGranolaUnmatchedDb(): Promise<GranolaUnmatchedMeeting[]> {
-  const { data, error } = await supabase.from("granola_unmatched").select("*").eq("handled", false).order("created_at", { ascending: false });
-  return error ? [] : (data ?? []).map(rowToGranolaUnmatched);
-}
-// Backfills the ledger once an unmatched meeting is manually assigned to a
-// client, so it reads the same as one the automatic matcher found.
-export const linkGranolaSyncedNoteDb = (granolaNoteId: string, clientId: string, clientNoteId: string) =>
-  save(() => supabase.from("granola_synced_notes").update({ client_id: clientId, client_note_id: clientNoteId }).eq("granola_note_id", granolaNoteId));
+// The Inbox's "Unmatched email" and unmatched-meeting sections were removed
+// (see Cockpit.tsx), and with them the only readers of inbound_unmatched and
+// granola_unmatched. Both tables are still WRITTEN by the server (poll-replies,
+// the Granola sync) as a record of what did not match, so the rows are kept;
+// nothing reads them from the browser, and fetchAll no longer pages two whole
+// tables on every single page load to build two arrays nobody renders.
 
 export const upsertContact = (c: Contact) => save(() => supabase.from("contacts").upsert(contactToRow(c)));
 
@@ -359,6 +336,63 @@ export async function fetchContacts(): Promise<Contact[]> {
   const { data, error } = await fetchAllRows("contacts");
   if (error) throw error;
   return (data ?? []).map(rowToContact);
+}
+
+/** Every review still out with a client, across all of them at once, for the
+ *  Reviews board. Not part of fetchAll: a document is otherwise loaded one task
+ *  at a time (see supabase/task-documents.sql), and this is two small queries
+ *  run when the board is opened rather than fifteen more rows on every boot.
+ *
+ *  Row level security scopes it for free — task_documents_select derives from
+ *  tasks, so this returns reviews on the tasks the caller can already see.
+ *
+ *  The pair is the shape buildOpenReviews takes: the documents, and the version
+ *  rows that say when each was sent or replied to. Versions come back for these
+ *  documents only, which is a handful of rows per review. */
+export async function fetchOpenReviews(): Promise<{ docs: OpenReviewDoc[]; versions: ReviewVersionRow[] }> {
+  const { data: docRows, error } = await supabase
+    .from("task_documents")
+    .select("id, task_id, kind, title, status, version, client_viewed_at")
+    .is("deleted_at", null)
+    .in("status", ["with_client", "client_submitted"]);
+  if (error || !docRows?.length) return { docs: [], versions: [] };
+
+  const docs: OpenReviewDoc[] = docRows.map((r) => ({
+    id: r.id as string,
+    taskId: r.task_id as string,
+    kind: parseKind(r.kind),
+    title: (r.title as string | null) ?? null,
+    status: r.status as OpenReviewStatus,
+    version: (r.version as number) ?? 0,
+    clientViewedAt: (r.client_viewed_at as string | null) ?? null,
+  }));
+
+  const { data: versionRows } = await supabase
+    .from("task_document_versions")
+    .select("document_id, kind, created_at")
+    .in("document_id", docs.map((d) => d.id));
+
+  return {
+    docs,
+    versions: (versionRows ?? []).map((r) => ({
+      documentId: r.document_id as string,
+      kind: r.kind as ReviewVersionRow["kind"],
+      createdAt: r.created_at as string,
+    })),
+  };
+}
+
+/** Ids in these tables trashed since a moment. The visibility refetch merges
+ *  rows in and never takes any out, so without this a task someone else trashed
+ *  while this tab's live connection was down stays on screen — and stays
+ *  editable, writing to a row on its way to the purge. Asking which rows were
+ *  trashed is positive evidence; treating "missing from the last full fetch" as
+ *  deleted is not, because a paged fetch can skip a row that is perfectly fine,
+ *  and wiping a just-saved task off the screen is the worse failure. */
+export async function trashedSince(table: "tasks" | "clients", sinceIso: string): Promise<string[]> {
+  const { data, error } = await supabase.from(table).select("id").gte("deleted_at", sinceIso);
+  if (error) return [];
+  return (data ?? []).map((r) => (r as { id: string }).id);
 }
 
 // --- mutations (fire-and-forget from the UI; errors surface via console) -----
@@ -588,6 +622,20 @@ export const fetchClientEmailDraft = async (clientId: string): Promise<EmailDraf
   if (error) { logErr({ error }); return null; }
   return (data?.draft as EmailDraft | undefined) ?? null;
 };
+/** Every client draft at once, for the Drafts board. Row level security scopes
+ *  it to the clients the caller can see (supabase/client-email-drafts.sql), so
+ *  there is nothing to filter here. Not in fetchAll: a draft is otherwise read
+ *  one client at a time, and this runs when the board is opened. */
+export async function fetchClientEmailDrafts(): Promise<ClientDraftInput[]> {
+  const { data, error } = await supabase.from("client_email_drafts").select("client_id, draft, updated_at");
+  if (error) { logErr({ error }); return []; }
+  return (data ?? []).map((r) => ({
+    clientId: r.client_id as string,
+    draft: r.draft as EmailDraft,
+    updatedAt: (r.updated_at as string) ?? "",
+  }));
+}
+
 export const saveClientEmailDraft = (clientId: string, draft: EmailDraft, memberId: string) =>
   save(() => supabase.from("client_email_drafts").upsert({ client_id: clientId, draft, updated_by: memberId, updated_at: new Date().toISOString() }));
 export const deleteClientEmailDraft = (clientId: string) =>

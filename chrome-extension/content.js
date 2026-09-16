@@ -3,6 +3,24 @@
 // without notice on a redesign — this must fail soft (return whatever
 // partial data is found, or null) so the popup falls back to a blank,
 // manually-fillable form rather than erroring.
+
+// Where an attachment may be fetched from. Everything this script reads comes
+// out of the rendered email body — `download_url` is an attribute, and the
+// anchors are links — so the sender chooses the text. Without this, a crafted
+// email could name any URL at all and have it fetched WITH the reader's Google
+// cookies attached, then uploaded. Parsed rather than prefix-matched, because
+// "https://mail.google.com.example.com/x" starts with the right characters and
+// is not Gmail. Both hosts below are Google's own attachment servers.
+const ATTACHMENT_HOSTS = new Set(["mail.google.com", "mail-attachment.googleusercontent.com"]);
+function isAttachmentUrl(url) {
+  try {
+    const u = new URL(url, location.href);
+    return u.protocol === "https:" && ATTACHMENT_HOSTS.has(u.hostname);
+  } catch {
+    return false;
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === "CLICKUPTASKS_GET_EMAIL") {
     try {
@@ -17,6 +35,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   // are sent with the request as a matter of course. The panel is a different
   // origin and would get a login page back instead of the file.
   if (msg?.type === "CLICKUPTASKS_FETCH_ATTACHMENT" && typeof msg.url === "string") {
+    if (!isAttachmentUrl(msg.url)) {
+      sendResponse({ error: "That attachment isn't on Gmail, so it wasn't downloaded." });
+      return true;
+    }
     (async () => {
       try {
         const res = await fetch(msg.url, { credentials: "include" });
@@ -142,14 +164,14 @@ function scrapeAttachments() {
     const mime = raw.slice(0, firstColon);
     const name = raw.slice(firstColon + 1, urlStart - 1);
     const url = raw.slice(urlStart);
-    if (!name) continue;
+    if (!name || !isAttachmentUrl(url)) continue;
     if (out.some((a) => a.url === url)) continue; // Gmail renders some tiles twice
     out.push({ name, mime, url });
   }
   if (out.length === 0) {
     for (const a of document.querySelectorAll('a[href*="view=att"]')) {
       const url = a.href;
-      if (!url || out.some((x) => x.url === url)) continue;
+      if (!url || !isAttachmentUrl(url) || out.some((x) => x.url === url)) continue;
       // Gmail puts the filename on a nearby .aV3 span; fall back to the link
       // text, then to something obviously placeholder rather than "".
       const name = a.closest(".aQH, .aZo, span")?.querySelector(".aV3")?.textContent?.trim()

@@ -42,7 +42,15 @@ export async function POST(req: NextRequest) {
   const rawBody = await req.text();
   if (!verifySignature(id, timestamp, rawBody, signature)) return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
 
-  const payload = JSON.parse(rawBody) as { event_type?: string; note_id?: string };
+  // Signed and still not valid JSON is possible (a truncated body, a format
+  // change at their end); throwing here answered a correctly signed delivery
+  // with a 500, which Granola then retries on a schedule, forever.
+  let payload: { event_type?: string; note_id?: string };
+  try {
+    payload = JSON.parse(rawBody);
+  } catch {
+    return NextResponse.json({ error: "Body is not JSON" }, { status: 400 });
+  }
   if ((payload.event_type === "note.generated" || payload.event_type === "note.regenerated") && payload.note_id) {
     try {
       await syncOneGranolaNote(payload.note_id);

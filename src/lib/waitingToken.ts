@@ -19,10 +19,6 @@ export type WaitingScope = {
   // project to file it under that the visitor should be trusted to name) —
   // forced false here rather than read off the client row when projectId is set.
   canRequestNewTasks: boolean;
-  // Whether the "Your growth plan" progress card is client-visible at all —
-  // same reasoning as canRequestNewTasks above (a project-scoped token is
-  // whole-client context out of scope, so it's forced false there too).
-  showGrowthPlan: boolean;
   // Whether the portal lists the whole account rather than only what involves
   // the client. Unlike the two flags above this is NOT forced false for a
   // project-scoped token: that token's queries are already pinned to one
@@ -52,13 +48,12 @@ export async function resolveWaitingToken(token: string): Promise<WaitingScope |
       assignedTo: (client.assigned_to as string[] | null) ?? [],
       linkedContactId: (client.linked_contact_id as string | null) ?? null,
       canRequestNewTasks: false,
-      showGrowthPlan: false,
       showAllTasks: client.portal_shows_all_tasks === true,
       projectId: project.id as string,
     };
   }
   const { data: client } = await supabaseAdmin.from("clients")
-    .select("id, name, assigned_to, can_request_new_tasks, show_growth_plan, portal_shows_all_tasks, linked_contact_id, deleted_at")
+    .select("id, name, assigned_to, can_request_new_tasks, portal_shows_all_tasks, linked_contact_id, deleted_at")
     .eq("share_token", token).maybeSingle();
   if (!client || client.deleted_at || client.id === PERSONAL_CLIENT_ID) return null;
   return {
@@ -67,7 +62,6 @@ export async function resolveWaitingToken(token: string): Promise<WaitingScope |
     assignedTo: (client.assigned_to as string[] | null) ?? [],
     linkedContactId: (client.linked_contact_id as string | null) ?? null,
     canRequestNewTasks: client.can_request_new_tasks === true,
-    showGrowthPlan: client.show_growth_plan === true,
     showAllTasks: client.portal_shows_all_tasks === true,
     projectId: null,
   };

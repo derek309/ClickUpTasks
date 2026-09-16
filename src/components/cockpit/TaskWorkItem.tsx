@@ -76,15 +76,12 @@ export function WorkItemWindow({ icon, title, badge, status, actions, onClose, c
   onClose: () => void;
   children: React.ReactNode;
 }) {
-  const close = useRef(onClose);
-  useEffect(() => { close.current = onClose; });
+  // Opened after the drawer, so Escape closes this window and leaves it be.
+  useEscapeToClose(onClose);
   useEffect(() => {
-    // Capture phase, so Esc closes this window and not the task drawer under it.
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); close.current(); } };
-    document.addEventListener("keydown", onKey, true);
     const overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    return () => { document.removeEventListener("keydown", onKey, true); document.body.style.overflow = overflow; };
+    return () => { document.body.style.overflow = overflow; };
   }, []);
 
   // Portalled to the body so it covers the drawer and the app around it.
@@ -661,13 +658,13 @@ export function ImageLightbox({ images, index, onIndex, onClose }: {
 }) {
   const nav = useRef({ index, count: images.length, onIndex, onClose });
   useEffect(() => { nav.current = { index, count: images.length, onIndex, onClose }; });
+  // Escape goes through the shared stack (this preview is the last thing
+  // opened, so it is the first thing closed); the arrows are its own.
+  useEscapeToClose(() => nav.current.onClose());
   useEffect(() => {
-    // On window in the capture phase, so it runs before the full screen window's
-    // and the drawer's Esc handlers on document: Esc closes only the preview.
     const onKey = (e: KeyboardEvent) => {
       const n = nav.current;
-      if (e.key === "Escape") { e.stopPropagation(); n.onClose(); }
-      else if (e.key === "ArrowRight" && n.count > 1) { e.stopPropagation(); n.onIndex((n.index + 1) % n.count); }
+      if (e.key === "ArrowRight" && n.count > 1) { e.stopPropagation(); n.onIndex((n.index + 1) % n.count); }
       else if (e.key === "ArrowLeft" && n.count > 1) { e.stopPropagation(); n.onIndex((n.index - 1 + n.count) % n.count); }
     };
     window.addEventListener("keydown", onKey, true);
