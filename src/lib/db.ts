@@ -361,6 +361,19 @@ export async function fetchContacts(): Promise<Contact[]> {
   return (data ?? []).map(rowToContact);
 }
 
+/** Ids in these tables trashed since a moment. The visibility refetch merges
+ *  rows in and never takes any out, so without this a task someone else trashed
+ *  while this tab's live connection was down stays on screen — and stays
+ *  editable, writing to a row on its way to the purge. Asking which rows were
+ *  trashed is positive evidence; treating "missing from the last full fetch" as
+ *  deleted is not, because a paged fetch can skip a row that is perfectly fine,
+ *  and wiping a just-saved task off the screen is the worse failure. */
+export async function trashedSince(table: "tasks" | "clients", sinceIso: string): Promise<string[]> {
+  const { data, error } = await supabase.from(table).select("id").gte("deleted_at", sinceIso);
+  if (error) return [];
+  return (data ?? []).map((r) => (r as { id: string }).id);
+}
+
 // --- mutations (fire-and-forget from the UI; errors surface via console) -----
 
 export const upsertTask = (t: Task, updatedBy?: string | null) => save(() => supabase.from("tasks").upsert(taskToRow(t, updatedBy)));

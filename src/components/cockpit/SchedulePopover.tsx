@@ -4,7 +4,7 @@
 // (ClientJournal's Chat tab, TaskDrawer's Email/SMS tab) — a clock-icon
 // button opens a compact popover with quick-picks plus an exact date/time,
 // and confirming calls onSchedule with an ISO timestamp.
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { I } from "./ui";
 
 function quickPick(hoursFromNow: number, atHour?: number): Date {
@@ -28,10 +28,15 @@ function toLocalInputValue(d: Date): string {
 export function SchedulePopover({ disabled, onSchedule }: { disabled?: boolean; onSchedule: (whenIso: string) => void }) {
   const [open, setOpen] = useState(false);
   const [custom, setCustom] = useState("");
-  // Computed in an effect, not render — Date.now() is impure, and the min
-  // only needs to reflect "now" at the moment the popover opens.
+  // Stamped when the popover is opened, not during a render: reading the clock
+  // in render is impure, and reading it in an effect makes the open a second
+  // render for a value the click already knew. It only has to mean "now" at
+  // the moment it opens.
   const [minValue, setMinValue] = useState("");
-  useEffect(() => { if (open) setMinValue(toLocalInputValue(new Date(Date.now() + 5 * 60 * 1000))); }, [open]);
+  const toggle = () => {
+    if (!open) setMinValue(toLocalInputValue(new Date(Date.now() + 5 * 60 * 1000)));
+    setOpen(!open);
+  };
 
   const pick = (d: Date) => { onSchedule(d.toISOString()); setOpen(false); };
   const quickPicks: { label: string; date: () => Date }[] = [
@@ -42,7 +47,7 @@ export function SchedulePopover({ disabled, onSchedule }: { disabled?: boolean; 
 
   return (
     <div className="relative inline-flex">
-      <button type="button" onClick={() => setOpen((o) => !o)} disabled={disabled} title="Schedule for later"
+      <button type="button" onClick={toggle} disabled={disabled} title="Schedule for later"
         className={`shrink-0 rounded-lg border px-2 py-1.5 text-muted hover:bg-background hover:text-foreground disabled:opacity-40 ${open ? "border-accent text-accent" : ""}`}>
         <I.clock className="h-4 w-4" />
       </button>

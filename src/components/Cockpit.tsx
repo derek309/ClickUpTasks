@@ -75,7 +75,7 @@ import {
   THIS_MONTH_END,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, trashedSince, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import DmChat from "./DmChat";
@@ -1100,9 +1100,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const goToViewRef = useRef(goToView);
   const navBlockedRef = useRef(false);
   useEffect(() => { goToViewRef.current = goToView; });
-  // Don't navigate out from under something that's asking for an answer —
-  // a confirm dialog, the link editor, or the command palette.
-  useEffect(() => { navBlockedRef.current = !!confirmDialog || !!linkModal || cmdkOpen; }, [confirmDialog, linkModal, cmdkOpen]);
+  // Don't navigate out from under anything holding work in progress — a
+  // dialog asking for an answer, or an open task. A number key reaching the
+  // task drawer closed it and switched view, taking an unsaved title, next
+  // step or half-typed comment with it; focus only has to be off the field
+  // (after a chip or a checkbox click, say) for the key to arrive here.
+  useEffect(() => {
+    navBlockedRef.current = !!confirmDialog || !!promptDialog || !!linkModal || cmdkOpen
+      || !!openTaskId || !!dumpGroup || !!mergeSourceId || !!mergeClientState || addClientOpen || quickAddOpen;
+  }, [confirmDialog, promptDialog, linkModal, cmdkOpen, openTaskId, dumpGroup, mergeSourceId, mergeClientState, addClientOpen, quickAddOpen]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -1489,8 +1495,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // message) out of view even though it was safely in the database.
   // contacts/projects/client_links have no realtime coverage at all, so they
   // still need a full replace (including removals) to reflect deletes.
+  //
+  // Merging alone left one hole: a task or client someone else trashed while
+  // this tab's socket was down never left the screen, and could still be
+  // edited, writing to a row on its way to the purge. So the refetch also asks
+  // which rows were trashed since it last looked and drops exactly those —
+  // positive evidence, rather than treating "absent from the fetch" as deleted,
+  // which is what made a wholesale replace dangerous in the first place.
   useEffect(() => {
     let lastRefetch = 0;
+    let trashedSinceIso = new Date().toISOString();
     const refetch = async () => {
       if (document.visibilityState !== "visible") return;
       // TODAY (and every due bucket, "Mark reviewed" stamp and Today pick built
@@ -1499,6 +1513,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       if (todayIso() !== TODAY) { window.location.reload(); return; }
       if (Date.now() - lastRefetch < 20000) return;
       lastRefetch = Date.now();
+      const askedAt = new Date().toISOString();
       try {
         const d = await fetchAll();
         const mergeById = <T extends { id: string }>(prev: T[], incoming: T[]) => {
@@ -1516,6 +1531,23 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setFolders((prev) => mergeById(prev, d.folders));
         setStages((prev) => mergeById(prev, d.stages));
         setDmMessages((prev) => mergeById(prev, d.dmMessages));
+
+        const [goneTasks, goneClients] = await Promise.all([
+          trashedSince("tasks", trashedSinceIso),
+          trashedSince("clients", trashedSinceIso),
+        ]);
+        trashedSinceIso = askedAt;
+        if (goneTasks.length) {
+          const gone = new Set(goneTasks);
+          setTasks((prev) => prev.filter((t) => !gone.has(t.id)));
+          // Whatever is open went with it — leaving the drawer up over a
+          // trashed task invites an edit that writes to a row nobody will see.
+          setOpenTaskId((id) => (id && gone.has(id) ? null : id));
+        }
+        if (goneClients.length) {
+          const gone = new Set(goneClients);
+          setClients((prev) => prev.filter((c) => !gone.has(c.id)));
+        }
       } catch (e) { console.warn("[realtime] visibility refetch failed", e); }
     };
     document.addEventListener("visibilitychange", refetch);
@@ -1567,11 +1599,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Best-effort email companion to an @mention notification — the in-app
   // bell above already fired, so a failure here (Google not configured,
   // non-Workspace sender, send error) is swallowed rather than surfaced.
-  const sendMentionEmail = (recipientMemberId: string, taskId: string, taskTitle: string, commentBody: string) => {
+  // The title is not sent: the route reads it off the task itself, so the
+  // email can only ever say what the task really says.
+  const sendMentionEmail = (recipientMemberId: string, taskId: string, commentBody: string) => {
     authedFetch("/api/notifications/mention-email", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ recipientMemberId, taskId, taskTitle, commentBody }),
+      body: JSON.stringify({ recipientMemberId, taskId, commentBody }),
     }).catch(() => {});
   };
 
@@ -2762,7 +2796,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         mentioned.add(u.id);
         notify(u.id, `${me.name} mentioned you in “${t.title}”`, id, { kind: "message", skipEmail: true });
         pushToast(`Notified ${u.name}`);
-        sendMentionEmail(u.id, id, t.title, body.trim());
+        sendMentionEmail(u.id, id, body.trim());
       }
     });
     if (t.assigneeId && t.assigneeId !== me.id && !mentioned.has(t.assigneeId)) {
