@@ -616,6 +616,30 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     const toName = a.toId ? (userById(a.toId)?.name ?? null) : null;
     const replies = (actions ?? []).filter((r) => r.parentId === a.id).sort((x, y) => x.at.localeCompare(y.at));
     const replyOpen = replyingAction === a.id;
+    // An entry with nothing to read (a logged chat or call that only set the
+    // next step) is one quiet line, not a card, so the real words stand out
+    // (Derek, 2026-09-16: the page read "very flat").
+    if (!a.body && replies.length === 0 && !replyOpen && editingAction !== a.id) {
+      return (
+        <div key={a.id} className={`group flex items-center gap-3 ${gap}`}>
+          <span className="z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-background text-[16px]" aria-hidden>{ACTION_ICON[a.kind]}</span>
+          <div className="min-w-0 flex-1 text-[16px] text-muted">
+            <span className="font-semibold text-foreground">{meta.verb}</span> · {who}{toName ? ` → ${toName}` : ""} · {timeAgo(a.at)}
+            {a.nextStep && <span className={a.nextStepDoneAt ? "line-through" : ""}> · Next step: {a.nextStep}</span>}
+            {onLogAction && (
+              <button onClick={() => { setReplyingAction(a.id); setActionReply(""); }}
+                className="ml-2 font-medium text-accent opacity-0 transition hover:underline focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">Reply</button>
+            )}
+            {onDeleteAction && (
+              <button onClick={() => onDeleteAction(a.id)} title="Delete this entry"
+                className="ml-1.5 rounded p-0.5 align-middle text-muted opacity-0 transition hover:text-danger group-hover:opacity-100">
+                <I.trash className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+        </div>
+      );
+    }
     return (
       <div key={a.id} className={`group flex gap-3 ${gap}`}>
         <span className="z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-[16px]" aria-hidden>{ACTION_ICON[a.kind]}</span>
@@ -751,8 +775,9 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
         <div className="relative flex gap-3">
           <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface bg-muted/50" /></div>
           {/* The client's words keep a warm ground so they stand apart from
-              ours; the coloured stripes and channel pills are gone. */}
-          <div className={`min-w-0 flex-1 rounded-xl border p-3 ${m.direction === "inbound" ? "bg-highlight-soft/60" : "bg-surface"}`}>
+              ours; the coloured stripes and channel pills are gone. Both read
+              as chat bubbles, ours tinted navy (Derek, 2026-09-16). */}
+          <div className={`min-w-0 flex-1 rounded-[4px_16px_16px_16px] p-3.5 ${m.direction === "inbound" ? "bg-highlight-soft/70" : "bg-accent-soft/70"}`}>
             <div className="flex items-center gap-2 text-[16px] text-muted">
               <span className="font-semibold text-foreground">{channelLabel} {m.direction === "inbound" ? "received" : "sent"}</span>
               {m.direction === "outbound" && m.createdBy && (

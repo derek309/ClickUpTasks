@@ -8,7 +8,7 @@ import {
   STATUS_META, pickableStatuses, type DelegateSpec, type ClientLink, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
-import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon, DateChip } from "./ui";
+import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
 import { authedFetch } from "@/lib/supabase";
 import { ActionDock } from "./ActionDock";
 import { ActionMenu } from "./ActionMenu";
@@ -541,7 +541,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Five fields with one look. Status, owner, priority, due and time were five
   // different kinds of control with their own borders and colours, and the
   // status and priority text was painted in its own colour on top of that.
-  const chip = "inline-flex min-h-10 items-center gap-2 rounded-lg border bg-surface px-3 text-[16px]";
+  // Tinted blocks with 5px corners, no outlines, and colour only where it
+  // means something (Derek, 2026-09-16: the page read "very flat"; "I don't
+  // like pills so make them 5px").
+  const chip = "inline-flex min-h-10 items-center gap-2 rounded-[5px] bg-background px-3 text-[16px]";
+  const tint = (color: string) => ({ background: `${color}1f` });
   const chipSelect = "min-w-0 cursor-pointer bg-transparent py-1 outline-none";
   const dueDays = task.due && task.status !== "done" ? daysUntilDue(task.due) : null;
   // Colour only when it means something: amber inside three days, red once late.
@@ -549,7 +553,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const recurrenceInput = "rounded-md border bg-background px-2 py-0.5 text-[16px] outline-none focus:border-accent";
   const chipRow = (
     <div className="mt-5 flex flex-wrap items-center gap-2">
-      <label className={chip}>
+      <label className={chip} style={tint(STATUS_META[effectiveStatus(task)].dot)}>
         <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: STATUS_META[effectiveStatus(task)].dot }} />
         <select value={effectiveStatus(task)} onChange={(e) => onPatch({ status: e.target.value as TaskStatus })} aria-label="Status" className={`${chipSelect} font-medium`}>
           {pickableStatuses(effectiveStatus(task)).map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
@@ -564,20 +568,20 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
         </select>
       </label>
-      <label className={chip}>
-        <span className="text-muted">Priority</span>
-        <select value={task.priority} onChange={(e) => onPatch({ priority: e.target.value as Priority })} aria-label="Priority" className={chipSelect}>
+      <label className={`${chip} ${task.priority === "urgent" ? "text-danger" : ""}`} style={task.priority === "urgent" ? tint(PRIORITY_META.urgent.color) : undefined}>
+        <span className={task.priority === "urgent" ? "" : "text-muted"}>Priority</span>
+        <select value={task.priority} onChange={(e) => onPatch({ priority: e.target.value as Priority })} aria-label="Priority" className={`${chipSelect} ${task.priority === "urgent" ? "font-semibold" : ""}`}>
           {manualPriorityOptions(task.priority).map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}
         </select>
       </label>
-      <span className={`${chip} ${dueTone === "late" ? "border-danger/40 bg-danger-soft" : dueTone === "soon" ? "border-amber-500/40 bg-amber-500/10" : ""}`}>
+      <span className={`${chip} ${dueTone === "late" ? "!bg-danger-soft" : dueTone === "soon" ? "!bg-highlight-soft" : ""}`}>
         <span className="text-muted">Due</span>
         <InlineDue value={task.due} overdue={false} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} recurrenceNth={task.recurrenceNth} recurrenceWeekday={task.recurrenceWeekday}
           showRecurrenceLabel={task.recurrence !== "custom"} showCountdown={false} showSnooze={false} formatValue={formatDue}
           textClass="-mx-1 text-[16px] font-medium" toneClass="text-foreground"
           onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} emptyLabel="Not set" />
         {task.due && task.status !== "done" && (
-          <span className={dueTone === "late" ? "font-medium text-danger" : dueTone === "soon" ? "font-medium text-amber-700" : "text-muted"}>{dueCountdown(task.due)}</span>
+          <span className={dueTone === "late" ? "font-semibold text-danger" : dueTone === "soon" ? "font-semibold text-highlight" : "text-muted"}>{dueCountdown(task.due)}</span>
         )}
       </span>
       {/* Sizing sits with the other chips: it is one decision, made once. */}
@@ -638,10 +642,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (openStep && stepDraft && stepDraft.text.trim() && stepDraft.text.trim() !== openStep.nextStep) renameNextStep(openStep.id, stepDraft.text.trim());
     setStepDraft(null);
   };
-  const cardButton = "inline-flex h-10 items-center rounded-lg border bg-surface px-4 text-[16px] font-medium hover:bg-background";
+  const cardButton = "inline-flex h-10 items-center rounded-lg bg-surface px-4 text-[16px] font-medium shadow-soft hover:bg-background";
+  // The loudest thing after the title: what to do now, with a bar down its edge.
   const nextStepCard = task.status === "done" && !openStep ? null : (
-    <div className={`mt-6 flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl px-4 py-3.5 ${openStep || followUp ? "bg-accent-soft" : "border border-dashed"}`}>
-      <span aria-hidden className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-surface text-[18px] text-accent">→</span>
+    <div className={`relative mt-7 flex flex-wrap items-center gap-x-4 gap-y-3 rounded-2xl py-5 pl-7 pr-5 ${openStep || followUp ? "bg-accent-soft" : "border border-dashed"}`}>
+      {(openStep || followUp) && <span aria-hidden className={`absolute bottom-4 left-0 top-4 w-[5px] rounded-r-[5px] ${followUpDays !== null && followUpDays < 0 ? "bg-danger" : "bg-accent"}`} />}
       <div className="min-w-0 flex-1 basis-60">
         <div className={`text-[16px] font-semibold ${followUpDays !== null && followUpDays < 0 ? "text-danger" : "text-accent"}`}>
           {openStep ? "Next step" : followUp ? "Follow up" : "No next step"}{followUp ? ` · ${followUpWhen}` : ""}
@@ -652,16 +657,18 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             onBlur={saveStepDraft} aria-label="Next step"
             className="mt-1 w-full rounded-lg border bg-surface px-2.5 py-1.5 text-[18px] font-semibold outline-none focus:border-accent" />
         ) : (
-          <div className={`text-[18px] leading-snug ${openStep ? "font-semibold" : "text-muted"}`}>
+          <div className={`mt-0.5 text-[20px] leading-snug ${openStep ? "font-bold" : "text-muted"}`}>
             {openStep?.nextStep ?? (followUp ? "Check back on this task" : "Log what you did below and say what happens next")}
           </div>
         )}
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-2">
         {openStep && (
-          <button onClick={() => setNextStepDone(openStep.id, true)} className="inline-flex h-10 items-center rounded-lg bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Mark done</button>
+          <button onClick={() => setNextStepDone(openStep.id, true)} className="inline-flex h-10 items-center rounded-lg bg-accent px-4 text-[16px] font-semibold text-white shadow-soft-md hover:opacity-90">Mark done</button>
         )}
-        <DateChip value={followUp} onChange={moveFollowUp} label={followUp ? "Change date" : "Set a date"} className={cardButton} />
+        {/* Today, Tomorrow, In 3 days and the rest first, then the calendar,
+            like every other date in the app (Derek, 2026-09-16). */}
+        <InlineDate value={followUp} onChange={moveFollowUp} formatValue={() => "Change date"} emptyLabel="Set a date" className={`${cardButton} !px-4 !py-0`} />
         {openStep && !editingStep && (
           <button onClick={() => setStepDraft({ taskId: task.id, text: openStep.nextStep ?? "" })} className={cardButton}>Edit</button>
         )}
@@ -968,7 +975,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     return 0; // "added" — keep stored order (oldest first, matches how they were attached)
   }), [task.attachments, attSort]);
   const attachmentsBlock = !showAttachments ? null : (
-    <div className="mt-4 rounded-xl border bg-surface p-4">
+    <div className={`mt-4 rounded-xl bg-surface p-4 ${!hasMessaging && task.comments.length === 0 ? "border" : "shadow-soft"}`}>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <span className="text-[16px] font-semibold">Links and files {task.attachments.length > 0 && <span className="font-normal text-muted">· {task.attachments.length}</span>}</span>
         <span className="flex items-center gap-3">
@@ -1161,7 +1168,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const section = (title: string, children: React.ReactNode, right?: React.ReactNode) => (
     <section className="mt-10">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-[18px] font-semibold">{title}</h2>
+        <h2 className="text-[21px] font-bold tracking-[-0.01em]">{title}</h2>
         {right}
       </div>
       {children}
@@ -1241,9 +1248,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
 
   // Client context only: who this is for, the three ways to reach them, and
   // where the task lives (2026-09-14 redesign).
-  const railButton = "flex flex-col items-center gap-1 rounded-lg border bg-surface px-1 py-2.5 text-[16px] transition hover:bg-background disabled:cursor-not-allowed disabled:opacity-40";
+  const railButton = "flex flex-col items-center gap-1 rounded-xl bg-surface px-1 py-3 text-[16px] font-medium shadow-soft transition hover:shadow-soft-md disabled:cursor-not-allowed disabled:opacity-40";
   const clientRail = (
-    <aside aria-label="Client" className="w-full border-t bg-surface px-5 py-6 min-[1100px]:sticky min-[1100px]:top-0 min-[1100px]:max-h-screen min-[1100px]:w-[340px] min-[1100px]:flex-none min-[1100px]:self-start min-[1100px]:overflow-y-auto min-[1100px]:border-l min-[1100px]:border-t-0">
+    <aside aria-label="Client" className="w-full border-t bg-background px-5 py-6 min-[1100px]:sticky min-[1100px]:top-0 min-[1100px]:max-h-screen min-[1100px]:w-[340px] min-[1100px]:flex-none min-[1100px]:self-start min-[1100px]:overflow-y-auto min-[1100px]:border-l min-[1100px]:border-t-0">
       <div className="flex items-center gap-3">
         <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[16px] font-bold text-white" style={{ background: client.color }}>{initialsOf(client.name)}</span>
         <div className="min-w-0">
@@ -1277,7 +1284,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         </div>
       )}
       {attachmentsBlock}
-      <div className="mt-6">{detailsBlock}</div>
+      <div className="mt-6 rounded-xl bg-surface px-3 py-3 shadow-soft">{detailsBlock}</div>
     </aside>
   );
 
@@ -1364,8 +1371,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             no contact and no comments has no client context worth a rail, so
             where it lives goes at the end of the page instead. */}
         <div className="flex flex-1 flex-col overflow-y-auto bg-background min-[1100px]:flex-row min-[1100px]:items-start">
-          <div className="min-w-0 flex-1 px-4 pb-32 pt-6 sm:px-8 lg:px-12">
-            <div className="mx-auto w-full max-w-4xl">
+          {/* The task sits on one white sheet over the tinted page, so it reads
+              as a thing rather than text on a background (Derek, 2026-09-16). */}
+          <div className="min-w-0 flex-1 px-2 pb-32 pt-3 sm:px-5 sm:pt-5">
+            <div className="mx-auto w-full max-w-5xl rounded-2xl bg-surface px-4 py-6 shadow-soft-md sm:px-10 sm:py-9">
               {mainColumn}
               {isLightTask && section("Client and list", detailsBlock)}
             </div>
