@@ -694,9 +694,12 @@ export function ActionDock({
   // lost among the cards (Derek, 2026-09-14). Absolute, not fixed: the drawer
   // is the containing block, and --dock-right keeps it clear of the client rail.
   return (
-    <div className="pointer-events-none absolute bottom-0 left-0 z-30 px-4 pb-4 sm:px-8 lg:px-12"
+    // Lined up with the task's own column above it: the same side padding and
+    // the same 5xl width, so its edges meet the title and sections (Derek,
+    // 2026-09-16: "make it the same width as the top content box").
+    <div className="pointer-events-none absolute bottom-0 left-0 z-30 px-2 pb-4 sm:px-5"
       style={{ right: "var(--dock-right, 0px)" }}>
-      <div className="pointer-events-auto mx-auto w-full max-w-4xl rounded-2xl border bg-surface/95 p-3 shadow-[0_12px_32px_rgba(20,24,40,.14),0_2px_6px_rgba(20,24,40,.08)] backdrop-blur-md">
+      <div className="pointer-events-auto mx-auto w-full max-w-5xl rounded-2xl border bg-surface/95 p-3 shadow-[0_12px_32px_rgba(20,24,40,.14),0_2px_6px_rgba(20,24,40,.08)] backdrop-blur-md">
 
         {view === "closed" && (() => {
           const canChat = canMessageClient && !!onSendMessage && (reachable?.chat ?? false);

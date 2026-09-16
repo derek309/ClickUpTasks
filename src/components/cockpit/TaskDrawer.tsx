@@ -546,7 +546,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // like pills so make them 5px").
   const chip = "inline-flex min-h-10 items-center gap-2 rounded-[5px] bg-background px-3 text-[16px]";
   const tint = (color: string) => ({ background: `${color}1f` });
-  const chipSelect = "min-w-0 cursor-pointer bg-transparent py-1 outline-none";
+  // Each dropdown is only as wide as what it shows. Sized to their longest
+  // option ("Changes requested", "Michaella Pastrana") the row ran out of room
+  // and pushed the time estimate onto a line of its own (Derek, 2026-09-16:
+  // "move it up on the same line as the date").
+  const chipSelect = "min-w-0 cursor-pointer bg-transparent py-1 outline-none [field-sizing:content]";
   const dueDays = task.due && task.status !== "done" ? daysUntilDue(task.due) : null;
   // Colour only when it means something: amber inside three days, red once late.
   const dueTone = dueDays === null ? "" : dueDays < 0 ? "late" : dueDays <= 3 ? "soon" : "";
@@ -563,7 +567,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           the status chip, and it keeps the owner (Derek, 2026-09-10). */}
       <label className={`${chip} max-w-[280px]`}>
         <span className="shrink-0 text-muted">Owner</span>
-        <select value={task.assigneeId ?? ""} onChange={(e) => onPatch({ assigneeId: e.target.value || null })} aria-label="Owner" className={`${chipSelect} w-full`}>
+        <select value={task.assigneeId ?? ""} onChange={(e) => onPatch({ assigneeId: e.target.value || null })} aria-label="Owner" className={chipSelect}>
           <option value="">Unassigned</option>
           {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
         </select>
@@ -1253,7 +1257,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // where the task lives (2026-09-14 redesign).
   const railButton = "flex flex-col items-center gap-1 rounded-xl bg-surface px-1 py-3 text-[16px] font-medium shadow-soft transition hover:shadow-soft-md disabled:cursor-not-allowed disabled:opacity-40";
   const clientRail = (
-    <aside aria-label="Client" className="w-full border-t bg-background px-5 py-6 min-[1100px]:sticky min-[1100px]:top-0 min-[1100px]:max-h-screen min-[1100px]:w-[340px] min-[1100px]:flex-none min-[1100px]:self-start min-[1100px]:overflow-y-auto min-[1100px]:border-l min-[1100px]:border-t-0">
+    <aside aria-label="Client" className="w-full border-t bg-surface px-5 py-6 min-[1100px]:sticky min-[1100px]:top-0 min-[1100px]:h-screen min-[1100px]:max-h-screen min-[1100px]:w-[340px] min-[1100px]:flex-none min-[1100px]:self-start min-[1100px]:overflow-y-auto min-[1100px]:border-l min-[1100px]:border-t-0">
       <div className="flex items-center gap-3">
         <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[16px] font-bold text-white" style={{ background: client.color }}>{initialsOf(client.name)}</span>
         <div className="min-w-0">
@@ -1373,11 +1377,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             1100px and up, and stacks under the task below that. A task with
             no contact and no comments has no client context worth a rail, so
             where it lives goes at the end of the page instead. */}
-        <div className="flex flex-1 flex-col overflow-y-auto bg-background min-[1100px]:flex-row min-[1100px]:items-start">
-          {/* The task sits on one white sheet over the tinted page, so it reads
-              as a thing rather than text on a background (Derek, 2026-09-16). */}
+        <div className="flex flex-1 flex-col overflow-y-auto bg-surface min-[1100px]:flex-row min-[1100px]:items-start">
+          {/* All white, no boxed in sheet (Derek, 2026-09-16: "I don't like it
+              boxed in so just make it all white"). */}
           <div className="min-w-0 flex-1 px-2 pb-32 pt-3 sm:px-5 sm:pt-5">
-            <div className="mx-auto w-full max-w-5xl rounded-2xl bg-surface px-4 py-6 shadow-soft-md sm:px-10 sm:py-9">
+            <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-10 sm:py-9">
               {mainColumn}
               {isLightTask && section("Client and list", detailsBlock)}
             </div>
