@@ -125,27 +125,37 @@ select count(*) as rows, coalesce(max(attempts), 0) as highest_attempts from sch
 -- by the anon role, which is anyone at all with the public key. They are the
 -- app's internal helpers and nothing signed out has any business calling them.
 --
--- Only `anon` is revoked here, deliberately. Four of these are called inside
--- the row level security policies on tasks, clients and the rest, and those
--- policies are evaluated as the signed-in user — take EXECUTE away from
--- `authenticated` and every query in the app fails with "permission denied for
--- function is_admin". All of those policies are `to authenticated`, so the
--- anon role never evaluates them and losing EXECUTE costs it nothing.
+-- Revoked from PUBLIC, not from `anon`. Postgres grants EXECUTE on every new
+-- function to PUBLIC by default, and `anon` inherits that, so revoking from
+-- `anon` alone removes a grant it never needed and changes nothing: the first
+-- version of this file did exactly that and left all five callable.
+--
+-- Revoking from PUBLIC is safe here only because `authenticated` and
+-- `service_role` each hold their OWN explicit grant (check the proacl below
+-- before running this anywhere else). Four of these are called inside the row
+-- level security policies on tasks, clients and the rest, so taking EXECUTE
+-- away from `authenticated` would make every query in the app fail with
+-- "permission denied for function is_admin".
 
-revoke execute on function public.handle_new_user() from anon;
-revoke execute on function public.is_admin() from anon;
-revoke execute on function public.my_member_id() from anon;
-revoke execute on function public.is_following_client(text) from anon;
-revoke execute on function public.is_assigned_to_territory(text) from anon;
+revoke execute on function public.handle_new_user() from public;
+revoke execute on function public.is_admin() from public;
+revoke execute on function public.my_member_id() from public;
+revoke execute on function public.is_following_client(text) from public;
+revoke execute on function public.is_assigned_to_territory(text) from public;
 
--- Read back: no row should come out of this. Each row that does is a function
--- the anon role can still run.
-select p.proname
+-- Read back: five rows, every one false under anon_can_run and true under
+-- signed_in_can_run. Do not use "no rows returned" as the test — the earlier
+-- version of this query did, and a still-granted function looked like a pass.
+select p.proname,
+       has_function_privilege('anon', p.oid, 'execute') as anon_can_run,
+       has_function_privilege('authenticated', p.oid, 'execute') as signed_in_can_run
 from pg_proc p
 join pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'public'
   and p.proname in ('handle_new_user', 'is_admin', 'my_member_id', 'is_following_client', 'is_assigned_to_territory')
-  and has_function_privilege('anon', p.oid, 'execute');
+order by p.proname;
+
+-- Then reload the app and confirm your task list still loads.
 
 -- merge_clients was on the linter's list too and needs nothing: it already
 -- refuses anyone who is not an admin, in its own first line.
