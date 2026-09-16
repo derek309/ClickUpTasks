@@ -75,7 +75,7 @@ import {
   THIS_MONTH_END,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, trashedSince, fetchOpenReviews, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, trashedSince, fetchOpenReviews, fetchClientEmailDrafts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import DmChat from "./DmChat";
@@ -100,7 +100,9 @@ import { ClientsBoard, type WorkBoardGroup, type WorkItem } from "./cockpit/Clie
 import { ClientsDirectory } from "./cockpit/ClientsDirectory";
 import { CompletedLog } from "./cockpit/CompletedLog";
 import { ReviewsBoard } from "./cockpit/ReviewsBoard";
+import { DraftsBoard } from "./cockpit/DraftsBoard";
 import { buildOpenReviews, type OpenReviewGroups } from "@/lib/openReviews";
+import { buildPendingSends, type PendingSendGroups } from "@/lib/pendingSends";
 import { ProjectsDirectory } from "./cockpit/ProjectsDirectory";
 import { FolderRail } from "./cockpit/FolderRail";
 
@@ -216,7 +218,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // No "completed" any more — it moved to All Tasks. Anyone whose stored
   // value still says completed fails this guard and lands back on Work,
   // rather than on a tab that no longer has a button or a view.
-  const [dashboardView, setDashboardView] = usePersisted<"work" | "plan" | "reviews">("dashboardView", "work", (v) => ["work", "plan", "reviews"].includes(v as string));
+  const [dashboardView, setDashboardView] = usePersisted<"work" | "plan" | "reviews" | "drafts">("dashboardView", "work", (v) => ["work", "plan", "reviews", "drafts"].includes(v as string));
   // What is out with a client, for the Reviews tab. Loaded when that tab is
   // opened rather than at boot: a document is otherwise read one task at a
   // time (supabase/task-documents.sql), and the board is two small queries
@@ -241,6 +243,36 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       setReviewsLoading(false);
     }
   };
+  // Everything written and not sent, for the Drafts tab. Task drafts are
+  // already in memory on the tasks themselves; the client drafts and the
+  // scheduled queue are fetched when the tab is opened.
+  const [pendingSends, setPendingSends] = useState<PendingSendGroups>({ scheduled: [], drafts: [] });
+  const [draftsLoading, setDraftsLoading] = useState(false);
+  const loadPendingSends = async () => {
+    setDraftsLoading(true);
+    try {
+      const [clientDrafts, scheduledRes] = await Promise.all([
+        fetchClientEmailDrafts(),
+        authedFetch("/api/messages/schedule").then((r) => (r.ok ? r.json() : { scheduled: [] })).catch(() => ({ scheduled: [] })),
+      ]);
+      const taskDrafts = tasksRef.current
+        .filter((t) => t.draftEmail)
+        .map((t) => ({ taskId: t.id, clientId: t.clientId, draft: t.draftEmail! }));
+      const queued = (scheduledRes.scheduled ?? []).map(rowToScheduledMessage) as ScheduledMessage[];
+      setPendingSends(buildPendingSends(taskDrafts, clientDrafts, queued));
+    } catch {
+      // Best effort, like the other on-demand loads.
+    } finally {
+      setDraftsLoading(false);
+    }
+  };
+  // Deferred a frame for the same reason as the reviews load below.
+  useEffect(() => {
+    if (!myWork || dashboardView !== "drafts") return;
+    const r = requestAnimationFrame(() => { void loadPendingSends(); });
+    return () => cancelAnimationFrame(r);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myWork, dashboardView]);
   // Re-read every time the tab is opened rather than once. It is two small
   // queries, and a board of what is waiting is worth nothing if it is showing
   // what was waiting an hour ago. Deferred a frame, the same way
@@ -4377,6 +4409,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 <button onClick={() => setDashboardView("work")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "work" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Work</button>
                 <button onClick={() => setDashboardView("plan")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "plan" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Plan</button>
                 <button onClick={() => setDashboardView("reviews")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "reviews" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Reviews</button>
+                <button onClick={() => setDashboardView("drafts")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "drafts" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Drafts</button>
               </div>
             </div>
           ) : showFilterControl ? (
@@ -4515,6 +4548,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 <button onClick={() => setDashboardView("work")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "work" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Work</button>
                 <button onClick={() => setDashboardView("plan")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "plan" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Plan</button>
                 <button onClick={() => setDashboardView("reviews")} title="Everything out with a client right now" className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "reviews" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Reviews</button>
+                <button onClick={() => setDashboardView("drafts")} title="Everything written and not sent yet" className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "drafts" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Drafts</button>
               </div>
               {/* De-emphasized on purpose — the Dashboard is meant to be the
                   one place everyone works from; this is just an escape
@@ -4598,6 +4632,22 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             starredLists={starredLists} onToggleStarList={toggleStarList} />
         ) : personalView ? (
           <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} visibleCols={["followUp", "due"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onAddInGroup={(k) => setDumpGroup({ key: k, personal: true })} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={hideEmpty} colOrder={colOrder} onReorderCols={reorderCols} />
+        ) : myWork && dashboardView === "drafts" ? (
+          <DraftsBoard groups={pendingSends} loading={draftsLoading} onRefresh={loadPendingSends}
+            rowContext={(row) => {
+              const client = clientById(row.clientId);
+              if (!client) return null;
+              const task = row.taskId ? tasks.find((t) => t.id === row.taskId) : null;
+              return { clientName: client.name, taskTitle: task?.title ?? null };
+            }}
+            // A draft on a task opens that task. One on the client itself was
+            // written in the Journal's composer, so that is where it opens, not
+            // on the client's task list where there is no sign of it.
+            onOpen={(row) => {
+              if (row.taskId) { setOpenTaskId(row.taskId); return; }
+              openClientList(row.clientId, null);
+              setClientTab("chat");
+            }} />
         ) : myWork && dashboardView === "reviews" ? (
           <ReviewsBoard groups={openReviews} loading={reviewsLoading} onRefresh={loadOpenReviews}
             taskContext={(taskId) => {

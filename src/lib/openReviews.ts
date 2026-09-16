@@ -9,6 +9,7 @@
 // Pure: rows in, ordered groups out, no React and no database, so the ordering
 // and the counting can be tested on their own.
 import { type ReviewKind, kindTitle } from "./reviewKinds";
+import { daysSince } from "./elapsed";
 
 /** A review's stage while it is still somebody's move. The other two stages,
  *  draft and approved, are not open: one has not been sent and the other is
@@ -52,16 +53,6 @@ export type OpenReviewGroups = {
   /** Sent, and we are waiting. */
   withClient: OpenReview[];
 };
-
-const DAY_MS = 86_400_000;
-
-/** Whole days between two moments, never negative. */
-export function daysSince(iso: string | null, now: number): number | null {
-  if (!iso) return null;
-  const then = new Date(iso).getTime();
-  if (!Number.isFinite(then)) return null;
-  return Math.max(0, Math.floor((now - then) / DAY_MS));
-}
 
 /** Its name on the board. An unnamed review would otherwise read as a blank
  *  row, and several on one task would all read as the task's own title. */
@@ -113,11 +104,3 @@ export function buildOpenReviews(docs: OpenReviewDoc[], versions: ReviewVersionR
 
 /** How many reviews are open in total, for the tab's own count. */
 export const openReviewCount = (g: OpenReviewGroups): number => g.yourMove.length + g.withClient.length;
-
-/** How long it has been waiting, for a person to read. */
-export function waitedFor(days: number | null): string {
-  if (days === null) return "not sent yet";
-  if (days === 0) return "today";
-  if (days === 1) return "1 day";
-  return `${days} days`;
-}

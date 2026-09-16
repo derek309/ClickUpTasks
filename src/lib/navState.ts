@@ -14,6 +14,7 @@
 //                                  (the default "mine" is never encoded)
 //   ?sub=plan                     My Work showing Plan instead of Work
 //   ?sub=reviews                  My Work showing what is out with a client
+//   ?sub=drafts                   My Work showing what is written and unsent
 //   ?sub=completed                All Tasks showing the completed log
 //   ?task=<id>                    the task drawer (layers over any of the above)
 //
@@ -22,7 +23,7 @@
 // day" and "here is what we finished" could not be linked, bookmarked or sent
 // to anyone, and the completed log had no way in at all except landing on All
 // Tasks and pressing its button.
-export type NavSub = "plan" | "reviews" | "completed";
+export type NavSub = "plan" | "reviews" | "drafts" | "completed";
 export type NavState = { view: "work" | "personal" | "inbox" | "clients" | "projects" | "settings" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | null; vaultFolder: string | null; dm: string | null; assignee: string | null; sub: NavSub | null };
 export function buildSearch(s: NavState): string {
   const p = new URLSearchParams();
@@ -30,7 +31,7 @@ export function buildSearch(s: NavState): string {
     p.set("view", s.view);
     if (s.view === "inbox" && s.dm) p.set("dm", s.dm);
     // Only My Work has these halves; anywhere else the parameter would be noise.
-    if (s.view === "work" && (s.sub === "plan" || s.sub === "reviews")) p.set("sub", s.sub);
+    if (s.view === "work" && (s.sub === "plan" || s.sub === "reviews" || s.sub === "drafts")) p.set("sub", s.sub);
   } else if (s.client !== "all") {
     p.set("client", s.client);
     if (s.project) p.set("project", s.project);
@@ -69,7 +70,7 @@ export function parseSearch(search: string): NavState {
     vaultFolder: p.get("folder"),
     dm: p.get("dm"),
     assignee: p.get("assignee"),
-    sub: sub === "plan" || sub === "reviews" || sub === "completed" ? sub : null,
+    sub: sub === "plan" || sub === "reviews" || sub === "drafts" || sub === "completed" ? sub : null,
   };
 }
 

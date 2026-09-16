@@ -5,6 +5,7 @@ import { supabase } from "./supabase";
 import type { EmailDraft } from "./data";
 import { parseKind, type FileKind, type ReviewKind } from "./reviewKinds";
 import type { OpenReviewDoc, OpenReviewStatus, ReviewVersionRow } from "./openReviews";
+import type { ClientDraftInput } from "./pendingSends";
 import {
   clientsSeed,
   contactsSeed,
@@ -621,6 +622,20 @@ export const fetchClientEmailDraft = async (clientId: string): Promise<EmailDraf
   if (error) { logErr({ error }); return null; }
   return (data?.draft as EmailDraft | undefined) ?? null;
 };
+/** Every client draft at once, for the Drafts board. Row level security scopes
+ *  it to the clients the caller can see (supabase/client-email-drafts.sql), so
+ *  there is nothing to filter here. Not in fetchAll: a draft is otherwise read
+ *  one client at a time, and this runs when the board is opened. */
+export async function fetchClientEmailDrafts(): Promise<ClientDraftInput[]> {
+  const { data, error } = await supabase.from("client_email_drafts").select("client_id, draft, updated_at");
+  if (error) { logErr({ error }); return []; }
+  return (data ?? []).map((r) => ({
+    clientId: r.client_id as string,
+    draft: r.draft as EmailDraft,
+    updatedAt: (r.updated_at as string) ?? "",
+  }));
+}
+
 export const saveClientEmailDraft = (clientId: string, draft: EmailDraft, memberId: string) =>
   save(() => supabase.from("client_email_drafts").upsert({ client_id: clientId, draft, updated_by: memberId, updated_at: new Date().toISOString() }));
 export const deleteClientEmailDraft = (clientId: string) =>

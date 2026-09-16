@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildOpenReviews, daysSince, openReviewCount, reviewName, waitedFor, type OpenReviewDoc, type ReviewVersionRow } from "./openReviews";
+import { buildOpenReviews, openReviewCount, reviewName, type OpenReviewDoc, type ReviewVersionRow } from "./openReviews";
+import { daysSince, waitedFor } from "./elapsed";
 
 // The board answers one question: what is out with a client, and whose move is
 // it. Getting the order wrong is the whole failure it exists to prevent — the

@@ -13,7 +13,8 @@
 // are waiting on reads OLDEST first, so the one going stale is at the top.
 import { I } from "./ui";
 import { kindTitle } from "@/lib/reviewKinds";
-import { waitedFor, type OpenReview, type OpenReviewGroups } from "@/lib/openReviews";
+import { type OpenReview, type OpenReviewGroups } from "@/lib/openReviews";
+import { waitedFor } from "@/lib/elapsed";
 
 export type ReviewsBoardProps = {
   groups: OpenReviewGroups;
