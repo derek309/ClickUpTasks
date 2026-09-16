@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/serverAuth";
 import { isClientVisible } from "@/lib/extensionApi";
 import { htmlToText } from "@/lib/data";
+import { aiRateLimit, geminiEndpoint } from "@/lib/ai";
 
 // Drafts a task description via Gemini — never writes anything itself, just
 // returns text for the human to review/edit before saving. Modeled on
@@ -10,11 +11,12 @@ import { htmlToText } from "@/lib/data";
 // single body (no subject/channel split — a description isn't addressed to
 // anyone).
 
-const GEMINI_MODEL = "gemini-flash-latest";
 
 export async function POST(req: NextRequest) {
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const limited = await aiRateLimit(caller.id);
+  if (limited) return limited;
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "AI drafting isn't configured yet (missing GEMINI_API_KEY)." }, { status: 501 });
@@ -54,7 +56,7 @@ export async function POST(req: NextRequest) {
   ].join("\n");
 
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
+    const res = await fetch(geminiEndpoint(apiKey), {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
     });

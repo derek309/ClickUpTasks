@@ -88,7 +88,7 @@ import { I, Avatar, SideItem, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFrom
 import { MindDumpModal, type ParsedRow } from "./cockpit/MindDumpModal";
 import { ClientEmail, type ClientEmailStart } from "./cockpit/ClientEmail";
 import { draftLinkHtml, escapeHtml } from "@/lib/draftLink";
-import { ConfirmModal, PromptModal, LinkFormModal, MergeTaskModal, MergeClientModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
+import { ConfirmModal, PromptModal, ShortcutsModal, LinkFormModal, MergeTaskModal, MergeClientModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
 import { CommandK } from "./cockpit/CommandK";
 import { GroupedList } from "./cockpit/GroupedList";
 import StageBoard from "./cockpit/StageBoard";
@@ -106,7 +106,7 @@ import { FolderRail } from "./cockpit/FolderRail";
 import { sortTasks as sortTasksBy } from "@/lib/taskSort";
 import { URGENCY_TIER, tierForDate, urgencyDateOf, urgencyKeyFrom } from "@/lib/urgency";
 import { clientContactIds, findDuplicateTrackedClient as findDuplicateClient } from "@/lib/clientDedup";
-import { type NavState, buildSearch, parseSearch, NAV_KEY_VIEWS, LONG_TITLE_THRESHOLD, TEAM_CHAT_LINK } from "@/lib/navState";
+import { type NavState, buildSearch, parseSearch, NAV_KEY_VIEWS, LONG_TITLE_THRESHOLD, DM_LINK_PREFIX } from "@/lib/navState";
 import { isInboxNotification } from "@/lib/extensionInbox";
 
 // A dumped task's description: what the AI summarised, then the client's own
@@ -1078,13 +1078,25 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   }, []);
   const toggleDrawerFull = () => setDrawerFull((f) => { const v = !f; try { localStorage.setItem("cut_drawerFull", v ? "1" : "0"); } catch {} return v; });
   const [cmdkOpen, setCmdkOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCmdkOpen(true); } };
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCmdkOpen(true); return; }
+      // "?" lists the rest of them. Not while typing, where it is punctuation,
+      // and not with a modifier held, which belongs to the browser.
+      if (e.key !== "?" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      e.preventDefault();
+      setShortcutsOpen(true);
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-  // Jump to a top-level view with a single number key — 1 Dashboard,
-  // 2 Clients, 3 Projects, 4 Personal, 5 Team.
+  // Jump to a top-level view with a single number key, in sidebar order:
+  // 1 My Work, 2 All Tasks, 3 Clients, 4 Projects, 5 Personal. The list lives
+  // in NAV_KEY_VIEWS; 2 was missing, so the sidebar's second row was the one
+  // thing you could not reach this way.
   //
   // Bare keys rather than Cmd/Ctrl+1-5: browsers reserve Cmd/Ctrl+1-9 for
   // tab switching and never hand the event to the page at all (Chrome,
@@ -1107,8 +1119,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // (after a chip or a checkbox click, say) for the key to arrive here.
   useEffect(() => {
     navBlockedRef.current = !!confirmDialog || !!promptDialog || !!linkModal || cmdkOpen
-      || !!openTaskId || !!dumpGroup || !!mergeSourceId || !!mergeClientState || addClientOpen || quickAddOpen;
-  }, [confirmDialog, promptDialog, linkModal, cmdkOpen, openTaskId, dumpGroup, mergeSourceId, mergeClientState, addClientOpen, quickAddOpen]);
+      || !!openTaskId || !!dumpGroup || !!mergeSourceId || !!mergeClientState || addClientOpen || quickAddOpen || shortcutsOpen;
+  }, [confirmDialog, promptDialog, linkModal, cmdkOpen, openTaskId, dumpGroup, mergeSourceId, mergeClientState, addClientOpen, quickAddOpen, shortcutsOpen]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -1158,7 +1170,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // The four primary nav items always show now — the hide/show toggle went
   // away when the account block replaced the sidebar's branding header. Kept
   // as a lookup so the render below stays unchanged.
-  const navVisible: Record<string, boolean> = { work: true, personal: true };
   // All Tasks is back as a primary nav item under My Work (Derek,
   // 2026-08-26) after a spell as a de-emphasized button on the Dashboard
   // header. It's a plain goToView case now rather than its own hand-rolled
@@ -3826,7 +3837,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // to where the message is"). The recipient is the one reading the mail,
     // so the thread they need is the one with ME in it.
     notify(otherUserId, `${me.name} sent you a message`, null, {
-      kind: "dm", skipEmail: !firstOfBurst, link: `${TEAM_CHAT_LINK}&dm=${encodeURIComponent(me.id)}`,
+      kind: "dm", skipEmail: !firstOfBurst, link: `${DM_LINK_PREFIX}&dm=${encodeURIComponent(me.id)}`,
     });
   };
   const deleteDmMessage = (id: string) => {
@@ -4206,16 +4217,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             want to chat with someone specifically they can use the @") but
             not deleted, just admin-toggled off by default. */}
         <nav className="shrink-0 space-y-0.5 px-2">
-          {navVisible.work && <SideItem active={myWork} title="My Work (press 1)" onClick={() => goToView("dashboard")}><I.grid className="text-muted" /> <span>My Work</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + myAssignedProjects.length}</span></SideItem>}
+          <SideItem active={myWork} title="My Work (press 1)" onClick={() => goToView("dashboard")}><I.grid className="text-muted" /> <span>My Work</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + myAssignedProjects.length}</span></SideItem>
           {/* Directly under My Work, which stays exactly as it was — this is
-              a second way in, not a replacement. Deliberately has no number
-              shortcut: NAV_KEY_VIEWS is documented as sidebar order, and
-              slotting All Tasks in at 2 would have shifted every row below it
-              down one and broken existing muscle memory for a key nobody
-              asked for. */}
+              a second way in, not a replacement. It went in without a number
+              shortcut at first, to avoid shifting every row below it down one
+              and breaking muscle memory. Shifting never turned out to be
+              necessary: Clients, Projects and Personal were already on 3, 4
+              and 5, so 2 was a hole in the middle of a list documented as
+              sidebar order, and the second row was the only one you could not
+              reach from the keyboard. It is now 2, and nothing else moved. */}
           {/* Your open tasks, not every task in the database. Every other row
               in this nav carries its count; this one was the exception. */}
-          {navVisible.work && <SideItem active={allTasksView} title={`${openTaskCount} open task${openTaskCount === 1 ? "" : "s"} assigned to you`} onClick={() => goToView("alltasks")}><I.list className="text-muted" /> <span>All Tasks</span><span className="ml-auto text-[13px] text-muted">{openTaskCount}</span></SideItem>}
+          <SideItem active={allTasksView} title={`${openTaskCount} open task${openTaskCount === 1 ? "" : "s"} assigned to you (press 2)`} onClick={() => goToView("alltasks")}><I.list className="text-muted" /> <span>All Tasks</span><span className="ml-auto text-[13px] text-muted">{openTaskCount}</span></SideItem>
           {/* "Client replies" nav item removed (Derek, 2026-08-09) — My Work
               and Follow Up already surface an open conversation-priority
               task each their own way (hasOpenConversationTask / Follow Up's
@@ -4231,7 +4244,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           {clients.some((c) => c.id === WORKSPACE_CLIENT_ID) && (
             <SideItem active={dirView === "projects"} title="Projects (press 4)" onClick={() => goToView("projects")}><I.folder className="text-muted" /> <span>Projects</span><span className="ml-auto text-[13px] text-muted">{workspaceProjects.length}</span></SideItem>
           )}
-          {navVisible.personal && <SideItem active={personalView} title="Personal (press 5)" onClick={() => goToView("personal")}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>}
+          <SideItem active={personalView} title="Personal (press 5)" onClick={() => goToView("personal")}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>
         </nav>
 
         {/* Pinned — per-user quick access to starred clients + lists. Starring
@@ -4730,6 +4743,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       {addClientOpen && <AddClientModal subAccounts={subAccounts} contacts={contacts} existingIds={new Set(clients.map((c) => c.id))} onAdd={addClientContact} onAddRemote={addRemoteContact} onClose={() => setAddClientOpen(false)} />}
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
       {promptDialog && <PromptModal {...promptDialog} onCancel={() => setPromptDialog(null)} />}
+      {shortcutsOpen && <ShortcutsModal onClose={() => setShortcutsOpen(false)} />}
       {mergeSourceId && (() => {
         const src = tasks.find((t) => t.id === mergeSourceId);
         if (!src) return null;

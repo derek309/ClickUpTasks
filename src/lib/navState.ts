@@ -58,8 +58,9 @@ export function parseSearch(search: string): NavState {
 
 // Number-key shortcuts for the top-level views, in sidebar order. Shown as
 // a hint on each sidebar item and handled by the keydown effect below.
-export const NAV_KEY_VIEWS: Record<string, "dashboard" | "clients" | "projects" | "personal"> = {
+export const NAV_KEY_VIEWS: Record<string, "dashboard" | "alltasks" | "clients" | "projects" | "personal"> = {
   "1": "dashboard",
+  "2": "alltasks",
   "3": "clients",
   "4": "projects",
   "5": "personal",
@@ -73,6 +74,8 @@ export const NAV_KEY_VIEWS: Record<string, "dashboard" | "clients" | "projects" 
 // already asks Gemini for, so both paths agree on what a good title looks like.
 export const LONG_TITLE_THRESHOLD = 80;
 
-// Deep link straight to Team Chat, for notification emails. ?view=inbox is
-// what parseUrl maps onto inboxView (see NavState above).
-export const TEAM_CHAT_LINK = "?view=inbox";
+// The first half of a deep link to a direct message, for notification emails:
+// it is always followed by &dm=<memberId>. Named for Team Chat, which this app
+// no longer has; ?view=inbox on its own renders nothing, so never send it
+// alone. parseUrl maps view=inbox onto inboxView (see NavState above).
+export const DM_LINK_PREFIX = "?view=inbox";

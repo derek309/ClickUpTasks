@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/serverAuth";
+import { aiRateLimit, geminiEndpoint } from "@/lib/ai";
 
 // Rewrites an over-long, typed-in-a-hurry task title into a real title and
 // hands back the full original text, proofread, so the caller can append it
@@ -26,7 +27,6 @@ import { requireUser } from "@/lib/serverAuth";
 // Thinking is also off: on this task it is the difference between 5s and 11s,
 // and rewriting one sentence and proofreading a paragraph does not need it.
 
-const GEMINI_MODEL = "gemini-flash-latest";
 const GEMINI_TIMEOUT_MS = 25000;
 // The serverless function has to outlive its own Gemini call.
 export const maxDuration = 30;
@@ -34,6 +34,8 @@ export const maxDuration = 30;
 export async function POST(req: NextRequest) {
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const limited = await aiRateLimit(caller.id);
+  if (limited) return limited;
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "AI cleanup isn't configured yet (missing GEMINI_API_KEY)." }, { status: 501 });
@@ -67,7 +69,7 @@ export async function POST(req: NextRequest) {
   ].join("\n");
 
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
+    const res = await fetch(geminiEndpoint(apiKey), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { thinkingConfig: { thinkingBudget: 0 } } }),

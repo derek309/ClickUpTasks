@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/serverAuth";
+import { aiRateLimit, geminiEndpoint } from "@/lib/ai";
 
 // Turns a pasted blob (meeting notes, an action-item list, an email) into a
 // set of discrete tasks for a human to review before anything is created
@@ -15,7 +16,6 @@ import { requireUser } from "@/lib/serverAuth";
 // a grammar clean-up, not a read (Derek, 2026-09-09: "sometimes we have to
 // just add a task quickly, other times we want to add a list of tasks").
 
-const GEMINI_MODEL = "gemini-flash-latest";
 const GEMINI_TIMEOUT_MS = 20000;
 const MAX_INPUT_CHARS = 12000;
 const MAX_TASKS = 40;
@@ -37,6 +37,8 @@ export type ParsedTask = {
 export async function POST(req: NextRequest) {
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const limited = await aiRateLimit(caller.id);
+  if (limited) return limited;
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "AI isn't configured yet (missing GEMINI_API_KEY)." }, { status: 501 });
@@ -91,7 +93,7 @@ export async function POST(req: NextRequest) {
   ].filter(Boolean).join("\n");
 
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
+    const res = await fetch(geminiEndpoint(apiKey), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
