@@ -32,27 +32,35 @@ const STALE_DAYS = 3;
 function Row({ r, context, onOpen }: { r: OpenReview; context: { taskTitle: string; clientName: string } | null; onOpen: () => void }) {
   const stale = r.status === "with_client" && r.days !== null && r.days >= STALE_DAYS;
   return (
+    // On a phone the chips drop under the name instead of competing with it for
+    // one line: at 375px a long review name was squeezed to "Bib..." and the
+    // badge beside it ran under the "Not opened" chip.
     <button type="button" onClick={onOpen}
-      className="flex w-full items-center gap-3 border-b px-4 py-3 text-left transition-colors last:border-0 hover:bg-accent-soft/50">
+      className="flex w-full flex-col gap-1.5 border-b px-4 py-3 text-left transition-colors last:border-0 hover:bg-accent-soft/50 sm:flex-row sm:items-center sm:gap-3">
       <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-2">
-          <span className="truncate text-[16px] font-medium">{r.name}</span>
-          <span className="shrink-0 rounded bg-background px-1.5 py-0.5 text-[16px] text-muted">{kindTitle(r.kind)}</span>
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="min-w-0 max-w-full truncate text-[16px] font-medium">{r.name}</span>
+          {/* Nobody named this one, so its name already IS the kind and the
+              badge would print "Client document  Client document". */}
+          {r.name !== kindTitle(r.kind) && (
+            <span className="shrink-0 rounded bg-background px-1.5 py-0.5 text-[16px] text-muted">{kindTitle(r.kind)}</span>
+          )}
           {r.version > 1 && <span className="shrink-0 text-[16px] text-muted">v{r.version}</span>}
         </span>
         <span className="mt-0.5 block truncate text-[16px] text-muted">
           {context ? `${context.clientName} · ${context.taskTitle}` : "On a task you cannot see"}
         </span>
       </span>
-      {r.status === "with_client" && (
-        <span className={`shrink-0 rounded px-2 py-0.5 text-[16px] font-medium ${r.opened ? "bg-background text-muted" : "bg-amber-50 text-amber-700"}`}
-          title={r.opened ? "The client has opened the link" : "The client has not opened the link yet"}>
-          {r.opened ? "Opened" : "Not opened"}
+      <span className="flex shrink-0 items-center gap-2">
+        {r.status === "with_client" && (
+          <span className={`rounded px-2 py-0.5 text-[16px] font-medium ${r.opened ? "bg-background text-muted" : "bg-amber-50 text-amber-700"}`}
+            title={r.opened ? "The client has opened the link" : "The client has not opened the link yet"}>
+            {r.opened ? "Opened" : "Not opened"}
+          </span>
+        )}
+        <span className={`text-right text-[16px] ${stale ? "font-semibold text-amber-700" : "text-muted"}`}>
+          {waitedFor(r.days)}
         </span>
-      )}
-      <span className={`shrink-0 text-right text-[16px] ${stale ? "font-semibold text-amber-700" : "text-muted"}`}
-        title={r.at ? new Date(r.at).toLocaleString() : undefined}>
-        {waitedFor(r.days)}
       </span>
     </button>
   );
@@ -68,7 +76,7 @@ function Group({ title, help, rows, taskContext, onOpenTask }: {
       <div className="flex items-center gap-2 border-b bg-background/40 px-4 py-2.5">
         <span className="text-[17px] font-bold">{title}</span>
         <span className="rounded-[5px] bg-border px-1.5 text-[16px] font-semibold text-foreground">{rows.length}</span>
-        <span className="ml-2 truncate text-[16px] text-muted">{help}</span>
+        <span className="ml-2 hidden truncate text-[16px] text-muted sm:inline">{help}</span>
       </div>
       {rows.map((r) => (
         <Row key={r.id} r={r} context={taskContext(r.taskId)} onOpen={() => onOpenTask(r.taskId)} />

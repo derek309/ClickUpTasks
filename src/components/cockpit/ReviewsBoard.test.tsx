@@ -92,10 +92,21 @@ describe("the Reviews board", () => {
     expect(all[0]).not.toContain("Opened");
   });
 
-  it("falls back to the kind's name when nobody named the review", () => {
+  it("falls back to the kind's name when nobody named the review, and says it once", () => {
     const groups = buildOpenReviews([doc({ id: "a", title: "", kind: "page" })], [{ documentId: "a", kind: "sent", createdAt: ago(1) }], NOW);
     render(<ReviewsBoard groups={groups} loading={false} taskContext={context} onOpenTask={() => {}} onRefresh={() => {}} />);
-    expect(rows()[0].textContent).toContain("HTML review");
+    const row = rows()[0].textContent ?? "";
+    expect(row).toContain("HTML review");
+    // The name is the kind here, so the kind badge beside it would read
+    // "HTML review  HTML review".
+    expect(row.match(/HTML review/g)).toHaveLength(1);
+  });
+
+  it("still badges the kind when the review has a name of its own", () => {
+    const groups = buildOpenReviews([doc({ id: "a", title: "Fall flyer", kind: "image" })], [{ documentId: "a", kind: "sent", createdAt: ago(1) }], NOW);
+    render(<ReviewsBoard groups={groups} loading={false} taskContext={context} onOpenTask={() => {}} onRefresh={() => {}} />);
+    expect(rows()[0].textContent).toContain("Fall flyer");
+    expect(rows()[0].textContent).toContain("Image review");
   });
 
   it("opens the task a review belongs to when its row is clicked", () => {
