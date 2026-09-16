@@ -418,12 +418,9 @@ export default function WaitingView({ token }: { token: string }) {
   // out of the main list and tucked behind a closed-by-default toggle at
   // the bottom instead of sorted inline with what's still open.
   const [completedOpen, setCompletedOpen] = useState(false);
-  // "What we're working on" starts collapsed (Derek, 2026-08-26: "we'll
-  // definitely want to toggle off what we're working on as default"). What
-  // needs the client is the point of this page; our own in-flight work is
-  // context, and with sees-all-tasks on it can be long enough to push the
-  // actionable half off the screen.
-  const [inProgressOpen, setInProgressOpen] = useState(false);
+  // "What we're working on" starts open (Derek, 2026-09-16: "default it open",
+  // reversing 2026-08-26). A client can still fold it away.
+  const [inProgressOpen, setInProgressOpen] = useState(true);
   // Project filter. "" is everything; otherwise one project's id. A
   // project-scoped share link already only carries its own project, so the
   // chips simply don't render in that case.
@@ -578,7 +575,7 @@ export default function WaitingView({ token }: { token: string }) {
     if (!initialProjectId || scrolledToProject.current) return;
     const req = groupRefs.current[`req-${initialProjectId}`];
     // Nothing needs them in this project, so the link's target is inside the
-    // now-collapsed "What we're working on". Open it, or the scroll lands on
+    // "What we're working on", which the client may have folded. Open it, or the scroll lands on
     // a display:none element and the page just sits at the top looking empty.
     if (!req && groupRefs.current[`wip-${initialProjectId}`] && !inProgressOpen) {
       setInProgressOpen(true);
