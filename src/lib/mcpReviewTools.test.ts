@@ -88,6 +88,15 @@ describe("review tools over MCP", () => {
     expect(services.removeVersion).toHaveBeenCalledWith("t_1", "page", "next");
     await call(client, "get_client_document", { task_id: "t_1" });
     expect(services.getReview).toHaveBeenCalledWith("t_1", "doc", false);
+    await call(client, "get_review", { task_id: "t_1", kind: "page", include_code: true, page: "Email 2" });
+    expect(services.getReview).toHaveBeenLastCalledWith("t_1", "page", true, "Email 2");
+  });
+
+  it("names an HTML review's pages with page_labels", async () => {
+    const updateReview = vi.fn(async () => "ok");
+    const client = await connect({ updateReview });
+    await call(client, "update_review", { task_id: "t_1", kind: "page", page_labels: ["Email 1: Stores IN", "Email 2: Stores NOT IN"] });
+    expect(updateReview).toHaveBeenCalledWith("t_1", "page", { imageLabels: ["Email 1: Stores IN", "Email 2: Stores NOT IN"] });
   });
 
   it("refuses a pin off the image", async () => {

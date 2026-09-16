@@ -965,8 +965,8 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   };
 
   const pageStack = shownFileId && (
-    // Each page stacked with its own name, pins and rewording (Derek, 2026-09-16: two emails in one review).
-    <PageReviewStack key={`${shownFileId}:${frameNonce}`}
+    // A tab per page, each with its own name, pins and rewording (Derek, 2026-09-16: two emails in one review, "use tabs").
+    <PageReviewStack reloadKey={frameNonce}
       pages={shownItems.map((item, i) => ({ fileId: item.file, label: itemLabel(shownItems, i) }))}
       loadFrame={loadFrame}
       onLoadError={() => pushToast("Could not show the page.")}
@@ -1200,7 +1200,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
       {/* Files and Comments stay beside the writing as it scrolls (Derek, 2026-09-11). */}
       {/* Stays beside the writing as it scrolls, except on a version with several
           images, where each image's comments line up beside that image instead. */}
-      <div className={`space-y-3 ${shownItems.length > 1 ? "" : "lg:sticky lg:top-0 lg:max-h-[calc(100dvh-9rem)] lg:overflow-y-auto"}`}>
+      <div className={`space-y-3 ${image && shownItems.length > 1 ? "" : "lg:sticky lg:top-0 lg:max-h-[calc(100dvh-9rem)] lg:overflow-y-auto"}`}>
         {/* Image and page reviews have no Files box: the version uploads on the left
             and a file rides on a comment (Derek, 2026-09-12: "we don't need upload
             files here since we can do it on the left"). */}
@@ -1222,9 +1222,9 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
         )}
         <CommentThread comments={versioned ? commentsFor(comments, shownIds) : comments} onPost={postComment} when={timeAgo} viewer="team"
           pinLabel={versioned ? imagePlace : undefined} pinGroups={image || shownItems.length > 1 ? shownItems.map((_, i) => itemLabel(shownItems, i)) : undefined}
-          alignGroup={versioned ? (label) => {
+          alignGroup={image ? (label) => {
             const i = shownItems.findIndex((_, n) => itemLabel(shownItems, n) === label);
-            return i < 0 ? null : document.querySelector<HTMLElement>(`[data-image-anchor="${shownItems[i].file}"], [data-page-anchor="${shownItems[i].file}"]`);
+            return i < 0 ? null : document.querySelector<HTMLElement>(`[data-image-anchor="${shownItems[i].file}"]`);
           } : undefined} pinDraftLabel={versioned && pinDraft ? imagePlace(pinDraft.fileId) : null}
           pinTone={image ? "var(--highlight)" : undefined} hoverId={image ? hoveredComment : undefined} onHover={image ? setHoveredComment : undefined}
           isMine={(c) => !!meId && comments.find((x) => x.id === c.id)?.authorId === meId}

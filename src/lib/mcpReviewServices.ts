@@ -172,7 +172,7 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
       return lines.join("\n");
     },
 
-    async getReview(taskId: string, kind: ReviewKind, includeCode: boolean): Promise<string> {
+    async getReview(taskId: string, kind: ReviewKind, includeCode: boolean, page?: number | string): Promise<string> {
       const found = await reviewFor(taskId, kind);
       if (typeof found === "string") return found;
       const { task, doc } = found;
@@ -208,8 +208,15 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
           }
         }
         if (kind === "page") {
-          // Every page of the working copy, like each of two emails, under its name.
+          // Every page of the working copy, like each of two emails, under its name;
+          // or only the one asked for by position or label.
+          let only = -1;
+          if (page !== undefined) {
+            only = typeof page === "number" ? page - 1 : items.findIndex((_, i) => imageLabel(items, i, "page").toLowerCase() === page.trim().toLowerCase());
+            if (only < 0 || only >= files.length) return `The working copy has no page ${JSON.stringify(page)}. Its pages: ${items.map((_, i) => `${i + 1} "${imageLabel(items, i, "page")}"`).join(", ")}.`;
+          }
           for (const [i, f] of files.entries()) {
+            if (only >= 0 && i !== only) continue;
             const html = await readPageFile(doc.id, f.id, false);
             if (html == null) continue;
             const which = files.length > 1 ? ` ${i + 1} "${imageLabel(items, i, "page")}"` : "";
@@ -267,7 +274,7 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
         done.push(change.title.trim() ? `renamed it "${change.title.trim()}"` : "cleared its name");
       }
       if (change.imageLabels) {
-        if (kind === "doc") return "image_labels is for an image or HTML review.";
+        if (kind === "doc") return "Labels are for an image or HTML review's images or pages.";
         const word = kind === "page" ? "page" : "image";
         const items = parseImageSet(found.doc.body);
         if (!items.length) return `The ${what(kind)} has no ${word}s yet. add_review_version adds them.`;

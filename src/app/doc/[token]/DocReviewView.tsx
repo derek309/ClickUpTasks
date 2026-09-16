@@ -502,8 +502,8 @@ export default function DocReviewView({ token }: { token: string }) {
                     </div>
                   )}
                   {shownFileId && page && (
-                    // Stacked under one toolbar, each page with its own pins and rewording (Derek, 2026-09-16: two emails in one review).
-                    <PageReviewStack key={`${shownFileId}:${frameNonce}`}
+                    // A tab per page, each with its own pins and rewording (Derek, 2026-09-16: two emails in one review, "use tabs").
+                    <PageReviewStack reloadKey={frameNonce}
                       pages={shownImages.map((img) => ({ fileId: img.fileId, label: img.label }))}
                       loadFrame={loadFrame}
                       onLoadError={() => setNotice({ tone: "warn", text: "We couldn't show the page. Please reload." })}
@@ -532,7 +532,7 @@ export default function DocReviewView({ token }: { token: string }) {
               {/* Stays beside the document as it scrolls (Derek, 2026-09-11: "make side
                   bar sticky"). Send my changes and Approve sit at its top, above
                   Files, in place of a bar fixed to the bottom of the screen. */}
-              <aside className={`space-y-4 ${versioned && shownImages.length > 1 ? "" : "lg:sticky lg:top-6 lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto"}`}>
+              <aside className={`space-y-4 ${image && shownImages.length > 1 ? "" : "lg:sticky lg:top-6 lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto"}`}>
                 {/* Nothing to approve or change while no version is up for review. */}
                 {!locked && !noVersion && (
                   <div className="rounded-2xl border bg-surface p-4 shadow-sm">
@@ -592,9 +592,9 @@ export default function DocReviewView({ token }: { token: string }) {
                 )}
                 <CommentThread comments={versioned ? commentsFor(data.comments ?? [], shownIds) : data.comments ?? []}
                   pinLabel={versioned ? imagePlace : undefined} pinGroups={versioned && shownImages.length > 1 ? shownImages.map((img) => img.label) : image ? shownImages.map((img) => img.label) : undefined}
-                  alignGroup={versioned ? (label) => {
+                  alignGroup={image ? (label) => {
                     const img = shownImages.find((x) => x.label === label);
-                    return img ? document.querySelector<HTMLElement>(`[data-image-anchor="${img.fileId}"], [data-page-anchor="${img.fileId}"]`) : null;
+                    return img ? document.querySelector<HTMLElement>(`[data-image-anchor="${img.fileId}"]`) : null;
                   } : undefined} pinDraftLabel={versioned && pinDraft ? imagePlace(pinDraft.fileId) : null}
                   pinTone={image ? "var(--highlight)" : undefined} hoverId={image ? hoveredComment : undefined} onHover={image ? setHoveredComment : undefined}
                   onPost={postComment} when={commentTime} viewer="client" buttonStyle={{ background: NAVY }}

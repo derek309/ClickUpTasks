@@ -443,10 +443,16 @@ export function createServer(opts = {}) {
       { task_id: z.string() },
       async ({ task_id }) => reply(await services.listReviews(task_id)));
 
-    const getReview = async ({ task_id, kind = "doc", include_code }) => reply(await services.getReview(task_id, kind, !!include_code));
+    const getReview = async ({ task_id, kind = "doc", include_code, page }) => reply(await (page === undefined
+      ? services.getReview(task_id, kind, !!include_code)
+      : services.getReview(task_id, kind, !!include_code, page)));
     server.tool("get_review",
       `Read one review on a task: stage, version, the client's link, versions (numbered, and "next" for an unsent working copy), the working copy (a document's text in the markdown write_document takes, a page's text or code, a link to see the image), and every comment with its id, pin and done state.`,
-      { task_id: z.string(), kind: KIND, include_code: z.boolean().optional().describe("on an HTML review, show the working page's HTML instead of its text") },
+      {
+        task_id: z.string(), kind: KIND,
+        include_code: z.boolean().optional().describe("on an HTML review, show the working pages' HTML instead of their text, each under its own heading"),
+        page: z.union([z.number().int().min(1).max(10), z.string()]).optional().describe("on an HTML review whose version holds several pages, show only this one: its position (1 based) or label"),
+      },
       getReview);
     server.tool("get_client_document", "Read a task's client document. The same as get_review with kind \"doc\".", { task_id: z.string() }, getReview);
 
@@ -456,15 +462,16 @@ export function createServer(opts = {}) {
       async ({ task_id, kind, title }) => reply(await services.createReview(task_id, kind, title)));
 
     server.tool("update_review",
-      "Rename a review, pick its stage by hand, reopen one the client approved so it can change again, or relabel an image review's images. Completed locks it; any stage but approved clears a client approval.",
+      "Rename a review, pick its stage by hand, reopen one the client approved so it can change again, or relabel an image review's images or an HTML review's pages. Completed locks it; any stage but approved clears a client approval.",
       {
         task_id: z.string(), kind: KIND,
         title: z.string().optional().describe("the review's name on the task and the client's page; empty uses the task's title"),
         stage: z.enum(["draft", "with_client", "client_submitted", "approved", "completed"]).optional(),
         reopen: z.boolean().optional(),
-        image_labels: z.array(z.string()).max(10).optional().describe('image or HTML review: names for the working copy\'s images or pages in order, like ["Front", "Back"] or ["Welcome email", "Reminder email"]; "" goes back to the default. The client sees them after the next send'),
+        image_labels: z.array(z.string()).max(10).optional().describe('image review: names for the working copy\'s images in order, like ["Front", "Back"]; "" goes back to the default. The client sees them after the next send'),
+        page_labels: z.array(z.string()).max(10).optional().describe('HTML review: names for the working copy\'s pages in order, like ["Email 1: Stores IN", "Email 2: Stores NOT IN"]; "" goes back to Page 1, Page 2. The client sees them as tabs after the next send'),
       },
-      async ({ task_id, kind, image_labels, ...change }) => reply(await services.updateReview(task_id, kind, { ...change, imageLabels: image_labels })));
+      async ({ task_id, kind, image_labels, page_labels, ...change }) => reply(await services.updateReview(task_id, kind, { ...change, imageLabels: page_labels ?? image_labels })));
 
     const writeDocument = async ({ task_id, body, title }) => {
       const html = docTextToHtml(body);
@@ -486,7 +493,7 @@ export function createServer(opts = {}) {
       async ({ task_id, file_name, size }) => reply(await services.startImageUpload(task_id, file_name, size)));
 
     server.tool("add_review_version",
-      "Add a new version to an image or HTML review (starting the review if there is none). It becomes the working copy, not sent yet. An image comes from image_url (a public https link to a PNG, JPEG, GIF or WebP) or upload_id (from start_image_upload). One image review version can hold up to 10 images shown stacked, like a postcard's front and back: pass images instead, each with image_url or upload_id and an optional label (two default to Front and Back, more to Image 1, 2, 3). With keep_others, each image replaces the one at its position in the working copy (or is added at the end) and the rest carry over with their pins. A page comes from html: the WHOLE page, up to 2 MB, images linked by web address (read the current code with get_review include_code). One HTML review version can also hold up to 10 pages shown stacked, each with its own comments and Copy code, like two emails for one campaign: pass pages instead, each with html and an optional label (they default to Page 1, Page 2); keep_others works the same way.",
+      "Add a new version to an image or HTML review (starting the review if there is none). It becomes the working copy, not sent yet. An image comes from image_url (a public https link to a PNG, JPEG, GIF or WebP) or upload_id (from start_image_upload). One image review version can hold up to 10 images shown stacked, like a postcard's front and back: pass images instead, each with image_url or upload_id and an optional label (two default to Front and Back, more to Image 1, 2, 3). With keep_others, each image replaces the one at its position in the working copy (or is added at the end) and the rest carry over with their pins. A page comes from html: the WHOLE page, up to 2 MB, images linked by web address (read the current code with get_review include_code). One HTML review version can also hold up to 10 pages, shown to the client as tabs, each with its own pins, comments and Copy code, like two emails for one campaign: pass pages instead, each with html and an optional label (they default to Page 1, Page 2); keep_others works the same way.",
       {
         task_id: z.string(), kind: FILE_KIND,
         image_url: z.string().url().optional(), upload_id: z.string().optional(),

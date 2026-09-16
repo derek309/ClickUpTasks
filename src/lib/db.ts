@@ -3,7 +3,8 @@
 
 import { supabase } from "./supabase";
 import type { EmailDraft } from "./data";
-import { parseKind, type FileKind, type ReviewKind } from "./reviewKinds";
+import { isFileKind, parseKind, type FileKind, type ReviewKind } from "./reviewKinds";
+import { setFiles } from "./imageSet";
 import type { OpenReviewDoc, OpenReviewStatus, ReviewVersionRow } from "./openReviews";
 import type { ClientDraftInput } from "./pendingSends";
 import {
@@ -352,7 +353,7 @@ export async function fetchContacts(): Promise<Contact[]> {
 export async function fetchOpenReviews(): Promise<{ docs: OpenReviewDoc[]; versions: ReviewVersionRow[] }> {
   const { data: docRows, error } = await supabase
     .from("task_documents")
-    .select("id, task_id, kind, title, status, version, client_viewed_at")
+    .select("id, task_id, kind, title, status, version, client_viewed_at, body")
     .is("deleted_at", null)
     .in("status", ["with_client", "client_submitted"]);
   if (error || !docRows?.length) return { docs: [], versions: [] };
@@ -365,6 +366,7 @@ export async function fetchOpenReviews(): Promise<{ docs: OpenReviewDoc[]; versi
     status: r.status as OpenReviewStatus,
     version: (r.version as number) ?? 0,
     clientViewedAt: (r.client_viewed_at as string | null) ?? null,
+    parts: isFileKind(parseKind(r.kind)) ? setFiles(r.body).length : 0,
   }));
 
   const { data: versionRows } = await supabase
