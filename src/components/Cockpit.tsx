@@ -75,7 +75,7 @@ import {
   THIS_MONTH_END,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, trashedSince, fetchOpenReviews, fetchClientEmailDrafts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, trashedSince, fetchOpenReviews, fetchClientEmailDrafts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, insertTaskAction, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import DmChat from "./DmChat";
@@ -101,8 +101,10 @@ import { ClientsDirectory } from "./cockpit/ClientsDirectory";
 import { CompletedLog } from "./cockpit/CompletedLog";
 import { ReviewsBoard } from "./cockpit/ReviewsBoard";
 import { DraftsBoard } from "./cockpit/DraftsBoard";
+import { BulkDelegateModal } from "./cockpit/BulkDelegateModal";
 import { buildOpenReviews, type OpenReviewGroups } from "@/lib/openReviews";
 import { buildPendingSends, type PendingSendGroups } from "@/lib/pendingSends";
+import { bulkDelegateSummary, bulkDelegations, type BulkDelegateSpec } from "@/lib/bulkDelegate";
 import { ProjectsDirectory } from "./cockpit/ProjectsDirectory";
 import { FolderRail } from "./cockpit/FolderRail";
 
@@ -529,6 +531,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // starred list gets its own quick-access row in the sidebar's Pinned section.
   const [starredLists, setStarredLists] = useState<Set<string>>(new Set());
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const [bulkDelegateOpen, setBulkDelegateOpen] = useState(false);
   const [manualOrder, setManualOrder] = useState<string[]>([]);
   const [headerMoreOpen, setHeaderMoreOpen] = useState(false);
   const [copiedForClaude, setCopiedForClaude] = useState(false);
@@ -1194,8 +1197,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // (after a chip or a checkbox click, say) for the key to arrive here.
   useEffect(() => {
     navBlockedRef.current = !!confirmDialog || !!promptDialog || !!linkModal || cmdkOpen
-      || !!openTaskId || !!dumpGroup || !!mergeSourceId || !!mergeClientState || addClientOpen || quickAddOpen || shortcutsOpen;
-  }, [confirmDialog, promptDialog, linkModal, cmdkOpen, openTaskId, dumpGroup, mergeSourceId, mergeClientState, addClientOpen, quickAddOpen, shortcutsOpen]);
+      || !!openTaskId || !!dumpGroup || !!mergeSourceId || !!mergeClientState || addClientOpen || quickAddOpen || shortcutsOpen || bulkDelegateOpen;
+  }, [confirmDialog, promptDialog, linkModal, cmdkOpen, openTaskId, dumpGroup, mergeSourceId, mergeClientState, addClientOpen, quickAddOpen, shortcutsOpen, bulkDelegateOpen]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -3277,7 +3280,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const delegateTask = (taskId: string, spec: {
     toId: string; title: string; instructions: string; theirDue: string; followUpAt: string | null;
     size: TaskSize | null; priority: Priority; links: string[];
-  }) => {
+  }, opts?: { skipEmail?: boolean }) => {
     const t = tasksRef.current.find((x) => x.id === taskId);
     if (!t) return;
     // Whatever they called it, or a name derived from the brief when they
@@ -3301,7 +3304,37 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // theirs, and the same rule governs the dock's other actions.
     if (spec.size && !t.size && !t.sizeHours) patch.size = spec.size;
     update(taskId, patch);
-    if (spec.toId !== me.id) notify(spec.toId, `${me.name} delegated "${title}" to you on ${t.title}`, taskId);
+    if (spec.toId !== me.id) notify(spec.toId, `${me.name} delegated "${title}" to you on ${t.title}`, taskId, { skipEmail: opts?.skipEmail });
+  };
+
+  // The same handoff, applied to everything selected. Nine tasks to one person
+  // should differ from nine handoffs only in how long it takes, so each task
+  // gets its own subtask, its own activity line and its own bell, exactly as
+  // it would one at a time. Only the email copies are collapsed: nine bells is
+  // a list, nine emails is a mailbox.
+  const bulkDelegate = (spec: BulkDelegateSpec) => {
+    const chosen = [...selectedTaskIds]
+      .map((id) => tasksRef.current.find((t) => t.id === id))
+      .filter((t): t is Task => !!t);
+    if (!chosen.length) { pushToast("Those tasks are no longer here."); setBulkDelegateOpen(false); return; }
+    const toName = users.find((u) => u.id === spec.toId)?.name ?? "them";
+    const at = new Date().toISOString();
+    bulkDelegations(chosen, spec).forEach(({ taskId, spec: one }, i) => {
+      delegateTask(taskId, one, { skipEmail: i > 0 });
+      // The activity line the dock writes for a single handoff, so a delegated
+      // task reads the same however it got that way.
+      insertTaskAction({
+        id: newId("ta_"), taskId, kind: "delegate", authorId: me.id,
+        toId: spec.toId, parentId: null,
+        body: one.instructions, at,
+        // What you are waiting on is them, not your own follow-up.
+        nextStep: `${toName} to finish this`,
+        nextStepDue: one.theirDue, nextStepDoneAt: null,
+      });
+    });
+    setBulkDelegateOpen(false);
+    clearSelection();
+    pushToast(bulkDelegateSummary(chosen.length, toName));
   };
   const toggleLabel = (taskId: string, labelId: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { labelIds: t.labelIds.includes(labelId) ? t.labelIds.filter((l) => l !== labelId) : [...t.labelIds, labelId] }); };
 
@@ -4783,6 +4816,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 className="rounded-md border px-2.5 py-1 text-[15px] font-medium hover:bg-background">Merge</button>
             );
           })()}
+          {users.some((u) => u.id !== me.id) && (
+            <button onClick={() => setBulkDelegateOpen(true)} title={`Hand all ${selectedTaskIds.size} to one person, once`}
+              className="rounded-md border px-2.5 py-1 text-[15px] font-medium hover:bg-background">Delegate</button>
+          )}
           <button onClick={bulkDelete} title="Delete selected tasks" className="rounded-md border border-danger/40 px-2.5 py-1 text-[15px] font-medium text-danger hover:bg-danger/10">Delete</button>
           <button onClick={clearSelection} className="rounded-md border px-2.5 py-1 text-[15px] font-medium hover:bg-background">Clear</button>
         </div>
@@ -4846,6 +4883,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
       {promptDialog && <PromptModal {...promptDialog} onCancel={() => setPromptDialog(null)} />}
       {shortcutsOpen && <ShortcutsModal onClose={() => setShortcutsOpen(false)} />}
+      {bulkDelegateOpen && (
+        <BulkDelegateModal count={selectedTaskIds.size} users={users.filter((u) => u.id !== me.id)}
+          onCancel={() => setBulkDelegateOpen(false)} onDelegate={bulkDelegate} onProblem={pushToast} />
+      )}
       {mergeSourceId && (() => {
         const src = tasks.find((t) => t.id === mergeSourceId);
         if (!src) return null;

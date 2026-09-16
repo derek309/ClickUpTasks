@@ -72,6 +72,16 @@ export function dateQuickPicks(from: string = TODAY): { label: string; date: str
   return DATE_QUICK_PICKS.map((q) => ({ label: q.label, date: addBusinessDaysIso(from, q.businessDays) }));
 }
 
+/** When to check back, as named offsets rather than a date picker: picking
+ *  "in 3 days" off a calendar means counting squares, naming it does not.
+ *  "Today" is dropped, because checking back on the day you just acted is not
+ *  a plan, and anything after `due` is dropped too, because offering a check
+ *  back after the promised date is offering to be late on purpose. */
+export function whenOptions(due: string | null): { label: string; date: string }[] {
+  const opts = dateQuickPicks().filter((o) => o.label !== "Today");
+  return due ? opts.filter((o) => o.date <= due) : opts;
+}
+
 /** yyyy-mm-dd of the Monday on or before `iso` (weeks start Monday) — the
  * anchor for the weekly Review reset: a client reviewed on/after this Monday
  * counts as "reviewed this week" and drops out of the Review tier until next

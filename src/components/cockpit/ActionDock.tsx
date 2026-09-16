@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Attachment, Contact, Message, Task, TaskAction, TaskActionKind, TaskStatus, htmlToText,
   TASK_ACTION_META, TASK_ACTION_ORDER, CLIENT_FACING_ACTIONS, STATUS_META, pickableStatuses, linkSpans, prettyLinkName,
-  User, TODAY, dateQuickPicks, formatDue, TaskSize, SIZE_META, SIZE_ORDER, sizeLabel, userById,
+  User, TODAY, whenOptions, formatDue, TaskSize, SIZE_META, SIZE_ORDER, sizeLabel, userById,
   Priority, PRIORITY_META, manualPriorityOptions, delegationTitle, type DelegateSpec, type ClientLink,
 } from "@/lib/data";
 import { I, newId, DateChip } from "./ui";
@@ -26,19 +26,6 @@ const GET_HELP = "Get help";
 const ICON: Record<TaskActionKind, string> = {
   note: "📝", team: "👥", chat: "🗨", email: "✉", sms: "💬", call: "☎", met: "🗓", meeting: "📅", delegate: "🤝",
 };
-
-// Named offsets rather than a date picker for the common cases. Picking
-// "in 3 days" off a calendar means counting squares; naming it does not.
-function whenOptions(due: string | null): { label: string; date: string }[] {
-  // Shared with the list view and the mind dump — see DATE_QUICK_PICKS in
-  // lib/data, which is where the business-day rule now lives. "Today" is
-  // dropped here: this asks when to CHECK BACK, and checking back on the day
-  // you just acted is not a plan.
-  const opts = dateQuickPicks().filter((o) => o.label !== "Today");
-  // Offering a check-back after the promised date is offering to be late on
-  // purpose, so those options are dropped rather than shown and ignored.
-  return due ? opts.filter((o) => o.date <= due) : opts;
-}
 
 export function ActionDock({
   task, client, contact, actions, messages, me, users, onLog, onPatch, onAddComment, onOpenCompose, canMessageClient = true, onSendDm, onDelegate, clientLinks = [], taskLink, askNextStepFor, onAskNextStepHandled, pushToast,
