@@ -19,6 +19,7 @@ import { I, Avatar, CollapsibleText, LinkedText, newId } from "./ui";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 import { AttachmentTile } from "./AttachmentTile";
 import { SchedulePopover } from "./SchedulePopover";
+import { CHANNEL_TONE } from "./channelTone";
 
 // A field change as a plain sentence with the new value in bold. Coloured
 // value pills made a run of status changes louder than the client's own
@@ -659,7 +660,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
         {/* Every entry is a white card on the feed's tinted ground (Derek:
             "add a white box around messages so it stands out" — "all of
             them"), so one entry never runs into the next. */}
-        <div className={`min-w-0 flex-1 rounded-xl border px-3 py-2 shadow-soft ${teamNote ? "border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10" : "bg-surface"}`}>
+        <div className={`min-w-0 flex-1 rounded-xl px-3 py-2 shadow-soft ${teamNote ? CHANNEL_TONE.note.surface : "border bg-surface"}`}>
           <span className="text-[16px] font-semibold">{teamNote ? "Note" : meta.verb}</span>
           {/* Who wrote it and who it was addressed to. "Messaged · Derek Fox"
               recorded that a teammate was messaged and lost which one, which
@@ -797,11 +798,13 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
               <span className={`flex h-8 w-8 items-center justify-center rounded-full text-[16px] font-bold text-white ${mine ? "bg-accent" : ""}`} style={mine ? undefined : { background: client.color }}>{mine ? "✳" : clientInitials}</span>
             )}
           </div>
-          <div className={`min-w-0 ${email ? "w-full max-w-[640px] rounded-2xl border bg-surface p-3.5 shadow-soft" : `max-w-[min(620px,85%)] rounded-2xl px-3.5 py-2.5 ${mine ? "rounded-br-md bg-accent-soft" : "rounded-bl-md bg-highlight-soft/80"}`}`}>
+          {/* Tinted by channel, the same colour the reply box turns when that
+              channel is picked; which side it sits on says who wrote it. */}
+          <div className={`min-w-0 ${CHANNEL_TONE[m.channel === "sms" ? "sms" : email ? "email" : "chat"].surface} ${email ? "w-full max-w-[640px] rounded-2xl p-3.5" : `max-w-[min(620px,85%)] rounded-2xl px-3.5 py-2.5 ${mine ? "rounded-br-md" : "rounded-bl-md"}`}`}>
             <div className={`flex flex-wrap items-center gap-x-2 text-[16px] text-muted ${continued && !email ? "hidden" : ""}`}>
-              {email && <span className="rounded-[5px] bg-accent-soft px-1.5 font-semibold text-accent">Email</span>}
+              {email && <span className={`font-semibold ${CHANNEL_TONE.email.label}`}>Email</span>}
               <span className="font-semibold text-foreground">{mine ? (m.createdBy ? (userById(m.createdBy)?.name ?? "You") : "Sent") : client.name}</span>
-              {!email && <span>· {m.channel === "sms" ? "Text" : "Chat"}</span>}
+              {!email && <span className={`font-medium ${CHANNEL_TONE[m.channel === "sms" ? "sms" : "chat"].label}`}>· {m.channel === "sms" ? "Text" : "Chat"}</span>}
               <span>· {timeAgo(m.at)}</span>
               {dupeCount && dupeCount > 1 && (
                 <span className="inline-flex items-center rounded-[5px] bg-background px-1.5 py-0 text-[16px] font-semibold text-muted" title={`Collapsed ${dupeCount} identical sends within 10 minutes`}>sent {dupeCount}×</span>

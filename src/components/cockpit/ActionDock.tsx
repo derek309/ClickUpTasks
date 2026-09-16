@@ -8,6 +8,7 @@ import {
   Priority, PRIORITY_META, manualPriorityOptions, delegationTitle, type DelegateSpec, type ClientLink,
 } from "@/lib/data";
 import { I, newId, DateChip } from "./ui";
+import { CHANNEL_TONE } from "./channelTone";
 // Plain fetch reaches this route without a session and gets a 401 back.
 import { authedFetch } from "@/lib/supabase";
 
@@ -706,10 +707,11 @@ export function ActionDock({
           const canText = canMessageClient && !!onSendMessage && (reachable?.sms ?? false);
           const canEmail = canMessageClient && !!onOpenCompose && (reachable?.email ?? false);
           const noting = channel === "note";
-          const tabBtn = "-mb-px border-b-2 py-1 text-[16px] font-semibold transition";
-          const tabOn = "border-accent text-foreground";
-          const tabOnNote = "border-amber-700 text-foreground";
-          const tabOff = "border-transparent text-muted hover:text-foreground";
+          // The field, the picked tab and the send button take the channel's
+          // colour, the same one its messages wear in the conversation.
+          const tone = CHANNEL_TONE[channel];
+          const tabBtn = "py-1 text-[16px] font-semibold outline-none transition focus-visible:underline";
+          const tabOff = "text-muted hover:text-foreground";
           const sendLabel = noting ? "Add note" : channel === "sms" ? "Send text" : "Send chat";
           return (
             <div>
@@ -724,12 +726,12 @@ export function ActionDock({
                   across its top, the words and the send arrow inside it, and Log
                   action on its own beside it (Derek, 2026-09-16, option B). */}
               <div className="flex items-end gap-2.5">
-                <div className={`min-w-0 flex-1 rounded-2xl border p-1.5 transition focus-within:border-accent ${noting ? "border-amber-300/70 bg-amber-50/70 dark:bg-amber-500/10" : "bg-surface"}`}>
+                <div className={`min-w-0 flex-1 rounded-2xl p-1.5 transition ${tone.surface}`}>
                   {(canChat || canText || canEmail) && (
                     <div role="group" aria-label="Send as" className="flex gap-4 px-2 pb-1.5 pt-0.5">
-                      <button onClick={() => { setChannel("note"); setReplyTo(null); }} aria-pressed={noting} className={`${tabBtn} ${noting ? tabOnNote : tabOff}`}>🔒 Note</button>
-                      {canChat && <button onClick={() => setChannel("chat")} aria-pressed={channel === "chat"} className={`${tabBtn} ${channel === "chat" ? tabOn : tabOff}`}>Chat</button>}
-                      {canText && <button onClick={() => setChannel("sms")} aria-pressed={channel === "sms"} className={`${tabBtn} ${channel === "sms" ? tabOn : tabOff}`}>Text</button>}
+                      <button onClick={() => { setChannel("note"); setReplyTo(null); }} aria-pressed={noting} className={`${tabBtn} ${noting ? CHANNEL_TONE.note.tab : tabOff}`}>🔒 Note</button>
+                      {canChat && <button onClick={() => setChannel("chat")} aria-pressed={channel === "chat"} className={`${tabBtn} ${channel === "chat" ? CHANNEL_TONE.chat.tab : tabOff}`}>Chat</button>}
+                      {canText && <button onClick={() => setChannel("sms")} aria-pressed={channel === "sms"} className={`${tabBtn} ${channel === "sms" ? CHANNEL_TONE.sms.tab : tabOff}`}>Text</button>}
                       {/* Email is a letter, so it opens the full email window. */}
                       {canEmail && <button onClick={() => onOpenCompose?.("email")} className={`${tabBtn} ${tabOff}`}>Email</button>}
                     </div>
@@ -747,7 +749,7 @@ export function ActionDock({
                         className="h-10 w-10 shrink-0 rounded-lg text-muted hover:bg-background hover:text-foreground">⋯</button>
                     )}
                     <button onClick={sendQuick} disabled={!quickNote.trim()} title={`${sendLabel} (Enter)`} aria-label={sendLabel}
-                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[18px] font-bold text-white transition hover:opacity-90 disabled:opacity-30 ${noting ? "bg-amber-700" : "bg-accent"}`}>↑</button>
+                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[18px] font-bold text-white transition hover:opacity-90 disabled:opacity-30 ${tone.send}`}>↑</button>
                   </div>
                 </div>
                 <button onClick={() => openPanel("menu")}
