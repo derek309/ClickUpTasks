@@ -170,6 +170,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // formatting toolbar in front of what the description actually says.
   const [descEditing, setDescEditing] = useState(false);
   const [dupOpen, setDupOpen] = useState(false);
+  // The delegation whose instructions are open for reading and editing; the rest show two lines.
+  const [openBrief, setOpenBrief] = useState<string | null>(null);
   const [dupClient, setDupClient] = useState(task.clientId);
   const [renamingAttId, setRenamingAttId] = useState<string | null>(null);
   const [labelOpen, setLabelOpen] = useState(false);
@@ -906,10 +908,20 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               <I.trash className="h-3.5 w-3.5" />
             </button>
           </div>
-          {/* The brief, editable in place. It is what they actually read. */}
-          <textarea value={s.note ?? ""} onChange={(e) => onPatchSub(s.id, { note: e.target.value })} rows={2}
-            placeholder="What do you need done? (instructions)"
-            className="mt-1.5 max-h-[11rem] w-full resize-none overflow-y-auto rounded-lg border bg-surface px-2.5 py-1.5 text-[16px] leading-snug outline-none [field-sizing:content] focus:border-accent" />
+          {/* The brief, editable in place. It is what they actually read. Shown
+              as two lines until clicked, and hidden once the handoff is done
+              (Derek, 2026-09-16: a long brief kept a huge box open on the task). */}
+          {s.done ? null : openBrief === s.id || !s.note?.trim() ? (
+            <textarea value={s.note ?? ""} onChange={(e) => onPatchSub(s.id, { note: e.target.value })} rows={2}
+              autoFocus={openBrief === s.id} onBlur={() => setOpenBrief((id) => (id === s.id ? null : id))}
+              placeholder="What do you need done? (instructions)"
+              className="mt-1.5 max-h-[11rem] w-full resize-none overflow-y-auto rounded-lg border bg-surface px-2.5 py-1.5 text-[16px] leading-snug outline-none [field-sizing:content] focus:border-accent" />
+          ) : (
+            <button type="button" onClick={() => setOpenBrief(s.id)} title="Show and edit the instructions"
+              className="mt-1.5 block w-full rounded-lg border bg-surface px-2.5 py-1.5 text-left text-[16px] leading-snug text-muted hover:text-foreground">
+              <span className="line-clamp-2 whitespace-pre-line">{s.note}</span>
+            </button>
+          )}
         </div>
       ))}
     </div>
@@ -1303,12 +1315,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 <I.bolt /> <span className="hidden sm:inline">Open in GHL</span>
               </a>
             )}
+            {/* Copy for Claude is used on most tasks, so it sits out here, one click
+                (Derek, 2026-09-16: "put the little star icon on the outside"). */}
+            <button onClick={copyForClaude} title="Copy for Claude" aria-label="Copy for Claude"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border text-[18px] leading-none text-foreground transition hover:bg-background">
+              <span aria-hidden>✳</span>
+            </button>
             {/* The rarer actions, one click in. Five bare icons sat here with
                 Delete right beside Close. */}
             <div className="relative">
               <ActionMenu label={<I.dots />} title="More actions" triggerClassName={iconButton} items={[
                 { label: "Copy link to task", onClick: onCopyLink },
-                { label: "Copy for Claude", onClick: copyForClaude },
                 { label: "Duplicate here", onClick: () => onDuplicate() },
                 { label: "Duplicate into another list", onClick: () => { setDupClient(task.clientId); setDupOpen(true); } },
                 task.priority === "conversation" && { label: "Merge into a task", onClick: onOpenMerge },
