@@ -200,9 +200,14 @@ async function wasPublished(documentId: string, fileId: string): Promise<boolean
   return (await publishedBodies(documentId)).some((body) => setFiles(body).includes(fileId));
 }
 
-/** What tells a pin's image apart ("Back"), when its version holds more than one image. */
+/** What tells a pin's image or page apart ("Back", "Page 2"), when its version
+ *  holds more than one. The file's own purpose says which default names apply. */
 export async function pinImageName(documentId: string, fileId: string): Promise<string | null> {
-  return pinImageLabel(await publishedBodies(documentId), fileId);
+  const [bodies, { data: f }] = await Promise.all([
+    publishedBodies(documentId),
+    supabaseAdmin.from("task_document_files").select("purpose").eq("id", fileId).eq("document_id", documentId).maybeSingle(),
+  ]);
+  return pinImageLabel(bodies, fileId, f?.purpose === "page" ? "page" : "image");
 }
 
 /** A short lived link to one shared file, saved rather than shown when asked.
@@ -234,9 +239,9 @@ export async function docVersionFile(documentId: string, fileId: unknown, purpos
 
 /** A version the client was shown and can still see. number is its version, counted
  *  over every body ever published, so a removed version leaves a gap and nothing
- *  renumbers. body names it; images are what it holds, in order, labelled (one for a
- *  page), and fileId and name are its first image's. fromClient: the client made it
- *  (a page they reworded). */
+ *  renumbers. body names it; images are the files it holds, in order, labelled (the
+ *  images of an image review, the pages of an HTML review), and fileId and name are
+ *  its first file's. fromClient: the client made it (a page they reworded). */
 export type SharedVersionFile = {
   body: string; fileId: string; name: string; number: number; fromClient: boolean;
   images: { fileId: string; name: string; label: string }[];
@@ -250,12 +255,14 @@ export async function sharedVersionFiles(documentId: string): Promise<SharedVers
   const bodies = publishedFiles((versions ?? []) as { version: number; body: string }[]);
   const ids = [...new Set(bodies.flatMap(setFiles))];
   if (!ids.length) return [];
-  const { data: files } = await supabaseAdmin.from("task_document_files").select("id, name, removed_at, added_by").in("id", ids);
+  const { data: files } = await supabaseAdmin.from("task_document_files").select("id, name, removed_at, added_by, purpose").in("id", ids);
   const live = new Map((files ?? []).filter((f) => !f.removed_at).map((f) => [f.id as string, f]));
   return bodies.flatMap((body, i) => {
     const items = parseImageSet(body);
     if (!items.length || items.some((item) => !live.has(item.file))) return [];
-    const images = items.map((item, n) => ({ fileId: item.file, name: live.get(item.file)!.name as string, label: imageLabel(items, n) }));
+    // A version holds one kind of file, so its first says which default names apply.
+    const kind = live.get(items[0].file)!.purpose === "page" ? "page" : "image";
+    const images = items.map((item, n) => ({ fileId: item.file, name: live.get(item.file)!.name as string, label: imageLabel(items, n, kind) }));
     return [{
       body, fileId: images[0].fileId, name: images[0].name, number: i + 1, images,
       fromClient: items.some((item) => live.get(item.file)!.added_by === null),

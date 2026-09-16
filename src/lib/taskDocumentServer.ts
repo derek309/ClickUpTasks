@@ -26,7 +26,7 @@ import { sanitizeDocHtml, DOC_MAX_RAW_CHARS, DOC_MAX_HTML_CHARS } from "./docHtm
 import { applyTextEdits, cleanEdits, pageTooBig, PAGE_TOO_BIG } from "./pageHtml";
 import { discardVersionFile, docComments, docVersionFile, readPageFile, sharedVersionFiles, storePageFile } from "./taskDocumentFiles";
 import { filePurpose, isFileKind, kindNoun, kindWhat, noDocumentYet, parseKind, type ReviewKind } from "./reviewKinds";
-import { setFiles } from "./imageSet";
+import { formatImageSet, parseImageSet, replaceSetFiles, setFiles } from "./imageSet";
 import { openClientComments } from "./reviewChanges";
 
 /** Why a client cannot approve: comments or edits of theirs are changes to submit
@@ -224,8 +224,9 @@ export type PublishOutcome =
   | { ok: true; version: number }
   | { ok: false; status: number; error: string; current?: { version: number; body: string } | null };
 
-/** On a web page review, what the client looked at (fileId) and their rewording (edits). */
-export type PagePublishInput = { fileId?: unknown; edits?: unknown };
+/** On an HTML review, the version the client looked at (body, which can hold several
+ *  pages) and their rewording, page by page ({ [fileId]: edits }). */
+export type PagePublishInput = { body?: unknown; edits?: unknown };
 
 /** A client sends changes or approves. In order: refuse a closed task, work out
  *  the body (clean HTML for a document; for an image or page the version under
@@ -246,7 +247,9 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
   if (scope.taskStatus === "done" || scope.documentStatus === "completed") return { ok: false, status: 400, error: docClosed(scope.kind) };
 
   let body: string;
-  let created: string | null = null;
+  // Page files stored for the client's rewording, removed again if the publish does not go through.
+  const created: string[] = [];
+  const discardCreated = async () => { for (const id of created) await discardVersionFile(scope.documentId, id); };
   // The files of the version under review, where the client's pins count as changes.
   let newestIds: string[] = [];
   if (fileKind) {
@@ -257,23 +260,35 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
     body = shown.body;
     newestIds = shown.images.map((img) => img.fileId);
     if (scope.kind === "page") {
-      if (page.fileId !== undefined && page.fileId !== shown.fileId) {
+      if (page.body !== undefined && page.body !== shown.body) {
         return { ok: false, status: 409, error: "The team posted a newer version while you were looking.", current: await latestPublished(scope.documentId, scope.kind) };
       }
-      const edits = page.edits === undefined ? [] : cleanEdits(page.edits);
-      if (!edits) return { ok: false, status: 400, error: "Invalid request." };
-      // Refused before any new page file is stored for the rewording.
-      if (edits.length && kind === "client_approved") return { ok: false, status: 409, error: APPROVE_WITH_CHANGES };
-      if (edits.length) {
-        const source = await readPageFile(scope.documentId, shown.fileId, true);
-        if (source === null) return { ok: false, status: 404, error: "Not found" };
-        const applied = applyTextEdits(source, edits);
-        if (!applied.ok) return { ok: false, status: 409, error: applied.error, current: await latestPublished(scope.documentId, scope.kind) };
-        if (pageTooBig(applied.html)) return { ok: false, status: 413, error: PAGE_TOO_BIG };
-        const stored = await storePageFile(scope.documentId, applied.html, shown.name, { id: null, label: scope.clientName });
-        if (!stored.ok) return { ok: false, status: stored.status, error: stored.error };
-        body = created = stored.fileId;
+      // Rewording arrives page by page. Every page named must be one of the version's.
+      const raw = page.edits === undefined ? {} : page.edits;
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, status: 400, error: "Invalid request." };
+      const byFile: [string, NonNullable<ReturnType<typeof cleanEdits>>][] = [];
+      for (const [fileId, list] of Object.entries(raw as Record<string, unknown>)) {
+        const edits = cleanEdits(list);
+        if (!edits || !shown.images.some((img) => img.fileId === fileId)) return { ok: false, status: 400, error: "Invalid request." };
+        if (edits.length) byFile.push([fileId, edits]);
       }
+      // Refused before any new page file is stored for the rewording.
+      if (byFile.length && kind === "client_approved") return { ok: false, status: 409, error: APPROVE_WITH_CHANGES };
+      const replaced: Record<string, string> = {};
+      for (const [fileId, edits] of byFile) {
+        const source = await readPageFile(scope.documentId, fileId, true);
+        if (source === null) { await discardCreated(); return { ok: false, status: 404, error: "Not found" }; }
+        const applied = applyTextEdits(source, edits);
+        if (!applied.ok) { await discardCreated(); return { ok: false, status: 409, error: applied.error, current: await latestPublished(scope.documentId, scope.kind) }; }
+        if (pageTooBig(applied.html)) { await discardCreated(); return { ok: false, status: 413, error: PAGE_TOO_BIG }; }
+        const name = shown.images.find((img) => img.fileId === fileId)?.name ?? shown.name;
+        const stored = await storePageFile(scope.documentId, applied.html, name, { id: null, label: scope.clientName });
+        if (!stored.ok) { await discardCreated(); return { ok: false, status: stored.status, error: stored.error }; }
+        created.push(stored.fileId);
+        replaced[fileId] = stored.fileId;
+      }
+      // The pages they reworded become new files; the rest carry over, with their names.
+      if (created.length) body = formatImageSet(replaceSetFiles(parseImageSet(shown.body), replaced));
     }
   } else {
     body = sanitizeDocHtml(rawHtml as string);
@@ -283,14 +298,14 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
   // Whether this carries the client's own changes, or only asks for them with
   // comments: new text on a document, a reworded page. An image never does.
   const previous = scope.kind === "doc" ? await latestPublished(scope.documentId, scope.kind) : null;
-  const sentChanges = scope.kind === "doc" ? previous?.body.trim() !== body.trim() : created !== null;
+  const sentChanges = scope.kind === "doc" ? previous?.body.trim() !== body.trim() : created.length > 0;
   // Approving means there is nothing to change. Edits, or a comment of the client's
   // still open on this round, are changes to submit instead (reviewChanges.ts, the
   // same rule the review page uses to show Approve or Submit changes).
   if (kind === "client_approved") {
     const [comments, sharedAt] = await Promise.all([docComments(scope.documentId), latestSentAt(scope.documentId)]);
     if (sentChanges || openClientComments(comments, newestIds, sharedAt).length) {
-      if (created) await discardVersionFile(scope.documentId, created);
+      await discardCreated();
       return { ok: false, status: 409, error: APPROVE_WITH_CHANGES };
     }
   }
@@ -299,10 +314,10 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
   try {
     version = await publishVersion(scope.documentId, baseVersion, kind, body, null, scope.clientName);
   } catch {
-    if (created) await discardVersionFile(scope.documentId, created);
+    await discardCreated();
     return { ok: false, status: 500, error: "Could not save. Please try again." };
   }
-  if (version < 0 && created) await discardVersionFile(scope.documentId, created);
+  if (version < 0) await discardCreated();
   if (version === -1 || version === -2) {
     return {
       ok: false, status: 409,

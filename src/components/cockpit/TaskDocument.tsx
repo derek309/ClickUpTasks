@@ -9,7 +9,8 @@
 // team uploads an image, or pastes or uploads a page, the client leaves numbered
 // pins, and asks for changes or approves. A revised version keeps the old ones and
 // their pins a click away. On a page the client (and the team) can also reword
-// text; the page itself only ever shows in a sandboxed frame (PageReviewFrame).
+// text; the page itself only ever shows in a sandboxed frame (PageReviewStack). A
+// version holds up to 10 images or pages, like two emails in one HTML review.
 // Everything else here is shared with the document: the link, stages, files,
 // comments, history, the review email and delete.
 //
@@ -33,14 +34,15 @@ import { addDocFiles, uploadSharedFile } from "@/lib/docFileUpload";
 import { publishedFiles, type PinAnchor } from "@/lib/reviewPins";
 import { commentHint, isFileKind, kindInSentence, kindNewName, kindQuery, kindTitle, kindWhat } from "@/lib/reviewKinds";
 import { MAX_SET_IMAGES, frontFirst, imageLabel, parseImageSet, setFiles as imagesOf, type ImageSetItem } from "@/lib/imageSet";
-import { mergeEdits, PAGE_MAX_BYTES, PAGE_TOO_BIG, type FrameMode, type PageEdit } from "@/lib/pageFrameProtocol";
+import { countEdits, withPageEdit, PAGE_MAX_BYTES, PAGE_TOO_BIG, type FrameMode, type PageEditsByFile } from "@/lib/pageFrameProtocol";
 import { formatFileSize, isPreviewableImage } from "@/lib/uploadTypes";
 import { RichTextEditor } from "./RichTextEditor";
 import { useDebouncedCommit } from "./useDebouncedCommit";
-import { PageReviewFrame, deviceForWidth, type PageDevice } from "./PageReviewFrame";
+import { deviceForWidth, type PageDevice } from "./PageReviewFrame";
+import { PageReviewStack } from "./PageReviewStack";
 import { ActionMenu } from "./ActionMenu";
 import {
-  CommentThread, FileDropLine, ImageLightbox, ImagePinBoard, ImageThumbGrid, ImageVersionPicker, WorkItemBadge, WorkItemRow, WorkItemWindow,
+  CommentThread, FileDropLine, ImageLightbox, ImagePinBoard, ImageThumbGrid, WorkItemBadge, WorkItemRow, WorkItemWindow,
   commentsFor, nextPin, quietButton as quiet, type PreviewImage,
 } from "./TaskWorkItem";
 
@@ -120,19 +122,20 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   const [pinDraft, setPinDraft] = useState<PinDraft | null>(null);
   const [viewingVersion, setViewingVersion] = useState<string | null>(null);
   const versionInput = useRef<HTMLInputElement>(null);
-  // Which image an upload replaces in an image review's working copy; null adds images.
+  // Which image or page an upload (or paste) replaces in the working copy; null adds.
   const slotRef = useRef<number | null>(null);
-  // Web page review: the frame for the version shown, how a click works in it, its
-  // width, the team's own rewording not saved yet, a pin to bring into view, pasted
-  // code, and each version's words for the History diff.
-  const [pageFrame, setPageFrame] = useState<{ fileId: string; url: string } | null>(null);
+  // HTML review: how a click works in its pages, their width, the team's own rewording
+  // not saved yet (page by page), a pin to bring into view, pasted code, and each
+  // version's words for the History diff. frameNonce reloads every page's frame.
   const [frameNonce, setFrameNonce] = useState(0);
   const [pageMode, setPageMode] = useState<FrameMode>("comment");
   const [pageDevice, setPageDevice] = useState<PageDevice>("desktop");
-  const [pageEdits, setPageEdits] = useState<{ fileId: string; edits: PageEdit[] }>({ fileId: "", edits: [] });
+  const [pageEdits, setPageEdits] = useState<{ body: string; edits: PageEditsByFile }>({ body: "", edits: {} });
   const [pageFocus, setPageFocus] = useState<{ id: string; n: number } | null>(null);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteDraft, setPasteDraft] = useState("");
+  // The page pasted code replaces; null adds a page.
+  const [pasteSlot, setPasteSlot] = useState<number | null>(null);
   const [pageTexts, setPageTexts] = useState<Record<string, string>>({});
   // Documents deleted from this task that can still be restored (30 days).
   const [deletedDocs, setDeletedDocs] = useState<DeletedTaskDocument[]>([]);
@@ -259,19 +262,12 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   const readJson = async (res: Response) => res.json().catch(() => ({} as Record<string, unknown>));
   const copy = async (text: string) => { try { await navigator.clipboard.writeText(text); return true; } catch { return false; } };
 
-  // The frame for the page version shown, fetched again when it expires or the page navigates.
-  const pageFileId = page && visible ? shownFileId : null;
-  useEffect(() => {
-    if (!pageFileId) return;
-    let cancelled = false;
-    void pageApi(`&fileId=${encodeURIComponent(pageFileId)}`).then(async (res) => {
-      const j = await readJson(res);
-      if (cancelled) return;
-      if (res.ok) setPageFrame({ fileId: pageFileId, url: j.frameUrl as string });
-      else pushToast((j.error as string) ?? "Could not show the page.");
-    });
-    return () => { cancelled = true; };
-  }, [pageFileId, frameNonce]); // eslint-disable-line react-hooks/exhaustive-deps
+  // One page's frame address; the stack asks for each page and again when one expires.
+  const loadFrame = async (fileId: string): Promise<string | null> => {
+    const res = await pageApi(`&fileId=${encodeURIComponent(fileId)}`);
+    const j = await readJson(res);
+    return res.ok ? (j.frameUrl as string) : null;
+  };
 
   // Each switch lands the pending save and carries what was typed across.
   const switchView = (next: { full: boolean }, d: Doc | null = doc) => {
@@ -366,13 +362,14 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     pushToast(message);
   };
 
-  // An image review's working copy holds up to 10 images, shown stacked (Derek,
-  // 2026-09-14: "upload both the front and back files in one"). Every change saves
-  // the whole set, which makes it the version to send next.
+  // A working copy holds up to 10 images or pages, shown stacked (Derek, 2026-09-14:
+  // "upload both the front and back files in one"; 2026-09-16: two emails in one HTML
+  // review). Every change saves the whole set, which makes it the version to send next.
+  const itemWord = page ? "page" : "image";
   const saveImages = async (items: ImageSetItem[]): Promise<unknown | null> => {
     const res = await api("", { method: "PATCH", body: JSON.stringify({ images: items }) });
     const j = await readJson(res);
-    if (!res.ok) { pushToast((j.error as string) ?? "Could not save the images."); return null; }
+    if (!res.ok) { pushToast((j.error as string) ?? `Could not save the ${itemWord}s.`); return null; }
     return j.document;
   };
   // Upload images: slot replaces that image and the others carry over; without it they
@@ -408,9 +405,9 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     const saved = await saveImages(current.map((item, i) => (i === index ? { ...item, label } : item)));
     if (saved) setDoc(rowToTaskDocument(saved));
   };
-  // Swap an image with the one above or below (Derek, 2026-09-14: "reorder"). Default
-  // names follow the place, so the top of two is always Front; typed names and pins
-  // move with their image.
+  // Swap an image or page with the one above or below (Derek, 2026-09-14: "reorder").
+  // Default names follow the place, so the top of two is always Front; typed names and
+  // pins move with their image.
   const moveImage = async (index: number, by: -1 | 1) => {
     const current = doc ? parseImageSet(doc.body) : [];
     const to = index + by;
@@ -424,79 +421,103 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   };
   const takeOutImage = async (index: number) => {
     const current = doc ? parseImageSet(doc.body) : [];
-    if (current.length < 2 || !window.confirm(`Take ${imageLabel(current, index)} out of this version? Earlier versions keep it, with its pins.`)) return;
+    if (current.length < 2 || !window.confirm(`Take ${imageLabel(current, index, kind === "page" ? "page" : "image")} out of this version? Earlier versions keep it, with its pins.`)) return;
     const saved = await saveImages(current.filter((_, i) => i !== index));
-    if (saved) await afterNewVersion(saved, "Image taken out. Send it when you're ready.");
+    if (saved) await afterNewVersion(saved, `${page ? "Page" : "Image"} taken out. Send it when you're ready.`);
   };
 
-  // A web page review: pasted code or an uploaded .html file becomes the version to
-  // send next (Derek, 2026-09-12: "upload an html file or copy code").
-  const addPage = async (html: string, name: string): Promise<boolean> => {
-    if (!doc || adding) return false;
-    if (new Blob([html]).size > PAGE_MAX_BYTES) { pushToast(PAGE_TOO_BIG); return false; }
+  // An HTML review: pasted code or uploaded .html files join the working copy, or one
+  // replaces the page at slot (Derek, 2026-09-12: "upload an html file or copy code").
+  const addPages = async (pages: { html: string; name: string }[], slot: number | null): Promise<boolean> => {
+    if (!doc || adding || !pages.length) return false;
+    if (pages.some((p) => new Blob([p.html]).size > PAGE_MAX_BYTES)) { pushToast(PAGE_TOO_BIG); return false; }
+    const room = slot !== null ? 1 : MAX_SET_IMAGES - parseImageSet(doc.body).length;
+    if (room <= 0) { pushToast(`A version holds up to ${MAX_SET_IMAGES} pages.`); return false; }
+    const chosen = pages.slice(0, room);
     setAdding(true);
-    const res = await pageApi("", { method: "POST", body: html, headers: { "Content-Type": "text/plain; charset=utf-8", "X-File-Name": encodeURIComponent(name) } });
-    const j = await readJson(res);
+    let saved: unknown = null;
+    for (const p of chosen) {
+      const res = await pageApi(slot !== null ? `&slot=${slot}` : "", { method: "POST", body: p.html, headers: { "Content-Type": "text/plain; charset=utf-8", "X-File-Name": encodeURIComponent(p.name) } });
+      const j = await readJson(res);
+      if (!res.ok) { pushToast((j.error as string) ?? "Could not add the page."); break; }
+      saved = j.document;
+    }
     setAdding(false);
-    if (!res.ok) { pushToast((j.error as string) ?? "Could not add the page."); return false; }
-    await afterNewVersion(j.document, doc.version > 0 ? "New version added. Send it when you're ready." : "Page added. Send it for review when you're ready.");
+    if (!saved) return false;
+    const done = slot !== null ? "Page replaced." : !doc.body ? (chosen.length > 1 ? `${chosen.length} pages added.` : "Page added.") : chosen.length > 1 ? `${chosen.length} pages added.` : "Page added.";
+    const left = pages.length > chosen.length ? ` A version holds up to ${MAX_SET_IMAGES} pages, so ${pages.length - chosen.length} ${pages.length - chosen.length === 1 ? "was" : "were"} left out.` : "";
+    await afterNewVersion(saved, `${done} ${doc.version > 0 ? "Send it when you're ready." : "Send it for review when you're ready."}${left}`);
     return true;
   };
-  const uploadPage = async (list: FileList) => {
-    const file = Array.from(list).find((f) => /\.html?$/i.test(f.name));
-    if (!file) { pushToast("Upload an .html file."); return; }
-    if (file.size > PAGE_MAX_BYTES) { pushToast(PAGE_TOO_BIG); return; }
-    await addPage(await file.text(), file.name);
+  const uploadPages = async (list: FileList, slot: number | null) => {
+    const picked = Array.from(list).filter((f) => /\.html?$/i.test(f.name));
+    if (!picked.length) { pushToast("Upload an .html file."); return; }
+    if (picked.some((f) => f.size > PAGE_MAX_BYTES)) { pushToast(PAGE_TOO_BIG); return; }
+    await addPages(await Promise.all((slot !== null ? picked.slice(0, 1) : picked).map(async (f) => ({ html: await f.text(), name: f.name }))), slot);
   };
+  const openPaste = (slot: number | null) => { setPasteSlot(slot); setPasteOpen(true); };
   const pastePage = async () => {
-    if (await addPage(pasteDraft, "Pasted code.html")) { setPasteDraft(""); setPasteOpen(false); }
+    if (await addPages([{ html: pasteDraft, name: "Pasted code.html" }], pasteSlot)) { setPasteDraft(""); setPasteOpen(false); setPasteSlot(null); }
   };
 
-  // The team's own rewording of the page shown, saved on the server as a new version.
-  const shownEdits = pageEdits.fileId === shownFileId ? pageEdits.edits : [];
+  // The team's own rewording of the version shown, on any of its pages, saved on the
+  // server as a new version.
+  const shownEdits: PageEditsByFile = pageEdits.body === shownFileId ? pageEdits.edits : {};
+  const shownEditCount = countEdits(shownEdits);
   const savePageEdits = async () => {
-    if (!doc || !shownFileId || !shownEdits.length) return;
+    if (!doc || !shownFileId || !shownEditCount) return;
     setBusy("page-edits");
-    const res = await pageApi("", { method: "POST", body: JSON.stringify({ baseFileId: shownFileId, edits: shownEdits }), headers: { "Content-Type": "application/json" } });
+    const res = await pageApi("", { method: "POST", body: JSON.stringify({ baseBody: shownFileId, edits: shownEdits }), headers: { "Content-Type": "application/json" } });
     const j = await readJson(res);
     setBusy(null);
     if (!res.ok) { pushToast((j.error as string) ?? "Could not save the text changes."); return; }
-    setPageEdits({ fileId: "", edits: [] });
+    setPageEdits({ body: "", edits: {} });
     await afterNewVersion(j.document, "Text changes saved as a new version. Send it when you're ready.");
   };
   const undoPageEdits = () => {
-    setPageEdits({ fileId: "", edits: [] });
+    setPageEdits({ body: "", edits: {} });
     setFrameNonce((n) => n + 1);
   };
 
-  // The code of a page version, as plain text, for Copy code and Download.
+  // The code of one page, as plain text, for Copy code and Download.
   const pageCode = async (fileId: string): Promise<string | null> => {
     const res = await pageApi(`&fileId=${encodeURIComponent(fileId)}&as=code`);
     if (res.ok) return res.text();
     pushToast(((await readJson(res)).error as string) ?? "Could not get the code.");
     return null;
   };
-  const copyCode = async () => {
-    const code = shownFileId ? await pageCode(shownFileId) : null;
+  const copyCode = async (fileId: string) => {
+    const code = await pageCode(fileId);
     if (code !== null) pushToast(await copy(code) ? "Code copied." : "Could not copy the code.");
   };
-  const downloadCode = async () => {
-    const code = shownFileId ? await pageCode(shownFileId) : null;
+  const downloadCode = async (fileId: string) => {
+    const code = await pageCode(fileId);
     if (code === null) return;
     const url = URL.createObjectURL(new Blob([code], { type: "text/html" }));
     const a = document.createElement("a");
     a.href = url;
-    a.download = files.find((f) => f.id === shownFileId)?.name ?? "page.html";
+    a.download = files.find((f) => f.id === fileId)?.name ?? "page.html";
     a.click();
     URL.revokeObjectURL(url);
   };
 
-  // A page version's words for the History diff, fetched once each (a file never changes).
-  const loadPageText = async (fileId: string) => {
-    if (pageTexts[fileId] !== undefined) return;
-    const res = await pageApi(`&fileId=${encodeURIComponent(fileId)}&as=text`);
-    const j = await readJson(res);
-    setPageTexts((t) => ({ ...t, [fileId]: res.ok ? (j.text as string) : "" }));
+  // A version's words, every page in order under its name, for the History diff and
+  // the review email. Null when a page could not be read.
+  const versionText = async (body: string): Promise<string | null> => {
+    const items = parseImageSet(body);
+    const texts = await Promise.all(items.map(async (item) => {
+      const res = await pageApi(`&fileId=${encodeURIComponent(item.file)}&as=text`);
+      return res.ok ? ((await readJson(res)).text as string) : null;
+    }));
+    if (texts.some((t) => t === null)) return null;
+    return items.length > 1 ? texts.map((t, i) => `${imageLabel(items, i, "page")}\n${t}`).join("\n\n") : texts[0] ?? "";
+  };
+
+  // A version's words for the History diff, fetched once each (a version never changes).
+  const loadPageText = async (body: string) => {
+    if (pageTexts[body] !== undefined) return;
+    const text = await versionText(body);
+    setPageTexts((t) => ({ ...t, [body]: text ?? "" }));
   };
 
   // Take a wrong version off (Derek, 2026-09-12: "a way to delete the image in case
@@ -530,11 +551,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     if (!count) return { text: "", changes: null };
     const generic = `A new version of the ${what}.`;
     if (!page || !latestBody || !beforeBody || latestBody === beforeBody) return { text: "", changes: generic };
-    const textOf = async (fileId: string) => {
-      const res = await pageApi(`&fileId=${encodeURIComponent(fileId)}&as=text`);
-      return res.ok ? ((await readJson(res)).text as string) : null;
-    };
-    const [before, after] = await Promise.all([textOf(beforeBody), textOf(latestBody)]);
+    const [before, after] = await Promise.all([versionText(beforeBody), versionText(latestBody)]);
     return { text: "", changes: (before !== null && after !== null ? summarizeTextChanges(before, after) : null) ?? generic };
   };
 
@@ -778,27 +795,28 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
       : <span className="text-muted">📎 File removed</span>;
   };
 
-  // The images of the image review version shown, and which of them tells a pin apart.
-  const shownItems = image ? parseImageSet(shownFileId) : [];
-  const shownIds = image ? shownItems.map((item) => item.file) : shownFileId ? [shownFileId] : [];
-  const editingSet = image && !locked && !!doc.body && shownFileId === doc.body;
+  // The images or pages of the version shown, and which of them tells a pin apart.
+  const shownItems = versioned ? parseImageSet(shownFileId) : [];
+  const shownIds = shownItems.map((item) => item.file);
+  const editingSet = versioned && !locked && !!doc.body && shownFileId === doc.body;
+  const itemLabel = (items: ImageSetItem[], i: number) => imageLabel(items, i, page ? "page" : "image");
   const imagePlace = (fileId: string) => {
     const i = shownItems.findIndex((item) => item.file === fileId);
-    return i >= 0 && shownItems.length > 1 ? imageLabel(shownItems, i) : null;
+    return i >= 0 && shownItems.length > 1 ? itemLabel(shownItems, i) : null;
   };
   const openComments = comments.filter((c) => !c.completedAt).length;
   // An image or page review's version numbers go by file, published order (reviewPins.ts).
   const fileVersion = (fileId: string) => sent.indexOf(fileId) + 1;
   const approvedFile = versioned ? versions.find((v) => v.version === doc.approvedVersion)?.body : undefined;
   const approvedNumber = versioned ? (approvedFile ? fileVersion(approvedFile) : 0) : doc.approvedVersion ?? 0;
-  // What removing the version shown takes off: on an image review, only the images
-  // no other version (or the working copy) uses; they go with their pins.
+  // What removing the version shown takes off: only the images or pages no other
+  // version (or the working copy) uses; they go with their pins.
   const otherIds = new Set([...sent, doc.body].filter((body) => body && body !== shownFileId).flatMap(imagesOf));
-  const goingIds = image ? shownIds.filter((id) => !otherIds.has(id)) : shownIds;
+  const goingIds = shownIds.filter((id) => !otherIds.has(id));
   // What removing the version shown will do, said before it happens.
   const removeMessage = (() => {
     if (!shownFileId) return "";
-    const kept = image && goingIds.length < shownIds.length ? " Images other versions use stay." : "";
+    const kept = goingIds.length < shownIds.length ? ` ${page ? "Pages" : "Images"} other versions use stay.` : "";
     if (!sent.includes(shownFileId)) return `Remove this version? It hasn't been sent, so the client never saw it.${kept}`;
     const sentShown = versionOptions.filter((o) => sent.includes(o.fileId));
     const others = sentShown.filter((o) => o.fileId !== shownFileId);
@@ -886,64 +904,89 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
       className="w-full rounded-md bg-transparent px-1 py-0.5 text-[22px] font-bold outline-none placeholder:text-foreground hover:bg-background focus:bg-background" />
   );
 
+  const pasteSlotLabel = pasteOpen && pasteSlot !== null && shownItems[pasteSlot] ? itemLabel(shownItems, pasteSlot) : null;
   const pasteBox = (
     <div className="mb-3 rounded-xl border bg-background p-3">
       <textarea value={pasteDraft} onChange={(e) => setPasteDraft(e.target.value)} rows={8} spellCheck={false}
-        placeholder="Paste the page code here…" aria-label="Page code"
+        placeholder={pasteSlotLabel ? `Paste the new code for ${pasteSlotLabel} here…` : "Paste the page code here…"} aria-label="Page code"
         className="w-full resize-y rounded-lg border bg-surface px-3 py-2 font-mono text-[16px] outline-none focus:border-accent" />
       <div className="mt-2 flex flex-wrap items-center gap-3">
         <button onClick={() => void pastePage()} disabled={adding || !pasteDraft.trim()}
           className="rounded-lg bg-accent px-4 py-1.5 text-[16px] font-semibold text-white disabled:opacity-50">{adding ? "Adding…" : "Use this code"}</button>
-        <button onClick={() => versionInput.current?.click()} disabled={adding} className={quiet}>Upload an .html file</button>
-        {doc.body && <button onClick={() => { setPasteOpen(false); setPasteDraft(""); }} className={quiet}>Cancel</button>}
-        <span className="text-[16px] text-muted">Up to 2 MB. Link images by web address.</span>
+        <button onClick={() => versionInput.current?.click()} disabled={adding} className={quiet}>{pasteSlotLabel ? "Upload an .html file" : "Upload .html files"}</button>
+        {doc.body && <button onClick={() => { setPasteOpen(false); setPasteDraft(""); setPasteSlot(null); }} className={quiet}>Cancel</button>}
+        <span className="text-[16px] text-muted">Up to 2 MB each. Link images by web address.{doc.body ? "" : " Two emails? Add the second one after this."}</span>
       </div>
     </div>
   );
 
-  // One toolbar instead of a row of five buttons (Derek, 2026-09-13: "a little
-  // messy"): New version and a More menu sit beside Desktop and Mobile, with
-  // Remove this version one click in.
-  const moreActions = shownFileId && (
+  // Remove this version sits one click in, in the review bar's More menu (Derek,
+  // 2026-09-13: "a little messy"). Copy code and Download belong to each page.
+  const moreActions = shownFileId && !locked && (
     <ActionMenu label="⋯" title="More actions" items={[
-      page && { label: "Copy code", onClick: () => void copyCode() },
-      page && { label: "Download", onClick: () => void downloadCode() },
-      !locked && { label: busy === "remove" ? "Removing…" : "Remove this version", danger: true, disabled: adding || busy !== null || !goingIds.length, onClick: () => void removeVersion(shownFileId, goingIds, removeMessage) },
+      { label: busy === "remove" ? "Removing…" : "Remove this version", danger: true, disabled: adding || busy !== null || !goingIds.length, onClick: () => void removeVersion(shownFileId, goingIds, removeMessage) },
     ]} />
   );
-  const pageActions = (
-    <>
-      {!locked && (
-        <ActionMenu label={adding ? "Uploading…" : "New version ▾"} title="Add a new version of the page" items={[
-          { label: "Paste code", onClick: () => setPasteOpen(true) },
-          { label: "Upload an .html file", disabled: adding, onClick: () => versionInput.current?.click() },
-        ]} />
-      )}
-      {moreActions}
-    </>
-  );
 
-  const pageFrameView = shownFileId && (
-    <PageReviewFrame
-      actions={pageActions}
-      frameUrl={pageFrame?.fileId === shownFileId ? pageFrame.url : null}
-      onReload={() => setFrameNonce((n) => n + 1)}
+  // A name above each image or page, with one quiet menu instead of a row of buttons
+  // (Derek, 2026-09-14 redesign). The working copy's can be renamed, replaced, moved
+  // or taken out; an older version is read only. Every page can copy its code.
+  const setItemHeader = (item: ImageSetItem, i: number) => {
+    const label = itemLabel(shownItems, i);
+    const menuItems = [
+      page && { label: "Copy code", onClick: () => void copyCode(item.file) },
+      page && { label: "Download", onClick: () => void downloadCode(item.file) },
+      editingSet && !page && { label: "Replace image", disabled: adding, onClick: () => { slotRef.current = i; versionInput.current?.click(); } },
+      editingSet && page && { label: "Replace with pasted code", disabled: adding, onClick: () => openPaste(i) },
+      editingSet && page && { label: "Replace with an .html file", disabled: adding, onClick: () => { slotRef.current = i; setPasteOpen(false); versionInput.current?.click(); } },
+      editingSet && shownItems.length > 1 && { label: "Move up", disabled: i === 0 || adding || busy !== null, onClick: () => void moveImage(i, -1) },
+      editingSet && shownItems.length > 1 && { label: "Move down", disabled: i === shownItems.length - 1 || adding || busy !== null, onClick: () => void moveImage(i, 1) },
+      editingSet && shownItems.length > 1 && { label: "Take out of this version", danger: true, disabled: adding, onClick: () => void takeOutImage(i) },
+    ];
+    if (!(shownItems.length > 1 || editingSet || page)) return null;
+    return (
+      <div className="mb-2 flex items-center gap-2">
+        {editingSet ? (
+          <input key={`${doc.body}:${i}`} defaultValue={item.label} maxLength={40} aria-label={`Name of ${label}`} title="Rename"
+            placeholder={itemLabel(shownItems.map((x, n) => (n === i ? { ...x, label: "" } : x)), i)}
+            onBlur={(e) => void relabelImage(i, e.currentTarget.value.trim())}
+            onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+            className="-ml-2 min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 text-[16px] font-semibold outline-none placeholder:text-foreground hover:bg-surface hover:ring-1 hover:ring-border focus:bg-surface focus:ring-2 focus:ring-accent" />
+        ) : (
+          <h3 className="min-w-0 flex-1 text-[16px] font-semibold">{label}</h3>
+        )}
+        {menuItems.some(Boolean) && (
+          <ActionMenu label="⋯" title={`${label} actions`}
+            triggerClassName={`${quiet} opacity-60 transition group-hover:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 [@media(hover:none)]:opacity-100`}
+            items={menuItems} />
+        )}
+      </div>
+    );
+  };
+
+  const pageStack = shownFileId && (
+    // Each page stacked with its own name, pins and rewording (Derek, 2026-09-16: two emails in one review).
+    <PageReviewStack key={`${shownFileId}:${frameNonce}`}
+      pages={shownItems.map((item, i) => ({ fileId: item.file, label: itemLabel(shownItems, i) }))}
+      loadFrame={loadFrame}
+      onLoadError={() => pushToast("Could not show the page.")}
       mode={pageMode} onMode={setPageMode} device={pageDevice} onDevice={setPageDevice}
       canEdit={!locked} canComment={!locked}
-      pins={comments.filter((c) => c.pin && c.pin.fileId === shownFileId).map((c) => ({
+      pinsFor={(fileId) => comments.filter((c) => c.pin && c.pin.fileId === fileId).map((c) => ({
         id: c.id, number: c.pin!.number, x: c.pin!.x, y: c.pin!.y, anchor: c.pin!.anchor, done: !!c.completedAt, active: c.id === focusedComment,
       }))}
-      pending={pinDraft && pinDraft.fileId === shownFileId ? pinDraft : null}
+      pending={pinDraft}
       focus={pageFocus} edits={shownEdits}
-      onPlace={(place) => setPinDraft({ fileId: shownFileId, ...place, number: nextPin(comments, shownFileId) })}
+      onPlace={(fileId, place) => setPinDraft({ fileId, ...place, number: nextPin(comments, fileId) })}
       onPinClick={setFocusedComment}
-      onEdit={(edit) => setPageEdits((s) => ({ fileId: shownFileId, edits: mergeEdits(s.fileId === shownFileId ? s.edits : [], edit) }))} />
+      onEdit={(fileId, edit) => setPageEdits((st) => ({ body: shownFileId, edits: withPageEdit(st.body === shownFileId ? st.edits : {}, fileId, edit) }))}
+      header={(_, i) => setItemHeader(shownItems[i], i)} />
   );
 
   const versionArticle = (
-    <article className={image && doc.body ? "min-w-0" : "rounded-2xl border bg-surface p-5 shadow-sm sm:p-8"}>
-      <input ref={versionInput} type="file" accept={page ? PAGE_ACCEPT : IMAGE_ACCEPT} className="hidden" multiple={image}
-        onChange={(e) => { if (e.target.files) void (page ? uploadPage(e.target.files) : uploadImages(e.target.files, slotRef.current)); e.target.value = ""; }} />
+    <article className={doc.body ? "min-w-0" : "rounded-2xl border bg-surface p-5 shadow-sm sm:p-8"}>
+      <input ref={versionInput} type="file" accept={page ? PAGE_ACCEPT : IMAGE_ACCEPT} className="hidden" multiple
+        onChange={(e) => { if (e.target.files) void (page ? uploadPages(e.target.files, pasteOpen ? pasteSlot : slotRef.current) : uploadImages(e.target.files, slotRef.current)); e.target.value = ""; }} />
       {!doc.body ? (
         page ? pasteBox : (
           <FileDropLine label="Images" count={0} busy={adding} disabled={locked} onFiles={(list) => void uploadImages(list, null)}>
@@ -952,46 +995,17 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
         )
       ) : (
         <>
-          {page && versionOptions.length > 1 && (
-            <div className="mb-3">
-              <ImageVersionPicker options={versionOptions} value={shownFileId} onChange={(id) => { setViewingVersion(id); setPinDraft(null); }} />
-            </div>
-          )}
           {page && pasteOpen && !locked && pasteBox}
-          {page ? pageFrameView : (
-            // Stacked, each with its own name and pins (Derek, 2026-09-14). The working
-            // copy's images can be renamed, replaced or taken out; an older version is read only.
+          {page ? pageStack : (
+            // Stacked, each with its own name and pins (Derek, 2026-09-14).
             <div className="space-y-8">
               {shownItems.map((item, i) => {
                 const f = files.find((x) => x.id === item.file);
                 const url = f ? thumbs[f.path] : undefined;
-                const label = imageLabel(shownItems, i);
+                const label = itemLabel(shownItems, i);
                 return (
                   <section key={`${shownFileId}:${item.file}`} aria-label={label} data-image-anchor={item.file} className="group">
-                    {(shownItems.length > 1 || editingSet) && (
-                      <div className="mb-2 flex items-center gap-2">
-                        {editingSet ? (
-                          <input key={`${doc.body}:${i}`} defaultValue={item.label} maxLength={40} aria-label={`Name of ${label}`} title="Rename"
-                            placeholder={imageLabel(shownItems.map((x, n) => (n === i ? { ...x, label: "" } : x)), i)}
-                            onBlur={(e) => void relabelImage(i, e.currentTarget.value.trim())}
-                            onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-                            className="-ml-2 min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 text-[16px] font-semibold outline-none placeholder:text-foreground hover:bg-surface hover:ring-1 hover:ring-border focus:bg-surface focus:ring-2 focus:ring-accent" />
-                        ) : (
-                          <h3 className="min-w-0 flex-1 text-[16px] font-semibold">{label}</h3>
-                        )}
-                        {/* One quiet menu per image instead of four buttons (Derek, 2026-09-14 redesign). */}
-                        {editingSet && (
-                          <ActionMenu label="⋯" title={`${label} actions`}
-                            triggerClassName={`${quiet} opacity-60 transition group-hover:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 [@media(hover:none)]:opacity-100`}
-                            items={[
-                              { label: "Replace image", disabled: adding, onClick: () => { slotRef.current = i; versionInput.current?.click(); } },
-                              shownItems.length > 1 && { label: "Move up", disabled: i === 0 || adding || busy !== null, onClick: () => void moveImage(i, -1) },
-                              shownItems.length > 1 && { label: "Move down", disabled: i === shownItems.length - 1 || adding || busy !== null, onClick: () => void moveImage(i, 1) },
-                              shownItems.length > 1 && { label: "Take out of this version", danger: true, disabled: adding, onClick: () => void takeOutImage(i) },
-                            ]} />
-                        )}
-                      </div>
-                    )}
+                    {setItemHeader(item, i)}
                     {url ? (
                       <ImagePinBoard src={url} alt={f?.name ?? label} comments={comments} fileId={item.file}
                         pending={pinDraft} activeId={focusedComment} onPinClick={setFocusedComment} hoverId={hoveredComment} onPinHover={setHoveredComment}
@@ -1004,9 +1018,9 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
               })}
             </div>
           )}
-          {page && !locked && shownEdits.length > 0 && (
+          {page && !locked && shownEditCount > 0 && (
             <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-highlight/40 bg-highlight-soft/40 px-4 py-2.5 text-[16px]">
-              <span className="min-w-0 flex-1">{shownEdits.length === 1 ? "1 text change" : `${shownEdits.length} text changes`} not saved yet.</span>
+              <span className="min-w-0 flex-1">{shownEditCount === 1 ? "1 text change" : `${shownEditCount} text changes`} not saved yet.</span>
               <button onClick={() => void savePageEdits()} disabled={busy !== null}
                 className="rounded-lg bg-accent px-4 py-1.5 font-semibold text-white disabled:opacity-50">{busy === "page-edits" ? "Saving…" : "Save text changes"}</button>
               <button onClick={undoPageEdits} disabled={busy !== null} className={quiet}>Undo text changes</button>
@@ -1077,14 +1091,14 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     </section>
   );
 
-  // One bar for the whole image review (Derek, 2026-09-14 redesign): which version,
-  // where it stands, and the few actions that belong to all its images.
+  // One bar for the whole image or HTML review (Derek, 2026-09-14 redesign): which
+  // version, where it stands, and the few actions that belong to all its images or pages.
   const lastSent = [...versions].filter((v) => v.kind === "sent").sort((a, b) => b.version - a.version)[0];
   const shortDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
   const barStatus = needsSend
     ? (doc.version ? "Changes not sent" : "Not sent yet")
     : [lastSent ? `Sent ${shortDate(lastSent.createdAt)}` : null, doc.clientViewedAt ? `Viewed ${timeAgo(doc.clientViewedAt)}` : null].filter(Boolean).join(" · ");
-  const reviewBar = image && doc.body ? (
+  const reviewBar = versioned && doc.body ? (
     <div className="mb-6 flex flex-wrap items-center gap-3 rounded-xl border bg-surface px-4 py-2.5 shadow-sm">
       {versionOptions.length > 1 ? (
         <select value={shownFileId ?? ""} onChange={(e) => { setViewingVersion(e.target.value); setPinDraft(null); }} aria-label="Version shown"
@@ -1101,11 +1115,17 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
         </span>
       )}
       <div className="ml-auto flex flex-wrap items-center gap-2">
-        {editingSet && shownItems.length < MAX_SET_IMAGES && (
+        {editingSet && shownItems.length < MAX_SET_IMAGES && (image ? (
           <button onClick={() => { slotRef.current = null; versionInput.current?.click(); }} disabled={adding} className={quiet}>
             {adding ? "Uploading…" : "Add images"}
           </button>
-        )}
+        ) : (
+          // Another page in this version, like a second email (Derek, 2026-09-16).
+          <ActionMenu label={adding ? "Adding…" : "Add page ▾"} title="Add another page to this version" items={[
+            { label: "Paste code", onClick: () => openPaste(null) },
+            { label: "Upload .html files", disabled: adding, onClick: () => { slotRef.current = null; setPasteOpen(false); setPasteSlot(null); versionInput.current?.click(); } },
+          ]} />
+        ))}
         <button onClick={() => setHistoryOpen((o) => !o)} aria-expanded={historyOpen} className={quiet}>
           {historyOpen ? "Hide history" : `History${timeline.length ? ` · ${timeline.length}` : ""}`}
         </button>
@@ -1125,7 +1145,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   const content = (
     <>
     {reviewBar}
-    {image && historyPanel && <div className="-mt-3 mb-6">{historyPanel}</div>}
+    {versioned && historyPanel && <div className="-mt-3 mb-6">{historyPanel}</div>}
     <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
       <div className="min-w-0">
       {!image && clientCrossed && (
@@ -1174,13 +1194,13 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
       </div>
       )}
 
-      {!image && historyPanel}
+      {!versioned && historyPanel}
 
       </div>
       {/* Files and Comments stay beside the writing as it scrolls (Derek, 2026-09-11). */}
       {/* Stays beside the writing as it scrolls, except on a version with several
           images, where each image's comments line up beside that image instead. */}
-      <div className={`space-y-3 ${image && shownItems.length > 1 ? "" : "lg:sticky lg:top-0 lg:max-h-[calc(100dvh-9rem)] lg:overflow-y-auto"}`}>
+      <div className={`space-y-3 ${shownItems.length > 1 ? "" : "lg:sticky lg:top-0 lg:max-h-[calc(100dvh-9rem)] lg:overflow-y-auto"}`}>
         {/* Image and page reviews have no Files box: the version uploads on the left
             and a file rides on a comment (Derek, 2026-09-12: "we don't need upload
             files here since we can do it on the left"). */}
@@ -1201,11 +1221,11 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
           </FileDropLine>
         )}
         <CommentThread comments={versioned ? commentsFor(comments, shownIds) : comments} onPost={postComment} when={timeAgo} viewer="team"
-          pinLabel={image ? imagePlace : undefined} pinGroups={image ? shownItems.map((_, i) => imageLabel(shownItems, i)) : undefined}
-          alignGroup={image ? (label) => {
-            const i = shownItems.findIndex((_, n) => imageLabel(shownItems, n) === label);
-            return i < 0 ? null : document.querySelector<HTMLElement>(`[data-image-anchor="${shownItems[i].file}"]`);
-          } : undefined} pinDraftLabel={image && pinDraft ? imagePlace(pinDraft.fileId) : null}
+          pinLabel={versioned ? imagePlace : undefined} pinGroups={image || shownItems.length > 1 ? shownItems.map((_, i) => itemLabel(shownItems, i)) : undefined}
+          alignGroup={versioned ? (label) => {
+            const i = shownItems.findIndex((_, n) => itemLabel(shownItems, n) === label);
+            return i < 0 ? null : document.querySelector<HTMLElement>(`[data-image-anchor="${shownItems[i].file}"], [data-page-anchor="${shownItems[i].file}"]`);
+          } : undefined} pinDraftLabel={versioned && pinDraft ? imagePlace(pinDraft.fileId) : null}
           pinTone={image ? "var(--highlight)" : undefined} hoverId={image ? hoveredComment : undefined} onHover={image ? setHoveredComment : undefined}
           isMine={(c) => !!meId && comments.find((x) => x.id === c.id)?.authorId === meId}
           canDelete={() => true}

@@ -33,6 +33,9 @@ as the older names for the document. See each tool's own description in
 images shown stacked, like a postcard's front and back (Derek, 2026-09-14):
 `add_review_version` takes `images` (with `keep_others` to replace just one),
 `update_review` takes `image_labels`, and a comment's `pin` takes `image`.
+An HTML review version can hold up to 10 pages the same way, like two emails
+for one campaign (Derek, 2026-09-16): `add_review_version` takes `pages`, each
+with its own `html` and `label`, and `image_labels` and `pin.image` work for pages too.
 
 What Claude may and may not do (Derek, 2026-09-13):
 

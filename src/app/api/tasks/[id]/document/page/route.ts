@@ -3,17 +3,22 @@ import { adminConfigured } from "@/lib/supabaseAdmin";
 import { teamDocument, memberLabel, setWorkingFile, NO_STORE } from "@/lib/taskDocumentServer";
 import { discardVersionFile, docVersionFile, readPageFile, storePageFile } from "@/lib/taskDocumentFiles";
 import { applyTextEdits, cleanEdits, pageText, pageTooBig, PAGE_MAX_BYTES, PAGE_TOO_BIG } from "@/lib/pageHtml";
+import type { PageEdit } from "@/lib/pageFrameProtocol";
 import { mintFrameTicket } from "@/lib/pageFrameTicket";
 import { nameReviewIfDefault } from "@/lib/reviewAutoName";
+import { MAX_SET_IMAGES, formatImageSet, parseImageSet, replaceSetFiles, type ImageSetItem } from "@/lib/imageSet";
 
-// The team's side of a web page review's page (?kind=page, supabase/task-page-reviews.sql).
+// The team's side of an HTML review's pages (?kind=page, supabase/task-page-reviews.sql).
+// A version can hold up to 10 pages, like two emails in one review (imageSet.ts).
 //   POST text/plain         pasted code or an uploaded .html file's text (X-File-Name
-//                           names it) becomes a new version, the one to send next
-//   POST application/json   { baseFileId, edits }: the team's own rewording of a
-//                           version, applied on the server to that version's text
-//   GET ?fileId=            { frameUrl } to show a version in the sandboxed frame
-//   GET ?fileId=&as=code    the version's HTML as plain text, for Copy code and Download
-// The page never renders from here: only /page-frame/[ticket] shows it, sandboxed.
+//                           names it). Added to the end of the working copy, or with
+//                           ?slot=N put in place of page N (it keeps that page's name)
+//   POST application/json   { baseBody, edits: { [fileId]: edits } }: the team's own
+//                           rewording, on any of a version's pages at once, applied on
+//                           the server to each page's text; the pages not reworded carry over
+//   GET ?fileId=            { frameUrl } to show a page in the sandboxed frame
+//   GET ?fileId=&as=code    a page's HTML as plain text, for Copy code and Download
+// A page never renders from here: only /page-frame/[ticket] shows it, sandboxed.
 
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: NO_STORE });
 
@@ -31,41 +36,76 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!found.ok) return found.res;
   const { doc, user } = found;
   if (doc.approved_at) return json({ error: "This page is approved. Reopen it to make changes." }, 409);
-  if (Number(req.headers.get("content-length") ?? 0) > PAGE_MAX_BYTES * 2) return json({ error: PAGE_TOO_BIG }, 413);
+  if (Number(req.headers.get("content-length") ?? 0) > PAGE_MAX_BYTES * 2 * MAX_SET_IMAGES) return json({ error: PAGE_TOO_BIG }, 413);
+  const actor = { id: user.memberId ?? user.id, label: await memberLabel(user) };
+  const current = parseImageSet((doc.body as string) ?? "");
 
-  let html: string;
-  let name: unknown;
+  // Every file stored here, so a request that fails part way leaves none behind.
+  const created: string[] = [];
+  const undo = async () => { for (const id of created) await discardVersionFile(doc.id, id); };
+  let items: ImageSetItem[];
+
   if ((req.headers.get("content-type") ?? "").toLowerCase().startsWith("application/json")) {
-    const payload = await req.json().catch(() => null) as { baseFileId?: unknown; edits?: unknown } | null;
-    const edits = cleanEdits(payload?.edits);
-    if (!edits) return json({ error: "Invalid request." }, 400);
-    if (!edits.length) return json({ error: "Change some text on the page first." }, 400);
-    const base = await docVersionFile(doc.id, payload?.baseFileId, "page", false);
-    const source = base ? await readPageFile(doc.id, base.id, false) : null;
-    if (!base || source === null) return json({ error: "That version is no longer on the review." }, 404);
-    const applied = applyTextEdits(source, edits);
-    if (!applied.ok) return json({ error: applied.error }, 409);
-    html = applied.html;
-    name = base.name;
+    const payload = await req.json().catch(() => null) as { baseBody?: unknown; edits?: unknown } | null;
+    const base = parseImageSet(payload?.baseBody);
+    const raw = payload?.edits && typeof payload.edits === "object" && !Array.isArray(payload.edits) ? payload.edits as Record<string, unknown> : null;
+    if (!base.length || !raw) return json({ error: "Invalid request." }, 400);
+    const byFile: [string, PageEdit[]][] = [];
+    for (const [fileId, list] of Object.entries(raw)) {
+      const edits = cleanEdits(list);
+      if (!edits || !base.some((item) => item.file === fileId)) return json({ error: "Invalid request." }, 400);
+      if (edits.length) byFile.push([fileId, edits]);
+    }
+    if (!byFile.length) return json({ error: "Change some text on the page first." }, 400);
+    const replaced: Record<string, string> = {};
+    for (const [fileId, edits] of byFile) {
+      const file = await docVersionFile(doc.id, fileId, "page", false);
+      const source = file ? await readPageFile(doc.id, file.id, false) : null;
+      if (!file || source === null) { await undo(); return json({ error: "That page is no longer on the review." }, 404); }
+      const applied = applyTextEdits(source, edits);
+      if (!applied.ok) { await undo(); return json({ error: applied.error }, 409); }
+      if (pageTooBig(applied.html)) { await undo(); return json({ error: PAGE_TOO_BIG }, 413); }
+      const stored = await storePageFile(doc.id, applied.html, file.name, actor);
+      if (!stored.ok) { await undo(); return json({ error: stored.error }, stored.status); }
+      created.push(stored.fileId);
+      replaced[fileId] = stored.fileId;
+    }
+    // The pages not reworded stay live: every one of them must still be on the review.
+    for (const item of base) {
+      if (!replaced[item.file] && !(await docVersionFile(doc.id, item.file, "page", false))) {
+        await undo();
+        return json({ error: "That page is no longer on the review." }, 404);
+      }
+    }
+    items = replaceSetFiles(base, replaced);
   } else {
-    html = await req.text();
+    const html = await req.text();
+    let name: unknown;
     try { name = decodeURIComponent(req.headers.get("x-file-name") ?? ""); } catch { name = ""; }
     if (!html.trim()) return json({ error: "Paste the page code first." }, 400);
+    if (pageTooBig(html)) return json({ error: PAGE_TOO_BIG }, 413);
+    const rawSlot = req.nextUrl.searchParams.get("slot");
+    const slot = rawSlot === null ? null : Number(rawSlot);
+    if (slot !== null && (!Number.isInteger(slot) || !current[slot])) return json({ error: "That page is no longer on the review." }, 404);
+    if (slot === null && current.length >= MAX_SET_IMAGES) return json({ error: `A version holds up to ${MAX_SET_IMAGES} pages.` }, 400);
+    const stored = await storePageFile(doc.id, html, name, actor);
+    if (!stored.ok) return json({ error: stored.error }, stored.status);
+    created.push(stored.fileId);
+    items = slot !== null
+      ? current.map((item, i) => (i === slot ? { file: stored.fileId, label: item.label } : item))
+      : [...current, { file: stored.fileId, label: "" }];
   }
-  if (pageTooBig(html)) return json({ error: PAGE_TOO_BIG }, 413);
 
-  const stored = await storePageFile(doc.id, html, name, { id: user.memberId ?? user.id, label: await memberLabel(user) });
-  if (!stored.ok) return json({ error: stored.error }, stored.status);
   try {
-    const data = await setWorkingFile(doc.id, stored.fileId, (doc.body as string) ?? "", { updated_by: user.memberId, updated_at: new Date().toISOString() });
+    const data = await setWorkingFile(doc.id, formatImageSet(items), (doc.body as string) ?? "", { updated_by: user.memberId, updated_at: new Date().toISOString() });
     if (data) {
       // Its first page gives a review still called "New HTML review" a name (reviewAutoName.ts).
-      const file = await docVersionFile(doc.id, stored.fileId, "page", false);
+      const file = await docVersionFile(doc.id, items[0].file, "page", false);
       const named = file ? await nameReviewIfDefault(data, { kind: "page", path: file.path, fileName: file.name }) : null;
-      return json({ document: named ?? data, fileId: stored.fileId });
+      return json({ document: named ?? data, fileIds: created });
     }
-  } catch { /* falls through to undo the file */ }
-  await discardVersionFile(doc.id, stored.fileId);
+  } catch { /* falls through to undo the files */ }
+  await undo();
   return json({ error: "This page is approved. Reopen it to make changes." }, 409);
 }
 

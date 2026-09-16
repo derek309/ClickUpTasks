@@ -102,3 +102,18 @@ export function mergeEdits(edits: PageEdit[], next: PageEdit): PageEdit[] {
   const rest = edits.filter((e) => !same(e));
   return merged.after.replace(/\s+/g, " ").trim() === merged.before.replace(/\s+/g, " ").trim() ? rest : [...rest, merged];
 }
+
+/** Rewording not saved yet, page by page: an HTML review version can hold several
+ *  pages (imageSet.ts), and each page's text is edited in its own frame. */
+export type PageEditsByFile = Record<string, PageEdit[]>;
+
+/** How many pieces of text were changed, across every page. */
+export const countEdits = (edits: PageEditsByFile): number => Object.values(edits).reduce((n, list) => n + list.length, 0);
+
+/** One page's rewording merged in, with a page left holding none dropped, so only
+ *  pages with changes are ever sent. */
+export function withPageEdit(edits: PageEditsByFile, fileId: string, next: PageEdit): PageEditsByFile {
+  const merged = mergeEdits(edits[fileId] ?? [], next);
+  const rest = Object.fromEntries(Object.entries(edits).filter(([id]) => id !== fileId));
+  return merged.length ? { ...rest, [fileId]: merged } : rest;
+}

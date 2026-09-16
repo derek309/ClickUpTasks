@@ -462,7 +462,7 @@ export function createServer(opts = {}) {
         title: z.string().optional().describe("the review's name on the task and the client's page; empty uses the task's title"),
         stage: z.enum(["draft", "with_client", "client_submitted", "approved", "completed"]).optional(),
         reopen: z.boolean().optional(),
-        image_labels: z.array(z.string()).max(10).optional().describe('image review only: labels for the working copy\'s images in order, like ["Front", "Back"]; "" goes back to the default. The client sees them after the next send'),
+        image_labels: z.array(z.string()).max(10).optional().describe('image or HTML review: names for the working copy\'s images or pages in order, like ["Front", "Back"] or ["Welcome email", "Reminder email"]; "" goes back to the default. The client sees them after the next send'),
       },
       async ({ task_id, kind, image_labels, ...change }) => reply(await services.updateReview(task_id, kind, { ...change, imageLabels: image_labels })));
 
@@ -486,7 +486,7 @@ export function createServer(opts = {}) {
       async ({ task_id, file_name, size }) => reply(await services.startImageUpload(task_id, file_name, size)));
 
     server.tool("add_review_version",
-      "Add a new version to an image or HTML review (starting the review if there is none). It becomes the working copy, not sent yet. An image comes from image_url (a public https link to a PNG, JPEG, GIF or WebP) or upload_id (from start_image_upload). One image review version can hold up to 10 images shown stacked, like a postcard's front and back: pass images instead, each with image_url or upload_id and an optional label (two default to Front and Back, more to Image 1, 2, 3). With keep_others, each image replaces the one at its position in the working copy (or is added at the end) and the rest carry over with their pins. A page comes from html: the WHOLE page, up to 2 MB, images linked by web address (read the current code with get_review include_code).",
+      "Add a new version to an image or HTML review (starting the review if there is none). It becomes the working copy, not sent yet. An image comes from image_url (a public https link to a PNG, JPEG, GIF or WebP) or upload_id (from start_image_upload). One image review version can hold up to 10 images shown stacked, like a postcard's front and back: pass images instead, each with image_url or upload_id and an optional label (two default to Front and Back, more to Image 1, 2, 3). With keep_others, each image replaces the one at its position in the working copy (or is added at the end) and the rest carry over with their pins. A page comes from html: the WHOLE page, up to 2 MB, images linked by web address (read the current code with get_review include_code). One HTML review version can also hold up to 10 pages shown stacked, each with its own comments and Copy code, like two emails for one campaign: pass pages instead, each with html and an optional label (they default to Page 1, Page 2); keep_others works the same way.",
       {
         task_id: z.string(), kind: FILE_KIND,
         image_url: z.string().url().optional(), upload_id: z.string().optional(),
@@ -494,12 +494,17 @@ export function createServer(opts = {}) {
           image_url: z.string().url().optional(), upload_id: z.string().optional(), name: z.string().optional(),
           label: z.string().optional(), position: z.number().int().min(1).max(10).optional().describe("with keep_others, the image (1 based) this one replaces"),
         })).min(1).max(10).optional(),
-        keep_others: z.boolean().optional().describe("keep the working copy's other images and replace or add only these"),
+        pages: z.array(z.object({
+          html: z.string(), name: z.string().optional().describe("the page's file name"),
+          label: z.string().optional(), position: z.number().int().min(1).max(10).optional().describe("with keep_others, the page (1 based) this one replaces"),
+        })).min(1).max(10).optional(),
+        keep_others: z.boolean().optional().describe("keep the working copy's other images or pages and replace or add only these"),
         html: z.string().optional(), name: z.string().optional().describe("the version's file name"),
       },
-      async ({ task_id, kind, image_url, upload_id, images, keep_others, html, name }) => reply(await services.addVersion(task_id, kind, {
+      async ({ task_id, kind, image_url, upload_id, images, pages, keep_others, html, name }) => reply(await services.addVersion(task_id, kind, {
         imageUrl: image_url, uploadId: upload_id, html, name,
         ...(images ? { images: images.map((i) => ({ imageUrl: i.image_url, uploadId: i.upload_id, name: i.name, label: i.label, position: i.position })), keepOthers: !!keep_others } : {}),
+        ...(pages ? { pages: pages.map((p) => ({ html: p.html, name: p.name, label: p.label, position: p.position })), keepOthers: !!keep_others } : {}),
       })));
 
     server.tool("use_version",
@@ -540,7 +545,7 @@ export function createServer(opts = {}) {
         quote: z.string().optional(),
         pin: z.object({
           version: VERSION, x: z.number().min(0).max(1), y: z.number().min(0).max(1),
-          image: z.union([z.number().int().min(1).max(10), z.string()]).optional().describe("on an image review version with several images, which one: its position (1 based) or label; the first when left out"),
+          image: z.union([z.number().int().min(1).max(10), z.string()]).optional().describe("on a version with several images or pages, which one: its position (1 based) or label; the first when left out"),
         }).optional(),
       },
       async ({ task_id, kind, text, quote, pin }) => reply(await services.addComment(task_id, kind, text, { quote, pin })));

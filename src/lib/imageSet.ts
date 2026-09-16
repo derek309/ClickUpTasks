@@ -1,6 +1,10 @@
-// Shared by the server, both review pages and Claude over MCP: an image review
-// version that holds several images, like a postcard's front and back (Derek,
-// 2026-09-14: "I will want to upload both the front and back files in one").
+// Shared by the server, both review pages and Claude over MCP: an image or HTML
+// review version that holds several files. An image review's front and back
+// (Derek, 2026-09-14: "I will want to upload both the front and back files in
+// one"), or an HTML review's two emails (Derek, 2026-09-16: "one Deliverable for
+// HTML and then inside there two separate HTML blocks ... able to comment and
+// copy code"). The format and every rule below are the same for both kinds; only
+// the default names differ (itemLabel).
 //
 // A version's body names what the client reviews. For one image it is that image's
 // file id, as every review made before this still is; for several it is a small
@@ -65,11 +69,14 @@ export function cleanImageSet(raw: unknown): ImageSetItem[] | null {
 /** The file ids a body holds. */
 export const setFiles = (body: unknown): string[] => parseImageSet(body).map((i) => i.file);
 
-/** What an image in a set is called: its typed label, else Front and Back for two,
- *  Image for one, and Image 1, 2, 3 for more. */
-export function imageLabel(items: ImageSetItem[], index: number): string {
+/** What a file in a set is called: its typed label, else a default by kind. An
+ *  image review says Front and Back for two, Image for one and Image 1, 2, 3 for
+ *  more; an HTML review says Page for one and Page 1, 2, 3 for more (two pages are
+ *  rarely a front and a back: they are two emails, or two sections). */
+export function imageLabel(items: ImageSetItem[], index: number, kind: "image" | "page" = "image"): string {
   const typed = items[index]?.label;
   if (typed) return typed;
+  if (kind === "page") return items.length === 1 ? "Page" : `Page ${index + 1}`;
   if (items.length === 2) return index === 0 ? "Front" : "Back";
   return items.length === 1 ? "Image" : `Image ${index + 1}`;
 }
@@ -82,13 +89,19 @@ export function frontFirst<T extends { name: string }>(files: T[]): T[] {
   return files.map((file, i) => ({ file, i })).sort((a, b) => rank(a.file.name) - rank(b.file.name) || a.i - b.i).map((x) => x.file);
 }
 
-/** The label that tells a pin's image apart, from the newest body holding it, or
- *  null when that version has only one image (a pin number alone is clear then). */
-export function pinImageLabel(bodiesNewestFirst: string[], fileId: string): string | null {
+/** The label that tells a pin's image or page apart, from the newest body holding
+ *  it, or null when that version holds only one (a pin number alone is clear then). */
+export function pinImageLabel(bodiesNewestFirst: string[], fileId: string, kind: "image" | "page" = "image"): string | null {
   for (const body of bodiesNewestFirst) {
     const items = parseImageSet(body);
     const index = items.findIndex((i) => i.file === fileId);
-    if (index >= 0) return items.length > 1 ? imageLabel(items, index) : null;
+    if (index >= 0) return items.length > 1 ? imageLabel(items, index, kind) : null;
   }
   return null;
+}
+
+/** A set with some of its files swapped for new ones, each keeping its place and
+ *  label: the files an edit rewrote become the new files, the rest carry over. */
+export function replaceSetFiles(items: ImageSetItem[], replaced: Record<string, string>): ImageSetItem[] {
+  return items.map((item) => (replaced[item.file] ? { file: replaced[item.file], label: item.label } : item));
 }

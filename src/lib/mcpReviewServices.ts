@@ -36,6 +36,9 @@ export type ReviewVersion = number | "next";
 /** One image for an image review version: from a link or an upload, where it goes
  *  (1 based) and what it is called. */
 export type VersionImage = { imageUrl?: string; uploadId?: string; name?: string; label?: string; position?: number };
+/** One page for an HTML review version, like one of two emails: its whole HTML, where
+ *  it goes (1 based) and what it is called. */
+export type VersionPage = { html: string; name?: string; label?: string; position?: number };
 export type ReviewStage = "draft" | "with_client" | "client_submitted" | "approved" | "completed";
 const KINDS: ReviewKind[] = ["doc", "image", "page"];
 
@@ -103,43 +106,52 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
     return { ok: false, error: "Pass image_url (a public https link to the image) or upload_id (from start_image_upload)." };
   }
 
-  /** Several images as one image review version, like a postcard's front and back
-   *  (Derek, 2026-09-14). Without keepOthers the list is the whole version, in order;
-   *  with it, each image replaces the one at its position in the working copy (or is
-   *  added at the end), and the rest carry over. */
-  async function addImages(taskId: string, images: VersionImage[], keepOthers: boolean): Promise<string> {
+  /** Several images or pages as one version, like a postcard's front and back (Derek,
+   *  2026-09-14) or two emails (2026-09-16). Without keepOthers the list is the whole
+   *  version, in order; with it, each one replaces the one at its position in the
+   *  working copy (or is added at the end), and the rest carry over. */
+  async function addSet(taskId: string, kind: FileKind, entries: (VersionImage | VersionPage)[], keepOthers: boolean): Promise<string> {
+    const word = kind === "page" ? "page" : "image";
     const task = await taskFor(taskId);
     if (typeof task === "string") return task;
-    if (images.length > MAX_SET_IMAGES) return `A version holds up to ${MAX_SET_IMAGES} images.`;
-    const made = await createReview(task, "image", actor);
+    if (entries.length > MAX_SET_IMAGES) return `A version holds up to ${MAX_SET_IMAGES} ${word}s.`;
+    const made = await createReview(task, kind, actor);
     if (!made.ok) return made.error;
     const doc = made.document;
-    if (doc.approved_at) return "This image review is approved. update_review with reopen first.";
+    if (doc.approved_at) return `This ${what(kind)} is approved. update_review with reopen first.`;
     const documentId = doc.id as string;
     const who = await fileActor();
     const items: ImageSetItem[] = keepOthers ? parseImageSet(doc.body) : [];
     const stored: string[] = [];
     const undo = async () => { for (const id of stored) await discardVersionFile(documentId, id); };
-    for (const img of images) {
-      const one = await storeImage(documentId, img, who);
+    for (const entry of entries) {
+      let one: { ok: true; fileId: string } | { ok: false; error: string };
+      if (kind === "page") {
+        const { html, name } = entry as VersionPage;
+        if (!html?.trim()) one = { ok: false, error: "Pass each page's whole HTML in html." };
+        else if (pageTooBig(html)) one = { ok: false, error: PAGE_TOO_BIG };
+        else one = await storePageFile(documentId, html, name ?? "", who);
+      } else {
+        one = await storeImage(documentId, entry as VersionImage, who);
+      }
       if (!one.ok) { await undo(); return one.error; }
       stored.push(one.fileId);
-      const at = keepOthers && img.position ? img.position - 1 : -1;
-      if (at >= 0 && at < items.length) items[at] = { file: one.fileId, label: img.label === undefined ? items[at].label : cleanImageLabel(img.label) };
-      else items.push({ file: one.fileId, label: cleanImageLabel(img.label) });
+      const at = keepOthers && entry.position ? entry.position - 1 : -1;
+      if (at >= 0 && at < items.length) items[at] = { file: one.fileId, label: entry.label === undefined ? items[at].label : cleanImageLabel(entry.label) };
+      else items.push({ file: one.fileId, label: cleanImageLabel(entry.label) });
     }
-    if (items.length > MAX_SET_IMAGES) { await undo(); return `A version holds up to ${MAX_SET_IMAGES} images; this would make ${items.length}.`; }
-    const picked = await pickReviewVersion(task.id, "image", actor, { images: items });
+    if (items.length > MAX_SET_IMAGES) { await undo(); return `A version holds up to ${MAX_SET_IMAGES} ${word}s; this would make ${items.length}.`; }
+    const picked = await pickReviewVersion(task.id, kind, actor, { images: items });
     if (!picked.ok) { await undo(); return picked.error; }
-    await event(task.id, `${await actor.label()} added a new version of the image review`);
-    const names = items.map((_, i) => `"${imageLabel(items, i)}"`).join(", ");
-    return `Added a new version of the image review on "${task.title}" with ${items.length} ${items.length === 1 ? "image" : `images: ${names}`}. It's the working copy (version "next"), not sent yet: send_for_review sends it.`;
+    await event(task.id, `${await actor.label()} added a new version of the ${what(kind)}`);
+    const names = items.map((_, i) => `"${imageLabel(items, i, word)}"`).join(", ");
+    return `Added a new version of the ${what(kind)} on "${task.title}" with ${items.length} ${items.length === 1 ? word : `${word}s: ${names}`}. It's the working copy (version "next"), not sent yet: send_for_review sends it.`;
   }
 
   /** "Back" for a set's second of two images, "" for a version of one. */
-  const placeOf = (items: ImageSetItem[], fileId: string) => {
+  const placeOf = (items: ImageSetItem[], fileId: string, kind: FileKind) => {
     const i = items.findIndex((item) => item.file === fileId);
-    return i >= 0 && items.length > 1 ? imageLabel(items, i) : "";
+    return i >= 0 && items.length > 1 ? imageLabel(items, i, kind) : "";
   };
 
   return {
@@ -186,9 +198,8 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
           : "  (none sent yet)"}`);
         const items = parseImageSet(working);
         const files = (await Promise.all(items.map((item) => docVersionFile(doc.id, item.file, kind, false)))).filter((f) => !!f);
-        const file = files[0] ?? null;
         if (files.length && !shown.some((v) => v.body === working)) {
-          out.push(`  - version "next": ${listImages(files.map((f, i) => ({ name: f.name, label: imageLabel(items, i) })))} · working copy, not sent yet`);
+          out.push(`  - version "next": ${listImages(files.map((f, i) => ({ name: f.name, label: imageLabel(items, i, kind) })))} · working copy, not sent yet`);
         }
         if (kind === "image") {
           for (const [i, f] of files.entries()) {
@@ -196,17 +207,22 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
             if (data?.signedUrl) out.push(`${i === 0 ? "\n" : ""}Working image ${files.length > 1 ? `${i + 1} "${imageLabel(items, i)}" ` : ""}(this link works for an hour): ${data.signedUrl}`);
           }
         }
-        if (file && kind === "page") {
-          const html = await readPageFile(doc.id, file.id, false);
-          if (html != null) out.push(includeCode ? `\nWorking page code:\n${html}` : `\nWorking page text (include_code shows the HTML):\n${pageText(html).slice(0, 8000)}`);
+        if (kind === "page") {
+          // Every page of the working copy, like each of two emails, under its name.
+          for (const [i, f] of files.entries()) {
+            const html = await readPageFile(doc.id, f.id, false);
+            if (html == null) continue;
+            const which = files.length > 1 ? ` ${i + 1} "${imageLabel(items, i, "page")}"` : "";
+            out.push(includeCode ? `\nWorking page${which} code:\n${html}` : `\nWorking page${which} text (include_code shows the HTML):\n${pageText(html).slice(0, files.length > 1 ? 4000 : 8000)}`);
+          }
         }
       }
       const comments = await docComments(doc.id);
-      // Which image of its version a pin is on, when the version holds several.
-      const setsNewestFirst = kind === "image" ? [(doc.body as string) ?? "", ...(await sharedVersionFiles(doc.id)).map((v) => v.body).reverse()] : [];
+      // Which image or page of its version a pin is on, when the version holds several.
+      const setsNewestFirst = kind !== "doc" ? [(doc.body as string) ?? "", ...(await sharedVersionFiles(doc.id)).map((v) => v.body).reverse()] : [];
       const pinPlace = (fileId: string) => {
         const holder = setsNewestFirst.map(parseImageSet).find((items) => items.some((item) => item.file === fileId));
-        return holder ? placeOf(holder, fileId) : "";
+        return holder ? placeOf(holder, fileId, kind === "page" ? "page" : "image") : "";
       };
       if (comments.length) {
         out.push(`\nComments (the client sees these too):\n${comments.map((c) => `  - [${c.id}] ${c.authorLabel}${c.fromClient ? " (client)" : ""}, ${c.createdAt}`
@@ -251,13 +267,14 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
         done.push(change.title.trim() ? `renamed it "${change.title.trim()}"` : "cleared its name");
       }
       if (change.imageLabels) {
-        if (kind !== "image") return "image_labels is for an image review.";
+        if (kind === "doc") return "image_labels is for an image or HTML review.";
+        const word = kind === "page" ? "page" : "image";
         const items = parseImageSet(found.doc.body);
-        if (!items.length) return "The image review has no images yet. add_review_version adds them.";
+        if (!items.length) return `The ${what(kind)} has no ${word}s yet. add_review_version adds them.`;
         const relabelled = items.map((item, i) => ({ file: item.file, label: cleanImageLabel(change.imageLabels![i] ?? item.label) }));
-        const r = await pickReviewVersion(found.task.id, "image", actor, { images: relabelled });
+        const r = await pickReviewVersion(found.task.id, kind, actor, { images: relabelled });
         if (!r.ok) return r.error;
-        done.push(`labelled its images ${relabelled.map((_, i) => `"${imageLabel(relabelled, i)}"`).join(", ")} (send_for_review shows the client)`);
+        done.push(`labelled its ${word}s ${relabelled.map((_, i) => `"${imageLabel(relabelled, i, word)}"`).join(", ")} (send_for_review shows the client)`);
       }
       if (!done.length) return "Nothing to change: pass title, stage, reopen or image_labels.";
       await event(found.task.id, `${await actor.label()} ${done.join(" and ")} on the ${what(kind)}`);
@@ -293,8 +310,9 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
         + `Then call add_review_version with kind "image" and upload_id "${r.path}".`;
     },
 
-    async addVersion(taskId: string, kind: FileKind, input: { imageUrl?: string; uploadId?: string; html?: string; name?: string; images?: VersionImage[]; keepOthers?: boolean }): Promise<string> {
-      if (kind === "image" && input.images?.length) return addImages(taskId, input.images, !!input.keepOthers);
+    async addVersion(taskId: string, kind: FileKind, input: { imageUrl?: string; uploadId?: string; html?: string; name?: string; images?: VersionImage[]; pages?: VersionPage[]; keepOthers?: boolean }): Promise<string> {
+      if (kind === "image" && input.images?.length) return addSet(taskId, kind, input.images, !!input.keepOthers);
+      if (kind === "page" && input.pages?.length) return addSet(taskId, kind, input.pages, !!input.keepOthers);
       const task = await taskFor(taskId);
       if (typeof task === "string") return task;
       const made = await createReview(task, kind, actor);
@@ -380,10 +398,14 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
           const [before, latest] = (await sharedVersionFiles(doc.id)).slice(-2);
           if (before && latest) {
             // An HTML review says which words changed, like a document; an image can't.
-            const texts = kind === "page"
-              ? await Promise.all([readPageFile(doc.id, before.fileId, true), readPageFile(doc.id, latest.fileId, true)])
-              : null;
-            changes = (texts?.[0] != null && texts[1] != null ? summarizeTextChanges(pageText(texts[0]), pageText(texts[1])) : null)
+            // Every page's words, under its name when there are several.
+            const wordsOf = async (v: typeof latest) => {
+              const htmls = await Promise.all(v.images.map((img) => readPageFile(doc.id, img.fileId, true)));
+              if (htmls.some((h) => h == null)) return null;
+              return v.images.length > 1 ? htmls.map((h, i) => `${v.images[i].label}\n${pageText(h!)}`).join("\n\n") : pageText(htmls[0]!);
+            };
+            const texts = kind === "page" ? await Promise.all([wordsOf(before), wordsOf(latest)]) : null;
+            changes = (texts?.[0] != null && texts[1] != null ? summarizeTextChanges(texts[0], texts[1]) : null)
               ?? `A new version of the ${kindWhat(kind)}.`;
           }
         }
@@ -437,13 +459,14 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
         if (kind === "doc") return "Pins are for image and HTML reviews. On the client document, pass quote with the words the comment is about.";
         const body = await versionFile(found.doc, extras.pin.version);
         if (!body) return `There is no version ${extras.pin.version} on the ${what(kind)}. get_review lists them.`;
-        // Which image: a 1 based position or a label, else the first.
+        // Which image or page: a 1 based position or a label, else the first.
+        const word = kind === "page" ? "page" : "image";
         const items = parseImageSet(body);
         const wanted = extras.pin.image;
         const index = wanted === undefined ? 0 : typeof wanted === "number"
           ? wanted - 1
-          : items.findIndex((_, i) => imageLabel(items, i).toLowerCase() === String(wanted).trim().toLowerCase());
-        if (index < 0 || index >= items.length) return `Version ${extras.pin.version} has no image ${JSON.stringify(wanted)}. Its images: ${items.map((_, i) => `${i + 1} "${imageLabel(items, i)}"`).join(", ")}.`;
+          : items.findIndex((_, i) => imageLabel(items, i, word).toLowerCase() === String(wanted).trim().toLowerCase());
+        if (index < 0 || index >= items.length) return `Version ${extras.pin.version} has no ${word} ${JSON.stringify(wanted)}. Its ${word}s: ${items.map((_, i) => `${i + 1} "${imageLabel(items, i, word)}"`).join(", ")}.`;
         pin = { fileId: items[index].file, x: extras.pin.x, y: extras.pin.y };
       }
       const r = await postDocComment(found.doc.id, text, await fileActor(), { quote: kind === "doc" ? extras.quote : undefined, pin });

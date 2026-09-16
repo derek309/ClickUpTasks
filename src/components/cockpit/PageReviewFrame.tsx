@@ -7,9 +7,14 @@
 //
 // Everything the frame sends is checked by readFrameMessage before it is used.
 // What goes in is only ids, numbers, spots and text the page already holds. The
-// toolbar picks the mode (Comment, Edit text, Try the page) and the width the page
-// is laid out at (Desktop 1280px, Mobile 390px); the frame opens up to the page's
-// height and zooms to its content. The other side is public/page-bridge.js.
+// frame opens up to the page's height and zooms to its content. The other side is
+// public/page-bridge.js.
+//
+// The toolbar that picks the mode (Comment, Edit text, Try the page) and the width
+// (Desktop 1280px, Mobile 390px) is its own component, because a review can stack
+// several pages under one toolbar (PageReviewStack.tsx, Derek 2026-09-16: two emails
+// in one HTML review). Each frame only listens to messages from its own window, so
+// any number of them can sit on one page.
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { readFrameMessage, type ContentSpan, type FrameMode, type FramePin, type PageEdit } from "@/lib/pageFrameProtocol";
 import type { PinAnchor } from "@/lib/reviewPins";
@@ -24,7 +29,7 @@ export type PageDevice = keyof typeof PAGE_DEVICES;
 /** The device a pin was dropped at, to show the page at that width before focusing it. */
 export const deviceForWidth = (width: number | null | undefined): PageDevice => (width != null && width < 800 ? "mobile" : "desktop");
 
-const MODES: { mode: FrameMode; label: string; hint: string }[] = [
+export const MODES: { mode: FrameMode; label: string; hint: string }[] = [
   { mode: "comment", label: "Comment", hint: "Click anywhere on the page to drop a numbered pin." },
   { mode: "edit", label: "Edit text", hint: "Click any text to change it. Press Enter to keep it." },
   { mode: "browse", label: "Try the page", hint: "Use the page like a visitor would. Links stay on this page." },
@@ -45,19 +50,60 @@ const SPURT_MS = 1500;
 const CONTENT_MARGIN = 24;
 const sameSpan = (a: ContentSpan | null, b: ContentSpan | null) => a === b || (!!a && !!b && a.left === b.left && a.right === b.right);
 
-export function PageReviewFrame({ frameUrl, onReload, mode, onMode, device, onDevice, canEdit, canComment, pins, pending, focus, edits, onPlace, onPinClick, onEdit, actions, color }: {
-  /** Buttons at the right end of the toolbar (the team's New version and More menus). */
+/** The modes a viewer may use, and the one in force (the last allowed when the chosen one is not). */
+export function allowedModes(mode: FrameMode, canEdit: boolean, canComment: boolean) {
+  const modes = MODES.filter((m) => (m.mode === "edit" ? canEdit : m.mode === "comment" ? canComment : true));
+  return { modes, current: modes.find((m) => m.mode === mode) ?? modes[modes.length - 1] };
+}
+
+/** How a click works in the pages, and how wide they are laid out. One for a whole stack. */
+export function PageReviewToolbar({ mode, onMode, device, onDevice, canEdit, canComment, actions, color }: {
+  mode: FrameMode;
+  onMode: (mode: FrameMode) => void;
+  device: PageDevice;
+  onDevice: (device: PageDevice) => void;
+  canEdit: boolean;
+  canComment: boolean;
+  /** Buttons at the right end (the team's menus). */
   actions?: ReactNode;
-  /** The chosen toolbar buttons' colour (the client page's navy); the app's own look without it. */
+  /** The chosen buttons' colour (the client page's navy); the app's own look without it. */
   color?: string;
+}) {
+  const { modes, current } = allowedModes(mode, canEdit, canComment);
+  const segment = (active: boolean) =>
+    `rounded-full px-3 py-1 text-[16px] font-medium transition ${active ? (color ? "text-white" : "bg-foreground text-background") : "text-muted hover:text-foreground"}`;
+  const segmentStyle = (active: boolean) => (active && color ? { background: color } : undefined);
+  return (
+    <>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <div role="radiogroup" aria-label="What a click does" className="flex flex-wrap gap-1 rounded-full border bg-surface p-1">
+          {modes.map((m) => (
+            <button key={m.mode} role="radio" aria-checked={current.mode === m.mode} onClick={() => onMode(m.mode)} className={segment(current.mode === m.mode)} style={segmentStyle(current.mode === m.mode)}>{m.label}</button>
+          ))}
+        </div>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <div role="radiogroup" aria-label="Page width" className="flex gap-1 rounded-full border bg-surface p-1">
+            {(Object.keys(PAGE_DEVICES) as PageDevice[]).map((d) => (
+              <button key={d} role="radio" aria-checked={device === d} onClick={() => onDevice(d)} className={segment(device === d)} style={segmentStyle(device === d)}>{PAGE_DEVICES[d].label}</button>
+            ))}
+          </div>
+          {actions}
+        </div>
+      </div>
+      <p className="mb-2 text-[16px] text-muted">{current.hint}</p>
+    </>
+  );
+}
+
+export function PageReviewFrame({ frameUrl, onReload, mode, device, canEdit, canComment, pins, pending, focus, edits, onPlace, onPinClick, onEdit, title }: {
   /** The frame's address, or null while it is being fetched. */
   frameUrl: string | null;
   /** Fetch a fresh frame address (the old one expired or the page navigated away). */
   onReload: () => void;
   mode: FrameMode;
-  onMode: (mode: FrameMode) => void;
   device: PageDevice;
-  onDevice: (device: PageDevice) => void;
+  /** What a screen reader calls this frame: its page's name. */
+  title?: string;
   canEdit: boolean;
   canComment: boolean;
   pins: FramePin[];
@@ -183,34 +229,16 @@ export function PageReviewFrame({ frameUrl, onReload, mode, onMode, device, onDe
   useEffect(() => { scaleRef.current = scale; }, [scale]);
   const pageHeight = report ? report.height : size.height;
   const frameHeight = Math.min(MAX_FRAME_HEIGHT, Math.max(MIN_FRAME_HEIGHT, pageHeight));
-  const modes = MODES.filter((m) => (m.mode === "edit" ? canEdit : m.mode === "comment" ? canComment : true));
-  const current = modes.find((m) => m.mode === mode) ?? modes[modes.length - 1];
-  const segment = (active: boolean) =>
-    `rounded-full px-3 py-1 text-[16px] font-medium transition ${active ? (color ? "text-white" : "bg-foreground text-background") : "text-muted hover:text-foreground"}`;
-  const segmentStyle = (active: boolean) => (active && color ? { background: color } : undefined);
 
   return (
     <div ref={box} className="w-full">
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div role="radiogroup" aria-label="What a click does" className="flex flex-wrap gap-1 rounded-full border bg-surface p-1">
-          {modes.map((m) => (
-            <button key={m.mode} role="radio" aria-checked={current.mode === m.mode} onClick={() => onMode(m.mode)} className={segment(current.mode === m.mode)} style={segmentStyle(current.mode === m.mode)}>{m.label}</button>
-          ))}
-        </div>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          <div role="radiogroup" aria-label="Page width" className="flex gap-1 rounded-full border bg-surface p-1">
-            {(Object.keys(PAGE_DEVICES) as PageDevice[]).map((d) => (
-              <button key={d} role="radio" aria-checked={device === d} onClick={() => onDevice(d)} className={segment(device === d)} style={segmentStyle(device === d)}>{PAGE_DEVICES[d].label}</button>
-            ))}
-          </div>
-          {actions}
-        </div>
-      </div>
-      <p className="mb-2 text-[16px] text-muted" aria-live="polite">{notice ?? current.hint}</p>
+      {/* Something this page said about a click (text it can't edit, a link it
+          followed). The toolbar's hint covers the rest, once for every page. */}
+      <p className={`text-[16px] text-muted ${notice ? "mb-2" : "sr-only"}`} aria-live="polite">{notice ?? ""}</p>
       <div className="relative mx-auto overflow-hidden rounded-lg border bg-white shadow-sm" style={{ width: Math.min(available || Infinity, size.width * scale), height: frameHeight * scale }}>
         <div ref={pinMark} aria-hidden className="pointer-events-none absolute left-0 h-px w-px" style={{ top: 0 }} />
         {frameUrl ? (
-          <iframe key={frameUrl} ref={frame} src={frameUrl} title="The page under review" sandbox="allow-scripts" referrerPolicy="no-referrer" onLoad={onLoad}
+          <iframe key={frameUrl} ref={frame} src={frameUrl} title={title ?? "The page under review"} sandbox="allow-scripts" referrerPolicy="no-referrer" onLoad={onLoad}
             style={{ width: size.width, height: frameHeight, border: 0, transform: `translateX(${shift}px) scale(${scale})`, transformOrigin: "0 0", display: "block" }} />
         ) : (
           <p className="p-6 text-[16px] text-muted">Loading the page…</p>

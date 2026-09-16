@@ -74,6 +74,14 @@ describe("review tools over MCP", () => {
       imageUrl: undefined, uploadId: undefined, html: undefined, name: undefined, keepOthers: true,
       images: [{ imageUrl: "https://example.com/back.png", uploadId: undefined, name: undefined, label: "Back", position: 2 }],
     });
+    await call(client, "add_review_version", {
+      task_id: "t_1", kind: "page",
+      pages: [{ html: "<p>Welcome</p>", label: "Welcome email" }, { html: "<p>Reminder</p>" }],
+    });
+    expect(services.addVersion).toHaveBeenLastCalledWith("t_1", "page", {
+      imageUrl: undefined, uploadId: undefined, html: undefined, name: undefined, keepOthers: false,
+      pages: [{ html: "<p>Welcome</p>", name: undefined, label: "Welcome email", position: undefined }, { html: "<p>Reminder</p>", name: undefined, label: undefined, position: undefined }],
+    });
     await call(client, "add_review_comment", { task_id: "t_1", kind: "image", text: "Darker", pin: { version: 1, x: 0.1, y: 0.2, image: "Back" } });
     expect(services.addComment).toHaveBeenLastCalledWith("t_1", "image", "Darker", { quote: undefined, pin: { version: 1, x: 0.1, y: 0.2, image: "Back" } });
     await call(client, "remove_version", { task_id: "t_1", kind: "page", version: "next" });

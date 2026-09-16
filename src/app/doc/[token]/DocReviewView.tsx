@@ -10,8 +10,9 @@
 // or adds a file there, then asks for changes or approves. On a page they can also
 // switch to Edit text and change the wording right on the page; only their words
 // are sent, and the server builds the new page from the one they saw. The page is
-// only ever shown in a sandboxed frame (PageReviewFrame). Earlier versions stay a
-// click away with their pins.
+// only ever shown in a sandboxed frame (PageReviewStack). A version can hold several
+// pages, like two emails (Derek, 2026-09-16), stacked with their names, each with its
+// own pins and rewording. Earlier versions stay a click away with their pins.
 //
 // Nothing reaches the server until the client clicks. Their unsent edits live in
 // this browser (localStorage, per document version or page file), so closing the
@@ -19,12 +20,14 @@
 // Every string here is client facing: 16px or larger, and no dashes.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RichTextEditor } from "@/components/cockpit/RichTextEditor";
-import { PageReviewFrame, deviceForWidth, type PageDevice } from "@/components/cockpit/PageReviewFrame";
+import { deviceForWidth, type PageDevice } from "@/components/cockpit/PageReviewFrame";
+import { PageReviewStack } from "@/components/cockpit/PageReviewStack";
 import { addDocFiles, uploadSharedFile } from "@/lib/docFileUpload";
 import { formatFileSize, isPreviewableImage } from "@/lib/uploadTypes";
 import { commentHint, isFileKind, kindWhat, type ReviewKind } from "@/lib/reviewKinds";
 import { openClientComments } from "@/lib/reviewChanges";
-import { cleanEdit, mergeEdits, type FrameMode, type PageEdit } from "@/lib/pageFrameProtocol";
+import { cleanEdit, countEdits, withPageEdit, type FrameMode, type PageEdit, type PageEditsByFile } from "@/lib/pageFrameProtocol";
+import { setFiles } from "@/lib/imageSet";
 import type { PinAnchor } from "@/lib/reviewPins";
 import {
   CommentThread, FileDropLine, ImageLightbox, ImagePinBoard, ImageThumbGrid, ImageVersionPicker, commentsFor, nextPin,
@@ -39,7 +42,7 @@ type DocData = {
   /** When the team last sent a version; the client's comments count as changes from then. */
   sharedAt: string | null;
   /** An image or page review's versions the client can see, oldest first. body is the
-   *  newest. An image review version can hold several images, shown stacked. */
+   *  newest. A version can hold several images or pages, shown stacked. */
   versionFiles: { body: string; fileId: string; name: string; number: number; fromClient: boolean; images: { fileId: string; name: string; label: string }[] }[];
 };
 type Notice = { tone: "good" | "info" | "warn"; text: string } | null;
@@ -97,21 +100,22 @@ export default function DocReviewView({ token }: { token: string }) {
   // looked at (null follows the newest).
   const [pinDraft, setPinDraft] = useState<PinDraft | null>(null);
   const [viewingImage, setViewingImage] = useState<string | null>(null);
-  // Web page review: the frame for the version shown, how a click works, the width,
-  // the client's rewording of the newest page, and a pin to bring into view.
-  const [pageFrame, setPageFrame] = useState<{ fileId: string; url: string } | null>(null);
+  // HTML review: how a click works, the width, the client's rewording of the newest
+  // version page by page, and a pin to bring into view. frameNonce reloads every
+  // page's frame, so undone words come back as they were.
   const [frameNonce, setFrameNonce] = useState(0);
   const [pageMode, setPageMode] = useState<FrameMode>("comment");
   const [pageDevice, setPageDevice] = useState<PageDevice>("desktop");
-  const [pageEdits, setPageEdits] = useState<{ fileId: string; edits: PageEdit[] }>({ fileId: "", edits: [] });
+  const [pageEdits, setPageEdits] = useState<{ body: string; edits: PageEditsByFile }>({ body: "", edits: {} });
   const [pageFocus, setPageFocus] = useState<{ id: string; n: number } | null>(null);
 
   const image = data?.kind === "image";
   const page = data?.kind === "page";
   const versioned = !!data && isFileKind(data.kind);
-  const newestEdits = page && pageEdits.fileId === data?.body ? pageEdits.edits : [];
+  const newestEdits: PageEditsByFile = page && pageEdits.body === data?.body ? pageEdits.edits : {};
+  const editCount = countEdits(newestEdits);
   // An image is never edited; a page is dirty while it holds rewording not sent.
-  const dirty = page ? newestEdits.length > 0 : !versioned && html.trim() !== startHtml.trim();
+  const dirty = page ? editCount > 0 : !versioned && html.trim() !== startHtml.trim();
   const locked = !!data && (data.status === "approved" || data.closed);
   const fileHref = (id: string) => `/api/doc/${encodeURIComponent(token)}/files/${id}`;
   // Photos show as pictures and open in a full screen preview.
@@ -133,9 +137,12 @@ export default function DocReviewView({ token }: { token: string }) {
     setHtml(start);
     setEditorKey((k) => k + 1);
     setNewer(null);
-    const keptEdits = d.kind === "page" && d.body ? readPageEdits(token, d.body) : [];
-    if (d.kind === "page") setPageEdits({ fileId: d.body, edits: keptEdits });
-    if (start !== d.body || keptEdits.length) setNotice({ tone: "info", text: "We kept your unsent edits from last time." });
+    // Every page of the version brings back its own kept rewording.
+    const keptEdits: PageEditsByFile = d.kind === "page"
+      ? Object.fromEntries(setFiles(d.body).map((id) => [id, readPageEdits(token, id)] as const).filter(([, list]) => list.length))
+      : {};
+    if (d.kind === "page") setPageEdits({ body: d.body, edits: keptEdits });
+    if (start !== d.body || countEdits(keptEdits)) setNotice({ tone: "info", text: "We kept your unsent edits from last time." });
   }, [token]);
 
   const load = useCallback(async (initial: boolean) => {
@@ -190,20 +197,29 @@ export default function DocReviewView({ token }: { token: string }) {
     const t = window.setTimeout(() => writeDraft(draftKey(token, baseVersion), dirty ? html : null), 400);
     return () => window.clearTimeout(t);
   }, [html, dirty, baseVersion, token, state, locked, versioned]);
-  // And a page's rewording, per page file.
+  // And a page's rewording, per page file: every page of the version, so a page
+  // put back as it was stops being kept too.
   useEffect(() => {
-    if (!pageEdits.fileId) return;
-    writeDraft(pageDraftKey(token, pageEdits.fileId), pageEdits.edits.length ? JSON.stringify(pageEdits.edits) : null);
+    if (!pageEdits.body) return;
+    for (const id of setFiles(pageEdits.body)) {
+      const list = pageEdits.edits[id];
+      writeDraft(pageDraftKey(token, id), list?.length ? JSON.stringify(list) : null);
+    }
   }, [pageEdits, token]);
+  // Forget the rewording kept for a version's pages, on this device too.
+  const clearPageEdits = (body: string) => {
+    for (const id of setFiles(body)) writeDraft(pageDraftKey(token, id), null);
+    setPageEdits({ body: "", edits: {} });
+  };
 
   const publish = async (kind: "submit" | "approve") => {
     setBusy(kind === "submit" ? "send" : "approve");
-    const sentEdits = newestEdits.length > 0;
+    const sentEdits = editCount > 0;
     try {
       const res = await fetch(`/api/doc/${encodeURIComponent(token)}/${kind}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(page ? { baseVersion, fileId: data?.body, edits: newestEdits } : { html, baseVersion }),
+        body: JSON.stringify(page ? { baseVersion, body: data?.body, edits: newestEdits } : { html, baseVersion }),
       });
       const j = await res.json().catch(() => ({}));
       if (res.status === 404) { setState("gone"); return; }
@@ -218,7 +234,7 @@ export default function DocReviewView({ token }: { token: string }) {
       if (!res.ok) { setNotice({ tone: "warn", text: j.error ?? "We couldn't save that. Please try again." }); return; }
 
       writeDraft(draftKey(token, baseVersion), null);
-      if (page) setPageEdits({ fileId: "", edits: [] });
+      if (page && data) clearPageEdits(data.body);
       const version = j.version as number;
       setBaseVersion(version);
       setStartHtml(html);
@@ -248,7 +264,7 @@ export default function DocReviewView({ token }: { token: string }) {
     writeDraft(draftKey(token, baseVersion), null);
     setHtml(startHtml);
     setEditorKey((k) => k + 1);
-    if (page) { setPageEdits({ fileId: "", edits: [] }); setFrameNonce((n) => n + 1); }
+    if (page && data) { clearPageEdits(data.body); setFrameNonce((n) => n + 1); }
     setNotice(null);
   };
 
@@ -349,7 +365,7 @@ export default function DocReviewView({ token }: { token: string }) {
   // Numbered as published, so a removed version leaves a gap and nothing renumbers.
   const versionOptions = versionFiles.map((v, i) => ({ fileId: v.body, label: i === versionFiles.length - 1 ? `Version ${v.number}, newest` : `Version ${v.number}` }));
   const shownFileId = versioned && data ? (viewingImage && versionFiles.some((v) => v.body === viewingImage) ? viewingImage : data.body) : null;
-  // The images of the version shown (one for a page), and the label that tells a pin's image apart.
+  // The images or pages of the version shown, and the label that tells a pin's one apart.
   const shownImages = versionFiles.find((v) => v.body === shownFileId)?.images ?? [];
   const shownIds = shownImages.map((img) => img.fileId);
   const imagePlace = (fileId: string) => (shownImages.length > 1 ? shownImages.find((img) => img.fileId === fileId)?.label ?? null : null);
@@ -361,21 +377,16 @@ export default function DocReviewView({ token }: { token: string }) {
   const openNotes = openClientComments(data?.comments ?? [], newestIds, data?.sharedAt ?? null).length;
   const what = data ? kindWhat(data.kind) : "document";
 
-  // The frame for the page version shown, fetched again when it expires or the page navigates.
-  const pageFileId = page ? shownFileId : null;
-  useEffect(() => {
-    if (!pageFileId) return;
-    let cancelled = false;
-    void fetch(`/api/doc/${encodeURIComponent(token)}/page?fileId=${encodeURIComponent(pageFileId)}`, { cache: "no-store" })
-      .then(async (res) => {
-        const j = await res.json().catch(() => ({}));
-        if (cancelled) return;
-        if (res.ok) setPageFrame({ fileId: pageFileId, url: j.frameUrl as string });
-        else setNotice({ tone: "warn", text: "We couldn't show the page. Please reload." });
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [pageFileId, frameNonce, token]);
+  // One page's frame address; the stack asks for each page and again when one expires.
+  const loadFrame = async (fileId: string): Promise<string | null> => {
+    try {
+      const res = await fetch(`/api/doc/${encodeURIComponent(token)}/page?fileId=${encodeURIComponent(fileId)}`, { cache: "no-store" });
+      const j = await res.json().catch(() => ({}));
+      return res.ok ? (j.frameUrl as string) : null;
+    } catch {
+      return null;
+    }
+  };
 
   // A comment picked in the thread: shown on the image, or on the page at the width its pin was dropped at.
   const focusComment = (id: string) => {
@@ -491,19 +502,21 @@ export default function DocReviewView({ token }: { token: string }) {
                     </div>
                   )}
                   {shownFileId && page && (
-                    <PageReviewFrame
-                      frameUrl={pageFrame?.fileId === shownFileId ? pageFrame.url : null}
-                      onReload={() => setFrameNonce((n) => n + 1)}
+                    // Stacked under one toolbar, each page with its own pins and rewording (Derek, 2026-09-16: two emails in one review).
+                    <PageReviewStack key={`${shownFileId}:${frameNonce}`}
+                      pages={shownImages.map((img) => ({ fileId: img.fileId, label: img.label }))}
+                      loadFrame={loadFrame}
+                      onLoadError={() => setNotice({ tone: "warn", text: "We couldn't show the page. Please reload." })}
                       mode={pageMode} onMode={setPageMode} device={pageDevice} onDevice={setPageDevice}
                       canEdit={!locked && onNewest} canComment={!data.closed && onNewest} color={NAVY}
-                      pins={(data.comments ?? []).filter((c) => c.pin && c.pin.fileId === shownFileId).map((c) => ({
+                      pinsFor={(fileId) => (data.comments ?? []).filter((c) => c.pin && c.pin.fileId === fileId).map((c) => ({
                         id: c.id, number: c.pin!.number, x: c.pin!.x, y: c.pin!.y, anchor: c.pin!.anchor ?? null, done: !!c.completedAt, active: c.id === focusedComment,
                       }))}
-                      pending={pinDraft && pinDraft.fileId === shownFileId ? pinDraft : null}
-                      focus={pageFocus} edits={onNewest ? newestEdits : []}
-                      onPlace={(place) => setPinDraft({ fileId: shownFileId, ...place, number: nextPin(data.comments ?? [], shownFileId) })}
+                      pending={pinDraft}
+                      focus={pageFocus} edits={onNewest ? newestEdits : {}}
+                      onPlace={(fileId, place) => setPinDraft({ fileId, ...place, number: nextPin(data.comments ?? [], fileId) })}
                       onPinClick={setFocusedComment}
-                      onEdit={(edit) => setPageEdits((s) => ({ fileId: shownFileId, edits: mergeEdits(s.fileId === shownFileId ? s.edits : [], edit) }))} />
+                      onEdit={(fileId, edit) => setPageEdits((s) => ({ body: data.body, edits: withPageEdit(s.body === data.body ? s.edits : {}, fileId, edit) }))} />
                   )}
                 </article>
               ) : (
@@ -519,7 +532,7 @@ export default function DocReviewView({ token }: { token: string }) {
               {/* Stays beside the document as it scrolls (Derek, 2026-09-11: "make side
                   bar sticky"). Send my changes and Approve sit at its top, above
                   Files, in place of a bar fixed to the bottom of the screen. */}
-              <aside className={`space-y-4 ${image && shownImages.length > 1 ? "" : "lg:sticky lg:top-6 lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto"}`}>
+              <aside className={`space-y-4 ${versioned && shownImages.length > 1 ? "" : "lg:sticky lg:top-6 lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto"}`}>
                 {/* Nothing to approve or change while no version is up for review. */}
                 {!locked && !noVersion && (
                   <div className="rounded-2xl border bg-surface p-4 shadow-sm">
@@ -541,8 +554,8 @@ export default function DocReviewView({ token }: { token: string }) {
                     {dirty && (
                       <button onClick={undoEdits} className="mt-2 min-h-[44px] text-[16px] font-medium text-muted underline underline-offset-4">Undo my edits</button>
                     )}
-                    {page && newestEdits.length > 0 && (
-                      <p className="mt-1 text-[16px] text-muted">{newestEdits.length === 1 ? "1 text change" : `${newestEdits.length} text changes`} not sent yet.</p>
+                    {page && editCount > 0 && (
+                      <p className="mt-1 text-[16px] text-muted">{editCount === 1 ? "1 text change" : `${editCount} text changes`} not sent yet.</p>
                     )}
                     <p className="mt-2 text-[16px] text-muted">{hasChanges ? changesHint : approveHint}</p>
                   </div>
@@ -578,11 +591,11 @@ export default function DocReviewView({ token }: { token: string }) {
                   </FileDropLine>
                 )}
                 <CommentThread comments={versioned ? commentsFor(data.comments ?? [], shownIds) : data.comments ?? []}
-                  pinLabel={image ? imagePlace : undefined} pinGroups={image ? shownImages.map((img) => img.label) : undefined}
-                  alignGroup={image ? (label) => {
+                  pinLabel={versioned ? imagePlace : undefined} pinGroups={versioned && shownImages.length > 1 ? shownImages.map((img) => img.label) : image ? shownImages.map((img) => img.label) : undefined}
+                  alignGroup={versioned ? (label) => {
                     const img = shownImages.find((x) => x.label === label);
-                    return img ? document.querySelector<HTMLElement>(`[data-image-anchor="${img.fileId}"]`) : null;
-                  } : undefined} pinDraftLabel={image && pinDraft ? imagePlace(pinDraft.fileId) : null}
+                    return img ? document.querySelector<HTMLElement>(`[data-image-anchor="${img.fileId}"], [data-page-anchor="${img.fileId}"]`) : null;
+                  } : undefined} pinDraftLabel={versioned && pinDraft ? imagePlace(pinDraft.fileId) : null}
                   pinTone={image ? "var(--highlight)" : undefined} hoverId={image ? hoveredComment : undefined} onHover={image ? setHoveredComment : undefined}
                   onPost={postComment} when={commentTime} viewer="client" buttonStyle={{ background: NAVY }}
                   isMine={(c) => c.fromClient} canDelete={(c) => c.fromClient}

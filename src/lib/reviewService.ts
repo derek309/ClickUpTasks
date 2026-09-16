@@ -116,9 +116,9 @@ export async function writeDocBody(
 }
 
 /** An image or HTML review's working copy is the version to send next: an uploaded
- *  file, "Use this version" (a client's page included), or on an image review a set
- *  of up to 10 images with their labels (imageSet.ts, Derek 2026-09-14: a postcard's
- *  front and back in one version). */
+ *  file, "Use this version" (a client's page included), or a set of up to 10 files
+ *  with their labels (imageSet.ts): an image review's postcard front and back
+ *  (Derek, 2026-09-14), an HTML review's two emails (Derek, 2026-09-16). */
 export async function pickReviewVersion(
   taskId: string, kind: FileKind, actor: ReviewActor, input: { file?: unknown; images?: unknown; restoreVersion?: unknown },
 ): Promise<ReviewOutcome<{ document: Row }>> {
@@ -131,9 +131,9 @@ export async function pickReviewVersion(
       .select("body").eq("document_id", doc.id).eq("version", input.restoreVersion).maybeSingle();
     if (!v) return fail(404, "That version no longer exists.");
     body = v.body as string;
-  } else if (kind === "image" && input.images !== undefined) {
+  } else if (input.images !== undefined) {
     const items = cleanImageSet(input.images);
-    if (!items) return fail(400, "A version holds 1 to 10 different images.");
+    if (!items) return fail(400, `A version holds 1 to 10 different ${kind === "page" ? "pages" : "images"}.`);
     body = formatImageSet(items);
   } else {
     // One file, or a set passed back as its body ("Use this version" over MCP), cleaned like a new one.
@@ -143,8 +143,8 @@ export async function pickReviewVersion(
   const ids = setFiles(body);
   const files = await Promise.all(ids.map((id) => docVersionFile(doc.id, id, filePurpose(kind), false)));
   const first = files[0];
-  if (!first || files.some((f) => !f) || (kind === "page" && ids.length > 1)) {
-    return fail(400, kind === "image" ? "Upload the image first." : "That version is no longer on the review.");
+  if (!first || files.some((f) => !f)) {
+    return fail(400, kind === "image" ? "Upload the image first." : "That page is no longer on the review.");
   }
   try {
     const data = await setWorkingFile(doc.id, body, (doc.body as string) ?? "", stampOf(actor));
@@ -172,7 +172,7 @@ export async function removeReviewVersion(taskId: string, kind: FileKind, actor:
   const others = new Set([...(versions ?? []).map((v) => v.body as string), (doc.body as string) ?? ""]
     .filter((body) => body && body !== target).flatMap(setFiles));
   const going = targetFiles.filter((id) => !others.has(id));
-  if (!going.length) return fail(400, "This version only reuses images from other versions, so there is nothing to take off.");
+  if (!going.length) return fail(400, `This version only reuses ${kind === "page" ? "pages" : "images"} from other versions, so there is nothing to take off.`);
   const who = { id: actor.id, label: await actor.label() };
   for (const id of going) {
     const removed = await removeVersionFile(doc.id, id, filePurpose(kind), who);
