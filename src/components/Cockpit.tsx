@@ -75,7 +75,7 @@ import {
   THIS_MONTH_END,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, trashedSince, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, trashedSince, fetchOpenReviews, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import DmChat from "./DmChat";
@@ -99,6 +99,8 @@ import { QuickAddTask } from "./cockpit/QuickAddTask";
 import { ClientsBoard, type WorkBoardGroup, type WorkItem } from "./cockpit/ClientsBoard";
 import { ClientsDirectory } from "./cockpit/ClientsDirectory";
 import { CompletedLog } from "./cockpit/CompletedLog";
+import { ReviewsBoard } from "./cockpit/ReviewsBoard";
+import { buildOpenReviews, type OpenReviewGroups } from "@/lib/openReviews";
 import { ProjectsDirectory } from "./cockpit/ProjectsDirectory";
 import { FolderRail } from "./cockpit/FolderRail";
 
@@ -214,7 +216,43 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // No "completed" any more — it moved to All Tasks. Anyone whose stored
   // value still says completed fails this guard and lands back on Work,
   // rather than on a tab that no longer has a button or a view.
-  const [dashboardView, setDashboardView] = usePersisted<"work" | "plan">("dashboardView", "work", (v) => ["work", "plan"].includes(v as string));
+  const [dashboardView, setDashboardView] = usePersisted<"work" | "plan" | "reviews">("dashboardView", "work", (v) => ["work", "plan", "reviews"].includes(v as string));
+  // What is out with a client, for the Reviews tab. Loaded when that tab is
+  // opened rather than at boot: a document is otherwise read one task at a
+  // time (supabase/task-documents.sql), and the board is two small queries
+  // that would be wasted on every other visit.
+  const [openReviews, setOpenReviews] = useState<OpenReviewGroups>({ yourMove: [], withClient: [] });
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const loadOpenReviews = async () => {
+    setReviewsLoading(true);
+    try {
+      const { docs, versions } = await fetchOpenReviews();
+      // Only reviews on a task that is still here. Row level security scopes
+      // task_documents by the task's own rule, which says nothing about the
+      // trash, so a review on a task someone binned stays "out with the
+      // client" until the purge takes it thirty days later. The loaded tasks
+      // are the live ones, so being among them is the test.
+      const live = new Set(tasksRef.current.map((t) => t.id));
+      setOpenReviews(buildOpenReviews(docs.filter((d) => live.has(d.taskId)), versions));
+    } catch {
+      // Best effort, same as the other on-demand loads: the board says nothing
+      // is out rather than showing an error nobody can act on.
+    } finally {
+      setReviewsLoading(false);
+    }
+  };
+  // Re-read every time the tab is opened rather than once. It is two small
+  // queries, and a board of what is waiting is worth nothing if it is showing
+  // what was waiting an hour ago. Deferred a frame, the same way
+  // NotificationPrefsPanel defers its own load: the first thing it does is set
+  // the loading flag, and writing state straight from an effect body is what
+  // stops the compiler optimising the component around it.
+  useEffect(() => {
+    if (!myWork || dashboardView !== "reviews") return;
+    const r = requestAnimationFrame(() => { void loadOpenReviews(); });
+    return () => cancelAnimationFrame(r);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myWork, dashboardView]);
   // Hours in YOUR working day. Deliberately local rather than a workspace
   // setting: how long your day is is a personal fact, and app_settings only
   // stores booleans anyway. Read after mount so the server and the first
@@ -1032,7 +1070,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     clientTab, vaultFolder: null, // vaultFolder is write-only (via copyFolderLink) — not mirrored into the live URL as you browse
     dm: inboxView ? dmUserId : null,
     assignee: activeClient === "all" ? allTasksScope : null,
-    sub: myWork ? (dashboardView === "plan" ? "plan" : null) : (showCompletedLog ? "completed" : null),
+    sub: myWork ? (dashboardView === "work" ? null : dashboardView) : (showCompletedLog ? "completed" : null),
   });
   const applyNav = (s: NavState) => {
     setSettingsView(s.view === "settings");
@@ -1052,7 +1090,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!s.view && s.client === "all") setAllTasksScope(s.assignee ?? "mine");
     // Same reasoning as the assignee above: absent means the default half of
     // the view, not whatever this browser was last left on.
-    if (s.view === "work") setDashboardView(s.sub === "plan" ? "plan" : "work");
+    if (s.view === "work") setDashboardView(s.sub === "plan" || s.sub === "reviews" ? s.sub : "work");
     if (!s.view && s.client === "all") setAllTasksCompleted(s.sub === "completed");
   };
   // The URL-writing effect below is inert until this flips, so nothing can
@@ -4338,6 +4376,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <div className="flex rounded-lg bg-background p-0.5">
                 <button onClick={() => setDashboardView("work")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "work" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Work</button>
                 <button onClick={() => setDashboardView("plan")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "plan" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Plan</button>
+                <button onClick={() => setDashboardView("reviews")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "reviews" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Reviews</button>
               </div>
             </div>
           ) : showFilterControl ? (
@@ -4475,6 +4514,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <div className="inline-flex overflow-hidden rounded-md border">
                 <button onClick={() => setDashboardView("work")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "work" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Work</button>
                 <button onClick={() => setDashboardView("plan")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "plan" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Plan</button>
+                <button onClick={() => setDashboardView("reviews")} title="Everything out with a client right now" className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "reviews" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Reviews</button>
               </div>
               {/* De-emphasized on purpose — the Dashboard is meant to be the
                   one place everyone works from; this is just an escape
@@ -4558,6 +4598,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             starredLists={starredLists} onToggleStarList={toggleStarList} />
         ) : personalView ? (
           <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} visibleCols={["followUp", "due"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onAddInGroup={(k) => setDumpGroup({ key: k, personal: true })} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={hideEmpty} colOrder={colOrder} onReorderCols={reorderCols} />
+        ) : myWork && dashboardView === "reviews" ? (
+          <ReviewsBoard groups={openReviews} loading={reviewsLoading} onRefresh={loadOpenReviews}
+            taskContext={(taskId) => {
+              const t = tasks.find((x) => x.id === taskId);
+              return t ? { taskTitle: t.title, clientName: clientById(t.clientId)?.name ?? "Unknown client" } : null;
+            }}
+            onOpenTask={setOpenTaskId} />
         ) : myWork && dashboardView === "plan" ? (
           <PlanView days={planDays.days} unplanned={planDays.unplanned} budgetHours={workdayHours} onBudget={setWorkdayHours}
             clientById={clientById} projectById={projectById} onOpen={setOpenTaskId}

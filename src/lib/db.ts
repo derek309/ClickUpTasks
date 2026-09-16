@@ -4,6 +4,7 @@
 import { supabase } from "./supabase";
 import type { EmailDraft } from "./data";
 import { parseKind, type FileKind, type ReviewKind } from "./reviewKinds";
+import type { OpenReviewDoc, OpenReviewStatus, ReviewVersionRow } from "./openReviews";
 import {
   clientsSeed,
   contactsSeed,
@@ -334,6 +335,50 @@ export async function fetchContacts(): Promise<Contact[]> {
   const { data, error } = await fetchAllRows("contacts");
   if (error) throw error;
   return (data ?? []).map(rowToContact);
+}
+
+/** Every review still out with a client, across all of them at once, for the
+ *  Reviews board. Not part of fetchAll: a document is otherwise loaded one task
+ *  at a time (see supabase/task-documents.sql), and this is two small queries
+ *  run when the board is opened rather than fifteen more rows on every boot.
+ *
+ *  Row level security scopes it for free — task_documents_select derives from
+ *  tasks, so this returns reviews on the tasks the caller can already see.
+ *
+ *  The pair is the shape buildOpenReviews takes: the documents, and the version
+ *  rows that say when each was sent or replied to. Versions come back for these
+ *  documents only, which is a handful of rows per review. */
+export async function fetchOpenReviews(): Promise<{ docs: OpenReviewDoc[]; versions: ReviewVersionRow[] }> {
+  const { data: docRows, error } = await supabase
+    .from("task_documents")
+    .select("id, task_id, kind, title, status, version, client_viewed_at")
+    .is("deleted_at", null)
+    .in("status", ["with_client", "client_submitted"]);
+  if (error || !docRows?.length) return { docs: [], versions: [] };
+
+  const docs: OpenReviewDoc[] = docRows.map((r) => ({
+    id: r.id as string,
+    taskId: r.task_id as string,
+    kind: parseKind(r.kind),
+    title: (r.title as string | null) ?? null,
+    status: r.status as OpenReviewStatus,
+    version: (r.version as number) ?? 0,
+    clientViewedAt: (r.client_viewed_at as string | null) ?? null,
+  }));
+
+  const { data: versionRows } = await supabase
+    .from("task_document_versions")
+    .select("document_id, kind, created_at")
+    .in("document_id", docs.map((d) => d.id));
+
+  return {
+    docs,
+    versions: (versionRows ?? []).map((r) => ({
+      documentId: r.document_id as string,
+      kind: r.kind as ReviewVersionRow["kind"],
+      createdAt: r.created_at as string,
+    })),
+  };
 }
 
 /** Ids in these tables trashed since a moment. The visibility refetch merges
