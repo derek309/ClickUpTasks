@@ -26,6 +26,8 @@ export type OpenReviewDoc = {
   version: number;
   /** When the client first opened the link, or null if they never have. */
   clientViewedAt: string | null;
+  /** How many images or pages its working copy holds; 0 on a document. */
+  parts?: number;
 };
 
 /** One row of task_document_versions: a send, a client's changes, an approval. */

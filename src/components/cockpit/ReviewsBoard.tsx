@@ -47,6 +47,8 @@ function Row({ r, context, onOpen }: { r: OpenReview; context: { taskTitle: stri
             <span className="shrink-0 rounded bg-background px-1.5 py-0.5 text-[16px] text-muted">{kindTitle(r.kind)}</span>
           )}
           {r.version > 1 && <span className="shrink-0 text-[16px] text-muted">v{r.version}</span>}
+          {/* Two emails in one HTML review, or a front and back, say so (Derek, 2026-09-16). */}
+          {(r.parts ?? 0) > 1 && <span className="shrink-0 text-[16px] text-muted">{r.parts} {r.kind === "page" ? "pages" : "images"}</span>}
         </span>
         <span className="mt-0.5 block truncate text-[16px] text-muted">
           {context ? `${context.clientName} · ${context.taskTitle}` : "On a task you cannot see"}
