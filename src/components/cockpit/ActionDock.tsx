@@ -719,7 +719,16 @@ export function ActionDock({
                   <button onClick={() => setReplyTo(null)} title="Stop replying" aria-label="Stop replying" className="shrink-0 rounded px-1 hover:text-foreground">✕</button>
                 </div>
               )}
-              <div className="flex flex-wrap items-end gap-2">
+              {/* The words get the whole width, like a message box in any chat
+                  app, and the choices sit on one line under them. Squeezed in
+                  between the buttons the box grew tall and thin (Derek,
+                  2026-09-16: "don't love this"). */}
+              <textarea ref={quickRef} rows={1} value={quickNote} onChange={(e) => setQuickNote(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); sendQuick(); } }}
+                placeholder={noting ? "Note for your team, the client never sees it" : `Message ${firstName} by ${channel === "sms" ? "text" : "chat"}`}
+                aria-label={noting ? "Note for your team" : `Message ${firstName}`}
+                className={`block max-h-40 min-h-[44px] w-full resize-none rounded-lg border px-3 py-2.5 text-[16px] leading-snug outline-none [field-sizing:content] placeholder:text-muted focus:border-accent ${noting ? "border-amber-300/60 bg-amber-50/60 dark:bg-amber-500/10" : "border-transparent bg-background focus:bg-surface"}`} />
+              <div className="mt-2 flex flex-wrap items-center gap-2">
                 {(canChat || canText || canEmail) && (
                   <div role="group" aria-label="Send as" className="flex shrink-0 rounded-lg bg-background p-1">
                     <button onClick={() => { setChannel("note"); setReplyTo(null); }} aria-pressed={noting} className={`${pick} ${noting ? on : off}`}>🔒 Note</button>
@@ -729,29 +738,26 @@ export function ActionDock({
                     {canEmail && <button onClick={() => onOpenCompose?.("email")} className={`${pick} ${off}`}>Email</button>}
                   </div>
                 )}
-                <textarea ref={quickRef} rows={1} value={quickNote} onChange={(e) => setQuickNote(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); sendQuick(); } }}
-                  placeholder={noting ? "Note for your team, the client never sees it" : `Message ${firstName} by ${channel === "sms" ? "text" : "chat"}`}
-                  aria-label={noting ? "Note for your team" : `Message ${firstName}`}
-                  className={`max-h-40 min-h-[42px] min-w-[200px] flex-1 resize-none rounded-lg border px-3 py-2 text-[16px] outline-none [field-sizing:content] placeholder:text-muted focus:border-accent ${noting ? "border-amber-300/60 bg-amber-50/60 dark:bg-amber-500/10" : "border-transparent bg-background focus:bg-surface"}`} />
-                {!noting && onOpenCompose && (
-                  // Attachments, scheduling and AI writing live in the full box.
-                  <button onClick={() => { onOpenCompose(channel, quickNote); setQuickNote(""); }} title="More: attach, schedule, write with AI" aria-label="More options"
-                    className="h-[42px] shrink-0 rounded-lg px-2.5 text-muted hover:bg-background hover:text-foreground">⋯</button>
-                )}
-                {quickNote.trim() && (
-                  <button onClick={sendQuick}
-                    className={`h-[42px] shrink-0 rounded-lg px-4 text-[16px] font-semibold text-white hover:opacity-90 ${noting ? "bg-amber-700" : "bg-accent"}`}>
-                    {sendLabel}
+                <span className="hidden min-w-0 flex-1 truncate px-1 text-[16px] text-muted sm:block">
+                  {noting ? "Only your team sees notes." : `Goes to ${firstName} as a ${channel === "sms" ? "text" : "chat"}.`}
+                </span>
+                <div className="ml-auto flex shrink-0 items-center gap-2">
+                  {!noting && onOpenCompose && (
+                    // Attachments, scheduling and AI writing live in the full box.
+                    <button onClick={() => { onOpenCompose(channel, quickNote); setQuickNote(""); }} title="More: attach, schedule, write with AI" aria-label="More options"
+                      className="h-10 rounded-lg px-2.5 text-muted hover:bg-background hover:text-foreground">⋯</button>
+                  )}
+                  {quickNote.trim() && (
+                    <button onClick={sendQuick} title="Enter sends, Shift+Enter for a new line"
+                      className={`h-10 rounded-lg px-4 text-[16px] font-semibold text-white hover:opacity-90 ${noting ? "bg-amber-700" : "bg-accent"}`}>
+                      {sendLabel}
+                    </button>
+                  )}
+                  <button onClick={() => openPanel("menu")}
+                    className={`h-10 rounded-lg px-4 text-[16px] font-semibold ${quickNote.trim() ? "bg-background text-foreground hover:bg-accent-soft" : "bg-accent text-white hover:opacity-90"}`}>
+                    ＋ Log action
                   </button>
-                )}
-                <button onClick={() => openPanel("menu")}
-                  className={`h-[42px] shrink-0 rounded-lg px-4 text-[16px] font-semibold ${quickNote.trim() ? "bg-background text-foreground hover:bg-accent-soft" : "bg-accent text-white hover:opacity-90"}`}>
-                  ＋ Log action
-                </button>
-              </div>
-              <div className="mt-1.5 px-1 text-[16px] text-muted">
-                {noting ? "Only your team sees notes." : `Goes to ${firstName} as a ${channel === "sms" ? "text" : "chat"}.`} Enter sends, Shift+Enter for a new line.
+                </div>
               </div>
             </div>
           );
