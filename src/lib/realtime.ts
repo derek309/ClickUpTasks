@@ -48,9 +48,15 @@ export function subscribeRealtime(handlers: {
         handlers.onStatusChange?.(status);
         if (status === "SUBSCRIBED") retries = 0;
         if ((status === "CHANNEL_ERROR" || status === "TIMED_OUT") && !torn) {
+          // One reconnect in flight at a time. A flapping connection can
+          // report the error several times over, and each report used to
+          // schedule its own reconnect on top of the last — several channels
+          // on the same topic, every live change handled once per channel.
+          if (retryTimer) clearTimeout(retryTimer);
           retries += 1;
           const delay = Math.min(1000 * 2 ** retries, 15000);
           retryTimer = setTimeout(() => {
+            retryTimer = null;
             if (channel) supabase.removeChannel(channel);
             connect();
           }, delay);

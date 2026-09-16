@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/serverAuth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { sendGmailAs, googleConfigured } from "@/lib/googleMail";
 import { APP_URL } from "@/lib/appUrl";
+import { canActOnTask } from "@/lib/taskAccess";
 
 // Best-effort email companion to the in-app @mention notification (see
 // Cockpit.tsx's addComment): the in-app bell already fired before this is
@@ -21,11 +22,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Your account isn't a Google Workspace sender." }, { status: 501 });
 
   const b = await req.json().catch(() => ({}));
-  const { recipientMemberId, taskId, taskTitle, commentBody } = b as {
-    recipientMemberId?: string; taskId?: string; taskTitle?: string; commentBody?: string;
+  const { recipientMemberId, taskId, commentBody } = b as {
+    recipientMemberId?: string; taskId?: string; commentBody?: string;
   };
   if (!recipientMemberId || !taskId || !commentBody?.trim())
     return NextResponse.json({ error: "Missing recipientMemberId, taskId, or commentBody." }, { status: 400 });
+
+  // The task is read here rather than taken from the request: the title used
+  // to arrive in the body, so any signed-in teammate could send anyone else an
+  // email about a task that says whatever they liked, or one they cannot see.
+  // A private task is left out of this entirely — the mention lands in the
+  // app's own bell, and quoting it by mail would put it in front of someone
+  // who is not allowed to open it.
+  const { data: task } = await supabaseAdmin.from("tasks")
+    .select("title, client_id, assignee_id, is_private, deleted_at").eq("id", taskId).maybeSingle();
+  if (!task || task.is_private || !(await canActOnTask(caller, task))) return NextResponse.json({ error: "No such task." }, { status: 404 });
 
   const [{ data: recipient }, { data: sender }] = await Promise.all([
     supabaseAdmin.from("profiles").select("email, name, email_notify_message").eq("member_id", recipientMemberId).maybeSingle(),
@@ -37,7 +48,7 @@ export async function POST(req: NextRequest) {
   if (recipient.email_notify_message === false) return NextResponse.json({ ok: true, skipped: "opted-out" });
 
   const senderName = (sender?.name as string | null)?.trim() || undefined;
-  const title = (taskTitle || "a task").trim();
+  const title = ((task.title as string | null) || "a task").trim();
   const link = `${APP_URL}/?task=${encodeURIComponent(taskId)}`;
   const quoted = commentBody.trim().slice(0, 1000);
 

@@ -14,8 +14,10 @@ import { ingestInboundMessage, ingestOutboundMessage } from "@/lib/inboundIngest
 // read their recent inbox, match each sender to a known contact by email, and
 // ingest anything new (deduped by Gmail message id).
 //
-// Trigger: a Vercel cron or an admin session (the app's "Sync email" action),
-// see cronAuth.ts. Requires the DWD service account to also be authorized for
+// Trigger: a Vercel cron every 15 minutes, or an admin session (the app's
+// "Sync email" action), see cronAuth.ts. It ran once a day until 2026-09-15,
+// which meant a client's emailed reply could sit unseen for most of a day
+// while the board still showed the task as waiting on them. Requires the DWD service account to also be authorized for
 // the gmail.readonly scope in the Workspace Admin console.
 
 export const maxDuration = 60;

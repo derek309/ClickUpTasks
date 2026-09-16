@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/serverAuth";
+import { aiRateLimit, geminiEndpoint } from "@/lib/ai";
 
 // Answers a question about one task from that task's own record: its
 // description, checklist, attachments, logged actions, notes and the emails
@@ -12,7 +13,6 @@ import { requireUser } from "@/lib/serverAuth";
 // tell the two apart later. Hence the hard instruction to say when the task
 // does not say, and a temperature of 0.
 
-const GEMINI_MODEL = "gemini-flash-latest";
 const GEMINI_TIMEOUT_MS = 25000;
 const MAX_CONTEXT_CHARS = 120000;
 const MAX_HISTORY = 8;
@@ -20,6 +20,8 @@ const MAX_HISTORY = 8;
 export async function POST(req: NextRequest) {
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const limited = await aiRateLimit(caller.id);
+  if (limited) return limited;
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "AI isn't configured yet (missing GEMINI_API_KEY)." }, { status: 501 });
@@ -56,7 +58,7 @@ export async function POST(req: NextRequest) {
   ].filter(Boolean).join("\n");
 
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
+    const res = await fetch(geminiEndpoint(apiKey), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0 } }),

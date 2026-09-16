@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/serverAuth";
+import { googleConfigured } from "@/lib/googleMail";
 
 // Self-service per-user email notification preferences — same shape as
 // /api/tokens: a caller can only ever read/write their own row (auth.uid()),
@@ -21,6 +22,12 @@ export async function GET(req: NextRequest) {
     emailNotifyActivity: data?.email_notify_activity ?? true,
     emailNotifyMessage: data?.email_notify_message ?? true,
     emailNotifyDm: data?.email_notify_dm ?? true,
+    // Email copies are sent AS the person who did the thing, through Google
+    // Workspace, so an account on any other domain quietly produces none at
+    // all — the send route refuses and the caller swallows it. Reported here
+    // so the panel can say so rather than showing three toggles that do
+    // nothing. Same two conditions the send route itself checks.
+    canSendEmailCopies: googleConfigured && caller.email.toLowerCase().endsWith("@clickuplocal.com"),
   });
 }
 

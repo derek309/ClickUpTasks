@@ -15,12 +15,26 @@ export async function GET(req: NextRequest) {
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const clientId = req.nextUrl.searchParams.get("clientId");
-  if (!clientId) return NextResponse.json({ error: "clientId is required." }, { status: 400 });
+  const columns = "id, client_id, task_id, channel, subject, body, cc, bcc, from_email, attachments, scheduled_at, status, error, created_by, sent_message_id, created_at";
+
+  // No clientId: everything YOU have queued, across every client, for the
+  // Drafts board. Scoped to your own rows rather than checked client by client,
+  // which would be one permission round trip per client to answer a question
+  // about your own queue. Whoever wrote it can always see it.
+  if (!clientId) {
+    if (!caller.memberId) return NextResponse.json({ scheduled: [] });
+    const { data, error } = await supabaseAdmin
+      .from("scheduled_messages").select(columns)
+      .eq("created_by", caller.memberId).eq("status", "pending")
+      .order("scheduled_at", { ascending: true });
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    return NextResponse.json({ scheduled: data ?? [] });
+  }
+
   const denied = await canCallerMessageClient(caller, clientId);
   if (denied) return NextResponse.json({ error: denied }, { status: 403 });
   const { data, error } = await supabaseAdmin
-    .from("scheduled_messages")
-    .select("id, client_id, task_id, channel, subject, body, cc, bcc, from_email, attachments, scheduled_at, status, error, created_by, sent_message_id, created_at")
+    .from("scheduled_messages").select(columns)
     .eq("client_id", clientId)
     .order("scheduled_at", { ascending: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });

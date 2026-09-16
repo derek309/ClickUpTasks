@@ -251,3 +251,48 @@ export function LinkFormModal({ initial, onSubmit, onCancel }: LinkFormSpec & { 
     </>
   );
 }
+
+// Every keyboard shortcut the app has, on one card, opened with "?".
+// Until this existed the only way to find out that j and k walk the task list,
+// or that the number keys jump between views, was to be told.
+const SHORTCUTS: { keys: string[]; what: string }[] = [
+  { keys: ["1"], what: "My Work" },
+  { keys: ["2"], what: "All Tasks" },
+  { keys: ["3"], what: "Clients" },
+  { keys: ["4"], what: "Projects" },
+  { keys: ["5"], what: "Personal" },
+  { keys: ["⌘", "K"], what: "Search everything" },
+  { keys: ["J", "↓"], what: "Next task, with one open" },
+  { keys: ["K", "↑"], what: "Previous task" },
+  { keys: ["Esc"], what: "Close what is on top" },
+  { keys: ["?"], what: "This list" },
+];
+
+export function ShortcutsModal({ onClose }: { onClose: () => void }) {
+  useEscapeToClose(onClose);
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
+      <div role="dialog" aria-modal="true" aria-label="Keyboard shortcuts"
+        className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border bg-surface p-5 shadow-xl">
+        <h2 className="text-[16px] font-semibold">Keyboard shortcuts</h2>
+        <p className="mt-1 text-[16px] text-muted">They work anywhere except while you are typing.</p>
+        <ul className="mt-4 space-y-2">
+          {SHORTCUTS.map((s) => (
+            <li key={s.what} className="flex items-center justify-between gap-4">
+              <span className="text-[16px]">{s.what}</span>
+              <span className="flex shrink-0 gap-1">
+                {s.keys.map((k) => (
+                  <kbd key={k} className="min-w-[26px] rounded border bg-background px-1.5 py-0.5 text-center text-[16px] font-medium">{k}</kbd>
+                ))}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <div className="mt-5 flex justify-end">
+          <button onClick={onClose} className="rounded-md border px-3 py-1.5 text-[16px] font-medium hover:bg-background">Close</button>
+        </div>
+      </div>
+    </>
+  );
+}

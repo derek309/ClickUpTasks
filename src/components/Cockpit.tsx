@@ -24,7 +24,7 @@ import {
   DUE_BUCKETS,
   dueBucketOf,
   NURTURE_CHECK_IN_DAYS,
-  TRIAL_DAYS,
+  TRIAL_DAYS, trialState,
   STATUS_META,
   STATUS_ORDER, HIDDEN_STATUSES, pickableStatuses,
   applyWaitingStatusSync,
@@ -75,7 +75,7 @@ import {
   THIS_MONTH_END,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, trashedSince, fetchOpenReviews, fetchClientEmailDrafts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, insertTaskAction, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import DmChat from "./DmChat";
@@ -88,7 +88,7 @@ import { I, Avatar, SideItem, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFrom
 import { MindDumpModal, type ParsedRow } from "./cockpit/MindDumpModal";
 import { ClientEmail, type ClientEmailStart } from "./cockpit/ClientEmail";
 import { draftLinkHtml, escapeHtml } from "@/lib/draftLink";
-import { ConfirmModal, PromptModal, LinkFormModal, MergeTaskModal, MergeClientModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
+import { ConfirmModal, PromptModal, ShortcutsModal, LinkFormModal, MergeTaskModal, MergeClientModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
 import { CommandK } from "./cockpit/CommandK";
 import { GroupedList } from "./cockpit/GroupedList";
 import StageBoard from "./cockpit/StageBoard";
@@ -99,6 +99,12 @@ import { QuickAddTask } from "./cockpit/QuickAddTask";
 import { ClientsBoard, type WorkBoardGroup, type WorkItem } from "./cockpit/ClientsBoard";
 import { ClientsDirectory } from "./cockpit/ClientsDirectory";
 import { CompletedLog } from "./cockpit/CompletedLog";
+import { ReviewsBoard } from "./cockpit/ReviewsBoard";
+import { DraftsBoard } from "./cockpit/DraftsBoard";
+import { BulkDelegateModal } from "./cockpit/BulkDelegateModal";
+import { buildOpenReviews, type OpenReviewGroups } from "@/lib/openReviews";
+import { buildPendingSends, type PendingSendGroups } from "@/lib/pendingSends";
+import { bulkDelegateSummary, bulkDelegations, type BulkDelegateSpec } from "@/lib/bulkDelegate";
 import { ProjectsDirectory } from "./cockpit/ProjectsDirectory";
 import { FolderRail } from "./cockpit/FolderRail";
 
@@ -106,7 +112,7 @@ import { FolderRail } from "./cockpit/FolderRail";
 import { sortTasks as sortTasksBy } from "@/lib/taskSort";
 import { URGENCY_TIER, tierForDate, urgencyDateOf, urgencyKeyFrom } from "@/lib/urgency";
 import { clientContactIds, findDuplicateTrackedClient as findDuplicateClient } from "@/lib/clientDedup";
-import { type NavState, buildSearch, parseSearch, NAV_KEY_VIEWS, LONG_TITLE_THRESHOLD, TEAM_CHAT_LINK } from "@/lib/navState";
+import { type NavState, buildSearch, parseSearch, NAV_KEY_VIEWS, LONG_TITLE_THRESHOLD, DM_LINK_PREFIX } from "@/lib/navState";
 import { isInboxNotification } from "@/lib/extensionInbox";
 
 // A dumped task's description: what the AI summarised, then the client's own
@@ -214,7 +220,73 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // No "completed" any more — it moved to All Tasks. Anyone whose stored
   // value still says completed fails this guard and lands back on Work,
   // rather than on a tab that no longer has a button or a view.
-  const [dashboardView, setDashboardView] = usePersisted<"work" | "plan">("dashboardView", "work", (v) => ["work", "plan"].includes(v as string));
+  const [dashboardView, setDashboardView] = usePersisted<"work" | "plan" | "reviews" | "drafts">("dashboardView", "work", (v) => ["work", "plan", "reviews", "drafts"].includes(v as string));
+  // What is out with a client, for the Reviews tab. Loaded when that tab is
+  // opened rather than at boot: a document is otherwise read one task at a
+  // time (supabase/task-documents.sql), and the board is two small queries
+  // that would be wasted on every other visit.
+  const [openReviews, setOpenReviews] = useState<OpenReviewGroups>({ yourMove: [], withClient: [] });
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const loadOpenReviews = async () => {
+    setReviewsLoading(true);
+    try {
+      const { docs, versions } = await fetchOpenReviews();
+      // Only reviews on a task that is still here. Row level security scopes
+      // task_documents by the task's own rule, which says nothing about the
+      // trash, so a review on a task someone binned stays "out with the
+      // client" until the purge takes it thirty days later. The loaded tasks
+      // are the live ones, so being among them is the test.
+      const live = new Set(tasksRef.current.map((t) => t.id));
+      setOpenReviews(buildOpenReviews(docs.filter((d) => live.has(d.taskId)), versions));
+    } catch {
+      // Best effort, same as the other on-demand loads: the board says nothing
+      // is out rather than showing an error nobody can act on.
+    } finally {
+      setReviewsLoading(false);
+    }
+  };
+  // Everything written and not sent, for the Drafts tab. Task drafts are
+  // already in memory on the tasks themselves; the client drafts and the
+  // scheduled queue are fetched when the tab is opened.
+  const [pendingSends, setPendingSends] = useState<PendingSendGroups>({ scheduled: [], drafts: [] });
+  const [draftsLoading, setDraftsLoading] = useState(false);
+  const loadPendingSends = async () => {
+    setDraftsLoading(true);
+    try {
+      const [clientDrafts, scheduledRes] = await Promise.all([
+        fetchClientEmailDrafts(),
+        authedFetch("/api/messages/schedule").then((r) => (r.ok ? r.json() : { scheduled: [] })).catch(() => ({ scheduled: [] })),
+      ]);
+      const taskDrafts = tasksRef.current
+        .filter((t) => t.draftEmail)
+        .map((t) => ({ taskId: t.id, clientId: t.clientId, draft: t.draftEmail! }));
+      const queued = (scheduledRes.scheduled ?? []).map(rowToScheduledMessage) as ScheduledMessage[];
+      setPendingSends(buildPendingSends(taskDrafts, clientDrafts, queued));
+    } catch {
+      // Best effort, like the other on-demand loads.
+    } finally {
+      setDraftsLoading(false);
+    }
+  };
+  // Deferred a frame for the same reason as the reviews load below.
+  useEffect(() => {
+    if (!myWork || dashboardView !== "drafts") return;
+    const r = requestAnimationFrame(() => { void loadPendingSends(); });
+    return () => cancelAnimationFrame(r);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myWork, dashboardView]);
+  // Re-read every time the tab is opened rather than once. It is two small
+  // queries, and a board of what is waiting is worth nothing if it is showing
+  // what was waiting an hour ago. Deferred a frame, the same way
+  // NotificationPrefsPanel defers its own load: the first thing it does is set
+  // the loading flag, and writing state straight from an effect body is what
+  // stops the compiler optimising the component around it.
+  useEffect(() => {
+    if (!myWork || dashboardView !== "reviews") return;
+    const r = requestAnimationFrame(() => { void loadOpenReviews(); });
+    return () => cancelAnimationFrame(r);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myWork, dashboardView]);
   // Hours in YOUR working day. Deliberately local rather than a workspace
   // setting: how long your day is is a personal fact, and app_settings only
   // stores booleans anyway. Read after mount so the server and the first
@@ -459,6 +531,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // starred list gets its own quick-access row in the sidebar's Pinned section.
   const [starredLists, setStarredLists] = useState<Set<string>>(new Set());
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const [bulkDelegateOpen, setBulkDelegateOpen] = useState(false);
   const [manualOrder, setManualOrder] = useState<string[]>([]);
   const [headerMoreOpen, setHeaderMoreOpen] = useState(false);
   const [copiedForClaude, setCopiedForClaude] = useState(false);
@@ -542,40 +615,60 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     markOwnClientWrite(nc.id);
     upsertClient(nc);
   };
+  // One switch on a client, flipped and saved. These were the same twenty
+  // lines written out twice, differing only in which column they wrote and
+  // what the toast said.
+  //
+  // Admin only, like everything in this sheet: clients_write RLS is is_admin(),
+  // so a VA calling one of these gets a silently ignored write. Every route
+  // that acts on one of these columns re-reads it server side, so a toggle
+  // here is the decision and never the enforcement.
+  const toggleClientFlag = (
+    clientId: string,
+    key: "canRequestNewTasks" | "portalShowsAllTasks",
+    toast: (name: string, on: boolean) => string,
+  ) => {
+    const c = clientById(clientId);
+    if (!c) return;
+    const on = c[key] !== true;
+    const nc = { ...c, [key]: on };
+    setClients((cs) => cs.map((x) => (x.id === clientId ? nc : x)));
+    markOwnClientWrite(nc.id);
+    upsertClient(nc);
+    pushToast(toast(c.name, on));
+  };
   // Whether this client's public page (/waiting/[token]) offers the "Add
-  // Something" composer that raises a brand-new task, or stays reply-only.
-  // Off by default, and admin-only for the same reason as
-  // toggleClientMessagePermission above: clients_write RLS is already
-  // is_admin(), so a VA calling this directly gets a silently-ignored write.
-  // /api/waiting/[token]/request re-reads the column before it writes
-  // anything, so this toggle is the decision, never the enforcement.
-  const toggleClientCanRequestNewTasks = (clientId: string) => {
+  // Something" composer that raises a brand new task, or stays reply only.
+  // Off by default. /api/waiting/[token]/request re-reads the column before it
+  // writes anything.
+  const toggleClientCanRequestNewTasks = (clientId: string) =>
+    toggleClientFlag(clientId, "canRequestNewTasks", (name, on) =>
+      on ? `${name} can now add their own requests.` : `${name} can no longer add their own requests.`);
+  // How much of the account the client portal shows. Off means only what
+  // involves them (waiting on their input, or already replied to); on means
+  // every non-private task on the account, which is real exposure: internal
+  // work becomes readable by the client. Per client for that reason, never
+  // global.
+  const toggleClientPortalShowsAllTasks = (clientId: string) =>
+    toggleClientFlag(clientId, "portalShowsAllTasks", (name, on) =>
+      on ? `${name} now sees every task on their account.` : `${name} now only sees what involves them.`);
+
+  // Ending a trial by hand. The window is stamped once, when the deal closes,
+  // and deliberately never re-stamped, so a routine save cannot push the end
+  // date out (see setClientStatus). That left no way to close one either: a
+  // client who cancelled in week one carried "in trial" until the date caught
+  // up. This clears the flag and KEEPS the date, so what was promised is still
+  // on the record and trialState can tell an early close from a natural end.
+  const endClientTrial = (clientId: string) => {
     const c = clientById(clientId);
-    if (!c) return;
-    const on = c.canRequestNewTasks !== true;
-    const nc = { ...c, canRequestNewTasks: on };
+    if (!c || c.inTrial !== true) return;
+    const nc = { ...c, inTrial: false };
     setClients((cs) => cs.map((x) => (x.id === clientId ? nc : x)));
     markOwnClientWrite(nc.id);
     upsertClient(nc);
-    pushToast(on ? `${c.name} can now add their own requests.` : `${c.name} can no longer add their own requests.`);
+    pushToast(`${c.name}'s trial is closed.`);
   };
-  // How much of the account the client portal shows. Off means the portal
-  // shows only what involves them (waiting on their input, or already
-  // replied to); on means every non-private task on the account, which is
-  // real exposure — internal work becomes readable by the client. Per client
-  // for that reason, never global. Admin only, same as the toggles around it:
-  // clients_write RLS is is_admin(), and the portal route re-reads the column
-  // itself, so this toggle is the decision and never the enforcement.
-  const toggleClientPortalShowsAllTasks = (clientId: string) => {
-    const c = clientById(clientId);
-    if (!c) return;
-    const on = c.portalShowsAllTasks !== true;
-    const nc = { ...c, portalShowsAllTasks: on };
-    setClients((cs) => cs.map((x) => (x.id === clientId ? nc : x)));
-    markOwnClientWrite(nc.id);
-    upsertClient(nc);
-    pushToast(on ? `${c.name} now sees every task on their account.` : `${c.name} now only sees what involves them.`);
-  };
+
   // Stamp reviewedAt = today, clearing this client/project from the Review
   // tier until next Monday (weekly) or its next nurture cycle. See
   // clientNeedsReview.
@@ -1032,6 +1125,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     clientTab, vaultFolder: null, // vaultFolder is write-only (via copyFolderLink) — not mirrored into the live URL as you browse
     dm: inboxView ? dmUserId : null,
     assignee: activeClient === "all" ? allTasksScope : null,
+    sub: myWork ? (dashboardView === "work" ? null : dashboardView) : (showCompletedLog ? "completed" : null),
   });
   const applyNav = (s: NavState) => {
     setSettingsView(s.view === "settings");
@@ -1049,6 +1143,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // no ?assignee= (or the back button landing on one) has to show the
     // default, not whatever this browser happened to have selected already.
     if (!s.view && s.client === "all") setAllTasksScope(s.assignee ?? "mine");
+    // Same reasoning as the assignee above: absent means the default half of
+    // the view, not whatever this browser was last left on.
+    if (s.view === "work") setDashboardView(s.sub === "plan" || s.sub === "reviews" ? s.sub : "work");
+    if (!s.view && s.client === "all") setAllTasksCompleted(s.sub === "completed");
   };
   // The URL-writing effect below is inert until this flips, so nothing can
   // clobber the deep link before we read it here.
@@ -1069,7 +1167,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const next = buildSearch(currentNav());
     if (next !== window.location.search) window.history.pushState(null, "", next || window.location.pathname);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settingsView, dirView, myWork, personalView, inboxView, activeClient, activeProject, openTaskId, clientTab, dmUserId, allTasksScope]);
+  }, [settingsView, dirView, myWork, personalView, inboxView, activeClient, activeProject, openTaskId, clientTab, dmUserId, allTasksScope, dashboardView, allTasksCompleted]);
   // Back/forward → state.
   useEffect(() => {
     const onPop = () => applyNav(parseSearch(window.location.search));
@@ -1078,13 +1176,25 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   }, []);
   const toggleDrawerFull = () => setDrawerFull((f) => { const v = !f; try { localStorage.setItem("cut_drawerFull", v ? "1" : "0"); } catch {} return v; });
   const [cmdkOpen, setCmdkOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCmdkOpen(true); } };
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCmdkOpen(true); return; }
+      // "?" lists the rest of them. Not while typing, where it is punctuation,
+      // and not with a modifier held, which belongs to the browser.
+      if (e.key !== "?" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      e.preventDefault();
+      setShortcutsOpen(true);
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-  // Jump to a top-level view with a single number key — 1 Dashboard,
-  // 2 Clients, 3 Projects, 4 Personal, 5 Team.
+  // Jump to a top-level view with a single number key, in sidebar order:
+  // 1 My Work, 2 All Tasks, 3 Clients, 4 Projects, 5 Personal. The list lives
+  // in NAV_KEY_VIEWS; 2 was missing, so the sidebar's second row was the one
+  // thing you could not reach this way.
   //
   // Bare keys rather than Cmd/Ctrl+1-5: browsers reserve Cmd/Ctrl+1-9 for
   // tab switching and never hand the event to the page at all (Chrome,
@@ -1100,9 +1210,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const goToViewRef = useRef(goToView);
   const navBlockedRef = useRef(false);
   useEffect(() => { goToViewRef.current = goToView; });
-  // Don't navigate out from under something that's asking for an answer —
-  // a confirm dialog, the link editor, or the command palette.
-  useEffect(() => { navBlockedRef.current = !!confirmDialog || !!linkModal || cmdkOpen; }, [confirmDialog, linkModal, cmdkOpen]);
+  // Don't navigate out from under anything holding work in progress — a
+  // dialog asking for an answer, or an open task. A number key reaching the
+  // task drawer closed it and switched view, taking an unsaved title, next
+  // step or half-typed comment with it; focus only has to be off the field
+  // (after a chip or a checkbox click, say) for the key to arrive here.
+  useEffect(() => {
+    navBlockedRef.current = !!confirmDialog || !!promptDialog || !!linkModal || cmdkOpen
+      || !!openTaskId || !!dumpGroup || !!mergeSourceId || !!mergeClientState || addClientOpen || quickAddOpen || shortcutsOpen || bulkDelegateOpen;
+  }, [confirmDialog, promptDialog, linkModal, cmdkOpen, openTaskId, dumpGroup, mergeSourceId, mergeClientState, addClientOpen, quickAddOpen, shortcutsOpen, bulkDelegateOpen]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -1152,7 +1268,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // The four primary nav items always show now — the hide/show toggle went
   // away when the account block replaced the sidebar's branding header. Kept
   // as a lookup so the render below stays unchanged.
-  const navVisible: Record<string, boolean> = { work: true, personal: true };
   // All Tasks is back as a primary nav item under My Work (Derek,
   // 2026-08-26) after a spell as a de-emphasized button on the Dashboard
   // header. It's a plain goToView case now rather than its own hand-rolled
@@ -1489,8 +1604,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // message) out of view even though it was safely in the database.
   // contacts/projects/client_links have no realtime coverage at all, so they
   // still need a full replace (including removals) to reflect deletes.
+  //
+  // Merging alone left one hole: a task or client someone else trashed while
+  // this tab's socket was down never left the screen, and could still be
+  // edited, writing to a row on its way to the purge. So the refetch also asks
+  // which rows were trashed since it last looked and drops exactly those —
+  // positive evidence, rather than treating "absent from the fetch" as deleted,
+  // which is what made a wholesale replace dangerous in the first place.
   useEffect(() => {
     let lastRefetch = 0;
+    let trashedSinceIso = new Date().toISOString();
     const refetch = async () => {
       if (document.visibilityState !== "visible") return;
       // TODAY (and every due bucket, "Mark reviewed" stamp and Today pick built
@@ -1499,6 +1622,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       if (todayIso() !== TODAY) { window.location.reload(); return; }
       if (Date.now() - lastRefetch < 20000) return;
       lastRefetch = Date.now();
+      const askedAt = new Date().toISOString();
       try {
         const d = await fetchAll();
         const mergeById = <T extends { id: string }>(prev: T[], incoming: T[]) => {
@@ -1516,6 +1640,23 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setFolders((prev) => mergeById(prev, d.folders));
         setStages((prev) => mergeById(prev, d.stages));
         setDmMessages((prev) => mergeById(prev, d.dmMessages));
+
+        const [goneTasks, goneClients] = await Promise.all([
+          trashedSince("tasks", trashedSinceIso),
+          trashedSince("clients", trashedSinceIso),
+        ]);
+        trashedSinceIso = askedAt;
+        if (goneTasks.length) {
+          const gone = new Set(goneTasks);
+          setTasks((prev) => prev.filter((t) => !gone.has(t.id)));
+          // Whatever is open went with it — leaving the drawer up over a
+          // trashed task invites an edit that writes to a row nobody will see.
+          setOpenTaskId((id) => (id && gone.has(id) ? null : id));
+        }
+        if (goneClients.length) {
+          const gone = new Set(goneClients);
+          setClients((prev) => prev.filter((c) => !gone.has(c.id)));
+        }
       } catch (e) { console.warn("[realtime] visibility refetch failed", e); }
     };
     document.addEventListener("visibilitychange", refetch);
@@ -1567,11 +1708,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Best-effort email companion to an @mention notification — the in-app
   // bell above already fired, so a failure here (Google not configured,
   // non-Workspace sender, send error) is swallowed rather than surfaced.
-  const sendMentionEmail = (recipientMemberId: string, taskId: string, taskTitle: string, commentBody: string) => {
+  // The title is not sent: the route reads it off the task itself, so the
+  // email can only ever say what the task really says.
+  const sendMentionEmail = (recipientMemberId: string, taskId: string, commentBody: string) => {
     authedFetch("/api/notifications/mention-email", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ recipientMemberId, taskId, taskTitle, commentBody }),
+      body: JSON.stringify({ recipientMemberId, taskId, commentBody }),
     }).catch(() => {});
   };
 
@@ -2762,7 +2905,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         mentioned.add(u.id);
         notify(u.id, `${me.name} mentioned you in “${t.title}”`, id, { kind: "message", skipEmail: true });
         pushToast(`Notified ${u.name}`);
-        sendMentionEmail(u.id, id, t.title, body.trim());
+        sendMentionEmail(u.id, id, body.trim());
       }
     });
     if (t.assigneeId && t.assigneeId !== me.id && !mentioned.has(t.assigneeId)) {
@@ -3157,7 +3300,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const delegateTask = (taskId: string, spec: {
     toId: string; title: string; instructions: string; theirDue: string; followUpAt: string | null;
     size: TaskSize | null; priority: Priority; links: string[];
-  }) => {
+  }, opts?: { skipEmail?: boolean }) => {
     const t = tasksRef.current.find((x) => x.id === taskId);
     if (!t) return;
     // Whatever they called it, or a name derived from the brief when they
@@ -3181,7 +3324,37 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // theirs, and the same rule governs the dock's other actions.
     if (spec.size && !t.size && !t.sizeHours) patch.size = spec.size;
     update(taskId, patch);
-    if (spec.toId !== me.id) notify(spec.toId, `${me.name} delegated "${title}" to you on ${t.title}`, taskId);
+    if (spec.toId !== me.id) notify(spec.toId, `${me.name} delegated "${title}" to you on ${t.title}`, taskId, { skipEmail: opts?.skipEmail });
+  };
+
+  // The same handoff, applied to everything selected. Nine tasks to one person
+  // should differ from nine handoffs only in how long it takes, so each task
+  // gets its own subtask, its own activity line and its own bell, exactly as
+  // it would one at a time. Only the email copies are collapsed: nine bells is
+  // a list, nine emails is a mailbox.
+  const bulkDelegate = (spec: BulkDelegateSpec) => {
+    const chosen = [...selectedTaskIds]
+      .map((id) => tasksRef.current.find((t) => t.id === id))
+      .filter((t): t is Task => !!t);
+    if (!chosen.length) { pushToast("Those tasks are no longer here."); setBulkDelegateOpen(false); return; }
+    const toName = users.find((u) => u.id === spec.toId)?.name ?? "them";
+    const at = new Date().toISOString();
+    bulkDelegations(chosen, spec).forEach(({ taskId, spec: one }, i) => {
+      delegateTask(taskId, one, { skipEmail: i > 0 });
+      // The activity line the dock writes for a single handoff, so a delegated
+      // task reads the same however it got that way.
+      insertTaskAction({
+        id: newId("ta_"), taskId, kind: "delegate", authorId: me.id,
+        toId: spec.toId, parentId: null,
+        body: one.instructions, at,
+        // What you are waiting on is them, not your own follow-up.
+        nextStep: `${toName} to finish this`,
+        nextStepDue: one.theirDue, nextStepDoneAt: null,
+      });
+    });
+    setBulkDelegateOpen(false);
+    clearSelection();
+    pushToast(bulkDelegateSummary(chosen.length, toName));
   };
   const toggleLabel = (taskId: string, labelId: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { labelIds: t.labelIds.includes(labelId) ? t.labelIds.filter((l) => l !== labelId) : [...t.labelIds, labelId] }); };
 
@@ -3792,7 +3965,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // to where the message is"). The recipient is the one reading the mail,
     // so the thread they need is the one with ME in it.
     notify(otherUserId, `${me.name} sent you a message`, null, {
-      kind: "dm", skipEmail: !firstOfBurst, link: `${TEAM_CHAT_LINK}&dm=${encodeURIComponent(me.id)}`,
+      kind: "dm", skipEmail: !firstOfBurst, link: `${DM_LINK_PREFIX}&dm=${encodeURIComponent(me.id)}`,
     });
   };
   const deleteDmMessage = (id: string) => {
@@ -4087,7 +4260,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background sm:hidden"><I.comment /> SMS</button>
           )}
           <div className="px-2.5 pb-0.5 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Share</div>
-          <button onClick={() => { setHeaderMoreOpen(false); copyLink({ view: null, client: activeClient, project: activeProject, task: null, clientTab, vaultFolder: null, dm: null, assignee: null }); }}
+          <button onClick={() => { setHeaderMoreOpen(false); copyLink({ view: null, client: activeClient, project: activeProject, task: null, clientTab, vaultFolder: null, dm: null, assignee: null, sub: null }); }}
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy link</button>
           {activeClient !== "all" && !activeProject && clientById(activeClient) && (
             <button onClick={() => { setHeaderMoreOpen(false); copyClientShareLink(activeClient); }} title="A public, no-login link showing this client what we're waiting on them for"
@@ -4172,16 +4345,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             want to chat with someone specifically they can use the @") but
             not deleted, just admin-toggled off by default. */}
         <nav className="shrink-0 space-y-0.5 px-2">
-          {navVisible.work && <SideItem active={myWork} title="My Work (press 1)" onClick={() => goToView("dashboard")}><I.grid className="text-muted" /> <span>My Work</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + myAssignedProjects.length}</span></SideItem>}
+          <SideItem active={myWork} title="My Work (press 1)" onClick={() => goToView("dashboard")}><I.grid className="text-muted" /> <span>My Work</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + myAssignedProjects.length}</span></SideItem>
           {/* Directly under My Work, which stays exactly as it was — this is
-              a second way in, not a replacement. Deliberately has no number
-              shortcut: NAV_KEY_VIEWS is documented as sidebar order, and
-              slotting All Tasks in at 2 would have shifted every row below it
-              down one and broken existing muscle memory for a key nobody
-              asked for. */}
+              a second way in, not a replacement. It went in without a number
+              shortcut at first, to avoid shifting every row below it down one
+              and breaking muscle memory. Shifting never turned out to be
+              necessary: Clients, Projects and Personal were already on 3, 4
+              and 5, so 2 was a hole in the middle of a list documented as
+              sidebar order, and the second row was the only one you could not
+              reach from the keyboard. It is now 2, and nothing else moved. */}
           {/* Your open tasks, not every task in the database. Every other row
               in this nav carries its count; this one was the exception. */}
-          {navVisible.work && <SideItem active={allTasksView} title={`${openTaskCount} open task${openTaskCount === 1 ? "" : "s"} assigned to you`} onClick={() => goToView("alltasks")}><I.list className="text-muted" /> <span>All Tasks</span><span className="ml-auto text-[13px] text-muted">{openTaskCount}</span></SideItem>}
+          <SideItem active={allTasksView} title={`${openTaskCount} open task${openTaskCount === 1 ? "" : "s"} assigned to you (press 2)`} onClick={() => goToView("alltasks")}><I.list className="text-muted" /> <span>All Tasks</span><span className="ml-auto text-[13px] text-muted">{openTaskCount}</span></SideItem>
           {/* "Client replies" nav item removed (Derek, 2026-08-09) — My Work
               and Follow Up already surface an open conversation-priority
               task each their own way (hasOpenConversationTask / Follow Up's
@@ -4197,7 +4372,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           {clients.some((c) => c.id === WORKSPACE_CLIENT_ID) && (
             <SideItem active={dirView === "projects"} title="Projects (press 4)" onClick={() => goToView("projects")}><I.folder className="text-muted" /> <span>Projects</span><span className="ml-auto text-[13px] text-muted">{workspaceProjects.length}</span></SideItem>
           )}
-          {navVisible.personal && <SideItem active={personalView} title="Personal (press 5)" onClick={() => goToView("personal")}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>}
+          <SideItem active={personalView} title="Personal (press 5)" onClick={() => goToView("personal")}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>
         </nav>
 
         {/* Pinned — per-user quick access to starred clients + lists. Starring
@@ -4286,6 +4461,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <div className="flex rounded-lg bg-background p-0.5">
                 <button onClick={() => setDashboardView("work")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "work" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Work</button>
                 <button onClick={() => setDashboardView("plan")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "plan" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Plan</button>
+                <button onClick={() => setDashboardView("reviews")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "reviews" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Reviews</button>
+                <button onClick={() => setDashboardView("drafts")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "drafts" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Drafts</button>
               </div>
             </div>
           ) : showFilterControl ? (
@@ -4374,11 +4551,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   long the clock has left, not where the work's at) and
                   stays. Client-scoped, so hidden while a project is open. */}
               {!activeProject && canAdmin && (() => {
-                const c = clientById(activeClient)!;
-                if (!c.trialEndsAt) return null;
+                // Only while it is actually running. It used to show for any
+                // client carrying an end date, so one whose trial finished in
+                // June still read "Trial ends 12 Jun" months later.
+                const trial = trialState(clientById(activeClient)!);
+                if (trial.kind !== "running") return null;
                 return (
-                  <span className="inline-flex items-center rounded-md border px-2 py-1 text-[13px] font-medium text-muted" title="14 day trial window, set when this deal closed">
-                    Trial ends {formatDue(c.trialEndsAt)}
+                  <span className="inline-flex items-center rounded-md border px-2 py-1 text-[13px] font-medium text-muted" title={`${TRIAL_DAYS} day trial window, set when this deal closed`}>
+                    Trial ends {formatDue(trial.endsAt)}
                   </span>
                 );
               })()}
@@ -4423,6 +4603,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <div className="inline-flex overflow-hidden rounded-md border">
                 <button onClick={() => setDashboardView("work")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "work" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Work</button>
                 <button onClick={() => setDashboardView("plan")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "plan" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Plan</button>
+                <button onClick={() => setDashboardView("reviews")} title="Everything out with a client right now" className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "reviews" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Reviews</button>
+                <button onClick={() => setDashboardView("drafts")} title="Everything written and not sent yet" className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "drafts" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Drafts</button>
               </div>
               {/* De-emphasized on purpose — the Dashboard is meant to be the
                   one place everyone works from; this is just an escape
@@ -4506,6 +4688,29 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             starredLists={starredLists} onToggleStarList={toggleStarList} />
         ) : personalView ? (
           <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} visibleCols={["followUp", "due"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onAddInGroup={(k) => setDumpGroup({ key: k, personal: true })} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={hideEmpty} colOrder={colOrder} onReorderCols={reorderCols} />
+        ) : myWork && dashboardView === "drafts" ? (
+          <DraftsBoard groups={pendingSends} loading={draftsLoading} onRefresh={loadPendingSends}
+            rowContext={(row) => {
+              const client = clientById(row.clientId);
+              if (!client) return null;
+              const task = row.taskId ? tasks.find((t) => t.id === row.taskId) : null;
+              return { clientName: client.name, taskTitle: task?.title ?? null };
+            }}
+            // A draft on a task opens that task. One on the client itself was
+            // written in the Journal's composer, so that is where it opens, not
+            // on the client's task list where there is no sign of it.
+            onOpen={(row) => {
+              if (row.taskId) { setOpenTaskId(row.taskId); return; }
+              openClientList(row.clientId, null);
+              setClientTab("chat");
+            }} />
+        ) : myWork && dashboardView === "reviews" ? (
+          <ReviewsBoard groups={openReviews} loading={reviewsLoading} onRefresh={loadOpenReviews}
+            taskContext={(taskId) => {
+              const t = tasks.find((x) => x.id === taskId);
+              return t ? { taskTitle: t.title, clientName: clientById(t.clientId)?.name ?? "Unknown client" } : null;
+            }}
+            onOpenTask={setOpenTaskId} />
         ) : myWork && dashboardView === "plan" ? (
           <PlanView days={planDays.days} unplanned={planDays.unplanned} budgetHours={workdayHours} onBudget={setWorkdayHours}
             clientById={clientById} projectById={projectById} onOpen={setOpenTaskId}
@@ -4634,6 +4839,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 className="rounded-md border px-2.5 py-1 text-[15px] font-medium hover:bg-background">Merge</button>
             );
           })()}
+          {users.some((u) => u.id !== me.id) && (
+            <button onClick={() => setBulkDelegateOpen(true)} title={`Hand all ${selectedTaskIds.size} to one person, once`}
+              className="rounded-md border px-2.5 py-1 text-[15px] font-medium hover:bg-background">Delegate</button>
+          )}
           <button onClick={bulkDelete} title="Delete selected tasks" className="rounded-md border border-danger/40 px-2.5 py-1 text-[15px] font-medium text-danger hover:bg-danger/10">Delete</button>
           <button onClick={clearSelection} className="rounded-md border px-2.5 py-1 text-[15px] font-medium hover:bg-background">Clear</button>
         </div>
@@ -4686,16 +4895,21 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={navTaskIds.length} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(body, attachments) => addComment(openTask.id, body, attachments)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onDownloadAll={downloadAllAsZip} zippingIds={zippingIds} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, assignee: null })} onDuplicate={(target) => duplicateTask(openTask.id, target)} projectsFor={projectsForClient} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => openClientList(openTask.clientId, openTask.projectId)} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} onMarkChannelRead={(channel) => markTaskChannelRead(openTask.id, channel)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage(`messages/${openTask.clientId}`, file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc, replyToMessageId) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id, undefined, replyToMessageId) : undefined} onScheduleTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, scheduledAt, attachments, cc, bcc, replyToMessageId) => scheduleMessage(openTask.clientId, channel, subject, body, scheduledAt, attachments, cc, bcc, openTask.id, undefined, replyToMessageId) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt, context) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId, context)} draftingMessage={draftingMessage} canAdmin={canAdmin} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onCopyClientLink={() => copyClientShareLink(openTask.clientId, openTask.projectId)} onDeleteComment={(cid) => deleteComment(openTask.id, cid)} onDraftDescription={draftDescription} draftingDescription={draftingDescription} pushToast={pushToast} meId={me.id}
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onDownloadAll={downloadAllAsZip} zippingIds={zippingIds} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, assignee: null, sub: null })} onDuplicate={(target) => duplicateTask(openTask.id, target)} projectsFor={projectsForClient} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => openClientList(openTask.clientId, openTask.projectId)} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} onMarkChannelRead={(channel) => markTaskChannelRead(openTask.id, channel)} linkedContactInfo={contactForClient(openTask.clientId)} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage(`messages/${openTask.clientId}`, file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc, replyToMessageId) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id, undefined, replyToMessageId) : undefined} onScheduleTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, scheduledAt, attachments, cc, bcc, replyToMessageId) => scheduleMessage(openTask.clientId, channel, subject, body, scheduledAt, attachments, cc, bcc, openTask.id, undefined, replyToMessageId) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt, context) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId, context)} draftingMessage={draftingMessage} canAdmin={canAdmin} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onCopyClientLink={() => copyClientShareLink(openTask.clientId, openTask.projectId)} onDeleteComment={(cid) => deleteComment(openTask.id, cid)} onDraftDescription={draftDescription} draftingDescription={draftingDescription} pushToast={pushToast} meId={me.id}
           onSendDm={(userId, body) => sendDmMessage(userId, body)}
           onDelegate={(spec) => delegateTask(openTask.id, spec)}
           clientLinks={clientLinks.filter((l) => l.clientId === openTask.clientId)}
-          taskLink={() => linkTo({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, assignee: null })} />
+          taskLink={() => linkTo({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, assignee: null, sub: null })} />
       )}
 
       {addClientOpen && <AddClientModal subAccounts={subAccounts} contacts={contacts} existingIds={new Set(clients.map((c) => c.id))} onAdd={addClientContact} onAddRemote={addRemoteContact} onClose={() => setAddClientOpen(false)} />}
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
       {promptDialog && <PromptModal {...promptDialog} onCancel={() => setPromptDialog(null)} />}
+      {shortcutsOpen && <ShortcutsModal onClose={() => setShortcutsOpen(false)} />}
+      {bulkDelegateOpen && (
+        <BulkDelegateModal count={selectedTaskIds.size} users={users.filter((u) => u.id !== me.id)}
+          onCancel={() => setBulkDelegateOpen(false)} onDelegate={bulkDelegate} onProblem={pushToast} />
+      )}
       {mergeSourceId && (() => {
         const src = tasks.find((t) => t.id === mergeSourceId);
         if (!src) return null;
@@ -4732,49 +4946,85 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <div className="fixed inset-0 z-40 bg-black/30" onClick={() => setClientSettingsOpen(false)} />
           <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col overflow-hidden border-l bg-surface shadow-xl">
             <div className="flex items-center justify-between border-b px-5 py-3">
-              <h2 className="text-[16px] font-semibold">Client settings — {settingsClient.name}</h2>
+              <h2 className="text-[17px] font-semibold">Client settings — {settingsClient.name}</h2>
               <button onClick={() => setClientSettingsOpen(false)} className="rounded-md p-1.5 text-muted hover:bg-background hover:text-foreground"><I.close /></button>
             </div>
             <div className="flex-1 space-y-5 overflow-y-auto p-5">
               <div>
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Client portal</div>
+                <div className="mb-2 text-[16px] font-semibold uppercase tracking-wide text-muted">Client portal</div>
                 <div className="space-y-3">
                   <label className="flex items-start justify-between gap-3">
-                    <span><span className="block text-[14px] font-medium">Client can add requests</span><span className="block text-[13px] text-muted">They can submit new task requests from their portal link, not just reply to what we send.</span></span>
+                    <span><span className="block text-[16px] font-medium">Client can add requests</span><span className="block text-[16px] text-muted">They can submit new task requests from their portal link, not just reply to what we send.</span></span>
                     <button onClick={() => toggleClientCanRequestNewTasks(activeClient)} className={`mt-0.5 flex h-5 w-9 shrink-0 items-center rounded-full transition ${settingsClient.canRequestNewTasks ? "bg-accent" : "bg-border"}`}><span className={`h-4 w-4 rounded-full bg-white shadow transition ${settingsClient.canRequestNewTasks ? "translate-x-4" : "translate-x-0.5"}`} /></button>
                   </label>
                   <label className="flex items-start justify-between gap-3">
-                    <span><span className="block text-[14px] font-medium">Client sees all tasks</span><span className="block text-[13px] text-muted">Their portal also lists what the team is working on and what&apos;s been completed, not just what needs them. Every non-private task on this account becomes readable by the client.</span></span>
+                    <span><span className="block text-[16px] font-medium">Client sees all tasks</span><span className="block text-[16px] text-muted">Their portal also lists what the team is working on and what&apos;s been completed, not just what needs them. Every non-private task on this account becomes readable by the client.</span></span>
                     <button onClick={() => toggleClientPortalShowsAllTasks(activeClient)} className={`mt-0.5 flex h-5 w-9 shrink-0 items-center rounded-full transition ${settingsClient.portalShowsAllTasks ? "bg-accent" : "bg-border"}`}><span className={`h-4 w-4 rounded-full bg-white shadow transition ${settingsClient.portalShowsAllTasks ? "translate-x-4" : "translate-x-0.5"}`} /></button>
                   </label>
                 </div>
-                <button onClick={() => copyClientShareLink(activeClient)} className="mt-3 flex items-center gap-1.5 text-[13px] font-medium text-accent hover:underline"><I.link className="h-3.5 w-3.5" /> Copy portal link</button>
+                <button onClick={() => copyClientShareLink(activeClient)} className="mt-3 flex items-center gap-1.5 text-[16px] font-medium text-accent hover:underline"><I.link className="h-3.5 w-3.5" /> Copy portal link</button>
               </div>
+              {/* The trial window is stamped once, when the deal closes, and
+                  never re-stamped, so it cannot silently slide forward. That
+                  left no way to CLOSE one either: a client who cancelled in
+                  week one carried "in trial" until the date caught up. Ending
+                  it keeps the date, so what was promised stays on the record. */}
+              {(() => {
+                const trial = trialState(settingsClient);
+                if (trial.kind === "none") return null;
+                return (
+                  <div className="border-t pt-4">
+                    <div className="mb-2 text-[16px] font-semibold uppercase tracking-wide text-muted">Trial</div>
+                    {trial.kind === "running" ? (
+                      <div className="flex items-start justify-between gap-3">
+                        <span>
+                          <span className="block text-[16px] font-medium">Ends {formatDue(trial.endsAt)}</span>
+                          <span className="block text-[16px] text-muted">
+                            {trial.daysLeft === 0 ? "Last day." : `${trial.daysLeft} day${trial.daysLeft === 1 ? "" : "s"} left.`}
+                          </span>
+                        </span>
+                        {canAdmin && (
+                          <button onClick={() => setConfirmDialog({
+                            title: `End ${settingsClient.name}'s trial?`,
+                            message: "They stop counting as in trial from now. The date it was due to end stays on the record, and nothing else about the account changes.",
+                            confirmLabel: "End trial", danger: false,
+                            onConfirm: () => { setConfirmDialog(null); endClientTrial(activeClient); },
+                          })} className="shrink-0 rounded-md border px-2.5 py-1 text-[16px] font-medium hover:bg-background">End trial</button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-[16px] text-muted">
+                        {trial.ended === "closed early" ? "Closed early" : "Ended"} · was due to end {formatDue(trial.endsAt)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               <div className="border-t pt-4">
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">GoHighLevel</div>
+                <div className="mb-2 text-[16px] font-semibold uppercase tracking-wide text-muted">GoHighLevel</div>
                 {settingsClient.linkedContactId ? (
                   <div className="flex items-center justify-between gap-2">
-                    <span className="inline-flex items-center gap-1.5 text-[14px] text-accent"><span className="h-2 w-2 rounded-full bg-accent" /> Connected</span>
+                    <span className="inline-flex items-center gap-1.5 text-[16px] text-accent"><span className="h-2 w-2 rounded-full bg-accent" /> Connected</span>
                     <span className="flex items-center gap-3">
-                      {ghlContactUrlFor(activeClient) && <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" className="text-[13px] font-medium text-accent hover:underline">Open in GHL</a>}
-                      {canAdmin && <button onClick={() => linkClientToContact(activeClient, null)} className="text-[13px] font-medium text-muted hover:text-danger">Unlink</button>}
+                      {ghlContactUrlFor(activeClient) && <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" className="text-[16px] font-medium text-accent hover:underline">Open in GHL</a>}
+                      {canAdmin && <button onClick={() => linkClientToContact(activeClient, null)} className="text-[16px] font-medium text-muted hover:text-danger">Unlink</button>}
                     </span>
                   </div>
                 ) : (
                   <div className="flex items-center justify-between gap-2">
-                    <span className="inline-flex items-center gap-1.5 text-[14px] text-muted"><span className="h-2 w-2 rounded-full bg-border" /> Not linked</span>
-                    {canAdmin && <button onClick={() => { setClientSettingsOpen(false); setGhlLinkSearch(""); setGhlLinkOpen(true); }} className="text-[13px] font-medium text-accent hover:underline">Link to GoHighLevel</button>}
+                    <span className="inline-flex items-center gap-1.5 text-[16px] text-muted"><span className="h-2 w-2 rounded-full bg-border" /> Not linked</span>
+                    {canAdmin && <button onClick={() => { setClientSettingsOpen(false); setGhlLinkSearch(""); setGhlLinkOpen(true); }} className="text-[16px] font-medium text-accent hover:underline">Link to GoHighLevel</button>}
                   </div>
                 )}
               </div>
               <div className="border-t pt-4">
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Ownership</div>
+                <div className="mb-2 text-[16px] font-semibold uppercase tracking-wide text-muted">Ownership</div>
                 {/* There's no separate "owner" field in the data model — Following
                     (assignedTo) already IS what puts a client in someone's My Work
                     queue (see assignedClientsFor), so it does double duty as
                     ownership here rather than this sheet inventing a second field
                     the brief's open question proposed but the app doesn't need. */}
-                <p className="mb-2 text-[13px] text-muted">Following decides whose My Work queue this client shows up in.</p>
+                <p className="mb-2 text-[16px] text-muted">Following decides whose My Work queue this client shows up in.</p>
                 {canAdmin ? (
                   <div className="flex flex-col gap-0.5">
                     {users.map((u) => {
@@ -4782,25 +5032,25 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                       return (
                         <button key={u.id} onClick={() => toggleClientAssignment(activeClient, u.id)} className="flex items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-background">
                           <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "border-accent bg-accent text-white" : "border-border"}`}>{on && <I.check />}</span>
-                          <Avatar id={u.id} size={18} /> <span className="truncate text-[13px]">{u.name}</span>
+                          <Avatar id={u.id} size={18} /> <span className="truncate text-[16px]">{u.name}</span>
                         </button>
                       );
                     })}
                   </div>
                 ) : (
-                  <div className="text-[13px] text-muted">{(settingsClient.assignedTo ?? []).length === 0 ? "Nobody yet" : (settingsClient.assignedTo ?? []).map((uid) => userById(uid)?.name).filter(Boolean).join(", ")}</div>
+                  <div className="text-[16px] text-muted">{(settingsClient.assignedTo ?? []).length === 0 ? "Nobody yet" : (settingsClient.assignedTo ?? []).map((uid) => userById(uid)?.name).filter(Boolean).join(", ")}</div>
                 )}
               </div>
               {canAdmin && (
                 <div className="space-y-2 border-t pt-4">
-                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Danger zone</div>
+                  <div className="mb-1 text-[16px] font-semibold uppercase tracking-wide text-muted">Danger zone</div>
                   {activeClient.startsWith("cl_") && (
                     <button onClick={() => { setClientSettingsOpen(false); setMergeClientState({ a: settingsClient }); }}
-                      className="flex w-full items-center gap-2 rounded-md border px-3 py-2 text-left text-[14px] hover:bg-background"><I.repeat /> Merge with another client…</button>
+                      className="flex w-full items-center gap-2 rounded-md border px-3 py-2 text-left text-[16px] hover:bg-background"><I.repeat /> Merge with another client…</button>
                   )}
                   {settingsClient.status !== "past_client" && (
                     <button onClick={() => { setClientSettingsOpen(false); setConfirmDialog({ title: `Archive ${settingsClient.name}?`, message: "Marks this client Past Client. Their tasks and history stay intact — this just takes them out of active views.", confirmLabel: "Archive", danger: true, onConfirm: () => { setConfirmDialog(null); setClientStatus(activeClient, "past_client"); } }); }}
-                      className="flex w-full items-center gap-2 rounded-md border px-3 py-2 text-left text-[14px] text-danger hover:bg-red-50"><I.close /> Archive client</button>
+                      className="flex w-full items-center gap-2 rounded-md border px-3 py-2 text-left text-[16px] text-danger hover:bg-red-50"><I.close /> Archive client</button>
                   )}
                 </div>
               )}

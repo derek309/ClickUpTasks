@@ -7,7 +7,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-const STATUSES = ["todo", "in_progress", "review", "changes_requested", "waiting", "done"];
+// Must stay in step with TaskStatus in src/lib/data.ts — a status missing here
+// is one Claude can neither read back nor set, and the app shows plenty of them.
+const STATUSES = ["todo", "get_started", "in_progress", "review", "changes_requested", "waiting", "approved", "delegated", "done"];
 const GHL = "https://services.leadconnectorhq.com";
 const SUB2LOC = { c_agency: "7B0Y8xCOblcTHzYnM1Kc", c_directory: "GN4HK1ybbTBWcolEjLHl" };
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36";
@@ -119,6 +121,27 @@ export function createServer(opts = {}) {
   }
   const enc = encodeURIComponent;
 
+  // These queries run on the service role key, which bypasses row level
+  // security, so the app's own two visibility rules are applied by hand here —
+  // the same pair src/lib/taskAccess.ts applies on every web route. A trashed
+  // row is gone as far as Claude is concerned (it would otherwise read as live
+  // right up until the 30-day purge deletes it), and a private task belongs to
+  // its assignee alone (supabase/private-tasks.sql), even when it was
+  // delegated: every private task lives under the one shared "personal"
+  // pseudo-client, so without this a client listing there returns the whole
+  // team's private work.
+  const LIVE = "&deleted_at=is.null";
+  const maySee = (t) => !!t && !t.deleted_at && (!t.is_private || t.assignee_id === ME);
+  // Every task read goes through this, so no tool can forget either rule, and
+  // every task write carries LIVE so a row trashed mid-call is not written to.
+  async function loadTask(id, cols = "*") {
+    const select = cols === "*" ? "*" : `${cols},deleted_at,is_private,assignee_id`;
+    const [t] = await sb(`tasks?select=${select}&id=eq.${enc(id)}${LIVE}`);
+    return maySee(t) ? t : null;
+  }
+  const patchTask = (id, patch) => sb(`tasks?id=eq.${enc(id)}${LIVE}`, "PATCH", patch);
+  const noTask = (id) => ({ content: [{ type: "text", text: `No task ${id}.` }] });
+
   // Push a status change to GoHighLevel for a GHL-linked task (best-effort).
   async function pushGhlStatus(t) {
     if (!t.ghl_task_id || !t.contact_id) return null;
@@ -145,8 +168,8 @@ export function createServer(opts = {}) {
   async function names(force = false) {
     if (!force && namesAt && Date.now() - namesAt < NAMES_TTL_MS) return;
     const fresh = {}, freshProjects = {};
-    for (const c of await sb("clients?select=id,name")) fresh[c.id] = c.name;
-    for (const p of await sb("projects?select=id,name")) freshProjects[p.id] = p.name;
+    for (const c of await sb("clients?select=id,name&deleted_at=is.null")) fresh[c.id] = c.name;
+    for (const p of await sb("projects?select=id,name&deleted_at=is.null")) freshProjects[p.id] = p.name;
     clientNames = fresh; projectNames = freshProjects; namesAt = Date.now();
   }
 
@@ -187,12 +210,12 @@ export function createServer(opts = {}) {
       limit: z.number().optional() },
     async ({ client, status, priority, include_done, limit }) => {
       await names();
-      let q = `tasks?select=*&or=(assignee_id.eq.${ME},delegated_to.cs.[\"${ME}\"])&order=due.asc.nullslast`;
+      let q = `tasks?select=*&or=(assignee_id.eq.${ME},delegated_to.cs.[\"${ME}\"])${LIVE}&order=due.asc.nullslast`;
       if (status) q += `&status=eq.${status}`;
       else if (!include_done) q += `&status=neq.done`;
       if (priority) q += `&priority=eq.${priority}`;
       q += `&limit=${limit || 100}`;
-      let rows = await sb(q);
+      let rows = (await sb(q)).filter(maySee);
       if (client) { const cl = client.toLowerCase(); rows = rows.filter((t) => (clientNames[t.client_id] || "").toLowerCase().includes(cl)); }
       if (!rows.length) return { content: [{ type: "text", text: "No matching tasks." }] };
       return { content: [{ type: "text", text: `${rows.length} task(s):\n\n${rows.map(brief).join("\n\n")}` }] };
@@ -212,11 +235,11 @@ export function createServer(opts = {}) {
       if (!clientNames[client_id]) return { content: [{ type: "text", text: `No client ${client_id}.` }] };
       if (project_id && !projectNames[project_id]) await names(true);
       if (project_id && !projectNames[project_id]) return { content: [{ type: "text", text: `No project ${project_id}.` }] };
-      let q = `tasks?select=*&client_id=eq.${enc(client_id)}&order=due.asc.nullslast`;
+      let q = `tasks?select=*&client_id=eq.${enc(client_id)}${LIVE}&order=due.asc.nullslast`;
       if (project_id) q += `&project_id=eq.${enc(project_id)}`;
       if (!include_done) q += `&status=neq.done`;
       q += `&limit=${limit || 200}`;
-      const rows = await sb(q);
+      const rows = (await sb(q)).filter(maySee);
       if (!rows.length) return { content: [{ type: "text", text: "No matching tasks." }] };
       return { content: [{ type: "text", text: `${rows.length} task(s):\n\n${rows.map(brief).join("\n\n")}` }] };
     });
@@ -226,8 +249,8 @@ export function createServer(opts = {}) {
     { id: z.string() },
     async ({ id }) => {
       await names();
-      const [t] = await sb(`tasks?select=*&id=eq.${enc(id)}`);
-      if (!t) return { content: [{ type: "text", text: `No task ${id}.` }] };
+      const t = await loadTask(id);
+      if (!t) return noTask(id);
       const checklist = (t.subtasks || []).map((s) => ({ title: s.title, done: !!s.done }));
       const links = (t.attachments || []).filter((a) => a.url).map((a) => `  - ${a.name}: ${a.url}`).join("\n");
       const comments = (t.comments || []).filter((c) => c.kind !== "event").slice(-5).map((c) => `  - ${c.body}`).join("\n");
@@ -261,7 +284,7 @@ export function createServer(opts = {}) {
       if (pid && !projectNames[pid]) await names(true);
       if (pid && !projectNames[pid]) return { content: [{ type: "text", text: `No project ${pid}.` }] };
       if (!pid) {
-        const existing = await sb(`projects?select=id&client_id=eq.${enc(client_id)}&limit=1`);
+        const existing = await sb(`projects?select=id&client_id=eq.${enc(client_id)}&deleted_at=is.null&limit=1`);
         if (existing?.length) pid = existing[0].id;
         else {
           pid = rid("p_");
@@ -312,15 +335,12 @@ export function createServer(opts = {}) {
       if (description !== undefined) patch.description = description;
       if (priority !== undefined) patch.priority = priority;
       if (due !== undefined) patch.due = due;
-      // "waiting" status and waiting_on_client always move together (see
-      // data.ts's applyWaitingStatusSync) — only fetch the task's current
-      // status when a change here could actually cross that boundary, to
-      // avoid a round-trip on a plain title/description/due edit.
-      let before = null;
-      if (assignee_id !== undefined || waiting_on_client !== undefined) {
-        [before] = await sb(`tasks?select=status&id=eq.${enc(id)}`);
-        if (!before) return { content: [{ type: "text", text: `No task ${id}.` }] };
-      }
+      // Read first on every edit, not only the ones that could cross the
+      // waiting boundary: the read is what enforces trash and privacy, and
+      // "waiting" status and waiting_on_client always move together after it
+      // (see data.ts's applyWaitingStatusSync).
+      const before = await loadTask(id, "status");
+      if (!before) return noTask(id);
       if (assignee_id !== undefined) {
         const resolved = await resolveAssignee(assignee_id);
         if (resolved.error) return { content: [{ type: "text", text: resolved.error }] };
@@ -336,8 +356,8 @@ export function createServer(opts = {}) {
         else if (before.status === "waiting") patch.status = "review";
       }
       if (!Object.keys(patch).length) return { content: [{ type: "text", text: "Nothing to update — provide at least one field." }] };
-      const [t] = await sb(`tasks?id=eq.${enc(id)}`, "PATCH", patch);
-      if (!t) return { content: [{ type: "text", text: `No task ${id}.` }] };
+      const [t] = await patchTask(id, patch);
+      if (!t) return noTask(id);
       let ghl = "";
       if (t.ghl_task_id) { try { const ok = await pushGhlStatus(t); ghl = ok ? " (synced to GoHighLevel)" : " (GoHighLevel push failed)"; } catch { ghl = " (GoHighLevel push errored)"; } }
       await members();
@@ -352,9 +372,9 @@ export function createServer(opts = {}) {
     "Permanently delete a task — cannot be undone, always confirm with the user first. Does NOT delete its mirror in GoHighLevel if it has one.",
     { id: z.string() },
     async ({ id }) => {
-      const [t] = await sb(`tasks?select=id,title&id=eq.${enc(id)}`);
-      if (!t) return { content: [{ type: "text", text: `No task ${id}.` }] };
-      await sb(`tasks?id=eq.${enc(id)}`, "DELETE");
+      const t = await loadTask(id, "id,title");
+      if (!t) return noTask(id);
+      await sb(`tasks?id=eq.${enc(id)}${LIVE}`, "DELETE");
       return { content: [{ type: "text", text: `Deleted ${id}: "${t.title}".` }] };
     });
 
@@ -362,16 +382,15 @@ export function createServer(opts = {}) {
     "Set a task's status (todo | in_progress | review | changes_requested | waiting | done). Use to start or complete work. Setting \"waiting\" also marks the task waiting on the client (clearing its assignee), same as the app's Waiting column.",
     { id: z.string(), status: z.enum(STATUSES) },
     async ({ id, status }) => {
+      const before = await loadTask(id, "status");
+      if (!before) return noTask(id);
       const patch = { status };
       // "waiting" status and waiting_on_client always move together (see
       // data.ts's applyWaitingStatusSync) — replicated here since this tool
       // is a separate Node process with no app import.
       if (status === "waiting") { patch.waiting_on_client = true; patch.assignee_id = null; }
-      else {
-        const [before] = await sb(`tasks?select=status&id=eq.${enc(id)}`);
-        if (before?.status === "waiting") patch.waiting_on_client = false;
-      }
-      const [t] = await sb(`tasks?id=eq.${enc(id)}`, "PATCH", patch);
+      else if (before.status === "waiting") patch.waiting_on_client = false;
+      const [t] = await patchTask(id, patch);
       let ghl = "";
       if (t?.ghl_task_id) { try { const ok = await pushGhlStatus(t); ghl = ok ? " (synced to GoHighLevel)" : " (GoHighLevel push failed)"; } catch { ghl = " (GoHighLevel push errored)"; } }
       return { content: [{ type: "text", text: `Set ${id} → ${status}.${ghl}` }] };
@@ -381,15 +400,14 @@ export function createServer(opts = {}) {
     "Add a progress comment to a task (logged as you).",
     { id: z.string(), text: z.string() },
     async ({ id, text }) => {
-      const [t] = await sb(`tasks?select=id&id=eq.${enc(id)}`);
-      if (!t) return { content: [{ type: "text", text: `No task ${id}.` }] };
+      if (!await loadTask(id, "id")) return noTask(id);
       // Atomic append, not a read then write of the whole list, which erased
       // any client comment or approval that landed in between. append_comment
       // stamps updated_by with the author and the app skips live updates
       // stamped with the viewer's own id, so clear it or the comment would not
       // show live for that teammate (same order as clientPublish).
       await sb("rpc/append_comment", "POST", { task_id: id, comment: { id: rid("cm_"), authorId: ME, body: text, at: nowIso() } });
-      await sb(`tasks?id=eq.${enc(id)}`, "PATCH", { updated_by: null });
+      await patchTask(id, { updated_by: null });
       return { content: [{ type: "text", text: `Comment added to ${id}.` }] };
     });
 
@@ -397,12 +415,11 @@ export function createServer(opts = {}) {
     "Prepare an email on a task for a human to review and send — never sends anything itself. The draft appears in the task's own review panel in the app (subject + body, editable), where a teammate edits if needed and hits Send. A task holds one draft: this won't replace a draft already waiting unless replace is true. Body should be plain text (paragraphs separated by a blank line) — it's converted to formatted HTML for the review panel.",
     { id: z.string(), subject: z.string(), body: z.string(), replace: z.boolean().optional().describe("replace a draft already waiting on the task") },
     async ({ id, subject, body, replace }) => {
-      const [t] = await sb(`tasks?select=id&id=eq.${enc(id)}`);
-      if (!t) return { content: [{ type: "text", text: `No task ${id}.` }] };
+      if (!await loadTask(id, "id")) return noTask(id);
       const now = nowIso();
       const draft_email = { subject, body: draftPlainTextToHtml(body), createdAt: now, updatedAt: now };
       // updated_by null makes a task open in the app pick the draft up live.
-      const saved = await sb(`tasks?id=eq.${enc(id)}${replace ? "" : "&draft_email=is.null"}`, "PATCH", { draft_email, updated_by: null });
+      const saved = await sb(`tasks?id=eq.${enc(id)}${LIVE}${replace ? "" : "&draft_email=is.null"}`, "PATCH", { draft_email, updated_by: null });
       if (!saved.length) return { content: [{ type: "text", text: `${id} already has a draft email waiting. Pass replace: true to swap it.` }] };
       return { content: [{ type: "text", text: `Draft email saved on ${id} — waiting for review in the app.` }] };
     });
@@ -553,13 +570,13 @@ export function createServer(opts = {}) {
     "Tick (or untick) a checklist item on a task by matching its title text.",
     { id: z.string(), item: z.string().describe("checklist item title (substring)"), done: z.boolean().optional() },
     async ({ id, item, done }) => {
-      const [t] = await sb(`tasks?select=subtasks&id=eq.${enc(id)}`);
-      if (!t) return { content: [{ type: "text", text: `No task ${id}.` }] };
+      const t = await loadTask(id, "subtasks");
+      if (!t) return noTask(id);
       const it = item.toLowerCase();
       let hit = null;
       const subtasks = (t.subtasks || []).map((s) => (!hit && s.title.toLowerCase().includes(it) ? (hit = s, { ...s, done: done ?? true }) : s));
       if (!hit) return { content: [{ type: "text", text: `No checklist item matching "${item}".` }] };
-      await sb(`tasks?id=eq.${enc(id)}`, "PATCH", { subtasks });
+      await patchTask(id, { subtasks });
       return { content: [{ type: "text", text: `Checklist "${hit.title}" → ${done ?? true ? "done" : "open"}.` }] };
     });
 
@@ -567,13 +584,13 @@ export function createServer(opts = {}) {
     "Add one or more unchecked checklist items to a task, in the order given. Creates the checklist if the task has none yet. Check get_task first to see what's already there and avoid duplicates.",
     { id: z.string(), items: z.array(z.string()).min(1).describe("item titles to add, unchecked") },
     async ({ id, items }) => {
-      const [t] = await sb(`tasks?select=subtasks&id=eq.${enc(id)}`);
-      if (!t) return { content: [{ type: "text", text: `No task ${id}.` }] };
+      const t = await loadTask(id, "subtasks");
+      if (!t) return noTask(id);
       const titles = items.map((s) => s.trim()).filter(Boolean);
       if (!titles.length) return { content: [{ type: "text", text: "No items to add." }] };
       const added = titles.map((title) => ({ id: rid("s_"), title, done: false }));
       const subtasks = [...(t.subtasks || []), ...added];
-      await sb(`tasks?id=eq.${enc(id)}`, "PATCH", { subtasks });
+      await patchTask(id, { subtasks });
       const summary = added.map((s) => ({ id: s.id, title: s.title }));
       return { content: [{ type: "text", text: `Added ${added.length} checklist item(s) to ${id}: ${JSON.stringify(summary)}` }] };
     });
@@ -593,7 +610,7 @@ export function createServer(opts = {}) {
     {},
     async () => {
       await names();
-      const rows = await sb("clients?select=id,name&order=name");
+      const rows = await sb("clients?select=id,name&deleted_at=is.null&order=name");
       return { content: [{ type: "text", text: rows.map((c) => `${c.name}  [${c.id}]`).join("\n") }] };
     });
 
@@ -602,7 +619,7 @@ export function createServer(opts = {}) {
     { client: z.string().optional().describe("filter by client name (substring, case-insensitive)") },
     async ({ client }) => {
       await names();
-      let rows = await sb("projects?select=id,name,client_id&order=name");
+      let rows = await sb("projects?select=id,name,client_id&deleted_at=is.null&order=name");
       if (client) { const cl = client.toLowerCase(); rows = rows.filter((p) => (clientNames[p.client_id] || "").toLowerCase().includes(cl)); }
       if (!rows.length) return { content: [{ type: "text", text: "No matching projects." }] };
       return { content: [{ type: "text", text: rows.map((p) => `${p.name}  [${p.id}]  · ${clientNames[p.client_id] || p.client_id}`).join("\n") }] };
@@ -644,14 +661,14 @@ export function createServer(opts = {}) {
     { client_id: z.string(), project_id: z.string().optional().describe("link to a single list rather than the whole client") },
     async ({ client_id, project_id }) => {
       if (client_id === PERSONAL_CLIENT_ID) return { content: [{ type: "text", text: "Personal tasks are private — there is no client link for them." }] };
-      const [client] = await sb(`clients?select=name,share_token&id=eq.${enc(client_id)}`);
+      const [client] = await sb(`clients?select=name,share_token&id=eq.${enc(client_id)}&deleted_at=is.null`);
       if (!client) return { content: [{ type: "text", text: `No client ${client_id}.` }] };
 
       // A project link is its own token, not the client's with a query
       // parameter — same split the web app makes, so revoking one doesn't
       // touch the other.
       if (project_id) {
-        const [project] = await sb(`projects?select=name,client_id,share_token&id=eq.${enc(project_id)}`);
+        const [project] = await sb(`projects?select=name,client_id,share_token&id=eq.${enc(project_id)}&deleted_at=is.null`);
         if (!project) return { content: [{ type: "text", text: `No list ${project_id}.` }] };
         if (project.client_id !== client_id) return { content: [{ type: "text", text: `List ${project_id} doesn't belong to ${client.name}.` }] };
         let token = project.share_token;
@@ -674,15 +691,16 @@ export function createServer(opts = {}) {
     "One-shot orientation on a client: status, cached AI summary, recent journal notes, quick links (websites/Drive folders), and open task count. Use this before working on a client instead of piecing it together from list_clients + list_notes + list_links + list_client_tasks separately.",
     { client_id: z.string() },
     async ({ client_id }) => {
-      const [client] = await sb(`clients?select=name,status,ai_summary,ai_summary_at&id=eq.${enc(client_id)}`);
+      const [client] = await sb(`clients?select=name,status,ai_summary,ai_summary_at&id=eq.${enc(client_id)}&deleted_at=is.null`);
       if (!client) return { content: [{ type: "text", text: `No client ${client_id}.` }] };
       const [notes, links, openTasks] = await Promise.all([
         sb(`client_notes?select=type,body,created_at&client_id=eq.${enc(client_id)}&project_id=is.null&order=created_at.desc&limit=8`),
         sb(`client_links?select=label,url,group_label&client_id=eq.${enc(client_id)}&order=position.asc`),
-        sb(`tasks?select=id&client_id=eq.${enc(client_id)}&status=neq.done`),
+        sb(`tasks?select=id,is_private,assignee_id&client_id=eq.${enc(client_id)}&status=neq.done${LIVE}`),
       ]);
+      const open = openTasks.filter(maySee);
       const text = [
-        `${client.name} — status: ${client.status ?? "unknown"} · ${openTasks.length} open task(s)`,
+        `${client.name} — status: ${client.status ?? "unknown"} · ${open.length} open task(s)`,
         client.ai_summary ? `\nAI summary (as of ${client.ai_summary_at || "?"}):\n${client.ai_summary}` : "",
         links.length ? `\nLinks:\n${links.map((l) => `  - ${l.group_label ? `[${l.group_label}] ` : ""}${l.label}: ${l.url}`).join("\n")}` : "",
         notes.length ? `\nRecent journal notes (newest first):\n${notes.map((n) => `  - [${n.type}] ${(n.body || "").slice(0, 300)} (${n.created_at})`).join("\n")}` : "",

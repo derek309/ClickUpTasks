@@ -28,7 +28,11 @@ describe("page frame tickets", () => {
     const [payload, mac] = ticket.slice(3).split(".");
     const forged = Buffer.from(JSON.stringify({ d: DOC, f: "tdf_00000000-0000-0000-0000-000000000000", e: Date.now() + 60_000 })).toString("base64url");
     expect(readFrameTicket(`pf_${forged}.${mac}`)).toBeNull();
-    expect(readFrameTicket(`pf_${payload}.${mac.slice(0, -1)}A`)).toBeNull();
+    // A character that is definitely NOT the one already there: the signature
+    // covers a timestamp, so about one run in sixty four minted a MAC ending in
+    // "A", where swapping in an "A" changed nothing and the ticket verified.
+    const flipped = mac.slice(0, -1) + (mac.endsWith("A") ? "B" : "A");
+    expect(readFrameTicket(`pf_${payload}.${flipped}`)).toBeNull();
   });
 
   it("refuses a ticket made with another secret", () => {

@@ -41,6 +41,10 @@ export async function POST(req: NextRequest) {
   if (prefColumn === false) return NextResponse.json({ ok: true, skipped: "opted-out" });
 
   const url = link ? `${APP_URL}/${link}` : APP_URL;
+  // Capped once, for the subject line and the body it is repeated in: the text
+  // arrives from the caller, and an unbounded one would be a long email with a
+  // short subject rather than the one-line note this is meant to be.
+  const line = subject.trim().slice(0, 200);
 
   try {
     const { id } = await sendGmailAs(caller.email, {
@@ -50,8 +54,8 @@ export async function POST(req: NextRequest) {
       // whatever name it associates with that address, which is how an update
       // Justin made could arrive looking like it came from Derek Fox.
       fromName: (sender?.name as string | null)?.trim() || undefined,
-      subject: subject.trim().slice(0, 200),
-      body: `${subject.trim()}\n\nView in ClickUpTasks: ${url}`,
+      subject: line,
+      body: `${line}\n\nView in ClickUpTasks: ${url}`,
     });
     return NextResponse.json({ ok: true, gmailMessageId: id });
   } catch (e) {

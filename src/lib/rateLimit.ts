@@ -87,6 +87,19 @@ export const RATE_LIMITS: Record<WaitingAction, Rule> = {
   page_frame:  { limit: 240, windowMs: 10 * MINUTE },
 };
 
+/** A fixed window limit on a key you choose, for the signed-in side of the app,
+ *  where the share-token scheme above does not apply and the natural key is the
+ *  person rather than the link. Same Postgres store and the same fail-open
+ *  rule: if the store errors, the request goes through. */
+export async function rateLimitBy(key: string, limit: number, windowMs: number): Promise<NextResponse | null> {
+  const count = await bump(`${key}:${Math.floor(Date.now() / windowMs)}`);
+  if (count === null || count <= limit) return null;
+  return NextResponse.json(
+    { error: "Too many requests. Please wait a moment and try again." },
+    { status: 429, headers: { "Retry-After": String(retryAfterSeconds(windowMs)) } },
+  );
+}
+
 /** Seconds until the current fixed window rolls over — exact for this
  *  scheme, so Retry-After tells the caller the truth rather than a guess. */
 export function retryAfterSeconds(windowMs: number, now: number = Date.now()): number {

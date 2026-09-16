@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/serverAuth";
+import { aiRateLimit, geminiEndpoint } from "@/lib/ai";
 
 // Proposes the next step after you log an action on a task (Derek: "we can
 // use Gemini to help keep us organised and on track").
@@ -17,7 +18,6 @@ import { requireUser } from "@/lib/serverAuth";
 // next move. Every one of them is a suggestion the dock shows you before
 // anything is written.
 
-const GEMINI_MODEL = "gemini-flash-latest";
 const GEMINI_TIMEOUT_MS = 12000;
 const MAX_HISTORY = 8;
 
@@ -39,6 +39,8 @@ const SIZES = ["quick", "hour", "h2", "h3", "half", "full", "multi"];
 export async function POST(req: NextRequest) {
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const limited = await aiRateLimit(caller.id);
+  if (limited) return limited;
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "AI isn't configured yet (missing GEMINI_API_KEY)." }, { status: 501 });
@@ -94,7 +96,7 @@ export async function POST(req: NextRequest) {
   ].filter(Boolean).join("\n");
 
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
+    const res = await fetch(geminiEndpoint(apiKey), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

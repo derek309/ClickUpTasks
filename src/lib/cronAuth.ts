@@ -6,16 +6,9 @@
 // The GoHighLevel webhook secret used to work here too, as ?secret=. It sits
 // in plain text in every sub-account's workflow URL, so anyone who could open
 // a workflow could fire scheduled sends. It now only opens the webhook.
-import { timingSafeEqual } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { requireUser } from "./serverAuth";
-
-function sameSecret(given: string, expected: string): boolean {
-  const a = Buffer.from(given);
-  const b = Buffer.from(expected);
-  // timingSafeEqual throws on a length mismatch rather than returning false.
-  return a.length === b.length && timingSafeEqual(a, b);
-}
+import { sameSecret } from "./sameSecret";
 
 export async function authorizeCron(req: NextRequest): Promise<boolean> {
   const secret = process.env.CRON_SECRET;

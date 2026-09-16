@@ -15,6 +15,14 @@ import { I, Avatar, LabelChips, LIST_COLUMNS } from "./ui";
 
 // --- grouped list view (ClickUp-style: group, quick-add, expandable subtasks) --
 
+// Which way the sorted column points. Declared out here rather than inside
+// GroupedList: a component defined during a render is a brand new component
+// type on every render, so React throws away the old one and remounts it.
+function SortArrow({ col, activeCol, sortDir }: { col: string; activeCol: string; sortDir: "asc" | "desc" }) {
+  if (activeCol !== col) return null;
+  return <span className="text-accent">{sortDir === "asc" ? "↑" : "↓"}</span>;
+}
+
 export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onAddInGroup, folderById, onToggleSub, onAddSub, onDeleteSub, hideEmpty, lensId, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId }: {
   groups: { key: string; label: string; color: string; tasks: Task[] }[];
   // The signed-in user — the row's assignee avatar only renders when the
@@ -170,7 +178,6 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
   const colCount = 1 + (showClient ? 1 : 0) + cols.length;
   const sortColKey: Record<string, string> = { title: "task", priority: "priority", due: "due", followUp: "followUp", assignee: "assignee", status: "status", comments: "comments" };
   const activeCol = sortColKey[sortKey];
-  const Arrow = ({ col }: { col: string }) => (activeCol === col ? <span className="text-accent">{sortDir === "asc" ? "↑" : "↓"}</span> : null);
 
   return (
     <div className="bg-background p-4 sm:p-5">
@@ -184,7 +191,7 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
         <thead className="hidden sm:table-header-group">
           <tr className="border-b bg-background/40 text-[12px] font-semibold tracking-wide text-muted">
             <th className="w-full max-w-0 px-4 py-1.5 font-semibold">
-              <button onClick={() => onSort("task")} className="flex items-center gap-1 text-left hover:text-foreground">Name <Arrow col="task" /></button>
+              <button onClick={() => onSort("task")} className="flex items-center gap-1 text-left hover:text-foreground">Name <SortArrow col="task" activeCol={activeCol} sortDir={sortDir} /></button>
             </th>
             {showClient && <th className="whitespace-nowrap py-1.5 pr-4 font-semibold">Client</th>}
             {cols.map((c) => (
@@ -192,7 +199,7 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
                 onDragOver={(e) => onReorderCols && e.preventDefault()} onDrop={(e) => { if (onReorderCols) { e.preventDefault(); dropColHere(c.key); } }}
                 className={`whitespace-nowrap py-1.5 pr-4 font-semibold ${onReorderCols ? "cursor-grab active:cursor-grabbing" : ""}`}>
                 {c.sortable
-                  ? <button onClick={() => onSort(c.key)} className={`flex items-center gap-1 hover:text-foreground ${c.key === "comments" ? "justify-center" : "text-left"}`}>{c.label} <Arrow col={c.key} /></button>
+                  ? <button onClick={() => onSort(c.key)} className={`flex items-center gap-1 hover:text-foreground ${c.key === "comments" ? "justify-center" : "text-left"}`}>{c.label} <SortArrow col={c.key} activeCol={activeCol} sortDir={sortDir} /></button>
                   : <span className={c.key === "comments" ? "block text-center" : ""}>{c.label}</span>}
               </th>
             ))}

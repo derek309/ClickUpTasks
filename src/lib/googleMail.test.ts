@@ -18,7 +18,8 @@ async function load() {
 }
 
 /** A fetch that answers Gmail's two shapes: a message read, and a search. */
-function gmailStub(handlers: { message?: any; search?: any }) {
+type GmailBody = Record<string, unknown>;
+function gmailStub(handlers: { message?: GmailBody; search?: GmailBody }) {
   return vi.fn(async (url: string) => {
     const u = String(url);
     const isSearch = u.includes("?q=");

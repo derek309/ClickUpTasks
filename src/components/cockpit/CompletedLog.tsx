@@ -13,6 +13,8 @@ export type CompletionRow = { id: string; taskId: string; taskTitle: string; cli
 // authorId, when given, is the caller answering "whose" for us — All Tasks
 // asks it in its own header dropdown, and the log's picker beneath would be
 // the same question a second time.
+const LOADED_ON = new Date();
+
 export function CompletedLog({ rows, authorId = null, onOpenTask }: { rows: CompletionRow[]; authorId?: string | null; onOpenTask?: (clientId: string, taskId: string) => void }) {
   const [q, setQ] = useState("");
   const [completedBy, setCompletedBy] = useState<string>("all");
@@ -34,8 +36,11 @@ export function CompletedLog({ rows, authorId = null, onOpenTask }: { rows: Comp
 
   // Grouped by calendar day. `rows` arrives already sorted most-recent-first,
   // so a Map preserves that order for both the days and the rows within each.
-  const today = new Date().toDateString();
-  const yesterday = new Date(Date.now() - 86400000).toDateString();
+  // Both from the day the app was loaded, not from the clock at render time:
+  // reading the clock in render is impure, and Cockpit reloads the page when
+  // the date rolls over, so a window left open overnight relabels anyway.
+  const today = LOADED_ON.toDateString();
+  const yesterday = new Date(LOADED_ON.getTime() - 86400000).toDateString();
   const dayLabel = (key: string) => key === today ? "Today" : key === yesterday ? "Yesterday" : new Date(key).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
   const dayGroups = useMemo(() => {
     const map = new Map<string, CompletionRow[]>();
