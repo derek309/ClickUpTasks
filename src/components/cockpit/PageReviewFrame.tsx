@@ -95,6 +95,11 @@ export function PageReviewToolbar({ mode, onMode, device, onDevice, canEdit, can
   );
 }
 
+// The frame's own sandbox, on top of the sandbox header /page-frame sends. The Claude
+// app's built in browser refuses to load any sandboxed iframe, so the local dev server
+// leaves the attribute off and relies on that header alone; production keeps both.
+const FRAME_SANDBOX = process.env.NODE_ENV === "development" ? undefined : "allow-scripts";
+
 export function PageReviewFrame({ frameUrl, onReload, mode, device, canEdit, canComment, pins, pending, focus, edits, onPlace, onPinClick, onEdit, title }: {
   /** The frame's address, or null while it is being fetched. */
   frameUrl: string | null;
@@ -238,7 +243,7 @@ export function PageReviewFrame({ frameUrl, onReload, mode, device, canEdit, can
       <div className="relative mx-auto overflow-hidden rounded-lg border bg-white shadow-sm" style={{ width: Math.min(available || Infinity, size.width * scale), height: frameHeight * scale }}>
         <div ref={pinMark} aria-hidden className="pointer-events-none absolute left-0 h-px w-px" style={{ top: 0 }} />
         {frameUrl ? (
-          <iframe key={frameUrl} ref={frame} src={frameUrl} title={title ?? "The page under review"} sandbox="allow-scripts" referrerPolicy="no-referrer" onLoad={onLoad}
+          <iframe key={frameUrl} ref={frame} src={frameUrl} title={title ?? "The page under review"} sandbox={FRAME_SANDBOX} referrerPolicy="no-referrer" onLoad={onLoad}
             style={{ width: size.width, height: frameHeight, border: 0, transform: `translateX(${shift}px) scale(${scale})`, transformOrigin: "0 0", display: "block" }} />
         ) : (
           <p className="p-6 text-[16px] text-muted">Loading the page…</p>
