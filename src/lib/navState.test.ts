@@ -6,7 +6,7 @@ import { buildSearch, parseSearch, type NavState } from "./navState";
 // survive build → parse → build sends someone somewhere else.
 const base: NavState = {
   view: null, client: "all", project: null, task: null,
-  clientTab: null, vaultFolder: null, dm: null, assignee: null,
+  clientTab: null, vaultFolder: null, dm: null, assignee: null, sub: null,
 };
 
 describe("the deep-link URL", () => {
@@ -59,5 +59,43 @@ describe("the deep-link URL", () => {
 
   it("defaults a missing client to all, not to undefined", () => {
     expect(parseSearch("").client).toBe("all");
+  });
+});
+
+// Plan and the completed log used to be clicks and nothing else: neither could
+// be linked or bookmarked, and the completed log had no way in but landing on
+// All Tasks and pressing its button.
+describe("the second half of a view", () => {
+  it("carries My Work's Plan tab, and only there", () => {
+    expect(buildSearch({ ...base, view: "work", sub: "plan" })).toBe("?view=work&sub=plan");
+    expect(parseSearch("?view=work&sub=plan").sub).toBe("plan");
+    // Work is the default half, so it stays off the URL.
+    expect(buildSearch({ ...base, view: "work", sub: null })).toBe("?view=work");
+    // Nowhere else has a Plan.
+    expect(buildSearch({ ...base, view: "clients", sub: "plan" })).toBe("?view=clients");
+  });
+
+  it("carries the completed log on All Tasks, whoever it is scoped to", () => {
+    expect(buildSearch({ ...base, sub: "completed" })).toBe("?sub=completed");
+    expect(buildSearch({ ...base, assignee: "u_maria", sub: "completed" })).toBe("?assignee=u_maria&sub=completed");
+    expect(parseSearch("?assignee=u_maria&sub=completed")).toMatchObject({ assignee: "u_maria", sub: "completed" });
+    // Not on a client's own list, which has no completed log of its own.
+    expect(buildSearch({ ...base, client: "c_1", sub: "completed" })).toBe("?client=c_1");
+  });
+
+  it("ignores a value it does not know, rather than guessing", () => {
+    expect(parseSearch("?view=work&sub=nonsense").sub).toBe(null);
+    expect(parseSearch("").sub).toBe(null);
+  });
+
+  it("round trips both halves through a link", () => {
+    for (const s of [
+      { ...base, view: "work" as const, sub: "plan" as const },
+      { ...base, sub: "completed" as const },
+      { ...base, assignee: "all", sub: "completed" as const },
+      { ...base, view: "work" as const, sub: "plan" as const, task: "t_9" },
+    ]) {
+      expect(buildSearch(parseSearch(buildSearch(s)))).toBe(buildSearch(s));
+    }
   });
 });

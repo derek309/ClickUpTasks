@@ -12,13 +12,24 @@
 //   ?client=<id>[&project=<id>]   a client (optionally scoped to one project)
 //   ?assignee=<id>|all            All Tasks scoped to one person or everyone
 //                                  (the default "mine" is never encoded)
+//   ?sub=plan                     My Work showing Plan instead of Work
+//   ?sub=completed                All Tasks showing the completed log
 //   ?task=<id>                    the task drawer (layers over any of the above)
-export type NavState = { view: "work" | "personal" | "inbox" | "clients" | "projects" | "settings" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | null; vaultFolder: string | null; dm: string | null; assignee: string | null };
+//
+// sub is the second half of a view. Both of these were reachable only by
+// clicking, and both were where the answer to a question lived: "here is my
+// day" and "here is what we finished" could not be linked, bookmarked or sent
+// to anyone, and the completed log had no way in at all except landing on All
+// Tasks and pressing its button.
+export type NavSub = "plan" | "completed";
+export type NavState = { view: "work" | "personal" | "inbox" | "clients" | "projects" | "settings" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | null; vaultFolder: string | null; dm: string | null; assignee: string | null; sub: NavSub | null };
 export function buildSearch(s: NavState): string {
   const p = new URLSearchParams();
   if (s.view) {
     p.set("view", s.view);
     if (s.view === "inbox" && s.dm) p.set("dm", s.dm);
+    // Only My Work has a Plan half; anywhere else the parameter would be noise.
+    if (s.view === "work" && s.sub === "plan") p.set("sub", "plan");
   } else if (s.client !== "all") {
     p.set("client", s.client);
     if (s.project) p.set("project", s.project);
@@ -34,6 +45,9 @@ export function buildSearch(s: NavState): string {
     // lands on, so it's the one value worth leaving off the URL.
     p.set("assignee", s.assignee);
   }
+  // All Tasks, whichever assignee it is scoped to, including the default one
+  // that writes no assignee of its own.
+  if (!s.view && s.client === "all" && s.sub === "completed") p.set("sub", "completed");
   if (s.task) p.set("task", s.task);
   const q = p.toString();
   return q ? `?${q}` : "";
@@ -42,6 +56,7 @@ export function parseSearch(search: string): NavState {
   const p = new URLSearchParams(search);
   const v = p.get("view");
   const tab = p.get("tab");
+  const sub = p.get("sub");
   return {
     view: v === "work" || v === "personal" || v === "inbox" || v === "clients" || v === "projects" || v === "settings" ? v : null,
     client: p.get("client") ?? "all",
@@ -53,6 +68,7 @@ export function parseSearch(search: string): NavState {
     vaultFolder: p.get("folder"),
     dm: p.get("dm"),
     assignee: p.get("assignee"),
+    sub: sub === "plan" || sub === "completed" ? sub : null,
   };
 }
 
