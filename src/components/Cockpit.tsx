@@ -24,7 +24,7 @@ import {
   DUE_BUCKETS,
   dueBucketOf,
   NURTURE_CHECK_IN_DAYS,
-  TRIAL_DAYS,
+  TRIAL_DAYS, trialState,
   STATUS_META,
   STATUS_ORDER, HIDDEN_STATUSES, pickableStatuses,
   applyWaitingStatusSync,
@@ -615,40 +615,60 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     markOwnClientWrite(nc.id);
     upsertClient(nc);
   };
+  // One switch on a client, flipped and saved. These were the same twenty
+  // lines written out twice, differing only in which column they wrote and
+  // what the toast said.
+  //
+  // Admin only, like everything in this sheet: clients_write RLS is is_admin(),
+  // so a VA calling one of these gets a silently ignored write. Every route
+  // that acts on one of these columns re-reads it server side, so a toggle
+  // here is the decision and never the enforcement.
+  const toggleClientFlag = (
+    clientId: string,
+    key: "canRequestNewTasks" | "portalShowsAllTasks",
+    toast: (name: string, on: boolean) => string,
+  ) => {
+    const c = clientById(clientId);
+    if (!c) return;
+    const on = c[key] !== true;
+    const nc = { ...c, [key]: on };
+    setClients((cs) => cs.map((x) => (x.id === clientId ? nc : x)));
+    markOwnClientWrite(nc.id);
+    upsertClient(nc);
+    pushToast(toast(c.name, on));
+  };
   // Whether this client's public page (/waiting/[token]) offers the "Add
-  // Something" composer that raises a brand-new task, or stays reply-only.
-  // Off by default, and admin-only for the same reason as
-  // toggleClientMessagePermission above: clients_write RLS is already
-  // is_admin(), so a VA calling this directly gets a silently-ignored write.
-  // /api/waiting/[token]/request re-reads the column before it writes
-  // anything, so this toggle is the decision, never the enforcement.
-  const toggleClientCanRequestNewTasks = (clientId: string) => {
+  // Something" composer that raises a brand new task, or stays reply only.
+  // Off by default. /api/waiting/[token]/request re-reads the column before it
+  // writes anything.
+  const toggleClientCanRequestNewTasks = (clientId: string) =>
+    toggleClientFlag(clientId, "canRequestNewTasks", (name, on) =>
+      on ? `${name} can now add their own requests.` : `${name} can no longer add their own requests.`);
+  // How much of the account the client portal shows. Off means only what
+  // involves them (waiting on their input, or already replied to); on means
+  // every non-private task on the account, which is real exposure: internal
+  // work becomes readable by the client. Per client for that reason, never
+  // global.
+  const toggleClientPortalShowsAllTasks = (clientId: string) =>
+    toggleClientFlag(clientId, "portalShowsAllTasks", (name, on) =>
+      on ? `${name} now sees every task on their account.` : `${name} now only sees what involves them.`);
+
+  // Ending a trial by hand. The window is stamped once, when the deal closes,
+  // and deliberately never re-stamped, so a routine save cannot push the end
+  // date out (see setClientStatus). That left no way to close one either: a
+  // client who cancelled in week one carried "in trial" until the date caught
+  // up. This clears the flag and KEEPS the date, so what was promised is still
+  // on the record and trialState can tell an early close from a natural end.
+  const endClientTrial = (clientId: string) => {
     const c = clientById(clientId);
-    if (!c) return;
-    const on = c.canRequestNewTasks !== true;
-    const nc = { ...c, canRequestNewTasks: on };
+    if (!c || c.inTrial !== true) return;
+    const nc = { ...c, inTrial: false };
     setClients((cs) => cs.map((x) => (x.id === clientId ? nc : x)));
     markOwnClientWrite(nc.id);
     upsertClient(nc);
-    pushToast(on ? `${c.name} can now add their own requests.` : `${c.name} can no longer add their own requests.`);
+    pushToast(`${c.name}'s trial is closed.`);
   };
-  // How much of the account the client portal shows. Off means the portal
-  // shows only what involves them (waiting on their input, or already
-  // replied to); on means every non-private task on the account, which is
-  // real exposure — internal work becomes readable by the client. Per client
-  // for that reason, never global. Admin only, same as the toggles around it:
-  // clients_write RLS is is_admin(), and the portal route re-reads the column
-  // itself, so this toggle is the decision and never the enforcement.
-  const toggleClientPortalShowsAllTasks = (clientId: string) => {
-    const c = clientById(clientId);
-    if (!c) return;
-    const on = c.portalShowsAllTasks !== true;
-    const nc = { ...c, portalShowsAllTasks: on };
-    setClients((cs) => cs.map((x) => (x.id === clientId ? nc : x)));
-    markOwnClientWrite(nc.id);
-    upsertClient(nc);
-    pushToast(on ? `${c.name} now sees every task on their account.` : `${c.name} now only sees what involves them.`);
-  };
+
   // Stamp reviewedAt = today, clearing this client/project from the Review
   // tier until next Monday (weekly) or its next nurture cycle. See
   // clientNeedsReview.
@@ -4531,11 +4551,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   long the clock has left, not where the work's at) and
                   stays. Client-scoped, so hidden while a project is open. */}
               {!activeProject && canAdmin && (() => {
-                const c = clientById(activeClient)!;
-                if (!c.trialEndsAt) return null;
+                // Only while it is actually running. It used to show for any
+                // client carrying an end date, so one whose trial finished in
+                // June still read "Trial ends 12 Jun" months later.
+                const trial = trialState(clientById(activeClient)!);
+                if (trial.kind !== "running") return null;
                 return (
-                  <span className="inline-flex items-center rounded-md border px-2 py-1 text-[13px] font-medium text-muted" title="14 day trial window, set when this deal closed">
-                    Trial ends {formatDue(c.trialEndsAt)}
+                  <span className="inline-flex items-center rounded-md border px-2 py-1 text-[13px] font-medium text-muted" title={`${TRIAL_DAYS} day trial window, set when this deal closed`}>
+                    Trial ends {formatDue(trial.endsAt)}
                   </span>
                 );
               })()}
@@ -4923,49 +4946,85 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <div className="fixed inset-0 z-40 bg-black/30" onClick={() => setClientSettingsOpen(false)} />
           <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col overflow-hidden border-l bg-surface shadow-xl">
             <div className="flex items-center justify-between border-b px-5 py-3">
-              <h2 className="text-[16px] font-semibold">Client settings — {settingsClient.name}</h2>
+              <h2 className="text-[17px] font-semibold">Client settings — {settingsClient.name}</h2>
               <button onClick={() => setClientSettingsOpen(false)} className="rounded-md p-1.5 text-muted hover:bg-background hover:text-foreground"><I.close /></button>
             </div>
             <div className="flex-1 space-y-5 overflow-y-auto p-5">
               <div>
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Client portal</div>
+                <div className="mb-2 text-[16px] font-semibold uppercase tracking-wide text-muted">Client portal</div>
                 <div className="space-y-3">
                   <label className="flex items-start justify-between gap-3">
-                    <span><span className="block text-[14px] font-medium">Client can add requests</span><span className="block text-[13px] text-muted">They can submit new task requests from their portal link, not just reply to what we send.</span></span>
+                    <span><span className="block text-[16px] font-medium">Client can add requests</span><span className="block text-[16px] text-muted">They can submit new task requests from their portal link, not just reply to what we send.</span></span>
                     <button onClick={() => toggleClientCanRequestNewTasks(activeClient)} className={`mt-0.5 flex h-5 w-9 shrink-0 items-center rounded-full transition ${settingsClient.canRequestNewTasks ? "bg-accent" : "bg-border"}`}><span className={`h-4 w-4 rounded-full bg-white shadow transition ${settingsClient.canRequestNewTasks ? "translate-x-4" : "translate-x-0.5"}`} /></button>
                   </label>
                   <label className="flex items-start justify-between gap-3">
-                    <span><span className="block text-[14px] font-medium">Client sees all tasks</span><span className="block text-[13px] text-muted">Their portal also lists what the team is working on and what&apos;s been completed, not just what needs them. Every non-private task on this account becomes readable by the client.</span></span>
+                    <span><span className="block text-[16px] font-medium">Client sees all tasks</span><span className="block text-[16px] text-muted">Their portal also lists what the team is working on and what&apos;s been completed, not just what needs them. Every non-private task on this account becomes readable by the client.</span></span>
                     <button onClick={() => toggleClientPortalShowsAllTasks(activeClient)} className={`mt-0.5 flex h-5 w-9 shrink-0 items-center rounded-full transition ${settingsClient.portalShowsAllTasks ? "bg-accent" : "bg-border"}`}><span className={`h-4 w-4 rounded-full bg-white shadow transition ${settingsClient.portalShowsAllTasks ? "translate-x-4" : "translate-x-0.5"}`} /></button>
                   </label>
                 </div>
-                <button onClick={() => copyClientShareLink(activeClient)} className="mt-3 flex items-center gap-1.5 text-[13px] font-medium text-accent hover:underline"><I.link className="h-3.5 w-3.5" /> Copy portal link</button>
+                <button onClick={() => copyClientShareLink(activeClient)} className="mt-3 flex items-center gap-1.5 text-[16px] font-medium text-accent hover:underline"><I.link className="h-3.5 w-3.5" /> Copy portal link</button>
               </div>
+              {/* The trial window is stamped once, when the deal closes, and
+                  never re-stamped, so it cannot silently slide forward. That
+                  left no way to CLOSE one either: a client who cancelled in
+                  week one carried "in trial" until the date caught up. Ending
+                  it keeps the date, so what was promised stays on the record. */}
+              {(() => {
+                const trial = trialState(settingsClient);
+                if (trial.kind === "none") return null;
+                return (
+                  <div className="border-t pt-4">
+                    <div className="mb-2 text-[16px] font-semibold uppercase tracking-wide text-muted">Trial</div>
+                    {trial.kind === "running" ? (
+                      <div className="flex items-start justify-between gap-3">
+                        <span>
+                          <span className="block text-[16px] font-medium">Ends {formatDue(trial.endsAt)}</span>
+                          <span className="block text-[16px] text-muted">
+                            {trial.daysLeft === 0 ? "Last day." : `${trial.daysLeft} day${trial.daysLeft === 1 ? "" : "s"} left.`}
+                          </span>
+                        </span>
+                        {canAdmin && (
+                          <button onClick={() => setConfirmDialog({
+                            title: `End ${settingsClient.name}'s trial?`,
+                            message: "They stop counting as in trial from now. The date it was due to end stays on the record, and nothing else about the account changes.",
+                            confirmLabel: "End trial", danger: false,
+                            onConfirm: () => { setConfirmDialog(null); endClientTrial(activeClient); },
+                          })} className="shrink-0 rounded-md border px-2.5 py-1 text-[16px] font-medium hover:bg-background">End trial</button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-[16px] text-muted">
+                        {trial.ended === "closed early" ? "Closed early" : "Ended"} · was due to end {formatDue(trial.endsAt)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               <div className="border-t pt-4">
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">GoHighLevel</div>
+                <div className="mb-2 text-[16px] font-semibold uppercase tracking-wide text-muted">GoHighLevel</div>
                 {settingsClient.linkedContactId ? (
                   <div className="flex items-center justify-between gap-2">
-                    <span className="inline-flex items-center gap-1.5 text-[14px] text-accent"><span className="h-2 w-2 rounded-full bg-accent" /> Connected</span>
+                    <span className="inline-flex items-center gap-1.5 text-[16px] text-accent"><span className="h-2 w-2 rounded-full bg-accent" /> Connected</span>
                     <span className="flex items-center gap-3">
-                      {ghlContactUrlFor(activeClient) && <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" className="text-[13px] font-medium text-accent hover:underline">Open in GHL</a>}
-                      {canAdmin && <button onClick={() => linkClientToContact(activeClient, null)} className="text-[13px] font-medium text-muted hover:text-danger">Unlink</button>}
+                      {ghlContactUrlFor(activeClient) && <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" className="text-[16px] font-medium text-accent hover:underline">Open in GHL</a>}
+                      {canAdmin && <button onClick={() => linkClientToContact(activeClient, null)} className="text-[16px] font-medium text-muted hover:text-danger">Unlink</button>}
                     </span>
                   </div>
                 ) : (
                   <div className="flex items-center justify-between gap-2">
-                    <span className="inline-flex items-center gap-1.5 text-[14px] text-muted"><span className="h-2 w-2 rounded-full bg-border" /> Not linked</span>
-                    {canAdmin && <button onClick={() => { setClientSettingsOpen(false); setGhlLinkSearch(""); setGhlLinkOpen(true); }} className="text-[13px] font-medium text-accent hover:underline">Link to GoHighLevel</button>}
+                    <span className="inline-flex items-center gap-1.5 text-[16px] text-muted"><span className="h-2 w-2 rounded-full bg-border" /> Not linked</span>
+                    {canAdmin && <button onClick={() => { setClientSettingsOpen(false); setGhlLinkSearch(""); setGhlLinkOpen(true); }} className="text-[16px] font-medium text-accent hover:underline">Link to GoHighLevel</button>}
                   </div>
                 )}
               </div>
               <div className="border-t pt-4">
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Ownership</div>
+                <div className="mb-2 text-[16px] font-semibold uppercase tracking-wide text-muted">Ownership</div>
                 {/* There's no separate "owner" field in the data model — Following
                     (assignedTo) already IS what puts a client in someone's My Work
                     queue (see assignedClientsFor), so it does double duty as
                     ownership here rather than this sheet inventing a second field
                     the brief's open question proposed but the app doesn't need. */}
-                <p className="mb-2 text-[13px] text-muted">Following decides whose My Work queue this client shows up in.</p>
+                <p className="mb-2 text-[16px] text-muted">Following decides whose My Work queue this client shows up in.</p>
                 {canAdmin ? (
                   <div className="flex flex-col gap-0.5">
                     {users.map((u) => {
@@ -4973,25 +5032,25 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                       return (
                         <button key={u.id} onClick={() => toggleClientAssignment(activeClient, u.id)} className="flex items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-background">
                           <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "border-accent bg-accent text-white" : "border-border"}`}>{on && <I.check />}</span>
-                          <Avatar id={u.id} size={18} /> <span className="truncate text-[13px]">{u.name}</span>
+                          <Avatar id={u.id} size={18} /> <span className="truncate text-[16px]">{u.name}</span>
                         </button>
                       );
                     })}
                   </div>
                 ) : (
-                  <div className="text-[13px] text-muted">{(settingsClient.assignedTo ?? []).length === 0 ? "Nobody yet" : (settingsClient.assignedTo ?? []).map((uid) => userById(uid)?.name).filter(Boolean).join(", ")}</div>
+                  <div className="text-[16px] text-muted">{(settingsClient.assignedTo ?? []).length === 0 ? "Nobody yet" : (settingsClient.assignedTo ?? []).map((uid) => userById(uid)?.name).filter(Boolean).join(", ")}</div>
                 )}
               </div>
               {canAdmin && (
                 <div className="space-y-2 border-t pt-4">
-                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Danger zone</div>
+                  <div className="mb-1 text-[16px] font-semibold uppercase tracking-wide text-muted">Danger zone</div>
                   {activeClient.startsWith("cl_") && (
                     <button onClick={() => { setClientSettingsOpen(false); setMergeClientState({ a: settingsClient }); }}
-                      className="flex w-full items-center gap-2 rounded-md border px-3 py-2 text-left text-[14px] hover:bg-background"><I.repeat /> Merge with another client…</button>
+                      className="flex w-full items-center gap-2 rounded-md border px-3 py-2 text-left text-[16px] hover:bg-background"><I.repeat /> Merge with another client…</button>
                   )}
                   {settingsClient.status !== "past_client" && (
                     <button onClick={() => { setClientSettingsOpen(false); setConfirmDialog({ title: `Archive ${settingsClient.name}?`, message: "Marks this client Past Client. Their tasks and history stay intact — this just takes them out of active views.", confirmLabel: "Archive", danger: true, onConfirm: () => { setConfirmDialog(null); setClientStatus(activeClient, "past_client"); } }); }}
-                      className="flex w-full items-center gap-2 rounded-md border px-3 py-2 text-left text-[14px] text-danger hover:bg-red-50"><I.close /> Archive client</button>
+                      className="flex w-full items-center gap-2 rounded-md border px-3 py-2 text-left text-[16px] text-danger hover:bg-red-50"><I.close /> Archive client</button>
                   )}
                 </div>
               )}

@@ -294,6 +294,27 @@ export function isMessageConversationTask(title: string | null | undefined): boo
  * of Client.trialEndsAt. One constant so the length is changed in one
  * place if the offer ever changes. */
 export const TRIAL_DAYS = 14;
+
+/** Where a client's trial has got to. `inTrial` says the clock is running and
+ *  `trialEndsAt` says when it stops, and the two can disagree: a window that
+ *  ran out days ago still carries inTrial until someone closes it, and one
+ *  closed early keeps its end date as the record of what was promised. This
+ *  reads both and answers the question a person actually asks. */
+export type TrialState =
+  | { kind: "none" }
+  | { kind: "running"; endsAt: string; daysLeft: number }
+  | { kind: "over"; endsAt: string; ended: "ran out" | "closed early" };
+
+export function trialState(client: Pick<Client, "inTrial" | "trialEndsAt">, today: string = TODAY): TrialState {
+  const endsAt = client.trialEndsAt ?? null;
+  if (!endsAt) return { kind: "none" };
+  // Closed by hand: the flag is off while the date it was promised until
+  // stays, so "ended early" and "ran its course" stay tellable apart.
+  if (client.inTrial !== true) return { kind: "over", endsAt, ended: endsAt > today ? "closed early" : "ran out" };
+  if (endsAt < today) return { kind: "over", endsAt, ended: "ran out" };
+  // Calendar days, not business days: a 14 day trial is 14 days on a calendar.
+  return { kind: "running", endsAt, daysLeft: daysUntilDue(endsAt, today) ?? 0 };
+}
 /** `clients.status` is plain text with no DB-level CHECK constraint, so a
  * stored value can in principle predate a funnel change (as happened when
  * this went from active/paused/archived to the 6-stage funnel below, and
@@ -383,22 +404,11 @@ export interface Client {
    * tasks.due. */
   inTrial?: boolean;
   trialEndsAt?: string | null;
-  /** Whether this business actually does SMS marketing, which is what gates
-   * creating the A2P registration steps and the dedicated email domain step
-   * at all. Plenty of businesses never text
-   * their list, and handing every one of them five setup tasks they'll never
-   * do buries the steps that matter. Off unless someone says otherwise, so
-   * the extra work is opted into rather than issued by default. Optional
-   * (like canMessage) so existing clientsSeed literals don't need editing;
-   * read as `=== true` everywhere. */
-  doesA2P?: boolean;
-  /** Whether the public /waiting/[token] page shows the "Your growth plan"
-   * progress card at all. Off unless an admin turns it on — not every client
-   * should see internal framing on their link, so this is opted in
-   * per client rather than shown by default. Optional (like canMessage) so
-   * existing clientsSeed literals don't need editing; read as `=== true`
-   * everywhere. */
-  showGrowthPlan?: boolean;
+  // doesA2P and showGrowthPlan used to live here. Both gated the Playbook,
+  // which was removed (commit "Remove Playbook"): nothing has read either
+  // since, so they were two switches that could only ever change a number in
+  // a column. The clients.does_a2p and clients.show_growth_plan columns are
+  // still there and are safe to drop whenever someone is in the schema.
   /** Portal shows every non-private task on the account, not just the ones
    *  waiting on the client. Off by default — see supabase/portal-all-tasks.sql. */
   portalShowsAllTasks?: boolean;

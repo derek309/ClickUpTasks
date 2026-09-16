@@ -8,20 +8,6 @@ import { TASK_FILES_BUCKET } from "@/lib/db";
 import { rateLimit } from "@/lib/rateLimit";
 import { resolveWaitingToken } from "@/lib/waitingToken";
 
-// Phase section headers, written for the business reading them rather than
-// the rep — the internal labels ("— side quest," "(ambassador)") are correct
-// in Cockpit.tsx for a rep audience but would confuse or read oddly to the
-// client seeing their own account described that way. Only overrides the
-// phases where that's actually true; every other phase's own label already
-// reads fine either way. A first, deliberately small step toward the
-// internal/client-facing split the game plan still wants finished — not a
-// new schema field yet, just the one place this page needs it today.
-const CLIENT_PHASE_LABEL: Record<string, string> = {
-  a2p: "Turn on texting",
-  email_domain: "Set up your email domain",
-  ongoing: "Ongoing",
-};
-
 // Public, deliberately unauthenticated — the first route of its kind in this
 // app. Backs /waiting/[token], a client-facing page showing "here's what
 // we're waiting on you for" (see supabase/client-share-token.sql). The
