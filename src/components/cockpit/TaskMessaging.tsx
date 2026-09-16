@@ -8,7 +8,7 @@
 // — feedArea always scrolls with whatever's around it, composerFooter is a
 // pinned element that sits OUTSIDE that scroll area — so TaskDrawer places
 // the two pieces itself rather than this module dictating layout.
-import { useRef, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import {
   users, userById, timeAgo, htmlToText, looksLikeHtml, plainTextToHtml, describeEvent, eventTopic, foldRuns,
   mentionCandidates, applyMention,
@@ -197,11 +197,11 @@ function ActionBody({ text }: { text: string }) {
   );
 }
 
-export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void; onComposeEmail?: (reply?: { subject?: string; replyTo?: string }) => void }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel) => void } {
+export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void; onComposeEmail?: (reply?: { subject?: string; replyTo?: string }) => void; onReplyInDock?: (id: string, channel: "chat" | "sms", preview: string) => void }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel, body?: string) => void } {
   const { task, client, comment, setComment, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin,
-    onDeleteMessage, onEditMessage, hasMessaging, actions, onDeleteAction, onEditAction, onLogAction, meId, onSendDm, onDeleteComment, onMessageSent, onComposeEmail } = p;
+    onDeleteMessage, onEditMessage, hasMessaging, actions, onDeleteAction, onEditAction, onLogAction, meId, onSendDm, onDeleteComment, onMessageSent, onComposeEmail, onReplyInDock } = p;
 
   // Conversation first: what was said and done. The app's own record of field
   // changes is one tab over, and folded to single lines under Everything.
@@ -248,8 +248,10 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   // Email, a reply included, is written in the email window (EmailWindow.tsx,
   // through the task's draft email), so only texts and chats open this small box
   // (Derek, 2026-09-11: "make this the default look for emailing all around").
-  const openReply = (id: string, channel: Channel, subject?: string | null) => {
+  const openReply = (id: string, channel: Channel, subject?: string | null, preview = "") => {
     onMarkChannelRead?.(channel === "activity" ? "chat" : channel);
+    // A chat or text is answered in the reply box at the bottom of the screen.
+    if ((channel === "chat" || channel === "sms") && onReplyInDock) { onReplyInDock(id, channel, preview); return; }
     if (channel === "email") {
       const s = (subject ?? "").trim();
       onComposeEmail?.({ subject: s ? (/^re:/i.test(s) ? s : `Re: ${s}`) : "", replyTo: id });
@@ -259,11 +261,12 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     resetComposer();
     setReplyingTo({ id, channel });
   };
-  const openCompose = (channel: Channel) => {
+  const openCompose = (channel: Channel, body?: string) => {
     if (channel !== "activity") onMarkChannelRead?.(channel);
     if (channel === "email") { onComposeEmail?.(); return; }
     setReplyingTo(null);
     resetComposer();
+    if (body) setMsgBody(body);
     setComposingChannel(channel);
   };
 
@@ -324,7 +327,6 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   // the card header alongside the channel badge, direction label, avatar,
   // and timestamp — broke badly at ~500px. One overflow trigger, keyed per
   // message so only one card's menu is ever open at a time.
-  const [openMsgMenuId, setOpenMsgMenuId] = useState<string | null>(null);
   const [openEventGroups, setOpenEventGroups] = useState<Set<string>>(new Set());
   // Which messages have had their quoted thread expanded. Per message rather
   // than one flag, so opening one does not unfold every email in the feed.
@@ -533,10 +535,9 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
       if (item.kind === "action") return item.action.body.toLowerCase().includes(q) || (item.action.nextStep ?? "").toLowerCase().includes(q);
       return false;
     })
-    // Newest first (Derek: "so we don't always have to scroll"). The chat
-    // convention of oldest-first only pays off when the composer is pinned to
-    // the bottom and you read downward into it; here the feed sits in the
-    // document column and the newest thing is what you opened the task for.
+    // Newest first here; the conversation is turned to read oldest to newest
+    // below, down into the reply box pinned at the bottom (Derek, 2026-09-16:
+    // "feel like it's an inline chat").
     .sort((a, b) => b.at.localeCompare(a.at)));
   const isChange = (item: FeedItem) => item.kind === "event";
   const conversationCount = allFeedItems.filter((item) => !isChange(item)).length;
@@ -544,7 +545,16 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   const mergedFeedItems = view === "all" ? allFeedItems : allFeedItems.filter((item) => isChange(item) === (view === "changes"));
   // Under Everything a run of changes between two real entries is one line.
   // The Changes tab lists every one, since reading them is why you went there.
-  const displayRows = view === "all" ? foldRuns(mergedFeedItems, isChange) : mergedFeedItems;
+  const foldedRows = view === "all" ? foldRuns(mergedFeedItems, isChange) : mergedFeedItems;
+  // Like a chat: oldest at the top, newest just above the reply box. Changes
+  // stays newest first, it is a log. A long thread shows its latest entries
+  // with the rest one click away.
+  const chatOrder = view !== "changes";
+  const [earlierShown, setEarlierShown] = useState(false);
+  const RECENT = 20;
+  const orderedRows = chatOrder ? [...foldedRows].reverse() : foldedRows;
+  const hiddenEarlier = chatOrder && !earlierShown && !q ? Math.max(0, orderedRows.length - RECENT) : 0;
+  const displayRows = hiddenEarlier ? orderedRows.slice(hiddenEarlier) : orderedRows;
 
   const unreadChannels = hasMessaging
     ? (["chat", "email", "sms"] as const).filter((ch) => (messages ?? []).some((m) => m.channel === ch && m.direction === "inbound" && !m.read))
@@ -640,18 +650,21 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
         </div>
       );
     }
+    // A note is for the team only, so it reads as a pale yellow card with a
+    // lock, never as something the client was sent (Derek, 2026-09-16).
+    const teamNote = a.kind === "note";
     return (
-      <div key={a.id} className={`group flex gap-3 ${gap}`}>
-        <span className="z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-[16px]" aria-hidden>{ACTION_ICON[a.kind]}</span>
+      <div key={a.id} className={`group flex gap-3 ${gap} ${teamNote ? "mx-auto max-w-[680px]" : ""}`}>
+        <span className={`z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[16px] ${teamNote ? "bg-amber-100 dark:bg-amber-500/20" : "bg-accent-soft"}`} aria-hidden>{teamNote ? "🔒" : ACTION_ICON[a.kind]}</span>
         {/* Every entry is a white card on the feed's tinted ground (Derek:
             "add a white box around messages so it stands out" — "all of
             them"), so one entry never runs into the next. */}
-        <div className="min-w-0 flex-1 rounded-xl border bg-surface px-3 py-2 shadow-soft">
-          <span className="text-[16px] font-semibold">{meta.verb}</span>
+        <div className={`min-w-0 flex-1 rounded-xl border px-3 py-2 shadow-soft ${teamNote ? "border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10" : "bg-surface"}`}>
+          <span className="text-[16px] font-semibold">{teamNote ? "Note" : meta.verb}</span>
           {/* Who wrote it and who it was addressed to. "Messaged · Derek Fox"
               recorded that a teammate was messaged and lost which one, which
               is the only part of the entry anyone needs to act on. */}
-          <span className="text-[16px] text-muted"> · {who}{toName ? ` → ${toName}` : ""} · {timeAgo(a.at)}</span>
+          <span className="text-[16px] text-muted"> · {who}{toName ? ` → ${toName}` : ""} · {timeAgo(a.at)}{teamNote ? " · Only your team sees this" : ""}</span>
           {onEditAction && a.body && (
             <button onClick={() => { setEditingAction(a.id); setActionEdit(a.body); }} title="Edit this entry"
               className="ml-1.5 rounded p-0.5 align-middle text-muted opacity-0 transition hover:text-foreground group-hover:opacity-100">
@@ -760,8 +773,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     );
   };
 
-  const renderMessageItem = (m: Message, gap: string, dupeCount?: number) => {
-    const channelLabel = m.channel === "email" ? "Email" : m.channel === "chat" ? "Chat" : "SMS";
+  const renderMessageItem = (m: Message, gap: string, dupeCount?: number, continued = false) => {
     const isReplyingHere = replyingTo?.id === m.id;
     const rawBodyText = m.body?.trim() ? (looksLikeHtml(m.body) ? htmlToText(m.body) : m.body) : "";
     // The reply chain and the signature block under it are not what anyone
@@ -770,19 +782,26 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     const { visible: ownText, quoted } = splitQuotedEmail(tidyEmailText(rawBodyText));
     const { cleanText, imageUrls, linkUrls } = splitMessageUrls(ownText || rawBodyText);
     const quotedOpen = openQuotes.has(m.id);
+    const mine = m.direction === "outbound";
+    const email = m.channel === "email";
+    const clientInitials = client.name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+    const hoverTool = "flex h-8 w-8 items-center justify-center rounded-lg bg-background text-muted hover:bg-accent-soft hover:text-foreground";
     return (
-      <div key={m.id} className={`relative ${gap}`}>
-        <div className="relative flex gap-3">
-          <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface bg-muted/50" /></div>
-          {/* The client's words keep a warm ground so they stand apart from
-              ours; the coloured stripes and channel pills are gone. Both read
-              as chat bubbles, ours tinted navy (Derek, 2026-09-16). */}
-          <div className={`min-w-0 flex-1 rounded-[4px_16px_16px_16px] p-3.5 ${m.direction === "inbound" ? "bg-highlight-soft/70" : "bg-accent-soft/70"}`}>
-            <div className="flex items-center gap-2 text-[16px] text-muted">
-              <span className="font-semibold text-foreground">{channelLabel} {m.direction === "inbound" ? "received" : "sent"}</span>
-              {m.direction === "outbound" && m.createdBy && (
-                <span className="inline-flex min-w-0 shrink items-center gap-1 truncate"><Avatar id={m.createdBy} size={14} /> <span className="truncate">{userById(m.createdBy)?.name ?? "Unknown"}</span></span>
-              )}
+      <div key={m.id} className={`group relative ${gap}`}>
+        {/* Two sides, like a text thread: the client on the left, us on the
+            right. An email is a letter, so it is a white card on its side
+            rather than a bubble (Derek, 2026-09-16). */}
+        <div className={`relative flex items-end gap-2.5 ${mine ? "flex-row-reverse" : ""}`}>
+          <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center">
+            {continued ? null : mine && m.createdBy ? <Avatar id={m.createdBy} size={30} /> : (
+              <span className={`flex h-8 w-8 items-center justify-center rounded-full text-[16px] font-bold text-white ${mine ? "bg-accent" : ""}`} style={mine ? undefined : { background: client.color }}>{mine ? "✳" : clientInitials}</span>
+            )}
+          </div>
+          <div className={`min-w-0 ${email ? "w-full max-w-[640px] rounded-2xl border bg-surface p-3.5 shadow-soft" : `max-w-[min(620px,85%)] rounded-2xl px-3.5 py-2.5 ${mine ? "rounded-br-md bg-accent-soft" : "rounded-bl-md bg-highlight-soft/80"}`}`}>
+            <div className={`flex flex-wrap items-center gap-x-2 text-[16px] text-muted ${continued && !email ? "hidden" : ""}`}>
+              {email && <span className="rounded-[5px] bg-accent-soft px-1.5 font-semibold text-accent">Email</span>}
+              <span className="font-semibold text-foreground">{mine ? (m.createdBy ? (userById(m.createdBy)?.name ?? "You") : "Sent") : client.name}</span>
+              {!email && <span>· {m.channel === "sms" ? "Text" : "Chat"}</span>}
               <span>· {timeAgo(m.at)}</span>
               {dupeCount && dupeCount > 1 && (
                 <span className="inline-flex items-center rounded-[5px] bg-background px-1.5 py-0 text-[16px] font-semibold text-muted" title={`Collapsed ${dupeCount} identical sends within 10 minutes`}>sent {dupeCount}×</span>
@@ -790,27 +809,6 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
               {!m.read && (
                 <span className="inline-flex items-center gap-1 rounded-[5px] bg-accent-soft px-1.5 py-0 text-[16px] font-semibold text-accent">
                   <span className="h-1.5 w-1.5 rounded-full bg-accent" /> New
-                </span>
-              )}
-              {editingMsgId !== m.id && (replyableChannel(m.channel) && onSendTaskMessage || (canAdmin && (onEditMessage || onDeleteMessage))) && (
-                <span className="relative ml-auto shrink-0">
-                  <button onClick={() => setOpenMsgMenuId((id) => (id === m.id ? null : m.id))} title="More" className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground"><I.dots /></button>
-                  {openMsgMenuId === m.id && (<>
-                    <div className="fixed inset-0 z-30" onClick={() => setOpenMsgMenuId(null)} />
-                    <div className="absolute right-0 top-full z-40 mt-1 w-40 overflow-hidden rounded-lg border bg-surface py-1 shadow-lg">
-                      {replyableChannel(m.channel) && onSendTaskMessage && (
-                        <button onClick={() => { setOpenMsgMenuId(null); openReply(m.id, replyableChannel(m.channel)!, m.subject); }} className="block w-full px-3 py-1.5 text-left text-[16px] font-medium text-accent hover:bg-background">Reply</button>
-                      )}
-                      {canAdmin && onEditMessage && (
-                        <button onClick={() => { setOpenMsgMenuId(null); startEditMessage(m); }} title="This doesn't unsend anything already delivered" className="block w-full px-3 py-1.5 text-left text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">Edit</button>
-                      )}
-                      {canAdmin && onDeleteMessage && (
-                        <button
-                          onClick={() => { setOpenMsgMenuId(null); if (window.confirm("Delete this message? This only removes it from ClickUpTasks and the client's waiting page — it does not unsend a real email or text already delivered.")) onDeleteMessage(m.id); }}
-                          className="block w-full px-3 py-1.5 text-left text-[16px] font-medium text-muted hover:bg-red-50 hover:text-red-600">Delete</button>
-                      )}
-                    </div>
-                  </>)}
                 </span>
               )}
             </div>
@@ -908,6 +906,22 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
               </div>
             )}
           </div>
+          {/* Reply, Edit and Delete beside the bubble on hover, always shown on
+              a touch screen, instead of a ⋯ menu to open first. */}
+          {editingMsgId !== m.id && (
+            <div className="flex shrink-0 gap-1 self-center opacity-0 transition group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+              {replyableChannel(m.channel) && onSendTaskMessage && (
+                <button onClick={() => openReply(m.id, replyableChannel(m.channel)!, m.subject, (cleanText || m.subject || "").slice(0, 120))} title="Reply" aria-label="Reply" className={hoverTool}>↩</button>
+              )}
+              {canAdmin && onEditMessage && (
+                <button onClick={() => startEditMessage(m)} title="Edit (this doesn't unsend anything already delivered)" aria-label="Edit" className={hoverTool}><I.pencil className="h-3.5 w-3.5" /></button>
+              )}
+              {canAdmin && onDeleteMessage && (
+                <button onClick={() => { if (window.confirm("Delete this message? This only removes it from ClickUpTasks and the client's waiting page. It does not unsend a real email or text already delivered.")) onDeleteMessage(m.id); }}
+                  title="Delete" aria-label="Delete" className={`${hoverTool} hover:!bg-danger-soft hover:!text-danger`}><I.trash className="h-3.5 w-3.5" /></button>
+              )}
+            </div>
+          )}
         </div>
         {isReplyingHere && replyingTo.channel !== "email" && <div className="ml-11 mt-2">{channelComposer(replyingTo.channel === "activity" ? "chat" : replyingTo.channel, closeComposers)}</div>}
       </div>
@@ -932,10 +946,8 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     );
   };
 
-  const commentsFeed = (
-    <div className="relative">
-      {mergedFeedItems.length > 0 && <div className="absolute bottom-2 left-4 top-2 w-px bg-border" />}
-      {displayRows.map((item, i) => {
+  // One row of the feed, in whichever order the tab reads.
+  const renderRow = (item: (typeof displayRows)[number], i: number): React.ReactNode => {
         const gap = i === displayRows.length - 1 ? "" : "pb-3";
         if ("run" in item) {
           // A run of the app's own changes between two real entries, as one
@@ -961,7 +973,16 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
             </div>
           );
         }
-        if (item.kind === "message") return renderMessageItem(item.message, gap, item.dupeCount);
+        if (item.kind === "message") {
+          // Back to back messages from the same person on the same channel read
+          // as one group, with the name and time shown once.
+          const prev = displayRows[i - 1];
+          const continued = chatOrder && !!prev && !("run" in prev) && prev.kind === "message"
+            && prev.message.direction === item.message.direction && prev.message.channel === item.message.channel
+            && (prev.message.createdBy ?? null) === (item.message.createdBy ?? null)
+            && Math.abs(Date.parse(item.at) - Date.parse(prev.at)) <= 10 * 60 * 1000;
+          return renderMessageItem(item.message, continued ? "pb-1" : gap, item.dupeCount, continued);
+        }
         if (item.kind === "action") return renderActionItem(item.action, gap);
         if (item.kind === "event") return renderEventRow(item.comment, gap);
         const c = item.comment;
@@ -1007,12 +1028,46 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
             </div>
           </div>
         );
+  };
+  // "Today", "Yesterday" or the date, between days in the conversation.
+  const dayKey = (iso: string) => new Date(iso).toDateString();
+  const dayName = (iso: string) => {
+    const d = new Date(iso);
+    const today = new Date();
+    const yesterday = new Date(); yesterday.setDate(today.getDate() - 1);
+    if (d.toDateString() === today.toDateString()) return "Today";
+    if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
+    return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", ...(d.getFullYear() === today.getFullYear() ? {} : { year: "numeric" }) });
+  };
+  const rowAt = (item: (typeof displayRows)[number]) => ("run" in item ? item.run[0].at : item.at);
+
+  const commentsFeed = (
+    <div className="relative">
+      {!chatOrder && mergedFeedItems.length > 0 && <div className="absolute bottom-2 left-4 top-2 w-px bg-border" />}
+      {chatOrder && mergedFeedItems.length > 0 && (
+        <div className="pb-3 text-center text-[16px] text-muted">
+          {hiddenEarlier > 0
+            ? <button onClick={() => setEarlierShown(true)} className="font-medium text-accent hover:underline">Show {hiddenEarlier} earlier</button>
+            : <>Start of your conversation with {client.name}</>}
+        </div>
+      )}
+      {displayRows.map((item, i) => {
+        const row = renderRow(item, i);
+        if (!chatOrder || (i > 0 && dayKey(rowAt(item)) === dayKey(rowAt(displayRows[i - 1])))) return row;
+        return (
+          <Fragment key={`day_${rowAt(item)}_${i}`}>
+            <div className="flex items-center gap-3 py-3 text-[16px] font-semibold text-muted" role="separator">
+              <span className="h-px flex-1 bg-border" />{dayName(rowAt(item))}<span className="h-px flex-1 bg-border" />
+            </div>
+            {row}
+          </Fragment>
+        );
       })}
       {/* C6: a short thread otherwise leaves a few hundred blank px below the
           last entry, which reads as a stuck load rather than a finished
           history. Top-anchored on purpose — bottom-anchoring was tried and
           reverted (short threads looked broken); don't reintroduce it. */}
-      {mergedFeedItems.length > 0 && (
+      {!chatOrder && mergedFeedItems.length > 0 && (
         <div className="pt-3 text-center text-[16px] text-muted">Start of your conversation with {client.name}</div>
       )}
       {mergedFeedItems.length === 0 && (

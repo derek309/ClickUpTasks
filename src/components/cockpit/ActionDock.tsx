@@ -18,8 +18,10 @@ import { authedFetch } from "@/lib/supabase";
 // point: the old activity feed logged what the app did to a task, so a task
 // could be worked on for a week and still end up with nothing scheduled.
 //
-// Collapsed it is one line: a quick note box and Log action. The open next
-// step is not repeated here; the drawer's Next step card shows it once.
+// Collapsed it is the task's one reply box, pinned to the bottom of the screen:
+// pick Note, Chat, Text or Email, type, press Enter; Log action sits beside it
+// (Derek, 2026-09-16: the conversation should feel like an inline chat). The
+// open next step is not repeated here; the drawer's Next step card shows it once.
 
 // One string, because the group's label is also how the code recognises it.
 const GET_HELP = "Get help";
@@ -29,6 +31,7 @@ const ICON: Record<TaskActionKind, string> = {
 
 export function ActionDock({
   task, client, contact, actions, messages, me, users, onLog, onPatch, onAddComment, onOpenCompose, canMessageClient = true, onSendDm, onDelegate, clientLinks = [], taskLink, askNextStepFor, onAskNextStepHandled, pushToast,
+  onSendMessage, reachable, replyTarget,
 }: {
   task: Task;
   client: { name: string } | null;
@@ -45,7 +48,7 @@ export function ActionDock({
   // scheduling and AI drafting. The dock used to render its own plain
   // textarea, which meant two ways to send the same message with the poorer
   // one in front.
-  onOpenCompose?: (channel: "activity" | "chat" | "email" | "sms") => void;
+  onOpenCompose?: (channel: "activity" | "chat" | "email" | "sms", body?: string) => void;
   /** May this person contact this client at all. False hides every outbound action. */
   canMessageClient?: boolean;
   // Set once a message has actually gone out. The dock reopens on it to ask
@@ -63,6 +66,12 @@ export function ActionDock({
   askNextStepFor?: { kind: TaskActionKind; body: string } | null;
   onAskNextStepHandled?: () => void;
   pushToast: (msg: string) => void;
+  /** Sends a chat or text straight from the box; the drawer logs it and asks what's next. */
+  onSendMessage?: (channel: "chat" | "sms", body: string, replyToId: string | null) => void;
+  /** Which channels this client can be reached on. */
+  reachable?: { chat: boolean; sms: boolean; email: boolean };
+  /** A message picked to reply to in the conversation; n changes to ask again. */
+  replyTarget?: { id: string; channel: "chat" | "sms"; preview: string; n: number } | null;
 }) {
   const [view, setView] = useState<"closed" | "menu" | "askTask" | TaskActionKind>("closed");
   const [body, setBody] = useState("");
@@ -103,6 +112,14 @@ export function ActionDock({
   // commit anyway (a title fetch resolving hundreds of ms later).
   useEffect(() => { taskRef.current = task; }, [task]);
   const [quickNote, setQuickNote] = useState("");
+  // Where the box sends. Note by default, because people type a quick note here
+  // and press Enter; a client message only goes out once Chat or Text is picked
+  // on purpose, or Reply is clicked on the client's message.
+  const [channel, setChannel] = useState<"note" | "chat" | "sms">("note");
+  const [replyTo, setReplyTo] = useState<{ id: string; preview: string } | null>(null);
+  const quickRef = useRef<HTMLTextAreaElement>(null);
+  const seenReply = useRef(0);
+  const firstName = (contact?.name ?? client?.name ?? "the client").split(" ")[0];
   // A link written into a note is a link on the task, so it joins the
   // Attachments panel as well as staying in the note (Derek: a link added in
   // a log wasn't attached). Deduped on URL, so writing the same link twice,
@@ -136,6 +153,14 @@ export function ActionDock({
     if (links) onPatch(links);
     setQuickNote("");
     pushToast(links ? "Note added · link attached" : "Note added");
+  };
+  const sendQuick = () => {
+    if (channel === "note") { postQuickNote(); return; }
+    const text = quickNote.trim();
+    if (!text || !onSendMessage) return;
+    onSendMessage(channel, text, replyTo?.id ?? null);
+    setQuickNote("");
+    setReplyTo(null);
   };
   const [wantNext, setWantNext] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
@@ -174,6 +199,16 @@ export function ActionDock({
   };
   const openPanelRef = useRef(openPanel);
   useEffect(() => { openPanelRef.current = openPanel; });
+
+  // Reply on a client's message: the box switches to that channel and quotes it.
+  useEffect(() => {
+    if (!replyTarget || replyTarget.n === seenReply.current) return;
+    seenReply.current = replyTarget.n;
+    setChannel(replyTarget.channel);
+    setReplyTo({ id: replyTarget.id, preview: replyTarget.preview });
+    setView("closed");
+    requestAnimationFrame(() => quickRef.current?.focus());
+  }, [replyTarget]);
 
   const suggest = (kind: TaskActionKind) => suggestFor(kind, body);
   const suggestFor = async (kind: TaskActionKind, note: string) => {
@@ -663,25 +698,61 @@ export function ActionDock({
       style={{ right: "var(--dock-right, 0px)" }}>
       <div className="pointer-events-auto mx-auto w-full max-w-4xl rounded-2xl border bg-surface/95 p-3 shadow-[0_12px_32px_rgba(20,24,40,.14),0_2px_6px_rgba(20,24,40,.08)] backdrop-blur-md">
 
-        {view === "closed" && (
-          <div className="flex flex-wrap items-center gap-3">
-            {/* The open next step is not repeated here. It is shown once, on
-                the Next step card at the top of the task. */}
-            <input value={quickNote} onChange={(e) => setQuickNote(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); postQuickNote(); } }}
-              placeholder="Write a quick note, or log what you did"
-              className="min-w-0 flex-1 rounded-lg border border-transparent bg-background px-3 py-2 text-[16px] outline-none placeholder:text-muted hover:border-border focus:border-accent focus:bg-surface" />
-            {/* One button, two jobs. Start typing a note and it becomes the
-                way to post it, because a second button that only matters
-                while you are typing would sit dead the rest of the time
-                (Derek: "keep log action but if you type in then changes to
-                quick note"). */}
-            <button onClick={() => (quickNote.trim() ? postQuickNote() : openPanel("menu"))}
-              className="ml-auto shrink-0 rounded-lg bg-accent px-4 py-2 text-[16px] font-semibold text-white hover:opacity-90">
-              {quickNote.trim() ? "Add note" : "＋ Log action"}
-            </button>
-          </div>
-        )}
+        {view === "closed" && (() => {
+          const canChat = canMessageClient && !!onSendMessage && (reachable?.chat ?? false);
+          const canText = canMessageClient && !!onSendMessage && (reachable?.sms ?? false);
+          const canEmail = canMessageClient && !!onOpenCompose && (reachable?.email ?? false);
+          const noting = channel === "note";
+          const pick = "rounded-md px-3 py-1.5 text-[16px] font-semibold transition";
+          const on = "bg-surface text-foreground shadow-soft";
+          const off = "text-muted hover:text-foreground";
+          const sendLabel = noting ? "Add note" : channel === "sms" ? "Send text" : "Send chat";
+          return (
+            <div>
+              {replyTo && (
+                <div className="mb-2 flex items-center gap-2 px-1 text-[16px] text-muted">
+                  <span aria-hidden>↩</span>
+                  <span className="min-w-0 flex-1 truncate">Replying to {firstName}: {replyTo.preview}</span>
+                  <button onClick={() => setReplyTo(null)} title="Stop replying" aria-label="Stop replying" className="shrink-0 rounded px-1 hover:text-foreground">✕</button>
+                </div>
+              )}
+              <div className="flex flex-wrap items-end gap-2">
+                {(canChat || canText || canEmail) && (
+                  <div role="group" aria-label="Send as" className="flex shrink-0 rounded-lg bg-background p-1">
+                    <button onClick={() => { setChannel("note"); setReplyTo(null); }} aria-pressed={noting} className={`${pick} ${noting ? on : off}`}>🔒 Note</button>
+                    {canChat && <button onClick={() => setChannel("chat")} aria-pressed={channel === "chat"} className={`${pick} ${channel === "chat" ? on : off}`}>Chat</button>}
+                    {canText && <button onClick={() => setChannel("sms")} aria-pressed={channel === "sms"} className={`${pick} ${channel === "sms" ? on : off}`}>Text</button>}
+                    {/* Email is a letter, so it opens the full email window. */}
+                    {canEmail && <button onClick={() => onOpenCompose?.("email")} className={`${pick} ${off}`}>Email</button>}
+                  </div>
+                )}
+                <textarea ref={quickRef} rows={1} value={quickNote} onChange={(e) => setQuickNote(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); sendQuick(); } }}
+                  placeholder={noting ? "Note for your team, the client never sees it" : `Message ${firstName} by ${channel === "sms" ? "text" : "chat"}`}
+                  aria-label={noting ? "Note for your team" : `Message ${firstName}`}
+                  className={`max-h-40 min-h-[42px] min-w-[200px] flex-1 resize-none rounded-lg border px-3 py-2 text-[16px] outline-none [field-sizing:content] placeholder:text-muted focus:border-accent ${noting ? "border-amber-300/60 bg-amber-50/60 dark:bg-amber-500/10" : "border-transparent bg-background focus:bg-surface"}`} />
+                {!noting && onOpenCompose && (
+                  // Attachments, scheduling and AI writing live in the full box.
+                  <button onClick={() => { onOpenCompose(channel, quickNote); setQuickNote(""); }} title="More: attach, schedule, write with AI" aria-label="More options"
+                    className="h-[42px] shrink-0 rounded-lg px-2.5 text-muted hover:bg-background hover:text-foreground">⋯</button>
+                )}
+                {quickNote.trim() && (
+                  <button onClick={sendQuick}
+                    className={`h-[42px] shrink-0 rounded-lg px-4 text-[16px] font-semibold text-white hover:opacity-90 ${noting ? "bg-amber-700" : "bg-accent"}`}>
+                    {sendLabel}
+                  </button>
+                )}
+                <button onClick={() => openPanel("menu")}
+                  className={`h-[42px] shrink-0 rounded-lg px-4 text-[16px] font-semibold ${quickNote.trim() ? "bg-background text-foreground hover:bg-accent-soft" : "bg-accent text-white hover:opacity-90"}`}>
+                  ＋ Log action
+                </button>
+              </div>
+              <div className="mt-1.5 px-1 text-[16px] text-muted">
+                {noting ? "Only your team sees notes." : `Goes to ${firstName} as a ${channel === "sms" ? "text" : "chat"}.`} Enter sends, Shift+Enter for a new line.
+              </div>
+            </div>
+          );
+        })()}
 
         {view === "menu" && (
           <div>

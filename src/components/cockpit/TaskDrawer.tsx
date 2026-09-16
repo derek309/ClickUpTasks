@@ -860,10 +860,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // happens next. Sending used to end the interaction; the follow-up date
   // never got set, which is how a task goes quiet after real work on it.
   const [pendingNextStep, setPendingNextStep] = useState<{ kind: TaskActionKind; body: string } | null>(null);
+  // Reply on a client's chat or text: the dock's box switches to it (Derek, 2026-09-16).
+  const [replyTarget, setReplyTarget] = useState<{ id: string; channel: "chat" | "sms"; preview: string; n: number } | null>(null);
   const { feedArea, composerFooter, openCompose } = useTaskMessaging({
     actions, onDeleteAction: deleteAction, onEditAction: editAction, onLogAction: logAction, meId, onSendDm, onDeleteComment,
     onMessageSent: (channel, body) => setPendingNextStep({ kind: channel, body }),
     onComposeEmail: hasMessaging ? startDraftEmail : undefined,
+    onReplyInDock: (id, channel, preview) => setReplyTarget((r) => ({ id, channel, preview, n: (r?.n ?? 0) + 1 })),
     task, client, comment, setComment, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin,
@@ -1401,6 +1404,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           canMessageClient={mayContactClient}
           onSendDm={onSendDm} onDelegate={onDelegate} clientLinks={clientLinks} taskLink={taskLink}
           askNextStepFor={pendingNextStep}
+          onSendMessage={onSendTaskMessage ? (channel, body, replyToId) => {
+            onSendTaskMessage(channel, "", body, undefined, undefined, undefined, replyToId);
+            setPendingNextStep({ kind: channel, body });
+          } : undefined}
+          reachable={{ chat: hasMessaging, sms: !!messageDest?.phone, email: !!messageDest?.email }}
+          replyTarget={replyTarget}
           onAskNextStepHandled={() => setPendingNextStep(null)}
           pushToast={pushToast}
         />
