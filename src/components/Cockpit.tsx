@@ -75,7 +75,7 @@ import {
   THIS_MONTH_END,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, trashedSince, fetchOpenReviews, fetchClientEmailDrafts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, insertTaskAction, fetchAppSetting, upsertAppSetting, fetchOpenNextSteps, setNextStepDoneDb, patchNextStepDb } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, trashedSince, fetchOpenReviews, fetchVideoStorage, fetchClientEmailDrafts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, insertTaskAction, fetchAppSetting, upsertAppSetting, fetchOpenNextSteps, setNextStepDoneDb, patchNextStepDb } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import DmChat from "./DmChat";
@@ -245,8 +245,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // that would be wasted on every other visit.
   const [openReviews, setOpenReviews] = useState<OpenReviewGroups>({ yourMove: [], withClient: [] });
   const [reviewsLoading, setReviewsLoading] = useState(false);
+  // What video is costing in storage, loaded with the board that shows it.
+  const [videoStorage, setVideoStorage] = useState<{ files: number; bytes: number } | null>(null);
   const loadOpenReviews = async () => {
     setReviewsLoading(true);
+    void fetchVideoStorage().then(setVideoStorage).catch(() => {});
     try {
       const { docs, versions } = await fetchOpenReviews();
       // Only reviews on a task that is still here. Row level security scopes
@@ -4750,7 +4753,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             }}
             onOpenTask={setOpenTaskId} />
         ) : myWork && dashboardView === "reviews" ? (
-          <ReviewsBoard groups={openReviews} loading={reviewsLoading} onRefresh={loadOpenReviews}
+          <ReviewsBoard groups={openReviews} loading={reviewsLoading} onRefresh={loadOpenReviews} videoStorage={videoStorage}
             taskContext={(taskId) => {
               const t = tasks.find((x) => x.id === taskId);
               return t ? { taskTitle: t.title, clientName: clientById(t.clientId)?.name ?? "Unknown client" } : null;

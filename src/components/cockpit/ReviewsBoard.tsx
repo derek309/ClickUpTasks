@@ -15,10 +15,15 @@ import { I } from "./ui";
 import { kindTitle } from "@/lib/reviewKinds";
 import { type OpenReview, type OpenReviewGroups } from "@/lib/openReviews";
 import { waitedFor } from "@/lib/elapsed";
+import { formatFileSize } from "@/lib/uploadTypes";
 
 export type ReviewsBoardProps = {
   groups: OpenReviewGroups;
   loading: boolean;
+  /** Video stored right now, or null while it is not known. Video is the only
+   *  thing here big enough to be worth watching, and this is the one place in the
+   *  app that says so (docs/video-review-plan.md). */
+  videoStorage?: { files: number; bytes: number } | null;
   /** Task title and client name for a review's task, or null if it is not loaded. */
   taskContext: (taskId: string) => { taskTitle: string; clientName: string } | null;
   onOpenTask: (taskId: string) => void;
@@ -88,7 +93,7 @@ function Group({ title, help, rows, taskContext, onOpenTask }: {
   );
 }
 
-export function ReviewsBoard({ groups, loading, taskContext, onOpenTask, onRefresh }: ReviewsBoardProps) {
+export function ReviewsBoard({ groups, loading, taskContext, onOpenTask, onRefresh, videoStorage }: ReviewsBoardProps) {
   const total = groups.yourMove.length + groups.withClient.length;
   return (
     <div className="flex-1 overflow-auto bg-background p-4 sm:p-5">
@@ -102,6 +107,14 @@ export function ReviewsBoard({ groups, loading, taskContext, onOpenTask, onRefre
           <I.repeat className="h-3.5 w-3.5" /> Refresh
         </button>
       </div>
+
+      {/* One line, because until now nothing in the app said what storage was being
+          used and video is the first thing big enough to matter. */}
+      {!!videoStorage && videoStorage.files > 0 && (
+        <p className="mb-3 text-[16px] text-muted">
+          {videoStorage.files} video{videoStorage.files === 1 ? "" : "s"} stored, {formatFileSize(videoStorage.bytes)}. A video is cleared 30 days after its review is approved.
+        </p>
+      )}
 
       <div className="flex flex-col gap-4">
         <Group title="Your move" help="The client sent changes back." rows={groups.yourMove} taskContext={taskContext} onOpenTask={onOpenTask} />

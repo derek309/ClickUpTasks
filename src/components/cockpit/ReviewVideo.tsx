@@ -24,8 +24,9 @@ export type VideoPin = { id: string; number: number; t: number; done: boolean; a
 
 
 export function ReviewVideo({ load, label, poster, pins = [], onPinClick, canComment, pending, onPlace, seekTo, color }: {
-  /** A fresh link to the video, or null when there isn't one. */
-  load: () => Promise<string | null>;
+  /** A fresh link to the video, "cleared" once its file has been deleted 30 days
+   *  after approval, or null when there isn't one. */
+  load: () => Promise<string | "cleared" | null>;
   /** What the video is called, read out to anyone who cannot see it. */
   label: string;
   poster?: string;
@@ -43,6 +44,7 @@ export function ReviewVideo({ load, label, poster, pins = [], onPinClick, canCom
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [cleared, setCleared] = useState(false);
   const [duration, setDuration] = useState(0);
   const [at, setAt] = useState(0);
   const [paused, setPaused] = useState(true);
@@ -59,6 +61,7 @@ export function ReviewVideo({ load, label, poster, pins = [], onPinClick, canCom
     setSource(() => load);
     setUrl(null);
     setFailed(false);
+    setCleared(false);
   }
 
   useEffect(() => {
@@ -67,7 +70,8 @@ export function ReviewVideo({ load, label, poster, pins = [], onPinClick, canCom
     resumeAt.current = 0;
     void load().then((fresh) => {
       if (cancelled) return;
-      setUrl(fresh);
+      setCleared(fresh === "cleared");
+      setUrl(fresh === "cleared" ? null : fresh);
       setFailed(!fresh);
     });
     return () => { cancelled = true; };
@@ -89,7 +93,8 @@ export function ReviewVideo({ load, label, poster, pins = [], onPinClick, canCom
     retried.current = true;
     resumeAt.current = video.current?.currentTime ?? 0;
     void load().then((fresh) => {
-      if (fresh) setUrl(fresh);
+      if (fresh === "cleared") setCleared(true);
+      else if (fresh) setUrl(fresh);
       else setFailed(true);
     });
   };
@@ -112,6 +117,16 @@ export function ReviewVideo({ load, label, poster, pins = [], onPinClick, canCom
     setAt(el.currentTime);
   };
 
+  if (cleared) {
+    // The comments are still below this, and still worth reading, so the message
+    // says the video went rather than that something is broken.
+    return (
+      <div className="rounded-2xl border bg-surface p-6 text-center">
+        <p className="text-[18px] font-semibold">This video has been cleared.</p>
+        <p className="mt-1 text-[16px] text-muted">We keep a video for 30 days after it is approved, then remove the file. Everything that was said about it is still here. Ask us if you need the video again.</p>
+      </div>
+    );
+  }
   if (!failed && !url) {
     return <p className="py-10 text-center text-[16px] text-muted">Loading the video…</p>;
   }

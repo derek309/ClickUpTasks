@@ -18,7 +18,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   if (limited) return limited;
   const scope = await resolveDocToken(token);
   if (!scope || scope.kind !== "video") return docNotFound();
-  const url = await docVideoUrl(scope.documentId, req.nextUrl.searchParams.get("fileId"), true);
-  if (!url) return docNotFound();
-  return NextResponse.json({ url }, { headers: NO_STORE });
+  const found = await docVideoUrl(scope.documentId, req.nextUrl.searchParams.get("fileId"), true);
+  if (!found) return docNotFound();
+  // Cleared 30 days after approval: the review and its comments are still here,
+  // so this is an answer, not a missing video.
+  return NextResponse.json(found, { headers: NO_STORE });
 }

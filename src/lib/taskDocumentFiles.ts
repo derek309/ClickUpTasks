@@ -243,9 +243,9 @@ const VIDEO_URL_TTL = 6 * 3600;
  *  page never opens this way, only in the sandboxed frame. */
 export async function sharedDocFileUrl(documentId: string, fileId: string, download: boolean): Promise<string | null> {
   const { data: f } = await supabaseAdmin.from("task_document_files")
-    .select("path, name, purpose").eq("id", fileId).eq("document_id", documentId)
+    .select("path, name, purpose, cleared_at").eq("id", fileId).eq("document_id", documentId)
     .is("removed_at", null).maybeSingle();
-  if (!f || f.purpose === "page") return null;
+  if (!f || f.purpose === "page" || f.cleared_at) return null;
   const version = f.purpose === "image" || f.purpose === "video";
   if (version && !(await wasPublished(documentId, fileId))) return null;
   const ttl = f.purpose === "video" ? VIDEO_URL_TTL : FILE_URL_TTL;
@@ -258,14 +258,17 @@ export async function sharedDocFileUrl(documentId: string, fileId: string, downl
  *  the file is not a live video version (or, with publishedOnly, was never sent).
  *  Storage serves the byte ranges seeking asks for, so this link goes to the
  *  player and the app is not in the way of the watching. */
-export async function docVideoUrl(documentId: string, fileId: unknown, publishedOnly: boolean): Promise<string | null> {
+export async function docVideoUrl(documentId: string, fileId: unknown, publishedOnly: boolean): Promise<{ url: string } | { cleared: true } | null> {
   const file = await docVersionFile(documentId, fileId, "video", publishedOnly);
   if (!file) return null;
+  // Cleared 30 days after approval (videoCleanupServer.ts). The version and its
+  // comments are still here, so this is a different answer from "no such video".
+  if (file.clearedAt) return { cleared: true };
   const { data } = await supabaseAdmin.storage.from(TASK_FILES_BUCKET).createSignedUrl(file.path, VIDEO_URL_TTL);
-  return data?.signedUrl ?? null;
+  return data?.signedUrl ? { url: data.signedUrl } : null;
 }
 
-export type VersionFile = { id: string; name: string; path: string; purpose: FileKind };
+export type VersionFile = { id: string; name: string; path: string; purpose: FileKind; clearedAt: string | null };
 
 /** One of a review's version files (an image review's image, a web page review's
  *  page, a video review's video) that is still on the review, or null. purpose null takes either kind.
@@ -273,10 +276,10 @@ export type VersionFile = { id: string; name: string; path: string; purpose: Fil
 export async function docVersionFile(documentId: string, fileId: unknown, purpose: FileKind | null, publishedOnly: boolean): Promise<VersionFile | null> {
   if (typeof fileId !== "string") return null;
   const query = supabaseAdmin.from("task_document_files")
-    .select("id, name, path, purpose").eq("id", fileId).eq("document_id", documentId).is("removed_at", null);
+    .select("id, name, path, purpose, cleared_at").eq("id", fileId).eq("document_id", documentId).is("removed_at", null);
   const { data: f } = await (purpose ? query.eq("purpose", purpose) : query.in("purpose", ["image", "page", "video"])).maybeSingle();
   if (!f || (publishedOnly && !(await wasPublished(documentId, fileId)))) return null;
-  return { id: f.id as string, name: f.name as string, path: f.path as string, purpose: f.purpose as FileKind };
+  return { id: f.id as string, name: f.name as string, path: f.path as string, purpose: f.purpose as FileKind, clearedAt: (f.cleared_at as string | null) ?? null };
 }
 
 /** A version the client was shown and can still see. number is its version, counted

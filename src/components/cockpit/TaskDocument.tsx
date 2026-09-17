@@ -274,9 +274,13 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
 
   // A video version's link, signed here because the team is signed in. Hours, not
   // minutes: the player holds one link for the whole watch and seeks against it.
-  const loadVideo = useCallback(async (fileId: string): Promise<string | null> => {
-    const path = files.find((f) => f.id === fileId)?.path;
-    return path ? await signedUrlForFile(path, 6 * 3600) : null;
+  const loadVideo = useCallback(async (fileId: string): Promise<string | "cleared" | null> => {
+    const f = files.find((x) => x.id === fileId);
+    if (!f) return null;
+    // Cleared 30 days after approval (videoCleanupServer.ts): there is nothing to
+    // sign, and the player says so rather than failing to load.
+    if (f.clearedAt) return "cleared";
+    return await signedUrlForFile(f.path, 6 * 3600);
   }, [files]);
 
   // One page's frame address; the stack asks for each page and again when one expires.

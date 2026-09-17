@@ -404,11 +404,12 @@ export default function DocReviewView({ token }: { token: string }) {
 
   // The link the player streams a video version from. Held in a callback so the
   // player can ask again if the link runs out in the middle of a long video.
-  const loadVideo = useCallback(async (fileId: string): Promise<string | null> => {
+  const loadVideo = useCallback(async (fileId: string): Promise<string | "cleared" | null> => {
     try {
       const res = await fetch(`/api/doc/${encodeURIComponent(token)}/video?fileId=${encodeURIComponent(fileId)}`, { cache: "no-store" });
       const j = await res.json().catch(() => ({}));
-      return res.ok ? (j.url as string) : null;
+      if (!res.ok) return null;
+      return j.cleared ? "cleared" : (j.url as string);
     } catch {
       return null;
     }

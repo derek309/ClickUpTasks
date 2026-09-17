@@ -687,6 +687,9 @@ export type TaskDocumentFile = {
   purpose: "file" | FileKind;
   addedBy: string | null; addedByLabel: string | null; createdAt: string;
   sharedAt: string | null; removedAt: string | null; removedByLabel: string | null;
+  /** When the file's bytes were deleted to save storage, the version staying as a
+   *  version (supabase/task-video-purge.sql). Null while the file is still here. */
+  clearedAt: string | null;
 };
 export type TaskDocumentCheckpoint = { id: string; body: string; authorId: string | null; authorLabel: string | null; createdAt: string };
 export const fetchTaskDocumentFiles = async (documentId: string): Promise<TaskDocumentFile[]> => {
@@ -697,6 +700,7 @@ export const fetchTaskDocumentFiles = async (documentId: string): Promise<TaskDo
     purpose: r.purpose === "image" || r.purpose === "page" || r.purpose === "video" ? r.purpose : "file",
     addedBy: r.added_by ?? null, addedByLabel: r.added_by_label ?? null, createdAt: r.created_at,
     sharedAt: r.shared_at ?? null, removedAt: r.removed_at ?? null, removedByLabel: r.removed_by_label ?? null,
+    clearedAt: r.cleared_at ?? null,
   }));
 };
 export const fetchTaskDocumentCheckpoints = async (documentId: string): Promise<TaskDocumentCheckpoint[]> => {
@@ -833,6 +837,17 @@ export async function uploadTaskFile(path: string, file: File): Promise<{ ok: tr
   const { error } = await supabase.storage.from(TASK_FILES_BUCKET).upload(path, file, { upsert: false, contentType: file.type || undefined });
   return error ? { ok: false, error: error.message } : { ok: true };
 }
+
+/** How much video is stored right now: the number the 30 day purge exists to hold
+ *  down (supabase/task-video-purge.sql). Cleared videos and removed ones are not
+ *  counted, because neither is taking up space any more. */
+export const fetchVideoStorage = async (): Promise<{ files: number; bytes: number }> => {
+  const { data, error } = await supabase.from("task_document_files")
+    .select("size_bytes").eq("purpose", "video").is("cleared_at", null).is("removed_at", null);
+  if (error) { logErr({ error }); return { files: 0, bytes: 0 }; }
+  const rows = (data ?? []) as { size_bytes: number | null }[];
+  return { files: rows.length, bytes: rows.reduce((sum, r) => sum + Number(r.size_bytes ?? 0), 0) };
+};
 
 export async function signedUrlForFile(path: string, expirySeconds = 60 * 10): Promise<string | null> {
   const { data } = await supabase.storage.from(TASK_FILES_BUCKET).createSignedUrl(path, expirySeconds);
