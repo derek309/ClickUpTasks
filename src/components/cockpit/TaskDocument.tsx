@@ -120,6 +120,9 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   const [focusedComment, setFocusedComment] = useState<string | null>(null);
   // The comment the pointer is over, in the thread or on its pin, lit on both.
   const [hoveredComment, setHoveredComment] = useState<string | null>(null);
+  // How far the video going up has got, 0 to 1, or null when none is. A video is
+  // big enough that a spinner with no number reads as a hang (Derek, 2026-09-17).
+  const [uploadShare, setUploadShare] = useState<number | null>(null);
   // Image and page reviews: the pin dropped for the next comment, and the version
   // looked at (null follows the newest).
   const [pinDraft, setPinDraft] = useState<PinDraft | null>(null);
@@ -426,10 +429,17 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     setAdding(true);
     const added: string[] = [];
     for (const file of chosen) {
-      const up = await uploadSharedFile(file, (payload) => api("/files", { method: "POST", body: JSON.stringify({ ...payload, purpose: "video" }) }), "video");
-      if (!up.ok) { pushToast(up.error); break; }
+      setUploadShare(0);
+      const up = await uploadSharedFile(file, (payload) => api("/files", { method: "POST", body: JSON.stringify({ ...payload, purpose: "video" }) }), "video", setUploadShare);
+      if (!up.ok) {
+        // Over the Supabase project's own upload limit, not ours: say where it is
+        // set, because trying again never gets past it.
+        pushToast(up.overLimit ? `${up.error} Raise the limit in Supabase under Storage, then Settings.` : up.error);
+        break;
+      }
       added.push(up.result.fileId as string);
     }
+    setUploadShare(null);
     const items = slot !== null && current[slot]
       ? current.map((item, i) => (i === slot ? { file: added[0], label: item.label } : item))
       : [...current, ...added.map((file) => ({ file, label: "" }))];
@@ -962,6 +972,8 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
 
   // Remove this version sits one click in, in the review bar's More menu (Derek,
   // 2026-09-13: "a little messy"). Copy code and Download belong to each page.
+  // "Uploading… 42%" once there is a number to show, so a big file never looks stuck.
+  const uploadLabel = uploadShare === null ? "Uploading…" : `Uploading… ${Math.round(uploadShare * 100)}%`;
   const moreActions = shownFileId && !locked && (
     <ActionMenu label="⋯" title="More actions" items={[
       { label: busy === "remove" ? "Removing…" : "Remove this version", danger: true, disabled: adding || busy !== null || !goingIds.length, onClick: () => void removeVersion(shownFileId, goingIds, removeMessage) },
@@ -1029,7 +1041,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
         onChange={(e) => { if (e.target.files) void (page ? uploadPages(e.target.files, pasteOpen ? pasteSlot : slotRef.current) : video ? uploadVideos(e.target.files, slotRef.current) : uploadImages(e.target.files, slotRef.current)); e.target.value = ""; }} />
       {!doc.body ? (
         page ? pasteBox : video ? (
-          <FileDropLine label="Video" count={0} busy={adding} disabled={locked} onFiles={(list) => void uploadVideos(list, null)}>
+          <FileDropLine label="Video" count={0} busy={adding} busyLabel={uploadLabel} disabled={locked} onFiles={(list) => void uploadVideos(list, null)}>
             <p className="py-8 text-center text-[16px] text-muted">Add the video your client should review. Send a 720p copy, not the master: whatever goes up is what they download to watch it.</p>
           </FileDropLine>
         ) : (
@@ -1174,7 +1186,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
       <div className="ml-auto flex flex-wrap items-center gap-2">
         {editingSet && shownItems.length < MAX_SET_IMAGES && (image || video ? (
           <button onClick={() => { slotRef.current = null; versionInput.current?.click(); }} disabled={adding} className={quiet}>
-            {adding ? "Uploading…" : video ? "Add a video" : "Add images"}
+            {adding ? uploadLabel : video ? "Add a video" : "Add images"}
           </button>
         ) : (
           // Another page in this version, like a second email (Derek, 2026-09-16).

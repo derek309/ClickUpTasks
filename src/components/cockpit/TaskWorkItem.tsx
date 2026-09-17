@@ -700,10 +700,13 @@ export function ImageLightbox({ images, index, onIndex, onClose }: {
 /** A small drop target with an Add button, for files. Drops stop here: the
  *  drawer around it would otherwise take them as task attachments, and React
  *  events cross the full window's portal. */
-export function FileDropLine({ label, count, busy, disabled, onFiles, children }: {
+export function FileDropLine({ label, count, busy, busyLabel, disabled, onFiles, children }: {
   label: string;
   count: number;
   busy: boolean;
+  /** What to say while busy. A video upload puts how far it has got in here, so a
+   *  file that takes minutes never reads as a hang. Default "Adding…". */
+  busyLabel?: string;
   disabled?: boolean;
   onFiles: (files: FileList) => void;
   /** The list of files, shown under the line when there are any. */
@@ -726,7 +729,7 @@ export function FileDropLine({ label, count, busy, disabled, onFiles, children }
         <span className="font-semibold">{label}{count ? ` · ${count}` : ""}</span>
         {!disabled && (
           <span className="ml-auto flex items-center gap-2 text-muted">
-            {busy ? "Adding…" : <span className="hidden sm:inline">Drop files here or</span>}
+            {busy ? busyLabel ?? "Adding…" : <span className="hidden sm:inline">Drop files here or</span>}
             <input ref={input} type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) onFiles(e.target.files); e.target.value = ""; }} />
             <button onClick={() => input.current?.click()} disabled={busy} className="rounded-lg border px-2.5 py-0.5 font-medium hover:bg-background hover:text-foreground disabled:opacity-50">+ Add</button>
           </span>
