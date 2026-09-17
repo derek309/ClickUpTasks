@@ -920,12 +920,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 <span className="font-semibold uppercase tracking-wide text-accent">Delegated</span>
                 <span aria-hidden>·</span>
                 <span>{userById(s.assigneeId!)?.name ?? "a teammate"}</span>
-                {s.due && (<><span aria-hidden>·</span>
-                  <span className={isOverdue(s.due) && !s.done ? "font-semibold text-danger" : ""}>due {formatDue(s.due)}</span></>)}
               </div>
             </div>
+            {/* The due date once, here, where it can be changed (Derek,
+                2026-09-16: "we have due date twice"). */}
             <InlineDate value={s.due ?? null} onChange={(d) => onPatchSub(s.id, { due: d })} onClear={() => onPatchSub(s.id, { due: null })}
-              className="shrink-0 text-[16px] text-muted" formatValue={formatDue} emptyLabel={<span className="text-[16px] text-muted">Set a date</span>} />
+              className={`shrink-0 text-[16px] ${s.due && isOverdue(s.due) && !s.done ? "font-semibold text-danger" : "text-muted"}`} formatValue={(d) => `Due ${formatDue(d)}`} emptyLabel={<span className="text-[16px] text-muted">Set a due date</span>} />
             {/* Taking it back. Confirmed in Cockpit's deleteSub, which names
                 the person and says they lose access, because this is the one
                 thing giving them the task at all. */}
@@ -956,7 +956,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                     </span>
                   </div>
                 )}
-                {!total && h.goal.trim() && <p className="line-clamp-2 whitespace-pre-line text-[16px] text-muted">{h.goal}</p>}
                 <div className="flex flex-wrap items-center gap-2">
                   {facts.map((f) => <span key={f} className="rounded-[5px] bg-surface px-2 py-0.5 text-[16px] text-muted">{f}</span>)}
                   <span className="ml-auto flex gap-2">
