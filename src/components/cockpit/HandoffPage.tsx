@@ -11,6 +11,7 @@
 // open and update it without anything new in the database. The link is the
 // task's link with &handoff= added.
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   handoffOf, handoffProgress, formatDue, timeAgo, userById, prettyLinkName,
   type Attachment, type Handoff, type HandoffDeliverable, type Subtask, type Task,
@@ -108,8 +109,11 @@ export function HandoffPage({ task, sub, meId, link, onPatchSub, onToggleSub, on
     </section>
   );
 
-  return (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-surface" role="dialog" aria-label={`Handoff: ${sub.title}`}>
+  // Rendered on the page body, not inside the task drawer: inside it the page
+  // was held under the sidebar and its header was cut off (Derek, 2026-09-16).
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div className="fixed inset-0 z-[80] flex min-w-0 flex-col bg-surface" role="dialog" aria-label={`Handoff: ${sub.title}`}>
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5 sm:px-6">
         <span className="rounded-[5px] bg-violet-100 px-2 py-0.5 text-[16px] font-bold tracking-wide text-violet-700 dark:bg-violet-500/20 dark:text-violet-300">HANDOFF</span>
         <span className="min-w-0 flex-1 truncate text-[16px] text-muted">from the task &quot;{task.title}&quot;</span>
@@ -141,7 +145,7 @@ export function HandoffPage({ task, sub, meId, link, onPatchSub, onToggleSub, on
             <textarea value={h.goal} onChange={(e) => save({ goal: e.target.value })} rows={3} placeholder="What needs to happen, and what good looks like"
               className={`${input} min-h-[96px] resize-y [field-sizing:content]`} />
           ) : (
-            <div className="whitespace-pre-wrap rounded-2xl bg-background px-5 py-4 text-[16px] leading-relaxed">{h.goal ? <LinkedText text={h.goal} chip /> : <span className="text-muted">No goal written yet.</span>}</div>
+            <div className="whitespace-pre-wrap rounded-2xl bg-background px-5 py-4 text-[16px] leading-relaxed [overflow-wrap:anywhere]">{h.goal ? <LinkedText text={h.goal} chip /> : <span className="text-muted">No goal written yet.</span>}</div>
           ))}
 
           {section("Steps", total ? total : null, (
@@ -162,8 +166,10 @@ export function HandoffPage({ task, sub, meId, link, onPatchSub, onToggleSub, on
                         </>
                       ) : (
                         <>
-                          <div className={`text-[16px] font-semibold ${st.done ? "text-muted line-through" : ""}`}>{st.text}</div>
-                          {st.how && <div className="mt-0.5 whitespace-pre-wrap text-[16px] leading-relaxed text-foreground/80"><LinkedText text={st.how} chip /></div>}
+                          {/* A pasted link reads as its name and wraps, instead of
+                              one long address running off the page (Derek, 2026-09-16). */}
+                          <div className={`text-[16px] font-semibold [overflow-wrap:anywhere] ${st.done ? "text-muted line-through" : ""}`}><LinkedText text={st.text} chip /></div>
+                          {st.how && <div className="mt-0.5 whitespace-pre-wrap text-[16px] leading-relaxed text-foreground/80 [overflow-wrap:anywhere]"><LinkedText text={st.how} chip /></div>}
                         </>
                       )}
                     </div>
@@ -292,7 +298,7 @@ export function HandoffPage({ task, sub, meId, link, onPatchSub, onToggleSub, on
                     {m.authorId ? <Avatar id={m.authorId} size={30} /> : <span className="h-[30px] w-[30px]" />}
                     <div className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 ring-1 ring-violet-200 bg-violet-50 dark:bg-violet-500/10 dark:ring-violet-500/30 ${mine ? "rounded-br-md" : "rounded-bl-md"}`}>
                       <div className="text-[16px] text-muted"><span className="font-semibold text-foreground">{m.authorId ? (userById(m.authorId)?.name ?? "Someone") : "Someone"}</span> · {timeAgo(m.at)}</div>
-                      <div className="whitespace-pre-wrap text-[16px] leading-relaxed"><LinkedText text={m.body} chip /></div>
+                      <div className="whitespace-pre-wrap text-[16px] leading-relaxed [overflow-wrap:anywhere]"><LinkedText text={m.body} chip /></div>
                     </div>
                   </div>
                 );
@@ -314,6 +320,7 @@ export function HandoffPage({ task, sub, meId, link, onPatchSub, onToggleSub, on
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
