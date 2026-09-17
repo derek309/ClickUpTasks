@@ -1842,7 +1842,98 @@ export type TaskAction = {
   nextStep: string | null;
   nextStepDue: string | null;
   nextStepDoneAt: string | null;
+  /** Who the step is for, when not the task owner (supabase/2026-09-next-step-owner-time-watch.sql). */
+  nextStepOwner?: string | null;
+  /** A time of day for the step, "17:00". */
+  nextStepTime?: string | null;
+  /** What ticks the step off by itself; see StepWatch. */
+  nextStepWatch?: string | null;
 };
+
+/** What finishes a next step without anyone ticking it (Derek, 2026-09-16):
+ *  the client approving a review, the client writing back, or a teammate
+ *  marking their handoff done. Stored as text: approved:page, reply, handoff:<id>. */
+export type StepWatch =
+  | { kind: "approved"; review: "doc" | "image" | "page" }
+  | { kind: "reply" }
+  | { kind: "handoff"; subId: string };
+
+export function parseStepWatch(raw: string | null | undefined): StepWatch | null {
+  if (!raw) return null;
+  if (raw === "reply") return { kind: "reply" };
+  const approved = /^approved:(doc|image|page)$/.exec(raw);
+  if (approved) return { kind: "approved", review: approved[1] as "doc" | "image" | "page" };
+  const handoff = /^handoff:([A-Za-z0-9_-]+)$/.exec(raw);
+  return handoff ? { kind: "handoff", subId: handoff[1] } : null;
+}
+export const formatStepWatch = (w: StepWatch): string =>
+  w.kind === "reply" ? "reply" : w.kind === "approved" ? `approved:${w.review}` : `handoff:${w.subId}`;
+
+/** What the step is waiting on, in words, and whether it has happened. */
+export function stepWatchState(w: StepWatch, ctx: {
+  since: string;
+  clientName: string;
+  messages: Pick<Message, "direction" | "at" | "channel">[];
+  subtasks: Pick<Subtask, "id" | "title" | "done" | "assigneeId">[];
+  reviews: Partial<Record<"doc" | "image" | "page", { title: string; status: string; approvedAt: string | null }>>;
+  nameOf: (memberId: string) => string;
+}): { waiting: string; met: string | null } {
+  const first = ctx.clientName.split(" ")[0];
+  if (w.kind === "reply") {
+    const reply = ctx.messages.filter((m) => m.direction === "inbound" && m.at > ctx.since).sort((a, b) => a.at.localeCompare(b.at))[0];
+    return { waiting: `Waiting on ${first} to reply`, met: reply ? `${first} replied` : null };
+  }
+  if (w.kind === "approved") {
+    const r = ctx.reviews[w.review];
+    const name = r?.title?.trim() || "the review";
+    const approved = !!r && (r.status === "approved" || r.status === "completed");
+    return { waiting: `Waiting on ${first} to approve ${name}`, met: approved ? `${first} approved ${name}` : null };
+  }
+  const sub = ctx.subtasks.find((s) => s.id === w.subId);
+  const who = sub?.assigneeId ? ctx.nameOf(sub.assigneeId).split(" ")[0] : "They";
+  return { waiting: `Ticks when ${who} marks "${sub?.title ?? "the handoff"}" done`, met: sub?.done ? `${who} finished "${sub.title}"` : null };
+}
+
+/** Likely next steps, from what is going on with the task right now: an open
+ *  handoff, a review out with the client, a conversation with them. */
+export function suggestNextSteps(ctx: {
+  clientName: string;
+  canMessage: boolean;
+  subtasks: Pick<Subtask, "id" | "title" | "done" | "assigneeId" | "due">[];
+  taskOwnerId: string | null;
+  reviews: Partial<Record<"doc" | "image" | "page", { title: string; status: string }>>;
+  nameOf: (memberId: string) => string;
+  today?: string;
+}): { text: string; watch: string | null; due: string | null; hint: string }[] {
+  const today = ctx.today ?? TODAY;
+  const first = ctx.clientName.split(" ")[0];
+  const out: { text: string; watch: string | null; due: string | null; hint: string }[] = [];
+  for (const s of ctx.subtasks) {
+    if (s.done || !s.assigneeId || s.assigneeId === ctx.taskOwnerId) continue;
+    const who = ctx.nameOf(s.assigneeId).split(" ")[0];
+    out.push({ text: `Make sure ${who} finishes "${s.title}"`, watch: `handoff:${s.id}`, due: s.due ?? addBusinessDaysIso(today, 1), hint: `Ticks when ${who} marks the handoff done` });
+  }
+  for (const kind of ["page", "image", "doc"] as const) {
+    const r = ctx.reviews[kind];
+    if (!r || (r.status !== "with_client" && r.status !== "client_submitted")) continue;
+    const name = r.title.trim() || "the review";
+    out.push(r.status === "with_client"
+      ? { text: `Get ${first}'s approval on ${name}`, watch: `approved:${kind}`, due: addBusinessDaysIso(today, 1), hint: `Ticks when ${first} approves it` }
+      : { text: `Make ${first}'s changes to ${name}`, watch: null, due: today, hint: `${first} sent changes` });
+  }
+  if (ctx.canMessage) out.push({ text: `Hear back from ${first}`, watch: "reply", due: addBusinessDaysIso(today, 3), hint: `Ticks when ${first} writes back` });
+  return out.slice(0, 3);
+}
+
+/** "5 PM" or "5:30 PM" from "17:00" or "17:30". */
+export function formatStepTime(hhmm: string | null | undefined): string | null {
+  const m = hhmm ? /^(\d{2}):(\d{2})$/.exec(hhmm) : null;
+  if (!m) return null;
+  const h = Number(m[1]);
+  const suffix = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}${m[2] === "00" ? "" : `:${m[2]}`} ${suffix}`;
+}
 
 // The one open commitment on a task: the newest action that set a next step
 // and hasn't had it ticked off. Newest wins because setting a new next step

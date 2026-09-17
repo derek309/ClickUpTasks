@@ -5,14 +5,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, clientStatusMeta, PERSONAL_CLIENT_ID,
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
-  STATUS_META, pickableStatuses, stepDateLabel, followUpMoves, doneSteps, dateQuickPicks, TASK_ACTION_META, handoffOf, handoffProgress, handoffLink, type DelegateSpec, type ClientLink, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
+  STATUS_META, pickableStatuses, stepDateLabel, followUpMoves, doneSteps, dateQuickPicks, TASK_ACTION_META,
+  parseStepWatch, stepWatchState, suggestNextSteps, formatStepTime, handoffOf, handoffProgress, handoffLink, type DelegateSpec, type ClientLink, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
 import { authedFetch } from "@/lib/supabase";
 import { ActionDock } from "./ActionDock";
 import { ActionMenu } from "./ActionMenu";
-import { fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskActionDb, editTaskActionDb, patchNextStepDb } from "@/lib/db";
+import { fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskActionDb, editTaskActionDb, patchNextStepDb, fetchTaskDocument } from "@/lib/db";
 import { AttachmentTile } from "./AttachmentTile";
 import { SizePicker } from "./SizePicker";
 import { InlineAssignee, InlineDate, InlineDue } from "./GroupedList";
@@ -471,6 +472,20 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // The task whose next step was just ticked and is asking what happens next.
   const [askNext, setAskNext] = useState<string | null>(null);
   const [nextDraft, setNextDraft] = useState("");
+  // What finished the step by itself, shown on the "what happens next" panel.
+  const [autoDone, setAutoDone] = useState<{ taskId: string; text: string } | null>(null);
+  // The task's reviews and where they stand, for steps that wait on an
+  // approval and for suggesting what comes next.
+  const [reviewStates, setReviewStates] = useState<{ taskId: string; reviews: Partial<Record<"doc" | "image" | "page", { title: string; status: string; approvedAt: string | null }>> }>({ taskId: "", reviews: {} });
+  const reviewsKey = `${task.id}:${askNext === task.id}:${openNextStep(actions)?.nextStepWatch ?? ""}`;
+  useEffect(() => {
+    let live = true;
+    void Promise.all((["doc", "image", "page"] as const).map(async (k) => [k, await fetchTaskDocument(task.id, k)] as const)).then((pairs) => {
+      if (!live) return;
+      setReviewStates({ taskId: task.id, reviews: Object.fromEntries(pairs.filter((p) => !!p[1]).map(([k, d]) => [k, { title: d!.title, status: d!.status, approvedAt: d!.approvedAt }])) });
+    });
+    return () => { live = false; };
+  }, [reviewsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // One name for "may this person contact this client", used by the dock, the
   // Open in GHL link and the Call link. Cockpit only passes onSendTaskMessage
@@ -663,8 +678,34 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // tick to finish it, the words to click and edit, the date to click for the
   // quick dates, who it's for, where it came from, and how often it has slid.
   // Ticking asks what happens next right in the card.
-  const stepOwner = task.assigneeId ? userById(task.assigneeId) : null;
   const stepDate = stepDateLabel(followUp);
+  const stepOwnerId = openStep?.nextStepOwner ?? task.assigneeId;
+  const stepOwner = stepOwnerId ? userById(stepOwnerId) : null;
+  const reviews = reviewStates.taskId === task.id ? reviewStates.reviews : {};
+  const nameOf = (id: string) => userById(id)?.name ?? "Someone";
+  const watch = parseStepWatch(openStep?.nextStepWatch);
+  const watchState = watch && openStep ? stepWatchState(watch, { since: openStep.at, clientName: client.name, messages: messages ?? [], subtasks: task.subtasks, reviews, nameOf }) : null;
+  const suggestions = suggestNextSteps({ clientName: client.name, canMessage: mayContactClient, subtasks: task.subtasks, taskOwnerId: task.assigneeId, reviews, nameOf });
+  const stepTime = formatStepTime(openStep?.nextStepTime);
+  const patchStep = (patch: Partial<Pick<TaskAction, "nextStepOwner" | "nextStepTime" | "nextStepWatch">>) => {
+    if (!openStep) return;
+    updateActionRow(openStep.id, patch);
+    patchNextStepDb(openStep.id, patch);
+  };
+  // Late and still waiting on the client: offer a reminder on the channel they
+  // last wrote on, for a person to read and send.
+  const lastInbound = [...(messages ?? [])].filter((m) => m.direction === "inbound" && m.channel !== "call").sort((a, b) => b.at.localeCompare(a.at))[0];
+  const nudgeDays = followUp && stepDate.tone === "late" ? Math.max(1, Math.round((Date.now() - Date.parse(openStep?.at ?? followUp)) / 86_400_000)) : 0;
+  const canNudge = !!openStep && !!watch && watch.kind !== "handoff" && !watchState?.met && nudgeDays > 0 && mayContactClient;
+  const nudge = () => {
+    const first = client.name.split(" ")[0];
+    const text = `Hi ${first}, just checking in on this. ${watch?.kind === "approved" ? "Let me know if it's good to go or if you'd like any changes." : "Let me know when you have a minute."}`;
+    if (lastInbound && (lastInbound.channel === "chat" || lastInbound.channel === "sms")) {
+      setReplyTarget((r) => ({ id: lastInbound.id, channel: lastInbound.channel as "chat" | "sms", preview: htmlToText(lastInbound.body).slice(0, 120), text, n: (r?.n ?? 0) + 1 }));
+    } else if (hasMessaging) {
+      startDraftEmail();
+    }
+  };
   const stepMoves = openStep ? followUpMoves(task.comments, openStep.at) : 0;
   const finished = doneSteps(actions);
   const asking = askNext === task.id;
@@ -675,21 +716,34 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     el.scrollIntoView({ behavior: "smooth", block: "center" });
     el.animate([{ backgroundColor: "rgba(250, 204, 21, 0.35)" }, { backgroundColor: "transparent" }], { duration: 1400, easing: "ease-out" });
   };
+  // A step waiting on something ticks itself off once it has happened, and
+  // asks what happens next.
+  const metText = watchState?.met ?? null;
+  const metKey = openStep && metText ? `${openStep.id}:${metText}` : "";
+  useEffect(() => {
+    if (!metKey || !openStep) return;
+    setNextStepDone(openStep.id, true);
+    setAutoDone({ taskId: task.id, text: metText! });
+    setAskNext(task.id);
+    setNextDraft("");
+  }, [metKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const tickStep = () => {
     if (openStep) setNextStepDone(openStep.id, true);
     else if (followUp) onPatch({ followUpAt: null });
+    setAutoDone(null);
     setAskNext(task.id);
     setNextDraft("");
   };
   // A new next step on its own, logged as a quiet entry so the conversation
   // keeps the story of what was planned.
-  const setNewStep = (text: string, date: string | null) => {
+  const setNewStep = (text: string, date: string | null, watchRaw: string | null = null) => {
     const step = text.trim();
     if (!step) { pushToast("Write the next step first."); return; }
     logAction({ id: newId("ta_"), taskId: task.id, kind: "note", authorId: meId ?? null, toId: null, parentId: null,
-      body: "", at: new Date().toISOString(), nextStep: step, nextStepDue: date, nextStepDoneAt: null });
+      body: "", at: new Date().toISOString(), nextStep: step, nextStepDue: date, nextStepDoneAt: null, nextStepWatch: watchRaw });
     if (date !== (task.followUpAt ?? null)) onPatch({ followUpAt: date });
     setAskNext(null);
+    setAutoDone(null);
     setNextDraft("");
   };
   const dateTone = { late: "bg-danger-soft text-danger", soon: "bg-highlight-soft text-highlight", later: "bg-background text-foreground", none: "bg-background text-muted" }[stepDate.tone];
@@ -705,7 +759,22 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         {asking ? (
           // Done: what happens next, with the quick dates as the way to save it.
           <div className="mt-2 rounded-xl bg-background p-3">
+            {autoDone?.taskId === task.id && (
+              <div className="mb-2 rounded-lg bg-success-soft px-3 py-2 text-[16px] font-semibold text-success">✓ {autoDone.text}, so this step is done.</div>
+            )}
             <div className="font-semibold">Done. What happens next?</div>
+            {suggestions.length > 0 && (
+              <div className="mt-2 grid gap-1.5">
+                {suggestions.map((sg) => (
+                  <button key={sg.text} onClick={() => setNewStep(sg.text, sg.due, sg.watch)}
+                    className="flex w-full items-center gap-3 rounded-lg bg-surface px-3 py-2.5 text-left ring-1 ring-border hover:ring-accent">
+                    <span className="min-w-0 flex-1"><span className="block font-semibold [overflow-wrap:anywhere]">{sg.text}</span><span className="block text-[16px] text-muted">{sg.hint}</span></span>
+                    {sg.due && <span className="shrink-0 font-semibold text-accent">{stepDateLabel(sg.due).label.split(",")[0]} ›</span>}
+                  </button>
+                ))}
+                <div className="mt-1 text-[16px] text-muted">or write your own</div>
+              </div>
+            )}
             <input autoFocus value={nextDraft} onChange={(e) => setNextDraft(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") setNewStep(nextDraft, dateQuickPicks()[1].date); if (e.key === "Escape") { e.stopPropagation(); setAskNext(null); } }}
               placeholder="Like: send the approved emails to Michaella" aria-label="Next step"
@@ -740,10 +809,34 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               <InlineDate value={followUp} onChange={moveFollowUp} onClear={followUp ? () => moveFollowUp(null) : undefined}
                 formatValue={() => `📅 ${stepDate.label}`} emptyLabel="📅 Set a date"
                 className={`rounded-[5px] !px-2.5 !py-1.5 text-[16px] font-semibold ${dateTone}`} />
-              {stepOwner && (
-                <span className="inline-flex items-center gap-1.5 rounded-[5px] bg-background py-1 pl-1 pr-2.5 text-[16px] font-semibold">
-                  <Avatar id={stepOwner.id} size={24} />{stepOwner.id === meId ? "You" : stepOwner.name}
+              {openStep && (
+                // Clock and owner are native pickers laid over their chips.
+                <label className="relative inline-flex cursor-pointer items-center gap-1.5 rounded-[5px] bg-background py-1 pl-1 pr-2.5 text-[16px] font-semibold hover:ring-1 hover:ring-border" title="Who this step is for">
+                  {stepOwner ? <Avatar id={stepOwner.id} size={24} /> : <span className="h-6 w-6 rounded-full bg-border" />}
+                  {stepOwner ? (stepOwner.id === meId ? "You" : stepOwner.name) : "Nobody"}
+                  <select value={stepOwnerId ?? ""} onChange={(e) => patchStep({ nextStepOwner: e.target.value && e.target.value !== task.assigneeId ? e.target.value : null })}
+                    aria-label="Who this step is for" className="absolute inset-0 cursor-pointer opacity-0">
+                    {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  </select>
+                </label>
+              )}
+              {openStep && (
+                <label className="relative inline-flex cursor-pointer items-center gap-1 rounded-[5px] bg-background px-2.5 py-1.5 text-[16px] font-semibold hover:ring-1 hover:ring-border" title="A time of day for this step">
+                  🕔 {stepTime ? `by ${stepTime}` : <span className="font-medium text-muted">Add a time</span>}
+                  <input type="time" value={openStep.nextStepTime ?? ""} onChange={(e) => patchStep({ nextStepTime: e.target.value || null })}
+                    aria-label="Time for this step" className="absolute inset-0 cursor-pointer opacity-0" />
+                </label>
+              )}
+              {openStep && watchState && (
+                <span className="inline-flex items-center gap-2 rounded-[5px] bg-sky-50 px-2.5 py-1.5 text-[16px] font-semibold text-sky-700 dark:bg-sky-500/10 dark:text-sky-300">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-sky-600" />{watchState.waiting}
+                  <button onClick={() => patchStep({ nextStepWatch: null })} title="Stop waiting on this" aria-label="Stop waiting on this" className="text-sky-700/60 hover:text-sky-900">×</button>
                 </span>
+              )}
+              {openStep && !watch && suggestions.some((sg) => sg.watch) && (
+                <ActionMenu label={<span className="text-[16px] font-medium text-muted">⚡ Tick itself when…</span>} title="Finish this step by itself when something happens"
+                  triggerClassName="rounded-[5px] px-2 py-1.5 hover:bg-background"
+                  items={suggestions.filter((sg) => sg.watch).map((sg) => ({ label: sg.hint.replace(/^Ticks when /, ""), onClick: () => patchStep({ nextStepWatch: sg.watch }) }))} />
               )}
               {openStep && (
                 <button onClick={() => jumpToAction(openStep.id)} title="Show where this step was set"
@@ -755,6 +848,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             {stepMoves >= 3 && (
               <div className="mt-2.5 rounded-lg bg-amber-50 px-3 py-2 text-[16px] font-medium text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
                 ⚠ Moved {stepMoves} times since it was set. Is it stuck?
+              </div>
+            )}
+            {canNudge && (
+              <div className="mt-2.5 flex flex-wrap items-center gap-2.5 rounded-lg bg-danger-soft px-3 py-2 text-[16px] font-medium text-danger">
+                <span className="min-w-0 flex-1">{watch?.kind === "approved" ? `${client.name.split(" ")[0]} hasn't approved yet` : `${client.name.split(" ")[0]} hasn't replied`} · {nudgeDays} {nudgeDays === 1 ? "day" : "days"}</span>
+                <button onClick={nudge} className="rounded-[5px] bg-surface px-3 py-1.5 font-semibold text-foreground ring-1 ring-border hover:ring-accent">💬 Nudge {client.name.split(" ")[0]}</button>
               </div>
             )}
             {finished.length > 0 && (
@@ -956,7 +1055,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // never got set, which is how a task goes quiet after real work on it.
   const [pendingNextStep, setPendingNextStep] = useState<{ kind: TaskActionKind; body: string } | null>(null);
   // Reply on a client's chat or text: the dock's box switches to it (Derek, 2026-09-16).
-  const [replyTarget, setReplyTarget] = useState<{ id: string; channel: "chat" | "sms"; preview: string; n: number } | null>(null);
+  const [replyTarget, setReplyTarget] = useState<{ id: string; channel: "chat" | "sms"; preview: string; text?: string; n: number } | null>(null);
   const { feedArea, composerFooter, openCompose } = useTaskMessaging({
     actions, onDeleteAction: deleteAction, onEditAction: editAction, onLogAction: logAction, meId, onSendDm, onDeleteComment,
     onMessageSent: (channel, body) => setPendingNextStep({ kind: channel, body }),

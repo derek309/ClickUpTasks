@@ -72,7 +72,7 @@ export function ActionDock({
   /** Which channels this client can be reached on. */
   reachable?: { chat: boolean; sms: boolean; email: boolean };
   /** A message picked to reply to in the conversation; n changes to ask again. */
-  replyTarget?: { id: string; channel: "chat" | "sms"; preview: string; n: number } | null;
+  replyTarget?: { id: string; channel: "chat" | "sms"; preview: string; text?: string; n: number } | null;
 }) {
   const [view, setView] = useState<"closed" | "menu" | "askTask" | TaskActionKind>("closed");
   const [body, setBody] = useState("");
@@ -207,6 +207,8 @@ export function ActionDock({
     seenReply.current = replyTarget.n;
     setChannel(replyTarget.channel);
     setReplyTo({ id: replyTarget.id, preview: replyTarget.preview });
+    // A nudge arrives already written, for a person to read before sending.
+    if (replyTarget.text) setQuickNote(replyTarget.text); // eslint-disable-line react-hooks/set-state-in-effect
     setView("closed");
     requestAnimationFrame(() => quickRef.current?.focus());
   }, [replyTarget]);

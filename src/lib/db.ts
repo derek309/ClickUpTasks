@@ -131,12 +131,18 @@ const taskActionToRow = (a: TaskAction) => ({
   id: a.id, task_id: a.taskId, kind: a.kind, author_id: a.authorId, body: a.body, at: a.at,
   to_id: a.toId ?? null, parent_id: a.parentId ?? null,
   next_step: a.nextStep, next_step_due: a.nextStepDue, next_step_done_at: a.nextStepDoneAt,
+  // Sent only when set, so saving a step keeps working before
+  // supabase/2026-09-next-step-owner-time-watch.sql has been run.
+  ...(a.nextStepOwner ? { next_step_owner: a.nextStepOwner } : {}),
+  ...(a.nextStepTime ? { next_step_time: a.nextStepTime } : {}),
+  ...(a.nextStepWatch ? { next_step_watch: a.nextStepWatch } : {}),
 });
 export const rowToTaskAction = (r: any): TaskAction => ({
   id: r.id, taskId: r.task_id, kind: r.kind as TaskActionKind, authorId: r.author_id ?? null,
   toId: r.to_id ?? null, parentId: r.parent_id ?? null,
   body: r.body ?? "", at: r.at, nextStep: r.next_step ?? null, nextStepDue: r.next_step_due ?? null,
   nextStepDoneAt: r.next_step_done_at ?? null,
+  nextStepOwner: r.next_step_owner ?? null, nextStepTime: r.next_step_time ?? null, nextStepWatch: r.next_step_watch ?? null,
 });
 
 export const rowToMessage = (r: any): Message => ({
@@ -578,10 +584,13 @@ export const deleteTaskActionDb = (id: string) => save(() => supabase.from("task
 export const editTaskActionDb = (id: string, body: string) =>
   save(() => supabase.from("task_actions").update({ body }).eq("id", id));
 // The open next step's wording or date, edited on the task's Next step card.
-export const patchNextStepDb = (id: string, patch: { nextStep?: string; nextStepDue?: string | null }) =>
+export const patchNextStepDb = (id: string, patch: { nextStep?: string; nextStepDue?: string | null; nextStepOwner?: string | null; nextStepTime?: string | null; nextStepWatch?: string | null }) =>
   save(() => supabase.from("task_actions").update({
     ...(patch.nextStep !== undefined ? { next_step: patch.nextStep } : {}),
     ...(patch.nextStepDue !== undefined ? { next_step_due: patch.nextStepDue } : {}),
+    ...(patch.nextStepOwner !== undefined ? { next_step_owner: patch.nextStepOwner } : {}),
+    ...(patch.nextStepTime !== undefined ? { next_step_time: patch.nextStepTime } : {}),
+    ...(patch.nextStepWatch !== undefined ? { next_step_watch: patch.nextStepWatch } : {}),
   }).eq("id", id));
 // Loaded per task rather than all at once. Unlike tasks or clients this grows
 // without bound and only one task's worth is ever on screen, so pulling the
