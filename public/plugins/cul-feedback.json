@@ -1,13 +1,13 @@
 {
   "name": "ClickUpLocal Feedback",
   "slug": "cul-feedback",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "author": "ClickUpLocal",
   "requires": "6.0",
   "tested": "6.8",
   "requires_php": "7.4",
-  "last_updated": "2026-09-17 16:43:56",
-  "download_url": "https://clickuptasks.vercel.app/plugins/cul-feedback-0.2.1.zip",
+  "last_updated": "2026-09-17 16:57:08",
+  "download_url": "https://clickuptasks.vercel.app/plugins/cul-feedback-0.2.2.zip",
   "homepage": "https://clickuptasks.vercel.app",
   "description": "A question mark bubble on the client's own site. They click what is wrong, say what is wrong, and it lands as a task in ClickUpTasks with the page and the exact element attached.",
   "changelog": "See the commit history."
