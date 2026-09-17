@@ -617,9 +617,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         {task.due && task.status !== "done" && (
           <span className={dueTone === "late" ? "font-semibold text-danger" : dueTone === "soon" ? "font-semibold text-highlight" : "text-muted"}>{dueCountdown(task.due)}</span>
         )}
+        {/* How long it takes, as a small clock at the end of the due date. */}
+        <SizePicker compact size={task.size} sizeHours={task.sizeHours} onChange={onPatch} />
       </span>
-      {/* Sizing sits with the other chips: it is one decision, made once. */}
-      <SizePicker size={task.size} sizeHours={task.sizeHours} onChange={onPatch} chipClass={chip} />
       {task.recurrence === "custom" && (
         <span className={`${chip} flex-wrap py-1 text-muted`}>
           {task.recurrenceUnit === "nth-weekday" ? (
