@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, clientStatusMeta, PERSONAL_CLIENT_ID,
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
-  STATUS_META, pickableStatuses, type DelegateSpec, type ClientLink, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
+  STATUS_META, pickableStatuses, handoffOf, handoffProgress, handoffLink, type DelegateSpec, type ClientLink, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -21,6 +21,12 @@ import { useTaskMessaging } from "./TaskMessaging";
 import { useDebouncedCommit } from "./useDebouncedCommit";
 import { useEscapeToClose } from "./useEscapeToClose";
 import { TaskDocument } from "./TaskDocument";
+import { HandoffPage } from "./HandoffPage";
+
+// A handoff link (?task=…&handoff=…) names the delegation to open. Read once
+// when the app loads, because the app rewrites the address as you move around,
+// and handed to the first drawer that holds that delegation.
+let handoffFromUrl: string | null = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("handoff");
 import { DraftEmail } from "./DraftEmail";
 import { buildReviewEmail, greetingHtml, type ReviewEmailInput } from "@/lib/reviewEmail";
 import { type FileKind } from "@/lib/reviewKinds";
@@ -170,8 +176,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // formatting toolbar in front of what the description actually says.
   const [descEditing, setDescEditing] = useState(false);
   const [dupOpen, setDupOpen] = useState(false);
-  // The delegation whose instructions are open for reading and editing; the rest show two lines.
-  const [openBrief, setOpenBrief] = useState<string | null>(null);
+  // The delegation whose handoff page is open. A handoff link (?task=…&handoff=…)
+  // opens it straight away; read once, since the app rewrites the address.
+  const [openHandoff, setOpenHandoff] = useState<string | null>(() => {
+    const id = handoffFromUrl;
+    if (!id || !task.subtasks.some((x) => x.id === id)) return null;
+    handoffFromUrl = null;
+    return id;
+  });
   const [dupClient, setDupClient] = useState(task.clientId);
   const [renamingAttId, setRenamingAttId] = useState<string | null>(null);
   const [labelOpen, setLabelOpen] = useState(false);
@@ -922,20 +934,43 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               <I.trash className="h-3.5 w-3.5" />
             </button>
           </div>
-          {/* The brief, editable in place. It is what they actually read. Shown
-              as two lines until clicked, and hidden once the handoff is done
-              (Derek, 2026-09-16: a long brief kept a huge box open on the task). */}
-          {s.done ? null : openBrief === s.id || !s.note?.trim() ? (
-            <textarea value={s.note ?? ""} onChange={(e) => onPatchSub(s.id, { note: e.target.value })} rows={2}
-              autoFocus={openBrief === s.id} onBlur={() => setOpenBrief((id) => (id === s.id ? null : id))}
-              placeholder="What do you need done? (instructions)"
-              className="mt-1.5 max-h-[11rem] w-full resize-none overflow-y-auto rounded-lg border bg-surface px-2.5 py-1.5 text-[16px] leading-snug outline-none [field-sizing:content] focus:border-accent" />
-          ) : (
-            <button type="button" onClick={() => setOpenBrief(s.id)} title="Show and edit the instructions"
-              className="mt-1.5 block w-full rounded-lg border bg-surface px-2.5 py-1.5 text-left text-[16px] leading-snug text-muted hover:text-foreground">
-              <span className="line-clamp-2 whitespace-pre-line">{s.note}</span>
-            </button>
-          )}
+          {/* The handoff, summed up: how far along it is and what is on it, one
+              click from the page itself (Derek, 2026-09-16). The instructions
+              live on that page now instead of in a tall box here. */}
+          {(() => {
+            const h = handoffOf(s);
+            const { done, total } = handoffProgress(h);
+            const facts = [
+              h.deliverables.length ? `${h.deliverables.length} ${h.deliverables.length === 1 ? "deliverable" : "deliverables"}` : null,
+              h.links.length ? `${h.links.length} ${h.links.length === 1 ? "link" : "links"}` : null,
+              h.fileIds.length ? `${h.fileIds.length} ${h.fileIds.length === 1 ? "file" : "files"}` : null,
+              h.thread.length ? `${h.thread.length} ${h.thread.length === 1 ? "message" : "messages"}` : null,
+            ].filter(Boolean);
+            return (
+              <div className="mt-2.5 space-y-2 pl-[3.25rem]">
+                {total > 0 && (
+                  <div className="flex items-center gap-2.5 text-[16px] text-muted">
+                    <span className="shrink-0">{done} of {total} steps</span>
+                    <span className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-surface">
+                      <span className="block h-full rounded-full" style={{ width: `${Math.round((done / total) * 100)}%`, background: STATUS_META.delegated.dot }} />
+                    </span>
+                  </div>
+                )}
+                {!total && h.goal.trim() && <p className="line-clamp-2 whitespace-pre-line text-[16px] text-muted">{h.goal}</p>}
+                <div className="flex flex-wrap items-center gap-2">
+                  {facts.map((f) => <span key={f} className="rounded-[5px] bg-surface px-2 py-0.5 text-[16px] text-muted">{f}</span>)}
+                  <span className="ml-auto flex gap-2">
+                    <button onClick={() => { const url = handoffLink(taskLink?.() ?? `?task=${task.id}`, s.id); navigator.clipboard?.writeText(url).then(() => pushToast("Handoff link copied"), () => pushToast(`Share this link: ${url}`)); }}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-surface px-3 text-[16px] font-medium shadow-soft hover:bg-background"><I.link /> Copy link</button>
+                    <button onClick={() => setOpenHandoff(s.id)}
+                      className="inline-flex h-9 items-center rounded-lg px-3 text-[16px] font-semibold text-white shadow-soft hover:opacity-90" style={{ background: STATUS_META.delegated.dot }}>
+                      {total || h.goal.trim() ? "Open handoff" : "Write the handoff"}
+                    </button>
+                  </span>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       ))}
     </div>
@@ -1173,7 +1208,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const isLightTask = !hasMessaging && task.comments.length === 0;
 
   const section = (title: string, children: React.ReactNode, right?: React.ReactNode) => (
-    <section className="mt-10">
+    <section className="mt-10" id={title === "Deliverables" ? "task-deliverables" : undefined}>
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="text-[21px] font-bold tracking-[-0.01em]">{title}</h2>
         {right}
@@ -1398,6 +1433,16 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         )}
         {/* Floating at the bottom of the drawer so you can log from anywhere
             in the scroll (Derek, 2026-09-14: inline "it will get lost"). */}
+        {(() => {
+          const hs = openHandoff ? task.subtasks.find((x) => x.id === openHandoff && !!x.assigneeId) : null;
+          return hs ? (
+            <HandoffPage task={task} sub={hs} meId={meId} link={handoffLink(taskLink?.() ?? `?task=${task.id}`, hs.id)}
+              onPatchSub={onPatchSub} onToggleSub={onToggleSub} onClose={() => setOpenHandoff(null)}
+              onOpenFile={(att) => { if (att.url) window.open(att.url, "_blank", "noopener,noreferrer"); else void openPreview(att); }}
+              onSendDm={onSendDm} pushToast={pushToast}
+              onOpenDeliverables={() => { setOpenHandoff(null); requestAnimationFrame(() => document.getElementById("task-deliverables")?.scrollIntoView({ behavior: "smooth", block: "start" })); }} />
+          ) : null;
+        })()}
         <ActionDock
           task={task} client={client} contact={linkedContactInfo ?? null} actions={actions} messages={messages ?? undefined}
           me={userById(meId) ?? null} users={users}

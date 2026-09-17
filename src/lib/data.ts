@@ -726,6 +726,55 @@ export interface Subtask {
    * meaningful when assigneeId is set (an assigned checklist item = a
    * delegation of one step of the parent task). */
   note?: string;
+  /** The delegation's handoff page: everything the teammate needs on one link
+   *  (Derek, 2026-09-16). Absent on older delegations; read it through
+   *  handoffOf, which fills the gaps. */
+  handoff?: Partial<Handoff>;
+}
+
+export type HandoffStep = { id: string; text: string; how?: string; done: boolean };
+export type HandoffLink = { id: string; label: string; url: string };
+export type HandoffMessage = { id: string; authorId: string | null; body: string; at: string };
+export type HandoffDeliverable = "doc" | "image" | "page";
+export interface Handoff {
+  /** What good looks like. Starts as the delegation's instructions. */
+  goal: string;
+  steps: HandoffStep[];
+  links: HandoffLink[];
+  /** Task attachments shown on the page. */
+  fileIds: string[];
+  /** The task's reviews shown on the page. */
+  deliverables: HandoffDeliverable[];
+  /** How the teammate knows it's finished. */
+  doneWhen: string[];
+  /** Questions and updates between the two people. */
+  thread: HandoffMessage[];
+}
+
+/** A delegation's handoff with every part present. The goal falls back to the
+ *  instructions written when it was delegated, so older ones open with them. */
+export function handoffOf(sub: Pick<Subtask, "note" | "handoff">): Handoff {
+  const h = sub.handoff ?? {};
+  return {
+    goal: h.goal ?? sub.note ?? "",
+    steps: h.steps ?? [],
+    links: h.links ?? [],
+    fileIds: h.fileIds ?? [],
+    deliverables: h.deliverables ?? [],
+    doneWhen: h.doneWhen ?? [],
+    thread: h.thread ?? [],
+  };
+}
+
+/** Steps ticked off, for the progress bar on the task. */
+export const handoffProgress = (h: Handoff): { done: number; total: number } =>
+  ({ done: h.steps.filter((s) => s.done).length, total: h.steps.length });
+
+/** The handoff's own link: the task's link with the delegation named. */
+export function handoffLink(taskLink: string, subId: string): string {
+  const url = new URL(taskLink, "https://clickuptasks.vercel.app");
+  url.searchParams.set("handoff", subId);
+  return /^https?:/i.test(taskLink) ? url.toString() : `${url.pathname}${url.search}`;
 }
 
 export interface Task {
