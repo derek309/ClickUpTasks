@@ -34,6 +34,8 @@ const HOW: Record<ReviewKind, string> = {
   doc: ", edit it",
   image: " on any spot",
   page: " on any spot, change the wording",
+  // A video review has no spots to comment on yet; that is the next slice.
+  video: "",
 };
 
 export function buildReviewEmail(review: ReviewEmailInput): ReviewEmail {

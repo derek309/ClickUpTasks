@@ -19,6 +19,9 @@
 // while the others carry over (with their pins, which belong to the image).
 
 export type ImageSetItem = { file: string; label: string };
+/** Which default names a set's files get. The same as the review's FileKind
+ *  (reviewKinds.ts), spelled out here so this file keeps its no-imports rule. */
+export type SetKind = "image" | "page" | "video";
 
 export const MAX_SET_IMAGES = 10;
 const MAX_LABEL_CHARS = 40;
@@ -72,11 +75,13 @@ export const setFiles = (body: unknown): string[] => parseImageSet(body).map((i)
 /** What a file in a set is called: its typed label, else a default by kind. An
  *  image review says Front and Back for two, Image for one and Image 1, 2, 3 for
  *  more; an HTML review says Page for one and Page 1, 2, 3 for more (two pages are
- *  rarely a front and a back: they are two emails, or two sections). */
-export function imageLabel(items: ImageSetItem[], index: number, kind: "image" | "page" = "image"): string {
+ *  rarely a front and a back: they are two emails, or two sections); a video review
+ *  says Video, then Video 1, 2, 3. */
+export function imageLabel(items: ImageSetItem[], index: number, kind: SetKind = "image"): string {
   const typed = items[index]?.label;
   if (typed) return typed;
   if (kind === "page") return items.length === 1 ? "Page" : `Page ${index + 1}`;
+  if (kind === "video") return items.length === 1 ? "Video" : `Video ${index + 1}`;
   if (items.length === 2) return index === 0 ? "Front" : "Back";
   return items.length === 1 ? "Image" : `Image ${index + 1}`;
 }
@@ -91,7 +96,7 @@ export function frontFirst<T extends { name: string }>(files: T[]): T[] {
 
 /** The label that tells a pin's image or page apart, from the newest body holding
  *  it, or null when that version holds only one (a pin number alone is clear then). */
-export function pinImageLabel(bodiesNewestFirst: string[], fileId: string, kind: "image" | "page" = "image"): string | null {
+export function pinImageLabel(bodiesNewestFirst: string[], fileId: string, kind: SetKind = "image"): string | null {
   for (const body of bodiesNewestFirst) {
     const items = parseImageSet(body);
     const index = items.findIndex((i) => i.file === fileId);

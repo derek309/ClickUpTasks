@@ -5,8 +5,8 @@ const nameOf = (id: string) => ({ m_mp: "Michaella Pastrana", m_df: "Derek Fox" 
 
 describe("parseStepWatch", () => {
   it("round trips each kind and refuses junk", () => {
-    for (const raw of ["reply", "approved:page", "approved:doc", "handoff:s_12ab"]) expect(formatStepWatch(parseStepWatch(raw)!)).toBe(raw);
-    expect(parseStepWatch("approved:video")).toBeNull();
+    for (const raw of ["reply", "approved:page", "approved:doc", "approved:image", "approved:video", "handoff:s_12ab"]) expect(formatStepWatch(parseStepWatch(raw)!)).toBe(raw);
+    expect(parseStepWatch("approved:audio")).toBeNull();
     expect(parseStepWatch("handoff:")).toBeNull();
     expect(parseStepWatch(null)).toBeNull();
   });

@@ -52,6 +52,15 @@ describe("checkFileSize", () => {
     expect(checkFileSize(0)?.status).toBe(400);
     expect(checkFileSize("12")?.status).toBe(400);
   });
+  it("gives a video review's video its own 500 MB cap", () => {
+    const over25 = 100 * 1024 * 1024;
+    expect(checkFileSize(over25, "video")).toBeNull();
+    // The bigger cap is the video purpose's alone: a file in the Files list, or an
+    // image review's image, still stops at 25 MB.
+    expect(checkFileSize(over25)?.status).toBe(413);
+    expect(checkFileSize(over25, "image")?.status).toBe(413);
+    expect(checkFileSize(500 * 1024 * 1024 + 1, "video")?.status).toBe(413);
+  });
 });
 
 describe("shouldCheckpoint", () => {

@@ -22,6 +22,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { RichTextEditor } from "@/components/cockpit/RichTextEditor";
 import { deviceForWidth, type PageDevice } from "@/components/cockpit/PageReviewFrame";
 import { PageReviewStack } from "@/components/cockpit/PageReviewStack";
+import { VideoVersion } from "@/components/cockpit/ReviewVideo";
 import { addDocFiles, uploadSharedFile } from "@/lib/docFileUpload";
 import { formatFileSize, isPreviewableImage } from "@/lib/uploadTypes";
 import { commentHint, isFileKind, kindWhat, type ReviewKind } from "@/lib/reviewKinds";
@@ -111,6 +112,7 @@ export default function DocReviewView({ token }: { token: string }) {
 
   const image = data?.kind === "image";
   const page = data?.kind === "page";
+  const video = data?.kind === "video";
   const versioned = !!data && isFileKind(data.kind);
   const newestEdits: PageEditsByFile = page && pageEdits.body === data?.body ? pageEdits.edits : {};
   const editCount = countEdits(newestEdits);
@@ -388,6 +390,18 @@ export default function DocReviewView({ token }: { token: string }) {
     }
   };
 
+  // The link the player streams a video version from. Held in a callback so the
+  // player can ask again if the link runs out in the middle of a long video.
+  const loadVideo = useCallback(async (fileId: string): Promise<string | null> => {
+    try {
+      const res = await fetch(`/api/doc/${encodeURIComponent(token)}/video?fileId=${encodeURIComponent(fileId)}`, { cache: "no-store" });
+      const j = await res.json().catch(() => ({}));
+      return res.ok ? (j.url as string) : null;
+    } catch {
+      return null;
+    }
+  }, [token]);
+
   // A comment picked in the thread: shown on the image, or on the page at the width its pin was dropped at.
   const focusComment = (id: string) => {
     setFocusedComment(id);
@@ -401,15 +415,19 @@ export default function DocReviewView({ token }: { token: string }) {
   // to be the same as doc"); only how the client comments or changes it differs.
   const how = page
     ? "leave comments on any spot you click, change the wording with Edit text"
-    : image ? "leave comments on any spot you click" : "leave comments on any words you select, edit anything you like";
-  const intro = `Look it over, ${how}. If it all looks right, approve it. Any comment or edit turns that button into Submit changes.`;
+    : image ? "leave comments on any spot you click"
+      : video ? "leave a comment on anything you want changed"
+        : "leave comments on any words you select, edit anything you like";
+  const intro = `${video ? "Watch it through" : "Look it over"}, ${how}. If it all looks right, approve it. Any comment or edit turns that button into Submit changes.`;
   // One button at a time (Derek, 2026-09-15): Approve while there is nothing to
   // change, Submit changes once the client comments or edits.
   const hasChanges = dirty || openNotes > 0;
   const approveHint = image
     ? "Want something changed? Click a spot on the image to leave a comment."
-    : page ? "Want something changed? Click a spot to comment, or use Edit text." : "Want something changed? Select words to comment on them, or edit the text.";
-  const changesHint = image ? "To approve instead, delete your comments." : "To approve instead, delete your comments and undo your edits.";
+    : page ? "Want something changed? Click a spot to comment, or use Edit text."
+      : video ? "Want something changed? Leave a comment saying what."
+        : "Want something changed? Select words to comment on them, or edit the text.";
+  const changesHint = image || video ? "To approve instead, delete your comments." : "To approve instead, delete your comments and undo your edits.";
 
   return (
     <div className="min-h-[100dvh] bg-background text-foreground">
@@ -477,7 +495,7 @@ export default function DocReviewView({ token }: { token: string }) {
               {versioned ? (
                 // An image review's artwork sits on the page itself, no card around it
                 // (Derek, 2026-09-14 redesign); an HTML review keeps its card.
-                <article className={image && shownFileId ? "min-w-0" : "min-w-0 rounded-2xl border bg-surface p-5 shadow-sm sm:p-8"}>
+                <article className={(image || video) && shownFileId ? "min-w-0" : "min-w-0 rounded-2xl border bg-surface p-5 shadow-sm sm:p-8"}>
                   {versionOptions.length > 1 && (
                     <div className="mb-3">
                       <ImageVersionPicker options={versionOptions} value={shownFileId} onChange={(id) => { setViewingImage(id); setPinDraft(null); }} />
@@ -497,6 +515,18 @@ export default function DocReviewView({ token }: { token: string }) {
                             comments={data.comments ?? []} fileId={img.fileId} pending={pinDraft} activeId={focusedComment}
                             onPinClick={setFocusedComment} hoverId={hoveredComment} onPinHover={setHoveredComment}
                             onPlace={data.closed || !onNewest ? undefined : (spot) => setPinDraft({ fileId: img.fileId, ...spot, anchor: null, number: nextPin(data.comments ?? [], img.fileId) })} />
+                        </section>
+                      ))}
+                    </div>
+                  )}
+                  {shownFileId && video && (
+                    // A version holds one video today, but the set format is the same
+                    // as an image review's, so several stack the same way.
+                    <div className="space-y-8">
+                      {shownImages.map((v) => (
+                        <section key={`${shownFileId}:${v.fileId}`} aria-label={v.label} data-image-anchor={v.fileId}>
+                          {shownImages.length > 1 && <h2 className="mb-2 text-[18px] font-semibold">{v.label}</h2>}
+                          <VideoVersion fileId={v.fileId} label={shownImages.length > 1 ? v.label : v.name} load={loadVideo} />
                         </section>
                       ))}
                     </div>

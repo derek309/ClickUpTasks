@@ -35,11 +35,12 @@ import { publishedFiles, type PinAnchor } from "@/lib/reviewPins";
 import { commentHint, isFileKind, kindInSentence, kindNewName, kindQuery, kindTitle, kindWhat } from "@/lib/reviewKinds";
 import { MAX_SET_IMAGES, frontFirst, imageLabel, parseImageSet, setFiles as imagesOf, type ImageSetItem } from "@/lib/imageSet";
 import { countEdits, withPageEdit, PAGE_MAX_BYTES, PAGE_TOO_BIG, type FrameMode, type PageEditsByFile } from "@/lib/pageFrameProtocol";
-import { formatFileSize, isPreviewableImage } from "@/lib/uploadTypes";
+import { VIDEO_WARN_BYTES, formatFileSize, isPreviewableImage, isReviewVideo } from "@/lib/uploadTypes";
 import { RichTextEditor } from "./RichTextEditor";
 import { useDebouncedCommit } from "./useDebouncedCommit";
 import { deviceForWidth, type PageDevice } from "./PageReviewFrame";
 import { PageReviewStack } from "./PageReviewStack";
+import { VideoVersion } from "./ReviewVideo";
 import { ActionMenu } from "./ActionMenu";
 import {
   CommentThread, FileDropLine, ImageLightbox, ImagePinBoard, ImageThumbGrid, WorkItemBadge, WorkItemRow, WorkItemWindow,
@@ -62,10 +63,11 @@ const STAGES = Object.keys(STATUS_VIEW) as TaskDocumentStatus[];
 // points at their comments, the same words as the task's activity line.
 const VERSION_LABEL: Record<TaskDocumentVersion["kind"], string> = { sent: "Sent to client", client_submitted: "Client sent changes", client_approved: "Client approved" };
 const ASKED_LABEL = "Client asked for changes";
-const KIND_ICON: Record<TaskDocumentKind, string> = { doc: "📄", image: "🖼️", page: "🌐" };
+const KIND_ICON: Record<TaskDocumentKind, string> = { doc: "📄", image: "🖼️", page: "🌐", video: "🎬" };
 const HISTORY_PREVIEW = 5;
 const IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
 const PAGE_ACCEPT = ".html,.htm,text/html";
+const VIDEO_ACCEPT = "video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm,.m4v";
 
 type PinDraft = { fileId: string; x: number; y: number; anchor: PinAnchor | null; number: number };
 
@@ -96,6 +98,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
 }) {
   const image = kind === "image";
   const page = kind === "page";
+  const video = kind === "video";
   const versioned = isFileKind(kind);
   const what = kindWhat(kind);
   const title = kind === "doc" ? "Document" : kindTitle(kind);
@@ -262,6 +265,13 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   const readJson = async (res: Response) => res.json().catch(() => ({} as Record<string, unknown>));
   const copy = async (text: string) => { try { await navigator.clipboard.writeText(text); return true; } catch { return false; } };
 
+  // A video version's link, signed here because the team is signed in. Hours, not
+  // minutes: the player holds one link for the whole watch and seeks against it.
+  const loadVideo = useCallback(async (fileId: string): Promise<string | null> => {
+    const path = files.find((f) => f.id === fileId)?.path;
+    return path ? await signedUrlForFile(path, 6 * 3600) : null;
+  }, [files]);
+
   // One page's frame address; the stack asks for each page and again when one expires.
   const loadFrame = async (fileId: string): Promise<string | null> => {
     const res = await pageApi(`&fileId=${encodeURIComponent(fileId)}`);
@@ -399,6 +409,36 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     const left = picked.length > chosen.length && slot === null ? ` A version holds up to ${MAX_SET_IMAGES} images, so ${picked.length - chosen.length} ${picked.length - chosen.length === 1 ? "was" : "were"} left out.` : "";
     await afterNewVersion(saved, `${done} Send it when you're ready.${left}`);
   };
+  // Upload videos, the same way as images. The warning above 200MB is the whole
+  // guard against a master going up by accident (docs/video-review-plan.md): at
+  // 720p nothing Derek sends a client is that big, and whatever goes up is what
+  // the client downloads, so it costs storage and it costs them their data.
+  const uploadVideos = async (list: FileList, slot: number | null) => {
+    if (!doc || adding) return;
+    const current = parseImageSet(doc.body);
+    const picked = Array.from(list).filter((f) => isReviewVideo(f.name));
+    if (!picked.length) { pushToast("Upload an MP4, MOV, WebM or M4V video."); return; }
+    const room = slot !== null ? 1 : MAX_SET_IMAGES - current.length;
+    if (room <= 0) { pushToast(`A version holds up to ${MAX_SET_IMAGES} videos.`); return; }
+    const chosen = picked.slice(0, room);
+    const big = chosen.find((f) => f.size > VIDEO_WARN_BYTES);
+    if (big && !window.confirm(`${big.name} is ${formatFileSize(big.size)}. Review copies are 720p and much smaller than that, so this looks like a master. Upload it anyway?`)) return;
+    setAdding(true);
+    const added: string[] = [];
+    for (const file of chosen) {
+      const up = await uploadSharedFile(file, (payload) => api("/files", { method: "POST", body: JSON.stringify({ ...payload, purpose: "video" }) }), "video");
+      if (!up.ok) { pushToast(up.error); break; }
+      added.push(up.result.fileId as string);
+    }
+    const items = slot !== null && current[slot]
+      ? current.map((item, i) => (i === slot ? { file: added[0], label: item.label } : item))
+      : [...current, ...added.map((file) => ({ file, label: "" }))];
+    const saved = added.length ? await saveImages(items) : null;
+    setAdding(false);
+    if (!saved) return;
+    const done = slot !== null ? "Video replaced." : added.length > 1 ? `${added.length} videos added.` : "Video added.";
+    await afterNewVersion(saved, `${done} Send it when you're ready.`);
+  };
   const relabelImage = async (index: number, label: string) => {
     const current = doc ? parseImageSet(doc.body) : [];
     if (!current[index] || current[index].label === label) return;
@@ -421,9 +461,9 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   };
   const takeOutImage = async (index: number) => {
     const current = doc ? parseImageSet(doc.body) : [];
-    if (current.length < 2 || !window.confirm(`Take ${imageLabel(current, index, kind === "page" ? "page" : "image")} out of this version? Earlier versions keep it, with its pins.`)) return;
+    if (current.length < 2 || !window.confirm(`Take ${itemLabel(current, index)} out of this version? Earlier versions keep it, with its pins.`)) return;
     const saved = await saveImages(current.filter((_, i) => i !== index));
-    if (saved) await afterNewVersion(saved, `${page ? "Page" : "Image"} taken out. Send it when you're ready.`);
+    if (saved) await afterNewVersion(saved, `${page ? "Page" : video ? "Video" : "Image"} taken out. Send it when you're ready.`);
   };
 
   // An HTML review: pasted code or uploaded .html files join the working copy, or one
@@ -799,7 +839,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   const shownItems = versioned ? parseImageSet(shownFileId) : [];
   const shownIds = shownItems.map((item) => item.file);
   const editingSet = versioned && !locked && !!doc.body && shownFileId === doc.body;
-  const itemLabel = (items: ImageSetItem[], i: number) => imageLabel(items, i, page ? "page" : "image");
+  const itemLabel = (items: ImageSetItem[], i: number) => imageLabel(items, i, page ? "page" : video ? "video" : "image");
   const imagePlace = (fileId: string) => {
     const i = shownItems.findIndex((item) => item.file === fileId);
     return i >= 0 && shownItems.length > 1 ? itemLabel(shownItems, i) : null;
@@ -936,7 +976,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     const menuItems = [
       page && { label: "Copy code", onClick: () => void copyCode(item.file) },
       page && { label: "Download", onClick: () => void downloadCode(item.file) },
-      editingSet && !page && { label: "Replace image", disabled: adding, onClick: () => { slotRef.current = i; versionInput.current?.click(); } },
+      editingSet && !page && { label: video ? "Replace video" : "Replace image", disabled: adding, onClick: () => { slotRef.current = i; versionInput.current?.click(); } },
       editingSet && page && { label: "Replace with pasted code", disabled: adding, onClick: () => openPaste(i) },
       editingSet && page && { label: "Replace with an .html file", disabled: adding, onClick: () => { slotRef.current = i; setPasteOpen(false); versionInput.current?.click(); } },
       editingSet && shownItems.length > 1 && { label: "Move up", disabled: i === 0 || adding || busy !== null, onClick: () => void moveImage(i, -1) },
@@ -985,10 +1025,14 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
 
   const versionArticle = (
     <article className={doc.body ? "min-w-0" : "rounded-2xl border bg-surface p-5 shadow-sm sm:p-8"}>
-      <input ref={versionInput} type="file" accept={page ? PAGE_ACCEPT : IMAGE_ACCEPT} className="hidden" multiple
-        onChange={(e) => { if (e.target.files) void (page ? uploadPages(e.target.files, pasteOpen ? pasteSlot : slotRef.current) : uploadImages(e.target.files, slotRef.current)); e.target.value = ""; }} />
+      <input ref={versionInput} type="file" accept={page ? PAGE_ACCEPT : video ? VIDEO_ACCEPT : IMAGE_ACCEPT} className="hidden" multiple
+        onChange={(e) => { if (e.target.files) void (page ? uploadPages(e.target.files, pasteOpen ? pasteSlot : slotRef.current) : video ? uploadVideos(e.target.files, slotRef.current) : uploadImages(e.target.files, slotRef.current)); e.target.value = ""; }} />
       {!doc.body ? (
-        page ? pasteBox : (
+        page ? pasteBox : video ? (
+          <FileDropLine label="Video" count={0} busy={adding} disabled={locked} onFiles={(list) => void uploadVideos(list, null)}>
+            <p className="py-8 text-center text-[16px] text-muted">Add the video your client should review. Send a 720p copy, not the master: whatever goes up is what they download to watch it.</p>
+          </FileDropLine>
+        ) : (
           <FileDropLine label="Images" count={0} busy={adding} disabled={locked} onFiles={(list) => void uploadImages(list, null)}>
             <p className="py-8 text-center text-[16px] text-muted">Add the image your client should review, or up to {MAX_SET_IMAGES} at once, like a postcard&apos;s front and back. They click any spot on an image to leave a numbered comment.</p>
           </FileDropLine>
@@ -996,7 +1040,20 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
       ) : (
         <>
           {page && pasteOpen && !locked && pasteBox}
-          {page ? pageStack : (
+          {page ? pageStack : video ? (
+            <div className="space-y-8">
+              {shownItems.map((item, i) => {
+                const f = files.find((x) => x.id === item.file);
+                const label = itemLabel(shownItems, i);
+                return (
+                  <section key={`${shownFileId}:${item.file}`} aria-label={label} data-image-anchor={item.file} className="group">
+                    {setItemHeader(item, i)}
+                    <VideoVersion fileId={item.file} label={f?.name ?? label} load={loadVideo} />
+                  </section>
+                );
+              })}
+            </div>
+          ) : (
             // Stacked, each with its own name and pins (Derek, 2026-09-14).
             <div className="space-y-8">
               {shownItems.map((item, i) => {
@@ -1115,9 +1172,9 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
         </span>
       )}
       <div className="ml-auto flex flex-wrap items-center gap-2">
-        {editingSet && shownItems.length < MAX_SET_IMAGES && (image ? (
+        {editingSet && shownItems.length < MAX_SET_IMAGES && (image || video ? (
           <button onClick={() => { slotRef.current = null; versionInput.current?.click(); }} disabled={adding} className={quiet}>
-            {adding ? "Uploading…" : "Add images"}
+            {adding ? "Uploading…" : video ? "Add a video" : "Add images"}
           </button>
         ) : (
           // Another page in this version, like a second email (Derek, 2026-09-16).

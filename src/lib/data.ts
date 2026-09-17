@@ -735,7 +735,7 @@ export interface Subtask {
 export type HandoffStep = { id: string; text: string; how?: string; done: boolean };
 export type HandoffLink = { id: string; label: string; url: string };
 export type HandoffMessage = { id: string; authorId: string | null; body: string; at: string };
-export type HandoffDeliverable = "doc" | "image" | "page";
+export type HandoffDeliverable = "doc" | "image" | "page" | "video";
 export interface Handoff {
   /** What good looks like. Starts as the delegation's instructions. */
   goal: string;
@@ -1854,15 +1854,15 @@ export type TaskAction = {
  *  the client approving a review, the client writing back, or a teammate
  *  marking their handoff done. Stored as text: approved:page, reply, handoff:<id>. */
 export type StepWatch =
-  | { kind: "approved"; review: "doc" | "image" | "page" }
+  | { kind: "approved"; review: "doc" | "image" | "page" | "video" }
   | { kind: "reply" }
   | { kind: "handoff"; subId: string };
 
 export function parseStepWatch(raw: string | null | undefined): StepWatch | null {
   if (!raw) return null;
   if (raw === "reply") return { kind: "reply" };
-  const approved = /^approved:(doc|image|page)$/.exec(raw);
-  if (approved) return { kind: "approved", review: approved[1] as "doc" | "image" | "page" };
+  const approved = /^approved:(doc|image|page|video)$/.exec(raw);
+  if (approved) return { kind: "approved", review: approved[1] as "doc" | "image" | "page" | "video" };
   const handoff = /^handoff:([A-Za-z0-9_-]+)$/.exec(raw);
   return handoff ? { kind: "handoff", subId: handoff[1] } : null;
 }
@@ -1875,7 +1875,7 @@ export function stepWatchState(w: StepWatch, ctx: {
   clientName: string;
   messages: Pick<Message, "direction" | "at" | "channel">[];
   subtasks: Pick<Subtask, "id" | "title" | "done" | "assigneeId">[];
-  reviews: Partial<Record<"doc" | "image" | "page", { title: string; status: string; approvedAt: string | null }>>;
+  reviews: Partial<Record<"doc" | "image" | "page" | "video", { title: string; status: string; approvedAt: string | null }>>;
   nameOf: (memberId: string) => string;
 }): { waiting: string; met: string | null } {
   const first = ctx.clientName.split(" ")[0];
@@ -1901,7 +1901,7 @@ export function suggestNextSteps(ctx: {
   canMessage: boolean;
   subtasks: Pick<Subtask, "id" | "title" | "done" | "assigneeId" | "due">[];
   taskOwnerId: string | null;
-  reviews: Partial<Record<"doc" | "image" | "page", { title: string; status: string }>>;
+  reviews: Partial<Record<"doc" | "image" | "page" | "video", { title: string; status: string }>>;
   nameOf: (memberId: string) => string;
   today?: string;
 }): { text: string; watch: string | null; due: string | null; hint: string }[] {
@@ -1913,7 +1913,7 @@ export function suggestNextSteps(ctx: {
     const who = ctx.nameOf(s.assigneeId).split(" ")[0];
     out.push({ text: `Make sure ${who} finishes "${s.title}"`, watch: `handoff:${s.id}`, due: s.due ?? addBusinessDaysIso(today, 1), hint: `Ticks when ${who} marks the handoff done` });
   }
-  for (const kind of ["page", "image", "doc"] as const) {
+  for (const kind of ["page", "image", "video", "doc"] as const) {
     const r = ctx.reviews[kind];
     if (!r || (r.status !== "with_client" && r.status !== "client_submitted")) continue;
     const name = r.title.trim() || "the review";

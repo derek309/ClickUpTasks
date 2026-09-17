@@ -65,6 +65,7 @@ const KIND_WORDS: Record<ReviewKind, string> = {
   doc: "a text document",
   image: "an image (a graphic, flyer, ad, social post, logo or photo)",
   page: "a web page or an HTML email",
+  video: "a video",
 };
 
 export function buildNamePrompt(kind: ReviewKind, taskTitle: string, fileName: string | null, content: string | null): string {

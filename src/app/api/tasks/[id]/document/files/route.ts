@@ -7,7 +7,8 @@ import { kindWhat } from "@/lib/reviewKinds";
 // The team adds and removes files on a task's client document. The client sees a
 // new file on their review page straight away; removing one takes it away too.
 // On an image review, { purpose: "image" } uploads a new version of the image,
-// which the client sees once it is sent.
+// and on a video review { purpose: "video" } a new version of the video, which
+// the client sees once it is sent.
 
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: NO_STORE });
 
@@ -22,7 +23,10 @@ async function open(req: NextRequest, params: Promise<{ id: string }>) {
   const user = found.user;
   return {
     ok: true as const, documentId: found.doc.id, payload,
-    purpose: found.kind === "image" && payload.purpose === "image" ? "image" as const : "file" as const,
+    // A review's own version file only through its own kind's review; anything
+    // else on the document is a plain file in the Files list.
+    purpose: (found.kind === "image" && payload.purpose === "image") || (found.kind === "video" && payload.purpose === "video")
+      ? found.kind : "file" as const,
     actor: { id: user.memberId ?? user.id, label: await memberLabel(user) },
   };
 }

@@ -144,13 +144,16 @@ export async function pickReviewVersion(
   const files = await Promise.all(ids.map((id) => docVersionFile(doc.id, id, filePurpose(kind), false)));
   const first = files[0];
   if (!first || files.some((f) => !f)) {
-    return fail(400, kind === "image" ? "Upload the image first." : "That page is no longer on the review.");
+    const missing = { image: "Upload the image first.", video: "Upload the video first." }[kind as string]
+      ?? "That page is no longer on the review.";
+    return fail(400, missing);
   }
   try {
     const data = await setWorkingFile(doc.id, body, (doc.body as string) ?? "", stampOf(actor));
     if (!data) return fail(409, locked(kind));
     // Its first image or page gives a review still called "New image review" a name.
-    const named = await nameReviewIfDefault(data, { kind, path: first.path, fileName: first.name });
+    // A video is not named by AI yet (reviewAutoName.ts reads words and images only).
+    const named = kind === "video" ? null : await nameReviewIfDefault(data, { kind, path: first.path, fileName: first.name });
     return { ok: true, document: named ?? data };
   } catch (e) {
     return fail(400, e instanceof Error ? e.message : "Could not save.");
@@ -200,7 +203,7 @@ export async function deleteReview(taskId: string, kind: ReviewKind, actor: Revi
  *  kind. A task has one live review of each kind, so this waits until the current
  *  one is deleted. */
 export async function restoreReview(taskId: string, kind: ReviewKind, actor: ReviewActor, documentId: string | null): Promise<ReviewOutcome<{ document: Row }>> {
-  const what = { doc: "a document", image: "an image review", page: "an HTML review" }[kind];
+  const what = { doc: "a document", image: "an image review", page: "an HTML review", video: "a video review" }[kind];
   const taken = `This task already has ${what}. Delete that one first, then restore this one.`;
   if (await liveDocument(taskId, kind)) return fail(409, taken);
   const cutoff = new Date(Date.now() - RESTORE_DAYS * 86_400_000).toISOString();

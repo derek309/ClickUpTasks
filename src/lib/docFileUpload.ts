@@ -4,7 +4,7 @@
 // check and record it. Used by the client review document (the team's drawer and
 // the client's /doc page) and the client portal's uploads (/waiting/[token]). See
 // src/lib/taskDocumentFiles.ts for the checks on the other side.
-import { MAX_SHARED_FILE_BYTES, isShareableFileName } from "./uploadTypes";
+import { formatFileSize, isReviewVideo, maxUploadBytes, isShareableFileName } from "./uploadTypes";
 
 /** Posts one JSON payload to the caller's upload route and returns the response. */
 export type DocFileApi = (payload: Record<string, unknown>) => Promise<Response>;
@@ -26,10 +26,13 @@ async function putToUploadUrl(uploadUrl: string, file: File): Promise<boolean> {
 }
 
 /** One file, start to confirm. On success, the confirm response's JSON; otherwise
- *  a message that can be shown to the person as it is. */
-export async function uploadSharedFile(file: File, api: DocFileApi): Promise<{ ok: true; result: Record<string, unknown> } | { ok: false; error: string }> {
+ *  a message that can be shown to the person as it is. purpose "video" is a video
+ *  review's video, which has its own, much larger cap (uploadTypes.ts). */
+export async function uploadSharedFile(file: File, api: DocFileApi, purpose: "file" | "image" | "video" = "file"): Promise<{ ok: true; result: Record<string, unknown> } | { ok: false; error: string }> {
+  if (purpose === "video" && !isReviewVideo(file.name)) return { ok: false, error: `${file.name} can't be added. Add an MP4, MOV, WebM or M4V video.` };
   if (!isShareableFileName(file.name)) return { ok: false, error: `${file.name} can't be added. Add a photo, PDF, document, spreadsheet, slides or a video.` };
-  if (file.size > MAX_SHARED_FILE_BYTES) return { ok: false, error: `${file.name} is over 25 MB.` };
+  const cap = maxUploadBytes(purpose);
+  if (file.size > cap) return { ok: false, error: `${file.name} is ${formatFileSize(file.size)}, over the ${formatFileSize(cap)} limit.` };
   try {
     const start = await api({ action: "start", name: file.name, size: file.size });
     const s = await start.json().catch(() => ({}));

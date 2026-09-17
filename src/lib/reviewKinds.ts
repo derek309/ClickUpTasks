@@ -5,14 +5,17 @@
 //   image  an image the client pins comments to (supabase/task-image-reviews.sql)
 //   page   a web page, uploaded .html or pasted code, the client pins comments to
 //          and can reword (supabase/task-page-reviews.sql)
-// image and page are "file kinds": their body and every version body hold the id
-// of a file, not HTML.
+//   video  a video the client watches and pauses to comment on
+//          (supabase/task-video-reviews.sql)
+// image, page and video are "file kinds": their body and every version body hold
+// the id of a file, not HTML.
 
-export type ReviewKind = "doc" | "image" | "page";
+export type ReviewKind = "doc" | "image" | "page" | "video";
 export type FileKind = Exclude<ReviewKind, "doc">;
 
 /** Any value (a query string, a row) as a kind; anything unknown is the text document. */
-export const parseKind = (raw: unknown): ReviewKind => (raw === "image" || raw === "page" ? raw : "doc");
+export const parseKind = (raw: unknown): ReviewKind =>
+  (raw === "image" || raw === "page" || raw === "video" ? raw : "doc");
 
 /** Whether the kind's body is a file id rather than HTML. */
 export const isFileKind = (kind: ReviewKind): kind is FileKind => kind !== "doc";
@@ -20,13 +23,13 @@ export const isFileKind = (kind: ReviewKind): kind is FileKind => kind !== "doc"
 /** The purpose its version files are stored under in task_document_files. */
 export const filePurpose = (kind: FileKind): FileKind => kind;
 
-const WHAT: Record<ReviewKind, string> = { doc: "document", image: "image", page: "page" };
+const WHAT: Record<ReviewKind, string> = { doc: "document", image: "image", page: "page", video: "video" };
 // The team calls the page kind an "HTML review" (Derek, 2026-09-13); what the client
 // sees still says "page".
-const TITLE: Record<ReviewKind, string> = { doc: "Client document", image: "Image review", page: "HTML review" };
-const NEW_NAME: Record<ReviewKind, string> = { doc: "New document", image: "New image review", page: "New HTML review" };
+const TITLE: Record<ReviewKind, string> = { doc: "Client document", image: "Image review", page: "HTML review", video: "Video review" };
+const NEW_NAME: Record<ReviewKind, string> = { doc: "New document", image: "New image review", page: "New HTML review", video: "New video review" };
 /** The title inside a sentence (lowercasing would spoil "HTML"). */
-const IN_SENTENCE: Record<ReviewKind, string> = { doc: "client document", image: "image review", page: "HTML review" };
+const IN_SENTENCE: Record<ReviewKind, string> = { doc: "client document", image: "image review", page: "HTML review", video: "video review" };
 
 /** The short word the client reads: "This image is approved." */
 export const kindWhat = (kind: ReviewKind) => WHAT[kind];
@@ -46,7 +49,11 @@ export const noDocumentYet = (kind: ReviewKind) => `This task has no ${IN_SENTEN
  *  HTML reviews "need to be the same as doc"). */
 export const commentHint = (kind: ReviewKind) => kind === "doc"
   ? "Write a comment, or select words in the document to comment on them…"
-  : `Write a comment, or click a spot on the ${WHAT[kind]} to comment on it…`;
+  // A video review plays the video; catching the moment a comment was left at is
+  // the next slice, so until then its hint promises nothing about pausing.
+  : kind === "video"
+    ? "Write a comment about the video…"
+    : `Write a comment, or click a spot on the ${WHAT[kind]} to comment on it…`;
 
 /** The query string a team route reads the kind from ("" for the text document). */
 export const kindQuery = (kind: ReviewKind) => (kind === "doc" ? "" : `?kind=${kind}`);

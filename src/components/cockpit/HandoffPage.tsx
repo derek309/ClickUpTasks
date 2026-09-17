@@ -21,8 +21,8 @@ import { kindTitle } from "@/lib/reviewKinds";
 import { I, Avatar, LinkedText, newId } from "./ui";
 import { useEscapeToClose } from "./useEscapeToClose";
 
-const KINDS: HandoffDeliverable[] = ["page", "image", "doc"];
-const KIND_ICON: Record<HandoffDeliverable, string> = { doc: "📄", image: "🖼️", page: "🌐" };
+const KINDS: HandoffDeliverable[] = ["page", "image", "video", "doc"];
+const KIND_ICON: Record<HandoffDeliverable, string> = { doc: "📄", image: "🖼️", page: "🌐", video: "🎬" };
 const STAGE: Record<string, { label: string; tone: string }> = {
   draft: { label: "Draft", tone: "bg-background text-muted" },
   with_client: { label: "With the client", tone: "bg-sky-50 text-sky-700" },

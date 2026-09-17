@@ -17,18 +17,27 @@ import { supabaseAdmin } from "./supabaseAdmin";
 import { TASK_FILES_BUCKET } from "./db";
 import { cleanPin, publishedFiles, type ReviewPin } from "./reviewPins";
 import type { FileKind } from "./reviewKinds";
-import { imageLabel, parseImageSet, pinImageLabel, setFiles } from "./imageSet";
+import { imageLabel, parseImageSet, pinImageLabel, setFiles, type SetKind } from "./imageSet";
 import type { ImageType } from "./safeFetch";
 import {
-  MAX_SHARED_FILE_BYTES, cleanFileName, extOf, isActiveContentType, isPreviewableImage, isShareableFileName,
-  sharedFileKind, storageSafeName, type SharedFileKind,
+  MAX_SHARED_FILE_BYTES, cleanFileName, extOf, isActiveContentType, isPreviewableImage, isReviewVideo,
+  isShareableFileName, maxUploadBytes, sharedFileKind, storageSafeName, type SharedFileKind,
 } from "./uploadTypes";
+
+/** Which default names a version file's set uses, from its stored purpose. An
+ *  unknown purpose falls back to an image review's names, as every set did before
+ *  there was more than one kind. */
+const setKindOf = (purpose: unknown): SetKind =>
+  (purpose === "page" || purpose === "video" ? purpose : "image");
 
 export const MAX_DOC_FILES = 50;
 /** Versions a web page review can hold; each paste or edit is one. */
 export const MAX_PAGE_FILES = 100;
 /** Images an image review can hold across its versions (a version can hold 10). */
 export const MAX_IMAGE_FILES = 100;
+/** Videos a video review can hold across its versions. Far lower than the others:
+ *  each one is up to 500MB, so this is the storage ceiling for one review. */
+export const MAX_VIDEO_FILES = 20;
 
 /** Whether the document has room for one more file of this purpose: Files and an
  *  image review's images each have their own cap, so a postcard's versions never
@@ -37,6 +46,7 @@ async function roomFor(documentId: string, purpose: UploadPurpose): Promise<Fail
   const { count } = await supabaseAdmin.from("task_document_files")
     .select("id", { count: "exact", head: true }).eq("document_id", documentId).eq("purpose", purpose).is("removed_at", null);
   if (purpose === "image") return (count ?? 0) >= MAX_IMAGE_FILES ? fail(400, `An image review can hold ${MAX_IMAGE_FILES} images. Remove an old version to add more.`) : null;
+  if (purpose === "video") return (count ?? 0) >= MAX_VIDEO_FILES ? fail(400, `A video review can hold ${MAX_VIDEO_FILES} videos. Remove an old version to add more.`) : null;
   return (count ?? 0) >= MAX_DOC_FILES ? fail(400, `A document can hold ${MAX_DOC_FILES} files. Remove one to add another.`) : null;
 }
 /** While someone keeps typing, their draft is kept in the history this often. */
@@ -49,10 +59,16 @@ const fail = (status: number, error: string): Fail => ({ ok: false, status, erro
 export type DocActor = { id: string | null; label: string };
 /** "file": everything in the Files list. image and page: a review's version files. */
 export type FilePurpose = "file" | FileKind;
-/** What the upload link may add: a file, or an image review's image. A page never
- *  comes through it (storePageFile below). */
-export type UploadPurpose = "file" | "image";
+/** What the upload link may add: a file, an image review's image, or a video
+ *  review's video. A page never comes through it (storePageFile below). */
+export type UploadPurpose = "file" | "image" | "video";
 const IMAGE_ONLY = "Upload a JPG, PNG, WebP or GIF image.";
+const VIDEO_ONLY = "Upload an MP4, MOV, WebM or M4V video.";
+/** Whether this purpose's file must be a playable video, an image, or anything shareable. */
+const wrongType = (purpose: UploadPurpose, name: string): string | null =>
+  (purpose === "image" && !isPreviewableImage(name) ? IMAGE_ONLY
+    : purpose === "video" && !isReviewVideo(name) ? VIDEO_ONLY
+      : null);
 
 export const docFileFolder = (documentId: string) => `doc/${documentId}/`;
 
@@ -70,14 +86,14 @@ export function isDocFilePath(documentId: string, path: unknown): path is string
 /** What actually landed in storage at `path` after a direct upload: it must exist,
  *  be under the cap and not carry a type a browser would run. Anything else is
  *  deleted. Shared by the document's files and the client portal's uploads. */
-export async function checkStoredFile(path: string): Promise<{ ok: true; size: number } | Fail> {
+export async function checkStoredFile(path: string, purpose: UploadPurpose = "file"): Promise<{ ok: true; size: number } | Fail> {
   const storage = supabaseAdmin.storage.from(TASK_FILES_BUCKET);
   const { data: info, error } = await storage.info(path);
   if (error || !info) return fail(400, "The upload didn't finish. Please try again.");
   const meta = ((info as { metadata?: { size?: number; mimetype?: string } }).metadata) ?? {};
   const size = Number(info.size ?? meta.size ?? 0);
   const type = String(info.contentType ?? meta.mimetype ?? "");
-  if (!size || size > MAX_SHARED_FILE_BYTES || isActiveContentType(type)) {
+  if (!size || size > maxUploadBytes(purpose) || isActiveContentType(type)) {
     await storage.remove([path]);
     return fail(400, "That file can't be added.");
   }
@@ -93,9 +109,11 @@ export function checkFileName(raw: unknown): { ok: true; name: string } | Fail {
   return { ok: true, name };
 }
 
-export function checkFileSize(raw: unknown): Fail | null {
+export function checkFileSize(raw: unknown, purpose: UploadPurpose = "file"): Fail | null {
   if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return fail(400, "Invalid file.");
-  if (raw > MAX_SHARED_FILE_BYTES) return fail(413, "Each file must be under 25 MB.");
+  if (raw > maxUploadBytes(purpose)) {
+    return fail(413, purpose === "video" ? "Each video must be under 500 MB." : "Each file must be under 25 MB.");
+  }
   return null;
 }
 
@@ -103,8 +121,9 @@ export function checkFileSize(raw: unknown): Fail | null {
 export async function startDocUpload(documentId: string, rawName: unknown, rawSize: unknown, purpose: UploadPurpose = "file"): Promise<{ ok: true; path: string; uploadUrl: string } | Fail> {
   const named = checkFileName(rawName);
   if (!named.ok) return named;
-  if (purpose === "image" && !isPreviewableImage(named.name)) return fail(400, IMAGE_ONLY);
-  const sized = checkFileSize(rawSize);
+  const wrong = wrongType(purpose, named.name);
+  if (wrong) return fail(400, wrong);
+  const sized = checkFileSize(rawSize, purpose);
   if (sized) return sized;
   const full = await roomFor(documentId, purpose);
   if (full) return full;
@@ -127,12 +146,13 @@ export async function finishDocUpload(documentId: string, rawPath: unknown, rawN
   if (!isDocFilePath(documentId, rawPath) || extOf(rawPath) !== extOf(named.name)) return fail(400, "Invalid file.");
   const { data: known } = await supabaseAdmin.from("task_document_files").select("id").eq("path", rawPath).limit(1).maybeSingle();
   if (known) return fail(409, "That file is already on the document.");
-  if (purpose === "image" && !isPreviewableImage(named.name)) {
+  const wrong = wrongType(purpose, named.name);
+  if (wrong) {
     await supabaseAdmin.storage.from(TASK_FILES_BUCKET).remove([rawPath]);
-    return fail(400, IMAGE_ONLY);
+    return fail(400, wrong);
   }
 
-  const stored = await checkStoredFile(rawPath);
+  const stored = await checkStoredFile(rawPath, purpose);
   if (!stored.ok) return stored;
   const size = stored.size;
 
@@ -207,32 +227,54 @@ export async function pinImageName(documentId: string, fileId: string): Promise<
     publishedBodies(documentId),
     supabaseAdmin.from("task_document_files").select("purpose").eq("id", fileId).eq("document_id", documentId).maybeSingle(),
   ]);
-  return pinImageLabel(bodies, fileId, f?.purpose === "page" ? "page" : "image");
+  return pinImageLabel(bodies, fileId, setKindOf(f?.purpose));
 }
 
+/** How long a link to a stored file lasts: long enough to open it, short enough
+ *  that a copied link is no use later. Every page asks again rather than holding one. */
+const FILE_URL_TTL = 300;
+/** A video's link lasts far longer, because it is not opened once: the player
+ *  holds it for the whole watch and seeking asks storage for byte ranges against
+ *  it, so it has to outlast the video itself. */
+const VIDEO_URL_TTL = 6 * 3600;
+
 /** A short lived link to one shared file, saved rather than shown when asked.
- *  An image review's image opens only once published; a page never opens this
- *  way, only in the sandboxed frame. */
+ *  An image review's image and a video review's video open only once published; a
+ *  page never opens this way, only in the sandboxed frame. */
 export async function sharedDocFileUrl(documentId: string, fileId: string, download: boolean): Promise<string | null> {
   const { data: f } = await supabaseAdmin.from("task_document_files")
     .select("path, name, purpose").eq("id", fileId).eq("document_id", documentId)
     .is("removed_at", null).maybeSingle();
-  if (!f || f.purpose === "page" || (f.purpose === "image" && !(await wasPublished(documentId, fileId)))) return null;
+  if (!f || f.purpose === "page") return null;
+  const version = f.purpose === "image" || f.purpose === "video";
+  if (version && !(await wasPublished(documentId, fileId))) return null;
+  const ttl = f.purpose === "video" ? VIDEO_URL_TTL : FILE_URL_TTL;
   const { data } = await supabaseAdmin.storage.from(TASK_FILES_BUCKET)
-    .createSignedUrl(f.path as string, 300, download ? { download: f.name as string } : undefined);
+    .createSignedUrl(f.path as string, ttl, download ? { download: f.name as string } : undefined);
+  return data?.signedUrl ?? null;
+}
+
+/** A link the client's player streams a video review's video from, or null when
+ *  the file is not a live video version (or, with publishedOnly, was never sent).
+ *  Storage serves the byte ranges seeking asks for, so this link goes to the
+ *  player and the app is not in the way of the watching. */
+export async function docVideoUrl(documentId: string, fileId: unknown, publishedOnly: boolean): Promise<string | null> {
+  const file = await docVersionFile(documentId, fileId, "video", publishedOnly);
+  if (!file) return null;
+  const { data } = await supabaseAdmin.storage.from(TASK_FILES_BUCKET).createSignedUrl(file.path, VIDEO_URL_TTL);
   return data?.signedUrl ?? null;
 }
 
 export type VersionFile = { id: string; name: string; path: string; purpose: FileKind };
 
 /** One of a review's version files (an image review's image, a web page review's
- *  page) that is still on the review, or null. purpose null takes either kind.
+ *  page, a video review's video) that is still on the review, or null. purpose null takes either kind.
  *  publishedOnly is the client's side, which may only use files it was shown. */
 export async function docVersionFile(documentId: string, fileId: unknown, purpose: FileKind | null, publishedOnly: boolean): Promise<VersionFile | null> {
   if (typeof fileId !== "string") return null;
   const query = supabaseAdmin.from("task_document_files")
     .select("id, name, path, purpose").eq("id", fileId).eq("document_id", documentId).is("removed_at", null);
-  const { data: f } = await (purpose ? query.eq("purpose", purpose) : query.in("purpose", ["image", "page"])).maybeSingle();
+  const { data: f } = await (purpose ? query.eq("purpose", purpose) : query.in("purpose", ["image", "page", "video"])).maybeSingle();
   if (!f || (publishedOnly && !(await wasPublished(documentId, fileId)))) return null;
   return { id: f.id as string, name: f.name as string, path: f.path as string, purpose: f.purpose as FileKind };
 }
@@ -261,7 +303,7 @@ export async function sharedVersionFiles(documentId: string): Promise<SharedVers
     const items = parseImageSet(body);
     if (!items.length || items.some((item) => !live.has(item.file))) return [];
     // A version holds one kind of file, so its first says which default names apply.
-    const kind = live.get(items[0].file)!.purpose === "page" ? "page" : "image";
+    const kind = setKindOf(live.get(items[0].file)!.purpose);
     const images = items.map((item, n) => ({ fileId: item.file, name: live.get(item.file)!.name as string, label: imageLabel(items, n, kind) }));
     return [{
       body, fileId: images[0].fileId, name: images[0].name, number: i + 1, images,

@@ -26,8 +26,10 @@ export function WorkItemBadge({ label, chip, dot }: { label: string; chip: strin
 const ROW_TONE = {
   doc: { box: "border-l-highlight", tile: "bg-highlight-soft" },
   image: { box: "border-l-success", tile: "bg-success-soft" },
-  // Every soft color pair is taken, so the web page line is a neutral dark stripe.
+  // Every soft color pair is taken, so the web page line is a neutral dark stripe
+  // and the video line the same neutral tile under a lighter grey one.
   page: { box: "border-l-foreground", tile: "bg-background" },
+  video: { box: "border-l-muted", tile: "bg-background" },
   email: { box: "border-l-accent", tile: "bg-accent-soft" },
 } as const;
 

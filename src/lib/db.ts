@@ -679,7 +679,7 @@ export const fetchDeletedTaskDocuments = async (taskId: string, kind: TaskDocume
 // supabase/task-document-files.sql). Read the same way, written by the server.
 export type TaskDocumentFile = {
   id: string; name: string; path: string; sizeBytes: number; kind: string;
-  /** image and page: a review's version files, kept out of the Files list. */
+  /** image, page and video: a review's version files, kept out of the Files list. */
   purpose: "file" | FileKind;
   addedBy: string | null; addedByLabel: string | null; createdAt: string;
   sharedAt: string | null; removedAt: string | null; removedByLabel: string | null;
@@ -689,7 +689,8 @@ export const fetchTaskDocumentFiles = async (documentId: string): Promise<TaskDo
   const { data, error } = await supabase.from("task_document_files").select("*").eq("document_id", documentId).order("created_at", { ascending: true });
   if (error) { logErr({ error }); return []; }
   return (data ?? []).map((r: any) => ({
-    id: r.id, name: r.name, path: r.path, sizeBytes: Number(r.size_bytes ?? 0), kind: r.kind, purpose: r.purpose === "image" || r.purpose === "page" ? r.purpose : "file",
+    id: r.id, name: r.name, path: r.path, sizeBytes: Number(r.size_bytes ?? 0), kind: r.kind,
+    purpose: r.purpose === "image" || r.purpose === "page" || r.purpose === "video" ? r.purpose : "file",
     addedBy: r.added_by ?? null, addedByLabel: r.added_by_label ?? null, createdAt: r.created_at,
     sharedAt: r.shared_at ?? null, removedAt: r.removed_at ?? null, removedByLabel: r.removed_by_label ?? null,
   }));

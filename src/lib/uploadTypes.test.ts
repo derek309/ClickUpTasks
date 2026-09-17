@@ -2,7 +2,8 @@
 import { describe, it, expect } from "vitest";
 import {
   extOf, isShareableFileName, isPreviewableImage, sharedFileKind, isActiveContentType,
-  cleanFileName, storageSafeName, formatFileSize, MAX_SHARED_FILE_BYTES,
+  cleanFileName, storageSafeName, formatFileSize, isReviewVideo, maxUploadBytes,
+  MAX_SHARED_FILE_BYTES, MAX_VIDEO_BYTES,
 } from "./uploadTypes";
 
 describe("isShareableFileName", () => {
@@ -66,10 +67,24 @@ describe("storageSafeName", () => {
   });
 });
 
+describe("isReviewVideo and maxUploadBytes", () => {
+  it("takes only the video extensions a browser plays, in any case", () => {
+    for (const n of ["cut.mp4", "Cut.MOV", "cut.webm", "cut.m4v"]) expect(isReviewVideo(n)).toBe(true);
+    for (const n of ["logo.png", "brief.pdf", "cut.avi", "cut.mkv", "cut"]) expect(isReviewVideo(n)).toBe(false);
+  });
+  it("raises the cap for a video review's video and nothing else", () => {
+    expect(maxUploadBytes("video")).toBe(MAX_VIDEO_BYTES);
+    expect(maxUploadBytes("file")).toBe(MAX_SHARED_FILE_BYTES);
+    expect(maxUploadBytes("image")).toBe(MAX_SHARED_FILE_BYTES);
+  });
+});
+
 describe("formatFileSize", () => {
   it("reads in B, KB and MB", () => {
     expect(formatFileSize(512)).toBe("512 B");
     expect(formatFileSize(2048)).toBe("2 KB");
-    expect(formatFileSize(MAX_SHARED_FILE_BYTES)).toBe("25.0 MB");
+    expect(formatFileSize(1.5 * 1024 * 1024)).toBe("1.5 MB");
+    expect(formatFileSize(MAX_SHARED_FILE_BYTES)).toBe("25 MB");
+    expect(formatFileSize(MAX_VIDEO_BYTES)).toBe("500 MB");
   });
 });

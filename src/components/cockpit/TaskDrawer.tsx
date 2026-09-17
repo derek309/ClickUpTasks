@@ -36,6 +36,7 @@ import { type FileKind } from "@/lib/reviewKinds";
 const REVIEW_LINES: { kind: FileKind; label: string }[] = [
   { kind: "image", label: "Image review" },
   { kind: "page", label: "HTML review" },
+  { kind: "video", label: "Video review" },
 ];
 
 const ATT_KIND_ORDER: Record<Attachment["kind"], number> = { image: 0, pdf: 1, doc: 2, sheet: 3, link: 4 };
@@ -480,7 +481,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const reviewsKey = `${task.id}:${askNext === task.id}:${openNextStep(actions)?.nextStepWatch ?? ""}`;
   useEffect(() => {
     let live = true;
-    void Promise.all((["doc", "image", "page"] as const).map(async (k) => [k, await fetchTaskDocument(task.id, k)] as const)).then((pairs) => {
+    void Promise.all((["doc", "image", "page", "video"] as const).map(async (k) => [k, await fetchTaskDocument(task.id, k)] as const)).then((pairs) => {
       if (!live) return;
       setReviewStates({ taskId: task.id, reviews: Object.fromEntries(pairs.filter((p) => !!p[1]).map(([k, d]) => [k, { title: d!.title, status: d!.status, approvedAt: d!.approvedAt }])) });
     });
@@ -971,7 +972,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // so a second click opens it again after it was closed; one counter per review
   // kind, so opening one never reopens the other.
   const [docStartNonce, setDocStartNonce] = useState(0);
-  const [reviewStartNonce, setReviewStartNonce] = useState<Record<FileKind, number>>({ image: 0, page: 0 });
+  const [reviewStartNonce, setReviewStartNonce] = useState<Record<FileKind, number>>({ image: 0, page: 0, video: 0 });
   const [emailOpenNonce, setEmailOpenNonce] = useState(0);
   // Email on this task, from the dock, the "+ Draft email" chip or Reply on a
   // message, opens the draft email window. A draft already here opens as it is;

@@ -250,7 +250,9 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
       }
       if (!made.created) return `"${task.title}" already has a ${what(kind)}, so nothing new was made. get_review shows it.`;
       await event(task.id, `${await actor.label()} started the ${what(kind)}`);
-      const next = { doc: "write_document writes it", image: "add_review_version adds the image (image_url, or upload_id from start_image_upload)", page: "add_review_version adds the page's HTML" }[kind];
+      // video is not in KINDS above, so a chat cannot reach it; the line is here so
+      // every kind has one.
+      const next = { doc: "write_document writes it", image: "add_review_version adds the image (image_url, or upload_id from start_image_upload)", page: "add_review_version adds the page's HTML", video: "the app uploads the video" }[kind];
       return `Created the ${what(kind)} on "${task.title}". ${next}, then send_for_review sends it.`;
     },
 
