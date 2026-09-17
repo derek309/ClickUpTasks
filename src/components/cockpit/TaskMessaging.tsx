@@ -632,7 +632,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     // (Derek, 2026-09-16: the page read "very flat").
     if (!a.body && replies.length === 0 && !replyOpen && editingAction !== a.id) {
       return (
-        <div key={a.id} className={`group flex items-center gap-3 ${gap}`}>
+        <div key={a.id} id={`action-${a.id}`} className={`group flex items-center gap-3 rounded-lg ${gap}`}>
           <span className="z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-background text-[16px]" aria-hidden>{ACTION_ICON[a.kind]}</span>
           <div className="min-w-0 flex-1 text-[16px] text-muted">
             <span className="font-semibold text-foreground">{meta.verb}</span> · {who}{toName ? ` → ${toName}` : ""} · {timeAgo(a.at)}
@@ -655,7 +655,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     // lock, never as something the client was sent (Derek, 2026-09-16).
     const teamNote = a.kind === "note";
     return (
-      <div key={a.id} className={`group flex gap-3 ${gap} ${teamNote ? "mx-auto max-w-[680px]" : ""}`}>
+      <div key={a.id} id={`action-${a.id}`} className={`group flex gap-3 rounded-lg ${gap} ${teamNote ? "mx-auto max-w-[680px]" : ""}`}>
         <span className={`z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[16px] ${teamNote ? "bg-amber-100 dark:bg-amber-500/20" : "bg-accent-soft"}`} aria-hidden>{teamNote ? "🔒" : ACTION_ICON[a.kind]}</span>
         {/* Every entry is a white card on the feed's tinted ground (Derek:
             "add a white box around messages so it stands out" — "all of

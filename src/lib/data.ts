@@ -1857,6 +1857,33 @@ export function openNextStep(actions: TaskAction[]): TaskAction | null {
   return best;
 }
 
+/** How the next step card names its date, and how loud it is: red once late,
+ *  orange today and tomorrow, grey further out (Derek, 2026-09-16, option A). */
+export function stepDateLabel(iso: string | null, today: string = TODAY): { label: string; tone: "late" | "soon" | "later" | "none" } {
+  if (!iso) return { label: "Set a date", tone: "none" };
+  const date = formatDue(iso);
+  const days = Math.round((Date.parse(`${iso}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
+  if (days < 0) return { label: `${-days === 1 ? "1 day" : `${-days} days`} late, ${date}`, tone: "late" };
+  if (days === 0) return { label: `Today, ${date}`, tone: "soon" };
+  if (days === 1) return { label: `Tomorrow, ${date}`, tone: "soon" };
+  return { label: date, tone: "later" };
+}
+
+/** How many times the follow up has been pushed since the open step was set,
+ *  read from the task's own change log. A step that keeps sliding is stuck. */
+export function followUpMoves(comments: Pick<Comment, "kind" | "body" | "at">[], since: string): number {
+  return comments.filter((c) => c.kind === "event" && c.at >= since && /^moved follow up from /.test(c.body)).length;
+}
+
+/** The steps already finished on a task, oldest first, the last `limit` of them. */
+export function doneSteps(actions: TaskAction[], limit = 3): { text: string; doneAt: string }[] {
+  return actions
+    .filter((a) => a.nextStep && a.nextStepDoneAt)
+    .map((a) => ({ text: a.nextStep as string, doneAt: a.nextStepDoneAt as string }))
+    .sort((a, b) => a.doneAt.localeCompare(b.doneAt))
+    .slice(-limit);
+}
+
 /** The follow up date once the step `doneId` is ticked off: the date of the
  *  step still open after it, or none. The follow up and the open next step
  *  are one date shown once, so closing the step has to move or clear it. */

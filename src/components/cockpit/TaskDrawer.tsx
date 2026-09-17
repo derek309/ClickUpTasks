@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, clientStatusMeta, PERSONAL_CLIENT_ID,
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
-  STATUS_META, pickableStatuses, handoffOf, handoffProgress, handoffLink, type DelegateSpec, type ClientLink, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
+  STATUS_META, pickableStatuses, stepDateLabel, followUpMoves, doneSteps, dateQuickPicks, TASK_ACTION_META, handoffOf, handoffProgress, handoffLink, type DelegateSpec, type ClientLink, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -468,6 +468,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Keyed by task like the other drafts here, since this drawer is not
   // remounted when the task changes.
   const [stepDraft, setStepDraft] = useState<{ taskId: string; text: string } | null>(null);
+  // The task whose next step was just ticked and is asking what happens next.
+  const [askNext, setAskNext] = useState<string | null>(null);
+  const [nextDraft, setNextDraft] = useState("");
 
   // One name for "may this person contact this client", used by the dock, the
   // Open in GHL link and the Call link. Cockpit only passes onSendTaskMessage
@@ -651,42 +654,118 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // The task's own follow up wins when the two disagree, because the task
   // list edits it without the steps loaded.
   const followUp = task.followUpAt ?? openStep?.nextStepDue ?? null;
-  const followUpDays = followUp ? daysUntilDue(followUp) : null;
-  const followUpWhen = !followUp ? "" : `${formatDue(followUp)}${followUpDays === 0 ? " (today)" : followUpDays === 1 ? " (tomorrow)" : followUpDays !== null && followUpDays < 0 ? ` (${-followUpDays}d late)` : ""}`;
   const editingStep = !!openStep && stepDraft?.taskId === task.id;
   const saveStepDraft = () => {
     if (openStep && stepDraft && stepDraft.text.trim() && stepDraft.text.trim() !== openStep.nextStep) renameNextStep(openStep.id, stepDraft.text.trim());
     setStepDraft(null);
   };
-  const cardButton = "inline-flex h-10 items-center rounded-lg bg-surface px-4 text-[16px] font-medium shadow-soft hover:bg-background";
-  // The loudest thing after the title: what to do now, with a bar down its edge.
-  const nextStepCard = task.status === "done" && !openStep ? null : (
-    <div className={`relative mt-7 flex flex-wrap items-center gap-x-4 gap-y-3 rounded-2xl py-5 pl-7 pr-5 ${openStep || followUp ? "bg-accent-soft" : "border border-dashed"}`}>
-      {(openStep || followUp) && <span aria-hidden className={`absolute bottom-4 left-0 top-4 w-[5px] rounded-r-[5px] ${followUpDays !== null && followUpDays < 0 ? "bg-danger" : "bg-accent"}`} />}
-      <div className="min-w-0 flex-1 basis-60">
-        <div className={`text-[16px] font-semibold ${followUpDays !== null && followUpDays < 0 ? "text-danger" : "text-accent"}`}>
-          {openStep ? "Next step" : followUp ? "Follow up" : "No next step"}{followUp ? ` · ${followUpWhen}` : ""}
-        </div>
-        {editingStep ? (
-          <input autoFocus value={stepDraft.text} onChange={(e) => setStepDraft({ taskId: task.id, text: e.target.value })}
-            onKeyDown={(e) => { if (e.key === "Enter") saveStepDraft(); if (e.key === "Escape") { e.stopPropagation(); setStepDraft(null); } }}
-            onBlur={saveStepDraft} aria-label="Next step"
-            className="mt-1 w-full rounded-lg border bg-surface px-2.5 py-1.5 text-[18px] font-semibold outline-none focus:border-accent" />
-        ) : (
-          <div className={`mt-0.5 text-[20px] leading-snug ${openStep ? "font-bold" : "text-muted"}`}>
-            {openStep?.nextStep ?? (followUp ? "Check back on this task" : "Log what you did below and say what happens next")}
+  // The next step as one item you tick (Derek, 2026-09-16, option A): a round
+  // tick to finish it, the words to click and edit, the date to click for the
+  // quick dates, who it's for, where it came from, and how often it has slid.
+  // Ticking asks what happens next right in the card.
+  const stepOwner = task.assigneeId ? userById(task.assigneeId) : null;
+  const stepDate = stepDateLabel(followUp);
+  const stepMoves = openStep ? followUpMoves(task.comments, openStep.at) : 0;
+  const finished = doneSteps(actions);
+  const asking = askNext === task.id;
+  // Lands on the entry that set the step in the conversation, and flashes it.
+  const jumpToAction = (id: string) => {
+    const el = document.getElementById(`action-${id}`);
+    if (!el) { pushToast("That entry is further back in the conversation."); return; }
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.animate([{ backgroundColor: "rgba(250, 204, 21, 0.35)" }, { backgroundColor: "transparent" }], { duration: 1400, easing: "ease-out" });
+  };
+  const tickStep = () => {
+    if (openStep) setNextStepDone(openStep.id, true);
+    else if (followUp) onPatch({ followUpAt: null });
+    setAskNext(task.id);
+    setNextDraft("");
+  };
+  // A new next step on its own, logged as a quiet entry so the conversation
+  // keeps the story of what was planned.
+  const setNewStep = (text: string, date: string | null) => {
+    const step = text.trim();
+    if (!step) { pushToast("Write the next step first."); return; }
+    logAction({ id: newId("ta_"), taskId: task.id, kind: "note", authorId: meId ?? null, toId: null, parentId: null,
+      body: "", at: new Date().toISOString(), nextStep: step, nextStepDue: date, nextStepDoneAt: null });
+    if (date !== (task.followUpAt ?? null)) onPatch({ followUpAt: date });
+    setAskNext(null);
+    setNextDraft("");
+  };
+  const dateTone = { late: "bg-danger-soft text-danger", soon: "bg-highlight-soft text-highlight", later: "bg-background text-foreground", none: "bg-background text-muted" }[stepDate.tone];
+  const quickChip = "rounded-[5px] bg-surface px-3 py-1.5 text-[16px] font-semibold ring-1 ring-border hover:ring-accent";
+  const nextStepCard = task.status === "done" && !openStep && !asking ? null : (
+    <div className={`mt-7 flex items-start gap-3.5 rounded-2xl px-4 py-4 sm:px-5 ${openStep || followUp || asking ? "bg-surface shadow-soft ring-1 ring-border" : "border-2 border-dashed"}`}>
+      <button onClick={tickStep} disabled={!openStep && !followUp} title="Mark done" aria-label="Mark done"
+        className={`group/tick mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 transition disabled:cursor-default disabled:border-dashed disabled:opacity-50 ${asking ? "border-success bg-success text-white" : "border-accent bg-surface text-transparent hover:bg-accent-soft hover:text-accent"}`}>
+        <I.check className="h-4 w-4" />
+      </button>
+      <div className="min-w-0 flex-1">
+        <div className="text-[16px] font-bold tracking-wide text-muted">NEXT STEP</div>
+        {asking ? (
+          // Done: what happens next, with the quick dates as the way to save it.
+          <div className="mt-2 rounded-xl bg-background p-3">
+            <div className="font-semibold">Done. What happens next?</div>
+            <input autoFocus value={nextDraft} onChange={(e) => setNextDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") setNewStep(nextDraft, dateQuickPicks()[1].date); if (e.key === "Escape") { e.stopPropagation(); setAskNext(null); } }}
+              placeholder="Like: send the approved emails to Michaella" aria-label="Next step"
+              className="mt-2 w-full rounded-lg bg-surface px-3 py-2 text-[16px] outline-none ring-1 ring-border focus:ring-2 focus:ring-accent" />
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {dateQuickPicks().slice(1, 4).map((q) => (
+                <button key={q.label} onClick={() => setNewStep(nextDraft, q.date)} className={quickChip}>{q.label}</button>
+              ))}
+              <InlineDate value={null} onChange={(d) => setNewStep(nextDraft, d)} emptyLabel="📅 Pick a date" className={quickChip} />
+              <button onClick={() => setAskNext(null)} className="ml-auto rounded-lg px-3 py-1.5 text-[16px] font-medium text-muted hover:text-foreground">Nothing for now</button>
+            </div>
           </div>
-        )}
-      </div>
-      <div className="flex shrink-0 flex-wrap items-center gap-2">
-        {openStep && (
-          <button onClick={() => setNextStepDone(openStep.id, true)} className="inline-flex h-10 items-center rounded-lg bg-accent px-4 text-[16px] font-semibold text-white shadow-soft-md hover:opacity-90">Mark done</button>
-        )}
-        {/* Today, Tomorrow, In 3 days and the rest first, then the calendar,
-            like every other date in the app (Derek, 2026-09-16). */}
-        <InlineDate value={followUp} onChange={moveFollowUp} formatValue={() => "Change date"} emptyLabel="Set a date" className={`${cardButton} !px-4 !py-0`} />
-        {openStep && !editingStep && (
-          <button onClick={() => setStepDraft({ taskId: task.id, text: openStep.nextStep ?? "" })} className={cardButton}>Edit</button>
+        ) : (
+          <>
+            {editingStep ? (
+              <input autoFocus value={stepDraft.text} onChange={(e) => setStepDraft({ taskId: task.id, text: e.target.value })}
+                onKeyDown={(e) => { if (e.key === "Enter") saveStepDraft(); if (e.key === "Escape") { e.stopPropagation(); setStepDraft(null); } }}
+                onBlur={saveStepDraft} aria-label="Next step"
+                className="mt-0.5 w-full rounded-lg bg-background px-2 py-1 text-[21px] font-bold outline-none ring-2 ring-accent" />
+            ) : openStep ? (
+              <button onClick={() => setStepDraft({ taskId: task.id, text: openStep.nextStep ?? "" })} title="Click to edit"
+                className="-ml-1.5 mt-0.5 block max-w-full rounded-md px-1.5 py-0.5 text-left text-[21px] font-bold leading-snug [overflow-wrap:anywhere] hover:bg-background">
+                {openStep.nextStep}
+              </button>
+            ) : (
+              <button onClick={() => { setAskNext(task.id); setNextDraft(""); }}
+                className="-ml-1.5 mt-0.5 block rounded-md px-1.5 py-0.5 text-left text-[21px] font-bold leading-snug text-muted hover:bg-background">
+                {followUp ? "Check back on this task" : "What happens next? Click to write it"}
+              </button>
+            )}
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <InlineDate value={followUp} onChange={moveFollowUp} onClear={followUp ? () => moveFollowUp(null) : undefined}
+                formatValue={() => `📅 ${stepDate.label}`} emptyLabel="📅 Set a date"
+                className={`rounded-[5px] !px-2.5 !py-1.5 text-[16px] font-semibold ${dateTone}`} />
+              {stepOwner && (
+                <span className="inline-flex items-center gap-1.5 rounded-[5px] bg-background py-1 pl-1 pr-2.5 text-[16px] font-semibold">
+                  <Avatar id={stepOwner.id} size={24} />{stepOwner.id === meId ? "You" : stepOwner.name}
+                </span>
+              )}
+              {openStep && (
+                <button onClick={() => jumpToAction(openStep.id)} title="Show where this step was set"
+                  className="text-[16px] text-muted underline decoration-border underline-offset-4 hover:text-foreground hover:decoration-current">
+                  {TASK_ACTION_META[openStep.kind].verb} · {timeAgo(openStep.at)}
+                </button>
+              )}
+            </div>
+            {stepMoves >= 3 && (
+              <div className="mt-2.5 rounded-lg bg-amber-50 px-3 py-2 text-[16px] font-medium text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
+                ⚠ Moved {stepMoves} times since it was set. Is it stuck?
+              </div>
+            )}
+            {finished.length > 0 && (
+              <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[16px] text-muted">
+                <span>Done so far:</span>
+                {finished.map((f) => (
+                  <span key={`${f.doneAt}_${f.text}`} className="rounded-[5px] bg-background px-2 py-0.5"><span className="text-success">✓</span> {f.text} {formatDue(f.doneAt.slice(0, 10))}</span>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
